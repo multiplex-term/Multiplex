@@ -195,10 +195,18 @@ struct TerminalContainerView: View {
     }
     #endif
 
-    /// Back to the main screen: opens (or brings forward) the deck window.
+    /// Back to the main screen: brings the EXISTING deck window forward —
+    /// openWindow on a WindowGroup would mint another deck — and only
+    /// creates one when none is alive.
     private var deckButton: some View {
         Button {
-            openWindow(id: "deck")
+            if let session = DeckScene.session {
+                UIApplication.shared.activateSceneSession(
+                    for: UISceneSessionActivationRequest(session: session)
+                )
+            } else {
+                openWindow(id: "deck")
+            }
         } label: {
             Image(systemName: "square.grid.2x2")
         }

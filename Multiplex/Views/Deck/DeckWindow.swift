@@ -1,5 +1,33 @@
 import SwiftUI
 
+/// Tracks the live deck window's scene so other windows can bring the
+/// EXISTING deck forward instead of spawning another one, plus one-shot
+/// state that must not repeat per deck window.
+@MainActor
+enum DeckScene {
+    private(set) static weak var session: UISceneSession?
+    static var autoAttachFired = false
+
+    static func register(_ newSession: UISceneSession) {
+        session = newSession
+    }
+}
+
+/// Reports the hosting window's scene session to `DeckScene`.
+private struct DeckSceneReporter: UIViewRepresentable {
+    final class ReporterView: UIView {
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let session = window?.windowScene?.session {
+                DeckScene.register(session)
+            }
+        }
+    }
+
+    func makeUIView(context: Context) -> ReporterView { ReporterView() }
+    func updateUIView(_ view: ReporterView, context: Context) {}
+}
+
 /// The launcher: hosts on the left, a host's tmux sessions on the right.
 struct DeckWindow: View {
     @Environment(HostStore.self) private var store
@@ -24,6 +52,7 @@ struct DeckWindow: View {
         }
         .sheet(isPresented: $addingHost) { AddHostSheet() }
         .sheet(item: $editingHost) { host in AddHostSheet(editing: host) }
+        .background(DeckSceneReporter())
         .onAppear {
             if selectedHostID == nil { selectedHostID = store.hosts.first?.id }
         }
@@ -34,10 +63,13 @@ struct DeckWindow: View {
 
     #if DEBUG
     /// Headless-verification hook: `MULTIPLEX_AUTO_ATTACH=<a,b,…>` opens one
-    /// terminal window per session through the same route the Attach button uses.
+    /// terminal window per session through the same route the Attach button
+    /// uses. Once per process — additional deck windows must not re-fire it.
     private func autoAttachIfRequested() async {
-        guard let list = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ATTACH"],
+        guard !DeckScene.autoAttachFired,
+              let list = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ATTACH"],
               !list.isEmpty else { return }
+        DeckScene.autoAttachFired = true
         try? await Task.sleep(for: .seconds(5))
         guard let host = store.hosts.first else { return }
         for name in list.split(separator: ",").map(String.init) {
