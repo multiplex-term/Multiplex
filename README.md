@@ -26,9 +26,14 @@ window count, active window, activity — before you attach.
   placement on visionOS, real multiple scenes on iPadOS (Stage Manager /
   split screen). SwiftTerm renders xterm-256color; resizing the window sends
   PTY window-change to the remote. **Detach** closes the channel — tmux keeps
-  the session; the deck still shows it. Keyboard focus follows the window:
-  tapping the terminal, activating its scene, or (re)connecting reclaims
-  first responder.
+  the session; the deck still shows it.
+- **Keyboard focus** — exactly one terminal owns keyboard input at a time
+  (`TerminalFocusArbiter`): every visionOS window is its own always-active
+  scene, so per-window first responders leave input stuck on the first
+  session. Tapping a terminal claims focus app-wide (resigning the previous
+  one and activating that window's scene); the chrome's keyboard button
+  re-summons a dismissed keyboard; a shell that (re)connects claims focus.
+  Keystrokes flow through a single ordered AsyncStream per shell.
 
 ## Architecture
 
@@ -53,7 +58,7 @@ with any POSIX-ish login shell, and channel close = clean detach.
 
 | Library | Version | Why |
 | --- | --- | --- |
-| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | 1.13.0 (exact) | The only mature native-Swift terminal emulator view; declares visionOS support; MIT. |
+| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | 1.13.0, vendored | The only mature native-Swift terminal emulator view; declares visionOS support; MIT. Vendored at `Vendor/SwiftTerm` (rev `8e7a1e1`) with one patch: `keyboardType` is settable so the terminal defaults to an ASCII-capable (English) keyboard instead of the user's IME. |
 | [Citadel](https://github.com/orlandos-nl/Citadel) | 0.12.0 (exact) | Async/await SSH on SwiftNIO: PTY shell + resize, exec, and OpenSSH key parsing (ed25519/RSA, encrypted keys included). |
 
 **Supply-chain note.** Citadel is deliberately pinned to **0.12.0**: 0.12.1

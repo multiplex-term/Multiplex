@@ -15,10 +15,12 @@ struct SwiftTermView: UIViewRepresentable {
         applyTheme(to: view)
         view.changeScrollback(5000)
         view.keyboardAppearance = .dark
+        view.keyboardType = .asciiCapable
         view.terminalDelegate = context.coordinator
 
-        // Tapping the terminal always reclaims keyboard focus — without
-        // cancelling SwiftTerm's own selection/scroll gestures.
+        // Tapping the terminal claims app-wide keyboard focus (and re-summons
+        // a dismissed keyboard) — without cancelling SwiftTerm's own
+        // selection/scroll gestures.
         let tap = UITapGestureRecognizer(
             target: context.coordinator,
             action: #selector(Coordinator.reclaimFocus(_:))
@@ -27,15 +29,9 @@ struct SwiftTermView: UIViewRepresentable {
         tap.delegate = context.coordinator
         view.addGestureRecognizer(tap)
 
-        // Multi-window: hardware keys go to the KEY window's first responder,
-        // and on visionOS every visible window stays scene-active — so grab
-        // first responder whenever this terminal's own window becomes key.
-        context.coordinator.observeKeyWindow(for: view)
-
         controller.bind(view)
         DispatchQueue.main.async {
-            view.window?.makeKey()
-            view.becomeFirstResponder()
+            TerminalFocusArbiter.claim(view)
         }
         return view
     }
@@ -74,35 +70,9 @@ struct SwiftTermView: UIViewRepresentable {
             self.controller = controller
         }
 
-        private var keyWindowObserver: NSObjectProtocol?
-
-        deinit {
-            if let keyWindowObserver {
-                NotificationCenter.default.removeObserver(keyWindowObserver)
-            }
-        }
-
         @objc func reclaimFocus(_ gesture: UITapGestureRecognizer) {
-            guard let view = gesture.view else { return }
-            view.window?.makeKey()
-            view.becomeFirstResponder()
-        }
-
-        func observeKeyWindow(for view: TerminalView) {
-            keyWindowObserver = NotificationCenter.default.addObserver(
-                forName: UIWindow.didBecomeKeyNotification,
-                object: nil,
-                queue: .main
-            ) { [weak view] notification in
-                MainActor.assumeIsolated {
-                    guard let view,
-                          let window = notification.object as? UIWindow,
-                          view.window === window,
-                          !view.isFirstResponder
-                    else { return }
-                    view.becomeFirstResponder()
-                }
-            }
+            guard let view = gesture.view as? TerminalView else { return }
+            TerminalFocusArbiter.summon(view)
         }
 
         func gestureRecognizer(

@@ -48,7 +48,25 @@ final class TerminalSessionController {
 
     /// Route keyboard input to this window's terminal.
     func focusTerminal() {
-        terminalView?.becomeFirstResponder()
+        guard let terminalView else { return }
+        TerminalFocusArbiter.claim(terminalView)
+    }
+
+    /// Explicit user request: bring the keyboard back even if it was
+    /// dismissed while this terminal stayed first responder.
+    func summonKeyboard() {
+        guard let terminalView else { return }
+        TerminalFocusArbiter.summon(terminalView)
+    }
+
+    /// Scene became active again: re-assert focus only if this terminal is
+    /// (or nothing is) the app-wide owner — every window's scene activates
+    /// at once on foreground, and they must not steal from each other.
+    func restoreFocusIfOwner() {
+        guard let terminalView,
+              TerminalFocusArbiter.current === terminalView || TerminalFocusArbiter.current == nil
+        else { return }
+        TerminalFocusArbiter.claim(terminalView)
     }
 
     func start() {

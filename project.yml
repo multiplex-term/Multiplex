@@ -7,9 +7,11 @@ options:
     visionOS: "1.0"
 
 packages:
+  # Vendored 1.13.0 (rev 8e7a1e1, MIT) with one patch: keyboardType is
+  # settable so the terminal can default to an ASCII-capable (English)
+  # keyboard instead of the user's IME.
   SwiftTerm:
-    url: https://github.com/migueldeicaza/SwiftTerm
-    exactVersion: 1.13.0
+    path: Vendor/SwiftTerm
   # Pinned to 0.12.0 on purpose: 0.12.1 moved its swift-nio-ssh dependency to
   # an unaudited personal fork. Review before upgrading (see README).
   Citadel:

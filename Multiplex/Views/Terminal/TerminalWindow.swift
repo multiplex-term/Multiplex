@@ -3,26 +3,55 @@ import SwiftUI
 /// Root of one terminal window scene, resolved from its `TerminalRoute`.
 struct TerminalWindowRoot: View {
     @Environment(HostStore.self) private var store
+    @Environment(\.dismissWindow) private var dismissWindow
 
     let route: TerminalRoute
 
     @State private var controller: TerminalSessionController?
+    @State private var hostMissing = false
 
     var body: some View {
         Group {
             if let controller {
                 TerminalContainerView(controller: controller)
+            } else if hostMissing {
+                missingHost
             } else {
-                Color.clear
+                Theme.ink.ignoresSafeArea()
             }
         }
         .task {
             guard controller == nil else { return }
-            guard let host = store.host(id: route.hostID) else { return }
+            guard let host = store.host(id: route.hostID) else {
+                hostMissing = true
+                return
+            }
             let fresh = TerminalSessionController(route: route, host: host)
             controller = fresh
             fresh.start()
         }
+    }
+
+    /// A restored window whose host was removed — say so, never a blank pane.
+    private var missingHost: some View {
+        VStack(spacing: 14) {
+            Text("This host was removed")
+                .font(.mono(17, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Text("The window can't reconnect because its host no longer exists in the deck.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+            Button("Close Window") {
+                dismissWindow(id: "terminal", value: route)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.phosphor)
+            .foregroundStyle(Theme.ink)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.ink.ignoresSafeArea())
     }
 }
 
@@ -66,10 +95,10 @@ struct TerminalContainerView: View {
                 .padding(.vertical, 8)
             statusOverlay
         }
-        // Keyboard focus follows the window: reclaim first responder whenever
-        // this scene becomes active again or the shell (re)connects.
+        // Keyboard focus follows the window: restore the owner when the scene
+        // reactivates; a shell that (re)connects claims focus outright.
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { controller.focusTerminal() }
+            if phase == .active { controller.restoreFocusIfOwner() }
         }
         .onChange(of: controller.status) { _, status in
             if status == .live { controller.focusTerminal() }
@@ -134,6 +163,7 @@ struct TerminalContainerView: View {
         HStack(spacing: 18) {
             sessionIdentity
             Divider().frame(height: 20)
+            keyboardButton
             fontButtons
             Divider().frame(height: 20)
             Button("Detach") { detachAndClose() }
@@ -149,6 +179,7 @@ struct TerminalContainerView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
+            keyboardButton
             fontButtons
             Button("Detach") { detachAndClose() }
                 .buttonStyle(.borderedProminent)
@@ -157,6 +188,16 @@ struct TerminalContainerView: View {
         }
     }
     #endif
+
+    private var keyboardButton: some View {
+        Button {
+            controller.summonKeyboard()
+        } label: {
+            Image(systemName: "keyboard")
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Show keyboard")
+    }
 
     private var fontButtons: some View {
         HStack(spacing: 4) {

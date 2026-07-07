@@ -61,20 +61,24 @@ final class HostStore {
               let seed = try? JSONDecoder().decode(SeedHost.self, from: data)
         else { return }
 
-        if let existing = hosts.first(where: { $0.name == seed.name }) {
-            KeychainStore.delete(for: existing.id)
-            hosts.removeAll { $0.id == existing.id }
-        }
-        let host = Host(
+        // Idempotent: update an existing host in place so its UUID survives —
+        // restored terminal scenes reference hosts by id across relaunches.
+        var host = hosts.first(where: { $0.name == seed.name }) ?? Host(
             name: seed.name,
             hostname: seed.hostname,
-            port: seed.port ?? 22,
-            username: seed.username,
-            authMethod: seed.privateKey != nil ? .privateKey : .password
+            username: seed.username
         )
+        host.hostname = seed.hostname
+        host.port = seed.port ?? 22
+        host.username = seed.username
+        host.authMethod = seed.privateKey != nil ? .privateKey : .password
         if let key = seed.privateKey { KeychainStore.set(key, for: host.id, kind: .privateKey) }
         if let password = seed.password { KeychainStore.set(password, for: host.id, kind: .password) }
-        hosts.append(host)
+        if let index = hosts.firstIndex(where: { $0.id == host.id }) {
+            hosts[index] = host
+        } else {
+            hosts.append(host)
+        }
         save()
         #endif
     }
