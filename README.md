@@ -7,6 +7,10 @@ window count, active window, activity — before you attach.
 
 *Design rationale and tokens: [DESIGN.md](DESIGN.md).*
 
+![Deck with live session cards](docs/visionos-deck.png)
+
+![Two sessions attached, each in its own spatial window](docs/visionos-multiwindow.png)
+
 ## What it does
 
 - **Hosts deck** — add SSH hosts (password or OpenSSH ed25519/RSA key, secrets
@@ -103,6 +107,27 @@ Because the simulator shares the Mac's network, launching the app with the
 (DEBUG builds only) imports a ready-to-use `devbox` host — connect, watch the
 session cards fill in, attach, and drive the session from the Mac side with
 `tmux send-keys` to see bytes stream into the window.
+
+## Verified
+
+End-to-end in the **visionOS 26.4 simulator** against the harness above
+(real sshd, real tmux 3.6a):
+
+- Citadel connects over ed25519 pubkey auth; the deck probes and renders all
+  sessions with correct window spines (active window, counts).
+- Attach opens a per-session spatial window; **two sessions attached
+  concurrently** over independent SSH connections
+  (`docs/visionos-multiwindow.png`).
+- `tmux select-window` / `send-keys` on the host render **live** in the app —
+  the full sshd → PTY → tmux → SwiftTerm pipeline
+  (`docs/visionos-terminal-sendkeys.png`).
+- Detach closes the channel; tmux keeps the session and the deck reflects it.
+- The tmux-attach handoff is silent (PTY opens with ECHO off for command
+  routes), and the injected command exercises the same stdin `write()` path
+  keyboard input uses.
+- Unit tests (probe parser, quoting, route commands) pass on the visionOS
+  simulator; the app also builds and runs on the iPad Pro 13-inch simulator
+  (`docs/ipad-deck.png`).
 
 ## Known limits (v1)
 
