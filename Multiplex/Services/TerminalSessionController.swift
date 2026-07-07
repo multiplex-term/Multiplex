@@ -26,6 +26,8 @@ final class TerminalSessionController {
     private var lastCols = 80
     private var lastRows = 24
     private var started = false
+    private var inputTask: Task<Void, Never>?
+    private var inputContinuation: AsyncStream<Data>.Continuation?
 
     init(route: TerminalRoute, host: Host) {
         self.route = route
@@ -75,6 +77,7 @@ final class TerminalSessionController {
                     }
                 }
             )
+            startInputPump(for: connection)
             status = .live
         } catch {
             let message = (error as? SSHConnectionError)?.userMessage(host: host)
@@ -93,15 +96,39 @@ final class TerminalSessionController {
     }
 
     private func handleClose(reason: String?) {
+        stopInputPump()
         if case .ended = status { return }
         status = .ended(reason)
+    }
+
+    // MARK: Input pump
+
+    /// Keystrokes flow through one AsyncStream consumed by a single task —
+    /// yield order is preserved, unlike a Task spawned per keystroke, and
+    /// the terminal thread never waits on the network.
+    private func startInputPump(for connection: SSHConnection) {
+        stopInputPump()
+        let (stream, continuation) = AsyncStream.makeStream(of: Data.self)
+        inputContinuation = continuation
+        inputTask = Task {
+            for await chunk in stream {
+                try? await connection.write(chunk)
+            }
+        }
+    }
+
+    private func stopInputPump() {
+        inputContinuation?.finish()
+        inputContinuation = nil
+        inputTask?.cancel()
+        inputTask = nil
     }
 
     // MARK: Terminal view events
 
     func sendInput(_ data: Data) {
-        guard status == .live, let connection else { return }
-        Task { try? await connection.write(data) }
+        guard status == .live else { return }
+        inputContinuation?.yield(data)
     }
 
     func terminalResized(cols: Int, rows: Int) {
@@ -115,6 +142,7 @@ final class TerminalSessionController {
 
     /// Closing the channel detaches the tmux client; tmux keeps the session.
     func detach() {
+        stopInputPump()
         status = .ended(nil)
         let connection = self.connection
         self.connection = nil
