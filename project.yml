@@ -62,3 +62,6 @@ targets:
       - path: MultiplexTests
     dependencies:
       - target: Multiplex
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES

@@ -2,16 +2,14 @@ import XCTest
 @testable import Multiplex
 
 final class TmuxProbeTests: XCTestCase {
-    private let us = String(TmuxProbe.fieldSeparator)
-
     func testParsesSessionsAndWindows() {
-        let output = [
-            ["S", "main", "1", "1751500000"].joined(separator: us),
-            ["S", "scratch", "0", "1751600000"].joined(separator: us),
-            ["W", "main", "0", "editor", "0", "0", "0"].joined(separator: us),
-            ["W", "main", "1", "server", "1", "0", "1"].joined(separator: us),
-            ["W", "scratch", "0", "zsh", "1", "0", "0"].joined(separator: us),
-        ].joined(separator: "\n")
+        let output = """
+        S $0 1 1751500000 main
+        S $3 0 1751600000 scratch
+        W $0 0 0 0 0 editor
+        W $0 1 1 0 1 server
+        W $3 0 1 0 0 zsh
+        """
 
         guard case .sessions(let sessions) = TmuxProbe.parse(output) else {
             return XCTFail("expected .sessions")
@@ -40,22 +38,33 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertEqual(TmuxProbe.parse("MULTIPLEX_NO_TMUX\n"), .tmuxMissing)
     }
 
-    func testSessionNameWithSpacesAndUnicode() {
-        let output = ["S", "my project ✨", "0", "0"].joined(separator: us)
+    func testNamesWithSpacesAndUnicodeSurviveTailRejoin() {
+        let output = """
+        S $1 0 0 my project ✨
+        W $1 0 1 0 0 build && watch
+        """
         guard case .sessions(let sessions) = TmuxProbe.parse(output) else {
             return XCTFail("expected .sessions")
         }
         XCTAssertEqual(sessions[0].name, "my project ✨")
-        XCTAssertEqual(sessions[0].windows, [])
+        XCTAssertEqual(sessions[0].windows[0].name, "build && watch")
+    }
+
+    func testMultipleAttachedClientsCountAsAttached() {
+        let output = "S $2 3 0 shared"
+        guard case .sessions(let sessions) = TmuxProbe.parse(output) else {
+            return XCTFail("expected .sessions")
+        }
+        XCTAssertTrue(sessions[0].isAttached)
     }
 
     func testMalformedLinesAreSkipped() {
-        let good = ["S", "ok", "0", "1751500000"].joined(separator: us)
-        let output = "garbage line\nW\(us)too\(us)short\n\(good)"
+        let output = "garbage line\nW $9 short\nS $4 0 1751500000 ok"
         guard case .sessions(let sessions) = TmuxProbe.parse(output) else {
             return XCTFail("expected .sessions")
         }
         XCTAssertEqual(sessions.map(\.name), ["ok"])
+        XCTAssertEqual(sessions[0].windows, [])
     }
 
     func testShellQuoting() {

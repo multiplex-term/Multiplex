@@ -61,7 +61,8 @@ struct TerminalContainerView: View {
         ZStack {
             Theme.ink.ignoresSafeArea()
             SwiftTermView(controller: controller, fontSize: fontSize)
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
             statusOverlay
         }
     }

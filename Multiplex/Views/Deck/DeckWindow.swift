@@ -33,14 +33,17 @@ struct DeckWindow: View {
     }
 
     #if DEBUG
-    /// Headless-verification hook: `MULTIPLEX_AUTO_ATTACH=<session>` opens a
-    /// terminal window through the same route the Attach button uses.
+    /// Headless-verification hook: `MULTIPLEX_AUTO_ATTACH=<a,b,…>` opens one
+    /// terminal window per session through the same route the Attach button uses.
     private func autoAttachIfRequested() async {
-        guard let name = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ATTACH"],
-              !name.isEmpty else { return }
+        guard let list = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ATTACH"],
+              !list.isEmpty else { return }
         try? await Task.sleep(for: .seconds(5))
         guard let host = store.hosts.first else { return }
-        openWindow(id: "terminal", value: TerminalRoute(hostID: host.id, mode: .attach(sessionName: name)))
+        for name in list.split(separator: ",").map(String.init) {
+            openWindow(id: "terminal", value: TerminalRoute(hostID: host.id, mode: .attach(sessionName: name)))
+            try? await Task.sleep(for: .seconds(1))
+        }
     }
     #endif
 
