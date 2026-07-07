@@ -26,7 +26,9 @@ window count, active window, activity — before you attach.
   placement on visionOS, real multiple scenes on iPadOS (Stage Manager /
   split screen). SwiftTerm renders xterm-256color; resizing the window sends
   PTY window-change to the remote. **Detach** closes the channel — tmux keeps
-  the session; the deck still shows it.
+  the session; the deck still shows it. Keyboard focus follows the window:
+  tapping the terminal, activating its scene, or (re)connecting reclaims
+  first responder.
 
 ## Architecture
 

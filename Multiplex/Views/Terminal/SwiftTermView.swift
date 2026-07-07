@@ -15,6 +15,17 @@ struct SwiftTermView: UIViewRepresentable {
         applyTheme(to: view)
         view.changeScrollback(5000)
         view.terminalDelegate = context.coordinator
+
+        // Tapping the terminal always reclaims keyboard focus — without
+        // cancelling SwiftTerm's own selection/scroll gestures.
+        let tap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.reclaimFocus(_:))
+        )
+        tap.cancelsTouchesInView = false
+        tap.delegate = context.coordinator
+        view.addGestureRecognizer(tap)
+
         controller.bind(view)
         DispatchQueue.main.async {
             view.becomeFirstResponder()
@@ -49,11 +60,22 @@ struct SwiftTermView: UIViewRepresentable {
     /// Forwards SwiftTerm delegate events to the session controller.
     /// SwiftTerm calls these on the main thread; `assumeIsolated` bridges
     /// into the controller's MainActor isolation.
-    final class Coordinator: NSObject, TerminalViewDelegate {
+    final class Coordinator: NSObject, TerminalViewDelegate, UIGestureRecognizerDelegate {
         let controller: TerminalSessionController
 
         init(controller: TerminalSessionController) {
             self.controller = controller
+        }
+
+        @objc func reclaimFocus(_ gesture: UITapGestureRecognizer) {
+            gesture.view?.becomeFirstResponder()
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool {
+            true
         }
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {

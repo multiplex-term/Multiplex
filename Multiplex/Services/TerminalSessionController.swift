@@ -44,6 +44,11 @@ final class TerminalSessionController {
         }
     }
 
+    /// Route keyboard input to this window's terminal.
+    func focusTerminal() {
+        terminalView?.becomeFirstResponder()
+    }
+
     func start() {
         guard !started else { return }
         started = true

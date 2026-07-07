@@ -30,6 +30,7 @@ struct TerminalWindowRoot: View {
 /// bottom ornament on visionOS and the toolbar on iPad.
 struct TerminalContainerView: View {
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.scenePhase) private var scenePhase
 
     let controller: TerminalSessionController
 
@@ -64,6 +65,14 @@ struct TerminalContainerView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
             statusOverlay
+        }
+        // Keyboard focus follows the window: reclaim first responder whenever
+        // this scene becomes active again or the shell (re)connects.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { controller.focusTerminal() }
+        }
+        .onChange(of: controller.status) { _, status in
+            if status == .live { controller.focusTerminal() }
         }
     }
 
