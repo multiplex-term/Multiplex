@@ -9,10 +9,14 @@ enum TmuxProbe {
 
     /// One exec round-trip fetches sessions and windows together.
     /// Sessions lines start with S, window lines with W.
+    ///
+    /// Non-interactive SSH exec often has a minimal PATH, so common tmux
+    /// locations (Homebrew, /usr/local) are appended before probing.
     static var probeCommand: String {
         let sessionFormat = "S\(sep)#{session_name}\(sep)#{session_attached}\(sep)#{session_created}"
         let windowFormat = "W\(sep)#{session_name}\(sep)#{window_index}\(sep)#{window_name}\(sep)#{window_active}\(sep)#{window_bell_flag}\(sep)#{window_activity_flag}"
-        return "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
+        return "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin\"; export PATH; "
+            + "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
             + "tmux list-sessions -F '\(sessionFormat)' 2>/dev/null "
             + "&& tmux list-windows -a -F '\(windowFormat)' 2>/dev/null "
             + "|| true"

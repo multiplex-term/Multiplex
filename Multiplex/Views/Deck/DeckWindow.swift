@@ -3,6 +3,7 @@ import SwiftUI
 /// The launcher: hosts on the left, a host's tmux sessions on the right.
 struct DeckWindow: View {
     @Environment(HostStore.self) private var store
+    @Environment(\.openWindow) private var openWindow
 
     @State private var selectedHostID: UUID?
     @State private var addingHost = false
@@ -26,7 +27,22 @@ struct DeckWindow: View {
         .onAppear {
             if selectedHostID == nil { selectedHostID = store.hosts.first?.id }
         }
+        #if DEBUG
+        .task { await autoAttachIfRequested() }
+        #endif
     }
+
+    #if DEBUG
+    /// Headless-verification hook: `MULTIPLEX_AUTO_ATTACH=<session>` opens a
+    /// terminal window through the same route the Attach button uses.
+    private func autoAttachIfRequested() async {
+        guard let name = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ATTACH"],
+              !name.isEmpty else { return }
+        try? await Task.sleep(for: .seconds(5))
+        guard let host = store.hosts.first else { return }
+        openWindow(id: "terminal", value: TerminalRoute(hostID: host.id, mode: .attach(sessionName: name)))
+    }
+    #endif
 
     private var sidebar: some View {
         List(selection: $selectedHostID) {

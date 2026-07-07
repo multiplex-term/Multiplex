@@ -1,0 +1,64 @@
+name: Multiplex
+options:
+  bundleIdPrefix: tools.bricks
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "17.0"
+    visionOS: "1.0"
+
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    exactVersion: 1.13.0
+  # Pinned to 0.12.0 on purpose: 0.12.1 moved its swift-nio-ssh dependency to
+  # an unaudited personal fork. Review before upgrading (see README).
+  Citadel:
+    url: https://github.com/orlandos-nl/Citadel.git
+    exactVersion: 0.12.0
+  # Local override of Citadel's swift-nio-ssh fork (same package identity):
+  # vendored at the exact resolved revision with a one-line manifest fix —
+  # the NIOSSH target uses `import NIO` without declaring the product.
+  swift-nio-ssh:
+    path: Vendor/swift-nio-ssh
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    # Citadel's swift-nio-ssh fork imports the NIO umbrella module without
+    # declaring it as a target dependency; explicit module builds reject that.
+    SWIFT_ENABLE_EXPLICIT_MODULES: NO
+    _EXPERIMENTAL_SWIFT_EXPLICIT_MODULES: NO
+
+targets:
+  Multiplex:
+    type: application
+    supportedDestinations: [iOS, visionOS]
+    sources:
+      - path: Multiplex
+    dependencies:
+      - package: SwiftTerm
+      - package: Citadel
+      - package: swift-nio-ssh
+        product: NIOSSH
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: tools.bricks.multiplex
+        PRODUCT_NAME: Multiplex
+        TARGETED_DEVICE_FAMILY: "2,7"
+        SUPPORTS_MACCATALYST: NO
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Multiplex
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Multiplex connects to SSH hosts on your local network.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+
+  MultiplexTests:
+    type: bundle.unit-test
+    supportedDestinations: [iOS, visionOS]
+    sources:
+      - path: MultiplexTests
+    dependencies:
+      - target: Multiplex
