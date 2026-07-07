@@ -52,10 +52,16 @@ final class TerminalSessionController {
         TerminalFocusArbiter.claim(terminalView)
     }
 
-    /// Explicit user request: bring the keyboard back even if it was
-    /// dismissed while this terminal stayed first responder.
+    /// Explicit user request: bring the normal system keyboard back — even if
+    /// it was dismissed while this terminal stayed first responder, and even
+    /// if SwiftTerm's accessory toggled its F-key pad in as a custom input
+    /// view (which otherwise sticks until toggled again).
     func summonKeyboard() {
         guard let terminalView else { return }
+        if terminalView.inputView != nil {
+            terminalView.inputView = nil
+            terminalView.reloadInputViews()
+        }
         TerminalFocusArbiter.summon(terminalView)
     }
 

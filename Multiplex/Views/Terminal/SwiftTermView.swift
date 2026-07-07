@@ -7,7 +7,7 @@ struct SwiftTermView: UIViewRepresentable {
     let controller: TerminalSessionController
     var fontSize: CGFloat
 
-    func makeUIView(context: Context) -> TerminalView {
+    func makeUIView(context: Context) -> UIView {
         let view = TerminalView(
             frame: .zero,
             font: .monospacedSystemFont(ofSize: fontSize, weight: .regular)
@@ -17,6 +17,7 @@ struct SwiftTermView: UIViewRepresentable {
         view.keyboardAppearance = .dark
         view.keyboardType = .asciiCapable
         view.terminalDelegate = context.coordinator
+        context.coordinator.terminalView = view
 
         // Tapping the terminal claims app-wide keyboard focus (and re-summons
         // a dismissed keyboard) — without cancelling SwiftTerm's own
@@ -29,14 +30,35 @@ struct SwiftTermView: UIViewRepresentable {
         tap.delegate = context.coordinator
         view.addGestureRecognizer(tap)
 
+        // The terminal shrinks above the keyboard — including the
+        // accessory-only presentation (hardware keyboard mode), which
+        // keyboardLayoutGuide misses in windowed iPadOS — so the bottom
+        // rows are never covered: the PTY reflows and tmux redraws its
+        // status line above the keyboard. On visionOS the keyboard floats
+        // in its own panel and never overlaps the window.
+        let container = UIView()
+        container.addSubview(view)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        let bottomConstraint = view.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: container.topAnchor),
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            bottomConstraint,
+        ])
+        #if !os(visionOS)
+        context.coordinator.installKeyboardAvoidance(container: container, constraint: bottomConstraint)
+        #endif
+
         controller.bind(view)
         DispatchQueue.main.async {
             TerminalFocusArbiter.claim(view)
         }
-        return view
+        return container
     }
 
-    func updateUIView(_ view: TerminalView, context: Context) {
+    func updateUIView(_ container: UIView, context: Context) {
+        guard let view = context.coordinator.terminalView else { return }
         if view.font.pointSize != fontSize {
             view.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
         }
@@ -65,10 +87,60 @@ struct SwiftTermView: UIViewRepresentable {
     /// into the controller's MainActor isolation.
     final class Coordinator: NSObject, TerminalViewDelegate, UIGestureRecognizerDelegate {
         let controller: TerminalSessionController
+        weak var terminalView: TerminalView?
 
         init(controller: TerminalSessionController) {
             self.controller = controller
         }
+
+        #if !os(visionOS)
+        private weak var avoidingContainer: UIView?
+        private var bottomConstraint: NSLayoutConstraint?
+        private var keyboardObservers: [NSObjectProtocol] = []
+
+        deinit {
+            for observer in keyboardObservers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
+
+        /// Raise the terminal's bottom edge by however much of the keyboard
+        /// (including the accessory row alone) overlaps the container.
+        func installKeyboardAvoidance(container: UIView, constraint: NSLayoutConstraint) {
+            avoidingContainer = container
+            bottomConstraint = constraint
+            for name in [UIResponder.keyboardWillChangeFrameNotification,
+                         UIResponder.keyboardWillHideNotification] {
+                keyboardObservers.append(NotificationCenter.default.addObserver(
+                    forName: name,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] notification in
+                    MainActor.assumeIsolated {
+                        self?.applyKeyboardFrame(notification)
+                    }
+                })
+            }
+        }
+
+        private func applyKeyboardFrame(_ notification: Notification) {
+            guard let container = avoidingContainer,
+                  let constraint = bottomConstraint,
+                  let window = container.window
+            else { return }
+
+            var overlap: CGFloat = 0
+            if notification.name != UIResponder.keyboardWillHideNotification,
+               let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                let inContainer = container.convert(endFrame, from: window.screen.coordinateSpace)
+                overlap = max(0, container.bounds.maxY - inContainer.minY)
+                overlap = min(overlap, container.bounds.height * 0.8)
+            }
+            guard constraint.constant != -overlap else { return }
+            constraint.constant = -overlap
+            container.layoutIfNeeded()
+        }
+        #endif
 
         @objc func reclaimFocus(_ gesture: UITapGestureRecognizer) {
             guard let view = gesture.view as? TerminalView else { return }

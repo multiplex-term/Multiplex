@@ -59,6 +59,7 @@ struct TerminalWindowRoot: View {
 /// bottom ornament on visionOS and the toolbar on iPad.
 struct TerminalContainerView: View {
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
 
     let controller: TerminalSessionController
@@ -161,6 +162,8 @@ struct TerminalContainerView: View {
     #if os(visionOS)
     private var ornamentBar: some View {
         HStack(spacing: 18) {
+            deckButton
+            Divider().frame(height: 20)
             sessionIdentity
             Divider().frame(height: 20)
             keyboardButton
@@ -178,6 +181,9 @@ struct TerminalContainerView: View {
     #else
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarLeading) {
+            deckButton
+        }
         ToolbarItemGroup(placement: .primaryAction) {
             keyboardButton
             fontButtons
@@ -188,6 +194,17 @@ struct TerminalContainerView: View {
         }
     }
     #endif
+
+    /// Back to the main screen: opens (or brings forward) the deck window.
+    private var deckButton: some View {
+        Button {
+            openWindow(id: "deck")
+        } label: {
+            Image(systemName: "square.grid.2x2")
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Show Deck")
+    }
 
     private var keyboardButton: some View {
         Button {
