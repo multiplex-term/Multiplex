@@ -1,0 +1,15 @@
+# Xcode / Swift
+DerivedData/
+build/
+*.xcodeproj
+!project.yml
+xcuserdata/
+*.xcresult
+.swiftpm/
+.build/
+
+# macOS
+.DS_Store
+
+# Dev harness artifacts (generated keys, sshd runtime state)
+Tools/dev-sshd/state/
