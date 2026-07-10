@@ -66,6 +66,9 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 - `MULTIPLEX_AUTO_MERGE=1` — after auto-attach, merges every terminal window
   into the first through the same surrender/adopt path the Merge menu uses
   (headless check that moved tabs keep their connections).
+- `MULTIPLEX_AUTO_DROP=<local path>` — after auto-attach, drops that file
+  into the first tab (the simulator shares the Mac's filesystem): SFTP
+  upload + typed path, the same path a real drag takes.
 
 Pass them through simctl with the `SIMCTL_CHILD_` prefix:
 ```sh
@@ -175,6 +178,22 @@ views.
   write): Codex's composer treats an Enter inside one rapid burst as a pasted
   newline, not a submit — verified against rust-v0.144; Claude Code accepts
   either. Full research + rationale: `local-plan/agent-harness-helpers.md`.
+- **File drop = SFTP upload + typed path, never Enter**: a dropped file is
+  local and the agent is remote, so the pane uploads it over the tab's own
+  connection (Citadel multiplexes the SFTP subsystem next to the PTY;
+  `.forceCreate` = O_EXCL makes collision renames race-free) into the
+  pane's cwd (`#{pane_current_path}` — follows the foreground process,
+  i.e. the agent's own cwd; $HOME + absolute typed paths only if it's
+  unresolvable). **Inside a git worktree drops are corralled into
+  `.multiplex-drops/`** (created with a `*` .gitignore so the folder never
+  appears in `git status`; the user's own .gitignore there is never
+  overwritten — O_EXCL again). ⚠ Query pane formats with **`list-panes
+  -F`, never `display-message -p -t`** — on tmux 3.6a display-message
+  silently renders every `pane_*` variable empty for outside clients. The
+  typed text is composer input but still sanitized/quoted (`DropText`,
+  pure + tested) so it stays inert at a shell prompt. tmux tabs only;
+  plain `.shell` tabs have no pane to ask for a cwd. Plan:
+  `local-plan/file-drop.md`.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
   entitlement/CloudKit): secrets *and* a JSON host record per host are
   synchronizable keychain items (services `tools.bricks.multiplex` /

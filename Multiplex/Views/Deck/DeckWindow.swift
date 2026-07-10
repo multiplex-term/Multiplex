@@ -73,11 +73,13 @@ struct DeckWindow: View {
         DeckScene.autoAttachFired = true
         try? await Task.sleep(for: .seconds(5))
         guard let host = store.hosts.first else { return }
+        var firstTabID: UUID?
         for entry in list.split(separator: ",") {
             let tabs = entry.split(separator: "+").map {
                 TerminalRoute(hostID: host.id, mode: .attach(sessionName: String($0)))
             }
             guard !tabs.isEmpty else { continue }
+            if firstTabID == nil { firstTabID = tabs.first?.id }
             openWindow(id: "terminal", value: TerminalWindowRoute(tabs: tabs))
             try? await Task.sleep(for: .seconds(1))
         }
@@ -87,6 +89,20 @@ struct DeckWindow: View {
         if ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_MERGE"] == "1" {
             try? await Task.sleep(for: .seconds(8))
             workspace.mergeAllWindows()
+        }
+        // MULTIPLEX_AUTO_DROP=<local path>: drop that file into the first
+        // auto-attached tab — the simulator shares the Mac's filesystem, so
+        // the whole SFTP-upload + typed-path loop runs headlessly.
+        if let dropPath = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_DROP"],
+           let tabID = firstTabID {
+            try? await Task.sleep(for: .seconds(8))
+            if let controller = workspace.controller(for: tabID),
+               let data = FileManager.default.contents(atPath: dropPath) {
+                controller.deliverDrop([DroppedFile(
+                    name: (dropPath as NSString).lastPathComponent,
+                    data: data
+                )])
+            }
         }
     }
     #endif

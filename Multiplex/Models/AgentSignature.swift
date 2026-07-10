@@ -148,24 +148,24 @@ enum AgentCommandSet {
     static func primary(for kind: AgentKind) -> [AgentCommand] {
         switch kind {
         case .claudeCode:
-            [.stop, .slash("clear"), .slash("compact"), .slash("context"),
-             .slash("model"), .mode]
+            [.stop, .slash("clear"), .slash("resume"), .slash("compact"),
+             .slash("context"), .slash("model"), .mode]
         case .codex:
-            [.stop, .slash("new"), .slash("compact"), .slash("model"),
-             .slash("permissions"), .slash("review"), .mode]
+            [.stop, .slash("new"), .slash("resume"), .slash("compact"),
+             .slash("model"), .slash("permissions"), .slash("review"), .mode]
         }
     }
 
     static func overflow(for kind: AgentKind) -> [AgentCommand] {
         switch kind {
         case .claudeCode:
-            [.slash("resume"), .slash("rewind"), .slash("skills"),
-             .slash("agents"), .slash("export"), .slash("status"),
-             .slash("usage"), .slash("mcp")]
+            [.slash("rewind"), .slash("skills"), .slash("agents"),
+             .slash("export"), .slash("status"), .slash("usage"),
+             .slash("mcp")]
         case .codex:
-            [.slash("diff"), .slash("status"), .slash("resume"),
-             .slash("fork"), .slash("init"), .slash("mention"),
-             .slash("skills"), .slash("plan"), .slash("usage")]
+            [.slash("diff"), .slash("status"), .slash("fork"),
+             .slash("init"), .slash("mention"), .slash("skills"),
+             .slash("plan"), .slash("usage")]
         }
     }
 }

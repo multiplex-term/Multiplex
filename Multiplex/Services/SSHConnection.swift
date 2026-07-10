@@ -122,6 +122,87 @@ actor SSHConnection {
         return String(decoding: buffer.readableBytesView, as: UTF8.self)
     }
 
+    // MARK: SFTP (file drops)
+
+    /// Upload one dropped file into `directory`, resolving name collisions
+    /// atomically (`.forceCreate` = O_EXCL, so two clients can't clobber
+    /// each other) and reporting whole-file progress. Returns the file
+    /// name actually used. Rides the same connection as the shell — Citadel
+    /// multiplexes the SFTP subsystem channel alongside the PTY.
+    func uploadFile(
+        _ data: Data,
+        toDirectory directory: String,
+        preferredName: String,
+        prepareGitIgnoredDirectory: Bool = false,
+        onProgress: @escaping @Sendable (Double) -> Void
+    ) async throws -> String {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            if prepareGitIgnoredDirectory {
+                // Best-effort, idempotent: the folder and its self-ignoring
+                // .gitignore may already exist; never overwrite either
+                // (forceCreate = O_EXCL keeps a user-customized one intact).
+                try? await sftp.createDirectory(atPath: directory)
+                if let gitignore = try? await sftp.openFile(
+                    filePath: directory + "/.gitignore",
+                    flags: [.write, .create, .forceCreate]
+                ) {
+                    try? await gitignore.write(ByteBuffer(string: "*\n"), at: 0)
+                    try? await gitignore.close()
+                }
+            }
+            var file: SFTPFile?
+            var name = preferredName
+            for attempt in 0..<8 {
+                let candidate = DropText.candidate(preferredName, attempt: attempt)
+                let path = directory.hasSuffix("/")
+                    ? directory + candidate
+                    : directory + "/" + candidate
+                do {
+                    file = try await sftp.openFile(
+                        filePath: path,
+                        flags: [.write, .create, .forceCreate]
+                    )
+                    name = candidate
+                    break
+                } catch {
+                    // Usually "already exists" (O_EXCL); a persistent error
+                    // (permissions, bad dir) surfaces after the last try.
+                    if attempt == 7 { throw error }
+                }
+            }
+            guard let file else { throw DropError(message: "Couldn't create \(preferredName)") }
+            do {
+                let chunkSize = 512 * 1024
+                var offset = 0
+                while offset < data.count {
+                    let end = min(offset + chunkSize, data.count)
+                    try await file.write(
+                        ByteBuffer(bytes: data[offset..<end]),
+                        at: UInt64(offset)
+                    )
+                    offset = end
+                    onProgress(Double(offset) / Double(data.count))
+                }
+                if data.isEmpty { onProgress(1) }
+                try await file.close()
+            } catch {
+                try? await file.close()
+                throw error
+            }
+            return name
+        }
+    }
+
+    /// The account's home directory ($HOME is where the SFTP session
+    /// starts) — the drop destination when a pane cwd can't be resolved.
+    func remoteHomeDirectory() async throws -> String {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            try await sftp.getRealPath(atPath: ".")
+        }
+    }
+
     // MARK: Interactive PTY shell
 
     /// Opens a PTY'd login shell. When `command` is set (tmux attach/create),

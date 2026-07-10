@@ -14,6 +14,12 @@ final class TerminalSessionController {
         case ended(String?)
     }
 
+    /// File-drop progress surfaced by the pane's status pill.
+    enum DropState: Equatable {
+        case uploading(name: String, fraction: Double)
+        case failed(String)
+    }
+
     let route: TerminalRoute
     let host: Host
 
@@ -32,6 +38,9 @@ final class TerminalSessionController {
     private var started = false
     private var inputTask: Task<Void, Never>?
     private var inputContinuation: AsyncStream<Data>.Continuation?
+    private(set) var dropState: DropState?
+    private var dropTask: Task<Void, Never>?
+    private var dropClearTask: Task<Void, Never>?
 
     init(route: TerminalRoute, host: Host) {
         self.route = route
@@ -168,10 +177,115 @@ final class TerminalSessionController {
         Task { try? await connection.resize(cols: cols, rows: rows) }
     }
 
+    // MARK: File drops
+
+    /// Files dropped on this tab's pane: upload each into the active
+    /// pane's working directory over this tab's own connection, then type
+    /// the resulting paths through the input pump — no Enter, the user
+    /// finishes the prompt. One drop batch at a time.
+    func deliverDrop(_ files: [DroppedFile]) {
+        guard status == .live, let connection, dropTask == nil, !files.isEmpty else { return }
+        dropClearTask?.cancel()
+        dropClearTask = nil
+        dropTask = Task { [weak self] in
+            await self?.performDrop(files, over: connection)
+            self?.dropTask = nil
+        }
+    }
+
+    private func performDrop(_ files: [DroppedFile], over connection: SSHConnection) async {
+        do {
+            let destination = try await dropDestination(over: connection)
+            var typedPaths: [String] = []
+            for file in files {
+                guard file.data.count <= DropText.maxBytes else {
+                    throw DropError(message: "\(file.name) is over 64 MB")
+                }
+                dropState = .uploading(name: file.name, fraction: 0)
+                let finalName = try await connection.uploadFile(
+                    file.data,
+                    toDirectory: destination.directory,
+                    preferredName: DropText.sanitizedName(file.name),
+                    prepareGitIgnoredDirectory: destination.prepareGitIgnoredDirectory,
+                    onProgress: { [weak self] fraction in
+                        Task { @MainActor [weak self] in
+                            guard case .uploading = self?.dropState else { return }
+                            self?.dropState = .uploading(name: file.name, fraction: fraction)
+                        }
+                    }
+                )
+                // Relative names read best in a prompt, but only when the
+                // file verifiably sits under the pane's cwd.
+                typedPaths.append(destination.typedPrefix.map { $0 + finalName }
+                    ?? destination.directory + "/" + finalName)
+            }
+            dropState = nil
+            sendInput(Data(DropText.typedPaths(typedPaths).utf8))
+        } catch is CancellationError {
+            dropState = nil
+        } catch {
+            dropState = .failed((error as? DropError)?.message ?? "Upload failed")
+            dropClearTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled else { return }
+                self?.dropState = nil
+            }
+        }
+    }
+
+    private struct DropDestination {
+        var directory: String
+        /// Prefix for typed relative paths ("" = bare name,
+        /// ".multiplex-drops/" inside git worktrees); nil types absolute.
+        var typedPrefix: String?
+        var prepareGitIgnoredDirectory: Bool
+    }
+
+    /// The pane's cwd when tmux can tell us (it follows the foreground
+    /// process, i.e. the agent's own cwd) — corralled into a self-ignoring
+    /// `.multiplex-drops/` when that cwd is inside a git worktree, so drops
+    /// never clutter `git status`. Otherwise $HOME with absolute typed
+    /// paths. The query's first `/`-prefixed line is the path; a
+    /// MULTIPLEX_GIT line marks a worktree.
+    private func dropDestination(
+        over connection: SSHConnection
+    ) async throws -> DropDestination {
+        if let sessionName = route.sessionName {
+            let output = (try? await connection.exec(
+                TmuxProbe.dropDestinationCommand(sessionName: sessionName)
+            )) ?? ""
+            let lines = output.split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            if let path = lines.first(where: { $0.hasPrefix("/") }) {
+                if lines.contains("MULTIPLEX_GIT") {
+                    return DropDestination(
+                        directory: path + "/" + DropText.dropsDirectoryName,
+                        typedPrefix: DropText.dropsDirectoryName + "/",
+                        prepareGitIgnoredDirectory: true
+                    )
+                }
+                return DropDestination(
+                    directory: path,
+                    typedPrefix: "",
+                    prepareGitIgnoredDirectory: false
+                )
+            }
+        }
+        return DropDestination(
+            directory: try await connection.remoteHomeDirectory(),
+            typedPrefix: nil,
+            prepareGitIgnoredDirectory: false
+        )
+    }
+
     // MARK: Actions
 
     /// Closing the channel detaches the tmux client; tmux keeps the session.
     func detach() {
+        dropTask?.cancel()
+        dropTask = nil
+        dropClearTask?.cancel()
+        dropState = nil
         stopInputPump()
         status = .ended(nil)
         let connection = self.connection

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Root of one terminal window scene: the window's tabs (each one SSH
 /// shell), resolved from its `TerminalWindowRoute` value. The tab list is
@@ -461,6 +462,8 @@ private struct TerminalPane: View {
     let isActive: Bool
     let close: () -> Void
 
+    @State private var dropTargeted = false
+
     var body: some View {
         ZStack {
             // The gutter around the terminal matches its background, so the
@@ -484,6 +487,31 @@ private struct TerminalPane: View {
         // the one on screen.
         .onChange(of: controller?.status) { _, status in
             if status == .live, isActive { controller?.focusTerminal() }
+        }
+        // Dropped files upload into the pane's cwd, then their paths get
+        // typed into the session (never submitted). tmux tabs only — a
+        // plain shell has no pane to ask for a cwd.
+        .onDrop(of: [.item], isTargeted: $dropTargeted) { providers in
+            guard let controller,
+                  controller.status == .live,
+                  controller.route.sessionName != nil
+            else { return false }
+            Task { @MainActor in
+                controller.deliverDrop(await TerminalDropCatcher.load(providers))
+            }
+            return true
+        }
+        .overlay {
+            if dropTargeted, controller?.status == .live,
+               controller?.route.sessionName != nil {
+                DropTargetVeil()
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let dropState = controller?.dropState {
+                DropStatusPill(state: dropState)
+                    .padding(.bottom, 12)
+            }
         }
     }
 

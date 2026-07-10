@@ -197,6 +197,17 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertTrue(command.contains("tmux kill-session -t '=main'"))
     }
 
+    func testDropDestinationCommandTargetsExactSession() {
+        let command = TmuxProbe.dropDestinationCommand(sessionName: "my project")
+        // list-panes, NOT display-message: 3.6a's display-message renders
+        // pane formats empty for outside clients.
+        XCTAssertTrue(command.contains("tmux list-panes -t '=my project'"))
+        XCTAssertTrue(command.contains("#{?pane_active,#{pane_current_path},}"))
+        // Git worktrees are flagged so drops go into .multiplex-drops/.
+        XCTAssertTrue(command.contains("rev-parse --is-inside-work-tree"))
+        XCTAssertTrue(command.contains("echo MULTIPLEX_GIT"))
+    }
+
     func testParseCapturesKeepsTrailingNonBlankTail() {
         let sessions = [session("main", id: "$0"), session("scratch", id: "$1")]
         let output = """

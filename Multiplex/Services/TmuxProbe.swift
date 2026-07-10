@@ -150,6 +150,28 @@ enum TmuxProbe {
         return pathPrefix + "tmux kill-session -t \(target.shellQuoted)"
     }
 
+    /// Where a drop should land for one session: line 1 is the *active*
+    /// pane's working directory (while an agent runs there, the agent's own
+    /// cwd — `pane_current_path` follows the foreground process), and a
+    /// MULTIPLEX_GIT line follows when that directory sits inside a git
+    /// worktree (drops then get corralled into `.multiplex-drops/`).
+    /// `=` forces an exact name match, same discipline as killCommand.
+    ///
+    /// Deliberately `list-panes -F`, NOT `display-message -p -t`: on tmux
+    /// 3.6a display-message fails to bind the target pane's format context
+    /// from an outside client, silently rendering every `pane_*` variable
+    /// empty — list-panes always binds. One line per pane of the current
+    /// window; only the active pane's line carries the path.
+    static func dropDestinationCommand(sessionName: String) -> String {
+        pathPrefix
+            + "p=$(tmux list-panes -t \("=\(sessionName)".shellQuoted)"
+            + " -F '#{?pane_active,#{pane_current_path},}' 2>/dev/null | grep -m1 .); "
+            + "printf '%s\\n' \"$p\"; "
+            + "if [ -n \"$p\" ] && command -v git >/dev/null 2>&1"
+            + " && [ \"$(git -C \"$p\" rev-parse --is-inside-work-tree 2>/dev/null)\" = true ]; "
+            + "then echo MULTIPLEX_GIT; fi"
+    }
+
     // MARK: - Miniatures (the deck wall's live tiles)
 
     /// Lines a tile shows; the parser keeps the trailing non-blank run.
