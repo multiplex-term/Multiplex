@@ -334,7 +334,7 @@ struct TerminalWindowRoot: View {
             }
             .accessibilityLabel("Smaller text")
             Button {
-                fontSize = min(24, fontSize + 1)
+                fontSize = min(32, fontSize + 1)
             } label: {
                 Image(systemName: "textformat.size.larger")
             }
