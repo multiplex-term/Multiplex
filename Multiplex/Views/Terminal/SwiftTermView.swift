@@ -6,15 +6,15 @@ import SwiftTerm
 struct SwiftTermView: UIViewRepresentable {
     let controller: TerminalSessionController
     var fontSize: CGFloat
+    var theme: TerminalTheme
 
     func makeUIView(context: Context) -> UIView {
         let view = TerminalView(
             frame: .zero,
             font: .monospacedSystemFont(ofSize: fontSize, weight: .regular)
         )
-        applyTheme(to: view)
+        apply(theme, to: view, coordinator: context.coordinator)
         view.changeScrollback(5000)
-        view.keyboardAppearance = .dark
         view.keyboardType = .asciiCapable
         view.terminalDelegate = context.coordinator
         context.coordinator.terminalView = view
@@ -62,24 +62,34 @@ struct SwiftTermView: UIViewRepresentable {
         if view.font.pointSize != fontSize {
             view.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
         }
+        if context.coordinator.appliedTheme != theme {
+            apply(theme, to: view, coordinator: context.coordinator)
+        }
     }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(controller: controller)
     }
 
-    private func applyTheme(to view: TerminalView) {
-        view.nativeBackgroundColor = UIColor(rgb: Theme.terminalBackground)
-        view.nativeForegroundColor = UIColor(rgb: Theme.terminalForeground)
-        view.caretColor = UIColor(rgb: Theme.terminalCursor)
-        view.installColors(Theme.ansiPalette.map { hex in
-            SwiftTerm.Color(
-                red: UInt16((hex >> 16) & 0xFF) * 257,
-                green: UInt16((hex >> 8) & 0xFF) * 257,
-                blue: UInt16(hex & 0xFF) * 257
-            )
-        })
-        view.backgroundColor = UIColor(rgb: Theme.terminalBackground)
+    /// Colors change live — SwiftTerm's setters queue a full redraw, so an
+    /// open session re-skins in place when the user switches themes.
+    private func apply(_ theme: TerminalTheme, to view: TerminalView, coordinator: Coordinator) {
+        view.nativeBackgroundColor = UIColor(theme.background)
+        view.nativeForegroundColor = UIColor(theme.foreground)
+        view.caretColor = UIColor(theme.cursor)
+        view.selectedTextBackgroundColor = UIColor(theme.cursor).withAlphaComponent(0.3)
+        if theme.isValid {
+            view.installColors(theme.ansi.map { color in
+                SwiftTerm.Color(
+                    red: UInt16(color.red) * 257,
+                    green: UInt16(color.green) * 257,
+                    blue: UInt16(color.blue) * 257
+                )
+            })
+        }
+        view.backgroundColor = UIColor(theme.background)
+        view.keyboardAppearance = theme.isDark ? .dark : .light
+        coordinator.appliedTheme = theme
     }
 
     /// Forwards SwiftTerm delegate events to the session controller.
@@ -88,6 +98,7 @@ struct SwiftTermView: UIViewRepresentable {
     final class Coordinator: NSObject, TerminalViewDelegate, UIGestureRecognizerDelegate {
         let controller: TerminalSessionController
         weak var terminalView: TerminalView?
+        var appliedTheme: TerminalTheme?
 
         init(controller: TerminalSessionController) {
             self.controller = controller
@@ -189,16 +200,5 @@ struct SwiftTermView: UIViewRepresentable {
         func bell(source: TerminalView) {}
         func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
         func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
-    }
-}
-
-extension UIColor {
-    convenience init(rgb: (red: UInt8, green: UInt8, blue: UInt8)) {
-        self.init(
-            red: CGFloat(rgb.red) / 255,
-            green: CGFloat(rgb.green) / 255,
-            blue: CGFloat(rgb.blue) / 255,
-            alpha: 1
-        )
     }
 }

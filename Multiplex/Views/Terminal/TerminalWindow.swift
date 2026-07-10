@@ -61,6 +61,7 @@ struct TerminalContainerView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(ThemeStore.self) private var themes
 
     let controller: TerminalSessionController
 
@@ -90,8 +91,10 @@ struct TerminalContainerView: View {
 
     private var terminalSurface: some View {
         ZStack {
-            Theme.ink.ignoresSafeArea()
-            SwiftTermView(controller: controller, fontSize: fontSize)
+            // The gutter around the terminal matches its background, so the
+            // window reads as one surface in whatever theme is active.
+            Color(themes.selected.background).ignoresSafeArea()
+            SwiftTermView(controller: controller, fontSize: fontSize, theme: themes.selected)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
             statusOverlay

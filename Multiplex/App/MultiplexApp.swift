@@ -4,6 +4,7 @@ import SwiftUI
 struct MultiplexApp: App {
     @State private var store = HostStore()
     @State private var hub = ConnectionHub()
+    @State private var themes = ThemeStore()
 
     var body: some Scene {
         #if os(visionOS)
@@ -23,6 +24,7 @@ struct MultiplexApp: App {
             DeckWindow()
                 .environment(store)
                 .environment(hub)
+                .environment(themes)
                 .modifier(PlatformChrome())
         }
     }
@@ -33,6 +35,7 @@ struct MultiplexApp: App {
                 TerminalWindowRoot(route: route)
                     .environment(store)
                     .environment(hub)
+                    .environment(themes)
                     .modifier(PlatformChrome())
             }
         }

@@ -37,6 +37,7 @@ struct DeckWindow: View {
     @State private var selectedHostID: UUID?
     @State private var addingHost = false
     @State private var editingHost: Host?
+    @State private var showingSettings = false
 
     var body: some View {
         NavigationSplitView {
@@ -53,6 +54,7 @@ struct DeckWindow: View {
         }
         .sheet(isPresented: $addingHost) { AddHostSheet() }
         .sheet(item: $editingHost) { host in AddHostSheet(editing: host) }
+        .sheet(isPresented: $showingSettings) { SettingsView() }
         .background(DeckSceneReporter())
         .onAppear {
             if selectedHostID == nil { selectedHostID = store.hosts.first?.id }
@@ -102,7 +104,12 @@ struct DeckWindow: View {
         }
         .navigationTitle("Multiplex")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    showingSettings = true
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
                 Button {
                     addingHost = true
                 } label: {

@@ -36,6 +36,11 @@ window count, active window, activity — before you attach.
   one and activating that window's scene); the chrome's keyboard button
   re-summons a dismissed keyboard; a shell that (re)connects claims focus.
   Keystrokes flow through a single ordered AsyncStream per shell.
+- **Terminal themes** — Settings (gear on the deck) picks the terminal color
+  scheme: six built-ins (Multiplex amber, Gruvbox Dark, Dracula, Nord,
+  Solarized Dark/Light) plus user-created themes with a full background /
+  text / cursor / 16-ANSI editor. Applies to every open terminal live; the
+  deck and window chrome keep the Multiplex amber identity.
 
 ## Architecture
 
@@ -44,6 +49,8 @@ SwiftUI (Deck window + N Terminal windows)
    │
    ├── HostStore            hosts.json local cache; secrets + host records
    │                        sync across devices via iCloud Keychain
+   ├── ThemeStore           terminal color schemes: built-ins + custom
+   │                        (themes.json), selection in UserDefaults
    ├── ConnectionHub        one HostConnectionModel per host (probe connection)
    │      └── TmuxProbe     list-sessions/-windows format strings + parser
    └── TerminalSessionController   one per terminal window

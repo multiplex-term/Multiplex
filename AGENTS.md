@@ -72,7 +72,10 @@ the software keyboard to appear (an app cannot override this).
 
 ```
 SwiftUI: Deck window  +  N Terminal windows (WindowGroup(for: TerminalRoute))
-  HostStore          hosts.json in App Support; secrets in Keychain (KeychainStore)
+  HostStore          hosts.json local cache; secrets + host records sync via
+                     iCloud Keychain as synchronizable items (KeychainStore)
+  ThemeStore         terminal color schemes — TerminalTheme built-ins + custom
+                     (themes.json); selected id in UserDefaults; device-local
   ConnectionHub      one HostConnectionModel per host — the probe connection
     TmuxProbe        list-sessions/-windows format strings + parser (pure, unit-tested)
   TerminalSessionController   one per terminal window; owns the input pump
@@ -113,6 +116,16 @@ views.
   handoff, works with any POSIX login shell). Detach = close the channel.
 - **Input is one ordered AsyncStream pump per shell**, not a Task per keystroke
   (which could reorder bytes). Citadel already sets `TCP_NODELAY`.
+- **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
+  entitlement/CloudKit): secrets *and* a JSON host record per host are
+  synchronizable keychain items (services `tools.bricks.multiplex` /
+  `….multiplex.hosts`). Every keychain query must pass
+  `kSecAttrSynchronizable(Any)` — omitting it silently matches only
+  device-local items. `HostSync.merge` (pure, unit-tested) reconciles
+  hosts.json with the mirror: last writer wins by `Host.updatedAt`; a
+  locally-persisted mirrored-IDs set distinguishes "new local host → publish"
+  from "peer deleted it → drop". Keychain sync has no change notification —
+  the deck re-merges on scenePhase `.active`.
 
 ## Conventions
 
@@ -121,6 +134,10 @@ views.
 - Design tokens live in `Theme.swift` (amber `#FFB000` on ink `#0C0E13`) — use
   them, don't hardcode colors. Monospace (`Font.mono`) is reserved for identity
   text (host/session names, addresses, counts); labels stay SF Pro.
+- **Terminal surface colors are user preference, not identity**: they come from
+  the selected `TerminalTheme` (deck gear → Settings), never `Theme` tokens.
+  App chrome stays amber-on-ink whatever the theme. Open terminals re-skin
+  live — `SwiftTermView.updateUIView` re-applies when the theme value changes.
 - Secrets never touch disk in plaintext — always `KeychainStore`, keyed by host
   UUID.
 - Platform splits use `#if os(visionOS)`; the iPad UI sits on ink with an amber

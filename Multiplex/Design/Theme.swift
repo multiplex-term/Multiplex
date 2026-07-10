@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Multiplex design tokens. See DESIGN.md.
 /// One accent — P3 phosphor amber — on deep blue-black ink.
@@ -15,31 +16,44 @@ enum Theme {
     // MARK: Text on ink
     static let textPrimary = Color(hex: 0xE9E4D8)
     static let textSecondary = Color(hex: 0x98A1B4)
+}
 
-    // MARK: Terminal surface
-    static let terminalBackground: (red: UInt8, green: UInt8, blue: UInt8) = (0x0C, 0x0E, 0x13)
-    static let terminalForeground: (red: UInt8, green: UInt8, blue: UInt8) = (0xE9, 0xE4, 0xD8)
-    static let terminalCursor: (red: UInt8, green: UInt8, blue: UInt8) = (0xFF, 0xB0, 0x00)
+// Terminal surface colors are the user's choice, not identity — they live in
+// `TerminalTheme` (Models) and are selected through `ThemeStore`.
 
-    /// 16-color ANSI palette tuned to sit on `ink` — warm signal colors, cool grays.
-    static let ansiPalette: [UInt32] = [
-        0x1B202B, // 0 black
-        0xEA6962, // 1 red
-        0xA9B665, // 2 green
-        0xD8A657, // 3 yellow
-        0x7DAEA3, // 4 blue
-        0xD3869B, // 5 magenta
-        0x89B482, // 6 cyan
-        0xC5BDA8, // 7 white
-        0x566073, // 8 bright black
-        0xF28B82, // 9 bright red
-        0xB8C77D, // 10 bright green
-        0xE9B858, // 11 bright yellow
-        0x93C0B5, // 12 bright blue
-        0xE19BB0, // 13 bright magenta
-        0x9CC79A, // 14 bright cyan
-        0xE9E4D8, // 15 bright white
-    ]
+extension Color {
+    init(_ themeColor: ThemeColor) {
+        self.init(
+            .sRGB,
+            red: Double(themeColor.red) / 255,
+            green: Double(themeColor.green) / 255,
+            blue: Double(themeColor.blue) / 255
+        )
+    }
+}
+
+extension UIColor {
+    convenience init(_ themeColor: ThemeColor) {
+        self.init(
+            red: CGFloat(themeColor.red) / 255,
+            green: CGFloat(themeColor.green) / 255,
+            blue: CGFloat(themeColor.blue) / 255,
+            alpha: 1
+        )
+    }
+}
+
+extension ThemeColor {
+    /// sRGB snapshot of a SwiftUI color — how ColorPicker output becomes a
+    /// theme value. Opacity is discarded; terminals paint opaque cells.
+    init?(_ color: Color) {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        guard UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return nil }
+        func unit(_ value: CGFloat) -> UInt8 {
+            UInt8(max(0, min(255, (value * 255).rounded())))
+        }
+        self.init(red: unit(red), green: unit(green), blue: unit(blue))
+    }
 }
 
 extension Color {

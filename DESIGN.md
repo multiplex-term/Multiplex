@@ -30,7 +30,9 @@ warm signal on cool ground. One accent, spent in one place.
 | `textSecondary` | `#98A1B4`   | cool gray-blue chrome text                             |
 
 Terminal ANSI palette: 16 tuned colors that sit well against `ink`, foreground
-`textPrimary`, cursor `phosphor`.
+`textPrimary`, cursor `phosphor`. This is the **Multiplex** terminal theme —
+the default of several the user can pick (or build) in Settings. Themes recolor
+the terminal surface only; deck, ornaments, and chrome never leave amber-on-ink.
 
 ## Type
 
