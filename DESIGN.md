@@ -134,8 +134,10 @@ Composer package: `fill` = chassis; layer `carrier`, plus layer `node` in
 its own front group (glass + specular + neutral shadow 0.5) so the lamp
 reads as a bead casting onto the trace. Compiles clean with Xcode 27
 `actool`, which also bakes the flattened pre-26 fallbacks. Icon Composer
-covers the square formats only — the visionOS circular layered stack
-(back = chassis, front = carrier + node) and `project.yml` wiring are TODO.
+covers the square formats only. `Assets.xcassets/AppIcon.solidimagestack`
+provides the visionOS circular icon as three 1024 px layers: opaque chassis
+back, carrier middle, and tally-node front. Both representations are named
+`AppIcon`; `actool` selects the platform-appropriate source at build time.
 
 ## Terminal themes
 
