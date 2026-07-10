@@ -33,6 +33,15 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         case .shell: "shell"
         }
     }
+
+    /// The tmux session this tab is bound to; nil for a plain shell (which
+    /// has no probe entry, so no agent detection).
+    var sessionName: String? {
+        switch mode {
+        case .attach(let name), .create(let name): name
+        case .shell: nil
+        }
+    }
 }
 
 extension String {

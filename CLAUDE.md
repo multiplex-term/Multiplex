@@ -46,9 +46,14 @@ under `Tools/dev-sshd/state/`, never touches `~/.ssh`) with demo tmux sessions:
 
 ```sh
 ./Tools/dev-sshd/harness.sh start   # keys + sshd + writes state/seed.json
-./Tools/dev-sshd/harness.sh demo    # tmux sessions: main, scratch, deploy
+./Tools/dev-sshd/harness.sh demo    # tmux sessions: main, scratch, deploy, agent
 ./Tools/dev-sshd/harness.sh stop
 ```
+
+The `agent` session fakes CLI agents for the helper strip: window `cc` sets
+the `✳ Claude Code` OSC title (title signal), window `cx` runs `exec -a codex
+cat` (ps-tree signal); both run `cat`, which echoes injected bytes so
+`tmux capture-pane -t agent:0 -p` shows what a chip typed.
 
 The simulator shares the Mac's network, so launch with these **DEBUG-only** env
 vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
@@ -79,7 +84,9 @@ app cannot override that placement policy. To see the on-screen keyboard,
 focus the device window and use **Device → Keyboard → Toggle Software
 Keyboard**. In DEBUG builds,
 `xcrun simctl spawn <UDID> notifyutil -p tools.bricks.multiplex.debug.summon`
-presses the focused terminal's "Show keyboard" button headlessly.
+presses the focused terminal's "Show keyboard" button headlessly, and
+`… -p tools.bricks.multiplex.debug.agentchip` taps the focused terminal's
+first slash chip in the agent helper strip (inject → pump → PTY → tmux).
 
 ## Architecture
 
@@ -95,8 +102,12 @@ SwiftUI: Deck window  +  N Terminal windows (WindowGroup(for: TerminalWindowRout
                      one capture-pane exec round-trip per host, polled ~5s by
                      FleetWall while the deck is frontmost; background
                      re-probes never surface .probing so tiles don't flicker)
-    TmuxProbe        list-sessions/-windows + capture-pane command builders
-                     and parsers (pure, unit-tested)
+    TmuxProbe        list-sessions/-windows/-panes + capture-pane + ps command
+                     builders and parsers (pure, unit-tested)
+    AgentSignature   classifies a pane's CLI agent (Claude Code / Codex) from
+                     probe output; command sets for the helper strip (pure)
+  EntitlementStore   the Pro gate — UserDefaults stub today, StoreKit 2 later;
+                     all commerce stays inside this one type
   TerminalWorkspace  tab controllers keyed by tab id + window directory —
                      merge/split move tabs across windows, shells stay live
   TerminalSessionController   one per tab; owns the input pump + TerminalView
@@ -147,6 +158,23 @@ views.
   merge (which empties the source first) never detaches moved tabs.
 - **Input is one ordered AsyncStream pump per shell**, not a Task per keystroke
   (which could reorder bytes). Citadel already sets `TCP_NODELAY`.
+- **Agent detection is multi-signal and fail-soft** (`AgentSignature`, fed by
+  the probe's P lines + `MULTIPLEX_PS` ps table): `pane_current_command`
+  (`claude` on Linux, `codex` everywhere) → pane title (`✳ Claude Code`,
+  undocumented Claude behavior) → bare-semver comm (macOS native launcher
+  execs `versions/2.1.206`) → ps-tree walk from `pane_pid` matching **argv[0]
+  basename only** (never substring — Claude Desktop helpers and
+  `--user-data-dir=…/Claude` false-positive otherwise; catches npm Codex,
+  whose node wrapper *spawns* the binary and stays pane leader). Any probe
+  stage failing just disables detection, never the session list. Helper chips
+  only ever *type* through `TerminalSessionController.sendInput` (the same
+  ordered pump as the keyboard; Enter = CR, Esc = 0x1B, Shift+Tab = CSI Z);
+  never ship a Ctrl+B payload — it's the remote tmux prefix. The strip is the
+  only Pro-gated surface; detection and the wall's telemetry token stay free.
+  **Slash chips submit with a CR sent ~160 ms after the text** (separate
+  write): Codex's composer treats an Enter inside one rapid burst as a pasted
+  newline, not a submit — verified against rust-v0.144; Claude Code accepts
+  either. Full research + rationale: `local-plan/agent-harness-helpers.md`.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
   entitlement/CloudKit): secrets *and* a JSON host record per host are
   synchronizable keychain items (services `tools.bricks.multiplex` /

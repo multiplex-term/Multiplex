@@ -6,6 +6,7 @@ struct MultiplexApp: App {
     @State private var hub = ConnectionHub()
     @State private var themes = ThemeStore()
     @State private var workspace = TerminalWorkspace()
+    @State private var entitlements = EntitlementStore()
 
     var body: some Scene {
         #if os(visionOS)
@@ -27,6 +28,7 @@ struct MultiplexApp: App {
                 .environment(hub)
                 .environment(themes)
                 .environment(workspace)
+                .environment(entitlements)
                 .modifier(PlatformChrome())
         }
     }
@@ -39,6 +41,7 @@ struct MultiplexApp: App {
                     .environment(hub)
                     .environment(themes)
                     .environment(workspace)
+                    .environment(entitlements)
                     .modifier(PlatformChrome())
             }
         }

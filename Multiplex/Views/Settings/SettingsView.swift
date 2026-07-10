@@ -4,11 +4,13 @@ import SwiftUI
 /// today it holds terminal themes; future preferences slot in as new sections.
 struct SettingsView: View {
     @Environment(ThemeStore.self) private var themes
+    @Environment(EntitlementStore.self) private var entitlements
     @Environment(\.dismiss) private var dismiss
 
     /// Non-nil while the editor is pushed; a theme unknown to the store is
     /// a new one and is added (and selected) on save.
     @State private var editingTheme: TerminalTheme?
+    @State private var showingPaywall = false
 
     var body: some View {
         NavigationStack {
@@ -56,7 +58,28 @@ struct SettingsView: View {
                         Text("A new theme starts from the colors of the one selected above.")
                     }
                 }
+
+                Section {
+                    HStack {
+                        Text("Agent Helpers")
+                        Spacer()
+                        Text(entitlements.isPro ? "Unlocked" : "Locked")
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("About Multiplex Pro…") { showingPaywall = true }
+                    #if DEBUG
+                    Toggle("Pro unlocked (debug)", isOn: Binding(
+                        get: { entitlements.isPro },
+                        set: { entitlements.setDebugUnlocked($0) }
+                    ))
+                    #endif
+                } header: {
+                    Eyebrow("Pro")
+                } footer: {
+                    Text("Agent Helpers shows quick commands in a terminal window when Claude Code or Codex is running in the attached session.")
+                }
             }
+            .sheet(isPresented: $showingPaywall) { ProPaywallView() }
             .navigationTitle("Settings")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

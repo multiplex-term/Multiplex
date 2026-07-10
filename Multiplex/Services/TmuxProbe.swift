@@ -7,7 +7,12 @@ import Foundation
 /// becomes `_`), so fields are space-separated with the one variable-length
 /// field — the name — placed LAST. Fixed fields (`$N` session ids, numeric
 /// flags) can never contain spaces, and tail-rejoining absorbs any spaces
-/// inside names. Session lines start with S, window lines with W.
+/// inside names. Session lines start with S, window lines with W, pane
+/// lines with P (variable-length pane *title* last — it feeds agent
+/// detection, see `AgentSignature`). After the MULTIPLEX_PS sentinel comes
+/// a `ps` process table for the pane-tree walk; every stage degrades
+/// silently — a host where list-panes or ps misbehaves just loses agent
+/// detection, never its session list.
 enum TmuxProbe {
     /// Non-interactive SSH exec often has a minimal PATH, so common tmux
     /// locations (Homebrew, /usr/local) are appended before any command.
@@ -17,10 +22,16 @@ enum TmuxProbe {
     static var probeCommand: String {
         let sessionFormat = "S #{session_id} #{session_attached} #{session_created} #{session_name}"
         let windowFormat = "W #{session_id} #{window_index} #{window_active} #{window_bell_flag} #{window_activity_flag} #{window_name}"
+        // No #{s/…/:} substitution on the command: tmux already normalizes
+        // pane_current_command to a bare word, and s/// needs tmux ≥ 2.9.
+        let paneFormat = "P #{session_id} #{window_index} #{pane_active} #{pane_pid} #{pane_current_command} #{pane_title}"
         return pathPrefix
             + "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
             + "tmux list-sessions -F '\(sessionFormat)' 2>/dev/null "
             + "&& tmux list-windows -a -F '\(windowFormat)' 2>/dev/null "
+            + "&& tmux list-panes -a -F '\(paneFormat)' 2>/dev/null "
+            // argv[0]/argv[1] are all the tree walk reads — clip the payload.
+            + "&& { echo MULTIPLEX_PS; ps -eo pid=,ppid=,args= 2>/dev/null | cut -c1-120; } "
             + "|| true"
     }
 
@@ -33,11 +44,38 @@ enum TmuxProbe {
             var clients: Int
             var created: Date
         }
+        struct PaneInfo {
+            var sessionID: String
+            var windowIndex: Int
+            var pid: Int
+            var command: String
+            var title: String
+        }
         var sessions: [String: SessionInfo] = [:]
         var order: [String] = []
         var windows: [String: [TmuxWindow]] = [:]
+        var activePanes: [PaneInfo] = []
+        var psRows: [PSRow] = []
+        var inPSSection = false
 
         for line in output.split(separator: "\n") {
+            if line == "MULTIPLEX_PS" {
+                inPSSection = true
+                continue
+            }
+            if inPSSection {
+                // ps right-aligns numeric columns with leading spaces.
+                let fields = line.split(separator: " ", omittingEmptySubsequences: true)
+                guard fields.count >= 3,
+                      let pid = Int(fields[0]), let ppid = Int(fields[1])
+                else { continue }
+                psRows.append(PSRow(
+                    pid: pid,
+                    ppid: ppid,
+                    args: fields[2...].joined(separator: " ")
+                ))
+                continue
+            }
             let fields = line.split(separator: " ", omittingEmptySubsequences: false)
                 .map(String.init)
             switch fields.first {
@@ -58,12 +96,35 @@ enum TmuxProbe {
                     hasActivity: fields[5] == "1"
                 )
                 windows[fields[1], default: []].append(window)
+            case "P" where fields.count >= 6:
+                // Only the active pane — that's the one attach keystrokes
+                // (and helper chips) reach. Title may legitimately be empty.
+                guard fields[3] == "1" else { continue }
+                activePanes.append(PaneInfo(
+                    sessionID: fields[1],
+                    windowIndex: Int(fields[2]) ?? 0,
+                    pid: Int(fields[4]) ?? 0,
+                    command: fields[5],
+                    title: fields.count > 6 ? fields[6...].joined(separator: " ") : ""
+                ))
             default:
                 continue
             }
         }
 
         guard !order.isEmpty else { return .noServer }
+
+        // Agent detection: cheap comm/title signals first, the pane's
+        // process tree as the authority (catches node/bun wrappers and
+        // macOS's versioned-binary comm).
+        for pane in activePanes {
+            guard let kind = AgentSignature.classify(command: pane.command, title: pane.title)
+                ?? AgentSignature.agentInTree(rows: psRows, panePID: pane.pid)
+            else { continue }
+            guard let i = windows[pane.sessionID]?.firstIndex(where: { $0.index == pane.windowIndex })
+            else { continue }
+            windows[pane.sessionID]?[i].agent = kind
+        }
 
         let list = order.compactMap { id -> TmuxSession? in
             guard let info = sessions[id] else { return nil }

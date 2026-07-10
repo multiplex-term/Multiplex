@@ -72,6 +72,7 @@ demo() {
     "$TMUX_BIN" kill-session -t main 2>/dev/null || true
     "$TMUX_BIN" kill-session -t scratch 2>/dev/null || true
     "$TMUX_BIN" kill-session -t deploy 2>/dev/null || true
+    "$TMUX_BIN" kill-session -t agent 2>/dev/null || true
 
     "$TMUX_BIN" new-session -d -s main -n editor
     "$TMUX_BIN" new-window -t main:1 -n server \
@@ -85,6 +86,17 @@ demo() {
     "$TMUX_BIN" new-window -t deploy:1 -n watch
     "$TMUX_BIN" select-window -t deploy:0
 
+    # Agent-helper fakes (macOS can't fake a comm, so each window exercises
+    # a different real detection path — see local-plan/agent-harness-helpers.md):
+    #   cc: OSC pane title "✳ Claude Code" (the title signal)
+    #   cx: argv[0] "codex" via exec -a   (the ps-tree signal)
+    # Both run `cat`, which echoes injected bytes — so capture-pane shows
+    # what a helper chip typed.
+    "$TMUX_BIN" new-session -d -s agent -n cc \
+        'printf "\033]2;✳ Claude Code\033\\"; exec -a claude cat'
+    "$TMUX_BIN" new-window -t agent:1 -n cx 'exec -a codex cat'
+    "$TMUX_BIN" select-window -t agent:0
+
     "$TMUX_BIN" list-sessions
 }
 
@@ -94,7 +106,7 @@ stop() {
         rm -f "$STATE/sshd.pid"
         echo "sshd stopped"
     fi
-    for s in main scratch deploy; do
+    for s in main scratch deploy agent; do
         tmux kill-session -t "$s" 2>/dev/null || true
     done
 }

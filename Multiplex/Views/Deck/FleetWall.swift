@@ -392,6 +392,10 @@ private struct SessionTile: View {
         if session.clientCount > 0 {
             parts.append("\(session.clientCount) CLIENT\(session.clientCount == 1 ? "" : "S")")
         }
+        // Free-tier teaser: the wall names a detected agent in telemetry.
+        if let agent = session.activeAgent {
+            parts.append(agent.telemetryLabel)
+        }
         parts.append(sessionAge)
         return parts.joined(separator: " · ")
     }

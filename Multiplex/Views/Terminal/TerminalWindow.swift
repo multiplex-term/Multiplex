@@ -11,14 +11,26 @@ import SwiftUI
 /// source-label tabs on top and the under-monitor display (UMD) below.
 struct TerminalWindowRoot: View {
     @Environment(HostStore.self) private var store
+    @Environment(ConnectionHub.self) private var hub
     @Environment(TerminalWorkspace.self) private var workspace
+    @Environment(EntitlementStore.self) private var entitlements
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
 
     @Binding var route: TerminalWindowRoute
 
-    @State private var fontSize: CGFloat = 14
+    @State private var fontSize: CGFloat = 21
+    /// Agent shown by the helper strip. Trails `detectedAgent` with a short
+    /// grace on loss (two probe ticks) so a transient probe miss doesn't
+    /// flap the strip — but never across a tab switch.
+    @State private var shownAgent: AgentKind?
+    @State private var hideAgentTask: Task<Void, Never>?
+    @State private var showingPaywall = false
+
+    /// The wall re-probes only while the deck is open; a terminal window
+    /// keeps its own host's probe warm so detection tracks the pane.
+    private static let agentPollInterval: Duration = .seconds(5)
 
     private var activeTab: TerminalRoute? { route.activeTab }
     private var activeController: TerminalSessionController? {
@@ -28,18 +40,47 @@ struct TerminalWindowRoot: View {
         workspace.mergeSources(for: route.id)
     }
 
+    /// Agent in the pane this tab's keystrokes reach, per the latest probe.
+    private var detectedAgent: AgentKind? {
+        guard let activeTab,
+              let sessionName = activeTab.sessionName,
+              let host = store.host(id: activeTab.hostID)
+        else { return nil }
+        return hub.model(for: host).tmux.sessions
+            .first { $0.name == sessionName }?
+            .activeAgent
+    }
+
     var body: some View {
         platformBody
             .task { syncTabs() }
+            .task(id: activeTab?.hostID) { await watchAgentPresence() }
             .onChange(of: route.tabs) { syncTabs() }
             // Keyboard focus follows the visible tab…
             .onChange(of: route.activeTabID) {
                 activeController?.focusTerminal()
+                // No detection grace across tabs — chips must describe the
+                // pane on screen, immediately.
+                hideAgentTask?.cancel()
+                shownAgent = detectedAgent
+            }
+            .onChange(of: detectedAgent) { _, agent in
+                hideAgentTask?.cancel()
+                if let agent {
+                    shownAgent = agent
+                } else {
+                    hideAgentTask = Task {
+                        try? await Task.sleep(for: .seconds(11))
+                        guard !Task.isCancelled else { return }
+                        shownAgent = nil
+                    }
+                }
             }
             // …and the window: restore the owner when the scene reactivates.
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { activeController?.restoreFocusIfOwner() }
             }
+            .sheet(isPresented: $showingPaywall) { ProPaywallView() }
             .onDisappear {
                 // Scene is gone (close button / dismiss): tabs still here are
                 // really closing. A merged-away window is already empty, so
@@ -47,7 +88,62 @@ struct TerminalWindowRoot: View {
                 workspace.unregisterWindow(id: route.id)
                 for tab in route.tabs { workspace.closeTab(tab.id) }
             }
+            #if DEBUG
+            .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugAgentChip)) { _ in
+                debugTapFirstSlashChip()
+            }
+            #endif
     }
+
+    /// Keep this host's probe fresh while the window is open (the deck only
+    /// polls while it's on screen). `refresh()` is single-flight, so several
+    /// windows on one host still cost one probe per tick.
+    private func watchAgentPresence() async {
+        #if DEBUG
+        AgentChipDebugHook.install()
+        #endif
+        guard let hostID = activeTab?.hostID, let host = store.host(id: hostID) else { return }
+        let model = hub.model(for: host)
+        shownAgent = detectedAgent
+        while !Task.isCancelled {
+            if UIApplication.shared.applicationState == .active {
+                model.refresh()
+            }
+            try? await Task.sleep(for: Self.agentPollInterval)
+        }
+    }
+
+    /// Type a helper command into the shell. Slash commands submit with a
+    /// CR sent as a separate, delayed write: Codex's composer treats Enter
+    /// inside one rapid burst as a pasted newline (see
+    /// `AgentCommand.submitsAfterPause`); 160 ms clears its burst window
+    /// with margin, and Claude Code is indifferent.
+    private func send(_ command: AgentCommand, via controller: TerminalSessionController) {
+        controller.sendInput(command.payload)
+        guard command.submitsAfterPause else { return }
+        Task {
+            try? await Task.sleep(for: .milliseconds(160))
+            controller.sendInput(Data([0x0D]))
+        }
+    }
+
+    #if DEBUG
+    /// Inject the first slash command of the focused terminal's strip —
+    /// only the window that owns keyboard focus reacts, so one notification
+    /// never types into several shells.
+    private func debugTapFirstSlashChip() {
+        guard let controller = activeController,
+              let view = controller.terminalView,
+              view === TerminalFocusArbiter.current,
+              let agent = shownAgent,
+              entitlements.isPro,
+              controller.status == .live,
+              let command = AgentCommandSet.primary(for: agent)
+                  .first(where: { $0.label.hasPrefix("/") })
+        else { return }
+        send(command, via: controller)
+    }
+    #endif
 
     // MARK: Layout
 
@@ -74,17 +170,20 @@ struct TerminalWindowRoot: View {
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .ornament(attachmentAnchor: .scene(.bottom), contentAlignment: .center) {
-                UMDBar(
-                    controller: activeController,
-                    title: umdTitle,
-                    mergeSources: mergeSources,
-                    showDeck: showDeck,
-                    summonKeyboard: { activeController?.summonKeyboard() },
-                    fontDown: { fontSize = max(9, fontSize - 1) },
-                    fontUp: { fontSize = min(24, fontSize + 1) },
-                    merge: { merge($0) },
-                    detach: { detachActiveTab() }
-                )
+                VStack(spacing: 10) {
+                    helperStrip(floating: true)
+                    UMDBar(
+                        controller: activeController,
+                        title: umdTitle,
+                        mergeSources: mergeSources,
+                        showDeck: showDeck,
+                        summonKeyboard: { activeController?.summonKeyboard() },
+                        fontDown: { fontSize = max(9, fontSize - 1) },
+                        fontUp: { fontSize = min(32, fontSize + 1) },
+                        merge: { merge($0) },
+                        detach: { detachActiveTab() }
+                    )
+                }
             }
     }
     #else
@@ -101,6 +200,9 @@ struct TerminalWindowRoot: View {
                     Rectangle().fill(Theme.bezelHi).frame(height: 1)
                 }
                 paneStack
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        helperStrip(floating: false)
+                    }
             }
             .navigationTitle(windowTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -129,6 +231,26 @@ struct TerminalWindowRoot: View {
             }
         }
         .background(Theme.screen.ignoresSafeArea())
+    }
+
+    /// The agent helper strip, when the active tab's session runs one.
+    /// visionOS floats it in the bottom ornament above the UMD (the window's
+    /// bottom edge belongs to the ornament, which would overlap an inset);
+    /// iPad docks it as a bottom inset under the screen, where appearing
+    /// resizes the PTY like a keyboard would.
+    @ViewBuilder
+    private func helperStrip(floating: Bool) -> some View {
+        if let agent = shownAgent,
+           let controller = activeController,
+           controller.status == .live {
+            AgentHelperStrip(
+                agent: agent,
+                isPro: entitlements.isPro,
+                floating: floating,
+                send: { send($0, via: controller) },
+                openPaywall: { showingPaywall = true }
+            )
+        }
     }
 
     private var tabItems: [TerminalTabStrip.Item] {
