@@ -39,6 +39,7 @@ targets:
     supportedDestinations: [iOS, visionOS]
     sources:
       - path: Multiplex
+      - path: AppIcon.icon
     dependencies:
       - package: SwiftTerm
       - package: Citadel
