@@ -57,16 +57,18 @@ final class TerminalSessionController {
     }
 
     /// Explicit user request: bring the normal system keyboard back — even if
-    /// it was dismissed while this terminal stayed first responder, and even
-    /// if SwiftTerm's accessory toggled its F-key pad in as a custom input
-    /// view (which otherwise sticks until toggled again).
+    /// it was dismissed while this terminal stayed first responder, even if
+    /// SwiftTerm's accessory toggled its F-key pad in as a custom input view
+    /// (which otherwise sticks until toggled again), and even if the OS
+    /// docked only the accessory because a hardware keyboard was attached
+    /// (the arbiter rebuilds the input session, re-checking that state).
     func summonKeyboard() {
         guard let terminalView else { return }
         if terminalView.inputView != nil {
             terminalView.inputView = nil
             terminalView.reloadInputViews()
         }
-        TerminalFocusArbiter.summon(terminalView)
+        TerminalFocusArbiter.summon(terminalView, force: true)
     }
 
     /// Scene became active again: re-assert focus only if this terminal is

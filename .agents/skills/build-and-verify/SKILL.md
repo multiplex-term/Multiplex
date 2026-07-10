@@ -143,10 +143,23 @@ shutdown/reboot is enough and keeps the app's on-device state.
 
 ### Simulator keyboard gotcha
 
-If you're checking keyboard behavior, the simulator's **I/O → Keyboard → Connect
-Hardware Keyboard must be OFF** for the on-screen keyboard to appear — an app
-can't override this. Toggle it in Simulator.app (⇧⌘K) or via the
-`ConnectHardwareKeyboard` preference.
+Xcode 27's DeviceHub (which replaced Simulator.app) always bridges the Mac
+keyboard into the simulator as a *hardware* keyboard — CoreDevice injects HID
+keyboard devices, `UIDevice._hardwareKeyboardAvailable` reads YES, and UIKit
+docks only the input accessory instead of the on-screen keyboard. The old
+"Connect Hardware Keyboard" toggle and `ConnectHardwareKeyboard` preference no
+longer apply, and an app cannot override the placement policy.
+
+To see the on-screen keyboard: focus the device window in DeviceHub and use
+**Device → Keyboard → Toggle Software Keyboard**. To press the app's own
+"Show keyboard" button without touching the UI (DEBUG builds):
+
+```sh
+xcrun simctl spawn <udid> notifyutil -p tools.bricks.multiplex.debug.summon
+```
+
+That drives the same input-session rebuild the ornament/toolbar button uses,
+and is the headless way to check keyboard-summon behavior.
 
 ## Typical flows
 

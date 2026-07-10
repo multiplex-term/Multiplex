@@ -1,5 +1,8 @@
 import SwiftTerm
 import UIKit
+#if DEBUG
+import notify
+#endif
 
 /// Exactly one terminal holds keyboard focus at a time, app-wide.
 ///
@@ -16,12 +19,17 @@ enum TerminalFocusArbiter {
     private static var keyboardVisible = false
     private static var observersInstalled = false
 
+    /// Below this, a "shown keyboard" is just the accessory row that
+    /// hardware-keyboard mode docks at the scene bottom (~48–55 pt) — not a
+    /// keyboard the user can type on. The real panel is ≥300 pt.
+    private static let minRealKeyboardHeight: CGFloat = 100
+
     /// Move keyboard focus to this terminal. No-op if it already has it.
     static func claim(_ view: TerminalView) {
         installObserversIfNeeded()
         let switching = current !== view
         if switching {
-            current?.resignFirstResponder()
+            _ = current?.resignFirstResponder()
             if let scene = view.window?.windowScene {
                 UIApplication.shared.activateSceneSession(
                     for: UISceneSessionActivationRequest(session: scene.session)
@@ -31,17 +39,35 @@ enum TerminalFocusArbiter {
         current = view
         view.window?.makeKey()
         if !view.isFirstResponder {
-            view.becomeFirstResponder()
+            _ = view.becomeFirstResponder()
         }
     }
 
-    /// Explicit user request for the keyboard (tap or keyboard button):
-    /// also recovers from "dismissed while still first responder", where a
-    /// plain becomeFirstResponder is a no-op and the keyboard never returns.
-    static func summon(_ view: TerminalView) {
+    /// Explicit user request for the keyboard (tap or keyboard button).
+    ///
+    /// If the terminal already has focus but no real keyboard is on screen —
+    /// dismissed while still first responder, or suppressed because the OS
+    /// believed a hardware keyboard was available — a plain
+    /// becomeFirstResponder is a no-op. Tearing the input session down and
+    /// rebuilding it one runloop turn later makes UIKit re-evaluate what to
+    /// present against the *current* hardware-keyboard state (resign+become
+    /// within one turn can be coalesced into "nothing changed").
+    ///
+    /// `force` skips the keyboard-visibility check: the keyboard *button*
+    /// always rebuilds, because in hardware-keyboard mode the OS reports a
+    /// tall "shown" keyboard frame while rendering only the accessory row —
+    /// visibility tracking can't tell that apart from a usable keyboard.
+    /// Terminal taps stay unforced so tapping while typing never blips the
+    /// keyboard away.
+    static func summon(_ view: TerminalView, force: Bool = false) {
         installObserversIfNeeded()
-        if current === view, view.isFirstResponder, !keyboardVisible {
-            view.resignFirstResponder()
+        if current === view, view.isFirstResponder, force || !keyboardVisible {
+            _ = view.resignFirstResponder()
+            DispatchQueue.main.async {
+                claim(view)
+                view.reloadInputViews()
+            }
+            return
         }
         claim(view)
     }
@@ -54,8 +80,11 @@ enum TerminalFocusArbiter {
             forName: UIResponder.keyboardDidShowNotification,
             object: nil,
             queue: .main
-        ) { _ in
-            MainActor.assumeIsolated { keyboardVisible = true }
+        ) { notification in
+            let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+            MainActor.assumeIsolated {
+                keyboardVisible = (frame?.height ?? 0) >= minRealKeyboardHeight
+            }
         }
         center.addObserver(
             forName: UIResponder.keyboardDidHideNotification,
@@ -64,5 +93,29 @@ enum TerminalFocusArbiter {
         ) { _ in
             MainActor.assumeIsolated { keyboardVisible = false }
         }
+        #if DEBUG
+        installDebugSummonHook()
+        #endif
     }
+
+    #if DEBUG
+    /// Headless-verification hook: pressing the keyboard button from the CLI —
+    /// `xcrun simctl spawn <udid> notifyutil -p tools.bricks.multiplex.debug.summon`
+    /// — drives the same path as the in-window "Show keyboard" button.
+    private static func installDebugSummonHook() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "tools.bricks.multiplex.debug.summon", &token, .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                guard let view = current else { return }
+                if view.inputView != nil {
+                    view.inputView = nil
+                    view.reloadInputViews()
+                }
+                summon(view, force: true)
+            }
+        }
+    }
+    #endif
 }

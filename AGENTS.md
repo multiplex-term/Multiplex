@@ -65,8 +65,14 @@ xcrun simctl launch <UDID> tools.bricks.multiplex
 Drive a live session from the Mac side to see bytes stream in:
 `tmux send-keys -t main:2 'echo hi' Enter`.
 
-Simulator caveat: **I/O → Keyboard → Connect Hardware Keyboard must be OFF** for
-the software keyboard to appear (an app cannot override this).
+Simulator caveat: Xcode 27's DeviceHub always bridges the Mac keyboard as a
+*hardware* keyboard (CoreDevice HID — the old "Connect Hardware Keyboard"
+toggle is gone), so the simulator never auto-shows the software keyboard; an
+app cannot override that placement policy. To see the on-screen keyboard,
+focus the device window and use **Device → Keyboard → Toggle Software
+Keyboard**. In DEBUG builds,
+`xcrun simctl spawn <UDID> notifyutil -p tools.bricks.multiplex.debug.summon`
+presses the focused terminal's "Show keyboard" button headlessly.
 
 ## Architecture
 
