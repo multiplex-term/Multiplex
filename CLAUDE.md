@@ -52,8 +52,12 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 
 - `MULTIPLEX_SEED_HOST=<path to seed.json>` — imports a ready `devbox` host
   (idempotent; stable UUID across relaunches so restored scenes stay valid).
-- `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per session via the
-  same route the Attach button uses. Fires **once per process**.
+- `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per comma entry via
+  the same route the Attach button uses; `+` inside an entry groups sessions
+  as tabs of one window (`main+scratch,deploy`). Fires **once per process**.
+- `MULTIPLEX_AUTO_MERGE=1` — after auto-attach, merges every terminal window
+  into the first through the same surrender/adopt path the Merge menu uses
+  (headless check that moved tabs keep their connections).
 
 Pass them through simctl with the `SIMCTL_CHILD_` prefix:
 ```sh
@@ -71,14 +75,17 @@ the software keyboard to appear (an app cannot override this).
 ## Architecture
 
 ```
-SwiftUI: Deck window  +  N Terminal windows (WindowGroup(for: TerminalRoute))
+SwiftUI: Deck window  +  N Terminal windows (WindowGroup(for: TerminalWindowRoute))
+                         a window = ordered tabs; each tab a TerminalRoute (one shell)
   HostStore          hosts.json local cache; secrets + host records sync via
                      iCloud Keychain as synchronizable items (KeychainStore)
   ThemeStore         terminal color schemes — TerminalTheme built-ins + custom
                      (themes.json); selected id in UserDefaults; device-local
   ConnectionHub      one HostConnectionModel per host — the probe connection
     TmuxProbe        list-sessions/-windows format strings + parser (pure, unit-tested)
-  TerminalSessionController   one per terminal window; owns the input pump
+  TerminalWorkspace  tab controllers keyed by tab id + window directory —
+                     merge/split move tabs across windows, shells stay live
+  TerminalSessionController   one per tab; owns the input pump + TerminalView
     SSHConnection (actor)  Citadel → SwiftNIO SSH
       exec channel     tmux probing
       PTY shell        bytes ⇄ SwiftTerm.TerminalView
@@ -114,6 +121,16 @@ views.
 - **tmux attach needs a PTY**: the shell opens with ECHO off and
   `exec tmux attach-session …` is injected as the first stdin line (silent
   handoff, works with any POSIX login shell). Detach = close the channel.
+- **Tabs move between windows without dropping the shell**: a terminal
+  window's scene value (`TerminalWindowRoute`) *is* its tab list — merge/split
+  mutate the window-value binding, never close-and-reopen windows. Controllers
+  live in `TerminalWorkspace` keyed by tab id, and each strongly owns its
+  SwiftTerm `TerminalView`; `SwiftTermView` re-parents that view when a tab
+  lands in a new window, so buffer + scrollback survive the move. A window
+  whose tab list empties dismisses itself via plain `dismiss()` — not
+  `dismissWindow(id:value:)`, whose committed-value matching lags the binding
+  and leaves ghost windows. `onDisappear` closes whatever tabs remain, so a
+  merge (which empties the source first) never detaches moved tabs.
 - **Input is one ordered AsyncStream pump per shell**, not a Task per keystroke
   (which could reorder bytes). Citadel already sets `TCP_NODELAY`.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no

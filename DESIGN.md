@@ -84,11 +84,19 @@ ornaments.
 ```
 
 **Terminal windows.** Each attach opens its own scene
-(`WindowGroup(for: TerminalRoute.self)` + `openWindow`) — the user places them
-around the room on visionOS; on iPadOS they are real multiple scenes (Stage
-Manager / split screen). The window is fully ink — it *is* the screen — with a
-bottom ornament (visionOS) / toolbar (iPad) carrying session name, spine, and
-Detach.
+(`WindowGroup(for: TerminalWindowRoute.self)` + `openWindow`) — the user places
+them around the room on visionOS; on iPadOS they are real multiple scenes
+(Stage Manager / split screen). The window is fully ink — it *is* the screen —
+with a bottom ornament (visionOS) / toolbar (iPad) carrying session name,
+spine, Merge, and Detach.
+
+**Tabs.** A window can hold several sessions as tabs. The tab strip speaks the
+spine's language grown up: rounded cells, amber-lit active cell with ink text,
+inactive cells ink-raised with a phosphor status dot, names in mono. It appears
+only when a window holds more than one tab — a single-session window keeps its
+clean edge — as a top ornament on visionOS and a row under the toolbar on iPad.
+Merge pulls another window's sessions in; a tab's context menu splits it back
+out into its own window.
 
 ## Motion & restraint
 

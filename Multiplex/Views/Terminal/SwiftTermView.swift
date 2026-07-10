@@ -7,25 +7,47 @@ struct SwiftTermView: UIViewRepresentable {
     let controller: TerminalSessionController
     var fontSize: CGFloat
     var theme: TerminalTheme
+    /// Only the window's active tab claims keyboard focus when it appears.
+    var isActive: Bool = true
+
+    private static let focusTapName = "multiplex.focus-tap"
 
     func makeUIView(context: Context) -> UIView {
-        let view = TerminalView(
-            frame: .zero,
-            font: .monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        )
+        let view: TerminalView
+        if let existing = controller.terminalView {
+            // This tab moved here from another window (merge/split): adopt
+            // the live view so buffer, scrollback, and connection survive.
+            // removeFromSuperview also drops constraints tied to the old
+            // container before we pin it to the new one.
+            existing.removeFromSuperview()
+            view = existing
+        } else {
+            view = TerminalView(
+                frame: .zero,
+                font: .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+            )
+            view.changeScrollback(5000)
+            view.keyboardType = .asciiCapable
+        }
         apply(theme, to: view, coordinator: context.coordinator)
-        view.changeScrollback(5000)
-        view.keyboardType = .asciiCapable
+        if view.font.pointSize != fontSize {
+            view.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        }
         view.terminalDelegate = context.coordinator
         context.coordinator.terminalView = view
 
         // Tapping the terminal claims app-wide keyboard focus (and re-summons
         // a dismissed keyboard) — without cancelling SwiftTerm's own
-        // selection/scroll gestures.
+        // selection/scroll gestures. An adopted view still carries the tap
+        // wired to its previous window's coordinator — replace, don't stack.
+        view.gestureRecognizers?
+            .filter { $0.name == Self.focusTapName }
+            .forEach(view.removeGestureRecognizer)
         let tap = UITapGestureRecognizer(
             target: context.coordinator,
             action: #selector(Coordinator.reclaimFocus(_:))
         )
+        tap.name = Self.focusTapName
         tap.cancelsTouchesInView = false
         tap.delegate = context.coordinator
         view.addGestureRecognizer(tap)
@@ -51,14 +73,19 @@ struct SwiftTermView: UIViewRepresentable {
         #endif
 
         controller.bind(view)
-        DispatchQueue.main.async {
-            TerminalFocusArbiter.claim(view)
+        if isActive {
+            DispatchQueue.main.async {
+                TerminalFocusArbiter.claim(view)
+            }
         }
         return container
     }
 
     func updateUIView(_ container: UIView, context: Context) {
-        guard let view = context.coordinator.terminalView else { return }
+        // A moved tab's view may already belong to another window while this
+        // (about to be torn down) representable gets one last update.
+        guard let view = context.coordinator.terminalView,
+              view.isDescendant(of: container) else { return }
         if view.font.pointSize != fontSize {
             view.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
         }

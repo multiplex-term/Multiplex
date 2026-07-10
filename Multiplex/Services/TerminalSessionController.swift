@@ -20,7 +20,11 @@ final class TerminalSessionController {
     private(set) var status: Status = .connecting
     var remoteTitle: String = ""
 
-    private weak var terminalView: TerminalView?
+    /// Strongly owned (SwiftTerm's delegate back-reference is weak): the view
+    /// carries the terminal buffer and scrollback, and tabs move between
+    /// windows — the adopting window re-parents this same view, so what's on
+    /// screen survives a merge/split. Released with the controller on close.
+    private(set) var terminalView: TerminalView?
     private var connection: SSHConnection?
     private var pendingOutput = Data()
     private var lastCols = 80

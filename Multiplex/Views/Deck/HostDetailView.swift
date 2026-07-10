@@ -192,7 +192,7 @@ struct HostDetailView: View {
     }
 
     private func open(_ route: TerminalRoute) {
-        openWindow(id: "terminal", value: route)
+        openWindow(id: "terminal", value: TerminalWindowRoute(tab: route))
         // Give tmux a beat to register the client, then reflect it on the deck.
         Task {
             try? await Task.sleep(for: .seconds(2))

@@ -23,12 +23,18 @@ window count, active window, activity — before you attach.
   count. **Attach** opens the session in its own window
   (`tmux attach-session`). **New Session** runs `tmux new-session -A`.
   **Shell** opens a plain login shell, no tmux.
-- **Terminal windows** — each terminal is its own SwiftUI scene
-  (`WindowGroup(for: TerminalRoute.self)` + `openWindow`): independent
+- **Terminal windows & tabs** — each terminal is its own SwiftUI scene
+  (`WindowGroup(for: TerminalWindowRoute.self)` + `openWindow`): independent
   placement on visionOS, real multiple scenes on iPadOS (Stage Manager /
-  split screen). SwiftTerm renders xterm-256color; resizing the window sends
-  PTY window-change to the remote. **Detach** closes the channel — tmux keeps
-  the session; the deck still shows it.
+  split screen). A window holds one or more sessions as **tabs**: **Merge**
+  pulls another window's sessions in as tabs (the emptied window closes
+  itself), and a tab's context menu moves it back out into its own window.
+  Moving a tab never drops the shell — the live SSH connection, buffer, and
+  scrollback travel with it. The spine-styled tab strip (top ornament on
+  visionOS, top bar on iPad) appears only when a window holds more than one
+  tab. SwiftTerm renders xterm-256color; resizing the window sends PTY
+  window-change to the remote. **Detach** closes the active tab's channel —
+  tmux keeps the session; the deck still shows it.
 - **Keyboard focus** — exactly one terminal owns keyboard input at a time
   (`TerminalFocusArbiter`): every visionOS window is its own always-active
   scene, so per-window first responders leave input stuck on the first
@@ -45,7 +51,7 @@ window count, active window, activity — before you attach.
 ## Architecture
 
 ```
-SwiftUI (Deck window + N Terminal windows)
+SwiftUI (Deck window + N Terminal windows, each an ordered set of tabs)
    │
    ├── HostStore            hosts.json local cache; secrets + host records
    │                        sync across devices via iCloud Keychain
@@ -53,7 +59,9 @@ SwiftUI (Deck window + N Terminal windows)
    │                        (themes.json), selection in UserDefaults
    ├── ConnectionHub        one HostConnectionModel per host (probe connection)
    │      └── TmuxProbe     list-sessions/-windows format strings + parser
-   └── TerminalSessionController   one per terminal window
+   ├── TerminalWorkspace    tab controllers keyed by tab id + window directory;
+   │                        merge/split move tabs across windows, shells stay live
+   └── TerminalSessionController   one per tab
           └── SSHConnection (actor) ── Citadel ── SwiftNIO SSH
                  ├── exec channel      tmux probing
                  └── PTY shell channel bytes ⇄ SwiftTerm.TerminalView

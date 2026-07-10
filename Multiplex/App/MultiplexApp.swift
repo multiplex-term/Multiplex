@@ -5,6 +5,7 @@ struct MultiplexApp: App {
     @State private var store = HostStore()
     @State private var hub = ConnectionHub()
     @State private var themes = ThemeStore()
+    @State private var workspace = TerminalWorkspace()
 
     var body: some Scene {
         #if os(visionOS)
@@ -25,17 +26,19 @@ struct MultiplexApp: App {
                 .environment(store)
                 .environment(hub)
                 .environment(themes)
+                .environment(workspace)
                 .modifier(PlatformChrome())
         }
     }
 
     private var terminalScene: some Scene {
-        WindowGroup(id: "terminal", for: TerminalRoute.self) { $route in
-            if let route = $route.wrappedValue {
-                TerminalWindowRoot(route: route)
+        WindowGroup(id: "terminal", for: TerminalWindowRoute.self) { $route in
+            if let binding = Binding($route) {
+                TerminalWindowRoot(route: binding)
                     .environment(store)
                     .environment(hub)
                     .environment(themes)
+                    .environment(workspace)
                     .modifier(PlatformChrome())
             }
         }

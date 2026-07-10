@@ -31,6 +31,7 @@ private struct DeckSceneReporter: UIViewRepresentable {
 /// The launcher: hosts on the left, a host's tmux sessions on the right.
 struct DeckWindow: View {
     @Environment(HostStore.self) private var store
+    @Environment(TerminalWorkspace.self) private var workspace
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
 
@@ -71,8 +72,10 @@ struct DeckWindow: View {
 
     #if DEBUG
     /// Headless-verification hook: `MULTIPLEX_AUTO_ATTACH=<a,b,…>` opens one
-    /// terminal window per session through the same route the Attach button
-    /// uses. Once per process — additional deck windows must not re-fire it.
+    /// terminal window per comma entry through the same route the Attach
+    /// button uses; `+` inside an entry groups sessions as tabs of one window
+    /// (`a+b,c` → window[a,b] + window[c]). Once per process — additional
+    /// deck windows must not re-fire it.
     private func autoAttachIfRequested() async {
         guard !DeckScene.autoAttachFired,
               let list = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ATTACH"],
@@ -80,9 +83,20 @@ struct DeckWindow: View {
         DeckScene.autoAttachFired = true
         try? await Task.sleep(for: .seconds(5))
         guard let host = store.hosts.first else { return }
-        for name in list.split(separator: ",").map(String.init) {
-            openWindow(id: "terminal", value: TerminalRoute(hostID: host.id, mode: .attach(sessionName: name)))
+        for entry in list.split(separator: ",") {
+            let tabs = entry.split(separator: "+").map {
+                TerminalRoute(hostID: host.id, mode: .attach(sessionName: String($0)))
+            }
+            guard !tabs.isEmpty else { continue }
+            openWindow(id: "terminal", value: TerminalWindowRoute(tabs: tabs))
             try? await Task.sleep(for: .seconds(1))
+        }
+        // MULTIPLEX_AUTO_MERGE=1: once the windows are up, merge them all
+        // into the first — headless exercise of the surrender/adopt path
+        // the in-window Merge menu uses.
+        if ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_MERGE"] == "1" {
+            try? await Task.sleep(for: .seconds(8))
+            workspace.mergeAllWindows()
         }
     }
     #endif
