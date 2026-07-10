@@ -13,3 +13,5 @@ xcuserdata/
 
 # Dev harness artifacts (generated keys, sshd runtime state)
 Tools/dev-sshd/state/
+
+local-plan/
