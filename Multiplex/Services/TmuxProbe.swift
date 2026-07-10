@@ -139,6 +139,17 @@ enum TmuxProbe {
         return .sessions(list)
     }
 
+    // MARK: - Session actions
+
+    /// Kill one session (and every process in it). Targets tmux's own id —
+    /// `-t` name matching is prefix-based, so a name target could take out
+    /// "main-2" when asked for "main"; the `=` fallback forces an exact
+    /// name match if the id is somehow missing.
+    static func killCommand(for session: TmuxSession) -> String {
+        let target = session.tmuxID.isEmpty ? "=\(session.name)" : session.tmuxID
+        return pathPrefix + "tmux kill-session -t \(target.shellQuoted)"
+    }
+
     // MARK: - Miniatures (the deck wall's live tiles)
 
     /// Lines a tile shows; the parser keeps the trailing non-blank run.

@@ -184,6 +184,19 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertFalse(command.contains("my project"))
     }
 
+    func testKillCommandTargetsSessionID() {
+        let command = TmuxProbe.killCommand(for: session("my project", id: "$3"))
+        XCTAssertTrue(command.contains("tmux kill-session -t '$3'"))
+        // Names never appear in targets — ids are unambiguous.
+        XCTAssertFalse(command.contains("my project"))
+    }
+
+    func testKillCommandFallsBackToExactNameMatch() {
+        // No id: `-t name` is prefix-matched by tmux, `=` forces exact.
+        let command = TmuxProbe.killCommand(for: session("main", id: ""))
+        XCTAssertTrue(command.contains("tmux kill-session -t '=main'"))
+    }
+
     func testParseCapturesKeepsTrailingNonBlankTail() {
         let sessions = [session("main", id: "$0"), session("scratch", id: "$1")]
         let output = """

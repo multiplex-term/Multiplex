@@ -18,6 +18,13 @@ struct FleetWall: View {
 
     @State private var namingHost: Host?
     @State private var newSessionName = ""
+    @State private var deleteTarget: DeleteTarget?
+
+    /// Pending delete confirmation — which session on which host.
+    private struct DeleteTarget {
+        let host: Host
+        let session: TmuxSession
+    }
 
     private let columns = [GridItem(.adaptive(minimum: 290, maximum: 360), spacing: 14)]
     /// Wall cadence: one probe + capture round-trip per host per tick.
@@ -51,6 +58,19 @@ struct FleetWall: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Creates a tmux session on \(namingHost?.name ?? "the host") and attaches to it.")
+        }
+        .alert(
+            "Delete Session",
+            isPresented: Binding(
+                get: { deleteTarget != nil },
+                set: { if !$0 { deleteTarget = nil } }
+            ),
+            presenting: deleteTarget
+        ) { target in
+            Button("Delete", role: .destructive) { kill(target) }
+            Button("Cancel", role: .cancel) {}
+        } message: { target in
+            Text("Kills “\(target.session.name)” on \(target.host.name) and everything running in it.")
         }
     }
 
@@ -191,10 +211,14 @@ struct FleetWall: View {
                 ForEach(sessions) { session in
                     SessionTile(
                         session: session,
-                        lines: model.miniatures[session.name] ?? []
-                    ) {
-                        open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: session.name)))
-                    }
+                        lines: model.miniatures[session.name] ?? [],
+                        attach: {
+                            open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: session.name)))
+                        },
+                        delete: {
+                            deleteTarget = DeleteTarget(host: host, session: session)
+                        }
+                    )
                 }
                 newSessionTile(host)
             case .noServer:
@@ -292,6 +316,11 @@ struct FleetWall: View {
         store.remove(host)
     }
 
+    private func kill(_ target: DeleteTarget) {
+        let model = hub.model(for: target.host)
+        Task { await model.killSession(target.session) }
+    }
+
     private func createSession() {
         guard let host = namingHost else { return }
         var name = newSessionName
@@ -331,6 +360,7 @@ private struct SessionTile: View {
     let session: TmuxSession
     let lines: [String]
     let attach: () -> Void
+    let delete: () -> Void
 
     var body: some View {
         Button(action: attach) {
@@ -346,6 +376,9 @@ private struct SessionTile: View {
         }
         .buttonStyle(.plain)
         .chassisHover(4)
+        .contextMenu {
+            Button("Delete Session…", role: .destructive, action: delete)
+        }
         .accessibilityLabel(accessibilitySummary)
     }
 

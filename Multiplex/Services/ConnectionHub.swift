@@ -104,6 +104,24 @@ final class HostConnectionModel {
         miniatures = TmuxProbe.parseCaptures(output, sessions: sessions)
     }
 
+    /// Kill a tmux session on the host over the control connection, then
+    /// re-probe. The tile drops as soon as the kill lands; the follow-up
+    /// probe is the truth and resurrects it if the kill failed. Fail-soft
+    /// like `captureTails` — if the control link dropped, do nothing and
+    /// let the next probe cycle surface the failure.
+    func killSession(_ session: TmuxSession) async {
+        guard phase == .connected, let connection else { return }
+        _ = try? await connection.exec(TmuxProbe.killCommand(for: session))
+        if case .sessions(let list) = tmux {
+            tmux = .sessions(list.filter { $0.id != session.id })
+        }
+        miniatures[session.name] = nil
+        // A probe already in flight may predate the kill — let it land,
+        // then re-probe so the wall settles on reality.
+        await refreshTask?.value
+        refresh()
+    }
+
     func disconnect() async {
         refreshTask?.cancel()
         refreshTask = nil
