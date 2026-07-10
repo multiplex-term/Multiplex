@@ -120,6 +120,27 @@ port 2222.
 
 Tear the harness down when done: `./Tools/dev-sshd/harness.sh stop`.
 
+### Zombie simulator boot (verify hangs at "launching")
+
+Occasionally the simulator boots broken: `verify` stalls at
+`== launching with seeded host + auto-attach ==` for many minutes and
+`simctl launch` eventually fails with Mach error -308 ("(ipc/mig) server
+died"). Other tells: `xcrun simctl listapps <udid>` doesn't list the app even
+though the install step succeeded, and simulator daemons (ScreenTimeAgent,
+siriactionsd) crash right after boot.
+
+Before suspecting the change you just made, check whether the app process
+exists: `ps aux | grep Multiplex.app` (simulator apps run as host processes).
+**No process means the app never spawned** — the sim's launch services died at
+boot and no amount of app-side debugging will help. A real app-side launch
+hang would show a running process you can `sample`.
+
+Fix: shut the simulator down and rerun — `xcrun simctl shutdown <udid>` (the
+UDID is printed in verify's `== booting <udid> ==` line), then
+`./Tools/build.sh verify …` again. It reboots the sim and a healthy run
+completes in a few minutes. Don't `erase` the device for this; a plain
+shutdown/reboot is enough and keeps the app's on-device state.
+
 ### Simulator keyboard gotcha
 
 If you're checking keyboard behavior, the simulator's **I/O → Keyboard → Connect

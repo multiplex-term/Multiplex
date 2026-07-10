@@ -1,7 +1,12 @@
 import Foundation
 import Observation
 
-/// Hosts persisted as JSON in Application Support. Secrets go to the Keychain.
+/// Hosts persisted as JSON in Application Support — a local cache of the
+/// cross-device truth. Secrets and a mirrored copy of each host record live
+/// in the Keychain as synchronizable items, so iCloud Keychain moves both to
+/// the user's other devices; `syncWithCloud()` reconciles the two on launch
+/// and whenever the deck returns to the foreground (keychain sync has no
+/// change notification to subscribe to).
 @MainActor
 @Observable
 final class HostStore {
@@ -9,34 +14,61 @@ final class HostStore {
 
     private let fileURL: URL
 
+    /// Host IDs this device has confirmed in the Keychain mirror. Lets the
+    /// merge tell "new local host, publish it" apart from "a peer deleted
+    /// this host". Device-local bookkeeping, so UserDefaults is fine.
+    private var mirroredIDs: Set<UUID>
+    private static let mirroredIDsKey = "MultiplexMirroredHostIDs"
+
     init() {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Multiplex", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("hosts.json")
+        mirroredIDs = Set(
+            (UserDefaults.standard.stringArray(forKey: Self.mirroredIDsKey) ?? [])
+                .compactMap(UUID.init)
+        )
+        KeychainStore.migrateDeviceOnlyItems()
         load()
+        syncWithCloud()
         seedFromEnvironmentIfNeeded()
     }
 
     func add(_ host: Host) {
+        var host = host
+        host.updatedAt = .now
         hosts.append(host)
         save()
+        mirror(host)
     }
 
     func update(_ host: Host) {
         guard let index = hosts.firstIndex(where: { $0.id == host.id }) else { return }
+        var host = host
+        host.updatedAt = .now
         hosts[index] = host
         save()
+        mirror(host)
     }
 
     func remove(_ host: Host) {
         hosts.removeAll { $0.id == host.id }
         KeychainStore.delete(for: host.id)
+        KeychainStore.deleteHostRecord(for: host.id)
+        mirroredIDs.remove(host.id)
+        persistMirroredIDs()
         save()
     }
 
     func host(id: UUID) -> Host? {
         hosts.first { $0.id == id }
+    }
+
+    /// Re-reads the mirrored records — call when the deck becomes active so
+    /// hosts added or edited on another device show up without a relaunch.
+    func refreshFromCloud() {
+        syncWithCloud()
     }
 
     private func load() {
@@ -49,6 +81,45 @@ final class HostStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(hosts) else { return }
         try? data.write(to: fileURL, options: .atomic)
+    }
+
+    // MARK: - Cloud mirror
+
+    private func syncWithCloud() {
+        let decoder = JSONDecoder()
+        let cloud = KeychainStore.hostRecords().compactMap { try? decoder.decode(Host.self, from: $0) }
+        let resolution = HostSync.merge(local: hosts, cloud: cloud, mirrored: mirroredIDs)
+
+        // Only IDs whose record verifiably sits in the mirror may be marked
+        // mirrored — a failed push must read as "publish again", never as
+        // "peer deleted it".
+        var confirmed = Set(resolution.hosts.map(\.id))
+        for host in resolution.toPush where !push(host) {
+            confirmed.remove(host.id)
+        }
+        mirroredIDs = confirmed
+        persistMirroredIDs()
+
+        if resolution.hosts != hosts {
+            hosts = resolution.hosts
+            save()
+        }
+    }
+
+    private func mirror(_ host: Host) {
+        if push(host) {
+            mirroredIDs.insert(host.id)
+            persistMirroredIDs()
+        }
+    }
+
+    private func push(_ host: Host) -> Bool {
+        guard let record = try? JSONEncoder().encode(host) else { return false }
+        return KeychainStore.setHostRecord(record, for: host.id)
+    }
+
+    private func persistMirroredIDs() {
+        UserDefaults.standard.set(mirroredIDs.map(\.uuidString).sorted(), forKey: Self.mirroredIDsKey)
     }
 
     /// Dev/verification hook: `MULTIPLEX_SEED_HOST` points at a JSON file
@@ -74,12 +145,11 @@ final class HostStore {
         host.authMethod = seed.privateKey != nil ? .privateKey : .password
         if let key = seed.privateKey { KeychainStore.set(key, for: host.id, kind: .privateKey) }
         if let password = seed.password { KeychainStore.set(password, for: host.id, kind: .password) }
-        if let index = hosts.firstIndex(where: { $0.id == host.id }) {
-            hosts[index] = host
+        if hosts.contains(where: { $0.id == host.id }) {
+            update(host)
         } else {
-            hosts.append(host)
+            add(host)
         }
-        save()
         #endif
     }
 

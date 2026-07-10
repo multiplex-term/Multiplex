@@ -14,8 +14,10 @@ window count, active window, activity — before you attach.
 ## What it does
 
 - **Hosts deck** — add SSH hosts (password or OpenSSH ed25519/RSA key, secrets
-  in the Keychain). Selecting a host connects and probes tmux over an exec
-  channel: one round-trip lists every session and its windows.
+  in the Keychain). Hosts and their secrets sync to your other devices through
+  iCloud Keychain — end-to-end encrypted, nothing touches a server of ours.
+  Selecting a host connects and probes tmux over an exec channel: one
+  round-trip lists every session and its windows.
 - **tmux session cards** — each card shows the *window spine* (one cell per
   tmux window, the active one lit, activity flagged), attach state, and window
   count. **Attach** opens the session in its own window
@@ -40,7 +42,8 @@ window count, active window, activity — before you attach.
 ```
 SwiftUI (Deck window + N Terminal windows)
    │
-   ├── HostStore            hosts.json in App Support; secrets in Keychain
+   ├── HostStore            hosts.json local cache; secrets + host records
+   │                        sync across devices via iCloud Keychain
    ├── ConnectionHub        one HostConnectionModel per host (probe connection)
    │      └── TmuxProbe     list-sessions/-windows format strings + parser
    └── TerminalSessionController   one per terminal window

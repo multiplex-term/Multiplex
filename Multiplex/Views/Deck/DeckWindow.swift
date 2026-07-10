@@ -32,6 +32,7 @@ private struct DeckSceneReporter: UIViewRepresentable {
 struct DeckWindow: View {
     @Environment(HostStore.self) private var store
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var selectedHostID: UUID?
     @State private var addingHost = false
@@ -55,6 +56,11 @@ struct DeckWindow: View {
         .background(DeckSceneReporter())
         .onAppear {
             if selectedHostID == nil { selectedHostID = store.hosts.first?.id }
+        }
+        // iCloud Keychain sync has no change notification; re-merge the host
+        // mirror whenever the deck comes back to the foreground.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { store.refreshFromCloud() }
         }
         #if DEBUG
         .task { await autoAttachIfRequested() }
