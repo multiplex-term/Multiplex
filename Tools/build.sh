@@ -23,24 +23,27 @@ BUNDLE_ID="tools.bricks.multiplex"
 HARNESS="$ROOT/Tools/dev-sshd/harness.sh"
 SEED="$ROOT/Tools/dev-sshd/state/seed.json"
 
-# Resolve a booted (or bootable) simulator UDID for a platform key.
-destination() {
-    case "$1" in
-        vos|visionos|xr) echo 'platform=visionOS Simulator,name=Apple Vision Pro' ;;
-        ipad|ios)        echo 'platform=iOS Simulator,name=iPad Pro 13-inch (M5)' ;;
-        *) echo "unknown platform '$1' (use vos|ipad)" >&2; exit 2 ;;
-    esac
-}
-
+# Resolve one concrete simulator UDID for a platform key. Name-based
+# xcodebuild destinations are ambiguous the moment several runtimes carry an
+# "Apple Vision Pro" — prefer a booted device (what the user is looking at),
+# else the newest runtime (simctl lists runtimes ascending).
 sim_udid() {
-    # First available device matching the platform's device name.
-    local name
+    local name list
     case "$1" in
         vos|visionos|xr) name="Apple Vision Pro" ;;
         ipad|ios)        name="iPad Pro 13-inch (M5)" ;;
+        *) echo "unknown platform '$1' (use vos|ipad)" >&2; exit 2 ;;
     esac
-    xcrun simctl list devices available | grep -F "$name (" | head -1 \
-        | grep -oE '[0-9A-F-]{36}'
+    list="$(xcrun simctl list devices available | grep -F "$name (")"
+    { echo "$list" | grep -F '(Booted)' | head -1; echo "$list" | tail -1; } \
+        | grep -oE '[0-9A-F-]{36}' | head -1
+}
+
+require_udid() {
+    local udid
+    udid="$(sim_udid "$1")"
+    [ -n "$udid" ] || { echo "no simulator found for '$1'" >&2; exit 1; }
+    echo "$udid"
 }
 
 gen() {
@@ -51,14 +54,14 @@ gen() {
 build() {
     local plat="${1:-vos}"
     xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
-        -destination "$(destination "$plat")" \
+        -destination "id=$(require_udid "$plat")" \
         -derivedDataPath "$DERIVED" build
 }
 
 run_tests() {
     local plat="${1:-vos}"
     xcodebuild -project "$PROJECT" -scheme "$TEST_SCHEME" \
-        -destination "$(destination "$plat")" \
+        -destination "id=$(require_udid "$plat")" \
         -derivedDataPath "$DERIVED" test
 }
 
@@ -69,8 +72,7 @@ verify() {
     # so a machine with multiple Vision Pro runtimes can't build for one and
     # install to another (SDK mismatch).
     local udid product
-    udid="$(sim_udid "$plat")"
-    [ -n "$udid" ] || { echo "no simulator found for '$plat'" >&2; exit 1; }
+    udid="$(require_udid "$plat")"
     case "$plat" in
         vos|visionos|xr) product="$DERIVED/Build/Products/Debug-xrsimulator/Multiplex.app" ;;
         ipad|ios)        product="$DERIVED/Build/Products/Debug-iphonesimulator/Multiplex.app" ;;
