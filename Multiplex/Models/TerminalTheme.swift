@@ -101,14 +101,14 @@ struct TerminalTheme: Codable, Hashable, Identifiable {
 
 extension TerminalTheme {
     static let builtIns: [TerminalTheme] = [
-        .multiplex, .gruvboxDark, .dracula, .nord, .solarizedDark, .solarizedLight,
+        .tally, .multiplex, .gruvboxDark, .dracula, .nord, .solarizedDark, .solarizedLight,
     ]
 
     static func builtIn(id: String) -> TerminalTheme? {
         builtIns.first { $0.id == id }
     }
 
-    /// The house theme — DESIGN.md's amber-on-ink, the app default.
+    /// The original amber-on-ink identity, kept as an optional theme.
     static let multiplex = TerminalTheme(
         id: "multiplex",
         name: "Multiplex",
@@ -118,6 +118,21 @@ extension TerminalTheme {
         ansi: palette([
             0x1B202B, 0xEA6962, 0xA9B665, 0xD8A657, 0x7DAEA3, 0xD3869B, 0x89B482, 0xC5BDA8,
             0x566073, 0xF28B82, 0xB8C77D, 0xE9B858, 0x93C0B5, 0xE19BB0, 0x9CC79A, 0xE9E4D8,
+        ])
+    )
+
+    /// The house theme and app default — DESIGN.md's Tally: screen ground,
+    /// signal text, tally-red cursor; ANSI tuned so red/amber match the
+    /// chrome's lamp semantics.
+    static let tally = TerminalTheme(
+        id: "tally",
+        name: "Tally",
+        background: ThemeColor(0x0A0B0C),
+        foreground: ThemeColor(0xE6E9EA),
+        cursor: ThemeColor(0xE5484D),
+        ansi: palette([
+            0x17181A, 0xE5484D, 0x7FBF9A, 0xE0A33E, 0x7AA5C4, 0xB88FB0, 0x8FBFC4, 0xC9CDD1,
+            0x5C6166, 0xF27074, 0x98D4B2, 0xEDBB66, 0x98BFDC, 0xCFA7C7, 0xABD6DA, 0xF2F3F4,
         ])
     )
 

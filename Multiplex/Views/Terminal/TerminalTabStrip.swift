@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// The window's tabs as physical cells — the deck's window-spine language
-/// grown up: amber-lit active cell, mono session names, a live-status dot.
-/// Tap switches; the context menu closes a tab or splits it out into its
-/// own window. Shown only when a window holds more than one tab.
+/// The window's tabs as multiviewer source labels: square cells in
+/// compressed caps, each with its own tally dot — the wall's language at
+/// terminal scale. Tap switches; the context menu closes a tab or splits
+/// it out into its own window. Shown only when a window holds more than
+/// one tab.
 struct TerminalTabStrip: View {
     struct Item: Identifiable {
         let id: UUID
@@ -20,7 +21,7 @@ struct TerminalTabStrip: View {
     let close: (UUID) -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             ForEach(items) { item in
                 tabCell(item)
             }
@@ -30,36 +31,30 @@ struct TerminalTabStrip: View {
     }
 
     private func tabCell(_ item: Item) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
-        return Button {
+        Button {
             activate(item.id)
         } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 8) {
                 Circle()
-                    .fill(statusColor(item))
+                    .fill(dotColor(item))
                     .frame(width: 6, height: 6)
-                Text(item.title)
-                    .font(.mono(13, weight: item.isActive ? .semibold : .regular))
-                    .lineLimit(1)
-                if let host = item.hostName {
-                    Text(host)
-                        .font(.mono(11))
-                        .opacity(0.65)
-                        .lineLimit(1)
-                }
+                    .shadow(
+                        color: dotColor(item) == Theme.tally
+                            ? Theme.tally.opacity(0.7) : .clear,
+                        radius: 3)
+                ChassisLabel(
+                    item.hostName.map { "\(item.title) · \($0)" } ?? item.title,
+                    size: 10,
+                    color: item.isActive ? Theme.signal : Theme.signal2)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .foregroundStyle(item.isActive ? Theme.ink : Theme.textSecondary)
-            .background(
-                item.isActive ? AnyShapeStyle(Theme.phosphor) : AnyShapeStyle(Theme.inkRaised),
-                in: shape
-            )
-            .overlay(
-                shape.strokeBorder(item.isActive ? Theme.phosphor : Theme.line, lineWidth: 1)
-            )
+            .background(item.isActive ? Theme.bezelHi : Theme.chassis)
+            .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .chassisHover(3)
         .contextMenu {
             if items.count > 1 {
                 Button {
@@ -77,12 +72,14 @@ struct TerminalTabStrip: View {
         .accessibilityLabel("\(item.title) tab\(item.isActive ? ", active" : "")")
     }
 
-    private func statusColor(_ item: Item) -> Color {
-        guard let controller = item.controller else { return Theme.line }
+    /// The tab's tally: red = its shell is live, caution = linking,
+    /// dim = ended.
+    private func dotColor(_ item: Item) -> Color {
+        guard let controller = item.controller else { return Theme.signal3 }
         switch controller.status {
-        case .live: return item.isActive ? Theme.ink : Theme.phosphor
-        case .connecting: return item.isActive ? Theme.ink.opacity(0.5) : Theme.phosphorDim
-        case .ended: return item.isActive ? Theme.ink.opacity(0.35) : Theme.line
+        case .live: return Theme.tally
+        case .connecting: return Theme.caution
+        case .ended: return Theme.signal3
         }
     }
 }

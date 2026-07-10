@@ -28,38 +28,28 @@ private struct DeckSceneReporter: UIViewRepresentable {
     func updateUIView(_ view: ReporterView, context: Context) {}
 }
 
-/// The launcher: hosts on the left, a host's tmux sessions on the right.
+/// The deck window: the fleet wall plus the sheets it opens (add/edit host,
+/// settings). Scene bookkeeping and the DEBUG auto-attach hook live here.
 struct DeckWindow: View {
     @Environment(HostStore.self) private var store
     @Environment(TerminalWorkspace.self) private var workspace
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var selectedHostID: UUID?
     @State private var addingHost = false
     @State private var editingHost: Host?
     @State private var showingSettings = false
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-        } detail: {
-            if let id = selectedHostID, let host = store.host(id: id) {
-                HostDetailView(host: host)
-                    .id(host.id)
-            } else {
-                FirstRunView(hasHosts: !store.hosts.isEmpty) {
-                    addingHost = true
-                }
-            }
-        }
+        FleetWall(
+            addHost: { addingHost = true },
+            editHost: { editingHost = $0 },
+            openSettings: { showingSettings = true }
+        )
         .sheet(isPresented: $addingHost) { AddHostSheet() }
         .sheet(item: $editingHost) { host in AddHostSheet(editing: host) }
         .sheet(isPresented: $showingSettings) { SettingsView() }
         .background(DeckSceneReporter())
-        .onAppear {
-            if selectedHostID == nil { selectedHostID = store.hosts.first?.id }
-        }
         // iCloud Keychain sync has no change notification; re-merge the host
         // mirror whenever the deck comes back to the foreground.
         .onChange(of: scenePhase) { _, phase in
@@ -100,106 +90,4 @@ struct DeckWindow: View {
         }
     }
     #endif
-
-    private var sidebar: some View {
-        List(selection: $selectedHostID) {
-            Section {
-                ForEach(store.hosts) { host in
-                    HostRow(host: host)
-                        .tag(host.id)
-                        .contextMenu {
-                            Button("Edit…") { editingHost = host }
-                            Button("Remove", role: .destructive) { remove(host) }
-                        }
-                }
-            } header: {
-                Eyebrow("Hosts")
-            }
-        }
-        .navigationTitle("Multiplex")
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    showingSettings = true
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                Button {
-                    addingHost = true
-                } label: {
-                    Label("Add Host", systemImage: "plus")
-                }
-            }
-        }
-    }
-
-    private func remove(_ host: Host) {
-        if selectedHostID == host.id { selectedHostID = nil }
-        store.remove(host)
-    }
-}
-
-private struct HostRow: View {
-    @Environment(ConnectionHub.self) private var hub
-    let host: Host
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(hub.model(for: host).phase == .connected ? Theme.phosphor : Theme.line)
-                .frame(width: 7, height: 7)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(host.name)
-                    .font(.mono(15, weight: .medium))
-                Text(host.address)
-                    .font(.mono(11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.vertical, 2)
-    }
-}
-
-/// First-run hero: the one place the amber caret gets to breathe.
-struct FirstRunView: View {
-    var hasHosts: Bool
-    var addHost: () -> Void
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var caretOn = true
-
-    var body: some View {
-        VStack(spacing: 18) {
-            HStack(spacing: 2) {
-                Text("multiplex")
-                    .font(.mono(34, weight: .semibold))
-                Rectangle()
-                    .fill(Theme.phosphor)
-                    .frame(width: 16, height: 34)
-                    .opacity(caretOn ? 1 : 0.15)
-            }
-            Text(hasHosts ? "Select a host to see its tmux sessions." : "Every tmux session, its own window in space.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-            if !hasHosts {
-                Button(action: addHost) {
-                    Text("Add Host")
-                        .font(.body.weight(.semibold))
-                        .padding(.horizontal, 8)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.phosphor)
-                .padding(.top, 6)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task {
-            guard !reduceMotion else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(700))
-                withAnimation(.easeInOut(duration: 0.25)) { caretOn.toggle() }
-            }
-        }
-    }
 }

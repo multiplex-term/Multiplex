@@ -45,8 +45,9 @@ struct MultiplexApp: App {
     }
 }
 
-/// iPad sits on ink (dark UI, amber accent); visionOS keeps native glass
-/// with amber applied per-control.
+/// iPad sits on chassis (dark UI, neutral signal accent — color is spent on
+/// state, not actions); visionOS keeps native glass for sheets and system
+/// controls.
 private struct PlatformChrome: ViewModifier {
     func body(content: Content) -> some View {
         #if os(visionOS)
@@ -54,7 +55,7 @@ private struct PlatformChrome: ViewModifier {
         #else
         content
             .preferredColorScheme(.dark)
-            .tint(Theme.phosphor)
+            .tint(Theme.signal)
         #endif
     }
 }

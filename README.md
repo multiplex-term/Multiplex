@@ -2,25 +2,31 @@
 
 A spatial SSH terminal for people who live inside remote tmux sessions.
 **visionOS first, iPadOS alongside.** Every tmux session gets its own window
-you can place around the room; the deck shows each host's sessions live —
-window count, active window, activity — before you attach.
+you can place around the room; the deck is a fleet-wide **monitor wall** that
+shows every session live — its actual last lines, window spine, and a tally
+lamp when it's attached — before you ever attach.
 
-*Design rationale and tokens: [DESIGN.md](DESIGN.md).*
+*Design rationale and tokens: [DESIGN.md](DESIGN.md). The identity bake-off
+that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
 
-![Deck with live session cards](docs/visionos-deck.png)
+![The deck: a live monitor wall of tmux sessions](docs/visionos-deck.png)
 
-![Two sessions attached, each in its own spatial window](docs/visionos-multiwindow.png)
+![A session attached in its own spatial window, UMD chrome below](docs/visionos-multiwindow.png)
 
 ## What it does
 
-- **Hosts deck** — add SSH hosts (password or OpenSSH ed25519/RSA key, secrets
-  in the Keychain). Hosts and their secrets sync to your other devices through
-  iCloud Keychain — end-to-end encrypted, nothing touches a server of ours.
-  Selecting a host connects and probes tmux over an exec channel: one
-  round-trip lists every session and its windows.
-- **tmux session cards** — each card shows the *window spine* (one cell per
-  tmux window, the active one lit, activity flagged), attach state, and window
-  count. **Attach** opens the session in its own window
+- **The wall (deck)** — add SSH hosts (password or OpenSSH ed25519/RSA key,
+  secrets in the Keychain); hosts and secrets sync to your other devices
+  through iCloud Keychain — end-to-end encrypted, nothing touches a server of
+  ours. Every host probes concurrently over an exec channel and renders as a
+  rail of live tiles: each tile streams the session's last lines
+  (`capture-pane` over the same control connection, ~5 s cadence while the
+  deck is frontmost), wears a captioned red **LIVE** tally when attached, and
+  carries telemetry (windows · clients · age). An unreachable host is a
+  hatched **NO SIGNAL** tile with a RECONNECT badge.
+- **Session tiles** — the tile's lower bezel is the *window spine*: one
+  segment per tmux window, the active one lit, bell/activity flagged with a
+  caution tick. Tapping a tile **Attaches** the session in its own window
   (`tmux attach-session`). **New Session** runs `tmux new-session -A`.
   **Shell** opens a plain login shell, no tmux.
 - **Terminal windows & tabs** — each terminal is its own SwiftUI scene
@@ -30,11 +36,13 @@ window count, active window, activity — before you attach.
   pulls another window's sessions in as tabs (the emptied window closes
   itself), and a tab's context menu moves it back out into its own window.
   Moving a tab never drops the shell — the live SSH connection, buffer, and
-  scrollback travel with it. The spine-styled tab strip (top ornament on
-  visionOS, top bar on iPad) appears only when a window holds more than one
-  tab. SwiftTerm renders xterm-256color; resizing the window sends PTY
-  window-change to the remote. **Detach** closes the active tab's channel —
-  tmux keeps the session; the deck still shows it.
+  scrollback travel with it. Tabs render as multiviewer source labels (square
+  cells, a tally dot per tab) on a top ornament (visionOS) / top bar (iPad),
+  shown only when a window holds more than one tab; below the window sits the
+  **UMD** — the under-monitor display carrying the source label, status lamp,
+  and controls. SwiftTerm renders xterm-256color; resizing the window sends
+  PTY window-change to the remote. **Detach** closes the active tab's
+  channel — tmux keeps the session; the wall still shows it.
 - **Keyboard focus** — exactly one terminal owns keyboard input at a time
   (`TerminalFocusArbiter`): every visionOS window is its own always-active
   scene, so per-window first responders leave input stuck on the first
@@ -42,11 +50,12 @@ window count, active window, activity — before you attach.
   one and activating that window's scene); the chrome's keyboard button
   re-summons a dismissed keyboard; a shell that (re)connects claims focus.
   Keystrokes flow through a single ordered AsyncStream per shell.
-- **Terminal themes** — Settings (gear on the deck) picks the terminal color
-  scheme: six built-ins (Multiplex amber, Gruvbox Dark, Dracula, Nord,
-  Solarized Dark/Light) plus user-created themes with a full background /
-  text / cursor / 16-ANSI editor. Applies to every open terminal live; the
-  deck and window chrome keep the Multiplex amber identity.
+- **Terminal themes** — Settings (chip on the wall) picks the terminal color
+  scheme: seven built-ins (Tally — the default, Multiplex amber, Gruvbox
+  Dark, Dracula, Nord, Solarized Dark/Light) plus user-created themes with a
+  full background / text / cursor / 16-ANSI editor. Applies to every open
+  terminal live; themes recolor the terminal surface only — the wall and
+  window chrome keep the Tally chassis.
 
 ## Architecture
 

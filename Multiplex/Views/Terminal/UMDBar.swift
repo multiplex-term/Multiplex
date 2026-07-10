@@ -1,0 +1,82 @@
+import SwiftUI
+
+/// The under-monitor display: every broadcast monitor wears one. Source
+/// label, captioned status lamp, and the window's controls as chassis
+/// chips. Deliberately opaque — the UMD is hardware, not glass.
+struct UMDBar: View {
+    var controller: TerminalSessionController?
+    var title: String
+    var mergeSources: [TerminalWorkspace.WindowEntry]
+    var showDeck: () -> Void
+    var summonKeyboard: () -> Void
+    var fontDown: () -> Void
+    var fontUp: () -> Void
+    var merge: (UUID) -> Void
+    var detach: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ChassisChip("DECK", action: showDeck)
+            divider
+            ChassisLabel(title, size: 12)
+            statusCluster
+            divider
+            ChassisChip("KBD", action: summonKeyboard)
+            ChassisChip("A−", action: fontDown)
+            ChassisChip("A+", action: fontUp)
+            if !mergeSources.isEmpty {
+                Menu {
+                    ForEach(mergeSources) { entry in
+                        Button {
+                            merge(entry.id)
+                        } label: {
+                            Label(entry.label, systemImage: "macwindow")
+                        }
+                    }
+                    if mergeSources.count > 1 {
+                        Divider()
+                        Button {
+                            for entry in mergeSources { merge(entry.id) }
+                        } label: {
+                            Label("Merge All Windows", systemImage: "rectangle.stack")
+                        }
+                    }
+                } label: {
+                    ChassisBadge("MERGE")
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .chassisHover(2)
+                .accessibilityLabel("Merge another window into this one")
+            }
+            divider
+            ChassisChip("DETACH", prominent: true, action: detach)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 11)
+        .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.bezelHi, lineWidth: 1))
+    }
+
+    private var divider: some View {
+        Rectangle().fill(Theme.bezelHi).frame(width: 1, height: 18)
+    }
+
+    /// The window's lamp: LIVE (tally, captioned), LINK while the shell
+    /// connects, ENDED when the channel closed.
+    @ViewBuilder
+    private var statusCluster: some View {
+        switch controller?.status {
+        case .live:
+            TallyLamp()
+        case .connecting:
+            TallyLamp(caption: "LINK", color: Theme.caution)
+        case .ended:
+            TallyLamp(caption: "ENDED", color: Theme.signal3)
+        case nil:
+            EmptyView()
+        }
+    }
+}

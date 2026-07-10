@@ -15,10 +15,15 @@ struct TmuxWindow: Identifiable, Hashable {
 struct TmuxSession: Identifiable, Hashable {
     var name: String
     var windows: [TmuxWindow]
-    var isAttached: Bool
+    /// Attached client count (`session_attached` is a count, not a flag).
+    var clientCount: Int = 0
     var created: Date
+    /// tmux's own id ("$3") — the only unambiguous capture-pane target;
+    /// names can prefix-collide.
+    var tmuxID: String = ""
 
     var id: String { name }
+    var isAttached: Bool { clientCount > 0 }
     var windowCount: Int { windows.count }
 }
 

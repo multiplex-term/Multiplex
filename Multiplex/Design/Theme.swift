@@ -1,21 +1,36 @@
 import SwiftUI
 import UIKit
 
-/// Multiplex design tokens. See DESIGN.md.
-/// One accent — P3 phosphor amber — on deep blue-black ink.
+/// Multiplex design tokens — the TALLY identity (see DESIGN.md).
+/// A broadcast monitor wall: graphite chassis, screens darker than the
+/// chassis that frames them, and color spent on state, never decoration.
 enum Theme {
-    // MARK: Ground
-    static let ink = Color(hex: 0x0C0E13)
-    static let inkRaised = Color(hex: 0x141823)
-    static let line = Color(hex: 0x262C3D)
+    // MARK: Chassis (ground)
+    /// Window ground — warm graphite, deliberately not blue-black.
+    static let chassis = Color(hex: 0x17181A)
+    /// Raised surfaces: tiles, rails, the UMD bar.
+    static let bezel = Color(hex: 0x26282B)
+    /// Borders, dividers, inactive bezel segments.
+    static let bezelHi = Color(hex: 0x33363A)
+    /// The darkest thing on screen: miniature + terminal grounds. Screens
+    /// sit *inside* lighter chassis — that inversion is the identity.
+    static let screen = Color(hex: 0x0A0B0C)
 
-    // MARK: Signal
-    static let phosphor = Color(hex: 0xFFB000)
-    static let phosphorDim = Color(hex: 0x8F6A1D)
+    // MARK: Signal (state only — a color here always means something)
+    /// Live/attached lamp — broadcast "on air". Always captioned (LIVE),
+    /// never used for errors, never used as an accent.
+    static let tally = Color(hex: 0xE5484D)
+    /// Bell/activity ticks, connecting states. Small doses.
+    static let caution = Color(hex: 0xE0A33E)
+    /// Connected dot on host rails.
+    static let ok = Color(hex: 0x7FBF9A)
 
-    // MARK: Text on ink
-    static let textPrimary = Color(hex: 0xE9E4D8)
-    static let textSecondary = Color(hex: 0x98A1B4)
+    // MARK: Text on chassis
+    static let signal = Color(hex: 0xF2F3F4)
+    static let signal2 = Color(hex: 0x9BA1A6)
+    static let signal3 = Color(hex: 0x5C6166)
+    /// Dimmed mono text inside miniature screens.
+    static let miniText = Color(hex: 0xC8D2D6)
 }
 
 // Terminal surface colors are the user's choice, not identity — they live in
@@ -70,13 +85,14 @@ extension Color {
 // MARK: - Type roles
 
 extension Font {
-    /// Identity voice: host names, session names, addresses, counts.
+    /// Identity voice: host names, session names, addresses, counts,
+    /// telemetry, and everything inside a screen.
     static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .monospaced)
     }
 }
 
-/// Small-caps eyebrow label: `HOSTS`, `TMUX SESSIONS`.
+/// Small-caps eyebrow label for form sections: `TERMINAL THEME`.
 struct Eyebrow: View {
     let text: String
     init(_ text: String) { self.text = text }

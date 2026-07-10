@@ -20,14 +20,14 @@ final class ThemeStore {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("themes.json")
         selectedID = UserDefaults.standard.string(forKey: Self.selectedIDKey)
-            ?? TerminalTheme.multiplex.id
+            ?? TerminalTheme.tally.id
         load()
     }
 
     /// The active theme; a stale selection (deleted custom theme, renamed
     /// built-in) falls back to the house default rather than a blank screen.
     var selected: TerminalTheme {
-        theme(id: selectedID) ?? .multiplex
+        theme(id: selectedID) ?? .tally
     }
 
     var allThemes: [TerminalTheme] {
@@ -60,7 +60,7 @@ final class ThemeStore {
     func remove(_ theme: TerminalTheme) {
         customThemes.removeAll { $0.id == theme.id }
         if selectedID == theme.id {
-            select(.multiplex)
+            select(.tally)
         }
         save()
     }

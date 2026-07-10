@@ -56,6 +56,67 @@ final class TmuxProbeTests: XCTestCase {
             return XCTFail("expected .sessions")
         }
         XCTAssertTrue(sessions[0].isAttached)
+        XCTAssertEqual(sessions[0].clientCount, 3)
+        XCTAssertEqual(sessions[0].tmuxID, "$2")
+    }
+
+    // MARK: Miniatures
+
+    private func session(_ name: String, id: String) -> TmuxSession {
+        TmuxSession(name: name, windows: [], created: Date(timeIntervalSince1970: 0), tmuxID: id)
+    }
+
+    func testCaptureCommandTargetsSessionIDsWithMarkers() {
+        let command = TmuxProbe.captureCommand(for: [
+            session("main", id: "$0"),
+            session("my project ✨", id: "$7"),
+        ])
+        XCTAssertTrue(command.contains("echo 'MPXS 0'; tmux capture-pane -p -t '$0'"))
+        XCTAssertTrue(command.contains("echo 'MPXS 1'; tmux capture-pane -p -t '$7'"))
+        XCTAssertTrue(command.hasSuffix("echo 'MPXE'"))
+        // Names never appear in targets or markers — ids are unambiguous.
+        XCTAssertFalse(command.contains("my project"))
+    }
+
+    func testParseCapturesKeepsTrailingNonBlankTail() {
+        let sessions = [session("main", id: "$0"), session("scratch", id: "$1")]
+        let output = """
+        MPXS 0
+        one
+        two
+        three
+        four
+        five
+
+        \u{20}\u{20}
+        MPXS 1
+        % vim notes.md
+        MPXE
+        """
+        let captures = TmuxProbe.parseCaptures(output, sessions: sessions)
+        // Blank pane rows below the cursor are dropped; last 4 lines kept.
+        XCTAssertEqual(captures["main"], ["two", "three", "four", "five"])
+        XCTAssertEqual(captures["scratch"], ["% vim notes.md"])
+    }
+
+    func testParseCapturesToleratesTruncationAndBogusIndexes() {
+        let sessions = [session("main", id: "$0")]
+        let output = """
+        MPXS 9
+        not a real session
+        MPXS 0
+        tail line
+        """
+        // No trailing MPXE, and index 9 is out of range — both tolerated.
+        let captures = TmuxProbe.parseCaptures(output, sessions: sessions)
+        XCTAssertEqual(captures, ["main": ["tail line"]])
+    }
+
+    func testParseCapturesClipsTileWidth() {
+        let sessions = [session("main", id: "$0")]
+        let long = String(repeating: "x", count: 200)
+        let captures = TmuxProbe.parseCaptures("MPXS 0\n\(long)\nMPXE", sessions: sessions)
+        XCTAssertEqual(captures["main"]?.first?.count, 56)
     }
 
     func testMalformedLinesAreSkipped() {

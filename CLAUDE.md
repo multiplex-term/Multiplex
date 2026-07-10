@@ -1,10 +1,13 @@
 # CLAUDE.md
 
 Multiplex — a spatial SSH terminal built around remote **tmux**. visionOS-first,
-iPadOS alongside. The deck window lists a host's live tmux sessions; each attach
-opens its own terminal window (a real scene you place in space on visionOS /
-Stage Manager on iPad). See `README.md` for the product tour and `DESIGN.md` for
-the visual system + rationale.
+iPadOS alongside. The deck is a fleet-wide **monitor wall**: every host probes
+concurrently and every session renders as a live tile (real capture-pane
+content, tally lamp when attached); each attach opens its own terminal window
+(a real scene you place in space on visionOS / Stage Manager on iPad). See
+`README.md` for the product tour and `DESIGN.md` for the visual system
+(the TALLY identity) + rationale; `docs/design-bakeoff.md` records the
+bake-off that produced it.
 
 ## Build & test
 
@@ -87,8 +90,13 @@ SwiftUI: Deck window  +  N Terminal windows (WindowGroup(for: TerminalWindowRout
                      iCloud Keychain as synchronizable items (KeychainStore)
   ThemeStore         terminal color schemes — TerminalTheme built-ins + custom
                      (themes.json); selected id in UserDefaults; device-local
-  ConnectionHub      one HostConnectionModel per host — the probe connection
-    TmuxProbe        list-sessions/-windows format strings + parser (pure, unit-tested)
+  ConnectionHub      one HostConnectionModel per host — the probe connection;
+                     also feeds the wall's live miniatures (captureTails() =
+                     one capture-pane exec round-trip per host, polled ~5s by
+                     FleetWall while the deck is frontmost; background
+                     re-probes never surface .probing so tiles don't flicker)
+    TmuxProbe        list-sessions/-windows + capture-pane command builders
+                     and parsers (pure, unit-tested)
   TerminalWorkspace  tab controllers keyed by tab id + window directory —
                      merge/split move tabs across windows, shells stay live
   TerminalSessionController   one per tab; owns the input pump + TerminalView
@@ -154,17 +162,31 @@ views.
 
 - Bundle id `tools.bricks.multiplex`; device families iPad + Vision Pro only
   (no iPhone). Min visionOS 1.0 / iOS 17.
-- Design tokens live in `Theme.swift` (amber `#FFB000` on ink `#0C0E13`) — use
-  them, don't hardcode colors. Monospace (`Font.mono`) is reserved for identity
-  text (host/session names, addresses, counts); labels stay SF Pro.
-- **Terminal surface colors are user preference, not identity**: they come from
-  the selected `TerminalTheme` (deck gear → Settings), never `Theme` tokens.
-  App chrome stays amber-on-ink whatever the theme. Open terminals re-skin
-  live — `SwiftTermView.updateUIView` re-applies when the theme value changes.
+- Design tokens live in `Theme.swift` — the TALLY identity: graphite chassis
+  (`#17181A`), screens darker than their frames (`#0A0B0C`), tally red
+  (`#E5484D`) spent ONLY on live state and always captioned. Use tokens, don't
+  hardcode colors; **color is state, never decoration** (actions are neutral
+  chips). Components live in `Chassis.swift`: `ChassisLabel` (compressed caps
+  — rails, tile names, UMD titles), `ChassisChip`/`ChassisBadge` (square
+  actions), `TallyLamp` (captioned state lamp). Monospace (`Font.mono`) stays
+  the identity/data voice (addresses, telemetry, screen content); body copy
+  stays SF Pro.
+- **visionOS hover**: use `chassisHover(_:)` on every custom Button/Menu —
+  and it must sit on the Button itself, NOT its label (the system resolves
+  the hover shape where the effect attaches; a label-level
+  `contentShape(.hoverEffect,…)` is silently ignored and you get the default
+  rounded platter).
+- **Terminal surface colors are user preference, not identity**: they come
+  from the selected `TerminalTheme` (wall SETTINGS chip), never `Theme`
+  tokens. Default is `TerminalTheme.tally`; chrome keeps the chassis whatever
+  the theme. Open terminals re-skin live — `SwiftTermView.updateUIView`
+  re-applies when the theme value changes. tmux's own status line is left to
+  the user's config on purpose (no `status-style` injection).
 - Secrets never touch disk in plaintext — always `KeychainStore`, keyed by host
   UUID.
-- Platform splits use `#if os(visionOS)`; the iPad UI sits on ink with an amber
-  tint, visionOS keeps native glass.
+- Platform splits use `#if os(visionOS)`; the iPad UI sits on chassis with a
+  neutral `signal` tint, visionOS keeps native glass for sheets. The wall and
+  terminal chrome are opaque chassis on both platforms by design.
 
 ## Known limits (v1)
 

@@ -38,6 +38,9 @@ final class HostConnectionModel {
     private(set) var phase: Phase = .idle
     private(set) var tmux: TmuxState = .unknown
     private(set) var lastRefreshed: Date?
+    /// Session name → last visible lines of its active pane; the deck
+    /// wall's live miniatures, refreshed by `captureTails()`.
+    private(set) var miniatures: [String: [String]] = [:]
 
     private var connection: SSHConnection?
     private var refreshTask: Task<Void, Never>?
@@ -62,7 +65,10 @@ final class HostConnectionModel {
     private func performRefresh() async {
         do {
             let connection = try await ensureConnection()
-            tmux = .probing
+            // Only surface .probing before the first result — the deck wall
+            // re-probes every few seconds, and flipping state on each cycle
+            // would crossfade live tiles against the acquiring placeholder.
+            if case .sessions = tmux {} else { tmux = .probing }
             let output = try await connection.exec(TmuxProbe.probeCommand)
             tmux = TmuxProbe.parse(output)
             lastRefreshed = Date()
@@ -84,6 +90,20 @@ final class HostConnectionModel {
         return fresh
     }
 
+    /// Refresh the wall miniatures over the existing control connection —
+    /// one exec round-trip for every session on the host. Failures are
+    /// soft: stale miniatures beat a flickering wall, and the next probe
+    /// refresh handles real connection loss.
+    func captureTails() async {
+        guard phase == .connected,
+              case .sessions(let sessions) = tmux, !sessions.isEmpty,
+              let connection
+        else { return }
+        guard let output = try? await connection.exec(TmuxProbe.captureCommand(for: sessions))
+        else { return }
+        miniatures = TmuxProbe.parseCaptures(output, sessions: sessions)
+    }
+
     func disconnect() async {
         refreshTask?.cancel()
         refreshTask = nil
@@ -93,6 +113,7 @@ final class HostConnectionModel {
         connection = nil
         phase = .idle
         tmux = .unknown
+        miniatures = [:]
     }
 
     private func friendlyMessage(for error: Error) -> String {

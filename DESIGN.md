@@ -1,115 +1,145 @@
-# Multiplex — Design
+# Multiplex — Design (TALLY)
 
 A spatial terminal for people who live inside remote tmux sessions.
 visionOS first, iPadOS alongside. The app's single job: **get you attached to a
 remote tmux session, each in its own floating window, fast.**
 
-The name is the thesis — tmux is a terminal *multiplexer*; Multiplex multiplies
-terminals into space.
+The identity is **Tally** — the deck is a broadcast monitor wall. It doesn't
+*describe* your sessions, it *shows* them: every session is a live miniature
+of its actual screen, and being attached is a lit, captioned tally lamp — the
+"on air" light. The identity is structural: any screenshot of the wall could
+not be mistaken for another app. (The previous amber-on-ink identity and the
+bake-off that retired it are recorded in `docs/design-bakeoff.md`.)
 
 ## Voice
 
 Plain verbs, user-side vocabulary: **Attach · Detach · New Session · Shell ·
 Add Host**. An action keeps its name through the whole flow. Errors say what
-happened and what to do next; they never apologize and never say "oops".
+happened and what to do next in broadcast language where it genuinely fits
+(`NO SIGNAL` on an unreachable host) and plain words everywhere else.
 
 ## Color
 
-Terminal heritage without the hacker-green cliché. The accent is the amber of
-real P3 phosphor hardware (VT220, Wyse 50), floating on a deep blue-black ink —
-warm signal on cool ground. One accent, spent in one place.
+Graphite chassis, not blue-black; screens darker than the chassis that frames
+them — that inversion (dark screens *inside* lighter hardware) is what makes
+the wall read as a wall. **Color is state, never decoration**: actions are
+neutral chips; if something is red it is live, if something is amber it wants
+attention.
 
-| Token           | Value       | Use                                                    |
-| --------------- | ----------- | ------------------------------------------------------ |
-| `ink`           | `#0C0E13`   | terminal surface, card ground, iPad window ground      |
-| `inkRaised`     | `#141823`   | raised card body, ornament fills                       |
-| `line`          | `#262C3D`   | hairlines, spine cell strokes                          |
-| `phosphor`      | `#FFB000`   | THE accent: active spine cell, caret, live badges, CTA |
-| `phosphorDim`   | `#8F6A1D`   | secondary amber (attached-elsewhere, pressed)          |
-| `textPrimary`   | `#E9E4D8`   | warm paper-white body text on ink                      |
-| `textSecondary` | `#98A1B4`   | cool gray-blue chrome text                             |
+| Token      | Value     | Use                                                        |
+| ---------- | --------- | ---------------------------------------------------------- |
+| `chassis`  | `#17181A` | window ground                                              |
+| `bezel`    | `#26282B` | raised: tiles, rails, the UMD bar                          |
+| `bezelHi`  | `#33363A` | borders, dividers, inactive bezel segments                 |
+| `screen`   | `#0A0B0C` | the darkest thing: miniature + terminal grounds            |
+| `tally`    | `#E5484D` | live/attached lamp — always captioned, never used for errors |
+| `caution`  | `#E0A33E` | bell/activity ticks, connecting lamps. Small doses         |
+| `ok`       | `#7FBF9A` | connected dot on host rails                                |
+| `signal`   | `#F2F3F4` | primary text                                               |
+| `signal2`  | `#9BA1A6` | secondary text, inactive segment labels                    |
+| `signal3`  | `#5C6166` | tertiary/disabled                                          |
+| `miniText` | `#C8D2D6` | mono text inside miniatures (rendered at ~78 % opacity)    |
 
-Terminal ANSI palette: 16 tuned colors that sit well against `ink`, foreground
-`textPrimary`, cursor `phosphor`. This is the **Multiplex** terminal theme —
-the default of several the user can pick (or build) in Settings. Themes recolor
-the terminal surface only; deck, ornaments, and chrome never leave amber-on-ink.
+**Red as a positive is the identity's named risk.** It is held by captioning:
+the lamp always reads `LIVE`/`ENDED`/`LINK`, and errors never use tally red —
+they use words and caution amber.
 
 ## Type
 
-Monospace is the app's *identity voice*, not wallpaper: host names, session
-names, counts, and addresses are always monospaced (SF Mono via
-`design: .monospaced`). Labels, buttons, and captions stay SF Pro — fighting
-the platform face on visionOS glass harms legibility and wins nothing.
-Eyebrows are small-caps SF Pro with wide tracking: `HOSTS`, `TMUX SESSIONS`.
+Three voices:
 
-## Signature — the window spine
+- **Compressed caps** (`ChassisLabel`: SF, bold, `.width(.compressed)`, +9 %
+  tracking) — the multiviewer source-label voice: app mark, host rails, tile
+  names, tab labels, UMD titles.
+- **Monospace** (`Font.mono`) — identity and data: addresses, telemetry,
+  chip labels, miniature content, and everything inside a screen.
+- **SF Pro** — body copy, form labels, footers. Sheets stay platform-native.
 
-Each tmux session card renders its windows as a row of small cells: the active
-window amber-lit, activity flagged with a dot, one cell per window. It is the
-tmux status line materialized as a physical object — every pixel encodes real
-state (window count, active index, activity), nothing is decoration.
+## Signature — the live wall
+
+The deck is one fleet-wide surface (no sidebar): every host probes
+concurrently under a thin **rail** (name, address, state, `SHELL` chip), and
+every session is a **tile** — a monitor on the wall:
 
 ```
-┌────────────────────────────────────────────┐
-│ main                        ● attached     │
-│ ▰ ▱ ▱ ▱ ▱   5 windows · created 2d ago     │
-│                                 [ Attach ] │
-└────────────────────────────────────────────┘
+┌──────────────────────────────┐
+│ ┌──────────────────────────┐ │
+│ │ $ pnpm build             │ │  ← screen: real capture-pane bytes,
+│ │ ✓ 214 modules · 3.2s     │ │    refreshed ~5 s while deck is visible
+│ └──────────────────────────┘ │
+│ MAIN  ● LIVE   3 WIN·1 CLIENT·2d │  ← UMD row: name, lamp, telemetry
+│ [0 editor][1 server*][2 logs]│  ← spine = segmented lower bezel
+└──────────────────────────────┘
 ```
+
+- **Miniatures** ride the host's existing control connection — one exec
+  round-trip per host (`TmuxProbe.captureCommand`), fetched only while the
+  deck is frontmost. Background re-probes are silent (no state flicker).
+- **The spine** (one cell per tmux window, the surviving idea from v1) is the
+  tile's segmented lower bezel: active window's segment lit `signal`, names
+  in tiny mono caps, a `caution` tick on bell/activity.
+- **Whole tile = Attach.** Attached sessions wear the captioned tally lamp;
+  unattached ones a neutral `ATTACH` badge.
+- **Failure is part of the composition**: unreachable host → hatched
+  `NO SIGNAL` tile with `RECONNECT`; probing → `ACQUIRING SIGNAL`; no tmux →
+  plain words. First run is one dark monitor `AWAITING SIGNAL` + `ADD HOST`.
 
 ## Composition
 
-**Deck window (launcher).** Native visionOS glass; the dark objects on it are
-the session cards — small ink screens floating on glass. NavigationSplitView:
-hosts sidebar, host detail with the session cards, `New Session` and `Shell`
-beneath. On iPad the same layout sits on ink (dark UI), toolbar instead of
-ornaments.
+**Deck window.** Full-bleed chassis (the wall is an object, not a glass
+panel). Header: `MULTIPLEX`, fleet stats (`2 HOSTS · 5 SESSIONS`), `+ HOST`
+and `SETTINGS` chips. Host rails carry a context menu (Edit/Remove Host).
 
-```
-┌──────────────────────────────────────────────────────────┐
-│  MULTIPLEX                                       [+ Add] │
-│ ┌───────────┐  ┌─────────────────────────────────────┐   │
-│ │ HOSTS     │  │ devbox   jhen@10.0.1.12:22   ● ssh  │   │
-│ │ ▸ devbox  │  │ TMUX SESSIONS              ↻        │   │
-│ │   prod-a  │  │ ┌─────────────────────────────────┐ │   │
-│ │   pi      │  │ │ main    ▰▱▱▱▱  5 win  ●attached │ │   │
-│ │           │  │ │                        [Attach] │ │   │
-│ │           │  │ ├─────────────────────────────────┤ │   │
-│ │           │  │ │ scratch ▰      1 win            │ │   │
-│ │           │  │ │                        [Attach] │ │   │
-│ │           │  │ └─────────────────────────────────┘ │   │
-│ │           │  │ [ New Session ]  [ Shell ]          │   │
-│ └───────────┘  └─────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────┘
-```
+**Terminal windows.** A chassis-framed screen: `bezelHi` hairline border,
+terminal surface edge to edge in the user's theme. Below, the **UMD**
+(under-monitor display — the label strip every broadcast monitor wears) as an
+opaque ornament on visionOS / toolbar equivalents on iPad: `DECK` chip,
+source label (`MAIN · DEVBOX`), status lamp (`LIVE`/`LINK`/`ENDED`), then
+`KBD · A− · A+ · MERGE · DETACH` chips. Connection overlays are chassis
+panels with the same lamp anatomy.
 
-**Terminal windows.** Each attach opens its own scene
-(`WindowGroup(for: TerminalWindowRoute.self)` + `openWindow`) — the user places
-them around the room on visionOS; on iPadOS they are real multiple scenes
-(Stage Manager / split screen). The window is fully ink — it *is* the screen —
-with a bottom ornament (visionOS) / toolbar (iPad) carrying session name,
-spine, Merge, and Detach.
+**Tabs.** Multiviewer source labels on an opaque chassis slab (top ornament
+on visionOS, top row on iPad, only when a window holds >1 tab): square cells,
+compressed-caps names, one tally dot per tab (red = that shell is live).
 
-**Tabs.** A window can hold several sessions as tabs. The tab strip speaks the
-spine's language grown up: rounded cells, amber-lit active cell with ink text,
-inactive cells ink-raised with a phosphor status dot, names in mono. It appears
-only when a window holds more than one tab — a single-session window keeps its
-clean edge — as a top ornament on visionOS and a row under the toolbar on iPad.
-Merge pulls another window's sessions in; a tab's context menu splits it back
-out into its own window.
+**Sheets** (Add Host, Settings, theme editor) stay platform-native with mono
+identity fields and eyebrow section labels — transient chrome doesn't wear
+the chassis.
+
+## Terminal themes
+
+Terminal surface colors are user preference, never identity. The default is
+**Tally** (`screen` ground, `signal` text, tally-red cursor, ANSI tuned so
+red/amber match the chrome's lamp semantics); the previous amber-on-ink ships
+as the optional "Multiplex" theme alongside Gruvbox/Dracula/Nord/Solarized.
+Chrome never re-skins with the theme.
+
+**tmux's own status line is left alone.** It styles itself from the user's
+tmux config and the theme's ANSI palette; Multiplex does not inject
+`status-style`. Deliberate: the app owns the chrome, the user owns the
+session.
 
 ## Motion & restraint
 
-visionOS hover effects and system window animations do the work; the only
-custom motion is a slow amber pulse on the empty-state caret. Reduced motion
-disables it. No scanlines, no CRT curvature, no glow shaders — the amber and
-the spine carry the identity.
+- Tally lamps: snap on, soft decay off (shadow glow only — no pulsing).
+- Miniature/tile changes crossfade 300 ms; background re-probes never flip
+  state, so the wall doesn't flicker.
+- Everything else is system motion. Reduced Motion disables the crossfade.
+
+## Hover (visionOS)
+
+The default gaze-hover platter is heavily rounded and fights the square
+chassis. Every interactive element uses `chassisHover(_:)` —
+`buttonBorderShape` + `contentShape(.hoverEffect, …)` + `.hoverEffect(.highlight)`
+applied **to the Button, not its label** (the system resolves hover shape at
+the level the effect attaches; a label-level shape is silently ignored).
 
 ## Self-critique (anti-template pass)
 
 The generic AI answer for "terminal app" is pure black + neon green + mono
-everywhere + scanline kitsch. Rejected: amber-on-blue-black from real hardware
-heritage; mono reserved for identity; labels stay platform-native; zero fake
-CRT effects. The generic visionOS answer is "glass window with a list."
-Rejected: the signature spine cells and ink-cards-on-glass composition encode
-tmux state physically, something only this subject could produce.
+everywhere + CRT kitsch; the generic dark-dashboard answer is near-black with
+one acid accent. Rejected: graphite chassis with screens darker than their
+frames; red spent only on LIVE; labels in compressed caps, not mono
+wallpaper; zero scanlines. The identity is carried by structure — live
+miniatures, segmented bezels, captioned lamps — visible in any thumbnail,
+dependent on no backstory.

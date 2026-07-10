@@ -25,7 +25,7 @@ struct SettingsView: View {
                 } header: {
                     Eyebrow("Terminal Theme")
                 } footer: {
-                    Text("Applies to every terminal window, live. The deck and window chrome stay Multiplex amber.")
+                    Text("Applies to every terminal window, live. Themes recolor the terminal surface only — the deck and window chrome keep the Tally chassis.")
                 }
 
                 Section {
@@ -102,7 +102,7 @@ private struct ThemeRow: View {
                     .foregroundStyle(.primary)
                 Spacer()
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? Theme.phosphor : Theme.line)
+                    .foregroundStyle(isSelected ? Theme.signal : Theme.bezelHi)
                     .imageScale(.large)
             }
             .padding(.vertical, 4)
@@ -134,7 +134,7 @@ struct ThemePreview: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: compact ? 9 : 14, style: .continuous)
-                .strokeBorder(Theme.line, lineWidth: 1)
+                .strokeBorder(Theme.bezelHi, lineWidth: 1)
         )
     }
 

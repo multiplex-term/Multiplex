@@ -6,6 +6,9 @@ import SwiftUI
 /// split out, and close, and it's what scene restoration persists.
 /// Controllers live in `TerminalWorkspace` keyed by tab id, so a moved tab
 /// keeps its live connection and terminal buffer.
+///
+/// Chrome is the Tally identity: a chassis-framed screen with multiviewer
+/// source-label tabs on top and the under-monitor display (UMD) below.
 struct TerminalWindowRoot: View {
     @Environment(HostStore.self) private var store
     @Environment(TerminalWorkspace.self) private var workspace
@@ -54,20 +57,34 @@ struct TerminalWindowRoot: View {
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(Theme.line, lineWidth: 1)
+                    .strokeBorder(Theme.bezelHi, lineWidth: 1)
             )
             .ornament(
                 visibility: route.tabs.count > 1 ? .visible : .hidden,
                 attachmentAnchor: .scene(.top),
                 contentAlignment: .center
             ) {
+                // Source labels on an opaque chassis slab, not glass — the
+                // tab strip is part of the monitor, not the room.
                 tabStrip
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .glassBackgroundEffect()
+                    .background(
+                        Theme.chassis,
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .ornament(attachmentAnchor: .scene(.bottom), contentAlignment: .center) {
-                ornamentBar
+                UMDBar(
+                    controller: activeController,
+                    title: umdTitle,
+                    mergeSources: mergeSources,
+                    showDeck: showDeck,
+                    summonKeyboard: { activeController?.summonKeyboard() },
+                    fontDown: { fontSize = max(9, fontSize - 1) },
+                    fontUp: { fontSize = min(24, fontSize + 1) },
+                    merge: { merge($0) },
+                    detach: { detachActiveTab() }
+                )
             }
     }
     #else
@@ -80,14 +97,14 @@ struct TerminalWindowRoot: View {
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                     }
-                    .background(Theme.ink)
-                    Rectangle().fill(Theme.line).frame(height: 1)
+                    .background(Theme.chassis)
+                    Rectangle().fill(Theme.bezelHi).frame(height: 1)
                 }
                 paneStack
             }
             .navigationTitle(windowTitle)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Theme.ink, for: .navigationBar)
+            .toolbarBackground(Theme.chassis, for: .navigationBar)
             .toolbar { toolbarContent }
         }
     }
@@ -111,21 +128,25 @@ struct TerminalWindowRoot: View {
                 .accessibilityHidden(!isActive)
             }
         }
-        .background(Theme.ink.ignoresSafeArea())
+        .background(Theme.screen.ignoresSafeArea())
+    }
+
+    private var tabItems: [TerminalTabStrip.Item] {
+        let multiHost = Set(route.tabs.map(\.hostID)).count > 1
+        return route.tabs.map { tab in
+            .init(
+                id: tab.id,
+                title: tab.displayName,
+                hostName: multiHost ? store.host(id: tab.hostID)?.name : nil,
+                controller: workspace.controller(for: tab.id),
+                isActive: tab.id == activeTab?.id
+            )
+        }
     }
 
     private var tabStrip: some View {
-        let multiHost = Set(route.tabs.map(\.hostID)).count > 1
-        return TerminalTabStrip(
-            items: route.tabs.map { tab in
-                .init(
-                    id: tab.id,
-                    title: tab.displayName,
-                    hostName: multiHost ? store.host(id: tab.hostID)?.name : nil,
-                    controller: workspace.controller(for: tab.id),
-                    isActive: tab.id == activeTab?.id
-                )
-            },
+        TerminalTabStrip(
+            items: tabItems,
             activate: { route.activate($0) },
             split: { split($0) },
             close: { close($0) }
@@ -140,41 +161,14 @@ struct TerminalWindowRoot: View {
         return "terminal"
     }
 
-    private var sessionIdentity: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(activeController?.status == .live ? Theme.phosphor : Theme.line)
-                .frame(width: 7, height: 7)
-            Text(windowTitle)
-                .font(.mono(14, weight: .medium))
-                .lineLimit(1)
-        }
+    /// "MAIN · DEVBOX" — the UMD source label.
+    private var umdTitle: String {
+        guard let activeTab else { return windowTitle }
+        let host = store.host(id: activeTab.hostID)?.name
+        return host.map { "\(activeTab.displayName) · \($0)" } ?? activeTab.displayName
     }
 
-    #if os(visionOS)
-    private var ornamentBar: some View {
-        HStack(spacing: 18) {
-            deckButton
-            Divider().frame(height: 20)
-            sessionIdentity
-            Divider().frame(height: 20)
-            keyboardButton
-            fontButtons
-            if !mergeSources.isEmpty {
-                Divider().frame(height: 20)
-                mergeMenu
-            }
-            Divider().frame(height: 20)
-            Button("Detach") { detachActiveTab() }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.phosphor)
-                .foregroundStyle(Theme.ink)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .glassBackgroundEffect()
-    }
-    #else
+    #if !os(visionOS)
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarLeading) {
@@ -187,26 +181,12 @@ struct TerminalWindowRoot: View {
                 mergeMenu
             }
             Button("Detach") { detachActiveTab() }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.phosphor)
-                .foregroundStyle(Theme.ink)
+                .buttonStyle(.bordered)
         }
     }
-    #endif
 
-    /// Back to the main screen: brings the EXISTING deck window forward —
-    /// openWindow on a WindowGroup would mint another deck — and only
-    /// creates one when none is alive.
     private var deckButton: some View {
-        Button {
-            if let session = DeckScene.session {
-                UIApplication.shared.activateSceneSession(
-                    for: UISceneSessionActivationRequest(session: session)
-                )
-            } else {
-                openWindow(id: "deck")
-            }
-        } label: {
+        Button(action: showDeck) {
             Image(systemName: "square.grid.2x2")
         }
         .buttonStyle(.borderless)
@@ -264,6 +244,20 @@ struct TerminalWindowRoot: View {
             Label("Merge", systemImage: "rectangle.stack.badge.plus")
         }
         .accessibilityLabel("Merge another window into this one")
+    }
+    #endif
+
+    /// Back to the main screen: brings the EXISTING deck window forward —
+    /// openWindow on a WindowGroup would mint another deck — and only
+    /// creates one when none is alive.
+    private func showDeck() {
+        if let session = DeckScene.session {
+            UIApplication.shared.activateSceneSession(
+                for: UISceneSessionActivationRequest(session: session)
+            )
+        } else {
+            openWindow(id: "deck")
+        }
     }
 
     // MARK: Tab machinery
@@ -375,59 +369,57 @@ private struct TerminalPane: View {
     private func statusOverlay(for controller: TerminalSessionController) -> some View {
         switch controller.status {
         case .connecting:
-            VStack(spacing: 14) {
+            chassisPanel {
                 ProgressView()
                 Text("Connecting to \(controller.host.name)…")
                     .font(.mono(14))
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(Theme.signal2)
             }
-            .padding(30)
-            .background(Theme.inkRaised, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         case .live:
             EmptyView()
         case .ended(let reason):
-            VStack(spacing: 16) {
-                Text(reason == nil ? "Detached" : "Connection ended")
-                    .font(.mono(17, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
+            chassisPanel {
+                TallyLamp(caption: reason == nil ? "DETACHED" : "ENDED", color: Theme.signal3)
                 if let reason {
                     Text(reason)
                         .font(.subheadline)
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(Theme.signal2)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 380)
                 }
                 HStack(spacing: 12) {
-                    Button("Reconnect") { controller.reconnect() }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.phosphor)
-                        .foregroundStyle(Theme.ink)
-                    Button("Close Tab") { close() }
-                        .buttonStyle(.bordered)
+                    ChassisChip("RECONNECT", prominent: true) { controller.reconnect() }
+                    ChassisChip("CLOSE TAB") { close() }
                 }
+                .padding(.top, 4)
             }
-            .padding(34)
-            .background(Theme.inkRaised, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
     }
 
     /// A restored tab whose host was removed — say so, never a blank pane.
     private var missingHost: some View {
-        VStack(spacing: 14) {
+        chassisPanel {
             Text("This host was removed")
                 .font(.mono(17, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(Theme.signal)
             Text("The tab can't reconnect because its host no longer exists in the deck.")
                 .font(.subheadline)
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(Theme.signal2)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
-            Button("Close Tab") { close() }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.phosphor)
-                .foregroundStyle(Theme.ink)
+            ChassisChip("CLOSE TAB", prominent: true) { close() }
+                .padding(.top, 4)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.ink.ignoresSafeArea())
+    }
+
+    private func chassisPanel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(spacing: 14) {
+            content()
+        }
+        .padding(30)
+        .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.bezelHi, lineWidth: 1))
     }
 }
