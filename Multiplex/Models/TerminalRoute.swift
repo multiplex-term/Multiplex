@@ -27,6 +27,22 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         }
     }
 
+    /// The command handed to `mosh-server` after `--`, or nil for a login
+    /// shell. Same tmux invocation as `remoteCommand` minus the `exec`
+    /// prefix: `exec` is a shell builtin, and mosh-server execvp()s its
+    /// trailing argv directly — the bootstrap shell line only strips the
+    /// quoting, no shell wraps the command itself.
+    var moshRemoteCommand: String? {
+        switch mode {
+        case .attach(let name):
+            "tmux attach-session -t \(name.shellQuoted)"
+        case .create(let name):
+            "tmux new-session -A -s \(name.shellQuoted)"
+        case .shell:
+            nil
+        }
+    }
+
     var displayName: String {
         switch mode {
         case .attach(let name), .create(let name): name

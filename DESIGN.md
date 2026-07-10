@@ -106,6 +106,37 @@ compressed-caps names, one tally dot per tab (red = that shell is live).
 identity fields and eyebrow section labels — transient chrome doesn't wear
 the chassis.
 
+## App icon — the Carrier mark
+
+Logo bake-off R1 ran three concepts: **Monitor** (one wall tile distilled —
+screen, captioned lamp, spine; risks reading generic-monitor-app without the
+spine), **Wall** (asymmetric multiviewer, one feed on air; busiest at favicon
+scale), and **Carrier** (chosen). Carrier won because it is the only mark
+that survives 16 px, works everywhere the brand lives (icon, chrome, empty
+states, a README badge), and carries the name's actual meaning.
+
+**The mark:** one continuous signal trace enters on the baseline, draws the
+M, and exits on the same wire — many sessions over one connection — with a
+bare tally node at the live joint. Bare (uncaptioned) is the tab-cell
+precedent; lockups caption it. Chassis ground, `signal` trace, `tally` node:
+red stays state — the node *is* the attached state, and the mark must also
+stand without it (detached contexts drop the node, never recolor it).
+
+**Geometry** (1024 grid): wire y 654–722; posts 68 wide at x 262/694 with
+flat tops at y 284; V = polyline (296,304)→(512,600)→(728,304), stroke 68,
+butt caps, miter joins. Four same-fill shapes union seamlessly — the posts
+absorb the V's butt ends, and the vertex miter just kisses the wire. Node
+r 40 at (512,600), no ring: depth (glass + shadow), not a painted gap, does
+the separation.
+
+**Source of truth is `AppIcon.icon`** (repo root), a hand-authored Icon
+Composer package: `fill` = chassis; layer `carrier`, plus layer `node` in
+its own front group (glass + specular + neutral shadow 0.5) so the lamp
+reads as a bead casting onto the trace. Compiles clean with Xcode 27
+`actool`, which also bakes the flattened pre-26 fallbacks. Icon Composer
+covers the square formats only — the visionOS circular layered stack
+(back = chassis, front = carrier + node) and `project.yml` wiring are TODO.
+
 ## Terminal themes
 
 Terminal surface colors are user preference, never identity. The default is

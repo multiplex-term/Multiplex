@@ -65,14 +65,20 @@ struct UMDBar: View {
     }
 
     /// The window's lamp: LIVE (tally, captioned), LINK while the shell
-    /// connects, ENDED when the channel closed.
+    /// connects, ENDED when the channel closed. A mosh tab that's live but
+    /// out of contact reads NO LINK — the session is intact and self-heals,
+    /// so it's caution, not a fault.
     @ViewBuilder
     private var statusCluster: some View {
         switch controller?.status {
         case .live:
-            TallyLamp()
+            if controller?.contactLost == true {
+                TallyLamp(caption: "NO LINK", color: Theme.caution)
+            } else {
+                TallyLamp()
+            }
         case .connecting:
-            TallyLamp(caption: "LINK", color: Theme.caution)
+            TallyLamp(caption: controller?.host.useMosh == true ? "MOSH" : "LINK", color: Theme.caution)
         case .ended:
             TallyLamp(caption: "ENDED", color: Theme.signal3)
         case nil:

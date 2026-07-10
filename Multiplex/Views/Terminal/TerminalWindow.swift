@@ -77,9 +77,16 @@ struct TerminalWindowRoot: View {
                     }
                 }
             }
-            // …and the window: restore the owner when the scene reactivates.
+            // …and the window: restore the owner when the scene reactivates,
+            // and prod any mosh transport so it re-establishes contact within
+            // a round trip instead of a heartbeat interval.
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { activeController?.restoreFocusIfOwner() }
+                if phase == .active {
+                    activeController?.restoreFocusIfOwner()
+                    for tab in route.tabs {
+                        workspace.controller(for: tab.id)?.transportForegrounded()
+                    }
+                }
             }
             .sheet(isPresented: $showingPaywall) { ProPaywallView() }
             .onDisappear {

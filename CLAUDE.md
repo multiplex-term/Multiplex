@@ -80,6 +80,22 @@ xcrun simctl launch <UDID> tools.bricks.multiplex
 Drive a live session from the Mac side to see bytes stream in:
 `tmux send-keys -t main:2 'echo hi' Enter`.
 
+**mosh path**: point `MULTIPLEX_SEED_HOST` at `state/seed-mosh.json` (same
+`devbox`, same UUID, `useMosh: true`) instead of `seed.json`. The harness also
+listens on `::1`; `seed-mosh-v6.json` drives the same proof over IPv6. The app
+then SSHes to the harness sshd only to launch `mosh-server` (must be on PATH —
+`brew install mosh`; the bootstrap prepends the usual Homebrew/local dirs),
+parses its `MOSH CONNECT` line, and runs the terminal over UDP to
+`127.0.0.1:<port>` (the simulator shares the Mac's network, so the mosh port
+range is reachable). Everything downstream — tmux attach, capture-pane, agent
+chips — is identical to the SSH path. `seed.json` flips the same host back to
+SSH. The clean-room protocol stack is also checked directly against the real
+binary with `./Tools/build.sh interop`. That command compiles the actual
+`MoshSession` actor plus its wire layers as a standalone macOS executable,
+forks `mosh-server`, and verifies idle-pump CPU, echo, shutdown, and a clean
+peer exit. It deliberately lives outside `MultiplexTests`: the app target has
+no macOS destination, while `Process` is unavailable in simulator tests.
+
 Simulator caveat: Xcode 27's DeviceHub always bridges the Mac keyboard as a
 *hardware* keyboard (CoreDevice HID — the old "Connect Hardware Keyboard"
 toggle is gone), so the simulator never auto-shows the software keyboard; an
@@ -114,9 +130,17 @@ SwiftUI: Deck window  +  N Terminal windows (WindowGroup(for: TerminalWindowRout
   TerminalWorkspace  tab controllers keyed by tab id + window directory —
                      merge/split move tabs across windows, shells stay live
   TerminalSessionController   one per tab; owns the input pump + TerminalView
-    SSHConnection (actor)  Citadel → SwiftNIO SSH
-      exec channel     tmux probing
-      PTY shell        bytes ⇄ SwiftTerm.TerminalView
+    TerminalTransport    the tab's byte pipe (write/resize/close); picked by
+                         host.useMosh. exec + SFTP stay SSH-only capabilities
+    SSHConnection (actor)  Citadel → SwiftNIO SSH; the TerminalTransport for
+      exec channel     tmux probing (+ mosh bootstrap, + file-drop SFTP)
+      PTY shell        bytes ⇄ SwiftTerm.TerminalView (SSH tabs)
+    MoshSession (actor)  the TerminalTransport for mosh tabs: UDP socket +
+                         MoshTransportEngine; bootstrapped over a throwaway
+                         SSHConnection (MoshBootstrap runs mosh-server)
+      Mosh/*           clean-room mosh stack, all pure + unit-tested against
+                       RFC 7253 / real mosh-server: OCB3 crypto, zlib,
+                       proto2 codec, fragmenter, packet layer, transport SM
   TerminalFocusArbiter  app-wide single owner of keyboard focus
 ```
 
@@ -149,6 +173,35 @@ views.
 - **tmux attach needs a PTY**: the shell opens with ECHO off and
   `exec tmux attach-session …` is injected as the first stdin line (silent
   handoff, works with any POSIX login shell). Detach = close the channel.
+- **mosh is a second `TerminalTransport`, not a fork of the SSH path**
+  (`Services/Mosh/`, `Host.useMosh`). SSH stays the control plane — deck
+  probing, capture-pane, file-drop SFTP, and the mosh bootstrap itself all
+  ride `SSHConnection.exec`; only the interactive byte stream moves to UDP.
+  Bootstrap resolves the hostname and **pins the bootstrap SSH to the literal
+  IP**, so `mosh-server -s` binds the same address the UDP session then aims
+  at (multi-record DNS can't split them); it parses `MOSH CONNECT <port>
+  <key>` and hands off. `route.moshRemoteCommand` is `remoteCommand` minus the
+  `exec` prefix — mosh-server `execvp`s its trailing argv, no shell wraps it.
+  The whole wire stack is **clean-room from protocol facts (mosh is GPLv3;
+  we don't translate its source)** and pure/unit-tested: AES-128-**OCB3**
+  (RFC 7253 vectors) with a 12-byte nonce = `0x00000000` ‖ BE64(dir<<63|seq),
+  zlib-wrapped DEFLATE over Apple's raw-deflate `Compression` (the 2-byte
+  header + adler32 are hand-added), a minimal proto2 codec (extensions and
+  all), a 10-byte-header fragmenter, and a faithful port of mosh's
+  TransportSender/receiver (paced diffs, prospective resend, empty-ack
+  heartbeats, the `new_num = UInt64.max` shutdown handshake). **Never let a
+  sent state number reach `.max` on a non-shutdown path** — the send code
+  computes `last.num + 1`, and the shutdown override must win first or it
+  overflows (regression-tested; the real-`mosh-server` interop harness caught
+  it). Receiver is head-state-only (we render into the live terminal, not
+  mosh's 1024-state history): a diff from the head applies, a diff from state
+  0 applies after a screen reset, anything else drops and the server re-bases
+  within an RTO; a desync valve turns the pathological case into a reconnect.
+  `MoshSession` (actor) owns the `NWConnection` and re-creates the socket on
+  failure / better-path / prolonged silence — that's mosh's port hop and the
+  roaming/sleep story; `scenePhase .active` nudges it to heartbeat at once.
+  mosh tabs have no exec surface, so **file drops are refused with a message,
+  not silently dropped**.
 - **Tabs move between windows without dropping the shell**: a terminal
   window's scene value (`TerminalWindowRoute`) *is* its tab list — merge/split
   mutate the window-value binding, never close-and-reopen windows. Controllers
@@ -192,8 +245,8 @@ views.
   silently renders every `pane_*` variable empty for outside clients. The
   typed text is composer input but still sanitized/quoted (`DropText`,
   pure + tested) so it stays inert at a shell prompt. tmux tabs only;
-  plain `.shell` tabs have no pane to ask for a cwd. Plan:
-  `local-plan/file-drop.md`.
+  plain `.shell` tabs have no pane to ask for a cwd (and mosh tabs have no
+  SFTP surface — the pill says so). Plan: `local-plan/file-drop.md`.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
   entitlement/CloudKit): secrets *and* a JSON host record per host are
   synchronizable keychain items (services `tools.bricks.multiplex` /
@@ -204,6 +257,16 @@ views.
   locally-persisted mirrored-IDs set distinguishes "new local host → publish"
   from "peer deleted it → drop". Keychain sync has no change notification —
   the deck re-merges on scenePhase `.active`.
+- **App icon is a hand-authored Icon Composer package** (`AppIcon.icon` at
+  the repo root; spec + bake-off record in `DESIGN.md`). icon.json lists
+  groups frontmost-first. Validate/render headlessly with `xcrun actool
+  AppIcon.icon --compile <dir> --platform iphonesimulator
+  --minimum-deployment-target 17.0 --app-icon AppIcon
+  --output-partial-info-plist <dir>/p.plist` — zero warnings today, and the
+  emitted PNGs are the flattened pre-26 fallbacks (use them as a visual
+  check). Icon Composer/.icon has no visionOS target: the circular layered
+  stack + project.yml wiring are still TODO, and the package stays out of
+  `Multiplex/` (the sources dir) until XcodeGen's .icon handling is verified.
 
 ## Conventions
 

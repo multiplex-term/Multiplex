@@ -29,6 +29,7 @@ start() {
     cat > "$STATE/sshd_config" <<EOF
 Port $PORT
 ListenAddress 127.0.0.1
+ListenAddress ::1
 HostKey $STATE/host_ed25519
 PidFile $STATE/sshd.pid
 AuthorizedKeysFile $STATE/authorized_keys
@@ -46,7 +47,7 @@ EOF
     else
         "$SSHD" -f "$STATE/sshd_config" -E "$STATE/sshd.log"
         sleep 0.5
-        echo "sshd listening on 127.0.0.1:$PORT (pid $(cat "$STATE/sshd.pid"))"
+        echo "sshd listening on 127.0.0.1 + [::1]:$PORT (pid $(cat "$STATE/sshd.pid"))"
     fi
 
     # Seed file the app imports in DEBUG builds via MULTIPLEX_SEED_HOST.
@@ -59,9 +60,14 @@ seed = {
     "port": port,
     "username": user,
     "privateKey": (state / "client_ed25519").read_text(),
+    "useMosh": False,
 }
 (state / "seed.json").write_text(json.dumps(seed, indent=2))
-print(f"wrote {state / 'seed.json'}")
+# Same host (same name -> same UUID on re-import), mosh transport. Point
+# MULTIPLEX_SEED_HOST here to flip devbox to mosh; seed.json flips it back.
+(state / "seed-mosh.json").write_text(json.dumps(dict(seed, useMosh=True), indent=2))
+(state / "seed-mosh-v6.json").write_text(json.dumps(dict(seed, hostname="::1", useMosh=True), indent=2))
+print(f"wrote {state / 'seed.json'} (+ seed-mosh.json, seed-mosh-v6.json)")
 PY
 }
 

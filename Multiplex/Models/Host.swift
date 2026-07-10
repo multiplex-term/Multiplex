@@ -21,6 +21,14 @@ struct Host: Identifiable, Codable, Hashable {
     var port: Int = 22
     var username: String
     var authMethod: AuthMethod = .password
+    /// Attach terminals over mosh (SSP over UDP) instead of the SSH PTY.
+    /// The credentials above still authenticate the SSH bootstrap that
+    /// launches `mosh-server`; deck probing stays on SSH either way.
+    var useMosh: Bool = false
+    /// Absolute path to `mosh-server` when it isn't on the exec PATH.
+    var moshServerPath: String?
+    /// UDP port or range ("60000:61000") handed to `mosh-server -p`.
+    var moshPorts: String?
     /// Bumped on every user edit. When the same host arrives from another
     /// device via the Keychain mirror, the newer record wins.
     var updatedAt: Date = .distantPast
@@ -42,6 +50,9 @@ extension Host {
         port = try container.decodeIfPresent(Int.self, forKey: .port) ?? 22
         username = try container.decode(String.self, forKey: .username)
         authMethod = try container.decodeIfPresent(AuthMethod.self, forKey: .authMethod) ?? .password
+        useMosh = try container.decodeIfPresent(Bool.self, forKey: .useMosh) ?? false
+        moshServerPath = try container.decodeIfPresent(String.self, forKey: .moshServerPath)
+        moshPorts = try container.decodeIfPresent(String.self, forKey: .moshPorts)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
     }
 }

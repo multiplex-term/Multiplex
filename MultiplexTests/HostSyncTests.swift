@@ -100,6 +100,9 @@ final class HostSyncTests: XCTestCase {
         let host = try JSONDecoder().decode(Host.self, from: legacy)
         XCTAssertEqual(host.name, "devbox")
         XCTAssertEqual(host.updatedAt, .distantPast)
+        XCTAssertFalse(host.useMosh)
+        XCTAssertNil(host.moshServerPath)
+        XCTAssertNil(host.moshPorts)
     }
 
     func testHostRoundTripsThroughRecordEncoding() throws {
@@ -107,5 +110,19 @@ final class HostSyncTests: XCTestCase {
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(Host.self, from: data)
         XCTAssertEqual(decoded, original)
+    }
+
+    func testHostMoshFieldsRoundTripThroughRecordEncoding() throws {
+        var original = host("devbox", updatedAt: Date(timeIntervalSince1970: 1234))
+        original.useMosh = true
+        original.moshServerPath = "/opt/homebrew/bin/mosh-server"
+        original.moshPorts = "60000:61000"
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Host.self, from: data)
+        XCTAssertEqual(decoded, original)
+        XCTAssertTrue(decoded.useMosh)
+        XCTAssertEqual(decoded.moshServerPath, "/opt/homebrew/bin/mosh-server")
+        XCTAssertEqual(decoded.moshPorts, "60000:61000")
     }
 }

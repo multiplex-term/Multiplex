@@ -275,4 +275,17 @@ final class TmuxProbeTests: XCTestCase {
         let shell = TerminalRoute(hostID: host, mode: .shell)
         XCTAssertNil(shell.remoteCommand)
     }
+
+    // mosh-server execvp()s its trailing argv — no shell, so no `exec`.
+    func testMoshRouteCommands() {
+        let host = UUID()
+        let attach = TerminalRoute(hostID: host, mode: .attach(sessionName: "main"))
+        XCTAssertEqual(attach.moshRemoteCommand, "tmux attach-session -t 'main'")
+
+        let create = TerminalRoute(hostID: host, mode: .create(sessionName: "new one"))
+        XCTAssertEqual(create.moshRemoteCommand, "tmux new-session -A -s 'new one'")
+
+        let shell = TerminalRoute(hostID: host, mode: .shell)
+        XCTAssertNil(shell.moshRemoteCommand)
+    }
 }

@@ -15,6 +15,9 @@ struct AddHostSheet: View {
     @State private var password = ""
     @State private var privateKey = ""
     @State private var passphrase = ""
+    @State private var useMosh = false
+    @State private var moshServerPath = ""
+    @State private var moshPorts = ""
 
     var body: some View {
         NavigationStack {
@@ -59,6 +62,29 @@ struct AddHostSheet: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                Section("Transport") {
+                    Toggle("Connect with mosh", isOn: $useMosh)
+                    if useMosh {
+                        TextField("mosh-server path", text: $moshServerPath, prompt: Text("mosh-server"))
+                            .font(.mono(12))
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                        TextField("UDP port or range", text: $moshPorts, prompt: Text("60000:61000"))
+                            .font(.mono(12))
+                            .keyboardType(.numbersAndPunctuation)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                    }
+                }
+
+                if useMosh {
+                    Section {
+                        Text("Terminals attach over UDP through mosh-server — sessions ride out roaming and sleep. Sign-in above authenticates the SSH bootstrap; the deck's session probe stays on SSH.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .navigationTitle(editing == nil ? "Add Host" : "Edit Host")
             .toolbar {
@@ -78,6 +104,22 @@ struct AddHostSheet: View {
         !hostname.trimmingCharacters(in: .whitespaces).isEmpty
             && !username.trimmingCharacters(in: .whitespaces).isEmpty
             && Int(port) != nil
+            && moshPortsValid
+    }
+
+    /// Empty, one port, or a low:high range — mirrors what mosh-server -p
+    /// accepts. The string lands in a remote shell line, so reject anything
+    /// beyond digits and a colon outright.
+    private var moshPortsValid: Bool {
+        guard useMosh else { return true }
+        let trimmed = moshPorts.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return true }
+        let parts = trimmed.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count <= 2 else { return false }
+        return parts.allSatisfy { part in
+            guard let value = Int(part) else { return false }
+            return (1...65535).contains(value)
+        }
     }
 
     private func populate() {
@@ -87,6 +129,9 @@ struct AddHostSheet: View {
         port = String(host.port)
         username = host.username
         authMethod = host.authMethod
+        useMosh = host.useMosh
+        moshServerPath = host.moshServerPath ?? ""
+        moshPorts = host.moshPorts ?? ""
         password = KeychainStore.get(for: host.id, kind: .password) ?? ""
         privateKey = KeychainStore.get(for: host.id, kind: .privateKey) ?? ""
         passphrase = KeychainStore.get(for: host.id, kind: .keyPassphrase) ?? ""
@@ -100,6 +145,11 @@ struct AddHostSheet: View {
         host.port = Int(port) ?? 22
         host.username = username.trimmingCharacters(in: .whitespaces)
         host.authMethod = authMethod
+        host.useMosh = useMosh
+        let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
+        host.moshServerPath = serverPath.isEmpty ? nil : serverPath
+        let ports = moshPorts.trimmingCharacters(in: .whitespaces)
+        host.moshPorts = ports.isEmpty ? nil : ports
 
         switch authMethod {
         case .password:

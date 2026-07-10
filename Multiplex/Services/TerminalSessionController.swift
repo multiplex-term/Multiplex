@@ -2,9 +2,10 @@ import Foundation
 import Observation
 import SwiftTerm
 
-/// Owns one terminal window's SSH shell: opens a dedicated connection,
-/// requests a PTY (running tmux attach / new-session / a plain shell),
-/// and pumps bytes between the channel and the SwiftTerm view.
+/// Owns one terminal tab's shell: opens a dedicated transport — an SSH
+/// PTY, or a mosh session bootstrapped over SSH when the host asks for it
+/// — running tmux attach / new-session / a plain shell, and pumps bytes
+/// between the transport and the SwiftTerm view.
 @MainActor
 @Observable
 final class TerminalSessionController {
@@ -31,7 +32,17 @@ final class TerminalSessionController {
     /// windows — the adopting window re-parents this same view, so what's on
     /// screen survives a merge/split. Released with the controller on close.
     private(set) var terminalView: TerminalView?
+    /// The byte pipe under this tab — SSH PTY or mosh session.
+    private var transport: (any TerminalTransport)?
+    /// SSH path only: the exec/SFTP surface (pane cwd, file drops). nil on
+    /// mosh tabs — their bootstrap SSH connection is transient by design.
     private var connection: SSHConnection?
+    /// mosh path only: contact nudges on foreground.
+    private var moshSession: MoshSession?
+    /// A live mosh session that hasn't heard its server past mosh's 6.5 s
+    /// threshold. Input still queues and the link self-heals; the chrome
+    /// just shows it truthfully. Always false on SSH tabs.
+    private(set) var contactLost = false
     private var pendingOutput = Data()
     private var lastCols = 80
     private var lastRows = 24
@@ -97,8 +108,17 @@ final class TerminalSessionController {
     }
 
     private func run() async {
+        if host.useMosh {
+            await runMosh()
+        } else {
+            await runSSH()
+        }
+    }
+
+    private func runSSH() async {
         let connection = SSHConnection(host: host, secrets: .load(for: host))
         self.connection = connection
+        transport = connection
         do {
             try await connection.connect()
             try await connection.openShell(
@@ -122,7 +142,56 @@ final class TerminalSessionController {
             let message = (error as? SSHConnectionError)?.userMessage(host: host)
                 ?? "Couldn't reach \(host.name). \(error.localizedDescription)"
             status = .ended(message)
+            self.connection = nil
+            transport = nil
             await connection.close()
+        }
+    }
+
+    /// mosh: a transient SSH connection launches mosh-server, then the
+    /// session itself rides UDP — resilient to roaming and sleep. The
+    /// deck's probe (and file drops) stay SSH; this tab simply has no
+    /// exec surface.
+    private func runMosh() async {
+        contactLost = false
+        do {
+            let target = try await MoshBootstrap.start(
+                host: host,
+                secrets: .load(for: host),
+                remoteCommand: route.moshRemoteCommand
+            )
+            let session = try MoshSession(target: target, cols: lastCols, rows: lastRows)
+            moshSession = session
+            transport = session
+            try await session.open(
+                onData: { [weak self] data in
+                    Task { @MainActor [weak self] in
+                        self?.feed(data)
+                    }
+                },
+                onClose: { [weak self] reason in
+                    Task { @MainActor [weak self] in
+                        self?.handleClose(reason: reason)
+                    }
+                },
+                onContact: { [weak self] lost in
+                    Task { @MainActor [weak self] in
+                        self?.contactLost = lost
+                    }
+                }
+            )
+            startInputPump(for: session)
+            status = .live
+        } catch {
+            let message = (error as? MoshBootstrapError)?.userMessage(host: host)
+                ?? (error as? MoshSession.Failure)?.userMessage(host: host)
+                ?? (error as? SSHConnectionError)?.userMessage(host: host)
+                ?? "Couldn't reach \(host.name) over mosh. \(error.localizedDescription)"
+            status = .ended(message)
+            let session = moshSession
+            moshSession = nil
+            transport = nil
+            Task { await session?.close() }
         }
     }
 
@@ -145,13 +214,13 @@ final class TerminalSessionController {
     /// Keystrokes flow through one AsyncStream consumed by a single task —
     /// yield order is preserved, unlike a Task spawned per keystroke, and
     /// the terminal thread never waits on the network.
-    private func startInputPump(for connection: SSHConnection) {
+    private func startInputPump(for transport: any TerminalTransport) {
         stopInputPump()
         let (stream, continuation) = AsyncStream.makeStream(of: Data.self)
         inputContinuation = continuation
         inputTask = Task {
             for await chunk in stream {
-                try? await connection.write(chunk)
+                try? await transport.write(chunk)
             }
         }
     }
@@ -173,8 +242,16 @@ final class TerminalSessionController {
     func terminalResized(cols: Int, rows: Int) {
         lastCols = cols
         lastRows = rows
-        guard status == .live, let connection else { return }
-        Task { try? await connection.resize(cols: cols, rows: rows) }
+        guard status == .live, let transport else { return }
+        Task { try? await transport.resize(cols: cols, rows: rows) }
+    }
+
+    /// Scene became active again: a mosh transport heartbeats immediately
+    /// (and replaces its socket if suspension killed it), so the session
+    /// proves itself within a round trip instead of a heartbeat interval.
+    func transportForegrounded() {
+        guard let moshSession else { return }
+        Task { await moshSession.nudge() }
     }
 
     // MARK: File drops
@@ -184,6 +261,17 @@ final class TerminalSessionController {
     /// the resulting paths through the input pump — no Enter, the user
     /// finishes the prompt. One drop batch at a time.
     func deliverDrop(_ files: [DroppedFile]) {
+        if host.useMosh, status == .live, dropTask == nil, !files.isEmpty {
+            // No SFTP channel under a mosh tab; say so instead of shrugging.
+            dropClearTask?.cancel()
+            dropState = .failed("File drops need an SSH tab")
+            dropClearTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled else { return }
+                self?.dropState = nil
+            }
+            return
+        }
         guard status == .live, let connection, dropTask == nil, !files.isEmpty else { return }
         dropClearTask?.cancel()
         dropClearTask = nil
@@ -280,7 +368,9 @@ final class TerminalSessionController {
 
     // MARK: Actions
 
-    /// Closing the channel detaches the tmux client; tmux keeps the session.
+    /// Closing the transport detaches the tmux client; tmux keeps the
+    /// session. (SSH: channel teardown does it. mosh: the shutdown
+    /// handshake ends mosh-server, which HUPs its tmux client.)
     func detach() {
         dropTask?.cancel()
         dropTask = nil
@@ -288,9 +378,12 @@ final class TerminalSessionController {
         dropState = nil
         stopInputPump()
         status = .ended(nil)
-        let connection = self.connection
+        contactLost = false
+        let transport = self.transport
+        self.transport = nil
         self.connection = nil
-        Task { await connection?.close() }
+        self.moshSession = nil
+        Task { await transport?.close() }
     }
 
     func reconnect() {

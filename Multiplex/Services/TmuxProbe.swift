@@ -16,7 +16,9 @@ import Foundation
 enum TmuxProbe {
     /// Non-interactive SSH exec often has a minimal PATH, so common tmux
     /// locations (Homebrew, /usr/local) are appended before any command.
-    private static let pathPrefix =
+    /// Shared with the mosh bootstrap, which has the same problem for
+    /// mosh-server (and for the tmux it wraps).
+    static let pathPrefix =
         "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin\"; export PATH; "
 
     static var probeCommand: String {

@@ -6,6 +6,7 @@
 #   ./Tools/build.sh test  [vos|ipad]    run unit tests (default: vos)
 #   ./Tools/build.sh verify [vos|ipad]   build + install + drive end-to-end
 #                                        against the local sshd/tmux harness
+#   ./Tools/build.sh interop             round-trip against real mosh-server
 #   ./Tools/build.sh all                 gen + build both + test
 #
 # Single source of truth for destinations, the shared DerivedData path, and the
@@ -108,11 +109,35 @@ verify() {
     echo "verify OK — inspect the screenshot to confirm output rendered."
 }
 
+interop() {
+    command -v swiftc >/dev/null || { echo "swiftc not found" >&2; exit 1; }
+    command -v mosh-server >/dev/null || {
+        echo "mosh-server not found (install with: brew install mosh)" >&2
+        exit 1
+    }
+
+    local src="$ROOT/Multiplex/Services/Mosh"
+    local harness="$ROOT/Tools/mosh-interop"
+    mkdir -p "$DERIVED"
+    swiftc -O -o "$DERIVED/mosh-interop" \
+        "$src/MoshCrypto.swift" \
+        "$src/MoshZlib.swift" \
+        "$src/MoshProtobuf.swift" \
+        "$src/MoshFragment.swift" \
+        "$src/MoshPacket.swift" \
+        "$src/MoshTransport.swift" \
+        "$harness/Shims.swift" \
+        "$src/MoshSession.swift" \
+        "$harness/Main.swift"
+    MOSH_SERVER="$(command -v mosh-server)" "$DERIVED/mosh-interop"
+}
+
 case "${1:-}" in
     gen) gen ;;
     build) build "${2:-vos}" ;;
     test) run_tests "${2:-vos}" ;;
     verify) verify "${2:-vos}" ;;
+    interop) interop ;;
     all) gen; build vos; build ipad; run_tests vos ;;
     *) sed -n '2,17p' "$0"; exit 1 ;;
 esac

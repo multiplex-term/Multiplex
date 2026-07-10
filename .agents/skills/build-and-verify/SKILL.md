@@ -34,6 +34,7 @@ Run everything through `Tools/build.sh` from the repo root:
 ./Tools/build.sh build [vos|ipad]    # build one platform (default: vos)
 ./Tools/build.sh test  [vos|ipad]    # run MultiplexTests unit tests
 ./Tools/build.sh verify [vos|ipad]   # build + install + drive end-to-end
+./Tools/build.sh interop             # real mosh-server wire/session proof
 ./Tools/build.sh all                 # gen + build both platforms + test
 ```
 
@@ -86,6 +87,13 @@ back-to-back: `./Tools/build.sh build vos && ./Tools/build.sh build ipad`.
 shell quoting, and terminal route commands. It's fast and needs no device I/O,
 so run it after any change to `Services/` or `Models/`. A green unit run does
 **not** exercise SSH/PTY/rendering — for that, use `verify`.
+
+For a mosh transport change, also run `./Tools/build.sh interop`. It compiles
+the app's actual `MoshSession` actor and wire layers into a standalone macOS
+executable, then checks idle pump CPU, echo, graceful shutdown, and peer close
+against an installed real `mosh-server` (`brew install mosh`). It stays
+separate from `MultiplexTests` because the application target has no macOS
+destination and simulator XCTest cannot launch `Process`.
 
 ## End-to-end verification
 

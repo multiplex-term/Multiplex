@@ -143,6 +143,11 @@ final class HostStore {
         host.port = seed.port ?? 22
         host.username = seed.username
         host.authMethod = seed.privateKey != nil ? .privateKey : .password
+        // Absent mosh keys leave the host's current setting alone, so a
+        // hand-trimmed seed doesn't silently flip transports.
+        if let useMosh = seed.useMosh { host.useMosh = useMosh }
+        if let path = seed.moshServerPath { host.moshServerPath = path }
+        if let ports = seed.moshPorts { host.moshPorts = ports }
         if let key = seed.privateKey { KeychainStore.set(key, for: host.id, kind: .privateKey) }
         if let password = seed.password { KeychainStore.set(password, for: host.id, kind: .password) }
         if hosts.contains(where: { $0.id == host.id }) {
@@ -161,6 +166,9 @@ final class HostStore {
         var username: String
         var password: String?
         var privateKey: String?
+        var useMosh: Bool?
+        var moshServerPath: String?
+        var moshPorts: String?
     }
     #endif
 }
