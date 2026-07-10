@@ -69,9 +69,11 @@ struct ChassisBadge: View {
                 Image(systemName: systemImage)
                     .font(.system(size: 9, weight: .semibold))
             }
-            Text(label)
-                .font(.mono(9, weight: .semibold))
-                .kerning(1.1)
+            if !label.isEmpty {
+                Text(label)
+                    .font(.mono(9, weight: .semibold))
+                    .kerning(1.1)
+            }
         }
         .foregroundStyle(prominent ? Theme.signal : Theme.signal2)
         .padding(.horizontal, 9)

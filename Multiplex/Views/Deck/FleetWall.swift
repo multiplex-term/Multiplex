@@ -19,6 +19,7 @@ struct FleetWall: View {
     @State private var namingHost: Host?
     @State private var newSessionName = ""
     @State private var deleteTarget: DeleteTarget?
+    @State private var removingHost: Host?
 
     /// Pending delete confirmation — which session on which host.
     private struct DeleteTarget {
@@ -71,6 +72,19 @@ struct FleetWall: View {
             Button("Cancel", role: .cancel) {}
         } message: { target in
             Text("Kills “\(target.session.name)” on \(target.host.name) and everything running in it.")
+        }
+        .alert(
+            "Remove Host",
+            isPresented: Binding(
+                get: { removingHost != nil },
+                set: { if !$0 { removingHost = nil } }
+            ),
+            presenting: removingHost
+        ) { host in
+            Button("Remove", role: .destructive) { remove(host) }
+            Button("Cancel", role: .cancel) {}
+        } message: { host in
+            Text("Removes “\(host.name)” and its saved secret from this device and your synced devices. tmux sessions on the host keep running.")
         }
     }
 
@@ -170,13 +184,30 @@ struct FleetWall: View {
                         open(TerminalRoute(hostID: host.id, mode: .shell))
                     }
                 }
+                hostMenu(host)
             }
             .contentShape(Rectangle())
             .contextMenu {
                 Button("Edit Host…") { editHost(host) }
-                Button("Remove Host", role: .destructive) { remove(host) }
+                Button("Remove Host…", role: .destructive) { removingHost = host }
             }
         }
+    }
+
+    /// Visible host controls. Edit is most needed when a host is
+    /// UNREACHABLE (fixing a bad address), so unlike SHELL this menu shows
+    /// in every connection phase; the rail's long-press menu mirrors it.
+    private func hostMenu(_ host: Host) -> some View {
+        Menu {
+            Button("Edit Host…") { editHost(host) }
+            Button("Remove Host…", role: .destructive) { removingHost = host }
+        } label: {
+            ChassisBadge("", systemImage: "ellipsis")
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .chassisHover(2)
+        .accessibilityLabel("Host options for \(host.name)")
     }
 
     @ViewBuilder
