@@ -262,7 +262,9 @@ views.
   whose node wrapper *spawns* the binary and stays pane leader). Any probe
   stage failing just disables detection, never the session list. Helper chips
   only ever *type* through `TerminalSessionController.sendInput` (the same
-  ordered pump as the keyboard; Enter = CR, Esc = 0x1B, Shift+Tab = CSI Z);
+  ordered pump as the keyboard; Enter = CR, Esc = 0x1B, Shift+Tab = CSI Z,
+  Codex's TRANSCRIPT overlay toggle = Ctrl+T; Claude Code's PG UP/PG DN
+  chips, CSI `5~`/`6~`, are visionOS-only — iPad's key rail already pages);
   never ship a Ctrl+B payload — it's the remote tmux prefix. The strip and
   agent alerts (`AttentionCenter`) are the Pro-gated surfaces; detection and
   the wall's telemetry (agent token, NEEDS YOU badge, RUNNING) stay free.
