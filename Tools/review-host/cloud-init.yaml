@@ -1,0 +1,137 @@
+#cloud-config
+# Reviewer demo host for Multiplex App Review (see README.md and
+# docs/appstore/release-playbook.md). Render with ./render.sh — it injects
+# the hashed demo password from fastlane/.env — then paste the output as
+# user-data when creating the VM. Target image: Ubuntu 24.04 LTS.
+#
+# What this provisions:
+#   - user `review`: password SSH login (only user with password auth),
+#     no sudo, every SSH forwarding surface disabled
+#   - tmux + mosh-server, demo sessions reseeded on boot and nightly
+#   - egress-blocked firewall (DNS/NTP/DHCP/apt only), fail2ban
+
+hostname: multiplex-review
+locale: C.UTF-8                    # mosh-server refuses non-UTF-8 locales
+package_update: true
+package_upgrade: true
+packages: [tmux, mosh, vim, htop, fail2ban, ufw]
+
+ssh_pwauth: false                  # global off; Match block opens it for `review` only
+
+users:
+  - default
+  - name: review
+    shell: /bin/bash
+    lock_passwd: false
+    # deliberately: no sudo, no groups — the account can run tmux and nothing else
+
+chpasswd:
+  expire: false
+  users:
+    - name: review
+      password: __DEMO_PASSWORD_HASH__
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/60-review.conf
+    content: |
+      # Password auth exists ONLY for the App Review account, with every
+      # forwarding surface closed so leaked credentials can't turn the box
+      # into a proxy.
+      Match User review
+          PasswordAuthentication yes
+          AllowTcpForwarding no
+          AllowAgentForwarding no
+          AllowStreamLocalForwarding no
+          X11Forwarding no
+          PermitTunnel no
+
+  - path: /usr/local/bin/demo-server-log
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      while true; do
+        printf '%s  api  GET /v1/sessions 200  %dms\n' "$(date +%T)" $((RANDOM % 90 + 10))
+        sleep 2
+      done
+
+  - path: /usr/local/bin/demo-worker-log
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      while true; do
+        printf '%s  worker  job=%d  done\n' "$(date +%T)" $((RANDOM % 900 + 100))
+        sleep 3
+      done
+
+  - path: /usr/local/bin/demo-build-loop
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      while true; do
+        for m in core probe wall terminal input themes sync; do
+          printf '  compiling %-10s' "$m"; sleep 1; printf ' ✓\n'
+        done
+        printf '\nbuild ok · 7 modules\n\n'; sleep 8
+      done
+
+  # The agent-detection stubs, same shape as Tools/dev-sshd/harness.sh demo
+  # (and disclosed as stubs in the App Review notes): `cat` echoes whatever a
+  # helper chip types, so the reviewer sees the command land in the pane.
+  - path: /usr/local/bin/demo-agent-cc
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      printf '\033]2;✳ Claude Code\033\\'
+      exec -a claude cat
+
+  - path: /usr/local/bin/demo-agent-cx
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      exec -a codex cat
+
+  - path: /usr/local/bin/seed-review-sessions
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Reset and reseed the reviewer's tmux sessions. Runs as root
+      # (@reboot + nightly cron); the sessions belong to `review`.
+      set -u
+      pkill -u review 2>/dev/null || true
+      sleep 1
+      rm -rf /home/review/project
+      su - review -s /bin/bash <<'SEED'
+      mkdir -p ~/project
+      printf '# notes\n\n- check deploy at 15:00\n- rotate api key\n' > ~/project/notes.md
+      tmux new-session -d -s main -n editor
+      tmux send-keys -t main:0 'vim ~/project/notes.md' Enter
+      tmux new-window -t main:1 -n server /usr/local/bin/demo-server-log
+      tmux new-window -t main:2 -n logs /usr/local/bin/demo-worker-log
+      tmux select-window -t main:1
+      tmux new-session -d -s build /usr/local/bin/demo-build-loop
+      tmux new-session -d -s logs /usr/local/bin/demo-worker-log
+      tmux new-session -d -s agent -n cc /usr/local/bin/demo-agent-cc
+      tmux new-window -t agent:1 -n cx /usr/local/bin/demo-agent-cx
+      tmux select-window -t agent:0
+      SEED
+
+  - path: /etc/cron.d/review-reseed
+    content: |
+      # Reseed demo sessions on boot and nightly at 08:00 UTC (midnight
+      # Pacific — App Review works US Pacific hours).
+      @reboot root /usr/local/bin/seed-review-sessions
+      0 8 * * * root /usr/local/bin/seed-review-sessions
+
+runcmd:
+  - systemctl restart ssh
+  - ufw default deny incoming
+  - ufw default deny outgoing
+  - ufw allow in 22/tcp
+  - ufw allow in 60000:61000/udp        # mosh
+  - ufw allow out 53                    # DNS
+  - ufw allow out 123/udp               # NTP
+  - ufw allow out 67:68/udp             # DHCP lease renewal
+  - ufw allow out 80/tcp                # apt / unattended-upgrades
+  - ufw allow out 443/tcp
+  - ufw --force enable
+  - /usr/local/bin/seed-review-sessions

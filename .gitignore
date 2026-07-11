@@ -15,3 +15,15 @@ xcuserdata/
 Tools/dev-sshd/state/
 
 local-plan/
+
+# fastlane — generated reports and local secrets (see fastlane/SETUP.md)
+fastlane/report.xml
+fastlane/README.md
+fastlane/test_output/
+fastlane/keys/
+fastlane/.env
+fastlane/metadata/review_information/demo_password.txt
+
+# App Store screenshot compositor — raw captures in, composed frames out
+Tools/appstore/raw/
+Tools/appstore/out/
