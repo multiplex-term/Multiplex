@@ -16,6 +16,7 @@ import Foundation
 import UIKit
 import CoreText
 import CoreGraphics
+import GameController
 import os
 import SwiftUI
 #if canImport(MetalKit)
@@ -861,28 +862,62 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         imgView.tintColor = .white
     }
     
+    // Multiplex patch: a pan used to be reported as a click-drag (press +
+    // motion + release), which in tmux starts a copy-mode selection and
+    // never scrolls; and with mouse reporting off there was no way to reach
+    // an alternate-screen app's own scrollback at all. Touch has one scroll
+    // gesture, so the pan now scrolls the *remote*: wheel reports when the
+    // client asked for mouse events, cursor keys ("alternate scroll") when
+    // the alternate buffer is active without mouse tracking. The primary
+    // buffer without mouse tracking keeps native local scrollback.
+    var remoteScrollResidual: CGFloat = 0
+
+    /// True when a pan should be forwarded to the remote instead of
+    /// scrolling the local scrollback. Terminal.init replays mode changes
+    /// through the delegate before `terminal` is assigned — stay nil-safe.
+    var remoteScrollApplies: Bool {
+        guard let terminal else { return false }
+        return (allowMouseReporting && terminal.mouseMode != .off) || terminal.isCurrentBufferAlternate
+    }
+
     @objc func panMouseHandler (_ gestureRecognizer: UIPanGestureRecognizer){
-        guard gestureRecognizer.view != nil else { return }
+        guard gestureRecognizer.view != nil, cellDimension.height > 0 else { return }
+        switch gestureRecognizer.state {
+        case .began:
+            remoteScrollResidual = 0
+        case .changed:
+            let dy = gestureRecognizer.translation(in: self).y + remoteScrollResidual
+            let ticks = Int (dy / cellDimension.height)
+            remoteScrollResidual = dy - CGFloat (ticks) * cellDimension.height
+            gestureRecognizer.setTranslation(.zero, in: self)
+            if ticks != 0 {
+                performRemoteScroll(ticks: ticks, at: gestureRecognizer.location(in: self))
+            }
+        default:
+            break
+        }
+    }
+
+    /// Multiplex patch: scrolls the remote by `ticks` cells — positive means
+    /// the finger moved down, i.e. reveal earlier content. Sends wheel
+    /// button events when the client requested mouse tracking, otherwise
+    /// DECCKM-aware cursor keys while the alternate buffer is active.
+    public func performRemoteScroll (ticks: Int, at point: CGPoint? = nil) {
+        guard let terminal else { return }
+        let count = min (abs (ticks), 40)
+        guard count > 0 else { return }
         if allowMouseReporting && terminal.mouseMode != .off {
-            switch gestureRecognizer.state {
-            case .began:
-                // send the initial tap
-                if terminal.mouseMode.sendButtonPress() {
-                    sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
-                }
-            case .ended, .cancelled:
-                if terminal.mouseMode.sendButtonRelease() {
-                    sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
-                }
-            case .changed:
-                if terminal.mouseMode.sendButtonTracking() {
-                    let hit = calculateTapHit(gesture: gestureRecognizer)
-                    if let grid = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) {
-                        terminal.sendMotion(buttonFlags: encodeFlags(release: false), x: grid.col, y: grid.row, pixelX: hit.pixels.col, pixelY: hit.pixels.row)
-                    }
-                }
-            default:
-                break
+            let flags = terminal.encodeButton(button: ticks > 0 ? 4 : 5, release: false,
+                                              shift: false, meta: false, control: false)
+            let hit = calculateTapHit(point: point ?? CGPoint (x: bounds.midX, y: bounds.midY))
+            guard let grid = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) else { return }
+            for _ in 0..<count {
+                terminal.sendEvent(buttonFlags: flags, x: grid.col, y: grid.row,
+                                   pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+            }
+        } else if terminal.isCurrentBufferAlternate {
+            for _ in 0..<count {
+                ticks > 0 ? sendKeyUp() : sendKeyDown()
             }
         }
     }
@@ -972,21 +1007,39 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     var panMouseGesture: UIPanGestureRecognizer?
+    // Multiplex patch: the gate yields to an active selection drag, and the
+    // recognizer also accepts indirect (trackpad/mouse wheel) scrolls.
+    private lazy var remoteScrollGate = RemoteScrollGestureGate (terminalView: self)
     func enableMousePanGesture () {
         guard panMouseGesture == nil else {
             return
         }
         let gesture = UIPanGestureRecognizer (target: self, action: #selector(panMouseHandler))
+        gesture.allowedScrollTypesMask = .all
+        gesture.delegate = remoteScrollGate
         addGestureRecognizer(gesture)
         panMouseGesture = gesture
     }
-    
+
     func disableMousePanGesture () {
         guard let gesture = panMouseGesture else {
             return
         }
         removeGestureRecognizer(gesture)
         panMouseGesture = nil
+    }
+
+    // Multiplex patch: while pans go to the remote, the scroll view's own
+    // pan must not compete for touches (the alternate buffer has no local
+    // content to scroll anyway). Re-enabled for local scrollback otherwise.
+    func updateRemotePanGesture () {
+        if remoteScrollApplies {
+            enableMousePanGesture()
+            isScrollEnabled = false
+        } else {
+            disableMousePanGesture()
+            isScrollEnabled = true
+        }
     }
     
     var panSelectionGesture: UIPanGestureRecognizer?
@@ -1276,6 +1329,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     open func bufferActivated(source: Terminal) {
         updateScroller ()
+        // Multiplex patch: entering/leaving the alternate buffer flips
+        // whether pans scroll the remote or the local scrollback.
+        updateRemotePanGesture ()
     }
     
     open func send(source: Terminal, data: ArraySlice<UInt8>) {
@@ -2159,6 +2215,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         if response {
             caretView?.updateCursorStyle()
             terminal.setTerminalFocus(true)
+            // Multiplex patch: route Mac hardware Ctrl+chords to this view
+            if ProcessInfo.processInfo.isiOSAppOnMac {
+                TerminalView.macControlKeyTarget = self
+                TerminalView.setupMacControlKeyBridgeIfNeeded()
+            }
         }
         return response
     }
@@ -2190,6 +2251,83 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// property in case someone needs the return key to send different sequences.
     public var returnByteSequence: [UInt8] = [13]
     
+    // Multiplex patch: on iOS-app-on-Mac ("Designed for iPad"), the hardware
+    // keyboard is bridged through UIKit's text-input pipeline, and
+    // UIKeyboardImpl translates Ctrl+character chords via the Cocoa
+    // key-binding table — Ctrl+C resolves to the `noop:` selector (the
+    // "Unsupported action selector noop:" log line) and is dropped before
+    // pressesBegan, insertText, or responder key commands ever see it.
+    // GameController's GCKeyboard observes the keyboard at the HID layer,
+    // ahead of that pipeline, so one shared handler routes Ctrl+character
+    // chords to whichever TerminalView is first responder. Real iPads keep
+    // the pressesBegan path — this bridge never installs there.
+    private static weak var macControlKeyTarget: TerminalView?
+    private static var macControlKeyBridgeInstalled = false
+
+    private static func setupMacControlKeyBridgeIfNeeded() {
+        guard ProcessInfo.processInfo.isiOSAppOnMac, !macControlKeyBridgeInstalled else { return }
+        macControlKeyBridgeInstalled = true
+        installMacControlKeyHandler(on: GCKeyboard.coalesced)
+        NotificationCenter.default.addObserver(forName: .GCKeyboardDidConnect,
+                                               object: nil, queue: .main) { note in
+            installMacControlKeyHandler(on: note.object as? GCKeyboard)
+        }
+    }
+
+    private static func installMacControlKeyHandler(on keyboard: GCKeyboard?) {
+        guard let input = keyboard?.keyboardInput else { return }
+        input.keyChangedHandler = { input, _, keyCode, pressed in
+            guard pressed,
+                  input.button(forKeyCode: .leftControl)?.isPressed == true ||
+                  input.button(forKeyCode: .rightControl)?.isPressed == true,
+                  input.button(forKeyCode: .leftGUI)?.isPressed != true,
+                  input.button(forKeyCode: .rightGUI)?.isPressed != true,
+                  let character = macControlCharacter(for: keyCode),
+                  let target = macControlKeyTarget,
+                  target.isFirstResponder, target.window?.isKeyWindow == true
+            else { return }
+            target.sendMacControl(character)
+        }
+    }
+
+    /// HID key → the character `applyControlToEventCharacters` expects.
+    /// Letters assume an ANSI-ish layout — the same simplification every
+    /// terminal makes for control chords.
+    private static func macControlCharacter(for keyCode: GCKeyCode) -> String? {
+        if keyCode.rawValue >= GCKeyCode.keyA.rawValue && keyCode.rawValue <= GCKeyCode.keyZ.rawValue {
+            // HID A–Z are contiguous (0x04–0x1D)
+            let scalar = UnicodeScalar(UInt8(ascii: "a") + UInt8(keyCode.rawValue - GCKeyCode.keyA.rawValue))
+            return String(scalar)
+        }
+        switch keyCode {
+        case .spacebar:     return " "
+        case .openBracket:  return "["
+        case .closeBracket: return "]"
+        case .backslash:    return "\\"
+        case .six:          return "6"   // Ctrl+6 / Ctrl+^ → RS (0x1e)
+        case .hyphen:       return "_"   // Ctrl+- / Ctrl+_ → US (0x1f)
+        default:            return nil
+        }
+    }
+
+    func sendMacControl(_ character: String) {
+        if !terminal.keyboardEnhancementFlags.isEmpty,
+           character.unicodeScalars.count == 1, let scalar = character.unicodeScalars.first {
+            _ = sendKittyEvent(KittyKeyEvent(key: .unicode(scalar.value),
+                                             modifiers: [.ctrl],
+                                             eventType: .press,
+                                             text: nil,
+                                             shiftedKey: nil,
+                                             baseLayoutKey: nil,
+                                             composing: kittyIsComposing))
+            return
+        }
+        let bytes = applyControlToEventCharacters(character)
+        if !bytes.isEmpty {
+            send(bytes)
+        }
+    }
+
     public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var didHandleEvent = false
         let wasCommandActive = commandActive
@@ -2596,11 +2734,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     open func mouseModeChanged(source: Terminal) {
-        if source.mouseMode != .off {
-            enableMousePanGesture()
-        } else {
-            disableMousePanGesture()
-        }
+        // Multiplex patch: pan handling depends on mouse mode *and* the
+        // active buffer — recompute both here and in bufferActivated.
+        updateRemotePanGesture()
     }
     
     open func setTerminalTitle(source: Terminal, title: String) {
@@ -2650,9 +2786,27 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 }
 
+// Multiplex patch: delegate for the remote-scroll pan. A separate object —
+// not TerminalView itself — so UIScrollView's private gesture-delegate
+// behavior for its own recognizers is left untouched. Yields when a text
+// selection is being dragged, and re-checks the remote-scroll conditions
+// live (they can drift between enabling the gesture and the pan starting).
+private class RemoteScrollGestureGate: NSObject, UIGestureRecognizerDelegate {
+    weak var terminalView: TerminalView?
+
+    init (terminalView: TerminalView) {
+        self.terminalView = terminalView
+    }
+
+    func gestureRecognizerShouldBegin (_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let view = terminalView else { return false }
+        return view.remoteScrollApplies && !view.selection.active
+    }
+}
+
 // Default implementations for TerminalViewDelegate
 
-extension TerminalViewDelegate {    
+extension TerminalViewDelegate {
     public func bell (source: TerminalView)
     {
         #if os(iOS)

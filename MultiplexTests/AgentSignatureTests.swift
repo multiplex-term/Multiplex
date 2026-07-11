@@ -120,6 +120,9 @@ final class AgentSignatureTests: XCTestCase {
     func testKeyPayloads() {
         XCTAssertEqual(AgentCommand.stop.payload, Data([0x1B]))                 // Esc
         XCTAssertEqual(AgentCommand.mode.payload, Data([0x1B, 0x5B, 0x5A]))     // CSI Z
+        XCTAssertEqual(AgentCommand.transcript.payload, Data([0x14]))           // Ctrl+T
+        XCTAssertEqual(AgentCommand.pageUp.payload, Data([0x1B, 0x5B, 0x35, 0x7E]))   // CSI 5~
+        XCTAssertEqual(AgentCommand.pageDown.payload, Data([0x1B, 0x5B, 0x36, 0x7E])) // CSI 6~
         // Slash chips type text only; the CR is a separate delayed write
         // (Codex's paste-burst detector treats an in-burst Enter as a
         // newline, not a submit).
@@ -127,6 +130,27 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertTrue(AgentCommand.slash("clear").submitsAfterPause)
         XCTAssertFalse(AgentCommand.stop.submitsAfterPause)
         XCTAssertFalse(AgentCommand.mode.submitsAfterPause)
+        XCTAssertFalse(AgentCommand.transcript.submitsAfterPause)
+        XCTAssertFalse(AgentCommand.pageUp.submitsAfterPause)
+        XCTAssertFalse(AgentCommand.pageDown.submitsAfterPause)
+    }
+
+    func testCommandSetMembership() {
+        // Ctrl+T toggles Codex's transcript overlay; Claude Code has no
+        // such binding.
+        XCTAssertTrue(AgentCommandSet.primary(for: .codex).contains(.transcript))
+        XCTAssertFalse(AgentCommandSet.primary(for: .claudeCode).contains(.transcript))
+
+        let claude = AgentCommandSet.primary(for: .claudeCode)
+        #if os(visionOS)
+        // No key rail on visionOS — transcript paging rides the strip.
+        XCTAssertEqual(Array(claude.suffix(2)), [.pageUp, .pageDown])
+        #else
+        // iPad's TerminalKeyBar already carries autorepeating PgUp/PgDn.
+        XCTAssertFalse(claude.contains(.pageUp))
+        XCTAssertFalse(claude.contains(.pageDown))
+        #endif
+        XCTAssertFalse(AgentCommandSet.primary(for: .codex).contains(.pageUp))
     }
 
     func testEveryCommandIsSafeToType() {

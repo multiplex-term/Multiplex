@@ -61,6 +61,9 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 - `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per comma entry via
   the same route the Attach button uses; `+` inside an entry groups sessions
   as tabs of one window (`main+scratch,deploy`). Fires **once per process**.
+  `MULTIPLEX_AUTO_ATTACH_HOST=devbox` names the target host — without it the
+  first host wins, which on a device with iCloud-synced real hosts is NOT
+  the seeded devbox (the sim is clean; a Mac/dev device isn't).
 - `MULTIPLEX_AUTO_MERGE=1` — after auto-attach, merges every terminal window
   into the first through the same surrender/adopt path the Merge menu uses
   (headless check that moved tabs keep their connections).
@@ -74,6 +77,19 @@ SIMCTL_CHILD_MULTIPLEX_SEED_HOST=.../state/seed.json \
 SIMCTL_CHILD_MULTIPLEX_AUTO_ATTACH=main \
 xcrun simctl launch <UDID> tools.bricks.multiplex
 ```
+
+**iOS-app-on-Mac** ("My Mac (Designed for iPad)"): the same hooks work, with
+two twists. The app is sandboxed, so `MULTIPLEX_SEED_HOST` must point at a
+copy *inside* the app container (`~/Library/Containers/<UUID>/Data/tmp/…`;
+find the UUID via the container's `MCMMetadataIdentifier`) — a repo path is
+silently unreadable. And there's no simctl: set the vars with
+`launchctl setenv` (GUI launches inherit launchd's environment, including
+Xcode-launched runs), and `launchctl unsetenv` them afterwards. Use
+`MULTIPLEX_AUTO_ATTACH_HOST=devbox` here — real synced hosts exist on a Mac.
+Also note DeviceHub bridges the Mac keyboard to *simulators* at the HID
+layer, so synthetic events (`osascript`/System Events) never reach a sim —
+but they DO reach the Mac app itself, which is how the Ctrl-chord fix was
+verified headlessly.
 
 Drive a live session from the Mac side to see bytes stream in:
 `tmux send-keys -t main:2 'echo hi' Enter`.
@@ -106,7 +122,21 @@ presses the focused terminal's "Show keyboard" button headlessly,
 first slash chip in the agent helper strip (inject → pump → PTY → tmux), and
 `… -p tools.bricks.multiplex.debug.newtab` presses the focused window's
 "+ TAB" primary action (control-connection exec → new-session in the
-pane's cwd → tab append → attach).
+pane's cwd → tab append → attach), and
+`… -p tools.bricks.multiplex.debug.keybar` runs the focused terminal's
+iPad key-bar proof sequence — the four symbol keys plus a latched CTRL
+consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`, and
+`… -p tools.bricks.multiplex.debug.scrollup` / `….scrolldown` delivers one
+scroll tick to the focused terminal — the same remote path a pan takes
+(wheel report when the app requested mouse tracking, alternate-screen
+cursor key otherwise), so with tmux `mouse on` a scrollup flips
+`#{pane_in_mode}` to 1 (copy-mode scrollback) and scrolldowns exit it, and
+`… -p tools.bricks.multiplex.debug.kbd.float` / `….kbd.dock` /
+`….kbd.hide` (iPad only) posts a synthetic keyboard-frame notification
+(floating pill / docked panel / hidden) to exercise keyboard avoidance
+headlessly; `SwiftTermView` logs each decision to the unified log
+(subsystem `tools.bricks.multiplex`, category `kbd`, debug level — use
+`log stream`, not `log show`).
 
 ## Architecture
 
@@ -156,10 +186,25 @@ views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5), patched
     to declare the `NIO` product it imports (Xcode 27's module resolution
     rejects the undeclared import). Also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.13.0, patched so `keyboardType` is settable (upstream is
-    get-only), letting terminals default to `.asciiCapable` (English) instead of
-    the user's IME. Sample apps trimmed.
-  - When bumping either, re-apply the one-line patch and diff before trusting it.
+  - `SwiftTerm` — 1.13.0, patched three times (all marked `Multiplex patch`):
+    `keyboardType` is settable (upstream is get-only), letting terminals
+    default to `.asciiCapable` (English) instead of the user's IME; pans
+    scroll the *remote* instead of reporting click-drags — wheel button
+    events when the client requested mouse tracking (tmux `mouse on` scrolls
+    its own scrollback), DECCKM-aware arrows in the alternate screen with
+    mouse off (`performRemoteScroll`; the scroll view's own pan is disabled
+    while remote scroll applies, so plain-shell tabs keep native local
+    scrollback); and on iOS-app-on-Mac ("Designed for iPad") hardware
+    Ctrl+character chords ride a `GCKeyboard` HID bridge — UIKit's
+    UIKeyboardImpl translates those chords through the Cocoa key-binding
+    table (Ctrl+C → `noop:`, the "Unsupported action selector noop:" log)
+    and drops them *before* pressesBegan, insertText, or responder
+    UIKeyCommands (`wantsPriorityOverSystemBehavior` included) ever run, so
+    GameController is the only layer that still sees them; the bridge sends
+    the control byte (kitty-encoded when enhancement flags are on) to the
+    first-responder TerminalView in the key window, and never installs on
+    real iPads. Sample apps trimmed.
+  - When bumping either, re-apply the patches and diff before trusting it.
 - **Citadel pinned to exactly 0.12.0**: 0.12.1 moved its swift-nio-ssh dep to an
   unaudited personal fork. Don't bump without review — this is the transport.
 - **tmux `-F` sanitizes control chars** (0x1F → `_`). The probe format is
@@ -169,6 +214,18 @@ views.
   visionOS window is its own always-key scene, so multiple first responders
   leave input stuck on the first session. Claiming resigns the previous owner
   and activates the claimed window's scene. Route all focus changes through it.
+- **The iPad keyboard accessory is `TerminalKeyBar`, not SwiftTerm's stock
+  `TerminalAccessory`**: a TALLY rail (ESC / latching CTRL / TAB, the shell
+  symbols `~ | / -`, DECCKM-aware autorepeat arrows, dismiss) installed as
+  `inputAccessoryView` when the view is created, so it survives tab moves.
+  PgUp/PgDn ride along (autorepeating, `CSI 5~`/`6~`) — pagers and CLI
+  agents like Claude Code page their transcripts with them; the narrowest
+  rail tier drops them after the symbols.
+  Every key sends through `TerminalView.send` → delegate → the controller's
+  ordered pump (never a side channel); CTRL rides SwiftTerm's public
+  `controlModifier`, consumed by the next typed character — the bar observes
+  `.terminalViewControlModifierReset` to release the latch visual. visionOS
+  keeps no accessory (its keyboard floats; SwiftTerm never plumbs one there).
 - **"Back to deck" activates the existing deck scene** (`DeckScene.session`);
   `openWindow(id: "deck")` would mint a *new* deck window. Symmetrically, a
   deck tile press focuses the window already attached to that session
@@ -230,7 +287,9 @@ views.
   whose node wrapper *spawns* the binary and stays pane leader). Any probe
   stage failing just disables detection, never the session list. Helper chips
   only ever *type* through `TerminalSessionController.sendInput` (the same
-  ordered pump as the keyboard; Enter = CR, Esc = 0x1B, Shift+Tab = CSI Z);
+  ordered pump as the keyboard; Enter = CR, Esc = 0x1B, Shift+Tab = CSI Z,
+  Codex's TRANSCRIPT overlay toggle = Ctrl+T; Claude Code's PG UP/PG DN
+  chips, CSI `5~`/`6~`, are visionOS-only — iPad's key rail already pages);
   never ship a Ctrl+B payload — it's the remote tmux prefix. The strip and
   agent alerts (`AttentionCenter`) are the Pro-gated surfaces; detection and
   the wall's telemetry (agent token, NEEDS YOU badge, RUNNING) stay free.
@@ -258,6 +317,19 @@ views.
   pure + tested) so it stays inert at a shell prompt. tmux tabs only;
   plain `.shell` tabs have no pane to ask for a cwd (and mosh tabs have no
   SFTP surface — the pill says so). Plan: `local-plan/file-drop.md`.
+- **iPad keyboard clearance has exactly one owner** — the terminal
+  container's keyboard-frame handler in `SwiftTermView`, gated by the pure
+  `KeyboardAvoidance.isDocked` (unit-tested). The terminal window opts out
+  of SwiftUI's automatic avoidance (`.ignoresSafeArea(.keyboard)` in
+  `TerminalWindow`): SwiftUI reserves space for *floating* keyboards and
+  goes stale across dock/float transitions — don't remove the opt-out or
+  re-add a second responder. Docked keyboards report different will-/did-
+  ChangeFrame geometry and Stage Manager keeps moving the window after the
+  notifications, so the handler re-measures on didChangeFrame, on container
+  layout, and again after a settle delay; only bottom-pinned,
+  window-spanning frames inset (floating pill/split keyboard reserve
+  nothing). The helper strip rides inside the opt-out, so a docked keyboard
+  covers it — the key rail is the input surface while typing.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
   entitlement/CloudKit): secrets *and* a JSON host record per host are
   synchronizable keychain items (services `tools.bricks.multiplex` /
@@ -275,9 +347,15 @@ views.
   --minimum-deployment-target 17.0 --app-icon AppIcon
   --output-partial-info-plist <dir>/p.plist` — zero warnings today, and the
   emitted PNGs are the flattened pre-26 fallbacks (use them as a visual
-  check). Icon Composer/.icon has no visionOS target: the circular layered
-  stack + project.yml wiring are still TODO, and the package stays out of
-  `Multiplex/` (the sources dir) until XcodeGen's .icon handling is verified.
+  check). Icon Composer/.icon has no visionOS target, so the visionOS
+  circular icon is `Assets.xcassets/AppIcon.solidimagestack` — **baked, not
+  hand-drawn**: `swift Tools/bake-vision-icon.swift` renders the document's
+  circle format with Icon Composer's own renderer (the `ictool` inside Icon
+  Composer.app — the `xcrun ictool` shim lacks `--export-image`) and
+  unblends fill/fill+carrier/full renders into the Back/Middle/Front
+  layers, verifying the restack recomposites the reference render
+  (≤0.5/255 inside the crop). Never edit the three layer PNGs by hand —
+  edit `AppIcon.icon` and re-run the bake.
 
 ## Conventions
 

@@ -149,6 +149,16 @@ struct AgentCommand: Identifiable, Hashable {
     /// send as CSI Z. A fixed default binding in both TUIs. Never ship a
     /// Ctrl+B payload here: that's the remote tmux prefix and gets eaten.
     static let mode = AgentCommand(label: "MODE", payload: Data([0x1B, 0x5B, 0x5A]))
+
+    /// Toggle Codex's transcript overlay — Ctrl+T (0x14), a fixed default
+    /// binding in the rust TUI. Only the tmux prefix (Ctrl+B) is special;
+    /// Ctrl+T passes through to the pane untouched.
+    static let transcript = AgentCommand(label: "TRANSCRIPT", payload: Data([0x14]))
+
+    /// Page the agent's transcript — PgUp/PgDn are CSI 5~/6~ (fixed; unlike
+    /// arrows they have no DECCKM variant). Claude Code pages with them.
+    static let pageUp = AgentCommand(label: "PG UP", payload: Data([0x1B, 0x5B, 0x35, 0x7E]))
+    static let pageDown = AgentCommand(label: "PG DN", payload: Data([0x1B, 0x5B, 0x36, 0x7E]))
 }
 
 /// The curated command sets, one place to tune. Slash lists verified
@@ -158,11 +168,21 @@ enum AgentCommandSet {
     static func primary(for kind: AgentKind) -> [AgentCommand] {
         switch kind {
         case .claudeCode:
-            [.stop, .slash("clear"), .slash("resume"), .slash("compact"),
-             .slash("context"), .slash("model"), .mode]
+            var commands: [AgentCommand] = [
+                .stop, .slash("clear"), .slash("resume"), .slash("compact"),
+                .slash("context"), .slash("model"), .mode,
+            ]
+            #if os(visionOS)
+            // visionOS has no key rail (SwiftTerm never plumbs an accessory
+            // there), so transcript paging lives on the strip; iPad's
+            // TerminalKeyBar already carries autorepeating PgUp/PgDn.
+            commands += [.pageUp, .pageDown]
+            #endif
+            return commands
         case .codex:
-            [.stop, .slash("new"), .slash("resume"), .slash("compact"),
-             .slash("model"), .slash("permissions"), .slash("review"), .mode]
+            return [.stop, .slash("new"), .slash("resume"), .slash("compact"),
+                    .slash("model"), .slash("permissions"), .slash("review"),
+                    .transcript, .mode]
         }
     }
 

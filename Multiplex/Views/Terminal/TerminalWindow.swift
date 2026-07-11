@@ -298,6 +298,17 @@ struct TerminalWindowRoot: View {
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         helperStrip(floating: false)
                     }
+                    // SwiftUI's automatic keyboard avoidance must not touch
+                    // the terminal: its tracker also reserves space for
+                    // *floating* keyboards (and goes stale across
+                    // dock/float transitions), eating the viewport. The
+                    // terminal container's own keyboard-frame handler is the
+                    // single owner of keyboard clearance — docked keyboards
+                    // and the accessory bar inset, floating pills don't
+                    // (`KeyboardAvoidance`). The helper strip rides inside
+                    // the opt-out, so a docked keyboard covers it while
+                    // typing — the key rail is the input surface then.
+                    .ignoresSafeArea(.keyboard)
             }
             .navigationTitle(windowTitle)
             .navigationBarTitleDisplayMode(.inline)
