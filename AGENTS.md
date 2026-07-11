@@ -322,9 +322,15 @@ views.
   --minimum-deployment-target 17.0 --app-icon AppIcon
   --output-partial-info-plist <dir>/p.plist` — zero warnings today, and the
   emitted PNGs are the flattened pre-26 fallbacks (use them as a visual
-  check). Icon Composer/.icon has no visionOS target: the circular layered
-  stack + project.yml wiring are still TODO, and the package stays out of
-  `Multiplex/` (the sources dir) until XcodeGen's .icon handling is verified.
+  check). Icon Composer/.icon has no visionOS target, so the visionOS
+  circular icon is `Assets.xcassets/AppIcon.solidimagestack` — **baked, not
+  hand-drawn**: `swift Tools/bake-vision-icon.swift` renders the document's
+  circle format with Icon Composer's own renderer (the `ictool` inside Icon
+  Composer.app — the `xcrun ictool` shim lacks `--export-image`) and
+  unblends fill/fill+carrier/full renders into the Back/Middle/Front
+  layers, verifying the restack recomposites the reference render
+  (≤0.5/255 inside the crop). Never edit the three layer PNGs by hand —
+  edit `AppIcon.icon` and re-run the bake.
 
 ## Conventions
 

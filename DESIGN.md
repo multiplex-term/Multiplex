@@ -139,6 +139,17 @@ provides the visionOS circular icon as three 1024 px layers: opaque chassis
 back, carrier middle, and tally-node front. Both representations are named
 `AppIcon`; `actool` selects the platform-appropriate source at build time.
 
+The stack layers are generated — `swift Tools/bake-vision-icon.swift`
+re-bakes them from `AppIcon.icon` (run it after any icon edit). It renders
+the document's circle format (artwork auto-scaled 0.94x into the disc, all
+glass baked, 16-bit Display P3) via Icon Composer's own `ictool`, then
+splits the render into layers by unblending fill-only, fill+carrier, and
+full passes, so the flattened stack matches the Icon Composer rendering
+pixel-for-pixel while visionOS still gets real depth. Layer assignment is
+deliberate: the disc's edge lighting lives only in the back layer and the
+bead + its cast shadow ride the front layer whole, so parallax never
+double-exposes an edge or splits the lamp across planes.
+
 ## Terminal themes
 
 Terminal surface colors are user preference, never identity. The default is
