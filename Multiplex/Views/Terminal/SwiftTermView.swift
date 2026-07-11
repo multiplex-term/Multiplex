@@ -149,6 +149,8 @@ struct SwiftTermView: UIViewRepresentable {
 
         /// Raise the terminal's bottom edge by however much of the keyboard
         /// (including the accessory row alone) overlaps the container.
+        /// Floating/split keyboards hover over content by design and reserve
+        /// nothing — `KeyboardAvoidance` makes the docked call.
         func installKeyboardAvoidance(container: UIView, constraint: NSLayoutConstraint) {
             avoidingContainer = container
             bottomConstraint = constraint
@@ -175,9 +177,17 @@ struct SwiftTermView: UIViewRepresentable {
             var overlap: CGFloat = 0
             if notification.name != UIResponder.keyboardWillHideNotification,
                let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
-                let inContainer = container.convert(endFrame, from: window.screen.coordinateSpace)
-                overlap = max(0, container.bounds.maxY - inContainer.minY)
-                overlap = min(overlap, container.bounds.height * 0.8)
+                let screenSpace = window.screen.coordinateSpace
+                let containerOnScreen = container.convert(container.bounds, to: screenSpace)
+                if KeyboardAvoidance.isDocked(
+                    keyboard: endFrame,
+                    screen: screenSpace.bounds,
+                    containerWidth: containerOnScreen.width
+                ) {
+                    let inContainer = container.convert(endFrame, from: screenSpace)
+                    overlap = max(0, container.bounds.maxY - inContainer.minY)
+                    overlap = min(overlap, container.bounds.height * 0.8)
+                }
             }
             guard constraint.constant != -overlap else { return }
             constraint.constant = -overlap

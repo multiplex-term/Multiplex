@@ -109,7 +109,12 @@ first slash chip in the agent helper strip (inject → pump → PTY → tmux), a
 pane's cwd → tab append → attach), and
 `… -p tools.bricks.multiplex.debug.keybar` runs the focused terminal's
 iPad key-bar proof sequence — the four symbol keys plus a latched CTRL
-consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`.
+consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`, and
+`… -p tools.bricks.multiplex.debug.scrollup` / `….scrolldown` delivers one
+scroll tick to the focused terminal — the same remote path a pan takes
+(wheel report when the app requested mouse tracking, alternate-screen
+cursor key otherwise), so with tmux `mouse on` a scrollup flips
+`#{pane_in_mode}` to 1 (copy-mode scrollback) and scrolldowns exit it.
 
 ## Architecture
 
@@ -159,10 +164,16 @@ views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5), patched
     to declare the `NIO` product it imports (Xcode 27's module resolution
     rejects the undeclared import). Also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.13.0, patched so `keyboardType` is settable (upstream is
-    get-only), letting terminals default to `.asciiCapable` (English) instead of
-    the user's IME. Sample apps trimmed.
-  - When bumping either, re-apply the one-line patch and diff before trusting it.
+  - `SwiftTerm` — 1.13.0, patched twice (both marked `Multiplex patch`):
+    `keyboardType` is settable (upstream is get-only), letting terminals
+    default to `.asciiCapable` (English) instead of the user's IME; and pans
+    scroll the *remote* instead of reporting click-drags — wheel button
+    events when the client requested mouse tracking (tmux `mouse on` scrolls
+    its own scrollback), DECCKM-aware arrows in the alternate screen with
+    mouse off (`performRemoteScroll`; the scroll view's own pan is disabled
+    while remote scroll applies, so plain-shell tabs keep native local
+    scrollback). Sample apps trimmed.
+  - When bumping either, re-apply the patches and diff before trusting it.
 - **Citadel pinned to exactly 0.12.0**: 0.12.1 moved its swift-nio-ssh dep to an
   unaudited personal fork. Don't bump without review — this is the transport.
 - **tmux `-F` sanitizes control chars** (0x1F → `_`). The probe format is

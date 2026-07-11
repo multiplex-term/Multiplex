@@ -116,6 +116,30 @@ enum TerminalFocusArbiter {
                 summon(view, force: true)
             }
         }
+        installDebugScrollHooks()
+    }
+
+    /// Headless-verification hooks: `… -p tools.bricks.multiplex.debug.scrollup`
+    /// (or `.scrolldown`) delivers one scroll tick to the focused terminal —
+    /// the same remote path a pan takes (wheel report with mouse tracking on,
+    /// alternate-screen cursor key otherwise).
+    private static func installDebugScrollHooks() {
+        var upToken: Int32 = 0
+        notify_register_dispatch(
+            "tools.bricks.multiplex.debug.scrollup", &upToken, .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                current?.performRemoteScroll(ticks: 1)
+            }
+        }
+        var downToken: Int32 = 0
+        notify_register_dispatch(
+            "tools.bricks.multiplex.debug.scrolldown", &downToken, .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                current?.performRemoteScroll(ticks: -1)
+            }
+        }
     }
     #endif
 }
