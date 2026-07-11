@@ -213,19 +213,27 @@ struct FleetWall: View {
 
     @ViewBuilder
     private func railStatus(_ model: HostConnectionModel) -> some View {
-        switch model.phase {
-        case .connected:
-            railLabel("CONNECTED", dot: Theme.ok)
-        case .connecting:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.mini)
-                Text("LINKING").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal2)
+        Group {
+            switch model.phase {
+            case .connected:
+                railLabel("CONNECTED", dot: Theme.ok)
+            case .connecting:
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.7)
+                        .frame(width: 8, height: 8)
+                    Text("LINKING").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal2)
+                }
+            case .failed:
+                railLabel("UNREACHABLE", dot: Theme.signal3, text: Theme.signal3)
+            case .idle:
+                Text("STANDBY").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal3)
             }
-        case .failed:
-            railLabel("UNREACHABLE", dot: Theme.signal3, text: Theme.signal3)
-        case .idle:
-            Text("STANDBY").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal3)
         }
+        // ProgressView is intrinsically taller than the dot/text variants.
+        // Keep every phase in one fixed-height slot so LINKING cannot move the rail.
+        .frame(height: 12)
     }
 
     private func railLabel(_ text: String, dot: Color, text textColor: Color = Theme.signal2) -> some View {
