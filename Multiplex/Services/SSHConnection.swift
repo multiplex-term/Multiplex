@@ -48,6 +48,10 @@ actor SSHConnection {
     private var client: SSHClient?
     private var stdinWriter: TTYStdinWriter?
     private var shellTask: Task<Void, Never>?
+    /// Set by `close()`. A connect that was abandoned on a deadline can
+    /// resolve *after* close ran — this makes that late client shut itself
+    /// down instead of leaking an open connection.
+    private var isClosed = false
 
     init(host: Host, secrets: HostSecrets) {
         self.host = host
@@ -72,9 +76,16 @@ actor SSHConnection {
         } catch {
             throw SSHConnectionError.connectFailed(shortDescription(of: error))
         }
+        if isClosed {
+            let late = client
+            client = nil
+            try? await late?.close()
+            throw SSHConnectionError.notConnected
+        }
     }
 
     func close() async {
+        isClosed = true
         shellTask?.cancel()
         shellTask = nil
         stdinWriter = nil
