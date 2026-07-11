@@ -176,6 +176,90 @@ enum TmuxProbe {
             + "then echo MULTIPLEX_GIT; fi"
     }
 
+    // MARK: - New sessions (the window's + TAB button, the deck tile's quick options)
+
+    /// Create a detached session and print its final name behind a
+    /// MULTIPLEX_NEW sentinel. Naming authority stays with the server: `-s`
+    /// asks for `name`, and a duplicate-name race just retries unnamed (the
+    /// server numbers it), so the printed name is always the truth.
+    ///
+    /// - `sourceSessionName`: start in that session's *active-pane* cwd —
+    ///   `pane_current_path` follows the foreground process, so "same dir"
+    ///   means the agent's own cwd. Queried with `list-panes -F`, never
+    ///   `display-message -p -t` (3.6a renders pane formats empty for
+    ///   outside clients). nil or unresolvable → $HOME.
+    /// - `launch`: typed into the fresh shell via send-keys (literal text,
+    ///   then Enter) — never the session's command argv, so the agent
+    ///   exiting leaves a shell, and the login shell's own PATH resolves it
+    ///   exactly as if the user typed it.
+    ///
+    /// The create prints `#{session_id} #{session_name}` (id fixed-width
+    /// first, variable-length name last — the probe's own format
+    /// discipline) and send-keys targets the id: 3.6a rejects `=name`
+    /// exact-match for *pane* targets outright ("can't find pane"), and a
+    /// bare name is prefix-matched. Ids are unambiguous everywhere.
+    ///
+    /// Always exits 0 — Citadel throws on a non-zero exit status, and a
+    /// failed create must read as "no sentinel", not a torn-down control
+    /// connection.
+    static func newSessionCommand(
+        name: String, sourceSessionName: String?, launch: String?
+    ) -> String {
+        var command = pathPrefix
+        if let source = sourceSessionName {
+            command += "p=$(tmux list-panes -t \("=\(source)".shellQuoted)"
+                + " -F '#{?pane_active,#{pane_current_path},}' 2>/dev/null | grep -m1 .); "
+                + "d=\"${p:-$HOME}\"; "
+        } else {
+            command += "d=\"$HOME\"; "
+        }
+        let create = "tmux new-session -d -P -F '#{session_id} #{session_name}' -c \"$d\""
+        command += "i=$(\(create) -s \(name.shellQuoted) 2>/dev/null)"
+            + " || i=$(\(create) 2>/dev/null); "
+        var onSuccess = ""
+        if let launch {
+            onSuccess += "tmux send-keys -t \"${i%% *}\" -l -- \(launch.shellQuoted); "
+                + "tmux send-keys -t \"${i%% *}\" Enter; "
+        }
+        onSuccess += "printf 'MULTIPLEX_NEW %s\\n' \"${i#* }\""
+        command += "[ -n \"$i\" ] && { \(onSuccess); }; true"
+        return command
+    }
+
+    /// The session name minted by `newSessionCommand`, or nil when creation
+    /// failed. Whole-rest-of-line, so names with spaces survive.
+    static func parseNewSession(_ output: String) -> String? {
+        let sentinel = "MULTIPLEX_NEW "
+        for line in output.split(separator: "\n") where line.hasPrefix(sentinel) {
+            let name = String(line.dropFirst(sentinel.count))
+            if !name.isEmpty { return name }
+        }
+        return nil
+    }
+
+    /// tmux target syntax reserves `:` and `.`, and new-session rejects
+    /// names containing them — normalize instead of failing, and never
+    /// return an empty name.
+    static func sanitizedSessionName(_ name: String) -> String {
+        let cleaned = name
+            .trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: ":", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+        return cleaned.isEmpty ? "main" : cleaned
+    }
+
+    /// First free name against the probe's session list: base, base-2,
+    /// base-3… A concurrent client can still win the race — harmless,
+    /// `newSessionCommand`'s unnamed retry absorbs it.
+    static func uniqueSessionName(base: String, existing: some Sequence<String>) -> String {
+        let base = sanitizedSessionName(base)
+        let taken = Set(existing)
+        guard taken.contains(base) else { return base }
+        var suffix = 2
+        while taken.contains("\(base)-\(suffix)") { suffix += 1 }
+        return "\(base)-\(suffix)"
+    }
+
     // MARK: - Miniatures (the deck wall's live tiles)
 
     /// Lines a tile shows; the parser keeps the trailing non-blank run.

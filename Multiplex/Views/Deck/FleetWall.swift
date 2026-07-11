@@ -274,8 +274,7 @@ struct FleetWall: View {
 
     private func newSessionTile(_ host: Host) -> some View {
         Button {
-            newSessionName = ""
-            namingHost = host
+            promptNewSession(host)
         } label: {
             VStack {
                 ChassisLabel("+ New Session", size: 11, color: Theme.signal2)
@@ -289,6 +288,14 @@ struct FleetWall: View {
         }
         .buttonStyle(.plain)
         .chassisHover(4)
+        // Long press: the agent quick options — a session named after the
+        // agent, its launch command already typed. Same menu as the
+        // terminal window's + TAB.
+        .contextMenu {
+            Button("New Session…") { promptNewSession(host) }
+            Button("New Session + Claude Code") { createAgentSession(on: host, agent: .claudeCode) }
+            Button("New Session + Codex") { createAgentSession(on: host, agent: .codex) }
+        }
         .accessibilityLabel("New session on \(host.name)")
     }
 
@@ -353,14 +360,32 @@ struct FleetWall: View {
         Task { await model.killSession(target.session) }
     }
 
+    private func promptNewSession(_ host: Host) {
+        newSessionName = ""
+        namingHost = host
+    }
+
     private func createSession() {
         guard let host = namingHost else { return }
-        var name = newSessionName
-            .trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: ":", with: "-")
-            .replacingOccurrences(of: ".", with: "-")
-        if name.isEmpty { name = "main" }
+        let name = TmuxProbe.sanitizedSessionName(newSessionName)
         open(TerminalRoute(hostID: host.id, mode: .create(sessionName: name)))
+    }
+
+    /// Quick option from the tile's long press: mint a session named after
+    /// the agent (claude, claude-2, …) in $HOME with its launch command
+    /// typed into the fresh shell, then attach in a new window. Creation
+    /// failures surface on the rail — `createSession` marks the host failed
+    /// when the control connection is the problem.
+    private func createAgentSession(on host: Host, agent: AgentKind) {
+        let model = hub.model(for: host)
+        Task {
+            guard let name = await model.createSession(
+                base: agent.launchCommand,
+                inDirectoryOf: nil,
+                typing: agent.launchCommand
+            ) else { return }
+            open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: name)))
+        }
     }
 
     private func open(_ route: TerminalRoute) {

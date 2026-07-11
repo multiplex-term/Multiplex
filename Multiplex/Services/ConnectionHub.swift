@@ -94,12 +94,16 @@ final class HostConnectionModel {
             lastRefreshed = Date()
             evaluateAttention()
         } catch {
-            let message = friendlyMessage(for: error)
-            phase = .failed(message)
-            tmux = .failed(message)
-            connection = nil
-            evaluateAttention()
+            markFailed(error)
         }
+    }
+
+    private func markFailed(_ error: Error) {
+        let message = friendlyMessage(for: error)
+        phase = .failed(message)
+        tmux = .failed(message)
+        connection = nil
+        evaluateAttention()
     }
 
     private func ensureConnection() async throws -> SSHConnection {
@@ -170,6 +174,35 @@ final class HostConnectionModel {
         }
         attentionTracker.prune(keeping: Set(sessions.map(\.name)))
         attention = next
+    }
+
+    /// Create a detached tmux session over the control connection and
+    /// return its final name — in `sourceSession`'s active-pane cwd ($HOME
+    /// when nil or unresolvable), optionally with `launch` typed into its
+    /// fresh shell. The wanted name derives from `base` against the latest
+    /// probe; the server settles races (see `TmuxProbe.newSessionCommand`).
+    /// Unlike the fail-soft probe helpers this connects on demand — it's a
+    /// user-initiated action — and returns nil on failure.
+    func createSession(
+        base: String, inDirectoryOf sourceSession: String?, typing launch: String?
+    ) async -> String? {
+        do {
+            let connection = try await ensureConnection()
+            let command = TmuxProbe.newSessionCommand(
+                name: TmuxProbe.uniqueSessionName(
+                    base: base, existing: tmux.sessions.map(\.name)),
+                sourceSessionName: sourceSession,
+                launch: launch
+            )
+            let name = TmuxProbe.parseNewSession(try await connection.exec(command))
+            // The wall and every open window should see the session now,
+            // not on their next tick.
+            refresh()
+            return name
+        } catch {
+            markFailed(error)
+            return nil
+        }
     }
 
     /// Kill a tmux session on the host over the control connection, then

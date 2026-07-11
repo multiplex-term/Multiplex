@@ -208,6 +208,73 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertTrue(command.contains("echo MULTIPLEX_GIT"))
     }
 
+    // MARK: New sessions (the + TAB button, the deck tile's quick options)
+
+    func testNewSessionCommandInheritsSourceDirectoryAndTypesLaunch() {
+        let command = TmuxProbe.newSessionCommand(
+            name: "claude", sourceSessionName: "my project", launch: "claude")
+        // Same dir = the source session's ACTIVE pane cwd, via list-panes
+        // (never display-message — 3.6a renders pane formats empty there),
+        // falling back to $HOME when unresolvable.
+        XCTAssertTrue(command.contains("tmux list-panes -t '=my project'"))
+        XCTAssertTrue(command.contains("#{?pane_active,#{pane_current_path},}"))
+        XCTAssertTrue(command.contains("d=\"${p:-$HOME}\""))
+        // Wanted name first, then the unnamed retry — the server settles
+        // duplicate-name races and its printed id+name pair is the truth.
+        XCTAssertTrue(command.contains(
+            "i=$(tmux new-session -d -P -F '#{session_id} #{session_name}' -c \"$d\" -s 'claude' 2>/dev/null)"))
+        XCTAssertTrue(command.contains(
+            "|| i=$(tmux new-session -d -P -F '#{session_id} #{session_name}' -c \"$d\" 2>/dev/null)"))
+        // The launch is TYPED into the shell (literal text, then Enter),
+        // targeting the session ID — 3.6a send-keys rejects `=name`
+        // exact-match pane targets, and a bare name is prefix-matched.
+        XCTAssertTrue(command.contains("tmux send-keys -t \"${i%% *}\" -l -- 'claude'"))
+        XCTAssertTrue(command.contains("tmux send-keys -t \"${i%% *}\" Enter"))
+        // The sentinel carries the NAME (the tail — names keep spaces);
+        // attach routes are name-based.
+        XCTAssertTrue(command.contains("printf 'MULTIPLEX_NEW %s\\n' \"${i#* }\""))
+        // Citadel throws on non-zero exit: failure must read as a missing
+        // sentinel, never a torn-down control connection.
+        XCTAssertTrue(command.hasSuffix("; true"))
+    }
+
+    func testNewSessionCommandWithoutSourceOrLaunch() {
+        let command = TmuxProbe.newSessionCommand(
+            name: "main", sourceSessionName: nil, launch: nil)
+        XCTAssertFalse(command.contains("list-panes"))
+        XCTAssertTrue(command.contains("d=\"$HOME\""))
+        XCTAssertFalse(command.contains("send-keys"))
+        XCTAssertTrue(command.contains("-s 'main'"))
+        XCTAssertTrue(command.contains("MULTIPLEX_NEW"))
+    }
+
+    func testParseNewSession() {
+        XCTAssertEqual(TmuxProbe.parseNewSession("MULTIPLEX_NEW claude\n"), "claude")
+        // Names keep their spaces; stray output around the sentinel is noise.
+        XCTAssertEqual(
+            TmuxProbe.parseNewSession("noise\nMULTIPLEX_NEW my project 2\n"),
+            "my project 2")
+        XCTAssertNil(TmuxProbe.parseNewSession("duplicate session: claude\n"))
+        XCTAssertNil(TmuxProbe.parseNewSession(""))
+    }
+
+    func testUniqueSessionNameCountsUpFromTaken() {
+        XCTAssertEqual(TmuxProbe.uniqueSessionName(base: "claude", existing: ["main"]), "claude")
+        XCTAssertEqual(TmuxProbe.uniqueSessionName(base: "claude", existing: ["claude"]), "claude-2")
+        XCTAssertEqual(
+            TmuxProbe.uniqueSessionName(base: "claude", existing: ["claude", "claude-2"]),
+            "claude-3")
+    }
+
+    func testSessionNameSanitization() {
+        // tmux target syntax reserves : and . — normalize like the deck's
+        // naming alert always has, and never mint an empty name.
+        XCTAssertEqual(TmuxProbe.uniqueSessionName(base: "v1.2:beta", existing: []), "v1-2-beta")
+        XCTAssertEqual(TmuxProbe.uniqueSessionName(base: "  ", existing: ["main"]), "main-2")
+        XCTAssertEqual(TmuxProbe.sanitizedSessionName(" release.notes "), "release-notes")
+        XCTAssertEqual(TmuxProbe.sanitizedSessionName(""), "main")
+    }
+
     func testParseCapturesKeepsTrailingNonBlankTail() {
         let sessions = [session("main", id: "$0"), session("scratch", id: "$1")]
         let output = """

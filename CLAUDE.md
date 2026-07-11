@@ -103,9 +103,12 @@ app cannot override that placement policy. To see the on-screen keyboard,
 focus the device window and use **Device → Keyboard → Toggle Software
 Keyboard**. In DEBUG builds,
 `xcrun simctl spawn <UDID> notifyutil -p tools.bricks.multiplex.debug.summon`
-presses the focused terminal's "Show keyboard" button headlessly, and
+presses the focused terminal's "Show keyboard" button headlessly,
 `… -p tools.bricks.multiplex.debug.agentchip` taps the focused terminal's
-first slash chip in the agent helper strip (inject → pump → PTY → tmux).
+first slash chip in the agent helper strip (inject → pump → PTY → tmux), and
+`… -p tools.bricks.multiplex.debug.newtab` presses the focused window's
+"+ TAB" primary action (control-connection exec → new-session in the
+pane's cwd → tab append → attach).
 
 ## Architecture
 
@@ -243,7 +246,11 @@ views.
   appears in `git status`; the user's own .gitignore there is never
   overwritten — O_EXCL again). ⚠ Query pane formats with **`list-panes
   -F`, never `display-message -p -t`** — on tmux 3.6a display-message
-  silently renders every `pane_*` variable empty for outside clients. The
+  silently renders every `pane_*` variable empty for outside clients. Also
+  3.6a: pane-target commands (`send-keys`, `capture-pane`) reject `=name`
+  exact-match targets outright ("can't find pane") — target session *ids*
+  (`$N`) instead; `=name` works only for session/window targets
+  (kill-session, list-panes). The
   typed text is composer input but still sanitized/quoted (`DropText`,
   pure + tested) so it stays inert at a shell prompt. tmux tabs only;
   plain `.shell` tabs have no pane to ask for a cwd (and mosh tabs have no

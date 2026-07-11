@@ -20,6 +20,16 @@ enum AgentKind: String, Hashable, Codable {
         case .codex: "CODEX"
         }
     }
+
+    /// What the "new session + agent" flows type into the fresh shell (and
+    /// use as the session's base name). Typed, never executed directly —
+    /// the login shell's PATH resolves it like a human launching the agent.
+    var launchCommand: String {
+        switch self {
+        case .claudeCode: "claude"
+        case .codex: "codex"
+        }
+    }
 }
 
 /// One `pid ppid args` row of the probe's `ps -eo pid=,ppid=,args=` stage.

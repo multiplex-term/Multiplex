@@ -11,6 +11,9 @@ struct UMDBar: View {
     var summonKeyboard: () -> Void
     var fontDown: () -> Void
     var fontUp: () -> Void
+    /// New tab: a fresh session on the active tab's host, in its pane's
+    /// directory — nil for a plain shell session, or an agent to launch.
+    var newSession: (AgentKind?) -> Void
     var merge: (UUID) -> Void
     var detach: () -> Void
 
@@ -24,6 +27,21 @@ struct UMDBar: View {
             ChassisChip("KBD", action: summonKeyboard)
             ChassisChip("A−", action: fontDown)
             ChassisChip("A+", action: fontUp)
+            // Tap = new session in the same directory; long press picks an
+            // agent variant — mirrors the deck tile's quick options.
+            Menu {
+                Button("New Session") { newSession(nil) }
+                Button("New Session + Claude Code") { newSession(.claudeCode) }
+                Button("New Session + Codex") { newSession(.codex) }
+            } label: {
+                ChassisBadge("TAB", systemImage: "plus")
+            } primaryAction: {
+                newSession(nil)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .chassisHover(2)
+            .accessibilityLabel("New tab: another session in this window")
             if !mergeSources.isEmpty {
                 Menu {
                     ForEach(mergeSources) { entry in

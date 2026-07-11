@@ -1,5 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if DEBUG
+import notify
+#endif
 
 /// Root of one terminal window scene: the window's tabs (each one SSH
 /// shell), resolved from its `TerminalWindowRoute` value. The tab list is
@@ -28,6 +31,10 @@ struct TerminalWindowRoot: View {
     @State private var shownAgent: AgentKind?
     @State private var hideAgentTask: Task<Void, Never>?
     @State private var showingPaywall = false
+    /// One new-tab exec in flight at a time — a double tap must not mint
+    /// two sessions.
+    @State private var creatingTab = false
+    @State private var newTabFailedHost: String?
 
     /// The wall re-probes only while the deck is open; a terminal window
     /// keeps its own host's probe warm so detection tracks the pane.
@@ -89,6 +96,17 @@ struct TerminalWindowRoot: View {
                 }
             }
             .sheet(isPresented: $showingPaywall) { ProPaywallView() }
+            .alert(
+                "Couldn't Create Session",
+                isPresented: Binding(
+                    get: { newTabFailedHost != nil },
+                    set: { if !$0 { newTabFailedHost = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Check the connection to \(newTabFailedHost ?? "the host") and try again.")
+            }
             .onDisappear {
                 // Scene is gone (close button / dismiss): tabs still here are
                 // really closing. A merged-away window is already empty, so
@@ -100,6 +118,9 @@ struct TerminalWindowRoot: View {
             .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugAgentChip)) { _ in
                 debugTapFirstSlashChip()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugNewTab)) { _ in
+                debugNewTab()
+            }
             #endif
     }
 
@@ -109,6 +130,7 @@ struct TerminalWindowRoot: View {
     private func watchAgentPresence() async {
         #if DEBUG
         AgentChipDebugHook.install()
+        NewTabDebugHook.install()
         #endif
         guard let hostID = activeTab?.hostID, let host = store.host(id: hostID) else { return }
         let model = hub.model(for: host)
@@ -151,7 +173,48 @@ struct TerminalWindowRoot: View {
         else { return }
         send(command, via: controller)
     }
+
+    /// Press the + TAB primary action of the focused window only — same
+    /// gating as the chip hook, so one notification never mints sessions
+    /// from several windows.
+    private func debugNewTab() {
+        guard let controller = activeController,
+              let view = controller.terminalView,
+              view === TerminalFocusArbiter.current
+        else { return }
+        openNewTab(launching: nil)
+    }
     #endif
+
+    /// The + TAB button: mint a fresh tmux session next to the active tab —
+    /// same host, same directory as its pane (an agent variant also types
+    /// its launch command into the new shell) — and attach it as a new tab
+    /// of this window. The session exists before the tab appears, so the
+    /// attach can't race it.
+    private func openNewTab(launching agent: AgentKind?) {
+        guard !creatingTab,
+              let activeTab,
+              let host = store.host(id: activeTab.hostID)
+        else { return }
+        creatingTab = true
+        // A plain shell tab has no pane to inherit a directory from —
+        // the new session starts in $HOME, named after the host's habit.
+        let source = activeTab.sessionName
+        Task {
+            defer { creatingTab = false }
+            guard let name = await hub.model(for: host).createSession(
+                base: agent?.launchCommand ?? source ?? "main",
+                inDirectoryOf: source,
+                typing: agent?.launchCommand
+            ) else {
+                newTabFailedHost = host.name
+                return
+            }
+            let tab = TerminalRoute(hostID: host.id, mode: .attach(sessionName: name))
+            route.tabs.append(tab)
+            route.activate(tab.id)
+        }
+    }
 
     // MARK: Layout
 
@@ -188,6 +251,7 @@ struct TerminalWindowRoot: View {
                         summonKeyboard: { activeController?.summonKeyboard() },
                         fontDown: { fontSize = max(9, fontSize - 1) },
                         fontUp: { fontSize = min(32, fontSize + 1) },
+                        newSession: { openNewTab(launching: $0) },
                         merge: { merge($0) },
                         detach: { detachActiveTab() }
                     )
@@ -305,6 +369,7 @@ struct TerminalWindowRoot: View {
             deckButton
         }
         ToolbarItemGroup(placement: .primaryAction) {
+            newTabMenu
             keyboardButton
             fontButtons
             if !mergeSources.isEmpty {
@@ -313,6 +378,21 @@ struct TerminalWindowRoot: View {
             Button("Detach") { detachActiveTab() }
                 .buttonStyle(.bordered)
         }
+    }
+
+    /// Tap = new session in the active tab's directory; long press picks an
+    /// agent variant — mirrors the deck tile's quick options.
+    private var newTabMenu: some View {
+        Menu {
+            Button("New Session") { openNewTab(launching: nil) }
+            Button("New Session + Claude Code") { openNewTab(launching: .claudeCode) }
+            Button("New Session + Codex") { openNewTab(launching: .codex) }
+        } label: {
+            Image(systemName: "plus")
+        } primaryAction: {
+            openNewTab(launching: nil)
+        }
+        .accessibilityLabel("New tab: another session in this window")
     }
 
     private var deckButton: some View {
@@ -580,3 +660,30 @@ private struct TerminalPane: View {
                 .strokeBorder(Theme.bezelHi, lineWidth: 1))
     }
 }
+
+#if DEBUG
+extension Notification.Name {
+    static let multiplexDebugNewTab = Notification.Name("MultiplexDebugNewTab")
+}
+
+/// Headless-verification hook, same shape as `AgentChipDebugHook`:
+/// `xcrun simctl spawn <udid> notifyutil -p tools.bricks.multiplex.debug.newtab`
+/// presses the focused window's + TAB primary action — control-connection
+/// exec → new-session in the pane's cwd → tab append → attach, without
+/// touching the screen.
+@MainActor
+enum NewTabDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "tools.bricks.multiplex.debug.newtab", &token, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugNewTab, object: nil)
+        }
+    }
+}
+#endif
