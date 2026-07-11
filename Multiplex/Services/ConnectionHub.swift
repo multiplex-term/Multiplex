@@ -16,7 +16,16 @@ final class ConnectionHub {
     }
 
     func model(for host: Host) -> HostConnectionModel {
-        if let existing = models[host.id] { return existing }
+        if let existing = models[host.id] {
+            if existing.host == host { return existing }
+            // The record changed under the model — edited locally or synced
+            // from another device. The old model keeps probing the old
+            // address with the old credentials (and would report CONNECTED
+            // against an endpoint the record no longer names), so replace
+            // it and let the wall's next tick connect fresh.
+            let stale = existing
+            Task { await stale.disconnect() }
+        }
         let model = HostConnectionModel(host: host)
         model.onAttentionAlert = { [attention] alert in
             attention?.handle(alert)
@@ -132,7 +141,8 @@ final class HostConnectionModel {
     /// + auth); longer than an exec round-trip on an already-live link.
     private static let connectDeadline: Double = 15
     /// Deadline for one exec round-trip on the established connection.
-    private static let execDeadline: Double = 10
+    /// (nonisolated so it can be a default argument of `deadlined`.)
+    private nonisolated static let execDeadline: Double = 10
 
     /// Every control-connection round-trip must eventually resolve: a link
     /// that dies without a FIN/RST (device left Wi-Fi, host powered off)
