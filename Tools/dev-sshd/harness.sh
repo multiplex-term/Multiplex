@@ -154,8 +154,18 @@ stop() {
     if [ -f "$STATE/sshd.pid" ]; then
         kill "$(cat "$STATE/sshd.pid")" 2>/dev/null || true
         rm -f "$STATE/sshd.pid"
-        echo "sshd stopped"
     fi
+    # The master only listens; established connections are served by
+    # per-connection sshd-session daemons that outlive it — leaving them
+    # running keeps every already-connected client (the app's control
+    # link!) healthy, so "stop" wouldn't look like the host going away.
+    # Kill them too, matched by the harness port so no other sshd on
+    # this Mac is ever touched.
+    sessions=$(lsof -nP -t -iTCP:$PORT -a -c sshd 2>/dev/null || true)
+    if [ -n "$sessions" ]; then
+        kill $sessions 2>/dev/null || true
+    fi
+    echo "sshd stopped"
     for s in main scratch deploy agent; do
         tmux kill-session -t "$s" 2>/dev/null || true
     done
