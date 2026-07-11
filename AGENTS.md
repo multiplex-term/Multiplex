@@ -114,7 +114,13 @@ consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`, and
 scroll tick to the focused terminal — the same remote path a pan takes
 (wheel report when the app requested mouse tracking, alternate-screen
 cursor key otherwise), so with tmux `mouse on` a scrollup flips
-`#{pane_in_mode}` to 1 (copy-mode scrollback) and scrolldowns exit it.
+`#{pane_in_mode}` to 1 (copy-mode scrollback) and scrolldowns exit it, and
+`… -p tools.bricks.multiplex.debug.kbd.float` / `….kbd.dock` /
+`….kbd.hide` (iPad only) posts a synthetic keyboard-frame notification
+(floating pill / docked panel / hidden) to exercise keyboard avoidance
+headlessly; `SwiftTermView` logs each decision to the unified log
+(subsystem `tools.bricks.multiplex`, category `kbd`, debug level — use
+`log stream`, not `log show`).
 
 ## Architecture
 
@@ -281,6 +287,19 @@ views.
   pure + tested) so it stays inert at a shell prompt. tmux tabs only;
   plain `.shell` tabs have no pane to ask for a cwd (and mosh tabs have no
   SFTP surface — the pill says so). Plan: `local-plan/file-drop.md`.
+- **iPad keyboard clearance has exactly one owner** — the terminal
+  container's keyboard-frame handler in `SwiftTermView`, gated by the pure
+  `KeyboardAvoidance.isDocked` (unit-tested). The terminal window opts out
+  of SwiftUI's automatic avoidance (`.ignoresSafeArea(.keyboard)` in
+  `TerminalWindow`): SwiftUI reserves space for *floating* keyboards and
+  goes stale across dock/float transitions — don't remove the opt-out or
+  re-add a second responder. Docked keyboards report different will-/did-
+  ChangeFrame geometry and Stage Manager keeps moving the window after the
+  notifications, so the handler re-measures on didChangeFrame, on container
+  layout, and again after a settle delay; only bottom-pinned,
+  window-spanning frames inset (floating pill/split keyboard reserve
+  nothing). The helper strip rides inside the opt-out, so a docked keyboard
+  covers it — the key rail is the input surface while typing.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
   entitlement/CloudKit): secrets *and* a JSON host record per host are
   synchronizable keychain items (services `tools.bricks.multiplex` /

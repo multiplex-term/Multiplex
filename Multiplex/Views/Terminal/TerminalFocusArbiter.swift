@@ -140,6 +140,66 @@ enum TerminalFocusArbiter {
                 current?.performRemoteScroll(ticks: -1)
             }
         }
+        #if !os(visionOS)
+        installDebugKeyboardHooks()
+        #endif
     }
+
+    #if !os(visionOS)
+    /// Headless keyboard-geometry reproduction: posts the same
+    /// NotificationCenter keyboard-frame notifications UIKit would.
+    /// Drives the app's own keyboard handling (`SwiftTermView`) only —
+    /// SwiftUI's automatic avoidance tracks the real keyboard internally
+    /// and ignores these, which is fine now that the terminal window opts
+    /// out of it. `….debug.kbd.float` = undocked pill mid-screen,
+    /// `….debug.kbd.dock` = full-width docked panel, `….debug.kbd.hide`.
+    /// visionOS has no window-anchored keyboard (and no `UIWindow.screen`).
+    private static func installDebugKeyboardHooks() {
+        func post(_ name: Notification.Name, endFrame: CGRect, screen: CGRect) {
+            NotificationCenter.default.post(
+                name: name,
+                object: nil,
+                userInfo: [
+                    UIResponder.keyboardFrameBeginUserInfoKey: CGRect(
+                        x: 0, y: screen.maxY, width: screen.width, height: 346),
+                    UIResponder.keyboardFrameEndUserInfoKey: endFrame,
+                    UIResponder.keyboardAnimationDurationUserInfoKey: 0.25,
+                    UIResponder.keyboardAnimationCurveUserInfoKey: 7,
+                    UIResponder.keyboardIsLocalUserInfoKey: true,
+                ]
+            )
+        }
+        var floatToken: Int32 = 0
+        notify_register_dispatch(
+            "tools.bricks.multiplex.debug.kbd.float", &floatToken, .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                guard let screen = current?.window?.screen.bounds else { return }
+                let pill = CGRect(x: screen.midX - 160, y: screen.maxY - 500, width: 320, height: 254)
+                post(UIResponder.keyboardWillChangeFrameNotification, endFrame: pill, screen: screen)
+            }
+        }
+        var dockToken: Int32 = 0
+        notify_register_dispatch(
+            "tools.bricks.multiplex.debug.kbd.dock", &dockToken, .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                guard let screen = current?.window?.screen.bounds else { return }
+                let panel = CGRect(x: 0, y: screen.maxY - 346, width: screen.width, height: 346)
+                post(UIResponder.keyboardWillChangeFrameNotification, endFrame: panel, screen: screen)
+            }
+        }
+        var hideToken: Int32 = 0
+        notify_register_dispatch(
+            "tools.bricks.multiplex.debug.kbd.hide", &hideToken, .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                guard let screen = current?.window?.screen.bounds else { return }
+                let gone = CGRect(x: 0, y: screen.maxY, width: screen.width, height: 346)
+                post(UIResponder.keyboardWillHideNotification, endFrame: gone, screen: screen)
+            }
+        }
+    }
+    #endif
     #endif
 }
