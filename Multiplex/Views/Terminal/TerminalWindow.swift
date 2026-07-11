@@ -492,6 +492,10 @@ struct TerminalWindowRoot: View {
             id: route.id,
             tabs: route.tabs,
             label: windowLabel,
+            reveal: { [route = $route, workspace] tabID in
+                route.wrappedValue.activate(tabID)
+                workspace.controller(for: tabID)?.revealWindow()
+            },
             surrender: { [route = $route] in
                 let tabs = route.wrappedValue.tabs
                 route.wrappedValue.tabs = []

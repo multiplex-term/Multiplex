@@ -172,7 +172,12 @@ views.
   leave input stuck on the first session. Claiming resigns the previous owner
   and activates the claimed window's scene. Route all focus changes through it.
 - **"Back to deck" activates the existing deck scene** (`DeckScene.session`);
-  `openWindow(id: "deck")` would mint a *new* deck window.
+  `openWindow(id: "deck")` would mint a *new* deck window. Symmetrically, a
+  deck tile press focuses the window already attached to that session
+  (`TerminalWorkspace.focusTab` → `WindowEntry.reveal` → controller
+  `revealWindow()`, which raises the scene *explicitly* — the arbiter only
+  does that when focus switches hands); the tile's long-press "Attach in
+  New Window" stays the duplicate-client path.
 - **tmux attach needs a PTY**: the shell opens with ECHO off and
   `exec tmux attach-session …` is injected as the first stdin line (silent
   handoff, works with any POSIX login shell). Detach = close the channel.

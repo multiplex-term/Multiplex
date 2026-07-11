@@ -9,6 +9,7 @@ import SwiftUI
 struct FleetWall: View {
     @Environment(HostStore.self) private var store
     @Environment(ConnectionHub.self) private var hub
+    @Environment(TerminalWorkspace.self) private var workspace
     @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -244,7 +245,11 @@ struct FleetWall: View {
                         session: session,
                         lines: model.miniatures[session.name] ?? [],
                         attention: model.attention[session.name],
+                        hasOpenTab: workspace.hasTab(hostID: host.id, sessionName: session.name),
                         attach: {
+                            focusOrAttach(host, session: session)
+                        },
+                        attachNewWindow: {
                             open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: session.name)))
                         },
                         delete: {
@@ -388,6 +393,15 @@ struct FleetWall: View {
         }
     }
 
+    /// A tile press: if some open terminal window already shows this
+    /// session, bring that window (and its tab) forward instead of
+    /// attaching a duplicate client; only otherwise attach in a new window.
+    /// The tile's long-press menu keeps an explicit new-window attach.
+    private func focusOrAttach(_ host: Host, session: TmuxSession) {
+        if workspace.focusTab(hostID: host.id, sessionName: session.name) { return }
+        open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: session.name)))
+    }
+
     private func open(_ route: TerminalRoute) {
         openWindow(id: "terminal", value: TerminalWindowRoute(tab: route))
     }
@@ -412,14 +426,21 @@ struct HatchedScreen: View {
 
 /// One monitor on the wall: live miniature, UMD row (name, lamp or attach
 /// badge, telemetry), and the session's windows as its segmented lower
-/// bezel — the spine. The whole tile is the Attach button.
+/// bezel — the spine. The whole tile is one button: press focuses the
+/// window already attached to this session, or attaches in a new one;
+/// long press offers an explicit new-window attach (a second synced
+/// tmux client) alongside delete.
 private struct SessionTile: View {
     let session: TmuxSession
     let lines: [String]
     /// Agent state from the latest probe/capture pass; nil when the active
     /// pane runs no detected agent.
     let attention: PaneAgentState?
+    /// Whether some open terminal window already has this session as a tab
+    /// — pressing then focuses that window instead of attaching again.
+    let hasOpenTab: Bool
     let attach: () -> Void
+    let attachNewWindow: () -> Void
     let delete: () -> Void
 
     var body: some View {
@@ -437,6 +458,7 @@ private struct SessionTile: View {
         .buttonStyle(.plain)
         .chassisHover(4)
         .contextMenu {
+            Button("Attach in New Window", action: attachNewWindow)
             Button("Delete Session…", role: .destructive, action: delete)
         }
         .accessibilityLabel(accessibilitySummary)
@@ -548,6 +570,7 @@ private struct SessionTile: View {
         var parts = [session.name, session.isAttached ? "live" : "not attached"]
         if case .needsYou = attention { parts.append("agent needs your input") }
         parts.append("\(session.windowCount) windows")
-        return parts.joined(separator: ", ") + ". Attach"
+        return parts.joined(separator: ", ")
+            + (hasOpenTab ? ". Shows its open window" : ". Attach")
     }
 }

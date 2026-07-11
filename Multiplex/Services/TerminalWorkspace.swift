@@ -52,6 +52,8 @@ final class TerminalWorkspace {
         let id: UUID
         var tabs: [TerminalRoute]
         var label: String
+        /// Brings the window's scene forward and makes this tab its active one.
+        var reveal: @MainActor (UUID) -> Void
         /// Empties the source window (which auto-dismisses) and returns its tabs.
         var surrender: @MainActor () -> [TerminalRoute]
         /// Appends tabs to the window — the receiving half of a merge.
@@ -75,6 +77,36 @@ final class TerminalWorkspace {
     /// The windows `windowID` could merge into itself.
     func mergeSources(for windowID: UUID) -> [WindowEntry] {
         windows.filter { $0.id != windowID && !$0.tabs.isEmpty }
+    }
+
+    /// True when an open terminal window already has a tab bound to this
+    /// tmux session — pressing that session's deck tile focuses it.
+    func hasTab(hostID: UUID, sessionName: String) -> Bool {
+        openTab(hostID: hostID, sessionName: sessionName) != nil
+    }
+
+    /// Bring the window already attached to (host, session) forward and make
+    /// that tab active — the deck tile's press. False when no open window
+    /// has such a tab (the deck then attaches in a new window).
+    @discardableResult
+    func focusTab(hostID: UUID, sessionName: String) -> Bool {
+        guard let (entry, tabID) = openTab(hostID: hostID, sessionName: sessionName)
+        else { return false }
+        entry.reveal(tabID)
+        return true
+    }
+
+    /// First-registered window holding a tab for this session — attach and
+    /// create tabs alike; plain shells have no session name and never match.
+    private func openTab(hostID: UUID, sessionName: String) -> (WindowEntry, UUID)? {
+        for entry in windows {
+            if let tab = entry.tabs.first(where: {
+                $0.hostID == hostID && $0.sessionName == sessionName
+            }) {
+                return (entry, tab.id)
+            }
+        }
+        return nil
     }
 
     /// Take every tab out of a sibling window; the source closes itself.

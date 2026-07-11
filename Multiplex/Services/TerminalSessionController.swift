@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SwiftTerm
+import UIKit
 
 /// Owns one terminal tab's shell: opens a dedicated transport — an SSH
 /// PTY, or a mosh session bootstrapped over SSH when the host asks for it
@@ -83,6 +84,21 @@ final class TerminalSessionController {
     /// Route keyboard input to this window's terminal.
     func focusTerminal() {
         guard let terminalView else { return }
+        TerminalFocusArbiter.claim(terminalView)
+    }
+
+    /// Bring this tab's hosting window scene forward and take keyboard
+    /// focus — the deck tile's press-to-focus path. The scene raise is
+    /// explicit: the arbiter only activates a scene when focus *switches*
+    /// hands, and this terminal may already own focus while its window
+    /// sits behind the deck the user is pressing.
+    func revealWindow() {
+        guard let terminalView else { return }
+        if let scene = terminalView.window?.windowScene {
+            UIApplication.shared.activateSceneSession(
+                for: UISceneSessionActivationRequest(session: scene.session)
+            )
+        }
         TerminalFocusArbiter.claim(terminalView)
     }
 
