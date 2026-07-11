@@ -28,6 +28,11 @@ struct SwiftTermView: UIViewRepresentable {
             )
             view.changeScrollback(5000)
             view.keyboardType = .asciiCapable
+            #if !os(visionOS)
+            // The TALLY key rail replaces SwiftTerm's stock accessory. Tied
+            // to the view, so it survives tab moves across windows.
+            view.inputAccessoryView = TerminalKeyBar(terminal: view)
+            #endif
         }
         apply(theme, to: view, coordinator: context.coordinator)
         if view.font.pointSize != fontSize {

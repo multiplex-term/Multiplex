@@ -106,7 +106,10 @@ presses the focused terminal's "Show keyboard" button headlessly,
 first slash chip in the agent helper strip (inject → pump → PTY → tmux), and
 `… -p tools.bricks.multiplex.debug.newtab` presses the focused window's
 "+ TAB" primary action (control-connection exec → new-session in the
-pane's cwd → tab append → attach).
+pane's cwd → tab append → attach), and
+`… -p tools.bricks.multiplex.debug.keybar` runs the focused terminal's
+iPad key-bar proof sequence — the four symbol keys plus a latched CTRL
+consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`.
 
 ## Architecture
 
@@ -169,6 +172,15 @@ views.
   visionOS window is its own always-key scene, so multiple first responders
   leave input stuck on the first session. Claiming resigns the previous owner
   and activates the claimed window's scene. Route all focus changes through it.
+- **The iPad keyboard accessory is `TerminalKeyBar`, not SwiftTerm's stock
+  `TerminalAccessory`**: a TALLY rail (ESC / latching CTRL / TAB, the shell
+  symbols `~ | / -`, DECCKM-aware autorepeat arrows, dismiss) installed as
+  `inputAccessoryView` when the view is created, so it survives tab moves.
+  Every key sends through `TerminalView.send` → delegate → the controller's
+  ordered pump (never a side channel); CTRL rides SwiftTerm's public
+  `controlModifier`, consumed by the next typed character — the bar observes
+  `.terminalViewControlModifierReset` to release the latch visual. visionOS
+  keeps no accessory (its keyboard floats; SwiftTerm never plumbs one there).
 - **"Back to deck" activates the existing deck scene** (`DeckScene.session`);
   `openWindow(id: "deck")` would mint a *new* deck window. Symmetrically, a
   deck tile press focuses the window already attached to that session
