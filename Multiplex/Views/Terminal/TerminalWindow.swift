@@ -35,6 +35,9 @@ struct TerminalWindowRoot: View {
     /// two sessions.
     @State private var creatingTab = false
     @State private var newTabFailedHost: String?
+    /// Detach long-press picked CLOSE SESSION — destructive, so it confirms
+    /// (same policy as the deck's delete and the ended overlay's chip).
+    @State private var confirmingCloseActiveSession = false
 
     /// The wall re-probes only while the deck is open; a terminal window
     /// keeps its own host's probe warm so detection tracks the pane.
@@ -46,6 +49,13 @@ struct TerminalWindowRoot: View {
     }
     private var mergeSources: [TerminalWorkspace.WindowEntry] {
         workspace.mergeSources(for: route.id)
+    }
+    /// Whether the detach control can offer CLOSE SESSION for the active
+    /// tab — same rule as the ended overlay: there must be a tmux session
+    /// to kill and a host record to kill it on.
+    private var activeTabHasSession: Bool {
+        guard let activeTab else { return false }
+        return activeTab.sessionName != nil && store.host(id: activeTab.hostID) != nil
     }
 
     /// Agent in the pane this tab's keystrokes reach, per the latest probe.
@@ -106,6 +116,17 @@ struct TerminalWindowRoot: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text("Check the connection to \(newTabFailedHost ?? "the host") and try again.")
+            }
+            .alert(
+                "Close Session",
+                isPresented: $confirmingCloseActiveSession
+            ) {
+                Button("Close Session", role: .destructive) {
+                    if let activeTab { closeSession(activeTab) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Kills “\(activeTab?.sessionName ?? "")” on \(activeTab.flatMap { store.host(id: $0.hostID) }?.name ?? "the host") and everything running in it, then closes the tab.")
             }
             .onDisappear {
                 // Scene is gone (close button / dismiss): tabs still here are
@@ -253,7 +274,9 @@ struct TerminalWindowRoot: View {
                         fontUp: { fontSize = min(32, fontSize + 1) },
                         newSession: { openNewTab(launching: $0) },
                         merge: { merge($0) },
-                        detach: { detachActiveTab() }
+                        detach: { detachActiveTab() },
+                        closeSession: activeTabHasSession
+                            ? { confirmingCloseActiveSession = true } : nil
                     )
                 }
             }
@@ -377,9 +400,28 @@ struct TerminalWindowRoot: View {
             if !mergeSources.isEmpty {
                 mergeMenu
             }
-            Button("Detach") { detachActiveTab() }
-                .buttonStyle(.bordered)
+            detachMenu
         }
+    }
+
+    /// Tap = detach (tmux keeps the session); long press offers the
+    /// destructive alternative — kill the session, then close the tab.
+    private var detachMenu: some View {
+        Menu {
+            Button("Detach") { detachActiveTab() }
+            if activeTabHasSession {
+                Button("Close Session", role: .destructive) {
+                    confirmingCloseActiveSession = true
+                }
+            }
+        } label: {
+            Text("Detach")
+        } primaryAction: {
+            detachActiveTab()
+        }
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .accessibilityLabel("Detach: tmux keeps the session. Long press to close the session instead")
     }
 
     /// Tap = new session in the active tab's directory; long press picks an

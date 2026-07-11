@@ -16,6 +16,10 @@ struct UMDBar: View {
     var newSession: (AgentKind?) -> Void
     var merge: (UUID) -> Void
     var detach: () -> Void
+    /// Kill the active tab's tmux session, then close the tab — the detach
+    /// chip's long-press alternative. nil when there's no session to kill
+    /// (plain shell tab, or the host record is gone).
+    var closeSession: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 14) {
@@ -68,7 +72,24 @@ struct UMDBar: View {
                 .accessibilityLabel("Merge another window into this one")
             }
             divider
-            ChassisChip("DETACH", prominent: true, action: detach)
+            // Tap = detach (tmux keeps the session); long press offers the
+            // destructive alternative: kill the session, then close the tab.
+            if let closeSession {
+                Menu {
+                    Button("Detach") { detach() }
+                    Button("Close Session", role: .destructive, action: closeSession)
+                } label: {
+                    ChassisBadge("DETACH", prominent: true)
+                } primaryAction: {
+                    detach()
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .chassisHover(2)
+                .accessibilityLabel("Detach: tmux keeps the session. Long press to close the session instead")
+            } else {
+                ChassisChip("DETACH", prominent: true, action: detach)
+            }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 11)
