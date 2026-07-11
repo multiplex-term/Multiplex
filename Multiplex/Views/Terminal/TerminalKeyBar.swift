@@ -10,7 +10,8 @@ import notify
 /// keyboard (and the row that docks alone in hardware-keyboard mode),
 /// replacing SwiftTerm's stock white accessory. Keys a remote tmux + CLI
 /// agent session actually needs: ESC, a latching CTRL, TAB, the shell
-/// symbols the iPad keyboard buries behind layer switches, and arrows.
+/// symbols the iPad keyboard buries behind layer switches, arrows, and
+/// PgUp/PgDn (pagers and CLI agents like Claude Code page with them).
 ///
 /// Every key sends through `TerminalView.send` → the view delegate → the
 /// controller's ordered input pump, so accessory bytes can never reorder
@@ -110,6 +111,12 @@ final class TerminalKeyBar: UIInputView, UIInputViewAudioFeedback {
         case .right:
             click()
             terminal.send(arrow(EscapeSequences.moveRightApp, EscapeSequences.moveRightNormal))
+        case .pageUp:
+            click()
+            terminal.send(EscapeSequences.cmdPageUp)
+        case .pageDown:
+            click()
+            terminal.send(EscapeSequences.cmdPageDown)
         case .dismiss:
             terminal.resignFirstResponder()
         }
@@ -140,6 +147,7 @@ private enum TerminalKey {
     case esc, ctrl, tab
     case text(String)
     case up, down, left, right
+    case pageUp, pageDown
     case dismiss
 }
 
@@ -153,8 +161,9 @@ private struct KeyBarRow: View {
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            row(withSymbols: true)
-            row(withSymbols: false)
+            row(withSymbols: true, withPageKeys: true)
+            row(withSymbols: false, withPageKeys: true)
+            row(withSymbols: false, withPageKeys: false)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
@@ -165,7 +174,7 @@ private struct KeyBarRow: View {
         }
     }
 
-    private func row(withSymbols: Bool) -> some View {
+    private func row(withSymbols: Bool, withPageKeys: Bool) -> some View {
         HStack(spacing: 6) {
             capsKey("ESC", .esc, "Escape")
             capsKey("CTRL", .ctrl, "Control", latched: model.ctrlLatched)
@@ -178,6 +187,13 @@ private struct KeyBarRow: View {
                     }
                 }
                 Spacer(minLength: 12)
+            }
+            if withPageKeys {
+                // Page keys scroll pagers and CLI-agent transcripts
+                // (Claude Code pages with PgUp/PgDn); they autorepeat
+                // like the arrows.
+                arrowKey("arrow.up.to.line", .pageUp, "Page up")
+                arrowKey("arrow.down.to.line", .pageDown, "Page down")
             }
             arrowKey("arrow.left", .left, "Arrow left")
             arrowKey("arrow.down", .down, "Arrow down")

@@ -193,6 +193,9 @@ views.
   `TerminalAccessory`**: a TALLY rail (ESC / latching CTRL / TAB, the shell
   symbols `~ | / -`, DECCKM-aware autorepeat arrows, dismiss) installed as
   `inputAccessoryView` when the view is created, so it survives tab moves.
+  PgUp/PgDn ride along (autorepeating, `CSI 5~`/`6~`) — pagers and CLI
+  agents like Claude Code page their transcripts with them; the narrowest
+  rail tier drops them after the symbols.
   Every key sends through `TerminalView.send` → delegate → the controller's
   ordered pump (never a side channel); CTRL rides SwiftTerm's public
   `controlModifier`, consumed by the next typed character — the bar observes
