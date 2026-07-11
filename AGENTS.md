@@ -61,6 +61,9 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 - `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per comma entry via
   the same route the Attach button uses; `+` inside an entry groups sessions
   as tabs of one window (`main+scratch,deploy`). Fires **once per process**.
+  `MULTIPLEX_AUTO_ATTACH_HOST=devbox` names the target host — without it the
+  first host wins, which on a device with iCloud-synced real hosts is NOT
+  the seeded devbox (the sim is clean; a Mac/dev device isn't).
 - `MULTIPLEX_AUTO_MERGE=1` — after auto-attach, merges every terminal window
   into the first through the same surrender/adopt path the Merge menu uses
   (headless check that moved tabs keep their connections).
@@ -74,6 +77,19 @@ SIMCTL_CHILD_MULTIPLEX_SEED_HOST=.../state/seed.json \
 SIMCTL_CHILD_MULTIPLEX_AUTO_ATTACH=main \
 xcrun simctl launch <UDID> tools.bricks.multiplex
 ```
+
+**iOS-app-on-Mac** ("My Mac (Designed for iPad)"): the same hooks work, with
+two twists. The app is sandboxed, so `MULTIPLEX_SEED_HOST` must point at a
+copy *inside* the app container (`~/Library/Containers/<UUID>/Data/tmp/…`;
+find the UUID via the container's `MCMMetadataIdentifier`) — a repo path is
+silently unreadable. And there's no simctl: set the vars with
+`launchctl setenv` (GUI launches inherit launchd's environment, including
+Xcode-launched runs), and `launchctl unsetenv` them afterwards. Use
+`MULTIPLEX_AUTO_ATTACH_HOST=devbox` here — real synced hosts exist on a Mac.
+Also note DeviceHub bridges the Mac keyboard to *simulators* at the HID
+layer, so synthetic events (`osascript`/System Events) never reach a sim —
+but they DO reach the Mac app itself, which is how the Ctrl-chord fix was
+verified headlessly.
 
 Drive a live session from the Mac side to see bytes stream in:
 `tmux send-keys -t main:2 'echo hi' Enter`.
@@ -170,15 +186,24 @@ views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5), patched
     to declare the `NIO` product it imports (Xcode 27's module resolution
     rejects the undeclared import). Also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.13.0, patched twice (both marked `Multiplex patch`):
+  - `SwiftTerm` — 1.13.0, patched three times (all marked `Multiplex patch`):
     `keyboardType` is settable (upstream is get-only), letting terminals
-    default to `.asciiCapable` (English) instead of the user's IME; and pans
+    default to `.asciiCapable` (English) instead of the user's IME; pans
     scroll the *remote* instead of reporting click-drags — wheel button
     events when the client requested mouse tracking (tmux `mouse on` scrolls
     its own scrollback), DECCKM-aware arrows in the alternate screen with
     mouse off (`performRemoteScroll`; the scroll view's own pan is disabled
     while remote scroll applies, so plain-shell tabs keep native local
-    scrollback). Sample apps trimmed.
+    scrollback); and on iOS-app-on-Mac ("Designed for iPad") hardware
+    Ctrl+character chords ride a `GCKeyboard` HID bridge — UIKit's
+    UIKeyboardImpl translates those chords through the Cocoa key-binding
+    table (Ctrl+C → `noop:`, the "Unsupported action selector noop:" log)
+    and drops them *before* pressesBegan, insertText, or responder
+    UIKeyCommands (`wantsPriorityOverSystemBehavior` included) ever run, so
+    GameController is the only layer that still sees them; the bridge sends
+    the control byte (kitty-encoded when enhancement flags are on) to the
+    first-responder TerminalView in the key window, and never installs on
+    real iPads. Sample apps trimmed.
   - When bumping either, re-apply the patches and diff before trusting it.
 - **Citadel pinned to exactly 0.12.0**: 0.12.1 moved its swift-nio-ssh dep to an
   unaudited personal fork. Don't bump without review — this is the transport.

@@ -72,7 +72,18 @@ struct DeckWindow: View {
               !list.isEmpty else { return }
         DeckScene.autoAttachFired = true
         try? await Task.sleep(for: .seconds(5))
-        guard let host = store.hosts.first else { return }
+        // MULTIPLEX_AUTO_ATTACH_HOST names the target host — on devices with
+        // iCloud-synced real hosts, `hosts.first` is not the seeded devbox.
+        // A named host that's absent bails outright: silently attaching to
+        // whatever synced host happens to be first is the failure this
+        // variable exists to prevent.
+        let host: Host?
+        if let name = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ATTACH_HOST"] {
+            host = store.hosts.first(where: { $0.name == name })
+        } else {
+            host = store.hosts.first
+        }
+        guard let host else { return }
         var firstTabID: UUID?
         for entry in list.split(separator: ",") {
             let tabs = entry.split(separator: "+").map {

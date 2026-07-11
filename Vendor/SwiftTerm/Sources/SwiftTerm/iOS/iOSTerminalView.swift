@@ -16,6 +16,7 @@ import Foundation
 import UIKit
 import CoreText
 import CoreGraphics
+import GameController
 import os
 import SwiftUI
 #if canImport(MetalKit)
@@ -2214,6 +2215,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         if response {
             caretView?.updateCursorStyle()
             terminal.setTerminalFocus(true)
+            // Multiplex patch: route Mac hardware Ctrl+chords to this view
+            if ProcessInfo.processInfo.isiOSAppOnMac {
+                TerminalView.macControlKeyTarget = self
+                TerminalView.setupMacControlKeyBridgeIfNeeded()
+            }
         }
         return response
     }
@@ -2245,6 +2251,83 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// property in case someone needs the return key to send different sequences.
     public var returnByteSequence: [UInt8] = [13]
     
+    // Multiplex patch: on iOS-app-on-Mac ("Designed for iPad"), the hardware
+    // keyboard is bridged through UIKit's text-input pipeline, and
+    // UIKeyboardImpl translates Ctrl+character chords via the Cocoa
+    // key-binding table — Ctrl+C resolves to the `noop:` selector (the
+    // "Unsupported action selector noop:" log line) and is dropped before
+    // pressesBegan, insertText, or responder key commands ever see it.
+    // GameController's GCKeyboard observes the keyboard at the HID layer,
+    // ahead of that pipeline, so one shared handler routes Ctrl+character
+    // chords to whichever TerminalView is first responder. Real iPads keep
+    // the pressesBegan path — this bridge never installs there.
+    private static weak var macControlKeyTarget: TerminalView?
+    private static var macControlKeyBridgeInstalled = false
+
+    private static func setupMacControlKeyBridgeIfNeeded() {
+        guard ProcessInfo.processInfo.isiOSAppOnMac, !macControlKeyBridgeInstalled else { return }
+        macControlKeyBridgeInstalled = true
+        installMacControlKeyHandler(on: GCKeyboard.coalesced)
+        NotificationCenter.default.addObserver(forName: .GCKeyboardDidConnect,
+                                               object: nil, queue: .main) { note in
+            installMacControlKeyHandler(on: note.object as? GCKeyboard)
+        }
+    }
+
+    private static func installMacControlKeyHandler(on keyboard: GCKeyboard?) {
+        guard let input = keyboard?.keyboardInput else { return }
+        input.keyChangedHandler = { input, _, keyCode, pressed in
+            guard pressed,
+                  input.button(forKeyCode: .leftControl)?.isPressed == true ||
+                  input.button(forKeyCode: .rightControl)?.isPressed == true,
+                  input.button(forKeyCode: .leftGUI)?.isPressed != true,
+                  input.button(forKeyCode: .rightGUI)?.isPressed != true,
+                  let character = macControlCharacter(for: keyCode),
+                  let target = macControlKeyTarget,
+                  target.isFirstResponder, target.window?.isKeyWindow == true
+            else { return }
+            target.sendMacControl(character)
+        }
+    }
+
+    /// HID key → the character `applyControlToEventCharacters` expects.
+    /// Letters assume an ANSI-ish layout — the same simplification every
+    /// terminal makes for control chords.
+    private static func macControlCharacter(for keyCode: GCKeyCode) -> String? {
+        if keyCode.rawValue >= GCKeyCode.keyA.rawValue && keyCode.rawValue <= GCKeyCode.keyZ.rawValue {
+            // HID A–Z are contiguous (0x04–0x1D)
+            let scalar = UnicodeScalar(UInt8(ascii: "a") + UInt8(keyCode.rawValue - GCKeyCode.keyA.rawValue))
+            return String(scalar)
+        }
+        switch keyCode {
+        case .spacebar:     return " "
+        case .openBracket:  return "["
+        case .closeBracket: return "]"
+        case .backslash:    return "\\"
+        case .six:          return "6"   // Ctrl+6 / Ctrl+^ → RS (0x1e)
+        case .hyphen:       return "_"   // Ctrl+- / Ctrl+_ → US (0x1f)
+        default:            return nil
+        }
+    }
+
+    func sendMacControl(_ character: String) {
+        if !terminal.keyboardEnhancementFlags.isEmpty,
+           character.unicodeScalars.count == 1, let scalar = character.unicodeScalars.first {
+            _ = sendKittyEvent(KittyKeyEvent(key: .unicode(scalar.value),
+                                             modifiers: [.ctrl],
+                                             eventType: .press,
+                                             text: nil,
+                                             shiftedKey: nil,
+                                             baseLayoutKey: nil,
+                                             composing: kittyIsComposing))
+            return
+        }
+        let bytes = applyControlToEventCharacters(character)
+        if !bytes.isEmpty {
+            send(bytes)
+        }
+    }
+
     public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var didHandleEvent = false
         let wasCommandActive = commandActive
