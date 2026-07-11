@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(ThemeStore.self) private var themes
     @Environment(EntitlementStore.self) private var entitlements
+    @Environment(AttentionCenter.self) private var attention
     @Environment(\.dismiss) private var dismiss
 
     /// Non-nil while the editor is pushed; a theme unknown to the store is
@@ -60,12 +61,21 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    HStack {
-                        Text("Agent Helpers")
-                        Spacer()
-                        Text(entitlements.isPro ? "Unlocked" : "Locked")
-                            .foregroundStyle(.secondary)
+                    @Bindable var attention = attention
+                    Toggle("Agent Alerts", isOn: $attention.alertsEnabled)
+                        .disabled(!entitlements.isPro)
+                    if !entitlements.isPro {
+                        Button("Unlock with Multiplex Pro…") { showingPaywall = true }
                     }
+                } header: {
+                    Eyebrow("Alerts")
+                } footer: {
+                    Text("Posts a banner when Claude Code or Codex finishes a turn, asks a question, or wants permission to run something — in any session you're not currently typing in. Works while Multiplex is open; sessions keep running either way. Requires Multiplex Pro.")
+                }
+
+                Section {
+                    proRow("Agent Helpers")
+                    proRow("Agent Alerts")
                     Button("About Multiplex Pro…") { showingPaywall = true }
                     #if DEBUG
                     Toggle("Pro unlocked (debug)", isOn: Binding(
@@ -76,7 +86,7 @@ struct SettingsView: View {
                 } header: {
                     Eyebrow("Pro")
                 } footer: {
-                    Text("Agent Helpers shows quick commands in a terminal window when Claude Code or Codex is running in the attached session.")
+                    Text("Agent Helpers shows quick commands in a terminal window when Claude Code or Codex is running in the attached session. Agent Alerts notifies you when an agent finishes or needs you in a session you're not watching. Detecting agents and the deck's live state stay free.")
                 }
             }
             .sheet(isPresented: $showingPaywall) { ProPaywallView() }
@@ -89,6 +99,16 @@ struct SettingsView: View {
             .navigationDestination(item: $editingTheme) { theme in
                 ThemeEditorView(theme: theme, onSave: save)
             }
+        }
+    }
+
+    /// A Pro feature's lock status row.
+    private func proRow(_ name: String) -> some View {
+        HStack {
+            Text(name)
+            Spacer()
+            Text(entitlements.isPro ? "Unlocked" : "Locked")
+                .foregroundStyle(.secondary)
         }
     }
 

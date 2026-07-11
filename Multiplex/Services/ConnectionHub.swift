@@ -7,10 +7,19 @@ import Observation
 @Observable
 final class ConnectionHub {
     private var models: [UUID: HostConnectionModel] = [:]
+    /// Fleet-wide alert sink; every model's attention events funnel here.
+    private let attention: AttentionCenter?
+
+    init(attention: AttentionCenter? = nil) {
+        self.attention = attention
+    }
 
     func model(for host: Host) -> HostConnectionModel {
         if let existing = models[host.id] { return existing }
         let model = HostConnectionModel(host: host)
+        model.onAttentionAlert = { [attention] alert in
+            attention?.handle(alert)
+        }
         models[host.id] = model
         return model
     }
@@ -41,9 +50,20 @@ final class HostConnectionModel {
     /// Session name → last visible lines of its active pane; the deck
     /// wall's live miniatures, refreshed by `captureTails()`.
     private(set) var miniatures: [String: [String]] = [:]
+    /// Session name → agent state (busy / idle / needs you), re-derived on
+    /// every probe and capture pass. Drives the wall's NEEDS YOU badge.
+    private(set) var attention: [String: PaneAgentState] = [:]
+    /// Fires on attention *edges* (turn ended, dialog appeared, bell).
+    /// Set once by `ConnectionHub`; policy and delivery live in
+    /// `AttentionCenter`, never here.
+    var onAttentionAlert: ((AttentionAlert) -> Void)?
 
     private var connection: SSHConnection?
     private var refreshTask: Task<Void, Never>?
+    private var attentionTracker = AttentionTracker()
+    /// Deeper, unclipped capture tails (the miniatures' source parse) —
+    /// what the question detector reads.
+    private var attentionTails: [String: [String]] = [:]
 
     init(host: Host) {
         self.host = host
@@ -72,11 +92,13 @@ final class HostConnectionModel {
             let output = try await connection.exec(TmuxProbe.probeCommand)
             tmux = TmuxProbe.parse(output)
             lastRefreshed = Date()
+            evaluateAttention()
         } catch {
             let message = friendlyMessage(for: error)
             phase = .failed(message)
             tmux = .failed(message)
             connection = nil
+            evaluateAttention()
         }
     }
 
@@ -101,7 +123,53 @@ final class HostConnectionModel {
         else { return }
         guard let output = try? await connection.exec(TmuxProbe.captureCommand(for: sessions))
         else { return }
-        miniatures = TmuxProbe.parseCaptures(output, sessions: sessions)
+        let tails = TmuxProbe.parseTails(output, sessions: sessions)
+        attentionTails = tails
+        miniatures = tails.mapValues(TmuxProbe.miniatureTail)
+        evaluateAttention()
+    }
+
+    /// Re-derive every session's agent state from the latest probe (title)
+    /// + capture (dialog content), and emit any edges. Runs after both
+    /// probe and capture passes — whichever input moved, states follow.
+    private func evaluateAttention() {
+        guard case .sessions(let sessions) = tmux else {
+            attention = [:]
+            attentionTracker.reset()
+            return
+        }
+        var next: [String: PaneAgentState] = [:]
+        for session in sessions {
+            let window = session.activeWindow
+            // No detected agent → no state (bells still tracked below).
+            var state: PaneAgentState?
+            if let window, window.agent != nil {
+                state = AgentAttention.classify(
+                    title: window.paneTitle,
+                    tail: attentionTails[session.name] ?? []
+                )
+                next[session.name] = state
+            }
+            let events = attentionTracker.update(
+                session: session.name,
+                state: state,
+                hasBell: session.windows.contains(where: \.hasBell)
+            )
+            // One banner per session per tick — the most actionable edge
+            // wins (they share a notification slot, and delivery order
+            // across independent posts isn't guaranteed).
+            if let event = events.max(by: { $0.priority < $1.priority }) {
+                onAttentionAlert?(AttentionAlert(
+                    host: host,
+                    sessionName: session.name,
+                    agent: window?.agent,
+                    event: event,
+                    paneTitle: window?.paneTitle ?? ""
+                ))
+            }
+        }
+        attentionTracker.prune(keeping: Set(sessions.map(\.name)))
+        attention = next
     }
 
     /// Kill a tmux session on the host over the control connection, then
@@ -116,6 +184,8 @@ final class HostConnectionModel {
             tmux = .sessions(list.filter { $0.id != session.id })
         }
         miniatures[session.name] = nil
+        attentionTails[session.name] = nil
+        attention[session.name] = nil
         // A probe already in flight may predate the kill — let it land,
         // then re-probe so the wall settles on reality.
         await refreshTask?.value
@@ -132,6 +202,9 @@ final class HostConnectionModel {
         phase = .idle
         tmux = .unknown
         miniatures = [:]
+        attentionTails = [:]
+        attention = [:]
+        attentionTracker.reset()
     }
 
     private func friendlyMessage(for error: Error) -> String {

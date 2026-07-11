@@ -224,7 +224,12 @@ struct SwiftTermView: UIViewRepresentable {
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
         func scrolled(source: TerminalView, position: Double) {}
         func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
-        func bell(source: TerminalView) {}
+
+        func bell(source: TerminalView) {
+            MainActor.assumeIsolated {
+                controller.bellRang()
+            }
+        }
         func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
         func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
     }

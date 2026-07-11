@@ -243,6 +243,7 @@ struct FleetWall: View {
                     SessionTile(
                         session: session,
                         lines: model.miniatures[session.name] ?? [],
+                        attention: model.attention[session.name],
                         attach: {
                             open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: session.name)))
                         },
@@ -390,6 +391,9 @@ struct HatchedScreen: View {
 private struct SessionTile: View {
     let session: TmuxSession
     let lines: [String]
+    /// Agent state from the latest probe/capture pass; nil when the active
+    /// pane runs no detected agent.
+    let attention: PaneAgentState?
     let attach: () -> Void
     let delete: () -> Void
 
@@ -441,6 +445,11 @@ private struct SessionTile: View {
             } else {
                 ChassisBadge("ATTACH")
             }
+            // An agent blocked on the user outranks everything else the
+            // tile could say — caution, captioned, never tally red.
+            if case .needsYou = attention {
+                TallyLamp(caption: "NEEDS YOU", color: Theme.caution)
+            }
             Spacer(minLength: 6)
             Text(telemetry)
                 .font(.mono(9.5))
@@ -456,9 +465,11 @@ private struct SessionTile: View {
         if session.clientCount > 0 {
             parts.append("\(session.clientCount) CLIENT\(session.clientCount == 1 ? "" : "S")")
         }
-        // Free-tier teaser: the wall names a detected agent in telemetry.
+        // Free-tier teaser: the wall names a detected agent in telemetry —
+        // and whether it's mid-turn right now.
         if let agent = session.activeAgent {
             parts.append(agent.telemetryLabel)
+            if attention == .busy { parts.append("RUNNING") }
         }
         parts.append(sessionAge)
         return parts.joined(separator: " · ")
@@ -509,6 +520,9 @@ private struct SessionTile: View {
     }
 
     private var accessibilitySummary: String {
-        "\(session.name), \(session.isAttached ? "live" : "not attached"), \(session.windowCount) windows. Attach"
+        var parts = [session.name, session.isAttached ? "live" : "not attached"]
+        if case .needsYou = attention { parts.append("agent needs your input") }
+        parts.append("\(session.windowCount) windows")
+        return parts.joined(separator: ", ") + ". Attach"
     }
 }

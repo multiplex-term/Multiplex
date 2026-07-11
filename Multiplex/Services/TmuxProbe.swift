@@ -118,12 +118,14 @@ enum TmuxProbe {
 
         // Agent detection: cheap comm/title signals first, the pane's
         // process tree as the authority (catches node/bun wrappers and
-        // macOS's versioned-binary comm).
+        // macOS's versioned-binary comm). The title lands on the window
+        // either way — `AgentAttention` reads state from it.
         for pane in activePanes {
+            guard let i = windows[pane.sessionID]?.firstIndex(where: { $0.index == pane.windowIndex })
+            else { continue }
+            windows[pane.sessionID]?[i].paneTitle = pane.title
             guard let kind = AgentSignature.classify(command: pane.command, title: pane.title)
                 ?? AgentSignature.agentInTree(rows: psRows, panePID: pane.pid)
-            else { continue }
-            guard let i = windows[pane.sessionID]?.firstIndex(where: { $0.index == pane.windowIndex })
             else { continue }
             windows[pane.sessionID]?[i].agent = kind
         }
@@ -199,10 +201,11 @@ enum TmuxProbe {
         return command
     }
 
-    /// Parse `captureCommand` output into session name → last visible lines.
-    /// Trailing blank pane rows are dropped, lines are right-trimmed and
-    /// clipped to tile width, and only the final `miniatureLines` are kept.
-    static func parseCaptures(_ output: String, sessions: [TmuxSession]) -> [String: [String]] {
+    /// Parse `captureCommand` output into session name → trailing lines:
+    /// right-trimmed, trailing blank pane rows dropped, full width. This is
+    /// the attention classifier's input; `miniatureTail` derives the tile
+    /// view from the same parse.
+    static func parseTails(_ output: String, sessions: [TmuxSession]) -> [String: [String]] {
         var result: [String: [String]] = [:]
         var currentIndex: Int?
         var lines: [String] = []
@@ -228,10 +231,21 @@ enum TmuxProbe {
         return result
     }
 
+    /// Session name → what a wall tile shows: the last `miniatureLines`
+    /// lines, clipped to tile width.
+    static func parseCaptures(_ output: String, sessions: [TmuxSession]) -> [String: [String]] {
+        parseTails(output, sessions: sessions).mapValues(miniatureTail)
+    }
+
+    /// Clip a parsed tail down to the tile's display window.
+    static func miniatureTail(_ lines: [String]) -> [String] {
+        lines.suffix(miniatureLines).map { String($0.prefix(miniatureWidth)) }
+    }
+
     private static func visibleTail(_ lines: [String]) -> [String] {
         var trimmed = lines.map(rightTrim)
         while let last = trimmed.last, last.isEmpty { trimmed.removeLast() }
-        return trimmed.suffix(miniatureLines).map { String($0.prefix(miniatureWidth)) }
+        return trimmed
     }
 
     private static func rightTrim(_ line: String) -> String {

@@ -23,6 +23,8 @@ final class TerminalSessionController {
 
     let route: TerminalRoute
     let host: Host
+    /// Alert sink for in-band signals (bell); nil in tests/previews.
+    private weak var attention: AttentionCenter?
 
     private(set) var status: Status = .connecting
     var remoteTitle: String = ""
@@ -53,9 +55,17 @@ final class TerminalSessionController {
     private var dropTask: Task<Void, Never>?
     private var dropClearTask: Task<Void, Never>?
 
-    init(route: TerminalRoute, host: Host) {
+    init(route: TerminalRoute, host: Host, attention: AttentionCenter? = nil) {
         self.route = route
         self.host = host
+        self.attention = attention
+    }
+
+    /// The remote rang the terminal bell (BEL through the PTY — how opt-in
+    /// agent hooks and `terminal_bell` notifications reach an attached tab,
+    /// on SSH and mosh alike).
+    func bellRang() {
+        attention?.handleBell(from: self)
     }
 
     var windowTitle: String {

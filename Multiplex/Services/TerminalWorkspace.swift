@@ -17,13 +17,20 @@ final class TerminalWorkspace {
     // MARK: Controllers (one per tab)
 
     private var controllers: [UUID: TerminalSessionController] = [:]
+    /// Handed to each controller so attached tabs can surface in-band
+    /// bells. Weak both ways — the center holds this workspace weakly too.
+    private weak var attention: AttentionCenter?
+
+    init(attention: AttentionCenter? = nil) {
+        self.attention = attention
+    }
 
     /// Get-or-create the controller for a tab, starting its connection on
     /// first sight. Returns nil when the tab's host no longer exists.
     func controller(for tab: TerminalRoute, store: HostStore) -> TerminalSessionController? {
         if let existing = controllers[tab.id] { return existing }
         guard let host = store.host(id: tab.hostID) else { return nil }
-        let controller = TerminalSessionController(route: tab, host: host)
+        let controller = TerminalSessionController(route: tab, host: host, attention: attention)
         controllers[tab.id] = controller
         controller.start()
         return controller

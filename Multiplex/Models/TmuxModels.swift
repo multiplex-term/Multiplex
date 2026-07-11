@@ -10,6 +10,9 @@ struct TmuxWindow: Identifiable, Hashable {
     /// CLI agent detected in this window's *active* pane — the pane that
     /// receives keystrokes when the session is attached.
     var agent: AgentKind?
+    /// The active pane's OSC title — both agents encode busy/idle (and
+    /// Codex its approval wait) here; `AgentAttention` classifies it.
+    var paneTitle: String = ""
 
     var id: Int { index }
 }
@@ -28,10 +31,14 @@ struct TmuxSession: Identifiable, Hashable {
     var id: String { name }
     var isAttached: Bool { clientCount > 0 }
     var windowCount: Int { windows.count }
+    /// The window an attached client is looking at.
+    var activeWindow: TmuxWindow? {
+        windows.first(where: \.isActive)
+    }
     /// Agent in the pane an attached client is typing into — the active
     /// window's active pane. Drives the helper strip and deck telemetry.
     var activeAgent: AgentKind? {
-        windows.first(where: \.isActive)?.agent
+        activeWindow?.agent
     }
 }
 

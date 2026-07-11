@@ -225,8 +225,9 @@ views.
   stage failing just disables detection, never the session list. Helper chips
   only ever *type* through `TerminalSessionController.sendInput` (the same
   ordered pump as the keyboard; Enter = CR, Esc = 0x1B, Shift+Tab = CSI Z);
-  never ship a Ctrl+B payload — it's the remote tmux prefix. The strip is the
-  only Pro-gated surface; detection and the wall's telemetry token stay free.
+  never ship a Ctrl+B payload — it's the remote tmux prefix. The strip and
+  agent alerts (`AttentionCenter`) are the Pro-gated surfaces; detection and
+  the wall's telemetry (agent token, NEEDS YOU badge, RUNNING) stay free.
   **Slash chips submit with a CR sent ~160 ms after the text** (separate
   write): Codex's composer treats an Enter inside one rapid burst as a pasted
   newline, not a submit — verified against rust-v0.144; Claude Code accepts

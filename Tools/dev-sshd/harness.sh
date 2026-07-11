@@ -7,6 +7,9 @@
 #
 #   ./harness.sh start   generate keys, start sshd, write app seed JSON
 #   ./harness.sh demo    create demo tmux sessions (main, scratch, deploy)
+#   ./harness.sh turn    fake agent turn in agent:cc (busy title → idle);
+#                        optional seconds arg, default 8
+#   ./harness.sh ask     fake permission dialog in agent:cc (needs-you state)
 #   ./harness.sh stop    stop sshd and kill demo sessions
 #
 # Everything lives in ./state/ (gitignored).
@@ -106,6 +109,47 @@ demo() {
     "$TMUX_BIN" list-sessions
 }
 
+# Drive the fake cc window through one agent turn: Braille-spinner pane
+# title while "working", ✳ title when done — the exact signal
+# AgentAttention keys on (local-plan/agent-attention.md). Detection holds
+# throughout via the ps-tree walk (argv[0] "claude" from exec -a). Watch
+# the wall flip CLAUDE·RUNNING → a "finished" banner if the deck is open
+# and the session unfocused.
+turn() {
+    local secs="${1:-8}"
+    # A real TUI redraws over its dialog; cat can't — wash a parked `ask`
+    # off the grid first (the escape echoes through cat into the terminal).
+    tmux send-keys -t agent:0.0 -l "$(printf '\033[2J\033[H')"
+    tmux send-keys -t agent:0.0 Enter
+    tmux select-pane -t agent:0.0 -T '⠐ Scripted harness task'
+    tmux send-keys -t agent:0.0 -l '✻ Working… (harness turn)'
+    tmux send-keys -t agent:0.0 Enter
+    echo "agent:cc busy for ${secs}s…"
+    sleep "$secs"
+    tmux send-keys -t agent:0.0 -l 'done.'
+    tmux send-keys -t agent:0.0 Enter
+    tmux select-pane -t agent:0.0 -T '✳ Scripted harness task'
+    echo "turn ended (title ⠐ → ✳)"
+}
+
+# Park the fake cc window on a permission dialog: busy title + the
+# option-list/hint shape the question detector matches. `turn` clears it.
+ask() {
+    tmux select-pane -t agent:0.0 -T '⠂ Scripted harness task'
+    while IFS= read -r line; do
+        tmux send-keys -t agent:0.0 -l "$line"
+        tmux send-keys -t agent:0.0 Enter
+    done <<'EOF'
+ Bash command
+   touch probe.txt
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow
+   3. No
+EOF
+    echo "agent:cc parked on a permission dialog (NEEDS YOU); run '$0 turn' to clear"
+}
+
 stop() {
     if [ -f "$STATE/sshd.pid" ]; then
         kill "$(cat "$STATE/sshd.pid")" 2>/dev/null || true
@@ -120,6 +164,8 @@ stop() {
 case "${1:-}" in
     start) start ;;
     demo) demo ;;
+    turn) shift; turn "$@" ;;
+    ask) ask ;;
     stop) stop ;;
-    *) echo "usage: $0 start|demo|stop" >&2; exit 1 ;;
+    *) echo "usage: $0 start|demo|turn [secs]|ask|stop" >&2; exit 1 ;;
 esac

@@ -19,6 +19,13 @@ struct ProPaywallView: View {
                     + "mode cycling and more, injected exactly as if typed."
                 )
 
+                feature(
+                    "AGENT ALERTS",
+                    "A banner when an agent finishes a turn, asks a question, "
+                    + "or wants permission — in any session you're not "
+                    + "watching, so you can step away and get pulled back."
+                )
+
                 Spacer()
 
                 HStack {
