@@ -416,18 +416,37 @@ struct TerminalWindowRoot: View {
     #if !os(visionOS)
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItemGroup(placement: .topBarLeading) {
-            deckButton
-        }
-        ToolbarItemGroup(placement: .primaryAction) {
-            newTabMenu
-            keyboardButton
-            fontButtons
-            if !mergeSources.isEmpty {
-                mergeMenu
+        if #available(iOS 26.0, *) {
+            // Liquid Glass otherwise gathers these controls into a rounded
+            // floating capsule. The terminal bar is the iPad equivalent of
+            // the opaque UMD: independent, square chassis chips.
+            ToolbarItemGroup(placement: .topBarLeading) {
+                deckButton
             }
-            detachMenu
+            .sharedBackgroundVisibility(.hidden)
+            ToolbarItemGroup(placement: .primaryAction) {
+                primaryToolbarActions
+            }
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItemGroup(placement: .topBarLeading) {
+                deckButton
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                primaryToolbarActions
+            }
         }
+    }
+
+    @ViewBuilder
+    private var primaryToolbarActions: some View {
+        newTabMenu
+        keyboardButton
+        fontButtons
+        if !mergeSources.isEmpty {
+            mergeMenu
+        }
+        detachMenu
     }
 
     /// Dropdown: detach (tmux keeps the session) or the destructive
@@ -442,14 +461,16 @@ struct TerminalWindowRoot: View {
                     confirmingCloseActiveSession = true
                 }
             } label: {
-                Text("Detach")
+                ChassisBadge("DETACH", prominent: true)
             }
             .menuStyle(.button)
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
+            .chassisHover(2)
+            .fixedSize()
             .accessibilityLabel("Detach or close the session")
         } else {
-            Button("Detach") { detachActiveTab() }
-                .buttonStyle(.bordered)
+            ChassisChip("DETACH", prominent: true, action: detachActiveTab)
+                .fixedSize()
                 .accessibilityLabel("Detach: tmux keeps the session")
         }
     }
@@ -462,45 +483,42 @@ struct TerminalWindowRoot: View {
             Button(AgentKind.claudeCode.displayName) { openNewTab(launching: .claudeCode) }
             Button(AgentKind.codex.displayName) { openNewTab(launching: .codex) }
         } label: {
-            Image(systemName: "plus")
+            ChassisBadge("TAB", systemImage: "plus")
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .chassisHover(2)
+        .fixedSize()
         .accessibilityLabel("New tab: another session in this window")
     }
 
     private var deckButton: some View {
-        Button(action: showDeck) {
-            Image(systemName: "square.grid.2x2")
-        }
-        .buttonStyle(.borderless)
-        .accessibilityLabel("Show Deck")
+        ChassisChip("DECK", systemImage: "square.grid.2x2", action: showDeck)
+            .fixedSize()
+            .accessibilityLabel("Show Deck")
     }
 
     private var keyboardButton: some View {
-        Button {
+        ChassisChip("KBD", systemImage: "keyboard") {
             activeController?.summonKeyboard()
-        } label: {
-            Image(systemName: "keyboard")
         }
-        .buttonStyle(.borderless)
+        .fixedSize()
         .accessibilityLabel("Show keyboard")
     }
 
     private var fontButtons: some View {
         HStack(spacing: 4) {
-            Button {
+            ChassisChip("A−") {
                 fontSize = max(9, fontSize - 1)
-            } label: {
-                Image(systemName: "textformat.size.smaller")
             }
+            .fixedSize()
             .accessibilityLabel("Smaller text")
-            Button {
+            ChassisChip("A+") {
                 fontSize = min(32, fontSize + 1)
-            } label: {
-                Image(systemName: "textformat.size.larger")
             }
+            .fixedSize()
             .accessibilityLabel("Larger text")
         }
-        .buttonStyle(.borderless)
     }
 
     /// Other terminal windows this one can swallow as tabs.
@@ -523,8 +541,12 @@ struct TerminalWindowRoot: View {
                 }
             }
         } label: {
-            Label("Merge", systemImage: "rectangle.stack.badge.plus")
+            ChassisBadge("MERGE")
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .chassisHover(2)
+        .fixedSize()
         .accessibilityLabel("Merge another window into this one")
     }
     #endif
