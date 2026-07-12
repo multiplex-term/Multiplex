@@ -32,19 +32,7 @@ struct FleetWall: View {
     private static let feedInterval: Duration = .seconds(5)
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                if store.hosts.isEmpty {
-                    awaitingSignal
-                } else {
-                    ForEach(store.hosts) { host in
-                        hostSection(host)
-                    }
-                }
-            }
-            .padding(26)
-        }
+        platformWall
         .background(Theme.chassis.ignoresSafeArea())
         .task(id: store.hosts.map(\.id)) { await runFeed() }
         .sheet(item: $namingHost) { host in
@@ -84,6 +72,44 @@ struct FleetWall: View {
         }
     }
 
+    @ViewBuilder
+    private var platformWall: some View {
+        #if os(visionOS)
+        wall(showHeader: true)
+        #else
+        if #available(iOS 26.0, *) {
+            // iPadOS window controls occupy the leading edge of the title
+            // bar, but don't contribute a safe-area inset to arbitrary
+            // content. Put the deck rail in the system toolbar so MULTIPLEX
+            // is laid out around those controls instead of underneath them.
+            NavigationStack {
+                wall(showHeader: false)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbarBackground(Theme.chassis, for: .navigationBar)
+                    .toolbar { deckToolbar }
+            }
+        } else {
+            wall(showHeader: true)
+        }
+        #endif
+    }
+
+    private func wall(showHeader: Bool) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if showHeader { header }
+                if store.hosts.isEmpty {
+                    awaitingSignal
+                } else {
+                    ForEach(store.hosts) { host in
+                        hostSection(host)
+                    }
+                }
+            }
+            .padding(26)
+        }
+    }
+
     /// While this view exists, keep the wall alive: re-probe each host and
     /// refresh its miniatures. Skips work while the app is backgrounded;
     /// `.task(id:)` restarts the loop when the fleet changes.
@@ -101,6 +127,33 @@ struct FleetWall: View {
     }
 
     // MARK: Wall chrome
+
+    #if !os(visionOS)
+    @available(iOS 26.0, *)
+    @ToolbarContentBuilder
+    private var deckToolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) {
+                    ChassisLabel("Multiplex", size: 15)
+                    Text(fleetSummary)
+                        .font(.mono(11))
+                        .foregroundStyle(Theme.signal2)
+                        .lineLimit(1)
+                }
+                ChassisLabel("Multiplex", size: 15)
+            }
+        }
+        ToolbarItemGroup(placement: .primaryAction) {
+            ChassisChip("HOST", systemImage: "plus", action: addHost)
+                .fixedSize()
+                .accessibilityLabel("Add host")
+            ChassisChip("SETTINGS", systemImage: "gearshape", action: openSettings)
+                .fixedSize()
+        }
+        .sharedBackgroundVisibility(.hidden)
+    }
+    #endif
 
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
