@@ -166,7 +166,8 @@ struct FleetWall: View {
     }
 
     private func rail(_ host: Host, model: HostConnectionModel) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let connected = model.phase == .connected
+        return VStack(alignment: .leading, spacing: 10) {
             Rectangle().fill(Theme.bezel).frame(height: 1)
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 ChassisLabel(host.name, size: 12)
@@ -175,11 +176,16 @@ struct FleetWall: View {
                     .foregroundStyle(Theme.signal2)
                 Spacer()
                 railStatus(model)
-                if model.phase == .connected {
-                    ChassisChip("SHELL") {
-                        open(TerminalRoute(hostID: host.id, mode: .shell))
-                    }
+                // The SHELL chip is the row's tallest element — inserting/
+                // removing it with the phase resizes the whole rail. Keep
+                // its slot in every phase and fade it instead.
+                ChassisChip("SHELL") {
+                    open(TerminalRoute(hostID: host.id, mode: .shell))
                 }
+                .opacity(connected ? 1 : 0)
+                .allowsHitTesting(connected)
+                .disabled(!connected)
+                .accessibilityHidden(!connected)
                 hostMenu(host)
             }
             .contentShape(Rectangle())
@@ -213,27 +219,27 @@ struct FleetWall: View {
             case .connected:
                 railLabel("CONNECTED", dot: Theme.ok)
             case .connecting:
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .scaleEffect(0.7)
-                        .frame(width: 8, height: 8)
-                    Text("LINKING").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal2)
-                }
+                // Same dot anatomy as every other phase — a ProgressView is
+                // intrinsically taller and its spinner draws outside the
+                // slot. The pulse carries the "in flight" signal instead.
+                railLabel("LINKING", dot: Theme.signal2, pulsing: true)
             case .failed:
                 railLabel("UNREACHABLE", dot: Theme.signal3, text: Theme.signal3)
             case .idle:
                 Text("STANDBY").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal3)
             }
         }
-        // ProgressView is intrinsically taller than the dot/text variants.
-        // Keep every phase in one fixed-height slot so LINKING cannot move the rail.
+        // Every phase shares one fixed-height slot so no phase change can
+        // move the rail.
         .frame(height: 12)
     }
 
-    private func railLabel(_ text: String, dot: Color, text textColor: Color = Theme.signal2) -> some View {
+    private func railLabel(
+        _ text: String, dot: Color, text textColor: Color = Theme.signal2, pulsing: Bool = false
+    ) -> some View {
         HStack(spacing: 6) {
             Circle().fill(dot).frame(width: 6, height: 6)
+                .modifier(DotPulse(active: pulsing))
             Text(text).font(.mono(9)).kerning(1).foregroundStyle(textColor)
         }
     }
@@ -496,6 +502,26 @@ struct HatchedScreen: View {
 /// window already attached to this session, or attaches in a new one;
 /// long press offers an explicit new-window attach (a second synced
 /// tmux client) alongside delete.
+/// Slow opacity pulse for a status dot — activity without geometry, so the
+/// rail can signal "in flight" from inside a fixed-height slot. Static under
+/// Reduce Motion.
+private struct DotPulse: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var active: Bool
+
+    func body(content: Content) -> some View {
+        if active && !reduceMotion {
+            content.phaseAnimator([1.0, 0.25]) { dot, opacity in
+                dot.opacity(opacity)
+            } animation: { _ in
+                .easeInOut(duration: 0.7)
+            }
+        } else {
+            content
+        }
+    }
+}
+
 private struct SessionTile: View {
     let session: TmuxSession
     let lines: [String]
@@ -553,10 +579,16 @@ private struct SessionTile: View {
     private var umd: some View {
         HStack(spacing: 9) {
             ChassisLabel(session.name, size: 12)
-            if session.isAttached {
-                TallyLamp()
-            } else {
+            // The badge is taller than the lamp, so swapping them resizes
+            // the tile on every attach/detach. The badge keeps its slot in
+            // both states (hidden under the lamp) to pin the row's height.
+            ZStack(alignment: .leading) {
                 ChassisBadge("ATTACH")
+                    .opacity(session.isAttached ? 0 : 1)
+                    .accessibilityHidden(session.isAttached)
+                if session.isAttached {
+                    TallyLamp()
+                }
             }
             // An agent blocked on the user outranks everything else the
             // tile could say — caution, captioned, never tally red.
