@@ -219,12 +219,17 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertTrue(command.contains("tmux list-panes -t '=my project'"))
         XCTAssertTrue(command.contains("#{?pane_active,#{pane_current_path},}"))
         XCTAssertTrue(command.contains("d=\"${p:-$HOME}\""))
+        // A first tmux server on systemd Linux escapes the SSH login scope;
+        // hosts without a usable user manager take the ordinary tmux path.
+        XCTAssertTrue(command.contains(
+            "systemd-run --user --scope --quiet -- tmux \"$@\""))
+        XCTAssertTrue(command.contains("fi; tmux \"$@\"; };"))
         // Wanted name first, then the unnamed retry — the server settles
         // duplicate-name races and its printed id+name pair is the truth.
         XCTAssertTrue(command.contains(
-            "i=$(tmux new-session -d -P -F '#{session_id} #{session_name}' -c \"$d\" -s 'claude' 2>/dev/null)"))
+            "i=$(multiplex_tmux new-session -d -P -F '#{session_id} #{session_name}' -c \"$d\" -s 'claude' 2>/dev/null)"))
         XCTAssertTrue(command.contains(
-            "|| i=$(tmux new-session -d -P -F '#{session_id} #{session_name}' -c \"$d\" 2>/dev/null)"))
+            "|| i=$(multiplex_tmux new-session -d -P -F '#{session_id} #{session_name}' -c \"$d\" 2>/dev/null)"))
         // The launch is TYPED into the shell (literal text, then Enter),
         // targeting the session ID — 3.6a send-keys rejects `=name`
         // exact-match pane targets, and a bare name is prefix-matched.
@@ -246,6 +251,31 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertFalse(command.contains("send-keys"))
         XCTAssertTrue(command.contains("-s 'main'"))
         XCTAssertTrue(command.contains("MULTIPLEX_NEW"))
+    }
+
+    func testNewSessionCommandStartsInExplicitDirectory() {
+        let command = TmuxProbe.newSessionCommand(
+            name: "main", sourceSessionName: nil, startDirectory: "/srv/app", launch: nil)
+        // A working dir missing on the host falls back to $HOME — a bad
+        // path must not make the create fail outright.
+        XCTAssertTrue(command.contains("d='/srv/app'; [ -d \"$d\" ] || d=\"$HOME\"; "))
+        XCTAssertFalse(command.contains("list-panes"))
+    }
+
+    func testNewSessionCommandExpandsTildeInDirectory() {
+        let command = TmuxProbe.newSessionCommand(
+            name: "main", sourceSessionName: nil, startDirectory: "~/projects/app", launch: nil)
+        // ~ has no meaning inside single quotes — it rides as "$HOME".
+        XCTAssertTrue(command.contains("d=\"$HOME\"/'projects/app'; "))
+    }
+
+    func testNewSessionCommandSourceSessionOutranksDirectory() {
+        // The + TAB path inherits the source pane's cwd; an explicit
+        // directory only applies when there is no source to inherit from.
+        let command = TmuxProbe.newSessionCommand(
+            name: "main", sourceSessionName: "work", startDirectory: "/srv/app", launch: nil)
+        XCTAssertTrue(command.contains("d=\"${p:-$HOME}\""))
+        XCTAssertFalse(command.contains("/srv/app"))
     }
 
     func testParseNewSession() {
@@ -331,16 +361,44 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertEqual("it's".shellQuoted, "'it'\\''s'")
     }
 
+    func testShellQuotedDirectory() {
+        XCTAssertEqual("/srv/app".shellQuotedDirectory, "'/srv/app'")
+        // A leading ~ stays outside the quotes as "$HOME" so the remote
+        // shell expands it; the rest is quoted verbatim.
+        XCTAssertEqual("~".shellQuotedDirectory, "\"$HOME\"")
+        XCTAssertEqual("~/work".shellQuotedDirectory, "\"$HOME\"/'work'")
+        XCTAssertEqual("~/it's here".shellQuotedDirectory, "\"$HOME\"/'it'\\''s here'")
+    }
+
     func testRouteCommands() {
         let host = UUID()
         let attach = TerminalRoute(hostID: host, mode: .attach(sessionName: "main"))
         XCTAssertEqual(attach.remoteCommand, "exec tmux attach-session -t 'main'")
 
         let create = TerminalRoute(hostID: host, mode: .create(sessionName: "new one"))
-        XCTAssertEqual(create.remoteCommand, "exec tmux new-session -A -s 'new one'")
+        XCTAssertTrue(create.remoteCommand?.contains(
+            "systemd-run --user --scope --quiet -- tmux \"$@\"") == true)
+        XCTAssertTrue(create.remoteCommand?.contains(
+            "tmux has-session -t '=new one' 2>/dev/null") == true)
+        XCTAssertTrue(create.remoteCommand?.contains(
+            "multiplex_tmux new-session -d -s 'new one' 2>/dev/null") == true)
+        XCTAssertTrue(create.remoteCommand?.hasSuffix(
+            "exec tmux attach-session -t 'new one'") == true)
 
         let shell = TerminalRoute(hostID: host, mode: .shell)
         XCTAssertNil(shell.remoteCommand)
+    }
+
+    func testCreateRouteCommandWithDirectory() {
+        let host = UUID()
+        let create = TerminalRoute(
+            hostID: host, mode: .create(sessionName: "app", directory: "~/work"))
+        // cd first (errors silenced → shell stays in $HOME), then create
+        // detached in the persistent scope before attaching.
+        XCTAssertTrue(create.remoteCommand?.hasPrefix(
+            "cd \"$HOME\"/'work' 2>/dev/null; multiplex_tmux()") == true)
+        XCTAssertTrue(create.remoteCommand?.hasSuffix(
+            "exec tmux attach-session -t 'app'") == true)
     }
 
     // mosh-server execvp()s its trailing argv — no shell, so no `exec`.
@@ -351,6 +409,14 @@ final class TmuxProbeTests: XCTestCase {
 
         let create = TerminalRoute(hostID: host, mode: .create(sessionName: "new one"))
         XCTAssertEqual(create.moshRemoteCommand, "tmux new-session -A -s 'new one'")
+
+        // No shell to cd in — the directory rides -c (the bootstrap shell
+        // line expands "$HOME" while stripping the quoting).
+        let inDir = TerminalRoute(
+            hostID: host, mode: .create(sessionName: "app", directory: "~/work"))
+        XCTAssertEqual(
+            inDir.moshRemoteCommand,
+            "tmux new-session -A -s 'app' -c \"$HOME\"/'work'")
 
         let shell = TerminalRoute(hostID: host, mode: .shell)
         XCTAssertNil(shell.moshRemoteCommand)

@@ -51,8 +51,8 @@ struct FleetWall: View {
             NewSessionSheet(
                 host: host,
                 existingNames: hub.model(for: host).tmux.sessions.map(\.name),
-                create: { name, agent in
-                    createSession(on: host, named: name, launching: agent)
+                create: { name, agent, directory in
+                    createSession(on: host, named: name, launching: agent, startingIn: directory)
                 }
             )
         }
@@ -366,25 +366,25 @@ struct FleetWall: View {
         Task { await model.killSession(target.session) }
     }
 
-    /// The prompt's Create & Attach. A plain session rides the `.create`
-    /// route (`new-session -A` in the attaching window); an agent session
-    /// is minted over the control connection first — its launch command
-    /// typed into the fresh shell — then attached, so the attach can't
-    /// race the send-keys. Creation failures surface on the rail —
-    /// `createSession` marks the host failed when the control connection
-    /// is the problem.
-    private func createSession(on host: Host, named rawName: String, launching agent: AgentKind?) {
+    /// The prompt's Create & Attach. Mint the detached session over the
+    /// control connection first, then attach the terminal window. Besides
+    /// keeping agent `send-keys` ahead of the attach, creation can place a
+    /// first Linux tmux server outside the SSH login scope so closing the
+    /// terminal does not reap it. Creation failures surface on the rail —
+    /// `createSession` marks the host failed when the control connection is
+    /// the problem.
+    private func createSession(
+        on host: Host, named rawName: String, launching agent: AgentKind?,
+        startingIn directory: String?
+    ) {
         let name = TmuxProbe.sanitizedSessionName(rawName)
-        guard let agent else {
-            open(TerminalRoute(hostID: host.id, mode: .create(sessionName: name)))
-            return
-        }
         let model = hub.model(for: host)
         Task {
             guard let created = await model.createSession(
                 base: name,
                 inDirectoryOf: nil,
-                typing: agent.launchCommand
+                startingIn: directory,
+                typing: agent?.launchCommand
             ) else { return }
             open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: created)))
         }
@@ -410,11 +410,12 @@ struct FleetWall: View {
 /// conventional name for the selection (main / claude / codex, then -2,
 /// -3…) so Create is one tap; picking an agent re-prefills it unless the
 /// user already typed their own. An opt-in remembers the submitted launch
-/// choice for the next prompt.
+/// choice for the next prompt. Hosts with working directories also get a
+/// "Starts in" picker, defaulting to the first (the host's own default).
 private struct NewSessionSheet: View {
     let host: Host
     let existingNames: [String]
-    let create: (String, AgentKind?) -> Void
+    let create: (String, AgentKind?, String?) -> Void
 
     private let preferences: NewSessionPreferences
 
@@ -422,12 +423,13 @@ private struct NewSessionSheet: View {
 
     @State private var name: String
     @State private var agent: AgentKind?
+    @State private var directory: String?
     @State private var remembersLastLaunch: Bool
 
     init(
         host: Host,
         existingNames: [String],
-        create: @escaping (String, AgentKind?) -> Void,
+        create: @escaping (String, AgentKind?, String?) -> Void,
         preferences: NewSessionPreferences = NewSessionPreferences()
     ) {
         self.host = host
@@ -438,6 +440,7 @@ private struct NewSessionSheet: View {
         let remembersLastLaunch = preferences.remembersLastLaunch
         let agent = preferences.rememberedAgent
         _agent = State(initialValue: agent)
+        _directory = State(initialValue: host.workingDirs.first)
         _remembersLastLaunch = State(initialValue: remembersLastLaunch)
         _name = State(initialValue: TmuxProbe.uniqueSessionName(
             base: agent?.launchCommand ?? "main", existing: existingNames))
@@ -456,6 +459,15 @@ private struct NewSessionSheet: View {
                         Text(AgentKind.codex.displayName).tag(AgentKind?.some(.codex))
                     }
                     .pickerStyle(.menu)
+                    if !host.workingDirs.isEmpty {
+                        Picker("Starts in", selection: $directory) {
+                            ForEach(host.workingDirs, id: \.self) { dir in
+                                Text(dir).tag(String?.some(dir))
+                            }
+                            Text("Home").tag(String?.none)
+                        }
+                        .pickerStyle(.menu)
+                    }
                     Toggle("Remember launch choice", isOn: $remembersLastLaunch)
                 } footer: {
                     Text(detail)
@@ -472,7 +484,7 @@ private struct NewSessionSheet: View {
                             remembersLastLaunch: remembersLastLaunch,
                             agent: agent
                         )
-                        create(name, agent)
+                        create(name, agent, directory)
                         dismiss()
                     }
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -492,6 +504,9 @@ private struct NewSessionSheet: View {
 
     private var detail: String {
         var text = "Creates a tmux session on \(host.name) and attaches to it."
+        if let directory {
+            text += " Starts in \(directory)."
+        }
         if let agent {
             text += " Types “\(agent.launchCommand)” into the fresh shell to start \(agent.displayName)."
         }

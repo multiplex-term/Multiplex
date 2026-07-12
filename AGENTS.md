@@ -256,6 +256,16 @@ views.
 - **tmux attach needs a PTY**: the shell opens with ECHO off and
   `exec tmux attach-session …` is injected as the first stdin line (silent
   handoff, works with any POSIX login shell). Detach = close the channel.
+- **A first tmux server must outlive the SSH login scope on systemd Linux**:
+  hosts with `KillUserProcesses=yes` reap a normally daemonized tmux server
+  when the terminal SSH session closes. New sessions are therefore created
+  detached through `TmuxSessionLaunch`'s best-effort
+  `systemd-run --user --scope` runner, then attached; the server lands under
+  `user@<uid>.service/app.slice` instead of `session-*.scope`. Plain and agent
+  New Session actions both mint through the control connection first. The
+  runner falls back to ordinary tmux on macOS/BSD or when the systemd user
+  manager is unavailable (a headless Linux host with logind cleanup then needs
+  user lingering enabled or `KillUserProcesses=no`).
 - **mosh is a second `TerminalTransport`, not a fork of the SSH path**
   (`Services/Mosh/`, `Host.useMosh`). SSH stays the control plane — deck
   probing, capture-pane, file-drop SFTP, and the mosh bootstrap itself all

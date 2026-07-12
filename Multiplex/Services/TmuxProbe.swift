@@ -179,15 +179,21 @@ enum TmuxProbe {
     // MARK: - New sessions (the window's + TAB button, the deck tile's quick options)
 
     /// Create a detached session and print its final name behind a
-    /// MULTIPLEX_NEW sentinel. Naming authority stays with the server: `-s`
-    /// asks for `name`, and a duplicate-name race just retries unnamed (the
-    /// server numbers it), so the printed name is always the truth.
+    /// MULTIPLEX_NEW sentinel. The create uses `TmuxSessionLaunch`'s
+    /// best-effort systemd user scope so a first tmux server is not reaped
+    /// with an SSH login scope on Linux. Naming authority stays with the
+    /// server: `-s` asks for `name`, and a duplicate-name race just retries
+    /// unnamed (the server numbers it), so the printed name is always the
+    /// truth.
     ///
     /// - `sourceSessionName`: start in that session's *active-pane* cwd —
     ///   `pane_current_path` follows the foreground process, so "same dir"
     ///   means the agent's own cwd. Queried with `list-panes -F`, never
     ///   `display-message -p -t` (3.6a renders pane formats empty for
     ///   outside clients). nil or unresolvable → $HOME.
+    /// - `startDirectory`: an explicit start directory (a host working dir
+    ///   picked in the New Session prompt); consulted only when there is no
+    ///   source session, and skipped for $HOME when missing on the host.
     /// - `launch`: typed into the fresh shell via send-keys (literal text,
     ///   then Enter) — never the session's command argv, so the agent
     ///   exiting leaves a shell, and the login shell's own PATH resolves it
@@ -203,17 +209,20 @@ enum TmuxProbe {
     /// failed create must read as "no sentinel", not a torn-down control
     /// connection.
     static func newSessionCommand(
-        name: String, sourceSessionName: String?, launch: String?
+        name: String, sourceSessionName: String?, startDirectory: String? = nil, launch: String?
     ) -> String {
-        var command = pathPrefix
+        var command = pathPrefix + TmuxSessionLaunch.persistentRunnerDefinition
         if let source = sourceSessionName {
             command += "p=$(tmux list-panes -t \("=\(source)".shellQuoted)"
                 + " -F '#{?pane_active,#{pane_current_path},}' 2>/dev/null | grep -m1 .); "
                 + "d=\"${p:-$HOME}\"; "
+        } else if let directory = startDirectory {
+            command += "d=\(directory.shellQuotedDirectory); [ -d \"$d\" ] || d=\"$HOME\"; "
         } else {
             command += "d=\"$HOME\"; "
         }
-        let create = "tmux new-session -d -P -F '#{session_id} #{session_name}' -c \"$d\""
+        let create = "multiplex_tmux new-session -d -P"
+            + " -F '#{session_id} #{session_name}' -c \"$d\""
         command += "i=$(\(create) -s \(name.shellQuoted) 2>/dev/null)"
             + " || i=$(\(create) 2>/dev/null); "
         var onSuccess = ""

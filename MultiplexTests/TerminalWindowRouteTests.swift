@@ -140,4 +140,22 @@ final class TerminalWindowRouteTests: XCTestCase {
         XCTAssertEqual(decoded.tabs, [legacy])
         XCTAssertEqual(decoded.activeTabID, legacy.id)
     }
+
+    func testDecodesCreateModePersistedBeforeDirectoriesExisted() throws {
+        // A scene value written by a build where .create had no directory
+        // must restore (directory absent → nil), not drop the window.
+        let json = """
+        {
+          "id": "6F1E9A3C-4B4C-4B7B-9A57-2B9E2E64A222",
+          "hostID": "6F1E9A3C-4B4C-4B7B-9A57-2B9E2E64A111",
+          "mode": { "create": { "sessionName": "deploy" } }
+        }
+        """
+        let decoded = try JSONDecoder().decode(TerminalRoute.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.mode, .create(sessionName: "deploy"))
+        XCTAssertTrue(decoded.remoteCommand?.contains(
+            "multiplex_tmux new-session -d -s 'deploy'") == true)
+        XCTAssertTrue(decoded.remoteCommand?.hasSuffix(
+            "exec tmux attach-session -t 'deploy'") == true)
+    }
 }

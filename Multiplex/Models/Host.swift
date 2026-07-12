@@ -29,6 +29,10 @@ struct Host: Identifiable, Codable, Hashable {
     var moshServerPath: String?
     /// UDP port or range ("60000:61000") handed to `mosh-server -p`.
     var moshPorts: String?
+    /// Remote directories new sessions can start in, in the user's order —
+    /// the first is the default; the rest are choices in the New Session
+    /// prompt. Empty means $HOME.
+    var workingDirs: [String] = []
     /// Bumped on every user edit. When the same host arrives from another
     /// device via the Keychain mirror, the newer record wins.
     var updatedAt: Date = .distantPast
@@ -53,6 +57,7 @@ extension Host {
         useMosh = try container.decodeIfPresent(Bool.self, forKey: .useMosh) ?? false
         moshServerPath = try container.decodeIfPresent(String.self, forKey: .moshServerPath)
         moshPorts = try container.decodeIfPresent(String.self, forKey: .moshPorts)
+        workingDirs = try container.decodeIfPresent([String].self, forKey: .workingDirs) ?? []
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
     }
 }

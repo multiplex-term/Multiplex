@@ -103,6 +103,7 @@ final class HostSyncTests: XCTestCase {
         XCTAssertFalse(host.useMosh)
         XCTAssertNil(host.moshServerPath)
         XCTAssertNil(host.moshPorts)
+        XCTAssertEqual(host.workingDirs, [])
     }
 
     func testHostRoundTripsThroughRecordEncoding() throws {

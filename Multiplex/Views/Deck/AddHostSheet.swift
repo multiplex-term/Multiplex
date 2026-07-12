@@ -18,6 +18,24 @@ struct AddHostSheet: View {
     @State private var useMosh = false
     @State private var moshServerPath = ""
     @State private var moshPorts = ""
+    @State private var workingDirs: [WorkingDir] = []
+    @State private var newWorkingDir = ""
+    @State private var testState: TestState = .idle
+
+    /// Editable row model — a stable identity (not `id: \.self` on the
+    /// string) so editing a path in place doesn't tear down the row's
+    /// text field, and reorders/deletes track rows, not values.
+    private struct WorkingDir: Identifiable, Equatable {
+        let id = UUID()
+        var path: String
+    }
+
+    private enum TestState: Equatable {
+        case idle
+        case running
+        case passed(headline: String, warnings: [String])
+        case failed(String)
+    }
 
     var body: some View {
         NavigationStack {
@@ -44,14 +62,14 @@ struct AddHostSheet: View {
 
                     switch authMethod {
                     case .password:
-                        SecureField("Password", text: $password)
+                        RevealableSecureField("Password", text: $password)
                     case .privateKey:
                         TextField("Private key", text: $privateKey, axis: .vertical)
                             .font(.mono(12))
                             .lineLimit(4...8)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
-                        SecureField("Passphrase (optional)", text: $passphrase)
+                        RevealableSecureField("Passphrase (optional)", text: $passphrase)
                     }
                 }
 
@@ -62,6 +80,10 @@ struct AddHostSheet: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                testSection
+
+                workingDirsSection
 
                 Section("Transport") {
                     Toggle("Connect with mosh", isOn: $useMosh)
@@ -98,7 +120,164 @@ struct AddHostSheet: View {
             }
         }
         .onAppear(perform: populate)
+        // Any edit that could change the outcome retires the shown result —
+        // a stale PASSED next to a new address would vouch for the wrong host.
+        .onChange(of: testFingerprint) { testState = .idle }
     }
+
+    // MARK: Test connection
+
+    private var testSection: some View {
+        Section {
+            Button(action: runTest) {
+                HStack {
+                    Text("Test Connection")
+                    Spacer()
+                    if testState == .running {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+            }
+            .disabled(!isValid || testState == .running)
+
+            switch testState {
+            case .idle, .running:
+                EmptyView()
+            case .passed(let headline, let warnings):
+                Label {
+                    Text(headline)
+                } icon: {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Theme.ok)
+                }
+                .font(.callout)
+                ForEach(warnings, id: \.self) { warning in
+                    Label {
+                        Text(warning)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Theme.caution)
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+            case .failed(let message):
+                Label {
+                    Text(message)
+                } icon: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Theme.caution)
+                }
+                .font(.callout)
+            }
+        } footer: {
+            Text(useMosh
+                ? "Signs in over SSH with the settings above (mosh uses SSH to start mosh-server), then looks for tmux and mosh-server on the host."
+                : "Signs in over SSH with the settings above, then looks for tmux on the host.")
+        }
+    }
+
+    /// Everything a test's outcome depends on. Edits reset the shown result,
+    /// and a test that finishes after further edits discards itself.
+    private var testFingerprint: [String] {
+        [hostname, port, username, authMethod.rawValue,
+         password, privateKey, passphrase,
+         useMosh ? "mosh" : "ssh", moshServerPath]
+    }
+
+    private func runTest() {
+        testState = .running
+        let host = formHost()
+        let secrets = HostSecrets(
+            password: authMethod == .password ? password : nil,
+            privateKey: authMethod == .privateKey ? privateKey : nil,
+            passphrase: authMethod == .privateKey && !passphrase.isEmpty ? passphrase : nil
+        )
+        let fingerprint = testFingerprint
+        Task {
+            let outcome = await HostTest.run(host: host, secrets: secrets)
+            guard fingerprint == testFingerprint else { return }
+            switch outcome {
+            case .connected(let report):
+                var warnings: [String] = []
+                if !report.tmuxFound {
+                    warnings.append("tmux wasn't found on the host — the deck can't list sessions there. Plain shells still work.")
+                }
+                if report.moshServerFound == false {
+                    warnings.append("mosh-server wasn't found — mosh attaches will fail. Install it on the host or set its path below.")
+                }
+                testState = .passed(
+                    headline: "Connected to \(host.hostname) as \(host.username).",
+                    warnings: warnings
+                )
+            case .failed(let message):
+                testState = .failed(message)
+            }
+        }
+    }
+
+    // MARK: Working directories
+
+    private var workingDirsSection: some View {
+        Section {
+            ForEach($workingDirs) { $dir in
+                TextField("Directory", text: $dir.path)
+                    .font(.mono(12))
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+            }
+            .onMove { workingDirs.move(fromOffsets: $0, toOffset: $1) }
+            .onDelete { workingDirs.remove(atOffsets: $0) }
+            HStack {
+                TextField("Add directory", text: $newWorkingDir, prompt: Text("~/projects/app"))
+                    .font(.mono(12))
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .onSubmit(addWorkingDir)
+                Button(action: addWorkingDir) {
+                    Image(systemName: "plus.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(newWorkingDir.trimmingCharacters(in: .whitespaces).isEmpty)
+                .accessibilityLabel("Add working directory")
+            }
+        } header: {
+            HStack {
+                Text("Working directories")
+                Spacer()
+                if workingDirs.count > 1 {
+                    EditButton().font(.footnote)
+                }
+            }
+        } footer: {
+            Text("New sessions start in the first directory (or your home directory when the list is empty); the rest are choices in the New Session prompt. Edit to reorder.")
+        }
+    }
+
+    private func addWorkingDir() {
+        let dir = newWorkingDir.trimmingCharacters(in: .whitespaces)
+        guard !dir.isEmpty, !workingDirs.contains(where: { $0.path == dir }) else { return }
+        workingDirs.append(WorkingDir(path: dir))
+        newWorkingDir = ""
+    }
+
+    /// What gets saved: rows trimmed, emptied rows dropped, duplicates
+    /// (possible now that rows are editable) collapsed to the first, and a
+    /// directory typed but not yet added folded in — losing text sitting
+    /// visibly in the field would read as a bug.
+    private var resolvedWorkingDirs: [String] {
+        var seen = Set<String>()
+        var dirs: [String] = []
+        let pending = newWorkingDir.trimmingCharacters(in: .whitespaces)
+        for path in workingDirs.map(\.path) + [pending] {
+            let dir = path.trimmingCharacters(in: .whitespaces)
+            if !dir.isEmpty, seen.insert(dir).inserted { dirs.append(dir) }
+        }
+        return dirs
+    }
+
+    // MARK: Validation / persistence
 
     private var isValid: Bool {
         !hostname.trimmingCharacters(in: .whitespaces).isEmpty
@@ -132,14 +311,17 @@ struct AddHostSheet: View {
         useMosh = host.useMosh
         moshServerPath = host.moshServerPath ?? ""
         moshPorts = host.moshPorts ?? ""
+        workingDirs = host.workingDirs.map { WorkingDir(path: $0) }
         password = KeychainStore.get(for: host.id, kind: .password) ?? ""
         privateKey = KeychainStore.get(for: host.id, kind: .privateKey) ?? ""
         passphrase = KeychainStore.get(for: host.id, kind: .keyPassphrase) ?? ""
     }
 
-    private func save() {
-        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+    /// The form's current values as a Host record — what Save persists and
+    /// what Test Connection dials, so the two can never disagree.
+    private func formHost() -> Host {
         var host = editing ?? Host(name: "", hostname: "", username: "")
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
         host.name = trimmedName.isEmpty ? hostname : trimmedName
         host.hostname = hostname.trimmingCharacters(in: .whitespaces)
         host.port = Int(port) ?? 22
@@ -150,6 +332,12 @@ struct AddHostSheet: View {
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
         let ports = moshPorts.trimmingCharacters(in: .whitespaces)
         host.moshPorts = ports.isEmpty ? nil : ports
+        host.workingDirs = resolvedWorkingDirs
+        return host
+    }
+
+    private func save() {
+        let host = formHost()
 
         switch authMethod {
         case .password:
@@ -167,5 +355,41 @@ struct AddHostSheet: View {
             store.update(host)
         }
         dismiss()
+    }
+}
+
+/// A secret field with an eye toggle: SecureField normally, a plain
+/// TextField while revealed. One binding backs both, so toggling never
+/// loses what was typed.
+private struct RevealableSecureField: View {
+    let title: String
+    @Binding var text: String
+
+    @State private var revealed = false
+
+    init(_ title: String, text: Binding<String>) {
+        self.title = title
+        _text = text
+    }
+
+    var body: some View {
+        HStack {
+            if revealed {
+                TextField(title, text: $text)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.asciiCapable)
+            } else {
+                SecureField(title, text: $text)
+            }
+            Button {
+                revealed.toggle()
+            } label: {
+                Image(systemName: revealed ? "eye.slash" : "eye")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel(revealed ? "Hide \(title)" : "Show \(title)")
+        }
     }
 }
