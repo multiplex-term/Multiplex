@@ -230,9 +230,9 @@ struct SwiftTermView: UIViewRepresentable {
                   let window = container.window
             else { return }
             let screenSpace = window.screen.coordinateSpace
+            let containerOnScreen = container.convert(container.bounds, to: screenSpace)
             var overlap: CGFloat = 0
             if let endFrame = lastKeyboardFrame {
-                let containerOnScreen = container.convert(container.bounds, to: screenSpace)
                 if KeyboardAvoidance.isDocked(
                     keyboard: endFrame,
                     screen: screenSpace.bounds,
@@ -246,13 +246,20 @@ struct SwiftTermView: UIViewRepresentable {
             // report a zero-height end frame pinned to the *window* bottom —
             // useless geometry — while still rendering the key rail over the
             // terminal's last rows. The rendered accessory knows its real
-            // frame, so measure it directly whenever it's on screen; the
-            // docked-keyboard path above still wins when a taller keyboard
-            // is up (max), and a hidden accessory has no window and adds 0.
+            // frame, so measure it directly — but only when that frame is
+            // itself docked (`accessoryIsDocked`): a floating keyboard drags
+            // the rail around mid-screen, and insetting by a moving pill
+            // resizes the PTY every frame — tmux reflow churn. The docked-
+            // keyboard path above still wins when a taller keyboard is up
+            // (max), and a hidden accessory has no window and adds 0.
             if let accessory = terminalView?.inputAccessoryView, accessory.window != nil {
                 let onScreen = accessory.convert(accessory.bounds, to: screenSpace)
-                let inContainer = container.convert(onScreen, from: screenSpace)
-                if inContainer.minY < container.bounds.maxY, inContainer.height > 0 {
+                if KeyboardAvoidance.accessoryIsDocked(
+                    accessory: onScreen,
+                    container: containerOnScreen,
+                    screen: screenSpace.bounds
+                ) {
+                    let inContainer = container.convert(onScreen, from: screenSpace)
                     overlap = max(overlap, container.bounds.maxY - inContainer.minY)
                 }
             }
@@ -274,10 +281,15 @@ struct SwiftTermView: UIViewRepresentable {
             let docked = KeyboardAvoidance.isDocked(
                 keyboard: endFrame, screen: screenSpace.bounds, containerWidth: containerOnScreen.width
             )
-            let logLine = { (tag: String) in
+            let logLine = { [weak self] (tag: String) in
                 let onScreen = container.convert(container.bounds, to: screenSpace)
+                var accessoryDescription = "none"
+                if let accessory = self?.terminalView?.inputAccessoryView, accessory.window != nil {
+                    let accessoryOnScreen = accessory.convert(accessory.bounds, to: screenSpace)
+                    accessoryDescription = String(describing: accessoryOnScreen)
+                }
                 Logger(subsystem: "app.multiplexterm.multiplex", category: "kbd").debug(
-                    "\(tag, privacy: .public): \(notification.name.rawValue, privacy: .public) end=\(String(describing: endFrame), privacy: .public) docked=\(docked, privacy: .public) container=\(String(describing: onScreen), privacy: .public) constraint=\(self.bottomConstraint?.constant ?? 0, privacy: .public) safeBottom=\(container.safeAreaInsets.bottom, privacy: .public)"
+                    "\(tag, privacy: .public): \(notification.name.rawValue, privacy: .public) end=\(String(describing: endFrame), privacy: .public) docked=\(docked, privacy: .public) container=\(String(describing: onScreen), privacy: .public) accessory=\(accessoryDescription, privacy: .public) constraint=\(self?.bottomConstraint?.constant ?? 0, privacy: .public) safeBottom=\(container.safeAreaInsets.bottom, privacy: .public)"
                 )
             }
             logLine("kbd-event")

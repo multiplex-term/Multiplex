@@ -223,6 +223,11 @@ views.
   visionOS window is its own always-key scene, so multiple first responders
   leave input stuck on the first session. Claiming resigns the previous owner
   and activates the claimed window's scene. Route all focus changes through it.
+  Its keyboard-visibility tracking must ride the frame-change notifications
+  too (`KeyboardAvoidance.isPresented`, pure geometry): **floating/undocked
+  keyboards never post didShow/didHide**, and with visibility stuck false a
+  terminal tap tears down and rebuilds the input session — the floating pill
+  blinks away and iPadOS may not re-present it until an app switch.
 - **The iPad keyboard accessory is `TerminalKeyBar`, not SwiftTerm's stock
   `TerminalAccessory`**: a TALLY rail (ESC / latching CTRL / TAB, the shell
   symbols `~ | / -`, DECCKM-aware autorepeat arrows, dismiss) installed as
@@ -347,6 +352,13 @@ views.
   report a **zero-height** end frame pinned to the window bottom — useless
   geometry — so the handler also measures the rendered `inputAccessoryView`
   directly and takes the larger inset; don't trust the notification alone.
+  That rendered frame gets its own docked test (`accessoryIsDocked`) — a
+  floating keyboard carries the rail around mid-screen, and insetting by a
+  moving pill resizes the PTY (tmux reflow) on every drag frame. The rail's
+  bottom-pinning is judged against the **terminal container, not the
+  screen**: fullscreen it lands at the screen bottom, but windowed iPadOS
+  can pin it to the window bottom instead — only a container-spanning rail
+  reaching the container's bottom edge reserves space.
   The helper strip rides inside the opt-out, so a docked keyboard
   covers it — the key rail is the input surface while typing.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no

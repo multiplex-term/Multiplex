@@ -19,11 +19,6 @@ enum TerminalFocusArbiter {
     private static var keyboardVisible = false
     private static var observersInstalled = false
 
-    /// Below this, a "shown keyboard" is just the accessory row that
-    /// hardware-keyboard mode docks at the scene bottom (~48–55 pt) — not a
-    /// keyboard the user can type on. The real panel is ≥300 pt.
-    private static let minRealKeyboardHeight: CGFloat = 100
-
     /// Move keyboard focus to this terminal. No-op if it already has it.
     static func claim(_ view: TerminalView) {
         installObserversIfNeeded()
@@ -83,7 +78,7 @@ enum TerminalFocusArbiter {
         ) { notification in
             let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
             MainActor.assumeIsolated {
-                keyboardVisible = (frame?.height ?? 0) >= minRealKeyboardHeight
+                keyboardVisible = (frame?.height ?? 0) >= KeyboardAvoidance.minRealKeyboardHeight
             }
         }
         center.addObserver(
@@ -93,6 +88,31 @@ enum TerminalFocusArbiter {
         ) { _ in
             MainActor.assumeIsolated { keyboardVisible = false }
         }
+        #if !os(visionOS)
+        // Floating/undocked keyboards never post didShow/didHide — only
+        // frame changes. Without these, `keyboardVisible` stays false while
+        // a floating pill is up, so every terminal tap runs the resign+
+        // rebuild branch below: the pill blinks away and iPadOS may not
+        // re-present it until the app is reactivated. Visibility is pure
+        // geometry (`KeyboardAvoidance.isPresented`), so both directions —
+        // pill appearing, pill flicked away — track from the same frames.
+        for name in [UIResponder.keyboardWillChangeFrameNotification,
+                     UIResponder.keyboardDidChangeFrameNotification] {
+            center.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { notification in
+                guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+                      notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool != false
+                else { return }
+                MainActor.assumeIsolated {
+                    guard let screen = current?.window?.screen.bounds else { return }
+                    keyboardVisible = KeyboardAvoidance.isPresented(keyboard: frame, screen: screen)
+                }
+            }
+        }
+        #endif
         #if DEBUG
         installDebugSummonHook()
         #endif
