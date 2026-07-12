@@ -17,8 +17,8 @@ struct UMDBar: View {
     var merge: (UUID) -> Void
     var detach: () -> Void
     /// Kill the active tab's tmux session, then close the tab — the detach
-    /// chip's long-press alternative. nil when there's no session to kill
-    /// (plain shell tab, or the host record is gone).
+    /// dropdown's destructive alternative. nil when there's no session to
+    /// kill (plain shell tab, or the host record is gone).
     var closeSession: (() -> Void)?
 
     var body: some View {
@@ -31,16 +31,14 @@ struct UMDBar: View {
             ChassisChip("KBD", action: summonKeyboard)
             ChassisChip("A−", action: fontDown)
             ChassisChip("A+", action: fontUp)
-            // Tap = new session in the same directory; long press picks an
-            // agent variant — mirrors the deck tile's quick options.
+            // Dropdown: a fresh session in the same directory, plain or
+            // launching an agent — mirrors the deck's New Session options.
             Menu {
                 Button("New Session") { newSession(nil) }
-                Button("New Session + Claude Code") { newSession(.claudeCode) }
-                Button("New Session + Codex") { newSession(.codex) }
+                Button(AgentKind.claudeCode.displayName) { newSession(.claudeCode) }
+                Button(AgentKind.codex.displayName) { newSession(.codex) }
             } label: {
                 ChassisBadge("TAB", systemImage: "plus")
-            } primaryAction: {
-                newSession(nil)
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
@@ -72,21 +70,20 @@ struct UMDBar: View {
                 .accessibilityLabel("Merge another window into this one")
             }
             divider
-            // Tap = detach (tmux keeps the session); long press offers the
-            // destructive alternative: kill the session, then close the tab.
+            // Dropdown: detach (tmux keeps the session) or the destructive
+            // alternative — kill the session, then close the tab. A plain
+            // shell tab has no session to kill, so it keeps the direct chip.
             if let closeSession {
                 Menu {
                     Button("Detach") { detach() }
                     Button("Close Session", role: .destructive, action: closeSession)
                 } label: {
                     ChassisBadge("DETACH", prominent: true)
-                } primaryAction: {
-                    detach()
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
                 .chassisHover(2)
-                .accessibilityLabel("Detach: tmux keeps the session. Long press to close the session instead")
+                .accessibilityLabel("Detach or close the session")
             } else {
                 ChassisChip("DETACH", prominent: true, action: detach)
             }

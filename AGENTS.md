@@ -120,8 +120,8 @@ Keyboard**. In DEBUG builds,
 presses the focused terminal's "Show keyboard" button headlessly,
 `… -p tools.bricks.multiplex.debug.agentchip` taps the focused terminal's
 first slash chip in the agent helper strip (inject → pump → PTY → tmux), and
-`… -p tools.bricks.multiplex.debug.newtab` presses the focused window's
-"+ TAB" primary action (control-connection exec → new-session in the
+`… -p tools.bricks.multiplex.debug.newtab` runs the focused window's
+"+ TAB" New Session action (control-connection exec → new-session in the
 pane's cwd → tab append → attach), and
 `… -p tools.bricks.multiplex.debug.keybar` runs the focused terminal's
 iPad key-bar proof sequence — the four symbol keys plus a latched CTRL

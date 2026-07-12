@@ -195,9 +195,9 @@ struct TerminalWindowRoot: View {
         send(command, via: controller)
     }
 
-    /// Press the + TAB primary action of the focused window only — same
-    /// gating as the chip hook, so one notification never mints sessions
-    /// from several windows.
+    /// Run the + TAB dropdown's New Session action for the focused window
+    /// only — same gating as the chip hook, so one notification never mints
+    /// sessions from several windows.
     private func debugNewTab() {
         guard let controller = activeController,
               let view = controller.terminalView,
@@ -415,37 +415,39 @@ struct TerminalWindowRoot: View {
         }
     }
 
-    /// Tap = detach (tmux keeps the session); long press offers the
-    /// destructive alternative — kill the session, then close the tab.
+    /// Dropdown: detach (tmux keeps the session) or the destructive
+    /// alternative — kill the session, then close the tab. A plain shell
+    /// tab has no session to kill, so it keeps a direct button.
+    @ViewBuilder
     private var detachMenu: some View {
-        Menu {
-            Button("Detach") { detachActiveTab() }
-            if activeTabHasSession {
+        if activeTabHasSession {
+            Menu {
+                Button("Detach") { detachActiveTab() }
                 Button("Close Session", role: .destructive) {
                     confirmingCloseActiveSession = true
                 }
+            } label: {
+                Text("Detach")
             }
-        } label: {
-            Text("Detach")
-        } primaryAction: {
-            detachActiveTab()
+            .menuStyle(.button)
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Detach or close the session")
+        } else {
+            Button("Detach") { detachActiveTab() }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Detach: tmux keeps the session")
         }
-        .menuStyle(.button)
-        .buttonStyle(.bordered)
-        .accessibilityLabel("Detach: tmux keeps the session. Long press to close the session instead")
     }
 
-    /// Tap = new session in the active tab's directory; long press picks an
-    /// agent variant — mirrors the deck tile's quick options.
+    /// Dropdown: a fresh session in the active tab's directory, plain or
+    /// launching an agent — mirrors the deck's New Session options.
     private var newTabMenu: some View {
         Menu {
             Button("New Session") { openNewTab(launching: nil) }
-            Button("New Session + Claude Code") { openNewTab(launching: .claudeCode) }
-            Button("New Session + Codex") { openNewTab(launching: .codex) }
+            Button(AgentKind.claudeCode.displayName) { openNewTab(launching: .claudeCode) }
+            Button(AgentKind.codex.displayName) { openNewTab(launching: .codex) }
         } label: {
             Image(systemName: "plus")
-        } primaryAction: {
-            openNewTab(launching: nil)
         }
         .accessibilityLabel("New tab: another session in this window")
     }
@@ -754,7 +756,7 @@ extension Notification.Name {
 
 /// Headless-verification hook, same shape as `AgentChipDebugHook`:
 /// `xcrun simctl spawn <udid> notifyutil -p tools.bricks.multiplex.debug.newtab`
-/// presses the focused window's + TAB primary action — control-connection
+/// runs the focused window's + TAB New Session action — control-connection
 /// exec → new-session in the pane's cwd → tab append → attach, without
 /// touching the screen.
 @MainActor
