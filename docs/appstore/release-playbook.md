@@ -69,13 +69,25 @@ ships its own SSH implementation (vendored `swift-nio-ssh`) and a hand-rolled
 AES-128-OCB3 for mosh. It *does* use only **standard, published algorithms**
 (SSH, AES-OCB per RFC 7253) — no proprietary cryptography.
 
-In App Store Connect → app → **App Encryption Documentation**, declare:
-uses encryption → **standard algorithms** → mass-market self-classification
-(5D992.c). Do it once at the app level so every build stops prompting; add
-`ITSAppUsesNonExemptEncryption` only if you prefer the plist route. Two
-follow-ups that are yours, not Apple's (not legal advice): the **annual BIS
-self-classification report** for mass-market crypto, and the **France**
-import declaration if you distribute there.
+The plist already declares it (`INFOPLIST_KEY_ITSAppUsesNonExemptEncryption:
+YES` in project.yml — non-exempt is the truthful value for self-implemented
+crypto; verified present in the built Info.plist). What remains is the
+one-time app-level declaration so builds never prompt:
+
+**App Store Connect → app → App Information → App Encryption Documentation**,
+answer:
+
+1. Uses encryption? **Yes**
+2. Qualifies for the listed exemptions (auth-only / OS-provided / …)? **No**
+3. Proprietary or non-standard algorithms? **No — standard algorithms**
+   (SSH suites, AES-OCB per RFC 7253) → self-classified mass-market
+   **5D992.c**, nothing to upload to Apple.
+4. France: either file the ANSSI import declaration, or exclude France from
+   territories at launch and add it later.
+
+Two follow-ups that are yours, not Apple's (not legal advice): the **annual
+BIS self-classification report** for mass-market crypto (due Feb 1, emailed
+to BIS + NSA), and the France declaration above if you keep France on.
 
 ## App Store submission
 

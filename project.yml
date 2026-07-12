@@ -56,6 +56,12 @@ targets:
         TARGETED_DEVICE_FAMILY: "2,7"
         SUPPORTS_MACCATALYST: NO
         GENERATE_INFOPLIST_FILE: YES
+        # Export compliance: the app IMPLEMENTS standard crypto (vendored
+        # swift-nio-ssh + clean-room AES-128-OCB3 for mosh), so it is
+        # non-exempt → YES, self-classified mass-market 5D992.c via the
+        # one-time App Encryption Documentation declaration in ASC (see
+        # docs/appstore/release-playbook.md → Export compliance).
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: YES
         INFOPLIST_KEY_CFBundleDisplayName: Multiplex
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
