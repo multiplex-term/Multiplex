@@ -24,7 +24,7 @@ struct TerminalWindowRoot: View {
 
     @Binding var route: TerminalWindowRoute
 
-    @State private var fontSize: CGFloat = 21
+    @State private var fontSize: CGFloat = 17
     /// Agent shown by the helper strip. Trails `detectedAgent` with a short
     /// grace on loss (two probe ticks) so a transient probe miss doesn't
     /// flap the strip — but never across a tab switch.
