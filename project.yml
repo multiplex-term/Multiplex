@@ -27,6 +27,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: C6EUM5DVB3
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     # Citadel's swift-nio-ssh fork imports the NIO umbrella module without
     # declaring it as a target dependency; explicit module builds reject that.
