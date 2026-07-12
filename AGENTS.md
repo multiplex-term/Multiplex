@@ -131,11 +131,11 @@ pane's cwd → tab append → attach), and
 `… -p app.multiplexterm.multiplex.debug.keybar` runs the focused terminal's
 iPad key-bar proof sequence — the four symbol keys plus a latched CTRL
 consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`, and
-`… -p app.multiplexterm.multiplex.debug.keycluster` runs the visionOS ornament
+`… -p app.multiplexterm.multiplex.keycluster` runs the visionOS ornament
 key cluster's proof — ESC and TAB through its send path plus a latched CTRL
 consumed by a typed `c` (a raw-mode `dd bs=1 count=3 | od -c` in the pane
 reads `033 \t 003`; ornament buttons can't be driven synthetically), and
-`… -p app.multiplexterm.multiplex.debug.scrollup` / `….scrolldown` delivers one
+`… -p app.multiplexterm.multiplex.scrollup` / `….scrolldown` delivers one
 scroll tick to the focused terminal — the same remote path a pan takes
 (wheel report when the app requested mouse tracking, alternate-screen
 cursor key otherwise), so with tmux `mouse on` a scrollup flips
