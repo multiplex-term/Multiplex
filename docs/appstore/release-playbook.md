@@ -136,7 +136,7 @@ The same host and credentials serve Beta App Review (TestFlight external) —
 | 1 | **Host-key TOFU pinning** | `.acceptAnything()` is fine for the sim, indefensible for real users' credentials; also the one security claim reviewers/users will test. | Citadel `.custom` validator; README "Known limits" |
 | 2 | **Real StoreKit 2 purchase** (or hide Pro UI) | A visible "coming soon" purchase button is rejectable (2.1 completeness / 2.3 accuracy). `EntitlementStore` is a stub; RELEASE builds lock Pro with no way to buy. | `Services/EntitlementStore.swift`, `ProPaywallView` |
 | 3 | **Ship the free-tier cap and IAP together** | Never un-free a feature post-launch (`local-plan/pricing-strategy.md` §7). Decide the host-cap question before v1.0, not after. | pricing-strategy.md |
-| 4 | **Privacy policy live** at `bricks.tools/multiplex/privacy` | URL is required metadata; draft ready in `docs/appstore/privacy-policy.md`. | — |
-| 5 | **Support URL live** at `bricks.tools/multiplex` | Required; a page with the app name + contact email is enough. | — |
+| 4 | **Privacy policy live** at `multiplexterm.dev/privacy` | URL is required metadata; draft ready in `docs/appstore/privacy-policy.md`. | — |
+| 5 | **Support URL live** at `multiplexterm.dev` | Required; a page with the app name + contact email is enough. | — |
 | 6 | **Encryption declaration** filed in ASC | See above; blocks the first upload otherwise. | ASC |
 | 7 | **App name check** | "Multiplex —  SSH tmux Terminal" must be unclaimed; reserve it when creating the app record. Fallbacks: swap the suffix, keep "Multiplex" first. | ASC |

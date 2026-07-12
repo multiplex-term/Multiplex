@@ -2,7 +2,7 @@ Multiplex is an SSH client: every feature needs a remote host running tmux. A de
 
 CONNECT
 1. Launch Multiplex and tap + HOST.
-2. Name: demo — Address: demo.bricks.tools — Port: 22 — User and password: the demo credentials above (Auth: Password).
+2. Name: demo — Address: demo.multiplexterm.dev — Port: 22 — User and password: the demo credentials above (Auth: Password).
 3. Save. The wall probes the host and live session tiles appear within a few seconds — each tile streams that session's actual last screen lines.
 
 CORE FLOW

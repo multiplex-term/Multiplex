@@ -1,6 +1,6 @@
 # Multiplex — Privacy Policy
 
-*Draft — publish at `https://bricks.tools/multiplex/privacy` before
+*Draft — publish at `https://multiplexterm.dev/privacy` before
 submission (ship-blocker #4 in the release playbook).*
 
 **Effective:** <date of publication>

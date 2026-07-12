@@ -31,7 +31,7 @@ makes the demo feel snappy instead of laggy.
    (root access for you), paste the rendered YAML into the **user-data /
    cloud-init** field. Boot; cloud-init needs ~2–3 min after first login
    prompt.
-4. DNS: `A demo.bricks.tools → <VM IP>` (TTL 300). The hostname is baked
+4. DNS: `A demo.multiplexterm.dev → <VM IP>` (TTL 300). The hostname is baked
    into the review notes — if you use a different name, update
    `fastlane/metadata/review_information/notes.txt`.
 5. `./verify.sh` — DNS, port, password login, session inventory,
