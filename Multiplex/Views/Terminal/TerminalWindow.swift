@@ -301,7 +301,17 @@ struct TerminalWindowRoot: View {
                 }
                 paneStack
                     .safeAreaInset(edge: .bottom, spacing: 0) {
+                        // The strip rests on the window's bottom edge, where
+                        // the docked key rail (hardware-keyboard mode) or
+                        // keyboard would paint straight over it — so it pads
+                        // itself up by the obstruction the terminal's
+                        // keyboard-clearance owner measured, staying tappable
+                        // above the rail. The bezel backfills the gap so a
+                        // dismissing keyboard never flashes the screen
+                        // through it.
                         helperStrip(floating: false)
+                            .padding(.bottom, activeController?.keyboardObstruction ?? 0)
+                            .background(Theme.bezel)
                     }
                     // SwiftUI's automatic keyboard avoidance must not touch
                     // the terminal: its tracker also reserves space for
@@ -310,9 +320,9 @@ struct TerminalWindowRoot: View {
                     // terminal container's own keyboard-frame handler is the
                     // single owner of keyboard clearance — docked keyboards
                     // and the accessory bar inset, floating pills don't
-                    // (`KeyboardAvoidance`). The helper strip rides inside
-                    // the opt-out, so a docked keyboard covers it while
-                    // typing — the key rail is the input surface then.
+                    // (`KeyboardAvoidance`); the helper strip above rides
+                    // inside the opt-out and consumes that same measurement
+                    // through `keyboardObstruction`.
                     .ignoresSafeArea(.keyboard)
             }
             .navigationTitle(windowTitle)

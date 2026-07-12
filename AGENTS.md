@@ -359,8 +359,13 @@ views.
   screen**: fullscreen it lands at the screen bottom, but windowed iPadOS
   can pin it to the window bottom instead — only a container-spanning rail
   reaching the container's bottom edge reserves space.
-  The helper strip rides inside the opt-out, so a docked keyboard
-  covers it — the key rail is the input surface while typing.
+  The helper strip rides inside the opt-out too, but is not sacrificed to
+  it: the same handler publishes how far the docked keyboard/rail rises
+  above the window's bottom safe-area edge
+  (`TerminalSessionController.keyboardObstruction`), and the strip pads
+  itself up by that amount — chips stay tappable above the key rail
+  (measured against the *window*, which the keyboard can't move, so the
+  published value never feeds back into the container's own inset).
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
   entitlement/CloudKit): secrets *and* a JSON host record per host are
   synchronizable keychain items (services `app.multiplexterm.multiplex` /

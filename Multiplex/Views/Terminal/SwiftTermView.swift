@@ -224,6 +224,12 @@ struct SwiftTermView: UIViewRepresentable {
         /// Recomputes the inset from the last-seen keyboard frame against
         /// the container's *current* on-screen position. Idempotent — safe
         /// to call from layout passes (the constraint guard stops recursion).
+        /// Also publishes `keyboardObstruction` — how far the same docked
+        /// presentations rise above the window's bottom safe-area edge — so
+        /// the helper strip (SwiftUI, below this container) can pad itself
+        /// clear of the key rail instead of being painted over. Measured
+        /// against the *window*, which the keyboard can't move, so the
+        /// published value never feeds back into this layout pass.
         func reapplyKeyboardOverlap() {
             guard let container = avoidingContainer,
                   let constraint = bottomConstraint,
@@ -231,7 +237,12 @@ struct SwiftTermView: UIViewRepresentable {
             else { return }
             let screenSpace = window.screen.coordinateSpace
             let containerOnScreen = container.convert(container.bounds, to: screenSpace)
+            let windowOnScreen = window.convert(window.bounds, to: screenSpace)
+            // Where SwiftUI rests bottom-edge chrome (the helper strip):
+            // the window bottom minus its safe-area inset (home indicator).
+            let restingBottom = windowOnScreen.maxY - window.safeAreaInsets.bottom
             var overlap: CGFloat = 0
+            var obstruction: CGFloat = 0
             if let endFrame = lastKeyboardFrame {
                 if KeyboardAvoidance.isDocked(
                     keyboard: endFrame,
@@ -240,6 +251,7 @@ struct SwiftTermView: UIViewRepresentable {
                 ) {
                     let inContainer = container.convert(endFrame, from: screenSpace)
                     overlap = max(0, container.bounds.maxY - inContainer.minY)
+                    obstruction = max(0, restingBottom - endFrame.minY)
                 }
             }
             // The accessory-only presentation (hardware-keyboard mode) can
@@ -261,9 +273,13 @@ struct SwiftTermView: UIViewRepresentable {
                 ) {
                     let inContainer = container.convert(onScreen, from: screenSpace)
                     overlap = max(overlap, container.bounds.maxY - inContainer.minY)
+                    obstruction = max(obstruction, restingBottom - onScreen.minY)
                 }
             }
             overlap = min(overlap, container.bounds.height * 0.8)
+            MainActor.assumeIsolated {
+                controller.reportKeyboardObstruction(max(0, obstruction))
+            }
             guard constraint.constant != -overlap else { return }
             constraint.constant = -overlap
             container.layoutIfNeeded()

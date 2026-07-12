@@ -30,6 +30,20 @@ final class TerminalSessionController {
     private(set) var status: Status = .connecting
     var remoteTitle: String = ""
 
+    /// How far a *docked* keyboard presentation (software keyboard, or the
+    /// accessory-only key rail of hardware-keyboard mode) intrudes above the
+    /// window's bottom safe-area edge — published by the terminal's
+    /// keyboard-clearance owner (`SwiftTermView`'s coordinator) so chrome
+    /// that rests on that edge (the iPad agent helper strip) can pad itself
+    /// above the keyboard instead of being painted over. Floating pills
+    /// report 0, same as the terminal's own inset. Always 0 on visionOS.
+    private(set) var keyboardObstruction: CGFloat = 0
+
+    func reportKeyboardObstruction(_ height: CGFloat) {
+        guard keyboardObstruction != height else { return }
+        keyboardObstruction = height
+    }
+
     /// Strongly owned (SwiftTerm's delegate back-reference is weak): the view
     /// carries the terminal buffer and scrollback, and tabs move between
     /// windows — the adopting window re-parents this same view, so what's on
