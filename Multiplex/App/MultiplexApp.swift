@@ -26,8 +26,14 @@ struct MultiplexApp: App {
 
     var body: some Scene {
         #if os(visionOS)
+        // Snug fit for a two-tile wall row: 26pt wall padding either side +
+        // two tiles at the grid's 360pt max + the 14pt gutter wide. Wider
+        // and the row gains dead space (a third column needs 950). 330 is
+        // the shortest visionOS will actually grant at this width (shorter
+        // requests render ~330 anyway — system aspect floor); it shows the
+        // header, host rail, and one full tile row, and more rows scroll.
         deckScene
-            .defaultSize(width: 940, height: 660)
+            .defaultSize(width: 786, height: 330)
         terminalScene
             .windowStyle(.plain)
             .defaultSize(width: 1120, height: 700)
