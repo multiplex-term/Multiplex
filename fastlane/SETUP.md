@@ -18,9 +18,11 @@ generate (role: **App Manager**). Download the `.p8` into `fastlane/keys/`
 - Platforms: iOS + visionOS (one record, two platforms)
 
 Still to do by hand in the record (deliver doesn't manage these): the
-encryption declaration, App Privacy (**Data Not Collected**), age rating
-(all None → 4+), and the IAP (`app.multiplexterm.multiplex.pro`,
-non-consumable, $19.99) — details in `docs/appstore/release-playbook.md`.
+App Privacy declaration (**Data Not Collected**), age rating (all None → 4+),
+and the IAP (`app.multiplexterm.multiplex.pro`, non-consumable, $19.99) —
+details in `docs/appstore/release-playbook.md`. Export compliance is declared
+as exempt standard encryption in the app plist; distributing in France still
+requires the France-specific step in the playbook.
 
 ## 3. Signing
 

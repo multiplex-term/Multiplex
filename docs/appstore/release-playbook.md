@@ -62,32 +62,35 @@ Feedback: screenshot in TestFlight, or jhen@bricks.tools
 
 Builds expire after 90 days — ship something monthly or testers go dark.
 
-## Export compliance (once)
+## Export compliance
 
 Multiplex does **not** qualify for the "only HTTPS / OS crypto" answer: it
 ships its own SSH implementation (vendored `swift-nio-ssh`) and a hand-rolled
 AES-128-OCB3 for mosh. It *does* use only **standard, published algorithms**
 (SSH, AES-OCB per RFC 7253) — no proprietary cryptography.
 
-The plist already declares it (`INFOPLIST_KEY_ITSAppUsesNonExemptEncryption:
-YES` in project.yml — non-exempt is the truthful value for self-implemented
-crypto; verified present in the built Info.plist). What remains is the
-one-time app-level declaration so builds never prompt:
+Apple's `ITSAppUsesNonExemptEncryption` key asks whether the app uses
+**non-exempt** encryption; `NO` also covers apps that contain only exempt
+encryption. Apple requires no App Store Connect documentation for published
+industry-standard crypto outside its OS unless the app is distributed in
+France. Therefore `project.yml` declares:
 
-**App Store Connect → app → App Information → App Encryption Documentation**,
-answer:
+```yaml
+INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+```
 
-1. Uses encryption? **Yes**
-2. Qualifies for the listed exemptions (auth-only / OS-provided / …)? **No**
-3. Proprietary or non-standard algorithms? **No — standard algorithms**
-   (SSH suites, AES-OCB per RFC 7253) → self-classified mass-market
-   **5D992.c**, nothing to upload to Apple.
-4. France: either file the ANSSI import declaration, or exclude France from
-   territories at launch and add it later.
+`fastlane beta` also passes `uses_non_exempt_encryption: false` explicitly as
+Pilot's fallback, so iOS and visionOS resolve to the same status even if a
+platform build is still processing when Pilot first sees it. No Apple export
+compliance code is expected in this configuration.
 
-Two follow-ups that are yours, not Apple's (not legal advice): the **annual
-BIS self-classification report** for mass-market crypto (due Feb 1, emailed
-to BIS + NSA), and the France declaration above if you keep France on.
+France is the exception: before enabling the French storefront, file the
+French encryption declaration through App Store Connect; otherwise exclude
+France at launch and add it after the declaration is accepted.
+
+Separate from Apple's upload metadata, the U.S. BIS mass-market classification
+may require a self-classification report for **5D992.c** software. That is a
+developer export obligation, not an Apple plist code (not legal advice).
 
 ## App Store submission
 
@@ -151,5 +154,5 @@ The same host and credentials serve Beta App Review (TestFlight external) —
 | 3 | **Ship the free-tier cap and IAP together** | Never un-free a feature post-launch (`local-plan/pricing-strategy.md` §7). Decide the host-cap question before v1.0, not after. | pricing-strategy.md |
 | 4 | **Privacy policy live** at `multiplexterm.dev/privacy` | URL is required metadata; draft ready in `docs/appstore/privacy-policy.md`. | — |
 | 5 | **Support URL live** at `multiplexterm.dev` | Required; a page with the app name + contact email is enough. | — |
-| 6 | **Encryption declaration** filed in ASC | See above; blocks the first upload otherwise. | ASC |
+| 6 | **France excluded or French encryption declaration filed** | Apple requires the French declaration for standard app-provided crypto only when distributing in France. | ASC availability / App Encryption Documentation |
 | ~~7~~ | ~~App name check~~ **Done 2026-07-12**: record created as "Multiplex — SSH tmux Terminal", bundle id `app.multiplexterm.multiplex`, Apple ID `6790074057`. | — | ASC |

@@ -95,6 +95,10 @@ lane :beta do |options|
       api_key: api_key,
       ipa: ipa,
       app_platform: DESTINATIONS.fetch(platform)[:pilot],
+      # Multiplex uses only exempt, published standard crypto. Keep Pilot's
+      # fallback explicit so iOS and visionOS cannot diverge if ASC fails to
+      # read the plist value while a build is processing.
+      uses_non_exempt_encryption: false,
       changelog: whats_new,
       distribute_external: options[:external] == true,
       groups: options[:external] == true ? [ENV.fetch("TESTFLIGHT_EXTERNAL_GROUP", "Multiplex Beta")] : nil,
