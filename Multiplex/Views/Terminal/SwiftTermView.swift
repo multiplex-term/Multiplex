@@ -266,7 +266,7 @@ struct SwiftTermView: UIViewRepresentable {
         /// Diagnosis aid for keyboard-geometry bugs: dumps what the
         /// notification reported, what the classifier decided, and where
         /// SwiftUI put the container — read with
-        /// `log show --predicate 'subsystem == "tools.bricks.multiplex"'`.
+        /// `log show --predicate 'subsystem == "dev.multiplexterm.multiplex"'`.
         private func logKeyboardDiagnostics(_ notification: Notification, container: UIView, window: UIWindow) {
             let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect ?? .null
             let screenSpace = window.screen.coordinateSpace
@@ -276,7 +276,7 @@ struct SwiftTermView: UIViewRepresentable {
             )
             let logLine = { (tag: String) in
                 let onScreen = container.convert(container.bounds, to: screenSpace)
-                Logger(subsystem: "tools.bricks.multiplex", category: "kbd").debug(
+                Logger(subsystem: "dev.multiplexterm.multiplex", category: "kbd").debug(
                     "\(tag, privacy: .public): \(notification.name.rawValue, privacy: .public) end=\(String(describing: endFrame), privacy: .public) docked=\(docked, privacy: .public) container=\(String(describing: onScreen), privacy: .public) constraint=\(self.bottomConstraint?.constant ?? 0, privacy: .public) safeBottom=\(container.safeAreaInsets.bottom, privacy: .public)"
                 )
             }

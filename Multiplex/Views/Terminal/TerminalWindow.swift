@@ -760,7 +760,7 @@ extension Notification.Name {
 }
 
 /// Headless-verification hook, same shape as `AgentChipDebugHook`:
-/// `xcrun simctl spawn <udid> notifyutil -p tools.bricks.multiplex.debug.newtab`
+/// `xcrun simctl spawn <udid> notifyutil -p dev.multiplexterm.multiplex.debug.newtab`
 /// runs the focused window's + TAB New Session action — control-connection
 /// exec → new-session in the pane's cwd → tab append → attach, without
 /// touching the screen.
@@ -773,7 +773,7 @@ enum NewTabDebugHook {
         installed = true
         var token: Int32 = 0
         notify_register_dispatch(
-            "tools.bricks.multiplex.debug.newtab", &token, .main
+            "dev.multiplexterm.multiplex.debug.newtab", &token, .main
         ) { _ in
             NotificationCenter.default.post(name: .multiplexDebugNewTab, object: nil)
         }

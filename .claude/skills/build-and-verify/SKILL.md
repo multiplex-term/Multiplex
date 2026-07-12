@@ -155,7 +155,7 @@ To see the on-screen keyboard: focus the device window in DeviceHub and use
 "Show keyboard" button without touching the UI (DEBUG builds):
 
 ```sh
-xcrun simctl spawn <udid> notifyutil -p tools.bricks.multiplex.debug.summon
+xcrun simctl spawn <udid> notifyutil -p dev.multiplexterm.multiplex.debug.summon
 ```
 
 That drives the same input-session rebuild the ornament/toolbar button uses,

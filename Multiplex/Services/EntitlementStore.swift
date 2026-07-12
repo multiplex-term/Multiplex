@@ -3,7 +3,7 @@ import Observation
 
 /// The Pro gate. v1 ships the seam without the commerce: `isPro` is a
 /// UserDefaults flag, and the future StoreKit 2 work (non-consumable
-/// `tools.bricks.multiplex.pro`, `Transaction.currentEntitlements` listener,
+/// `dev.multiplexterm.multiplex.pro`, `Transaction.currentEntitlements` listener,
 /// restore) replaces only this type's internals — nothing outside it may
 /// know how entitlement is decided. DEBUG builds default to unlocked so
 /// daily development and the headless harness exercise the real feature;

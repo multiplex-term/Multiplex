@@ -48,7 +48,7 @@ cat <<'EOF'
 Launch the app against the store fleet (UDID=$(xcrun simctl list devices booted | grep -oE '[0-9A-F-]{36}' | head -1)):
 
   SIMCTL_CHILD_MULTIPLEX_SEED_HOST=$PWD/Tools/dev-sshd/state/store-seed.json \
-    xcrun simctl launch $UDID tools.bricks.multiplex
+    xcrun simctl launch $UDID dev.multiplexterm.multiplex
 
 Per-shot staging: local-plan/appstore-screenshots.md
 EOF

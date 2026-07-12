@@ -1,6 +1,6 @@
 name: Multiplex
 options:
-  bundleIdPrefix: tools.bricks
+  bundleIdPrefix: dev.multiplexterm
   createIntermediateGroups: true
   deploymentTarget:
     iOS: "17.0"
@@ -48,7 +48,7 @@ targets:
         product: NIOSSH
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: tools.bricks.multiplex
+        PRODUCT_BUNDLE_IDENTIFIER: dev.multiplexterm.multiplex
         PRODUCT_NAME: Multiplex
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"

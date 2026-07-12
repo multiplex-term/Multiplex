@@ -260,7 +260,7 @@ private struct KeyFace: ButtonStyle {
 #if DEBUG
 /// Headless-verification hook, same shape as the agent-chip and new-tab
 /// hooks: `xcrun simctl spawn <udid> notifyutil -p
-/// tools.bricks.multiplex.debug.keybar` runs the focused terminal's key-bar
+/// dev.multiplexterm.multiplex.debug.keybar` runs the focused terminal's key-bar
 /// proof sequence without touching the screen.
 @MainActor
 enum KeyBarDebugHook {
@@ -271,7 +271,7 @@ enum KeyBarDebugHook {
         installed = true
         var token: Int32 = 0
         notify_register_dispatch(
-            "tools.bricks.multiplex.debug.keybar", &token, .main
+            "dev.multiplexterm.multiplex.debug.keybar", &token, .main
         ) { _ in
             guard let view = TerminalFocusArbiter.current,
                   let bar = view.inputAccessoryView as? TerminalKeyBar
@@ -396,7 +396,7 @@ extension Notification.Name {
 
 /// Headless-verification hook, same shape as the iPad `KeyBarDebugHook`:
 /// `xcrun simctl spawn <udid> notifyutil -p
-/// tools.bricks.multiplex.debug.keycluster` runs the focused terminal's
+/// dev.multiplexterm.multiplex.debug.keycluster` runs the focused terminal's
 /// key-cluster proof sequence without touching the screen (visionOS ornament
 /// buttons can't be driven synthetically).
 @MainActor
@@ -408,7 +408,7 @@ enum KeyClusterDebugHook {
         installed = true
         var token: Int32 = 0
         notify_register_dispatch(
-            "tools.bricks.multiplex.debug.keycluster", &token, .main
+            "dev.multiplexterm.multiplex.debug.keycluster", &token, .main
         ) { _ in
             NotificationCenter.default.post(name: .multiplexDebugKeyCluster, object: nil)
         }

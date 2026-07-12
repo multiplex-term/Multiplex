@@ -86,7 +86,7 @@ accounts, no analytics, hosts/secrets live in the user's Keychain/iCloud
 Keychain).
 
 Set up the IAP by hand (deliver doesn't manage IAPs): non-consumable
-`tools.bricks.multiplex.pro`, display name **Multiplex Pro**, price tier
+`dev.multiplexterm.multiplex.pro`, display name **Multiplex Pro**, price tier
 $19.99, Family Sharing on if desired, plus its own review screenshot (the
 paywall screen) — IAPs are reviewed with images too. Submit the IAP together
 with the app version.
