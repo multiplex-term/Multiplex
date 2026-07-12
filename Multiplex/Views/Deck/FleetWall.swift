@@ -409,23 +409,38 @@ struct FleetWall: View {
 /// long press are the dropdown now. The name prefills the first free
 /// conventional name for the selection (main / claude / codex, then -2,
 /// -3…) so Create is one tap; picking an agent re-prefills it unless the
-/// user already typed their own.
+/// user already typed their own. An opt-in remembers the submitted launch
+/// choice for the next prompt.
 private struct NewSessionSheet: View {
     let host: Host
     let existingNames: [String]
     let create: (String, AgentKind?) -> Void
 
+    private let preferences: NewSessionPreferences
+
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String
     @State private var agent: AgentKind?
+    @State private var remembersLastLaunch: Bool
 
-    init(host: Host, existingNames: [String], create: @escaping (String, AgentKind?) -> Void) {
+    init(
+        host: Host,
+        existingNames: [String],
+        create: @escaping (String, AgentKind?) -> Void,
+        preferences: NewSessionPreferences = NewSessionPreferences()
+    ) {
         self.host = host
         self.existingNames = existingNames
         self.create = create
+        self.preferences = preferences
+
+        let remembersLastLaunch = preferences.remembersLastLaunch
+        let agent = preferences.rememberedAgent
+        _agent = State(initialValue: agent)
+        _remembersLastLaunch = State(initialValue: remembersLastLaunch)
         _name = State(initialValue: TmuxProbe.uniqueSessionName(
-            base: "main", existing: existingNames))
+            base: agent?.launchCommand ?? "main", existing: existingNames))
     }
 
     var body: some View {
@@ -441,6 +456,7 @@ private struct NewSessionSheet: View {
                         Text(AgentKind.codex.displayName).tag(AgentKind?.some(.codex))
                     }
                     .pickerStyle(.menu)
+                    Toggle("Remember launch choice", isOn: $remembersLastLaunch)
                 } footer: {
                     Text(detail)
                 }
@@ -452,6 +468,10 @@ private struct NewSessionSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create & Attach") {
+                        preferences.save(
+                            remembersLastLaunch: remembersLastLaunch,
+                            agent: agent
+                        )
                         create(name, agent)
                         dismiss()
                     }
