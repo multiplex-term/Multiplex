@@ -1,0 +1,25 @@
+Multiplex is a terminal for people who live inside remote tmux sessions — built native for Apple Vision Pro and iPad.
+
+THE WALL
+Your hosts probe concurrently and every tmux session appears as a live monitor: its actual last lines, one spine segment per window, and a red LIVE tally while you're attached. You see everything running across your fleet before you ever attach. An unreachable host shows NO SIGNAL — reconnect is one tap.
+
+A WINDOW PER SESSION
+Attach opens the session in its own window. On Vision Pro that means real spatial windows — build logs above your editor, a server dashboard across the room. On iPad every terminal is a real scene: Stage Manager, Split View, external displays. Merge windows into tabs and split them back out — the SSH connection, buffer, and scrollback move with the tab, so shells never drop.
+
+BUILT FOR AI AGENT SESSIONS
+Multiplex spots Claude Code and Codex running in your sessions, right on the wall — see which agents are working and which need you. With Pro, get a notification the moment an agent finishes a turn, asks a question, or waits for permission, and drive agents with one-tap command chips (stop, /clear, /compact, /resume, model and mode switches, and more). Drop a file from Files onto a terminal and it uploads to the session's working directory, with the remote path typed in for you — ready for the agent to read.
+
+MOSH BUILT IN
+Switch a host to mosh and the session survives sleep, roaming, and IP changes — a native Swift mosh client, no companion app. Made for a headset that suspends and an iPad that hops networks.
+
+A REAL TERMINAL
+Full xterm-256color emulation, hardware keyboard support, live PTY resize, and seven built-in color themes plus a custom theme editor — background, text, cursor, and all 16 ANSI colors.
+
+PRIVATE BY DESIGN
+Hosts and secrets sync between your devices through iCloud Keychain, end-to-end encrypted. Nothing touches our servers — there are none. No account, no analytics, no tracking.
+
+MULTIPLEX PRO
+One purchase, no subscription: agent notifications and the agent command strip, on all your devices.
+
+WHAT YOU NEED
+A remote host you can reach over SSH (password or OpenSSH ed25519/RSA key) with tmux 1.8 or newer. mosh needs mosh-server on the host. Works with any POSIX login shell.

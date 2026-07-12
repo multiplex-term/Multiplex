@@ -31,7 +31,14 @@ struct SwiftTermView: UIViewRepresentable {
             )
             view.changeScrollback(5000)
             view.keyboardType = .asciiCapable
-            #if !os(visionOS)
+            #if os(visionOS)
+            // SwiftTerm still builds its stock accessory here even though
+            // the floating visionOS keyboard never shows one — and that
+            // invisible accessory's controlModifier shadows the view-level
+            // latch the ornament key cluster sets (`terminalAccessory?.
+            // controlModifier ?? controlModifier`). Drop it.
+            view.inputAccessoryView = nil
+            #else
             // The TALLY key rail replaces SwiftTerm's stock accessory. Tied
             // to the view, so it survives tab moves across windows.
             view.inputAccessoryView = TerminalKeyBar(terminal: view)
@@ -259,7 +266,7 @@ struct SwiftTermView: UIViewRepresentable {
         /// Diagnosis aid for keyboard-geometry bugs: dumps what the
         /// notification reported, what the classifier decided, and where
         /// SwiftUI put the container — read with
-        /// `log show --predicate 'subsystem == "tools.bricks.multiplex"'`.
+        /// `log show --predicate 'subsystem == "app.multiplexterm.multiplex"'`.
         private func logKeyboardDiagnostics(_ notification: Notification, container: UIView, window: UIWindow) {
             let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect ?? .null
             let screenSpace = window.screen.coordinateSpace
@@ -269,7 +276,7 @@ struct SwiftTermView: UIViewRepresentable {
             )
             let logLine = { (tag: String) in
                 let onScreen = container.convert(container.bounds, to: screenSpace)
-                Logger(subsystem: "tools.bricks.multiplex", category: "kbd").debug(
+                Logger(subsystem: "app.multiplexterm.multiplex", category: "kbd").debug(
                     "\(tag, privacy: .public): \(notification.name.rawValue, privacy: .public) end=\(String(describing: endFrame), privacy: .public) docked=\(docked, privacy: .public) container=\(String(describing: onScreen), privacy: .public) constraint=\(self.bottomConstraint?.constant ?? 0, privacy: .public) safeBottom=\(container.safeAreaInsets.bottom, privacy: .public)"
                 )
             }

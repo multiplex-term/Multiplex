@@ -78,7 +78,7 @@ Pass them through simctl with the `SIMCTL_CHILD_` prefix:
 ```sh
 SIMCTL_CHILD_MULTIPLEX_SEED_HOST=.../state/seed.json \
 SIMCTL_CHILD_MULTIPLEX_AUTO_ATTACH=main \
-xcrun simctl launch <UDID> tools.bricks.multiplex
+xcrun simctl launch <UDID> app.multiplexterm.multiplex
 ```
 
 **iOS-app-on-Mac** ("My Mac (Designed for iPad)"): the same hooks work, with
@@ -119,28 +119,32 @@ toggle is gone), so the simulator never auto-shows the software keyboard; an
 app cannot override that placement policy. To see the on-screen keyboard,
 focus the device window and use **Device → Keyboard → Toggle Software
 Keyboard**. In DEBUG builds,
-`xcrun simctl spawn <UDID> notifyutil -p tools.bricks.multiplex.debug.summon`
+`xcrun simctl spawn <UDID> notifyutil -p app.multiplexterm.multiplex.debug.summon`
 presses the focused terminal's "Show keyboard" button headlessly
 (`….debug.dismiss` is its counterpart — resigns the focused terminal so a
 screenshot run can hide the system keyboard),
-`… -p tools.bricks.multiplex.debug.agentchip` taps the focused terminal's
+`… -p app.multiplexterm.multiplex.debug.agentchip` taps the focused terminal's
 first slash chip in the agent helper strip (inject → pump → PTY → tmux), and
-`… -p tools.bricks.multiplex.debug.newtab` runs the focused window's
+`… -p app.multiplexterm.multiplex.debug.newtab` runs the focused window's
 "+ TAB" New Session action (control-connection exec → new-session in the
 pane's cwd → tab append → attach), and
-`… -p tools.bricks.multiplex.debug.keybar` runs the focused terminal's
+`… -p app.multiplexterm.multiplex.debug.keybar` runs the focused terminal's
 iPad key-bar proof sequence — the four symbol keys plus a latched CTRL
 consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`, and
-`… -p tools.bricks.multiplex.debug.scrollup` / `….scrolldown` delivers one
+`… -p app.multiplexterm.multiplex.debug.keycluster` runs the visionOS ornament
+key cluster's proof — ESC and TAB through its send path plus a latched CTRL
+consumed by a typed `c` (a raw-mode `dd bs=1 count=3 | od -c` in the pane
+reads `033 \t 003`; ornament buttons can't be driven synthetically), and
+`… -p app.multiplexterm.multiplex.debug.scrollup` / `….scrolldown` delivers one
 scroll tick to the focused terminal — the same remote path a pan takes
 (wheel report when the app requested mouse tracking, alternate-screen
 cursor key otherwise), so with tmux `mouse on` a scrollup flips
 `#{pane_in_mode}` to 1 (copy-mode scrollback) and scrolldowns exit it, and
-`… -p tools.bricks.multiplex.debug.kbd.float` / `….kbd.dock` /
+`… -p app.multiplexterm.multiplex.debug.kbd.float` / `….kbd.dock` /
 `….kbd.hide` (iPad only) posts a synthetic keyboard-frame notification
 (floating pill / docked panel / hidden) to exercise keyboard avoidance
 headlessly; `SwiftTermView` logs each decision to the unified log
-(subsystem `tools.bricks.multiplex`, category `kbd`, debug level — use
+(subsystem `app.multiplexterm.multiplex`, category `kbd`, debug level — use
 `log stream`, not `log show`).
 
 ## Architecture
@@ -230,7 +234,13 @@ views.
   ordered pump (never a side channel); CTRL rides SwiftTerm's public
   `controlModifier`, consumed by the next typed character — the bar observes
   `.terminalViewControlModifierReset` to release the latch visual. visionOS
-  keeps no accessory (its keyboard floats; SwiftTerm never plumbs one there).
+  keeps no accessory (its keyboard floats and shows none); its ESC / latching
+  CTRL / TAB live in `TerminalKeyCluster`, a chassis slab beside the UMD in
+  the terminal window's bottom ornament, riding the same send path and latch
+  mechanism. ⚠ SwiftTerm still *builds* its stock accessory on visionOS, and
+  `commitTextInput` prefers that (invisible) accessory's `controlModifier`
+  over the view-level one — `SwiftTermView` nils `inputAccessoryView` there
+  so the cluster's latch is authoritative; don't remove that.
 - **"Back to deck" activates the existing deck scene** (`DeckScene.session`);
   `openWindow(id: "deck")` would mint a *new* deck window. Symmetrically, a
   deck tile press focuses the window already attached to that session
@@ -341,7 +351,7 @@ views.
   covers it — the key rail is the input surface while typing.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
   entitlement/CloudKit): secrets *and* a JSON host record per host are
-  synchronizable keychain items (services `tools.bricks.multiplex` /
+  synchronizable keychain items (services `app.multiplexterm.multiplex` /
   `….multiplex.hosts`). Every keychain query must pass
   `kSecAttrSynchronizable(Any)` — omitting it silently matches only
   device-local items. `HostSync.merge` (pure, unit-tested) reconciles
@@ -368,7 +378,7 @@ views.
 
 ## Conventions
 
-- Bundle id `tools.bricks.multiplex`; device families iPad + Vision Pro only
+- Bundle id `app.multiplexterm.multiplex`; device families iPad + Vision Pro only
   (no iPhone). Min visionOS 1.0 / iOS 17.
 - Design tokens live in `Theme.swift` — the TALLY identity: graphite chassis
   (`#17181A`), screens darker than their frames (`#0A0B0C`), tally red

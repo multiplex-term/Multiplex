@@ -1,0 +1,1 @@
+mosh,shell,console,remote,server,devops,homelab,vps,linux,claude,codex,agent,cli,sysadmin,unix

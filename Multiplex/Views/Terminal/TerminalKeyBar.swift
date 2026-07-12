@@ -260,7 +260,7 @@ private struct KeyFace: ButtonStyle {
 #if DEBUG
 /// Headless-verification hook, same shape as the agent-chip and new-tab
 /// hooks: `xcrun simctl spawn <udid> notifyutil -p
-/// tools.bricks.multiplex.debug.keybar` runs the focused terminal's key-bar
+/// app.multiplexterm.multiplex.debug.keybar` runs the focused terminal's key-bar
 /// proof sequence without touching the screen.
 @MainActor
 enum KeyBarDebugHook {
@@ -271,12 +271,146 @@ enum KeyBarDebugHook {
         installed = true
         var token: Int32 = 0
         notify_register_dispatch(
-            "tools.bricks.multiplex.debug.keybar", &token, .main
+            "app.multiplexterm.multiplex.debug.keybar", &token, .main
         ) { _ in
             guard let view = TerminalFocusArbiter.current,
                   let bar = view.inputAccessoryView as? TerminalKeyBar
             else { return }
             bar.debugExercise()
+        }
+    }
+}
+#endif
+#endif
+
+#if os(visionOS)
+import SwiftUI
+import SwiftTerm
+#if DEBUG
+import notify
+#endif
+
+/// The visionOS terminal's key cluster — ESC, a latching CTRL, and TAB on a
+/// chassis slab beside the UMD. The floating visionOS keyboard has none of
+/// these keys and SwiftTerm plumbs no input accessory on visionOS, so the
+/// window's bottom ornament carries them instead.
+///
+/// Same guarantees as the iPad key rail: every key sends through
+/// `TerminalView.send` → the view delegate → the controller's ordered input
+/// pump, and CTRL rides SwiftTerm's `controlModifier`, consumed by the next
+/// character the keyboard types — the cluster observes the reset
+/// notification to release the latch visual.
+struct TerminalKeyCluster: View {
+    var controller: TerminalSessionController?
+
+    @State private var ctrlLatched = false
+
+    private var terminal: TerminalView? { controller?.terminalView }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            key("ESC", "Escape") { $0.send(EscapeSequences.cmdEsc) }
+            key("CTRL", "Control", latched: ctrlLatched) { terminal in
+                let latched = !terminal.controlModifier
+                terminal.controlModifier = latched
+                ctrlLatched = latched
+            }
+            key("TAB", "Tab") { $0.send([0x09]) }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.bezelHi, lineWidth: 1))
+        // SwiftTerm consumes the modifier on the next typed character.
+        .onReceive(NotificationCenter.default.publisher(
+            for: .terminalViewControlModifierReset
+        )) { notification in
+            if notification.object as? TerminalView === terminal {
+                ctrlLatched = false
+            }
+        }
+        // A tab switch swaps the terminal under the cluster — show the
+        // incoming view's own latch state, not the outgoing tab's.
+        .onChange(of: controller?.route.id) {
+            ctrlLatched = terminal?.controlModifier ?? false
+        }
+        #if DEBUG
+        .onAppear { KeyClusterDebugHook.install() }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .multiplexDebugKeyCluster
+        )) { _ in
+            debugExercise()
+        }
+        #endif
+    }
+
+    #if DEBUG
+    /// Headless proof sequence, iPad-keybar style: ESC and TAB through the
+    /// cluster's own send path, then a latched CTRL consumed by a typed 'c'
+    /// — `tmux capture-pane` on the attached session shows `^C`. Only the
+    /// focused terminal's cluster reacts, so one notification never types
+    /// into several shells.
+    private func debugExercise() {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
+        terminal.send(EscapeSequences.cmdEsc)
+        terminal.send([0x09])
+        terminal.controlModifier = true
+        ctrlLatched = true
+        terminal.insertText("c")
+    }
+    #endif
+
+    /// One key: the chassis-chip face at key proportions. Latched (sticky
+    /// CTRL) inverts the face — prominence, not color, marks the held
+    /// modifier, same as the iPad rail.
+    private func key(
+        _ label: String, _ accessibility: String, latched: Bool = false,
+        press: @escaping (TerminalView) -> Void
+    ) -> some View {
+        Button {
+            if let terminal { press(terminal) }
+        } label: {
+            Text(label)
+                .font(.mono(9, weight: .semibold))
+                .kerning(1.1)
+                .foregroundStyle(latched ? Theme.chassis : Theme.signal2)
+                .frame(width: 46, height: 26)
+                .background(latched ? Theme.signal2 : Theme.chassis)
+                .overlay(Rectangle().strokeBorder(
+                    latched ? Theme.signal2 : Theme.bezelHi, lineWidth: 1))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .chassisHover(2)
+        .accessibilityLabel(accessibility)
+        .accessibilityAddTraits(latched ? .isSelected : [])
+    }
+}
+
+#if DEBUG
+extension Notification.Name {
+    static let multiplexDebugKeyCluster = Notification.Name("MultiplexDebugKeyCluster")
+}
+
+/// Headless-verification hook, same shape as the iPad `KeyBarDebugHook`:
+/// `xcrun simctl spawn <udid> notifyutil -p
+/// app.multiplexterm.multiplex.debug.keycluster` runs the focused terminal's
+/// key-cluster proof sequence without touching the screen (visionOS ornament
+/// buttons can't be driven synthetically).
+@MainActor
+enum KeyClusterDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.keycluster", &token, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugKeyCluster, object: nil)
         }
     }
 }

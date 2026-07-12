@@ -13,8 +13,8 @@ import Security
 /// without the key matches only device-local items, so synced secrets would
 /// silently become invisible.
 enum KeychainStore {
-    private static let secretService = "tools.bricks.multiplex"
-    private static let hostRecordService = "tools.bricks.multiplex.hosts"
+    private static let secretService = "app.multiplexterm.multiplex"
+    private static let hostRecordService = "app.multiplexterm.multiplex.hosts"
 
     enum Kind: String {
         case password

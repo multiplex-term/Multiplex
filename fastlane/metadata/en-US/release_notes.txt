@@ -1,0 +1,8 @@
+Multiplex 1.0 — first release.
+
+• The wall: every tmux session as a live monitor, before you attach
+• A spatial window per session on Vision Pro; real scenes on iPad
+• Tabs, merge, and split — shells stay connected while windows move
+• Claude Code / Codex detection, with Pro alerts and one-tap command chips
+• mosh built in: sessions survive sleep, roaming, and IP changes
+• File drops, custom terminal themes, iCloud Keychain host sync

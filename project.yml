@@ -1,6 +1,6 @@
 name: Multiplex
 options:
-  bundleIdPrefix: tools.bricks
+  bundleIdPrefix: app.multiplexterm
   createIntermediateGroups: true
   deploymentTarget:
     iOS: "17.0"
@@ -27,6 +27,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: C6EUM5DVB3
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     # Citadel's swift-nio-ssh fork imports the NIO umbrella module without
     # declaring it as a target dependency; explicit module builds reject that.
@@ -48,13 +49,19 @@ targets:
         product: NIOSSH
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: tools.bricks.multiplex
+        PRODUCT_BUNDLE_IDENTIFIER: app.multiplexterm.multiplex
         PRODUCT_NAME: Multiplex
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "2,7"
         SUPPORTS_MACCATALYST: NO
         GENERATE_INFOPLIST_FILE: YES
+        # Export compliance: the app IMPLEMENTS standard crypto (vendored
+        # swift-nio-ssh + clean-room AES-128-OCB3 for mosh), so it is
+        # non-exempt → YES, self-classified mass-market 5D992.c via the
+        # one-time App Encryption Documentation declaration in ASC (see
+        # docs/appstore/release-playbook.md → Export compliance).
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: YES
         INFOPLIST_KEY_CFBundleDisplayName: Multiplex
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES

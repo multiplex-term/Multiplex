@@ -1,0 +1,130 @@
+# Multiplex fastlane — one app record, two platform binaries (iOS + visionOS).
+#
+# One-time account/app setup lives in SETUP.md. Secrets come from fastlane/.env
+# (copy .env.sample; never committed). Common flows:
+#
+#   bundle exec fastlane tests                 # unit tests (visionOS sim)
+#   bundle exec fastlane beta                  # archive + upload BOTH platforms to TestFlight
+#   bundle exec fastlane beta platform:visionos
+#   bundle exec fastlane store_metadata        # push fastlane/metadata → App Store Connect
+#   bundle exec fastlane store_screenshots     # push fastlane/screenshots → App Store Connect
+#
+# The Xcode project is XcodeGen-generated: every lane regenerates it first, so
+# lanes work from a clean checkout. Build number = git commit count (strictly
+# increasing on main; both platform binaries of one release share it).
+
+default_platform(:ios)
+
+PROJECT = "Multiplex.xcodeproj"
+SCHEME  = "Multiplex"
+
+DESTINATIONS = {
+  "ios"      => { generic: "generic/platform=iOS",      pilot: "ios"  },
+  "visionos" => { generic: "generic/platform=visionOS", pilot: "xros" },
+}.freeze
+
+def asc_api_key
+  app_store_connect_api_key(
+    key_id: ENV.fetch("ASC_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+    key_filepath: ENV.fetch("ASC_KEY_PATH"),
+  )
+end
+
+def build_number
+  sh("git rev-list --count HEAD").strip
+end
+
+def generate_project
+  sh("cd .. && xcodegen generate")
+end
+
+def whats_new
+  path = File.expand_path("testflight-whats-new.txt", __dir__)
+  File.exist?(path) ? File.read(path) : "Internal build."
+end
+
+# Beta App Review contact + demo host. TestFlight external review and App
+# Store review both need a reachable SSH demo host — see
+# docs/appstore/release-playbook.md for the demo-host runbook.
+def beta_review_info
+  {
+    contact_email:      ENV.fetch("REVIEW_CONTACT_EMAIL", "jhen@bricks.tools"),
+    contact_first_name: ENV.fetch("REVIEW_CONTACT_FIRST", "Jhen-Jie"),
+    contact_last_name:  ENV.fetch("REVIEW_CONTACT_LAST", "Hong"),
+    contact_phone:      ENV.fetch("REVIEW_CONTACT_PHONE"),
+    demo_account_name:  ENV.fetch("DEMO_SSH_USER"),
+    demo_account_password: ENV.fetch("DEMO_SSH_PASSWORD"),
+    notes: File.read(File.expand_path("metadata/review_information/notes.txt", __dir__)),
+  }
+end
+
+lane :tests do
+  generate_project
+  run_tests(
+    project: PROJECT,
+    scheme: "MultiplexTests",
+    destination: "platform=visionOS Simulator,name=Apple Vision Pro",
+  )
+end
+
+desc "Archive one platform for App Store distribution (platform:ios|visionos)"
+lane :archive do |options|
+  platform = options.fetch(:platform)
+  dest = DESTINATIONS.fetch(platform)
+  generate_project unless options[:skip_generate]
+  gym(
+    project: PROJECT,
+    scheme: SCHEME,
+    destination: dest[:generic],
+    export_method: "app-store",
+    output_directory: "build/fastlane",
+    output_name: "Multiplex-#{platform}",
+    xcargs: "CURRENT_PROJECT_VERSION=#{build_number} -allowProvisioningUpdates",
+  )
+end
+
+desc "Upload to TestFlight. platform:ios|visionos or omit for both. external:true to distribute to the external group after processing."
+lane :beta do |options|
+  platforms = options[:platform] ? [options[:platform]] : DESTINATIONS.keys
+  generate_project
+  api_key = asc_api_key
+  platforms.each do |platform|
+    ipa = archive(platform: platform, skip_generate: true)
+    upload_to_testflight(
+      api_key: api_key,
+      ipa: ipa,
+      app_platform: DESTINATIONS.fetch(platform)[:pilot],
+      changelog: whats_new,
+      distribute_external: options[:external] == true,
+      groups: options[:external] == true ? [ENV.fetch("TESTFLIGHT_EXTERNAL_GROUP", "Multiplex Beta")] : nil,
+      beta_app_review_info: options[:external] == true ? beta_review_info : nil,
+      # External distribution must wait for processing; internal-only uploads
+      # return as soon as the binary is accepted.
+      skip_waiting_for_build_processing: options[:external] != true,
+    )
+  end
+end
+
+desc "Push fastlane/metadata (App Info copy, review notes) to App Store Connect. Uploads no binary, no screenshots."
+lane :store_metadata do
+  deliver(
+    api_key: asc_api_key,
+    skip_binary_upload: true,
+    skip_screenshots: true,
+    force: true,                             # skip the HTML preview prompt (CI-friendly)
+    precheck_include_in_app_purchases: false, # API-key auth cannot precheck IAP
+  )
+end
+
+desc "Push fastlane/screenshots to App Store Connect (device class inferred from pixel size)."
+lane :store_screenshots do
+  deliver(
+    api_key: asc_api_key,
+    skip_binary_upload: true,
+    skip_metadata: true,
+    overwrite_screenshots: true,
+    force: true,
+    precheck_include_in_app_purchases: false,
+  )
+end

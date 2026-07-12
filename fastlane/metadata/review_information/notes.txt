@@ -1,0 +1,25 @@
+Multiplex is an SSH client: every feature needs a remote host running tmux. A dedicated demo server is provisioned for review, so nothing has to be installed on your side.
+
+CONNECT
+1. Launch Multiplex and tap + HOST.
+2. Name: demo — Address: demo.multiplexterm.dev — Port: 22 — User and password: the demo credentials above (Auth: Password).
+3. Save. The wall probes the host and live session tiles appear within a few seconds — each tile streams that session's actual last screen lines.
+
+CORE FLOW
+- Tap a tile to attach: the session opens in its own window wearing a red LIVE lamp. Attach a second session and place the windows side by side (each terminal is its own spatial window on Vision Pro; on iPad use Stage Manager).
+- MERGE in a terminal's bottom bar pulls another window's session in as a tab; a tab's context menu moves it back out into its own window. The shell stays connected while it moves.
+- DETACH closes the window; tmux keeps the session running, so its tile stays on the wall.
+
+AGENT FEATURES (Pro)
+- The session named "agent" runs a simulated CLI coding agent — a stub process that reproduces Claude Code's terminal signature, so agent detection is reproducible during review. With a real Claude Code or Codex install the behavior is identical.
+- Its tile carries an agent glyph. Attach, and the Pro command strip appears at the bottom of the window; tapping a chip types that command into the session (you'll see it echoed).
+- Notifications permission is requested only to alert you when an agent finishes or asks something while its window isn't focused (Settings → AGENT ALERTS). Optional.
+
+MOSH
+- Edit the demo host, enable MOSH, and re-attach: the connection bootstraps over SSH, then runs over UDP and survives network changes.
+
+PERMISSIONS
+- Local Network: requested only when a host address is on the local network. The demo host is on the public internet, so you may never see this prompt.
+- Notifications: agent alerts, as above.
+
+The demo server is an isolated VM provisioned only for App Review: the account is unprivileged and its outbound traffic is firewalled. It stays online for the entire review period — if it is ever unreachable, contact the email in this app's review contact and it will be fixed within hours.

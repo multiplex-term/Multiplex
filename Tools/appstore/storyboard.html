@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Multiplex — App Store screenshot compositor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* TALLY tokens (DESIGN.md) */
+  :root {
+    --chassis: #17181A;
+    --bezel:   #26282B;
+    --bezelHi: #33363A;
+    --screen:  #0A0B0C;
+    --tally:   #E5484D;
+    --caution: #E0A33E;
+    --ok:      #7FBF9A;
+    --signal:  #F2F3F4;
+    --signal2: #9BA1A6;
+    --signal3: #5C6166;
+    --caps: "Helvetica Neue", "Arial Narrow", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body { background: var(--screen); color: var(--signal); font-family: system-ui, sans-serif; }
+
+  /* ---------- the frame itself (shared by gallery + exact render) ---------- */
+  .frame { position: relative; overflow: hidden; background: var(--chassis); }
+  .frame img.raw { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+  /* visionOS: full-bleed environment capture, floating UMD slab lower third */
+  .frame.visionos .umd {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: calc(var(--u) * 3.2);
+    width: calc(var(--u) * 62);
+    box-shadow: 0 calc(var(--u) * .5) calc(var(--u) * 2.4) rgba(0,0,0,.55);
+  }
+
+  /* iPad: chassis mat, inset screen, UMD docked under the inset */
+  .frame.ipad { display: flex; flex-direction: column; padding: calc(var(--u) * 1.8); gap: 0; }
+  .frame.ipad .inset {
+    position: relative; flex: 1; overflow: hidden;
+    background: var(--screen); border: calc(var(--u) * .06) solid var(--bezelHi);
+  }
+  .frame.ipad .inset img.raw { position: absolute; inset: 0; }
+  .frame.ipad .umd { width: 100%; }
+
+  /* the UMD bar — the app's under-monitor display carrying the caption */
+  .umd {
+    display: flex; align-items: center; gap: calc(var(--u) * 1.4);
+    background: var(--bezel);
+    border: calc(var(--u) * .06) solid var(--bezelHi);
+    padding: calc(var(--u) * 1.1) calc(var(--u) * 1.6);
+  }
+  .umd .headline {
+    flex: 1; font-family: var(--caps); font-weight: 800; font-stretch: condensed;
+    text-transform: uppercase; letter-spacing: .09em;
+    font-size: calc(var(--u) * 1.9); line-height: 1.05; color: var(--signal);
+    white-space: nowrap;
+  }
+  .umd .telemetry {
+    font-family: var(--mono); font-size: calc(var(--u) * 1.05);
+    letter-spacing: .06em; color: var(--signal2); white-space: nowrap;
+  }
+  .umd .lamp {
+    display: flex; align-items: center; gap: calc(var(--u) * .5);
+    font-family: var(--mono); font-size: calc(var(--u) * 1.05); letter-spacing: .1em;
+    white-space: nowrap;
+  }
+  .umd .lamp .dot { width: calc(var(--u) * .8); height: calc(var(--u) * .8); border-radius: 50%; }
+  .lamp.live  { color: var(--tally);   } .lamp.live  .dot { background: var(--tally);   box-shadow: 0 0 calc(var(--u)*.9) var(--tally); }
+  .lamp.needs { color: var(--caution); } .lamp.needs .dot { background: var(--caution); box-shadow: 0 0 calc(var(--u)*.9) var(--caution); }
+  .lamp.plain { color: var(--signal2); } .lamp.plain .dot { background: var(--signal3); }
+
+  /* missing capture → AWAITING CAPTURE (the app's own empty-state voice) */
+  .frame .awaiting {
+    position: absolute; inset: calc(var(--u) * 1.8);
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    gap: calc(var(--u) * 1.2); text-align: center;
+    border: calc(var(--u) * .06) dashed var(--bezelHi); background: var(--screen);
+  }
+  .frame.ipad .awaiting { position: absolute; inset: 0; }
+  .frame.missing img.raw { display: none; }
+  .frame.missing .awaiting { display: flex; }
+  .awaiting .mark { font-family: var(--mono); font-size: calc(var(--u) * 1.3); letter-spacing: .18em; color: var(--signal3); }
+  .awaiting .file { font-family: var(--mono); font-size: calc(var(--u) * 1.0); color: var(--signal2); }
+  .awaiting .stage { max-width: 72%; font-size: calc(var(--u) * 1.05); line-height: 1.5; color: var(--signal2); }
+
+  /* ---------- gallery chrome (not part of the render) ---------- */
+  .gallery { max-width: 1040px; margin: 0 auto; padding: 48px 24px 96px; }
+  .gallery h1 { font-family: var(--caps); font-weight: 800; font-stretch: condensed; text-transform: uppercase; letter-spacing: .08em; font-size: 28px; }
+  .gallery .lede { color: var(--signal2); margin: 12px 0 8px; max-width: 68ch; line-height: 1.55; }
+  .gallery .how { font-family: var(--mono); font-size: 12.5px; color: var(--signal2); background: var(--chassis); border: 1px solid var(--bezelHi); padding: 12px 16px; margin: 20px 0 40px; line-height: 1.7; overflow-x: auto; }
+  .entry { margin-bottom: 56px; }
+  .entry .meta { display: flex; gap: 14px; align-items: baseline; margin-bottom: 10px; flex-wrap: wrap; }
+  .entry .idx { font-family: var(--mono); color: var(--signal3); font-size: 13px; }
+  .entry .name { font-family: var(--caps); font-weight: 800; font-stretch: condensed; text-transform: uppercase; letter-spacing: .08em; font-size: 17px; }
+  .entry .dims { font-family: var(--mono); color: var(--signal2); font-size: 12px; }
+  .entry .stagenote { color: var(--signal2); font-size: 13.5px; line-height: 1.55; margin-top: 10px; max-width: 78ch; }
+  .scalebox { border: 1px solid var(--bezelHi); overflow: hidden; }
+  .scalebox .inner { transform-origin: top left; }
+</style>
+</head>
+<body>
+<script>
+// ============================================================================
+// Frame definitions — keep ids in sync with Tools/appstore/compose.sh.
+// Raw captures: Tools/appstore/raw/<id>.png  (see docs/appstore/screenshots-plan.md)
+// ============================================================================
+const LAMP = { live: ["live", "LIVE"], needs: ["needs", "NEEDS YOU"], plain: ["plain", ""] };
+
+const SHOTS = [
+  { key: "wall",    headline: "Every tmux session, live on the wall",  telemetry: "2 HOSTS · 6 SESSIONS", lamp: "live",
+    stage: "Deck frontmost, 2 host rails, ~6 tiles with staged miniature content (editor, build ✓ lines, logs). One tile LIVE, the agent tile showing its glyph. Nothing behind the app." },
+  { key: "windows", headline: "A spatial window per session",          telemetry: "3 WINDOWS", lamp: "live", ipadHeadline: "Real scenes, Stage Manager ready",
+    stage: "visionOS: three terminals placed around the room at different depths, deck small at left. iPad: two scenes side-by-side in Stage Manager." },
+  { key: "agents",  headline: "Know when your agent needs you",        telemetry: "✳ CLAUDE CODE", lamp: "needs",
+    stage: "Wall with the agent tile in NEEDS YOU (run real claude, let it ask a question). Notification banner visible if you can catch it — that's the money pixel." },
+  { key: "strip",   headline: "One-tap agent commands",                telemetry: "/CLEAR · /COMPACT · STOP · PRO", lamp: "plain",
+    stage: "Attached session running real Claude Code, Pro chip strip visible at window bottom, keyboard hidden." },
+  { key: "mosh",    headline: "mosh built in — roam, sleep, resume",   telemetry: "UDP · RTT 18 MS", lamp: "live",
+    stage: "Host edit sheet with MOSH toggle on, an attached live session behind it." },
+  { key: "tabs",    headline: "Merge windows — shells stay live",      telemetry: "3 TABS · 1 WINDOW", lamp: "live",
+    stage: "One terminal window holding three tabs (source-label strip visible, one tally dot lit). Stage right after a Merge." },
+  { key: "themes",  headline: "Seven themes, plus your own",           telemetry: "GRUVBOX DARK", lamp: "plain",
+    stage: "Settings theme picker open over a Gruvbox-skinned terminal — shows the surface re-skinning while chrome stays chassis." },
+];
+
+const PLATFORMS = [
+  { id: "visionos", w: 3840, h: 2160, label: "Apple Vision Pro" },
+  { id: "ipad",     w: 2752, h: 2064, label: "iPad 13″ (landscape)" },
+];
+
+function frameEl(shot, platform) {
+  const f = document.createElement("div");
+  f.className = `frame ${platform.id}`;
+  f.style.width = platform.w + "px";
+  f.style.height = platform.h + "px";
+  // --u: one UMD unit, proportional to frame width so both sizes stay in tune
+  f.style.setProperty("--u", (platform.w / 100) + "px");
+
+  const [lampClass, lampText] = LAMP[shot.lamp];
+  const headline = (platform.id === "ipad" && shot.ipadHeadline) ? shot.ipadHeadline : shot.headline;
+  const raw = `raw/${platform.id}-${shot.key}.png`;
+  const umd = `
+    <div class="umd">
+      <div class="headline">${headline}</div>
+      <div class="telemetry">${shot.telemetry}</div>
+      ${lampText ? `<div class="lamp ${lampClass}"><span class="dot"></span>${lampText}</div>` : ""}
+    </div>`;
+  const awaiting = `
+    <div class="awaiting">
+      <div class="mark">AWAITING CAPTURE</div>
+      <div class="file">${raw}</div>
+      <div class="stage">${shot.stage}</div>
+    </div>`;
+
+  if (platform.id === "visionos") {
+    f.innerHTML = `<img class="raw" src="${raw}" alt="">${awaiting}${umd}`;
+  } else {
+    f.innerHTML = `<div class="inset"><img class="raw" src="${raw}" alt="">${awaiting}</div>${umd}`;
+  }
+  f.querySelector("img.raw").addEventListener("error", () => f.classList.add("missing"));
+  return f;
+}
+
+const params = new URLSearchParams(location.search);
+const want = params.get("frame"); // e.g. "visionos-wall" → exact-size render for compose.sh
+
+if (want) {
+  const [pid, ...rest] = want.split("-");
+  const shot = SHOTS.find(s => s.key === rest.join("-"));
+  const platform = PLATFORMS.find(p => p.id === pid);
+  if (shot && platform) {
+    document.body.appendChild(frameEl(shot, platform));
+  } else {
+    document.body.textContent = `Unknown frame: ${want}`;
+  }
+} else {
+  const g = document.createElement("div");
+  g.className = "gallery";
+  g.innerHTML = `
+    <h1>Multiplex — App Store screenshot compositor</h1>
+    <p class="lede">Each store image is one monitor of the TALLY wall: the raw capture is
+    the screen, and the app's own UMD bar carries the caption — compressed-caps headline,
+    mono telemetry, captioned tally lamp. Frames without a capture yet show their staging
+    notes in place of the screen.</p>
+    <div class="how">1 &nbsp;Capture raws per docs/appstore/screenshots-plan.md → Tools/appstore/raw/&lt;platform&gt;-&lt;id&gt;.png<br>
+2 &nbsp;./compose.sh &nbsp;→ exact-size PNGs in out/, copied into fastlane/screenshots/en-US/<br>
+3 &nbsp;bundle exec fastlane store_screenshots</div>`;
+  const displayW = 960;
+  for (const platform of PLATFORMS) {
+    SHOTS.forEach((shot, i) => {
+      const entry = document.createElement("div");
+      entry.className = "entry";
+      const scale = displayW / platform.w;
+      entry.innerHTML = `
+        <div class="meta">
+          <span class="idx">${String(i + 1).padStart(2, "0")}</span>
+          <span class="name">${platform.id}-${shot.key}</span>
+          <span class="dims">${platform.label} · ${platform.w}×${platform.h}</span>
+        </div>`;
+      const box = document.createElement("div");
+      box.className = "scalebox";
+      box.style.width = displayW + "px";
+      box.style.height = Math.round(platform.h * scale) + "px";
+      const inner = document.createElement("div");
+      inner.className = "inner";
+      inner.style.transform = `scale(${scale})`;
+      inner.appendChild(frameEl(shot, platform));
+      box.appendChild(inner);
+      entry.appendChild(box);
+      const note = document.createElement("p");
+      note.className = "stagenote";
+      note.textContent = "Stage: " + shot.stage;
+      entry.appendChild(note);
+      g.appendChild(entry);
+    });
+  }
+  document.body.appendChild(g);
+}
+</script>
+</body>
+</html>

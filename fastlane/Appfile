@@ -1,0 +1,6 @@
+# All authentication goes through an App Store Connect API key (see SETUP.md
+# and .env.sample) — no Apple ID password / 2FA in automation.
+app_identifier "app.multiplexterm.multiplex"
+apple_id ENV["FASTLANE_APPLE_ID"] || "jhen@bricks.tools"
+team_id ENV["FASTLANE_TEAM_ID"]      # App Store Connect team
+itc_team_id ENV["FASTLANE_ITC_TEAM_ID"] if ENV["FASTLANE_ITC_TEAM_ID"]

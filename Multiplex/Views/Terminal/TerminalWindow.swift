@@ -264,20 +264,25 @@ struct TerminalWindowRoot: View {
             .ornament(attachmentAnchor: .scene(.bottom), contentAlignment: .center) {
                 VStack(spacing: 10) {
                     helperStrip(floating: true)
-                    UMDBar(
-                        controller: activeController,
-                        title: umdTitle,
-                        mergeSources: mergeSources,
-                        showDeck: showDeck,
-                        summonKeyboard: { activeController?.summonKeyboard() },
-                        fontDown: { fontSize = max(9, fontSize - 1) },
-                        fontUp: { fontSize = min(32, fontSize + 1) },
-                        newSession: { openNewTab(launching: $0) },
-                        merge: { merge($0) },
-                        detach: { detachActiveTab() },
-                        closeSession: activeTabHasSession
-                            ? { confirmingCloseActiveSession = true } : nil
-                    )
+                    HStack(spacing: 10) {
+                        // The floating visionOS keyboard has no ESC/CTRL/TAB;
+                        // the chrome carries them (same send path as typing).
+                        TerminalKeyCluster(controller: activeController)
+                        UMDBar(
+                            controller: activeController,
+                            title: umdTitle,
+                            mergeSources: mergeSources,
+                            showDeck: showDeck,
+                            summonKeyboard: { activeController?.summonKeyboard() },
+                            fontDown: { fontSize = max(9, fontSize - 1) },
+                            fontUp: { fontSize = min(32, fontSize + 1) },
+                            newSession: { openNewTab(launching: $0) },
+                            merge: { merge($0) },
+                            detach: { detachActiveTab() },
+                            closeSession: activeTabHasSession
+                                ? { confirmingCloseActiveSession = true } : nil
+                        )
+                    }
                 }
             }
     }
@@ -755,7 +760,7 @@ extension Notification.Name {
 }
 
 /// Headless-verification hook, same shape as `AgentChipDebugHook`:
-/// `xcrun simctl spawn <udid> notifyutil -p tools.bricks.multiplex.debug.newtab`
+/// `xcrun simctl spawn <udid> notifyutil -p app.multiplexterm.multiplex.debug.newtab`
 /// runs the focused window's + TAB New Session action — control-connection
 /// exec → new-session in the pane's cwd → tab append → attach, without
 /// touching the screen.
@@ -768,7 +773,7 @@ enum NewTabDebugHook {
         installed = true
         var token: Int32 = 0
         notify_register_dispatch(
-            "tools.bricks.multiplex.debug.newtab", &token, .main
+            "app.multiplexterm.multiplex.debug.newtab", &token, .main
         ) { _ in
             NotificationCenter.default.post(name: .multiplexDebugNewTab, object: nil)
         }
