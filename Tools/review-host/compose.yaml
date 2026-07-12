@@ -1,0 +1,32 @@
+# Reviewer demo host — demo.multiplexterm.dev
+#
+#   DEMO_SSH_PASSWORD=… docker compose up -d --build
+#   (or copy .env.sample to .env — git-ignored — and `docker compose up -d`)
+#
+# Host prerequisites (see README.md):
+#   - the VM's own admin sshd must move off port 22 (e.g. Port 2222)
+#   - egress lockdown happens on the HOST via the DOCKER-USER chain — a
+#     container can't firewall itself, and ufw's outgoing policy does not
+#     apply to Docker's FORWARD path. Rules in README §Egress.
+services:
+  demo:
+    build: .
+    image: multiplex-demo
+    container_name: multiplex-demo
+    restart: unless-stopped
+    environment:
+      DEMO_SSH_PASSWORD: ${DEMO_SSH_PASSWORD:?put it in the environment or Tools/review-host/.env}
+    ports:
+      - "22:22"
+      - "60000-60010:60000-60010/udp"   # mosh; the in-image wrapper pins this range
+    volumes:
+      - hostkeys:/etc/ssh/hostkeys
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24         # fixed subnet so the egress rules below are copy-paste
+
+volumes:
+  hostkeys:

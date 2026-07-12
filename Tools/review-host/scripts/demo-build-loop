@@ -1,0 +1,7 @@
+#!/bin/bash
+while true; do
+  for m in core probe wall terminal input themes sync; do
+    printf '  compiling %-10s' "$m"; sleep 1; printf ' ✓\n'
+  done
+  printf '\nbuild ok · 7 modules\n\n'; sleep 8
+done

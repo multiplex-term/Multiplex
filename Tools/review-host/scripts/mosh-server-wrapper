@@ -1,0 +1,6 @@
+#!/bin/sh
+# Pins mosh-server to the container's published UDP range (compose maps
+# 60000-60010). Multiplex's bootstrap runs `mosh-server new …` without -p;
+# this wrapper injects it. The real binary is dpkg-diverted to *.distrib.
+cmd="${1:-new}"; [ $# -gt 0 ] && shift
+exec /usr/bin/mosh-server.distrib "$cmd" -p 60000:60010 "$@"

@@ -1,0 +1,6 @@
+#!/bin/bash
+# Claude Code detection stub (disclosed in the App Review notes): the OSC
+# title is the signal Multiplex keys on; `cat` echoes injected bytes so a
+# helper-chip tap is visible in the pane. Same shape as the dev harness.
+printf '\033]2;✳ Claude Code\033\\'
+exec -a claude cat

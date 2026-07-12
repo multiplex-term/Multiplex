@@ -1,55 +1,79 @@
-# Reviewer demo host
+# Reviewer demo host — demo.multiplexterm.dev
 
-The App Review demo server as code: one cloud-init file, rendered with the
-demo password, pasted into any VPS provider. Policy/why in
+The App Review demo server as code. Policy/why in
 `docs/appstore/release-playbook.md`; reviewer-facing walkthrough in
 `fastlane/metadata/review_information/notes.txt`.
 
+Two ways to run it — same behavior either way: sshd with password auth for
+`review` only (every forwarding surface disabled, no sudo — the binary isn't
+even installed), tmux + mosh-server, and demo sessions (`main`/`build`/
+`logs`/`agent` with the disclosed agent-detection stubs) reseeded on
+boot/start and nightly.
+
 ## Platform
 
-Any plain KVM VPS works — this needs a real VM (persistent tmux, systemd,
-**UDP 60000–61000 for mosh**), which rules out containers/PaaS. Pick a
-**US-West region**: App Review works US Pacific hours, and a nearby host
-makes the demo feel snappy instead of laggy.
+Needs a real VM with **UDP 60000–60010 reachable** (mosh) — rules out
+container PaaS. Pick **US-West**: App Review works US Pacific hours and a
+nearby host keeps the demo snappy.
 
-| Provider | Plan | Region | ~Cost | Notes |
-| --- | --- | --- | --- | --- |
-| **Hetzner Cloud** (recommended) | CPX11 | Hillsboro, OR | ~€4.6/mo | cheapest solid option; clean UI + user-data field |
-| DigitalOcean | Basic 1 GB | SFO3 | $6/mo | most familiar; good docs |
-| Vultr | Cloud Compute 1 GB | LAX/SJC | ~$6/mo | fine alternative |
-| Oracle Cloud | Always Free VM | San Jose | $0 | free, but signup friction and reclamation risk — don't hang a review on it |
+| Provider | Plan | Region | ~Cost |
+| --- | --- | --- | --- |
+| **Hetzner Cloud** (recommended) | CPX11 | Hillsboro, OR | ~€4.6/mo |
+| DigitalOcean | Basic 1 GB | SFO3 | $6/mo |
+| Vultr | Cloud Compute 1 GB | LAX/SJC | ~$6/mo |
 
-~$60/yr to leave running permanently, which is the point: every app
-**update** is reviewed against it too.
+~$60/yr to leave running permanently — every app **update** is reviewed
+against it too.
 
-## Workflow
+## Option A — Docker (recommended)
 
-1. Password into `fastlane/.env` → `DEMO_SSH_PASSWORD` (long random; it's
-   also what you'll paste into App Store Connect's demo-account field).
-2. `./render.sh | pbcopy`
-3. Create the VM: Ubuntu 24.04 LTS, smallest plan, US-West, add your SSH key
-   (root access for you), paste the rendered YAML into the **user-data /
-   cloud-init** field. Boot; cloud-init needs ~2–3 min after first login
-   prompt.
-4. DNS: `A demo.multiplexterm.dev → <VM IP>` (TTL 300). The hostname is baked
-   into the review notes — if you use a different name, update
-   `fastlane/metadata/review_information/notes.txt`.
-5. `./verify.sh` — DNS, port, password login, session inventory,
-   mosh-server, no-sudo check.
-6. App Store Connect: demo account `review` + the password, in both the app
-   version's review details and (via `fastlane beta external:true`) Beta App
-   Review.
+The container is the whole host: `Dockerfile` + `compose.yaml` here.
+Immutable by design — **rebuild, don't patch** (a rebuild pulls Ubuntu
+security updates; host keys persist in a volume so the box keeps its SSH
+identity, which matters once the app ships TOFU pinning).
 
-## Lifecycle
+1. **VM prep** (any Ubuntu box with Docker): move the VM's own admin sshd
+   off port 22 — `Port 2222` in `/etc/ssh/sshd_config`, restart — the
+   container takes 22.
+2. Copy this directory to the box (`scp -r Tools/review-host box:`), put the
+   demo password in `.env` (`cp .env.sample .env`; same value as
+   `fastlane/.env` and ASC's demo-account field).
+3. `docker compose up -d --build`
+4. DNS: `A demo.multiplexterm.dev → <VM IP>` (TTL 300). Different name →
+   update `notes.txt`.
+5. **Egress lockdown** — on the *host*, not in the container (ufw's
+   outgoing policy does not govern Docker's FORWARD path). The running
+   container needs **zero** outbound; replies ride conntrack. Run in this
+   order (each `-I` prepends, so the DROP ends up last):
 
-- **Rebuild, don't repair**: nothing on the box is precious. Delete the VM,
-  re-create with the same user-data (rotate the password in `.env` first if
-  it may have leaked).
-- Sessions reseed on boot and nightly at 08:00 UTC; `verify.sh` the day
-  before every submission.
-- The `agent` session runs the same detection stubs as the dev harness
-  (`✳ Claude Code` pane title / `exec -a` argv) so the Pro strip is
-  demonstrable and deterministic — the review notes say so explicitly.
-- Hardening in the cloud-init: password auth for `review` only with all SSH
-  forwarding off, no sudo, egress firewall (DNS/NTP/DHCP/apt only — the box
-  can't relay spam or proxy traffic), fail2ban, nightly home wipe.
+   ```sh
+   iptables -I DOCKER-USER -s 172.28.0.0/24 -j DROP
+   iptables -I DOCKER-USER -s 172.28.0.0/24 -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+   ```
+
+   (`172.28.0.0/24` is pinned in compose.yaml; persist with
+   `iptables-persistent`.)
+6. `./verify.sh` from the Mac — DNS, port, the real password-auth path,
+   session inventory, mosh-server, no-sudo.
+7. **Cadence**: `docker compose build --no-cache && docker compose up -d`
+   before every submission (and monthly); restarts reseed the sessions —
+   there's also an in-container 24 h reseed loop.
+
+## Option B — cloud-init VM (no Docker)
+
+`cloud-init.yaml` provisions a bare Ubuntu 24.04 VM identically:
+`./render.sh | pbcopy` (injects the password from `fastlane/.env` as a
+SHA-512 hash), paste as user-data at VM creation, DNS, `./verify.sh`.
+Includes ufw egress rules and unattended-upgrades since there's no
+rebuild cycle. ⚠ The demo scripts exist twice: `scripts/` (canonical,
+used by Docker) and embedded in `cloud-init.yaml` — keep them in sync.
+
+## Verified (local Docker run, 2026-07-12)
+
+Built and exercised end-to-end on a Mac: seeds 4 sessions (`agent` pane
+title `✳ Claude Code`, build loop printing ✓ lines); `sshd -T` shows
+password auth **no** globally / **yes** only under `Match User review` with
+all forwarding off; a real `ssh review@…` password login lands in
+`LANG=C.UTF-8` with no locale warnings and `sudo: command not found`;
+`mosh-server` via the wrapper answers `MOSH CONNECT 60000 …` — inside the
+published 60000–60010 range.

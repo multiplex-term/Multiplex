@@ -1,8 +1,11 @@
 #cloud-config
-# Reviewer demo host for Multiplex App Review (see README.md and
-# docs/appstore/release-playbook.md). Render with ./render.sh — it injects
-# the hashed demo password from fastlane/.env — then paste the output as
-# user-data when creating the VM. Target image: Ubuntu 24.04 LTS.
+# Reviewer demo host for Multiplex App Review — the NO-DOCKER path (option B
+# in README.md; the Dockerfile is option A and the recommended one). Render
+# with ./render.sh — it injects the hashed demo password from fastlane/.env —
+# then paste the output as user-data when creating the VM. Ubuntu 24.04 LTS.
+#
+# ⚠ The demo scripts below are embedded copies of scripts/* (Docker uses
+# those directly). If you touch one side, mirror the other.
 #
 # What this provisions:
 #   - user `review`: password SSH login (only user with password auth),

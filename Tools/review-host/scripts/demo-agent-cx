@@ -1,0 +1,3 @@
+#!/bin/bash
+# Codex detection stub — argv[0] "codex" exercises the ps-tree signal.
+exec -a codex cat

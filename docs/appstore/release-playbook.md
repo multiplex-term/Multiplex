@@ -99,16 +99,17 @@ no reachable host is an empty screen → near-certain "we were unable to
 assess" rejection. Providing a host also removes their incentive to type
 random credentials at your error paths.
 
-The runbook is code: **`Tools/review-host/`** — a cloud-init file provisions
-the whole box (platform guidance in its README; short version: any US-West
-VPS, Hetzner Hillsboro recommended, ~$5/mo, left running permanently).
-`render.sh` injects the hashed demo password from `fastlane/.env`;
-`verify.sh` is the pre-submission check. What it provisions: password auth
+The runbook is code: **`Tools/review-host/`** — a Dockerfile + compose file
+run the whole box as a container on any US-West VPS (Hetzner Hillsboro
+recommended, ~$5/mo, left running permanently; **rebuild the image** to pick
+up security updates — host keys persist in a volume, so the SSH identity is
+stable). A cloud-init variant covers Docker-less VMs, and `verify.sh` is the
+pre-submission check either way. What it provisions: password auth
 for `review` only with every SSH forwarding surface disabled, no sudo,
 tmux + mosh-server, boot/nightly-reseeded demo sessions (including the
-disclosed agent stub that makes the Pro strip demonstrable), an
-egress-blocked firewall (DNS/NTP/DHCP/apt only — the box can't relay spam or
-proxy traffic), and fail2ban.
+disclosed agent stub that makes the Pro strip demonstrable), and a
+zero-egress firewall stance (host `DOCKER-USER` rules / in-VM ufw — the box
+can't relay spam or proxy traffic).
 
 Two rules the automation can't enforce: the password goes into **both**
 `fastlane/.env` and ASC's demo-account fields, and `verify.sh` runs the day
