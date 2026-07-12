@@ -222,9 +222,9 @@ struct SwiftTermView: UIViewRepresentable {
                   let constraint = bottomConstraint,
                   let window = container.window
             else { return }
+            let screenSpace = window.screen.coordinateSpace
             var overlap: CGFloat = 0
             if let endFrame = lastKeyboardFrame {
-                let screenSpace = window.screen.coordinateSpace
                 let containerOnScreen = container.convert(container.bounds, to: screenSpace)
                 if KeyboardAvoidance.isDocked(
                     keyboard: endFrame,
@@ -233,9 +233,23 @@ struct SwiftTermView: UIViewRepresentable {
                 ) {
                     let inContainer = container.convert(endFrame, from: screenSpace)
                     overlap = max(0, container.bounds.maxY - inContainer.minY)
-                    overlap = min(overlap, container.bounds.height * 0.8)
                 }
             }
+            // The accessory-only presentation (hardware-keyboard mode) can
+            // report a zero-height end frame pinned to the *window* bottom —
+            // useless geometry — while still rendering the key rail over the
+            // terminal's last rows. The rendered accessory knows its real
+            // frame, so measure it directly whenever it's on screen; the
+            // docked-keyboard path above still wins when a taller keyboard
+            // is up (max), and a hidden accessory has no window and adds 0.
+            if let accessory = terminalView?.inputAccessoryView, accessory.window != nil {
+                let onScreen = accessory.convert(accessory.bounds, to: screenSpace)
+                let inContainer = container.convert(onScreen, from: screenSpace)
+                if inContainer.minY < container.bounds.maxY, inContainer.height > 0 {
+                    overlap = max(overlap, container.bounds.maxY - inContainer.minY)
+                }
+            }
+            overlap = min(overlap, container.bounds.height * 0.8)
             guard constraint.constant != -overlap else { return }
             constraint.constant = -overlap
             container.layoutIfNeeded()

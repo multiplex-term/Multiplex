@@ -328,7 +328,11 @@ views.
   notifications, so the handler re-measures on didChangeFrame, on container
   layout, and again after a settle delay; only bottom-pinned,
   window-spanning frames inset (floating pill/split keyboard reserve
-  nothing). The helper strip rides inside the opt-out, so a docked keyboard
+  nothing). The accessory-only presentation (hardware-keyboard mode) can
+  report a **zero-height** end frame pinned to the window bottom — useless
+  geometry — so the handler also measures the rendered `inputAccessoryView`
+  directly and takes the larger inset; don't trust the notification alone.
+  The helper strip rides inside the opt-out, so a docked keyboard
   covers it — the key rail is the input surface while typing.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
   entitlement/CloudKit): secrets *and* a JSON host record per host are
