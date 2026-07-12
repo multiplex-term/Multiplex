@@ -70,6 +70,9 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 - `MULTIPLEX_AUTO_DROP=<local path>` — after auto-attach, drops that file
   into the first tab (the simulator shares the Mac's filesystem): SFTP
   upload + typed path, the same path a real drag takes.
+- `MULTIPLEX_DECK_SIZE=<w>x<h>` / `MULTIPLEX_TERM_SIZE=<w>x<h>` (visionOS) —
+  override a scene's default window size; the simulator can't drag-resize a
+  window, so screenshot runs (docs/*.png) request the size they need.
 
 Pass them through simctl with the `SIMCTL_CHILD_` prefix:
 ```sh
@@ -117,7 +120,9 @@ app cannot override that placement policy. To see the on-screen keyboard,
 focus the device window and use **Device → Keyboard → Toggle Software
 Keyboard**. In DEBUG builds,
 `xcrun simctl spawn <UDID> notifyutil -p tools.bricks.multiplex.debug.summon`
-presses the focused terminal's "Show keyboard" button headlessly,
+presses the focused terminal's "Show keyboard" button headlessly
+(`….debug.dismiss` is its counterpart — resigns the focused terminal so a
+screenshot run can hide the system keyboard),
 `… -p tools.bricks.multiplex.debug.agentchip` taps the focused terminal's
 first slash chip in the agent helper strip (inject → pump → PTY → tmux), and
 `… -p tools.bricks.multiplex.debug.newtab` runs the focused window's
