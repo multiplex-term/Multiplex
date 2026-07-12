@@ -249,7 +249,8 @@ struct FleetWall: View {
         let grid = LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
             switch model.tmux {
             case .sessions(let sessions):
-                ForEach(sessions) { session in
+                newSessionTile(host)
+                ForEach(sessions.reversed()) { session in
                     SessionTile(
                         session: session,
                         lines: model.miniatures[session.name] ?? [],
@@ -266,7 +267,6 @@ struct FleetWall: View {
                         }
                     )
                 }
-                newSessionTile(host)
             case .noServer:
                 newSessionTile(host)
             case .tmuxMissing:
