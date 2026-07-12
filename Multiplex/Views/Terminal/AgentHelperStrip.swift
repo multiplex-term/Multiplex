@@ -83,7 +83,7 @@ extension Notification.Name {
 }
 
 /// Headless-verification hook: `xcrun simctl spawn <udid> notifyutil -p
-/// dev.multiplexterm.multiplex.debug.agentchip` taps the focused terminal's
+/// app.multiplexterm.multiplex.debug.agentchip` taps the focused terminal's
 /// first slash chip — the whole tap → pump → PTY → tmux → pane path without
 /// touching the screen. The Darwin notification fans out through
 /// NotificationCenter; the terminal window that owns keyboard focus reacts.
@@ -96,7 +96,7 @@ enum AgentChipDebugHook {
         installed = true
         var token: Int32 = 0
         notify_register_dispatch(
-            "dev.multiplexterm.multiplex.debug.agentchip", &token, .main
+            "app.multiplexterm.multiplex.debug.agentchip", &token, .main
         ) { _ in
             NotificationCenter.default.post(name: .multiplexDebugAgentChip, object: nil)
         }

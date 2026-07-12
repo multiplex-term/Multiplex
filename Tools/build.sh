@@ -20,7 +20,7 @@ PROJECT="Multiplex.xcodeproj"
 SCHEME="Multiplex"
 TEST_SCHEME="MultiplexTests"
 DERIVED="DerivedData"
-BUNDLE_ID="dev.multiplexterm.multiplex"
+BUNDLE_ID="app.multiplexterm.multiplex"
 HARNESS="$ROOT/Tools/dev-sshd/harness.sh"
 SEED="$ROOT/Tools/dev-sshd/state/seed.json"
 

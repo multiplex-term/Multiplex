@@ -86,7 +86,7 @@ accounts, no analytics, hosts/secrets live in the user's Keychain/iCloud
 Keychain).
 
 Set up the IAP by hand (deliver doesn't manage IAPs): non-consumable
-`dev.multiplexterm.multiplex.pro`, display name **Multiplex Pro**, price tier
+`app.multiplexterm.multiplex.pro`, display name **Multiplex Pro**, price tier
 $19.99, Family Sharing on if desired, plus its own review screenshot (the
 paywall screen) — IAPs are reviewed with images too. Submit the IAP together
 with the app version.
@@ -140,4 +140,4 @@ The same host and credentials serve Beta App Review (TestFlight external) —
 | 4 | **Privacy policy live** at `multiplexterm.dev/privacy` | URL is required metadata; draft ready in `docs/appstore/privacy-policy.md`. | — |
 | 5 | **Support URL live** at `multiplexterm.dev` | Required; a page with the app name + contact email is enough. | — |
 | 6 | **Encryption declaration** filed in ASC | See above; blocks the first upload otherwise. | ASC |
-| 7 | **App name check** | "Multiplex —  SSH tmux Terminal" must be unclaimed; reserve it when creating the app record. Fallbacks: swap the suffix, keep "Multiplex" first. | ASC |
+| ~~7~~ | ~~App name check~~ **Done 2026-07-12**: record created as "Multiplex — SSH tmux Terminal", bundle id `app.multiplexterm.multiplex`, Apple ID `6790074057`. | — | ASC |

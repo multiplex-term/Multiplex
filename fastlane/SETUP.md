@@ -11,20 +11,16 @@ Users and Access → Integrations → App Store Connect API → **Team Keys** �
 generate (role: **App Manager**). Download the `.p8` into `fastlane/keys/`
 (git-ignored), and put key id / issuer id / path into `.env`.
 
-## 2. Create the app record (once, by hand)
+## 2. App record — ✅ created 2026-07-12
 
-App Store Connect → My Apps → **+** → New App:
+- Name: `Multiplex — SSH tmux Terminal` · SKU `multiplex`
+- Bundle ID: `app.multiplexterm.multiplex` · **Apple ID `6790074057`**
+- Platforms: iOS + visionOS (one record, two platforms)
 
-- Platforms: **iOS** and **visionOS** (both — one record, two platforms)
-- Name: `Multiplex — SSH tmux Terminal` (reserves the name; fallback: change
-  the suffix after the em dash)
-- Primary language: English (U.S.) · Bundle ID: `dev.multiplexterm.multiplex`
-- SKU: `multiplex`
-
-Then, still by hand (deliver doesn't manage these): the encryption
-declaration, App Privacy (**Data Not Collected**), age rating (all None →
-4+), and the IAP (`dev.multiplexterm.multiplex.pro`, non-consumable, $19.99) —
-details in `docs/appstore/release-playbook.md`.
+Still to do by hand in the record (deliver doesn't manage these): the
+encryption declaration, App Privacy (**Data Not Collected**), age rating
+(all None → 4+), and the IAP (`app.multiplexterm.multiplex.pro`,
+non-consumable, $19.99) — details in `docs/appstore/release-playbook.md`.
 
 ## 3. Signing
 

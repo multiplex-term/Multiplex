@@ -100,12 +100,12 @@ enum TerminalFocusArbiter {
 
     #if DEBUG
     /// Headless-verification hook: pressing the keyboard button from the CLI —
-    /// `xcrun simctl spawn <udid> notifyutil -p dev.multiplexterm.multiplex.debug.summon`
+    /// `xcrun simctl spawn <udid> notifyutil -p app.multiplexterm.multiplex.debug.summon`
     /// — drives the same path as the in-window "Show keyboard" button.
     private static func installDebugSummonHook() {
         var token: Int32 = 0
         notify_register_dispatch(
-            "dev.multiplexterm.multiplex.debug.summon", &token, .main
+            "app.multiplexterm.multiplex.debug.summon", &token, .main
         ) { _ in
             MainActor.assumeIsolated {
                 guard let view = current else { return }
@@ -120,14 +120,14 @@ enum TerminalFocusArbiter {
         installDebugScrollHooks()
     }
 
-    /// Headless-capture hook: `… -p dev.multiplexterm.multiplex.debug.dismiss`
+    /// Headless-capture hook: `… -p app.multiplexterm.multiplex.debug.dismiss`
     /// resigns the focused terminal — the only way to hide the system
     /// keyboard in a screenshot run (the simulator can't tap the dismiss
     /// affordance).
     private static func installDebugDismissHook() {
         var token: Int32 = 0
         notify_register_dispatch(
-            "dev.multiplexterm.multiplex.debug.dismiss", &token, .main
+            "app.multiplexterm.multiplex.debug.dismiss", &token, .main
         ) { _ in
             MainActor.assumeIsolated {
                 _ = current?.resignFirstResponder()
@@ -135,14 +135,14 @@ enum TerminalFocusArbiter {
         }
     }
 
-    /// Headless-verification hooks: `… -p dev.multiplexterm.multiplex.debug.scrollup`
+    /// Headless-verification hooks: `… -p app.multiplexterm.multiplex.debug.scrollup`
     /// (or `.scrolldown`) delivers one scroll tick to the focused terminal —
     /// the same remote path a pan takes (wheel report with mouse tracking on,
     /// alternate-screen cursor key otherwise).
     private static func installDebugScrollHooks() {
         var upToken: Int32 = 0
         notify_register_dispatch(
-            "dev.multiplexterm.multiplex.debug.scrollup", &upToken, .main
+            "app.multiplexterm.multiplex.debug.scrollup", &upToken, .main
         ) { _ in
             MainActor.assumeIsolated {
                 current?.performRemoteScroll(ticks: 1)
@@ -150,7 +150,7 @@ enum TerminalFocusArbiter {
         }
         var downToken: Int32 = 0
         notify_register_dispatch(
-            "dev.multiplexterm.multiplex.debug.scrolldown", &downToken, .main
+            "app.multiplexterm.multiplex.debug.scrolldown", &downToken, .main
         ) { _ in
             MainActor.assumeIsolated {
                 current?.performRemoteScroll(ticks: -1)
@@ -187,7 +187,7 @@ enum TerminalFocusArbiter {
         }
         var floatToken: Int32 = 0
         notify_register_dispatch(
-            "dev.multiplexterm.multiplex.debug.kbd.float", &floatToken, .main
+            "app.multiplexterm.multiplex.debug.kbd.float", &floatToken, .main
         ) { _ in
             MainActor.assumeIsolated {
                 guard let screen = current?.window?.screen.bounds else { return }
@@ -197,7 +197,7 @@ enum TerminalFocusArbiter {
         }
         var dockToken: Int32 = 0
         notify_register_dispatch(
-            "dev.multiplexterm.multiplex.debug.kbd.dock", &dockToken, .main
+            "app.multiplexterm.multiplex.debug.kbd.dock", &dockToken, .main
         ) { _ in
             MainActor.assumeIsolated {
                 guard let screen = current?.window?.screen.bounds else { return }
@@ -207,7 +207,7 @@ enum TerminalFocusArbiter {
         }
         var hideToken: Int32 = 0
         notify_register_dispatch(
-            "dev.multiplexterm.multiplex.debug.kbd.hide", &hideToken, .main
+            "app.multiplexterm.multiplex.debug.kbd.hide", &hideToken, .main
         ) { _ in
             MainActor.assumeIsolated {
                 guard let screen = current?.window?.screen.bounds else { return }
