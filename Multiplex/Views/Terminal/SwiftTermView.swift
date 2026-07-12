@@ -31,7 +31,14 @@ struct SwiftTermView: UIViewRepresentable {
             )
             view.changeScrollback(5000)
             view.keyboardType = .asciiCapable
-            #if !os(visionOS)
+            #if os(visionOS)
+            // SwiftTerm still builds its stock accessory here even though
+            // the floating visionOS keyboard never shows one — and that
+            // invisible accessory's controlModifier shadows the view-level
+            // latch the ornament key cluster sets (`terminalAccessory?.
+            // controlModifier ?? controlModifier`). Drop it.
+            view.inputAccessoryView = nil
+            #else
             // The TALLY key rail replaces SwiftTerm's stock accessory. Tied
             // to the view, so it survives tab moves across windows.
             view.inputAccessoryView = TerminalKeyBar(terminal: view)

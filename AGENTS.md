@@ -131,6 +131,10 @@ pane's cwd → tab append → attach), and
 `… -p tools.bricks.multiplex.debug.keybar` runs the focused terminal's
 iPad key-bar proof sequence — the four symbol keys plus a latched CTRL
 consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`, and
+`… -p tools.bricks.multiplex.debug.keycluster` runs the visionOS ornament
+key cluster's proof — ESC and TAB through its send path plus a latched CTRL
+consumed by a typed `c` (a raw-mode `dd bs=1 count=3 | od -c` in the pane
+reads `033 \t 003`; ornament buttons can't be driven synthetically), and
 `… -p tools.bricks.multiplex.debug.scrollup` / `….scrolldown` delivers one
 scroll tick to the focused terminal — the same remote path a pan takes
 (wheel report when the app requested mouse tracking, alternate-screen
@@ -230,7 +234,13 @@ views.
   ordered pump (never a side channel); CTRL rides SwiftTerm's public
   `controlModifier`, consumed by the next typed character — the bar observes
   `.terminalViewControlModifierReset` to release the latch visual. visionOS
-  keeps no accessory (its keyboard floats; SwiftTerm never plumbs one there).
+  keeps no accessory (its keyboard floats and shows none); its ESC / latching
+  CTRL / TAB live in `TerminalKeyCluster`, a chassis slab beside the UMD in
+  the terminal window's bottom ornament, riding the same send path and latch
+  mechanism. ⚠ SwiftTerm still *builds* its stock accessory on visionOS, and
+  `commitTextInput` prefers that (invisible) accessory's `controlModifier`
+  over the view-level one — `SwiftTermView` nils `inputAccessoryView` there
+  so the cluster's latch is authoritative; don't remove that.
 - **"Back to deck" activates the existing deck scene** (`DeckScene.session`);
   `openWindow(id: "deck")` would mint a *new* deck window. Symmetrically, a
   deck tile press focuses the window already attached to that session

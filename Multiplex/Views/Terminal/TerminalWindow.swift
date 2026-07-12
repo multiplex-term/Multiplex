@@ -264,20 +264,25 @@ struct TerminalWindowRoot: View {
             .ornament(attachmentAnchor: .scene(.bottom), contentAlignment: .center) {
                 VStack(spacing: 10) {
                     helperStrip(floating: true)
-                    UMDBar(
-                        controller: activeController,
-                        title: umdTitle,
-                        mergeSources: mergeSources,
-                        showDeck: showDeck,
-                        summonKeyboard: { activeController?.summonKeyboard() },
-                        fontDown: { fontSize = max(9, fontSize - 1) },
-                        fontUp: { fontSize = min(32, fontSize + 1) },
-                        newSession: { openNewTab(launching: $0) },
-                        merge: { merge($0) },
-                        detach: { detachActiveTab() },
-                        closeSession: activeTabHasSession
-                            ? { confirmingCloseActiveSession = true } : nil
-                    )
+                    HStack(spacing: 10) {
+                        // The floating visionOS keyboard has no ESC/CTRL/TAB;
+                        // the chrome carries them (same send path as typing).
+                        TerminalKeyCluster(controller: activeController)
+                        UMDBar(
+                            controller: activeController,
+                            title: umdTitle,
+                            mergeSources: mergeSources,
+                            showDeck: showDeck,
+                            summonKeyboard: { activeController?.summonKeyboard() },
+                            fontDown: { fontSize = max(9, fontSize - 1) },
+                            fontUp: { fontSize = min(32, fontSize + 1) },
+                            newSession: { openNewTab(launching: $0) },
+                            merge: { merge($0) },
+                            detach: { detachActiveTab() },
+                            closeSession: activeTabHasSession
+                                ? { confirmingCloseActiveSession = true } : nil
+                        )
+                    }
                 }
             }
     }
