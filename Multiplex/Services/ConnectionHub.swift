@@ -126,7 +126,12 @@ final class HostConnectionModel {
 
     private func ensureConnection() async throws -> SSHConnection {
         if let connection, phase == .connected { return connection }
-        phase = .connecting
+        // Only surface .connecting before the first settled phase — same
+        // rule as `.probing` above. The wall retries failed hosts every few
+        // seconds, and flashing LINKING ↔ UNREACHABLE each cycle makes the
+        // rail churn; a settled UNREACHABLE keeps reading UNREACHABLE until
+        // a retry actually lands.
+        if phase == .idle { phase = .connecting }
         let fresh = SSHConnection(host: host, secrets: .load(for: host))
         do {
             try await deadlined(seconds: Self.connectDeadline) { try await fresh.connect() }

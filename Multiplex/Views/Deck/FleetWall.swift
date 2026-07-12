@@ -18,7 +18,6 @@ struct FleetWall: View {
     var openSettings: () -> Void
 
     @State private var namingHost: Host?
-    @State private var newSessionName = ""
     @State private var deleteTarget: DeleteTarget?
     @State private var removingHost: Host?
 
@@ -48,18 +47,14 @@ struct FleetWall: View {
         }
         .background(Theme.chassis.ignoresSafeArea())
         .task(id: store.hosts.map(\.id)) { await runFeed() }
-        .alert(
-            "New Session",
-            isPresented: Binding(
-                get: { namingHost != nil },
-                set: { if !$0 { namingHost = nil } }
+        .sheet(item: $namingHost) { host in
+            NewSessionSheet(
+                host: host,
+                existingNames: hub.model(for: host).tmux.sessions.map(\.name),
+                create: { name, agent in
+                    createSession(on: host, named: name, launching: agent)
+                }
             )
-        ) {
-            TextField("Name", text: $newSessionName)
-            Button("Create & Attach") { createSession() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Creates a tmux session on \(namingHost?.name ?? "the host") and attaches to it.")
         }
         .alert(
             "Delete Session",
@@ -171,7 +166,8 @@ struct FleetWall: View {
     }
 
     private func rail(_ host: Host, model: HostConnectionModel) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let connected = model.phase == .connected
+        return VStack(alignment: .leading, spacing: 10) {
             Rectangle().fill(Theme.bezel).frame(height: 1)
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 ChassisLabel(host.name, size: 12)
@@ -180,11 +176,16 @@ struct FleetWall: View {
                     .foregroundStyle(Theme.signal2)
                 Spacer()
                 railStatus(model)
-                if model.phase == .connected {
-                    ChassisChip("SHELL") {
-                        open(TerminalRoute(hostID: host.id, mode: .shell))
-                    }
+                // The SHELL chip is the row's tallest element — inserting/
+                // removing it with the phase resizes the whole rail. Keep
+                // its slot in every phase and fade it instead.
+                ChassisChip("SHELL") {
+                    open(TerminalRoute(hostID: host.id, mode: .shell))
                 }
+                .opacity(connected ? 1 : 0)
+                .allowsHitTesting(connected)
+                .disabled(!connected)
+                .accessibilityHidden(!connected)
                 hostMenu(host)
             }
             .contentShape(Rectangle())
@@ -218,27 +219,27 @@ struct FleetWall: View {
             case .connected:
                 railLabel("CONNECTED", dot: Theme.ok)
             case .connecting:
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .scaleEffect(0.7)
-                        .frame(width: 8, height: 8)
-                    Text("LINKING").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal2)
-                }
+                // Same dot anatomy as every other phase — a ProgressView is
+                // intrinsically taller and its spinner draws outside the
+                // slot. The pulse carries the "in flight" signal instead.
+                railLabel("LINKING", dot: Theme.signal2, pulsing: true)
             case .failed:
                 railLabel("UNREACHABLE", dot: Theme.signal3, text: Theme.signal3)
             case .idle:
                 Text("STANDBY").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal3)
             }
         }
-        // ProgressView is intrinsically taller than the dot/text variants.
-        // Keep every phase in one fixed-height slot so LINKING cannot move the rail.
+        // Every phase shares one fixed-height slot so no phase change can
+        // move the rail.
         .frame(height: 12)
     }
 
-    private func railLabel(_ text: String, dot: Color, text textColor: Color = Theme.signal2) -> some View {
+    private func railLabel(
+        _ text: String, dot: Color, text textColor: Color = Theme.signal2, pulsing: Bool = false
+    ) -> some View {
         HStack(spacing: 6) {
             Circle().fill(dot).frame(width: 6, height: 6)
+                .modifier(DotPulse(active: pulsing))
             Text(text).font(.mono(9)).kerning(1).foregroundStyle(textColor)
         }
     }
@@ -248,7 +249,8 @@ struct FleetWall: View {
         let grid = LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
             switch model.tmux {
             case .sessions(let sessions):
-                ForEach(sessions) { session in
+                newSessionTile(host)
+                ForEach(sessions.reversed()) { session in
                     SessionTile(
                         session: session,
                         lines: model.miniatures[session.name] ?? [],
@@ -265,7 +267,6 @@ struct FleetWall: View {
                         }
                     )
                 }
-                newSessionTile(host)
             case .noServer:
                 newSessionTile(host)
             case .tmuxMissing:
@@ -287,7 +288,7 @@ struct FleetWall: View {
 
     private func newSessionTile(_ host: Host) -> some View {
         Button {
-            promptNewSession(host)
+            namingHost = host
         } label: {
             VStack {
                 ChassisLabel("+ New Session", size: 11, color: Theme.signal2)
@@ -301,14 +302,6 @@ struct FleetWall: View {
         }
         .buttonStyle(.plain)
         .chassisHover(4)
-        // Long press: the agent quick options — a session named after the
-        // agent, its launch command already typed. Same menu as the
-        // terminal window's + TAB.
-        .contextMenu {
-            Button("New Session…") { promptNewSession(host) }
-            Button("New Session + Claude Code") { createAgentSession(on: host, agent: .claudeCode) }
-            Button("New Session + Codex") { createAgentSession(on: host, agent: .codex) }
-        }
         .accessibilityLabel("New session on \(host.name)")
     }
 
@@ -373,36 +366,27 @@ struct FleetWall: View {
         Task { await model.killSession(target.session) }
     }
 
-    private func promptNewSession(_ host: Host) {
-        // Prefill the first free conventional name (main, main-2, …) so
-        // Create is one tap; `.create` uses `new-session -A`, so a fresh
-        // name also guarantees a new session, not a silent attach.
-        newSessionName = TmuxProbe.uniqueSessionName(
-            base: "main",
-            existing: hub.model(for: host).tmux.sessions.map(\.name))
-        namingHost = host
-    }
-
-    private func createSession() {
-        guard let host = namingHost else { return }
-        let name = TmuxProbe.sanitizedSessionName(newSessionName)
-        open(TerminalRoute(hostID: host.id, mode: .create(sessionName: name)))
-    }
-
-    /// Quick option from the tile's long press: mint a session named after
-    /// the agent (claude, claude-2, …) in $HOME with its launch command
-    /// typed into the fresh shell, then attach in a new window. Creation
-    /// failures surface on the rail — `createSession` marks the host failed
-    /// when the control connection is the problem.
-    private func createAgentSession(on host: Host, agent: AgentKind) {
+    /// The prompt's Create & Attach. A plain session rides the `.create`
+    /// route (`new-session -A` in the attaching window); an agent session
+    /// is minted over the control connection first — its launch command
+    /// typed into the fresh shell — then attached, so the attach can't
+    /// race the send-keys. Creation failures surface on the rail —
+    /// `createSession` marks the host failed when the control connection
+    /// is the problem.
+    private func createSession(on host: Host, named rawName: String, launching agent: AgentKind?) {
+        let name = TmuxProbe.sanitizedSessionName(rawName)
+        guard let agent else {
+            open(TerminalRoute(hostID: host.id, mode: .create(sessionName: name)))
+            return
+        }
         let model = hub.model(for: host)
         Task {
-            guard let name = await model.createSession(
-                base: agent.launchCommand,
+            guard let created = await model.createSession(
+                base: name,
                 inDirectoryOf: nil,
                 typing: agent.launchCommand
             ) else { return }
-            open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: name)))
+            open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: created)))
         }
     }
 
@@ -417,6 +401,101 @@ struct FleetWall: View {
 
     private func open(_ route: TerminalRoute) {
         openWindow(id: "terminal", value: TerminalWindowRoute(tab: route))
+    }
+}
+
+/// The wall's New Session prompt: a name plus what launches in the fresh
+/// shell — the agent quick options that used to hide behind the tile's
+/// long press are the dropdown now. The name prefills the first free
+/// conventional name for the selection (main / claude / codex, then -2,
+/// -3…) so Create is one tap; picking an agent re-prefills it unless the
+/// user already typed their own. An opt-in remembers the submitted launch
+/// choice for the next prompt.
+private struct NewSessionSheet: View {
+    let host: Host
+    let existingNames: [String]
+    let create: (String, AgentKind?) -> Void
+
+    private let preferences: NewSessionPreferences
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name: String
+    @State private var agent: AgentKind?
+    @State private var remembersLastLaunch: Bool
+
+    init(
+        host: Host,
+        existingNames: [String],
+        create: @escaping (String, AgentKind?) -> Void,
+        preferences: NewSessionPreferences = NewSessionPreferences()
+    ) {
+        self.host = host
+        self.existingNames = existingNames
+        self.create = create
+        self.preferences = preferences
+
+        let remembersLastLaunch = preferences.remembersLastLaunch
+        let agent = preferences.rememberedAgent
+        _agent = State(initialValue: agent)
+        _remembersLastLaunch = State(initialValue: remembersLastLaunch)
+        _name = State(initialValue: TmuxProbe.uniqueSessionName(
+            base: agent?.launchCommand ?? "main", existing: existingNames))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name", text: $name)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    Picker("Launches", selection: $agent) {
+                        Text("Shell only").tag(AgentKind?.none)
+                        Text(AgentKind.claudeCode.displayName).tag(AgentKind?.some(.claudeCode))
+                        Text(AgentKind.codex.displayName).tag(AgentKind?.some(.codex))
+                    }
+                    .pickerStyle(.menu)
+                    Toggle("Remember launch choice", isOn: $remembersLastLaunch)
+                } footer: {
+                    Text(detail)
+                }
+            }
+            .navigationTitle("New Session")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create & Attach") {
+                        preferences.save(
+                            remembersLastLaunch: remembersLastLaunch,
+                            agent: agent
+                        )
+                        create(name, agent)
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .onChange(of: agent) { previous, selected in
+            let untouched = name == prefill(for: previous)
+            if untouched { name = prefill(for: selected) }
+        }
+    }
+
+    private func prefill(for agent: AgentKind?) -> String {
+        TmuxProbe.uniqueSessionName(
+            base: agent?.launchCommand ?? "main", existing: existingNames)
+    }
+
+    private var detail: String {
+        var text = "Creates a tmux session on \(host.name) and attaches to it."
+        if let agent {
+            text += " Types “\(agent.launchCommand)” into the fresh shell to start \(agent.displayName)."
+        }
+        return text
     }
 }
 
@@ -443,6 +522,26 @@ struct HatchedScreen: View {
 /// window already attached to this session, or attaches in a new one;
 /// long press offers an explicit new-window attach (a second synced
 /// tmux client) alongside delete.
+/// Slow opacity pulse for a status dot — activity without geometry, so the
+/// rail can signal "in flight" from inside a fixed-height slot. Static under
+/// Reduce Motion.
+private struct DotPulse: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var active: Bool
+
+    func body(content: Content) -> some View {
+        if active && !reduceMotion {
+            content.phaseAnimator([1.0, 0.25]) { dot, opacity in
+                dot.opacity(opacity)
+            } animation: { _ in
+                .easeInOut(duration: 0.7)
+            }
+        } else {
+            content
+        }
+    }
+}
+
 private struct SessionTile: View {
     let session: TmuxSession
     let lines: [String]
@@ -500,10 +599,16 @@ private struct SessionTile: View {
     private var umd: some View {
         HStack(spacing: 9) {
             ChassisLabel(session.name, size: 12)
-            if session.isAttached {
-                TallyLamp()
-            } else {
+            // The badge is taller than the lamp, so swapping them resizes
+            // the tile on every attach/detach. The badge keeps its slot in
+            // both states (hidden under the lamp) to pin the row's height.
+            ZStack(alignment: .leading) {
                 ChassisBadge("ATTACH")
+                    .opacity(session.isAttached ? 0 : 1)
+                    .accessibilityHidden(session.isAttached)
+                if session.isAttached {
+                    TallyLamp()
+                }
             }
             // An agent blocked on the user outranks everything else the
             // tile could say — caution, captioned, never tally red.

@@ -116,7 +116,23 @@ enum TerminalFocusArbiter {
                 summon(view, force: true)
             }
         }
+        installDebugDismissHook()
         installDebugScrollHooks()
+    }
+
+    /// Headless-capture hook: `… -p tools.bricks.multiplex.debug.dismiss`
+    /// resigns the focused terminal — the only way to hide the system
+    /// keyboard in a screenshot run (the simulator can't tap the dismiss
+    /// affordance).
+    private static func installDebugDismissHook() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "tools.bricks.multiplex.debug.dismiss", &token, .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                _ = current?.resignFirstResponder()
+            }
+        }
     }
 
     /// Headless-verification hooks: `… -p tools.bricks.multiplex.debug.scrollup`

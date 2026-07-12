@@ -70,6 +70,9 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 - `MULTIPLEX_AUTO_DROP=<local path>` — after auto-attach, drops that file
   into the first tab (the simulator shares the Mac's filesystem): SFTP
   upload + typed path, the same path a real drag takes.
+- `MULTIPLEX_DECK_SIZE=<w>x<h>` / `MULTIPLEX_TERM_SIZE=<w>x<h>` (visionOS) —
+  override a scene's default window size; the simulator can't drag-resize a
+  window, so screenshot runs (docs/*.png) request the size they need.
 
 Pass them through simctl with the `SIMCTL_CHILD_` prefix:
 ```sh
@@ -117,15 +120,21 @@ app cannot override that placement policy. To see the on-screen keyboard,
 focus the device window and use **Device → Keyboard → Toggle Software
 Keyboard**. In DEBUG builds,
 `xcrun simctl spawn <UDID> notifyutil -p tools.bricks.multiplex.debug.summon`
-presses the focused terminal's "Show keyboard" button headlessly,
+presses the focused terminal's "Show keyboard" button headlessly
+(`….debug.dismiss` is its counterpart — resigns the focused terminal so a
+screenshot run can hide the system keyboard),
 `… -p tools.bricks.multiplex.debug.agentchip` taps the focused terminal's
 first slash chip in the agent helper strip (inject → pump → PTY → tmux), and
-`… -p tools.bricks.multiplex.debug.newtab` presses the focused window's
-"+ TAB" primary action (control-connection exec → new-session in the
+`… -p tools.bricks.multiplex.debug.newtab` runs the focused window's
+"+ TAB" New Session action (control-connection exec → new-session in the
 pane's cwd → tab append → attach), and
 `… -p tools.bricks.multiplex.debug.keybar` runs the focused terminal's
 iPad key-bar proof sequence — the four symbol keys plus a latched CTRL
 consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`, and
+`… -p tools.bricks.multiplex.debug.keycluster` runs the visionOS ornament
+key cluster's proof — ESC and TAB through its send path plus a latched CTRL
+consumed by a typed `c` (a raw-mode `dd bs=1 count=3 | od -c` in the pane
+reads `033 \t 003`; ornament buttons can't be driven synthetically), and
 `… -p tools.bricks.multiplex.debug.scrollup` / `….scrolldown` delivers one
 scroll tick to the focused terminal — the same remote path a pan takes
 (wheel report when the app requested mouse tracking, alternate-screen
@@ -225,7 +234,13 @@ views.
   ordered pump (never a side channel); CTRL rides SwiftTerm's public
   `controlModifier`, consumed by the next typed character — the bar observes
   `.terminalViewControlModifierReset` to release the latch visual. visionOS
-  keeps no accessory (its keyboard floats; SwiftTerm never plumbs one there).
+  keeps no accessory (its keyboard floats and shows none); its ESC / latching
+  CTRL / TAB live in `TerminalKeyCluster`, a chassis slab beside the UMD in
+  the terminal window's bottom ornament, riding the same send path and latch
+  mechanism. ⚠ SwiftTerm still *builds* its stock accessory on visionOS, and
+  `commitTextInput` prefers that (invisible) accessory's `controlModifier`
+  over the view-level one — `SwiftTermView` nils `inputAccessoryView` there
+  so the cluster's latch is authoritative; don't remove that.
 - **"Back to deck" activates the existing deck scene** (`DeckScene.session`);
   `openWindow(id: "deck")` would mint a *new* deck window. Symmetrically, a
   deck tile press focuses the window already attached to that session
@@ -328,7 +343,11 @@ views.
   notifications, so the handler re-measures on didChangeFrame, on container
   layout, and again after a settle delay; only bottom-pinned,
   window-spanning frames inset (floating pill/split keyboard reserve
-  nothing). The helper strip rides inside the opt-out, so a docked keyboard
+  nothing). The accessory-only presentation (hardware-keyboard mode) can
+  report a **zero-height** end frame pinned to the window bottom — useless
+  geometry — so the handler also measures the rendered `inputAccessoryView`
+  directly and takes the larger inset; don't trust the notification alone.
+  The helper strip rides inside the opt-out, so a docked keyboard
   covers it — the key rail is the input surface while typing.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
   entitlement/CloudKit): secrets *and* a JSON host record per host are
