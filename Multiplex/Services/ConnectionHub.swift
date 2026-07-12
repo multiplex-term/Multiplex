@@ -95,10 +95,12 @@ final class HostConnectionModel {
     private func performRefresh() async {
         do {
             let connection = try await ensureConnection()
-            // Only surface .probing before the first result — the deck wall
-            // re-probes every few seconds, and flipping state on each cycle
-            // would crossfade live tiles against the acquiring placeholder.
-            if case .sessions = tmux {} else { tmux = .probing }
+            // Only surface .probing before the first result — every later
+            // state (sessions, no server, unreachable) is a settled answer.
+            // The deck wall re-probes every few seconds, and flipping a
+            // settled tile back to the acquiring placeholder each cycle
+            // makes the wall shake; the next parse/failure overwrites it.
+            if case .unknown = tmux { tmux = .probing }
             let output = try await deadlined { try await connection.exec(TmuxProbe.probeCommand) }
             tmux = TmuxProbe.parse(output)
             lastRefreshed = Date()

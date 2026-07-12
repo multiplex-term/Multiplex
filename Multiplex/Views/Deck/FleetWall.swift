@@ -374,7 +374,12 @@ struct FleetWall: View {
     }
 
     private func promptNewSession(_ host: Host) {
-        newSessionName = ""
+        // Prefill the first free conventional name (main, main-2, …) so
+        // Create is one tap; `.create` uses `new-session -A`, so a fresh
+        // name also guarantees a new session, not a silent attach.
+        newSessionName = TmuxProbe.uniqueSessionName(
+            base: "main",
+            existing: hub.model(for: host).tmux.sessions.map(\.name))
         namingHost = host
     }
 
