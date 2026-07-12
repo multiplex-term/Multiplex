@@ -144,6 +144,10 @@ The same host and credentials serve Beta App Review (TestFlight external) —
   4.8 (Login Services) and account-deletion rules don't apply.
 - **visionOS screenshots** must show the app in an environment capture, not
   flat UI on black — the compositor handles this.
+- **Pro features during review** — mosh and the unmetered strip sit behind
+  the IAP; reviewers unlock it with a free sandbox purchase (the review
+  notes say so), and the free tier's daily strip taps keep the agent strip
+  demonstrable even without it.
 
 ## Ship-blockers — do these BEFORE external beta / submission
 
@@ -151,7 +155,7 @@ The same host and credentials serve Beta App Review (TestFlight external) —
 | --- | --- | --- | --- |
 | 1 | **Host-key TOFU pinning** | `.acceptAnything()` is fine for the sim, indefensible for real users' credentials; also the one security claim reviewers/users will test. | Citadel `.custom` validator; README "Known limits" |
 | 2 | **Real StoreKit 2 purchase** (or hide Pro UI) | A visible "coming soon" purchase button is rejectable (2.1 completeness / 2.3 accuracy). `EntitlementStore` is a stub; RELEASE builds lock Pro with no way to buy. | `Services/EntitlementStore.swift`, `ProPaywallView` |
-| 3 | **Ship the free-tier cap and IAP together** | Never un-free a feature post-launch (`local-plan/pricing-strategy.md` §7). Decide the host-cap question before v1.0, not after. | pricing-strategy.md |
+| 3 | **Ship all free-tier gates and the IAP together** | Never un-free a feature post-launch (`local-plan/pricing-strategy.md` §7). Gate line decided 2026-07-12: host cap, mosh gate, agent-strip taste meter (§5 there). | pricing-strategy.md |
 | 4 | **Privacy policy live** at `multiplexterm.dev/privacy` | URL is required metadata; draft ready in `docs/appstore/privacy-policy.md`. | — |
 | 5 | **Support URL live** at `multiplexterm.dev` | Required; a page with the app name + contact email is enough. | — |
 | 6 | **France excluded or French encryption declaration filed** | Apple requires the French declaration for standard app-provided crypto only when distributing in France. | ASC availability / App Encryption Documentation |
