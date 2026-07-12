@@ -18,7 +18,6 @@ struct FleetWall: View {
     var openSettings: () -> Void
 
     @State private var namingHost: Host?
-    @State private var newSessionName = ""
     @State private var deleteTarget: DeleteTarget?
     @State private var removingHost: Host?
 
@@ -48,18 +47,14 @@ struct FleetWall: View {
         }
         .background(Theme.chassis.ignoresSafeArea())
         .task(id: store.hosts.map(\.id)) { await runFeed() }
-        .alert(
-            "New Session",
-            isPresented: Binding(
-                get: { namingHost != nil },
-                set: { if !$0 { namingHost = nil } }
+        .sheet(item: $namingHost) { host in
+            NewSessionSheet(
+                host: host,
+                existingNames: hub.model(for: host).tmux.sessions.map(\.name),
+                create: { name, agent in
+                    createSession(on: host, named: name, launching: agent)
+                }
             )
-        ) {
-            TextField("Name", text: $newSessionName)
-            Button("Create & Attach") { createSession() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Creates a tmux session on \(namingHost?.name ?? "the host") and attaches to it.")
         }
         .alert(
             "Delete Session",
@@ -287,7 +282,7 @@ struct FleetWall: View {
 
     private func newSessionTile(_ host: Host) -> some View {
         Button {
-            promptNewSession(host)
+            namingHost = host
         } label: {
             VStack {
                 ChassisLabel("+ New Session", size: 11, color: Theme.signal2)
@@ -301,14 +296,6 @@ struct FleetWall: View {
         }
         .buttonStyle(.plain)
         .chassisHover(4)
-        // Long press: the agent quick options — a session named after the
-        // agent, its launch command already typed. Same menu as the
-        // terminal window's + TAB.
-        .contextMenu {
-            Button("New Session…") { promptNewSession(host) }
-            Button("New Session + Claude Code") { createAgentSession(on: host, agent: .claudeCode) }
-            Button("New Session + Codex") { createAgentSession(on: host, agent: .codex) }
-        }
         .accessibilityLabel("New session on \(host.name)")
     }
 
@@ -373,36 +360,27 @@ struct FleetWall: View {
         Task { await model.killSession(target.session) }
     }
 
-    private func promptNewSession(_ host: Host) {
-        // Prefill the first free conventional name (main, main-2, …) so
-        // Create is one tap; `.create` uses `new-session -A`, so a fresh
-        // name also guarantees a new session, not a silent attach.
-        newSessionName = TmuxProbe.uniqueSessionName(
-            base: "main",
-            existing: hub.model(for: host).tmux.sessions.map(\.name))
-        namingHost = host
-    }
-
-    private func createSession() {
-        guard let host = namingHost else { return }
-        let name = TmuxProbe.sanitizedSessionName(newSessionName)
-        open(TerminalRoute(hostID: host.id, mode: .create(sessionName: name)))
-    }
-
-    /// Quick option from the tile's long press: mint a session named after
-    /// the agent (claude, claude-2, …) in $HOME with its launch command
-    /// typed into the fresh shell, then attach in a new window. Creation
-    /// failures surface on the rail — `createSession` marks the host failed
-    /// when the control connection is the problem.
-    private func createAgentSession(on host: Host, agent: AgentKind) {
+    /// The prompt's Create & Attach. A plain session rides the `.create`
+    /// route (`new-session -A` in the attaching window); an agent session
+    /// is minted over the control connection first — its launch command
+    /// typed into the fresh shell — then attached, so the attach can't
+    /// race the send-keys. Creation failures surface on the rail —
+    /// `createSession` marks the host failed when the control connection
+    /// is the problem.
+    private func createSession(on host: Host, named rawName: String, launching agent: AgentKind?) {
+        let name = TmuxProbe.sanitizedSessionName(rawName)
+        guard let agent else {
+            open(TerminalRoute(hostID: host.id, mode: .create(sessionName: name)))
+            return
+        }
         let model = hub.model(for: host)
         Task {
-            guard let name = await model.createSession(
-                base: agent.launchCommand,
+            guard let created = await model.createSession(
+                base: name,
                 inDirectoryOf: nil,
                 typing: agent.launchCommand
             ) else { return }
-            open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: name)))
+            open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: created)))
         }
     }
 
@@ -417,6 +395,81 @@ struct FleetWall: View {
 
     private func open(_ route: TerminalRoute) {
         openWindow(id: "terminal", value: TerminalWindowRoute(tab: route))
+    }
+}
+
+/// The wall's New Session prompt: a name plus what launches in the fresh
+/// shell — the agent quick options that used to hide behind the tile's
+/// long press are the dropdown now. The name prefills the first free
+/// conventional name for the selection (main / claude / codex, then -2,
+/// -3…) so Create is one tap; picking an agent re-prefills it unless the
+/// user already typed their own.
+private struct NewSessionSheet: View {
+    let host: Host
+    let existingNames: [String]
+    let create: (String, AgentKind?) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name: String
+    @State private var agent: AgentKind?
+
+    init(host: Host, existingNames: [String], create: @escaping (String, AgentKind?) -> Void) {
+        self.host = host
+        self.existingNames = existingNames
+        self.create = create
+        _name = State(initialValue: TmuxProbe.uniqueSessionName(
+            base: "main", existing: existingNames))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name", text: $name)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    Picker("Launches", selection: $agent) {
+                        Text("Shell only").tag(AgentKind?.none)
+                        Text(AgentKind.claudeCode.displayName).tag(AgentKind?.some(.claudeCode))
+                        Text(AgentKind.codex.displayName).tag(AgentKind?.some(.codex))
+                    }
+                    .pickerStyle(.menu)
+                } footer: {
+                    Text(detail)
+                }
+            }
+            .navigationTitle("New Session")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create & Attach") {
+                        create(name, agent)
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .onChange(of: agent) { previous, selected in
+            let untouched = name == prefill(for: previous)
+            if untouched { name = prefill(for: selected) }
+        }
+    }
+
+    private func prefill(for agent: AgentKind?) -> String {
+        TmuxProbe.uniqueSessionName(
+            base: agent?.launchCommand ?? "main", existing: existingNames)
+    }
+
+    private var detail: String {
+        var text = "Creates a tmux session on \(host.name) and attaches to it."
+        if let agent {
+            text += " Types “\(agent.launchCommand)” into the fresh shell to start \(agent.displayName)."
+        }
+        return text
     }
 }
 
