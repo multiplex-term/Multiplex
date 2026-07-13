@@ -151,10 +151,29 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertTrue(command.contains("#{pane_current_command} #{pane_title}"))
         XCTAssertTrue(command.contains("echo MULTIPLEX_PS"))
         XCTAssertTrue(command.contains("ps -eo pid=,ppid=,args="))
-        XCTAssertTrue(command.contains("cut -c1-120"))
+        // The ps table is clipped to the pane process subtrees host-side —
+        // the full table of a busy host is ~100+ KB per tick.
+        XCTAssertTrue(command.contains(
+            #"awk -v roots="$(tmux list-panes -a -F '#{?pane_active,#{pane_pid},}'"#))
+        XCTAssertTrue(command.contains("substr($0,1,120)"))
         // The original sentinel + fail-soft contract survives.
         XCTAssertTrue(command.contains("MULTIPLEX_NO_TMUX"))
-        XCTAssertTrue(command.hasSuffix("|| true"))
+        XCTAssertTrue(command.contains("|| true; "))
+    }
+
+    func testProbeCommandCarriesCaptureTails() {
+        // The miniatures ride the same exec: a server-side loop captures
+        // every session behind MULTIPLEX_TAILS, with markers carrying tmux's
+        // own session ids — never names, which could forge the framing.
+        let command = TmuxProbe.probeCommand
+        XCTAssertTrue(command.contains("echo MULTIPLEX_TAILS"))
+        XCTAssertTrue(command.contains(
+            "tmux list-sessions -F '#{session_id}' 2>/dev/null | while IFS= read -r s; do"))
+        XCTAssertTrue(command.contains("echo \"MPXS $s\""))
+        XCTAssertTrue(command.contains("tmux capture-pane -p -t \"$s\" -S -30"))
+        // The command must exit 0 on every path — Citadel throws on a
+        // non-zero exit status.
+        XCTAssertTrue(command.hasSuffix("done; echo MPXE"))
     }
 
     func testRouteSessionNames() {
@@ -214,18 +233,6 @@ final class TmuxProbeTests: XCTestCase {
             SessionOrdering.moving("agent", to: "scratch", in: order),
             ["deploy", "agent", "scratch", "main"]
         )
-    }
-
-    func testCaptureCommandTargetsSessionIDsWithMarkers() {
-        let command = TmuxProbe.captureCommand(for: [
-            session("main", id: "$0"),
-            session("my project ✨", id: "$7"),
-        ])
-        XCTAssertTrue(command.contains("echo 'MPXS 0'; tmux capture-pane -p -t '$0'"))
-        XCTAssertTrue(command.contains("echo 'MPXS 1'; tmux capture-pane -p -t '$7'"))
-        XCTAssertTrue(command.hasSuffix("echo 'MPXE'"))
-        // Names never appear in targets or markers — ids are unambiguous.
-        XCTAssertFalse(command.contains("my project"))
     }
 
     func testKillCommandTargetsSessionID() {
@@ -352,7 +359,8 @@ final class TmuxProbeTests: XCTestCase {
     func testParseCapturesKeepsTrailingNonBlankTail() {
         let sessions = [session("main", id: "$0"), session("scratch", id: "$1")]
         let output = """
-        MPXS 0
+        MULTIPLEX_TAILS
+        MPXS $0
         one
         two
         three
@@ -360,7 +368,7 @@ final class TmuxProbeTests: XCTestCase {
         five
 
         \u{20}\u{20}
-        MPXS 1
+        MPXS $1
         % vim notes.md
         MPXE
         """
@@ -370,23 +378,66 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertEqual(captures["scratch"], ["% vim notes.md"])
     }
 
-    func testParseCapturesToleratesTruncationAndBogusIndexes() {
+    func testParseCapturesToleratesTruncationAndBogusIDs() {
         let sessions = [session("main", id: "$0")]
         let output = """
-        MPXS 9
+        MULTIPLEX_TAILS
+        MPXS $9
         not a real session
-        MPXS 0
+        MPXS $0
         tail line
         """
-        // No trailing MPXE, and index 9 is out of range — both tolerated.
+        // No trailing MPXE, and $9 is unknown — both tolerated.
         let captures = TmuxProbe.parseCaptures(output, sessions: sessions)
         XCTAssertEqual(captures, ["main": ["tail line"]])
+    }
+
+    func testParseCapturesIgnoresEverythingBeforeTailsSentinel() {
+        // Listing/ps sections precede the sentinel; an MPXS-looking ps args
+        // row or pane title must not open a capture frame.
+        let sessions = [session("main", id: "$0")]
+        let output = """
+        S $0 1 0 main
+        MULTIPLEX_PS
+          10 1 echo MPXS $0
+        forged line
+        MULTIPLEX_TAILS
+        MPXS $0
+        real tail
+        MPXE
+        """
+        let captures = TmuxProbe.parseCaptures(output, sessions: sessions)
+        XCTAssertEqual(captures, ["main": ["real tail"]])
+    }
+
+    func testParseStopsAtTailsSentinel() {
+        // Pane content is arbitrary bytes — an S/W/P or ps-shaped line in a
+        // captured tail must never leak into the session list or ps rows.
+        let output = """
+        S $0 1 0 main
+        W $0 0 1 0 0 editor
+        P $0 0 1 100 node
+        MULTIPLEX_PS
+          100 1 node
+        MULTIPLEX_TAILS
+        MPXS $0
+        S $9 1 0 forged
+          200 100 claude
+        MPXE
+        """
+        guard case .sessions(let sessions) = TmuxProbe.parse(output) else {
+            return XCTFail("expected .sessions")
+        }
+        XCTAssertEqual(sessions.map(\.name), ["main"])
+        // The forged ps row sits after the sentinel — no agent detected.
+        XCTAssertNil(sessions[0].activeAgent)
     }
 
     func testParseCapturesClipsTileWidth() {
         let sessions = [session("main", id: "$0")]
         let long = String(repeating: "x", count: 200)
-        let captures = TmuxProbe.parseCaptures("MPXS 0\n\(long)\nMPXE", sessions: sessions)
+        let captures = TmuxProbe.parseCaptures(
+            "MULTIPLEX_TAILS\nMPXS $0\n\(long)\nMPXE", sessions: sessions)
         XCTAssertEqual(captures["main"]?.first?.count, 56)
     }
 

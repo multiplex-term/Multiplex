@@ -10,9 +10,11 @@ import Foundation
 /// inside names. Session lines start with S, window lines with W, pane
 /// lines with P (variable-length pane *title* last — it feeds agent
 /// detection, see `AgentSignature`). After the MULTIPLEX_PS sentinel comes
-/// a `ps` process table for the pane-tree walk; every stage degrades
-/// silently — a host where list-panes or ps misbehaves just loses agent
-/// detection, never its session list.
+/// a `ps` process table (clipped host-side to the pane subtrees) for the
+/// pane-tree walk, and after MULTIPLEX_TAILS every session's active-pane
+/// capture for the wall miniatures — one exec round-trip carries it all.
+/// Every stage degrades silently — a host where list-panes or ps misbehaves
+/// just loses agent detection, never its session list.
 enum TmuxProbe {
     /// Non-interactive SSH exec often has a minimal PATH, so common tmux
     /// locations (Homebrew, /usr/local) are appended before any command.
@@ -21,6 +23,12 @@ enum TmuxProbe {
     static let pathPrefix =
         "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin\"; export PATH; "
 
+    /// One exec round-trip carrying everything a wall tick needs: session/
+    /// window/pane listings, the (subtree-clipped) ps table for agent
+    /// detection, and — after the MULTIPLEX_TAILS sentinel — every session's
+    /// active-pane capture for the live miniatures. A second capture exec
+    /// used to follow the probe; folding it in halves the per-tick channel
+    /// opens, login-shell spawns, and round-trips.
     static var probeCommand: String {
         let sessionFormat = "S #{session_id} #{session_attached} #{session_created} #{session_name}"
         let windowFormat = "W #{session_id} #{window_index} #{window_active} #{window_bell_flag} #{window_activity_flag} #{window_name}"
@@ -32,10 +40,29 @@ enum TmuxProbe {
             + "tmux list-sessions -F '\(sessionFormat)' 2>/dev/null "
             + "&& tmux list-windows -a -F '\(windowFormat)' 2>/dev/null "
             + "&& tmux list-panes -a -F '\(paneFormat)' 2>/dev/null "
-            // argv[0]/argv[1] are all the tree walk reads — clip the payload.
-            + "&& { echo MULTIPLEX_PS; ps -eo pid=,ppid=,args= 2>/dev/null | cut -c1-120; } "
-            + "|| true"
+            + "&& { echo MULTIPLEX_PS; \(psSubtreeCommand); } "
+            + "|| true; "
+            + "echo MULTIPLEX_TAILS; "
+            + "tmux list-sessions -F '#{session_id}' 2>/dev/null | while IFS= read -r s; do "
+            + "echo \"MPXS $s\"; "
+            + "tmux capture-pane -p -t \"$s\" -S -\(captureDepth) 2>/dev/null; "
+            + "done; echo MPXE"
     }
+
+    /// The ps stage, clipped to the pane process *subtrees* before it leaves
+    /// the host: the agent tree walk only ever descends from pane PIDs, and
+    /// a busy host's full table is ~100+ KB per tick (dominates the probe's
+    /// payload and its main-actor parse). awk keeps each active pane's PID
+    /// and every transitive child, clipping args to what the walk reads
+    /// (argv[0]/argv[1]). POSIX awk/tr only; any stage failing just loses
+    /// agent detection — never the session list.
+    private static let psSubtreeCommand =
+        #"ps -eo pid=,ppid=,args= 2>/dev/null | awk -v roots="$(tmux list-panes -a -F '#{?pane_active,#{pane_pid},}' 2>/dev/null | tr '\n' ' ')" '"#
+        + "BEGIN{n=split(roots,r,\" \");for(i=1;i<=n;i++)keep[r[i]]=1} "
+        + "{pids[NR]=$1;parent[$1]=$2;line[$1]=substr($0,1,120)} "
+        + "END{f=1;while(f){f=0;for(i=1;i<=NR;i++){p=pids[i];"
+        + "if(!(p in keep)&&(parent[p] in keep)){keep[p]=1;f=1}}}"
+        + "for(i=1;i<=NR;i++)if(pids[i] in keep)print line[pids[i]]}'"
 
     /// Parse combined probe output into a `TmuxState`.
     static func parse(_ output: String) -> TmuxState {
@@ -61,6 +88,9 @@ enum TmuxProbe {
         var inPSSection = false
 
         for line in output.split(separator: "\n") {
+            // Everything after the tails sentinel is raw pane content —
+            // arbitrary bytes that must never be read as S/W/P/ps lines.
+            if line == "MULTIPLEX_TAILS" { break }
             if line == "MULTIPLEX_PS" {
                 inPSSection = true
                 continue
@@ -278,45 +308,39 @@ enum TmuxProbe {
     /// Tile width clip — anything longer can't render in a tile anyway.
     private static let miniatureWidth = 56
 
-    /// One exec round-trip fetching the last visible lines of every
-    /// session's active pane. Sessions are delimited with MPXS <index> /
-    /// MPXE marker lines; markers carry list indexes, never names, so
-    /// arbitrary session names can't forge or break the framing. Targets
-    /// use tmux's own session id ("$3") — names can prefix-collide.
-    static func captureCommand(for sessions: [TmuxSession]) -> String {
-        var command = pathPrefix
-        for (index, session) in sessions.enumerated() {
-            let target = session.tmuxID.isEmpty ? session.name : session.tmuxID
-            command += "echo 'MPXS \(index)'; "
-                + "tmux capture-pane -p -t \(target.shellQuoted) -S -\(captureDepth) 2>/dev/null; "
-        }
-        command += "echo 'MPXE'"
-        return command
-    }
-
-    /// Parse `captureCommand` output into session name → trailing lines:
-    /// right-trimmed, trailing blank pane rows dropped, full width. This is
-    /// the attention classifier's input; `miniatureTail` derives the tile
-    /// view from the same parse.
+    /// Parse the probe's tails section (after MULTIPLEX_TAILS) into session
+    /// name → trailing lines: right-trimmed, trailing blank pane rows
+    /// dropped, full width. MPXS markers carry tmux's own session ids ("$3"
+    /// — server-minted by the probe's shell loop, never names, so arbitrary
+    /// session names can't forge or break the framing), matched against the
+    /// same output's session listing. This is the attention classifier's
+    /// input; `miniatureTail` derives the tile view from the same parse.
     static func parseTails(_ output: String, sessions: [TmuxSession]) -> [String: [String]] {
+        var names: [String: String] = [:]
+        for session in sessions where !session.tmuxID.isEmpty {
+            names[session.tmuxID] = session.name
+        }
         var result: [String: [String]] = [:]
-        var currentIndex: Int?
+        var inTails = false
+        var currentName: String?
         var lines: [String] = []
         func flush() {
-            if let index = currentIndex, sessions.indices.contains(index) {
-                result[sessions[index].name] = visibleTail(lines)
-            }
-            currentIndex = nil
+            if let name = currentName { result[name] = visibleTail(lines) }
+            currentName = nil
             lines = []
         }
         for raw in output.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = String(raw)
+            if !inTails {
+                if line == "MULTIPLEX_TAILS" { inTails = true }
+                continue
+            }
             if line.hasPrefix("MPXS ") {
                 flush()
-                currentIndex = Int(line.dropFirst(5).trimmingCharacters(in: .whitespaces))
+                currentName = names[String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)]
             } else if line == "MPXE" {
                 flush()
-            } else if currentIndex != nil {
+            } else if currentName != nil {
                 lines.append(line)
             }
         }

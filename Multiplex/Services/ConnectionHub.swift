@@ -58,7 +58,8 @@ final class HostConnectionModel {
     private(set) var tmux: TmuxState = .unknown
     private(set) var lastRefreshed: Date?
     /// Session name → last visible lines of its active pane; the deck
-    /// wall's live miniatures, refreshed by `captureTails()`.
+    /// wall's live miniatures, refreshed by every probe (the probe's single
+    /// exec carries the capture tails).
     private(set) var miniatures: [String: [String]] = [:]
     /// Session name → agent state (busy / idle / needs you), re-derived on
     /// every probe and capture pass. Drives the wall's NEEDS YOU badge.
@@ -67,6 +68,11 @@ final class HostConnectionModel {
     /// Set once by `ConnectionHub`; policy and delivery live in
     /// `AttentionCenter`, never here.
     var onAttentionAlert: ((AttentionAlert) -> Void)?
+
+    /// Stage timings for the wall's feed pipeline (debug level; read with
+    /// `log stream --predicate 'category == "wall"'`).
+    private static let timing = Logger(
+        subsystem: "app.multiplexterm.multiplex", category: "wall")
 
     private var connection: SSHConnection?
     private var refreshTask: Task<Void, Never>?
@@ -92,16 +98,14 @@ final class HostConnectionModel {
         }
     }
 
-    /// One complete wall update: join the current probe (or start one), then
-    /// capture the sessions that probe actually discovered. Keeping this
-    /// ordering inside the model prevents the first capture from racing an
-    /// initial connection and being deferred until the wall's next tick.
-    func refreshAndCapture() async {
+    /// One complete wall update: join the in-flight probe or start one. The
+    /// probe's single exec round-trip carries the miniature tails too, so
+    /// joining it is the whole tick — a first load paints sessions and
+    /// miniatures together instead of deferring tails to the next tick.
+    func refreshAndWait() async {
         refresh()
         let task = refreshTask
         await task?.value
-        guard !Task.isCancelled else { return }
-        await captureTails()
     }
 
     private func performRefresh() async {
@@ -113,13 +117,31 @@ final class HostConnectionModel {
             // settled tile back to the acquiring placeholder each cycle
             // makes the wall shake; the next parse/failure overwrites it.
             if case .unknown = tmux { tmux = .probing }
+            let execStart = ContinuousClock.now
             let output = try await deadlined { try await connection.exec(TmuxProbe.probeCommand) }
+            let execEnd = ContinuousClock.now
             tmux = TmuxProbe.parse(output)
+            if case .sessions(let sessions) = tmux {
+                let tails = TmuxProbe.parseTails(output, sessions: sessions)
+                attentionTails = tails
+                miniatures = tails.mapValues(TmuxProbe.miniatureTail)
+            }
+            Self.timing.debug("""
+                \(self.host.name, privacy: .public) probe: exec \
+                \(Self.ms(execStart, execEnd), privacy: .public)ms, parse \
+                \(Self.ms(execEnd, .now), privacy: .public)ms, \
+                \(output.utf8.count, privacy: .public)B
+                """)
             lastRefreshed = Date()
             evaluateAttention()
         } catch {
             markFailed(error)
         }
+    }
+
+    /// Elapsed milliseconds between two clock instants, for the stage logs.
+    private static func ms(_ from: ContinuousClock.Instant, _ to: ContinuousClock.Instant) -> Int {
+        Int((to - from) / .milliseconds(1))
     }
 
     private func markFailed(_ error: Error) {
@@ -144,13 +166,20 @@ final class HostConnectionModel {
         // rail churn; a settled UNREACHABLE keeps reading UNREACHABLE until
         // a retry actually lands.
         if phase == .idle { phase = .connecting }
+        let secretsStart = ContinuousClock.now
         let fresh = SSHConnection(host: host, secrets: .load(for: host))
+        let connectStart = ContinuousClock.now
         do {
             try await deadlined(seconds: Self.connectDeadline) { try await fresh.connect() }
         } catch {
             Task { await fresh.close() }
             throw error
         }
+        Self.timing.debug("""
+            \(self.host.name, privacy: .public) connect: secrets \
+            \(Self.ms(secretsStart, connectStart), privacy: .public)ms, ssh \
+            \(Self.ms(connectStart, .now), privacy: .public)ms
+            """)
         connection = fresh
         phase = .connected
         return fresh
@@ -194,29 +223,9 @@ final class HostConnectionModel {
         }
     }
 
-    /// Refresh the wall miniatures over the existing control connection —
-    /// one exec round-trip for every session on the host. Failures are
-    /// soft: stale miniatures beat a flickering wall, and the next probe
-    /// refresh handles real connection loss.
-    func captureTails() async {
-        guard phase == .connected,
-              case .sessions(let sessions) = tmux, !sessions.isEmpty,
-              let connection
-        else { return }
-        // Deadlined even though failures are soft: this host's wall update
-        // awaits the capture, so it must eventually yield to the next tick.
-        guard let output = try? await deadlined({
-            try await connection.exec(TmuxProbe.captureCommand(for: sessions))
-        }) else { return }
-        let tails = TmuxProbe.parseTails(output, sessions: sessions)
-        attentionTails = tails
-        miniatures = tails.mapValues(TmuxProbe.miniatureTail)
-        evaluateAttention()
-    }
-
     /// Re-derive every session's agent state from the latest probe (title)
-    /// + capture (dialog content), and emit any edges. Runs after both
-    /// probe and capture passes — whichever input moved, states follow.
+    /// + capture (dialog content), and emit any edges. Runs after every
+    /// probe pass — title and tail inputs arrive together.
     private func evaluateAttention() {
         guard case .sessions(let sessions) = tmux else {
             attention = [:]
@@ -294,7 +303,7 @@ final class HostConnectionModel {
     /// Kill a tmux session on the host over the control connection, then
     /// re-probe. The tile drops as soon as the kill lands; the follow-up
     /// probe is the truth and resurrects it if the kill failed. Fail-soft
-    /// like `captureTails` — if the control link dropped, do nothing and
+    /// like the probe helpers — if the control link dropped, do nothing and
     /// let the next probe cycle surface the failure.
     func killSession(_ session: TmuxSession) async {
         guard phase == .connected, let connection else { return }

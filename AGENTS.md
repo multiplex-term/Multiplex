@@ -157,8 +157,9 @@ SwiftUI: Deck window  +  N Terminal windows (WindowGroup(for: TerminalWindowRout
   ThemeStore         terminal color schemes — TerminalTheme built-ins + custom
                      (themes.json); selected id in UserDefaults; device-local
   ConnectionHub      one HostConnectionModel per host — the probe connection;
-                     also feeds the wall's live miniatures (captureTails() =
-                     one capture-pane exec round-trip per host, polled ~5s by
+                     also feeds the wall's live miniatures (the probe's ONE
+                     exec round-trip carries sessions + a pane-subtree-clipped
+                     ps table + capture tails, polled ~5s per host by
                      FleetWall while the deck is frontmost; background
                      re-probes never surface .probing so tiles don't flicker)
     TmuxProbe        list-sessions/-windows/-panes + capture-pane + ps command

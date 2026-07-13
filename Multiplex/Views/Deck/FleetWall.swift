@@ -40,7 +40,7 @@ struct FleetWall: View {
     }
 
     private let columns = [GridItem(.adaptive(minimum: 290, maximum: 360), spacing: 14)]
-    /// Wall cadence: one concurrent probe + capture pipeline per host per tick.
+    /// Wall cadence: one concurrent probe round-trip per host per tick.
     private static let feedInterval: Duration = .seconds(5)
 
     var body: some View {
@@ -136,14 +136,14 @@ struct FleetWall: View {
         while !Task.isCancelled {
             if UIApplication.shared.applicationState == .active {
                 // Resolve models on the main actor first, then let every host
-                // finish its own ordered probe → capture pipeline. One slow
-                // host must not delay the rest of the fleet, and a first-load
-                // capture must use the sessions discovered by that probe.
+                // run its own probe (one exec round-trip carrying sessions,
+                // agent detection, and miniature tails). One slow host must
+                // not delay the rest of the fleet.
                 let models = store.hosts.map { hub.model(for: $0) }
                 await withTaskGroup(of: Void.self) { group in
                     for model in models {
                         group.addTask {
-                            await model.refreshAndCapture()
+                            await model.refreshAndWait()
                         }
                     }
                 }

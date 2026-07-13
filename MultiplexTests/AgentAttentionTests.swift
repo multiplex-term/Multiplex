@@ -296,7 +296,7 @@ final class AgentAttentionTests: XCTestCase {
 
     func testParseTailsKeepsFullDialogWhileMiniatureClips() {
         let dialog = permissionDialog.joined(separator: "\n")
-        let output = "MPXS 0\n\(dialog)\n\nMPXE"
+        let output = "MULTIPLEX_TAILS\nMPXS $1\n\(dialog)\n\nMPXE"
         let sessions = [TmuxSession(name: "main", windows: [], created: .init(), tmuxID: "$1")]
         let tails = TmuxProbe.parseTails(output, sessions: sessions)
         XCTAssertEqual(tails["main"]?.count, permissionDialog.count)
