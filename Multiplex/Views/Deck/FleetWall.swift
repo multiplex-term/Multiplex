@@ -150,6 +150,9 @@ struct FleetWall: View {
                 .accessibilityLabel("Add host")
             ChassisChip("SETTINGS", systemImage: "gearshape", action: openSettings)
                 .fixedSize()
+                // The system's compact trailing margin looks crowded against
+                // the rounded corner when the deck is an iPad window.
+                .padding(.trailing, 12)
         }
         .sharedBackgroundVisibility(.hidden)
     }
