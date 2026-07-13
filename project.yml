@@ -60,6 +60,22 @@ targets:
       - path: Multiplex
       - path: AppIcon.icon
       - path: Assets.xcassets
+    info:
+      path: Multiplex/Info.plist
+      properties:
+        CFBundleDisplayName: Multiplex
+        ITSAppUsesNonExemptEncryption: false
+        NSLocalNetworkUsageDescription: Multiplex connects to SSH hosts on your local network.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+          UISceneConfigurations: {}
+        UILaunchScreen:
+          UIColorName: AppBackground
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     dependencies:
       - package: SwiftTerm
       - package: Citadel
@@ -73,18 +89,11 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "2,7"
         SUPPORTS_MACCATALYST: NO
-        GENERATE_INFOPLIST_FILE: YES
         # Export compliance: Multiplex implements only published,
         # industry-standard crypto (SSH and AES-OCB). Apple's NO value means
         # "no non-exempt encryption," not "no encryption"; no Apple
         # documentation/code is required unless the app is distributed in
         # France. See docs/appstore/release-playbook.md → Export compliance.
-        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
-        INFOPLIST_KEY_CFBundleDisplayName: Multiplex
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Multiplex connects to SSH hosts on your local network.
-        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
 
   MultiplexTests:
     type: bundle.unit-test

@@ -4,9 +4,9 @@ import Observation
 /// Hosts persisted as JSON in Application Support — a local cache of the
 /// cross-device truth. Secrets and a mirrored copy of each host record live
 /// in the Keychain as synchronizable items, so iCloud Keychain moves both to
-/// the user's other devices; `syncWithCloud()` reconciles the two on launch
-/// and whenever the deck returns to the foreground (keychain sync has no
-/// change notification to subscribe to).
+/// the user's other devices; `refreshFromCloud()` reconciles the two after
+/// the first frame and whenever the deck returns to the foreground (keychain
+/// sync has no change notification to subscribe to).
 @MainActor
 @Observable
 final class HostStore {
@@ -19,6 +19,7 @@ final class HostStore {
     /// this host". Device-local bookkeeping, so UserDefaults is fine.
     private var mirroredIDs: Set<UUID>
     private static let mirroredIDsKey = "MultiplexMirroredHostIDs"
+    private var isRefreshingFromCloud = false
 
     init() {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -29,9 +30,7 @@ final class HostStore {
             (UserDefaults.standard.stringArray(forKey: Self.mirroredIDsKey) ?? [])
                 .compactMap(UUID.init)
         )
-        KeychainStore.migrateDeviceOnlyItems()
         load()
-        syncWithCloud()
         seedFromEnvironmentIfNeeded()
     }
 
@@ -65,10 +64,20 @@ final class HostStore {
         hosts.first { $0.id == id }
     }
 
-    /// Re-reads the mirrored records — call when the deck becomes active so
-    /// hosts added or edited on another device show up without a relaunch.
-    func refreshFromCloud() {
-        syncWithCloud()
+    /// Re-reads the mirrored records after launch and whenever the deck becomes
+    /// active, so hosts added or edited on another device appear without a
+    /// relaunch. Synchronizable Keychain queries can involve securityd/iCloud
+    /// and are intentionally kept off the main actor's first-frame path.
+    func refreshFromCloud() async {
+        guard !isRefreshingFromCloud else { return }
+        isRefreshingFromCloud = true
+        defer { isRefreshingFromCloud = false }
+
+        let records = await Task.detached(priority: .utility) {
+            KeychainStore.migrateDeviceOnlyItems()
+            return KeychainStore.hostRecords()
+        }.value
+        syncWithCloud(records: records)
     }
 
     private func load() {
@@ -85,9 +94,9 @@ final class HostStore {
 
     // MARK: - Cloud mirror
 
-    private func syncWithCloud() {
+    private func syncWithCloud(records: [Data]) {
         let decoder = JSONDecoder()
-        let cloud = KeychainStore.hostRecords().compactMap { try? decoder.decode(Host.self, from: $0) }
+        let cloud = records.compactMap { try? decoder.decode(Host.self, from: $0) }
         let resolution = HostSync.merge(local: hosts, cloud: cloud, mirrored: mirroredIDs)
 
         // Only IDs whose record verifiably sits in the mirror may be marked

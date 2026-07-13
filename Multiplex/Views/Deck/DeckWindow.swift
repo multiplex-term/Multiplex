@@ -50,10 +50,16 @@ struct DeckWindow: View {
         .sheet(item: $editingHost) { host in AddHostSheet(editing: host) }
         .sheet(isPresented: $showingSettings) { SettingsView() }
         .background(DeckSceneReporter())
+        // Render the local cache first. Synchronizable Keychain reads may
+        // involve securityd/iCloud, so cloud reconciliation begins only once
+        // the deck exists instead of blocking App initialization.
+        .task { await store.refreshFromCloud() }
         // iCloud Keychain sync has no change notification; re-merge the host
         // mirror whenever the deck comes back to the foreground.
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { store.refreshFromCloud() }
+            if phase == .active {
+                Task { await store.refreshFromCloud() }
+            }
         }
         #if DEBUG
         .task { await autoAttachIfRequested() }

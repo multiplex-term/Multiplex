@@ -6,7 +6,7 @@ struct MultiplexApp: App {
     @State private var hub: ConnectionHub
     @State private var themes = ThemeStore()
     @State private var workspace: TerminalWorkspace
-    @State private var entitlements = EntitlementStore()
+    @State private var entitlements: EntitlementStore
     @State private var attention: AttentionCenter
 
     init() {

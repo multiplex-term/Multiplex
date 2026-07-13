@@ -7,7 +7,9 @@ import UIKit
 enum Theme {
     // MARK: Chassis (ground)
     /// Window ground — warm graphite, deliberately not blue-black.
-    static let chassis = Color(hex: 0x17181A)
+    /// Shared with the system launch screen so startup hands off without a
+    /// white flash before SwiftUI paints the deck.
+    static let chassis = Color("AppBackground")
     /// Raised surfaces: tiles, rails, the UMD bar.
     static let bezel = Color(hex: 0x26282B)
     /// Borders, dividers, inactive bezel segments.
