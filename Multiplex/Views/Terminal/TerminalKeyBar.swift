@@ -153,17 +153,17 @@ private enum TerminalKey {
 
 /// The rail: modifiers left, shell symbols center, arrows + dismiss right.
 /// Fixed-size keys so ViewThatFits can actually measure — when the bar is
-/// narrow (accessory-only row in a small Stage Manager window) the symbol
-/// cluster is the first thing to go.
+/// narrow (accessory-only row in a small Stage Manager window), keep the
+/// path essentials (`~` and `/`) while dropping the less-used symbols first.
 private struct KeyBarRow: View {
     var model: TerminalKeyBar.Model
     var press: (TerminalKey) -> Void
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            row(withSymbols: true, withPageKeys: true)
-            row(withSymbols: false, withPageKeys: true)
-            row(withSymbols: false, withPageKeys: false)
+            row(symbols: ["~", "|", "/", "-"], withPageKeys: true)
+            row(symbols: ["~", "/"], withPageKeys: true)
+            row(symbols: ["~", "/"], withPageKeys: false)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
@@ -174,14 +174,14 @@ private struct KeyBarRow: View {
         }
     }
 
-    private func row(withSymbols: Bool, withPageKeys: Bool) -> some View {
+    private func row(symbols: [String], withPageKeys: Bool) -> some View {
         HStack(spacing: 6) {
             capsKey("ESC", .esc, "Escape")
             capsKey("CTRL", .ctrl, "Control", latched: model.ctrlLatched)
             capsKey("TAB", .tab, "Tab")
             Spacer(minLength: 12)
-            if withSymbols {
-                ForEach(["~", "|", "/", "-"], id: \.self) { symbol in
+            if !symbols.isEmpty {
+                ForEach(symbols, id: \.self) { symbol in
                     Key(action: { press(.text(symbol)) }, accessibilityText: symbol) {
                         Text(symbol).font(.mono(15))
                     }
