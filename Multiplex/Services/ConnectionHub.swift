@@ -92,6 +92,18 @@ final class HostConnectionModel {
         }
     }
 
+    /// One complete wall update: join the current probe (or start one), then
+    /// capture the sessions that probe actually discovered. Keeping this
+    /// ordering inside the model prevents the first capture from racing an
+    /// initial connection and being deferred until the wall's next tick.
+    func refreshAndCapture() async {
+        refresh()
+        let task = refreshTask
+        await task?.value
+        guard !Task.isCancelled else { return }
+        await captureTails()
+    }
+
     private func performRefresh() async {
         do {
             let connection = try await ensureConnection()
@@ -191,8 +203,8 @@ final class HostConnectionModel {
               case .sessions(let sessions) = tmux, !sessions.isEmpty,
               let connection
         else { return }
-        // Deadlined even though failures are soft: the wall's feed loop
-        // awaits this inline, so a hung capture would stall every host.
+        // Deadlined even though failures are soft: this host's wall update
+        // awaits the capture, so it must eventually yield to the next tick.
         guard let output = try? await deadlined({
             try await connection.exec(TmuxProbe.captureCommand(for: sessions))
         }) else { return }
