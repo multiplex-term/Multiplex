@@ -50,7 +50,7 @@ struct AgentHelperStrip: View {
             } else {
                 VStack(alignment: .leading, spacing: 3) {
                     ChassisChip("✳ AGENT HELPERS · PRO", prominent: true, action: openPaywall)
-                    Text("Daily slash-command taste resets tomorrow")
+                    Text("Free daily slash commands return tomorrow")
                         .font(.mono(8, weight: .medium))
                         .foregroundStyle(Theme.signal3)
                         .lineLimit(1)

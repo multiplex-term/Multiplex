@@ -56,7 +56,7 @@ struct ProPaywallView: View {
             ChassisLabel("Multiplex Pro", size: 18)
             Text("Buy once. Use it on iPad and Vision Pro.")
                 .font(.title3.weight(.semibold))
-            Text("The free tier stays useful: one host, spatial SSH terminals, live agent detection, built-in themes and 10 slash-command helper taps each day.")
+            Text("The free tier stays useful: one host, spatial SSH terminals, live agent detection, built-in themes and \(EntitlementStore.dailySlashChipLimit) slash-command helper taps each day.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

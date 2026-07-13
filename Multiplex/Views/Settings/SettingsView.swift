@@ -99,7 +99,10 @@ struct SettingsView: View {
                 Section {
                     proRow("Unlimited Hosts")
                     proRow("Mosh Transport")
-                    proRow("Agent Helpers", freeStatus: "10/day")
+                    proRow(
+                        "Agent Helpers",
+                        freeStatus: "\(EntitlementStore.dailySlashChipLimit)/day"
+                    )
                     proRow("Agent Alerts")
                     proRow("Custom Themes")
                     Button(entitlements.isPro
