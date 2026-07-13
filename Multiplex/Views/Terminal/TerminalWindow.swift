@@ -425,7 +425,7 @@ struct TerminalWindowRoot: View {
             }
             .sharedBackgroundVisibility(.hidden)
             ToolbarItemGroup(placement: .primaryAction) {
-                primaryToolbarActions
+                primaryToolbarActions(trailingPadding: 12)
             }
             .sharedBackgroundVisibility(.hidden)
         } else {
@@ -433,13 +433,13 @@ struct TerminalWindowRoot: View {
                 deckButton
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                primaryToolbarActions
+                primaryToolbarActions(trailingPadding: 0)
             }
         }
     }
 
     @ViewBuilder
-    private var primaryToolbarActions: some View {
+    private func primaryToolbarActions(trailingPadding: CGFloat) -> some View {
         newTabMenu
         keyboardButton
         fontButtons
@@ -447,6 +447,7 @@ struct TerminalWindowRoot: View {
             mergeMenu
         }
         detachMenu
+            .padding(.trailing, trailingPadding)
     }
 
     /// Dropdown: detach (tmux keeps the session) or the destructive
