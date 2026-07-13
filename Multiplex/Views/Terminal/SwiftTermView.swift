@@ -409,9 +409,10 @@ struct SwiftTermView: UIViewRepresentable {
             let screenSpace = window.screen.coordinateSpace
             let containerOnScreen = container.convert(container.bounds, to: screenSpace)
             let windowOnScreen = window.convert(window.bounds, to: screenSpace)
-            // The interactive rail rests on the window's bottom safe-area
-            // edge; a passive bezel paint continues through the protected
-            // rounded corner, but does not change this layout reference.
+            // The helper's interactive content rests on the window's bottom
+            // safe-area edge. Keep that stable reference even though its
+            // passive background paints through the protected rounded corner;
+            // the keyboard cannot move it, so this value cannot feed back.
             let restingBottom = windowOnScreen.maxY - window.safeAreaInsets.bottom
             var overlap: CGFloat = 0
             var obstruction: CGFloat = 0

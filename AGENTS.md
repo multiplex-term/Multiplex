@@ -395,7 +395,12 @@ views.
   (`TerminalSessionController.keyboardObstruction`), and the strip pads
   itself above the rail by that amount — chips stay tappable (measured against
   the *window*, which the keyboard can't move, so the published value never
-  feeds back into the container's own inset). The interactive rail stays
+  feeds back into the container's own inset). While that obstruction is
+  nonzero, the pane also ignores the bottom *container* safe area: otherwise
+  SwiftUI counts the rounded-corner inset a second time, clips tmux's status
+  row, and leaves a gap above a full-width keyboard. Keep that opt-out
+  conditional — hidden and floating modes need the normal safe boundary.
+  The interactive rail stays
   inside the rounded-corner safe boundary; a passive bezel paint ignores both
   container and stale keyboard safe regions to continue the rail through the
   protected tail, while the terminal theme remains inside its ordinary bounds

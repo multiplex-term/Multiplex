@@ -337,6 +337,17 @@ struct TerminalWindowRoot: View {
                                     + TerminalKeyBar.barHeight
                             )
                     }
+                    // A real docked keyboard makes SwiftUI apply the window's
+                    // bottom safe area twice: once to this surface and once
+                    // to the helper's published clearance. Extend through
+                    // that region only while docked so the tmux row, helper,
+                    // and UIKit rail share one baseline. Hidden/floating
+                    // modes keep controls inside the rounded-corner boundary.
+                    .ignoresSafeArea(
+                        .container,
+                        edges: (activeController?.keyboardObstruction ?? 0) > 0
+                            ? .bottom : []
+                    )
                     // SwiftUI's automatic keyboard avoidance must not touch
                     // the terminal: floating keyboards reserve no space. The
                     // terminal container is the single owner of docked
