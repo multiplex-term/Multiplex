@@ -264,8 +264,7 @@ struct FleetWall: View {
             }
             .contentShape(Rectangle())
             .contextMenu {
-                Button("Edit Host…") { editHost(host) }
-                Button("Remove Host…", role: .destructive) { removingHost = host }
+                hostMenuActions(host)
             }
         }
     }
@@ -275,8 +274,7 @@ struct FleetWall: View {
     /// in every connection phase; the rail's long-press menu mirrors it.
     private func hostMenu(_ host: Host) -> some View {
         Menu {
-            Button("Edit Host…") { editHost(host) }
-            Button("Remove Host…", role: .destructive) { removingHost = host }
+            hostMenuActions(host)
         } label: {
             ChassisBadge("", systemImage: "ellipsis")
         }
@@ -284,6 +282,27 @@ struct FleetWall: View {
         .buttonStyle(.plain)
         .chassisHover(2)
         .accessibilityLabel("Host options for \(host.name)")
+    }
+
+    @ViewBuilder
+    private func hostMenuActions(_ host: Host) -> some View {
+        Button {
+            store.moveUp(host)
+        } label: {
+            Label("Move Up", systemImage: "arrow.up")
+        }
+        .disabled(!store.canMoveUp(host))
+
+        Button {
+            store.moveDown(host)
+        } label: {
+            Label("Move Down", systemImage: "arrow.down")
+        }
+        .disabled(!store.canMoveDown(host))
+
+        Divider()
+        Button("Edit Host…") { editHost(host) }
+        Button("Remove Host…", role: .destructive) { removingHost = host }
     }
 
     @ViewBuilder

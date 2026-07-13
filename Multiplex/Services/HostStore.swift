@@ -60,6 +60,27 @@ final class HostStore {
         save()
     }
 
+    /// Host order is a deck presentation preference. The Keychain mirror
+    /// stores independent host records, so reordering stays device-local in
+    /// `hosts.json` while cloud refreshes continue to preserve local order.
+    func moveUp(_ host: Host) {
+        move(host, offset: -1)
+    }
+
+    func moveDown(_ host: Host) {
+        move(host, offset: 1)
+    }
+
+    func canMoveUp(_ host: Host) -> Bool {
+        guard let index = hosts.firstIndex(where: { $0.id == host.id }) else { return false }
+        return index > hosts.startIndex
+    }
+
+    func canMoveDown(_ host: Host) -> Bool {
+        guard let index = hosts.firstIndex(where: { $0.id == host.id }) else { return false }
+        return index < hosts.index(before: hosts.endIndex)
+    }
+
     func host(id: UUID) -> Host? {
         hosts.first { $0.id == id }
     }
@@ -90,6 +111,15 @@ final class HostStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(hosts) else { return }
         try? data.write(to: fileURL, options: .atomic)
+    }
+
+    private func move(_ host: Host, offset: Int) {
+        guard let source = hosts.firstIndex(where: { $0.id == host.id }) else { return }
+        let destination = source + offset
+        guard hosts.indices.contains(destination) else { return }
+        let moved = hosts.remove(at: source)
+        hosts.insert(moved, at: destination)
+        save()
     }
 
     // MARK: - Cloud mirror
