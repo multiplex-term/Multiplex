@@ -393,9 +393,19 @@ views.
   it: the same handler publishes how far the docked keyboard/rail rises
   above the window's bottom safe-area edge
   (`TerminalSessionController.keyboardObstruction`), and the strip pads
-  itself above the rail by that amount — chips stay tappable
-  (measured against the *window*, which the keyboard can't move, so the
-  published value never feeds back into the container's own inset).
+  itself above the rail by that amount — chips stay tappable (measured against
+  the *window*, which the keyboard can't move, so the published value never
+  feeds back into the container's own inset). The interactive rail stays
+  inside the rounded-corner safe boundary; a passive bezel paint ignores both
+  container and stale keyboard safe regions to continue the rail through the
+  protected tail, while the terminal theme remains inside its ordinary bounds
+  and can never reappear there as a black seam. SwiftTerm floors its viewport
+  to whole text rows and leaves the fractional remainder below tmux's last
+  row; for tmux routes the UIKit container moves that measured remainder into
+  the existing top gutter, retaining one physical pixel of row-count safety,
+  so the status line hugs the helper/rail without ever changing the PTY row
+  count. Keep that nudge remainder-derived—an unconditional inset can drop a
+  row at other Stage Manager sizes.
   Stage Manager also emits `UIKeyboardDidChangeFrameNotification` repeatedly
   while a window moves with a floating keyboard. Classify presentation before
   touching layout: after the transition into floating has cleared an old

@@ -17,7 +17,10 @@ struct SwiftTermView: UIViewRepresentable {
     var isActive: Bool = true
 
     private static let focusTapName = "multiplex.focus-tap"
-    private static let terminalInsets = UIEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+    // Keep breathing room around the terminal chassis, but let tmux's status
+    // line meet the helper/key rail directly—any bottom inset reads as an
+    // accidental black seam between the two surfaces.
+    private static let terminalInsets = UIEdgeInsets(top: 8, left: 10, bottom: 0, right: 10)
 
     func makeUIView(context: Context) -> UIView {
         let view: TerminalView
@@ -96,13 +99,17 @@ struct SwiftTermView: UIViewRepresentable {
         container.addSubview(keyBar)
         view.translatesAutoresizingMaskIntoConstraints = false
         keyBar.translatesAutoresizingMaskIntoConstraints = false
+        let terminalTop = view.topAnchor.constraint(
+            equalTo: container.topAnchor,
+            constant: Self.terminalInsets.top
+        )
         let keyBarBottom = keyBar.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         let terminalBottom = view.bottomAnchor.constraint(
             equalTo: keyBar.topAnchor,
             constant: -(Self.terminalInsets.bottom + bottomChromeHeight)
         )
         NSLayoutConstraint.activate([
-            view.topAnchor.constraint(equalTo: container.topAnchor, constant: Self.terminalInsets.top),
+            terminalTop,
             view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Self.terminalInsets.left),
             view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.terminalInsets.right),
             terminalBottom,
@@ -114,6 +121,7 @@ struct SwiftTermView: UIViewRepresentable {
         context.coordinator.installKeyboardAvoidance(
             container: container,
             constraint: keyBarBottom,
+            terminalTopConstraint: terminalTop,
             terminalBottomConstraint: terminalBottom
         )
         container.onLayout = { [weak coordinator = context.coordinator] in
@@ -135,7 +143,8 @@ struct SwiftTermView: UIViewRepresentable {
         // (about to be torn down) representable gets one last update.
         guard let view = context.coordinator.terminalView,
               view.isDescendant(of: container) else { return }
-        if view.font.pointSize != fontSize {
+        let fontChanged = view.font.pointSize != fontSize
+        if fontChanged {
             view.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
         }
         if context.coordinator.appliedTheme != theme {
@@ -145,6 +154,9 @@ struct SwiftTermView: UIViewRepresentable {
         context.coordinator.updateBottomChromeHeight(
             Self.terminalInsets.bottom + bottomChromeHeight
         )
+        if fontChanged {
+            context.coordinator.terminalMetricsDidChange()
+        }
         #endif
     }
 
@@ -188,6 +200,7 @@ struct SwiftTermView: UIViewRepresentable {
         #if !os(visionOS)
         private weak var avoidingContainer: UIView?
         private var bottomConstraint: NSLayoutConstraint?
+        private var terminalTopConstraint: NSLayoutConstraint?
         private var terminalBottomConstraint: NSLayoutConstraint?
         private var keyboardObservers: [NSObjectProtocol] = []
         private var keyboardPresentation: KeyboardAvoidance.Presentation = .hidden
@@ -216,10 +229,12 @@ struct SwiftTermView: UIViewRepresentable {
         func installKeyboardAvoidance(
             container: UIView,
             constraint: NSLayoutConstraint,
+            terminalTopConstraint: NSLayoutConstraint,
             terminalBottomConstraint: NSLayoutConstraint
         ) {
             avoidingContainer = container
             bottomConstraint = constraint
+            self.terminalTopConstraint = terminalTopConstraint
             self.terminalBottomConstraint = terminalBottomConstraint
             // didChangeFrame too: some presentations deliver their final
             // geometry (accessory attach, dock/float transitions) only in
@@ -249,6 +264,46 @@ struct SwiftTermView: UIViewRepresentable {
             else { return }
             constraint.constant = -height
             avoidingContainer?.layoutIfNeeded()
+        }
+
+        func terminalMetricsDidChange() {
+            avoidingContainer?.setNeedsLayout()
+            avoidingContainer?.layoutIfNeeded()
+        }
+
+        /// SwiftTerm renders only whole rows from the top of its bounds. Move
+        /// its measured fractional remainder into the existing top gutter so
+        /// a tmux status line hugs the lower chrome. One physical pixel stays
+        /// below the grid to keep the PTY safely in the same row-count bucket.
+        private func alignTerminalGridTowardBottom() {
+            guard controller.route.sessionName != nil,
+                  let view = terminalView,
+                  let topConstraint = terminalTopConstraint,
+                  view.bounds.height > 0
+            else { return }
+
+            let baseTop = SwiftTermView.terminalInsets.top
+            let appliedNudge = max(0, topConstraint.constant - baseTop)
+            let rawHeight = view.bounds.height + appliedNudge
+            let rows = view.getTerminal().rows
+            guard rows > 0 else { return }
+            let cellHeight = view.getOptimalFrameSize().height / CGFloat(rows)
+            guard cellHeight > 0 else { return }
+
+            let scale = max(view.window?.screen.scale ?? UIScreen.main.scale, 1)
+            let epsilon = 0.5 / scale
+            let nudge = TerminalGridAlignment.bottomNudge(
+                rawHeight: rawHeight,
+                cellHeight: cellHeight,
+                displayScale: scale
+            )
+            let targetTop = baseTop + nudge
+            guard abs(topConstraint.constant - targetTop) > epsilon else { return }
+            topConstraint.constant = targetTop
+            // This method runs after `super.layoutSubviews()`. Ensure UIKit
+            // resolves the new constraint even if the keyboard/window stops
+            // moving immediately after the layout pass that changed it.
+            avoidingContainer?.setNeedsLayout()
         }
 
         private func applyKeyboardFrame(_ notification: Notification) {
@@ -334,6 +389,7 @@ struct SwiftTermView: UIViewRepresentable {
         /// or short/flat keyboard frame has no effect on terminal geometry.
         /// Only a docked keyboard needs remeasurement as the window moves.
         func containerDidLayout() {
+            alignTerminalGridTowardBottom()
             guard terminalView === TerminalFocusArbiter.current else { return }
             guard keyboardPresentation == .docked else { return }
             reapplyKeyboardLayout()
@@ -353,8 +409,9 @@ struct SwiftTermView: UIViewRepresentable {
             let screenSpace = window.screen.coordinateSpace
             let containerOnScreen = container.convert(container.bounds, to: screenSpace)
             let windowOnScreen = window.convert(window.bounds, to: screenSpace)
-            // Where SwiftUI rests bottom-edge chrome (the helper strip):
-            // the window bottom minus its safe-area inset (home indicator).
+            // The interactive rail rests on the window's bottom safe-area
+            // edge; a passive bezel paint continues through the protected
+            // rounded corner, but does not change this layout reference.
             let restingBottom = windowOnScreen.maxY - window.safeAreaInsets.bottom
             var overlap: CGFloat = 0
             var obstruction: CGFloat = 0
@@ -462,10 +519,11 @@ struct SwiftTermView: UIViewRepresentable {
 }
 
 #if !os(visionOS)
-/// Terminal wrapper that offers every layout pass to the keyboard-avoidance
-/// coordinator. Docked geometry is re-measured because Stage Manager, Split
-/// View, and rotation can move the terminal without a keyboard notification;
-/// floating presentations are rejected before measurement.
+/// Terminal wrapper that offers every layout pass to the coordinator. It
+/// aligns SwiftTerm's fractional grid remainder and re-measures docked
+/// keyboard geometry because Stage Manager, Split View, and rotation can move
+/// the terminal without a notification; unchanged/floating passes do no
+/// constraint work.
 private final class KeyboardAvoidingContainer: UIView {
     var onLayout: (() -> Void)?
 

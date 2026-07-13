@@ -372,7 +372,11 @@ struct TerminalWindowRoot: View {
                 .accessibilityHidden(!isActive)
             }
         }
+        #if os(visionOS)
         .background(Theme.screen.ignoresSafeArea())
+        #else
+        .background(Theme.screen)
+        #endif
     }
 
     /// The agent helper strip, when the active tab's session runs one.
@@ -689,7 +693,18 @@ private struct TerminalPane: View {
         ZStack {
             // The gutter around the terminal matches its background, so the
             // window reads as one surface in whatever theme is active.
+            #if os(visionOS)
             Color(themes.selected.background).ignoresSafeArea()
+            #else
+            // UIKit keeps rail controls inside the rounded-corner safe
+            // boundary. Paint that protected tail as part of the rail, then
+            // cover the terminal's ordinary bounds with its selected theme.
+            // The stale strip may still be classified as keyboard safe area
+            // after a float/window move, so this paint layer ignores both
+            // container and keyboard regions. It has no controls or layout.
+            Theme.bezel.ignoresSafeArea()
+            Color(themes.selected.background)
+            #endif
             if let controller {
                 SwiftTermView(
                     controller: controller,
