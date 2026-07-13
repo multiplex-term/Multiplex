@@ -21,6 +21,7 @@ struct FleetWall: View {
     @State private var deleteTarget: DeleteTarget?
     @State private var removingHost: Host?
     @State private var unreachableNotice: UnreachableNotice?
+    @State private var legacyDropTarget: SessionDropTarget?
 
     /// Pending delete confirmation — which session on which host.
     private struct DeleteTarget {
@@ -347,41 +348,159 @@ struct FleetWall: View {
 
     @ViewBuilder
     private func tiles(_ host: Host, model: HostConnectionModel) -> some View {
-        let grid = LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
-            switch model.tmux {
-            case .sessions(let sessions):
-                newSessionTile(host)
-                ForEach(sessions.reversed()) { session in
-                    SessionTile(
-                        session: session,
-                        lines: model.miniatures[session.name] ?? [],
-                        attention: model.attention[session.name],
-                        hasOpenTab: workspace.hasTab(hostID: host.id, sessionName: session.name),
-                        attach: {
-                            focusOrAttach(host, session: session)
-                        },
-                        attachNewWindow: {
-                            open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: session.name)))
-                        },
-                        delete: {
-                            deleteTarget = DeleteTarget(host: host, session: session)
+        switch model.tmux {
+        case .sessions(let sessions):
+            if #available(iOS 27.0, visionOS 27.0, *) {
+                animatedGrid(
+                    reorderableSessionGrid(host, model: model, sessions: sessions),
+                    state: model.tmux
+                )
+            } else {
+                animatedGrid(
+                    legacySessionGrid(host, model: model, sessions: sessions),
+                    state: model.tmux
+                )
+            }
+        case .noServer:
+            animatedGrid(
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                    newSessionTile(host)
+                },
+                state: model.tmux
+            )
+        case .tmuxMissing:
+            animatedGrid(
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                    noteTile("No tmux on host", detail: "You can still open a plain shell.")
+                },
+                state: model.tmux
+            )
+        case .failed:
+            animatedGrid(
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                    noSignalTile(host, model: model)
+                },
+                state: model.tmux
+            )
+        case .unknown, .probing:
+            animatedGrid(
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                    acquiringTile
+                },
+                state: model.tmux
+            )
+        }
+    }
+
+    /// OS 27's reorder container is purpose-built for this interaction: a
+    /// long press lifts one tile, leaves a placeholder, and makes the other
+    /// tiles move out of the way as the drag crosses the adaptive grid.
+    @available(iOS 27.0, visionOS 27.0, *)
+    private func reorderableSessionGrid(
+        _ host: Host, model: HostConnectionModel, sessions: [TmuxSession]
+    ) -> some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+            newSessionTile(host)
+            ForEach(store.orderedSessions(sessions, for: host.id)) { session in
+                sessionTile(host, model: model, session: session)
+            }
+            .reorderable()
+        }
+        .reorderContainer(for: TmuxSession.self) { difference in
+            let destination: String?
+            switch difference.destination.position {
+            case .before(let sessionName): destination = sessionName
+            case .end: destination = nil
+            }
+            store.moveSessions(
+                difference.sources,
+                before: destination,
+                for: host.id,
+                available: sessions
+            )
+        }
+    }
+
+    /// iOS/visionOS 16–26 fallback using the original Transferable drag/drop
+    /// API. Dropping on a session moves the dragged tile into that tile's
+    /// slot; the neutral outline makes the pending destination explicit.
+    private func legacySessionGrid(
+        _ host: Host, model: HostConnectionModel, sessions: [TmuxSession]
+    ) -> some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+            newSessionTile(host)
+            ForEach(store.orderedSessions(sessions, for: host.id)) { session in
+                let target = SessionDropTarget(hostID: host.id, sessionName: session.name)
+                sessionTile(host, model: model, session: session)
+                    .draggable(sessionDragPayload(hostID: host.id, sessionName: session.name))
+                    .overlay {
+                        Rectangle()
+                            .strokeBorder(Theme.signal2, lineWidth: 2)
+                            .opacity(legacyDropTarget == target ? 1 : 0)
+                            .allowsHitTesting(false)
+                    }
+                    .dropDestination(for: String.self) { payloads, _ in
+                        defer { legacyDropTarget = nil }
+                        guard let payload = payloads.first,
+                              let source = SessionDropTarget(payload: payload),
+                              source.hostID == host.id
+                        else { return false }
+
+                        let move = {
+                            store.moveSession(
+                                source.sessionName,
+                                to: session.name,
+                                for: host.id,
+                                available: sessions
+                            )
                         }
-                    )
-                }
-            case .noServer:
-                newSessionTile(host)
-            case .tmuxMissing:
-                noteTile("No tmux on host", detail: "You can still open a plain shell.")
-            case .failed:
-                noSignalTile(host, model: model)
-            case .unknown, .probing:
-                acquiringTile
+                        if reduceMotion {
+                            move()
+                        } else {
+                            withAnimation(.spring(response: 0.32, dampingFraction: 1), move)
+                        }
+                        return true
+                    } isTargeted: { targeted in
+                        if targeted {
+                            legacyDropTarget = target
+                        } else if legacyDropTarget == target {
+                            legacyDropTarget = nil
+                        }
+                    }
             }
         }
+    }
+
+    private func sessionTile(
+        _ host: Host, model: HostConnectionModel, session: TmuxSession
+    ) -> SessionTile {
+        SessionTile(
+            session: session,
+            lines: model.miniatures[session.name] ?? [],
+            attention: model.attention[session.name],
+            hasOpenTab: workspace.hasTab(hostID: host.id, sessionName: session.name),
+            attach: {
+                focusOrAttach(host, session: session)
+            },
+            attachNewWindow: {
+                open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: session.name)))
+            },
+            delete: {
+                deleteTarget = DeleteTarget(host: host, session: session)
+            }
+        )
+    }
+
+    private func sessionDragPayload(hostID: UUID, sessionName: String) -> String {
+        "multiplex-session\n\(hostID.uuidString)\n\(sessionName)"
+    }
+
+    @ViewBuilder
+    private func animatedGrid<Content: View>(_ grid: Content, state: TmuxState) -> some View {
         if reduceMotion {
             grid
         } else {
-            grid.animation(.easeOut(duration: 0.3), value: model.tmux)
+            grid.animation(.easeOut(duration: 0.3), value: state)
         }
     }
 
@@ -502,6 +621,33 @@ struct FleetWall: View {
 
     private func open(_ route: TerminalRoute) {
         openWindow(id: "terminal", value: TerminalWindowRoute(tab: route))
+    }
+}
+
+/// String-backed identity for the pre-27 Transferable fallback. Session names
+/// occupy the final component verbatim, so spaces and Unicode survive.
+private struct SessionDropTarget: Equatable {
+    let hostID: UUID
+    let sessionName: String
+
+    init(hostID: UUID, sessionName: String) {
+        self.hostID = hostID
+        self.sessionName = sessionName
+    }
+
+    init?(payload: String) {
+        let parts = payload.split(
+            separator: "\n",
+            maxSplits: 2,
+            omittingEmptySubsequences: false
+        )
+        guard parts.count == 3,
+              parts[0] == "multiplex-session",
+              let hostID = UUID(uuidString: String(parts[1]))
+        else { return nil }
+
+        self.hostID = hostID
+        sessionName = String(parts[2])
     }
 }
 
@@ -685,11 +831,16 @@ private struct SessionTile: View {
         }
         .buttonStyle(.plain)
         .chassisHover(4)
+        // Keep the lifted reorder preview on the tile's full rectangular
+        // chassis bounds; the default inferred shape can inset/round it and
+        // make the card read as if it shrank under the finger.
+        .contentShape(.dragPreview, Rectangle())
         .contextMenu {
             Button("Attach in New Window", action: attachNewWindow)
             Button("Delete Session…", role: .destructive, action: delete)
         }
         .accessibilityLabel(accessibilitySummary)
+        .accessibilityHint("Long press and drag to reorder within this host")
     }
 
     private var screen: some View {

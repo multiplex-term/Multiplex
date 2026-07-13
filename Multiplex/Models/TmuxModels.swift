@@ -42,6 +42,51 @@ struct TmuxSession: Identifiable, Hashable {
     }
 }
 
+/// Pure ordering rules for the deck's per-host session tiles. tmux owns the
+/// sessions themselves; Multiplex stores only their names as a device-local
+/// presentation preference. New sessions stay at the front in tmux's
+/// newest-first order, while stale saved names simply disappear.
+enum SessionOrdering {
+    static func ordered(_ sessions: [TmuxSession], saved: [String]?) -> [TmuxSession] {
+        let newestFirst = Array(sessions.reversed())
+        guard let saved else { return newestFirst }
+
+        let byName = Dictionary(uniqueKeysWithValues: sessions.map { ($0.name, $0) })
+        let savedNames = Set(saved)
+        let newSessions = newestFirst.filter { !savedNames.contains($0.name) }
+        return newSessions + saved.compactMap { byName[$0] }
+    }
+
+    /// Applies the destination emitted by SwiftUI's reorder container.
+    /// Multiple sources preserve their current visual order.
+    static func moving(
+        _ sources: [String], before destination: String?, in order: [String]
+    ) -> [String] {
+        let sourceSet = Set(sources)
+        let moving = order.filter(sourceSet.contains)
+        guard !moving.isEmpty else { return order }
+
+        var remaining = order.filter { !sourceSet.contains($0) }
+        let insertion = destination.flatMap { remaining.firstIndex(of: $0) } ?? remaining.endIndex
+        remaining.insert(contentsOf: moving, at: insertion)
+        return remaining
+    }
+
+    /// Older OS fallback: dropping onto a tile moves the source into that
+    /// tile's current slot, regardless of drag direction.
+    static func moving(_ source: String, to target: String, in order: [String]) -> [String] {
+        guard let sourceIndex = order.firstIndex(of: source),
+              let targetIndex = order.firstIndex(of: target),
+              sourceIndex != targetIndex
+        else { return order }
+
+        var result = order
+        let moved = result.remove(at: sourceIndex)
+        result.insert(moved, at: targetIndex)
+        return result
+    }
+}
+
 /// What a host's tmux server currently looks like.
 enum TmuxState: Equatable {
     case unknown

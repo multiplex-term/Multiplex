@@ -19,6 +19,10 @@ final class HostStore {
     /// this host". Device-local bookkeeping, so UserDefaults is fine.
     private var mirroredIDs: Set<UUID>
     private static let mirroredIDsKey = "MultiplexMirroredHostIDs"
+    /// Device-local deck preference: host ID → session names in display
+    /// order. tmux remains the source of truth for which sessions exist.
+    private var sessionOrders: [UUID: [String]] = [:]
+    private static let sessionOrdersKey = "MultiplexSessionOrders"
     private var isRefreshingFromCloud = false
 
     init() {
@@ -30,6 +34,7 @@ final class HostStore {
             (UserDefaults.standard.stringArray(forKey: Self.mirroredIDsKey) ?? [])
                 .compactMap(UUID.init)
         )
+        sessionOrders = Self.loadSessionOrders()
         load()
         seedFromEnvironmentIfNeeded()
     }
@@ -57,6 +62,8 @@ final class HostStore {
         KeychainStore.deleteHostRecord(for: host.id)
         mirroredIDs.remove(host.id)
         persistMirroredIDs()
+        sessionOrders.removeValue(forKey: host.id)
+        persistSessionOrders()
         save()
     }
 
@@ -83,6 +90,36 @@ final class HostStore {
 
     func host(id: UUID) -> Host? {
         hosts.first { $0.id == id }
+    }
+
+    // MARK: - Session presentation order
+
+    func orderedSessions(_ sessions: [TmuxSession], for hostID: UUID) -> [TmuxSession] {
+        SessionOrdering.ordered(sessions, saved: sessionOrders[hostID])
+    }
+
+    func moveSessions(
+        _ sources: [String], before destination: String?, for hostID: UUID,
+        available sessions: [TmuxSession]
+    ) {
+        let current = orderedSessions(sessions, for: hostID).map(\.name)
+        setSessionOrder(
+            SessionOrdering.moving(sources, before: destination, in: current),
+            for: hostID,
+            replacing: current
+        )
+    }
+
+    func moveSession(
+        _ source: String, to target: String, for hostID: UUID,
+        available sessions: [TmuxSession]
+    ) {
+        let current = orderedSessions(sessions, for: hostID).map(\.name)
+        setSessionOrder(
+            SessionOrdering.moving(source, to: target, in: current),
+            for: hostID,
+            replacing: current
+        )
     }
 
     /// Re-reads the mirrored records after launch and whenever the deck becomes
@@ -120,6 +157,33 @@ final class HostStore {
         let moved = hosts.remove(at: source)
         hosts.insert(moved, at: destination)
         save()
+    }
+
+    private func setSessionOrder(_ order: [String], for hostID: UUID, replacing old: [String]) {
+        guard order != old else { return }
+        sessionOrders[hostID] = order
+        persistSessionOrders()
+    }
+
+    private static func loadSessionOrders() -> [UUID: [String]] {
+        guard let data = UserDefaults.standard.data(forKey: sessionOrdersKey),
+              let raw = try? JSONDecoder().decode([String: [String]].self, from: data)
+        else { return [:] }
+
+        return Dictionary(uniqueKeysWithValues: raw.compactMap { key, value in
+            UUID(uuidString: key).map { ($0, value) }
+        })
+    }
+
+    private func persistSessionOrders() {
+        let raw = Dictionary(uniqueKeysWithValues: sessionOrders.map { ($0.key.uuidString, $0.value) })
+        guard !raw.isEmpty else {
+            UserDefaults.standard.removeObject(forKey: Self.sessionOrdersKey)
+            return
+        }
+        if let data = try? JSONEncoder().encode(raw) {
+            UserDefaults.standard.set(data, forKey: Self.sessionOrdersKey)
+        }
     }
 
     // MARK: - Cloud mirror

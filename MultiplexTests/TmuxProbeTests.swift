@@ -172,6 +172,50 @@ final class TmuxProbeTests: XCTestCase {
         TmuxSession(name: name, windows: [], created: Date(timeIntervalSince1970: 0), tmuxID: id)
     }
 
+    func testSessionOrderingKeepsNewSessionsAheadOfSavedOrder() {
+        let sessions = [
+            session("main", id: "$0"),
+            session("scratch", id: "$1"),
+            session("deploy", id: "$2"),
+        ]
+
+        XCTAssertEqual(
+            SessionOrdering.ordered(sessions, saved: nil).map(\.name),
+            ["deploy", "scratch", "main"]
+        )
+        XCTAssertEqual(
+            SessionOrdering.ordered(
+                sessions,
+                saved: ["gone", "scratch", "main"]
+            ).map(\.name),
+            ["deploy", "scratch", "main"]
+        )
+    }
+
+    func testSessionOrderingAppliesReorderContainerDestination() {
+        let order = ["deploy", "scratch", "main", "agent"]
+        XCTAssertEqual(
+            SessionOrdering.moving(["main"], before: "deploy", in: order),
+            ["main", "deploy", "scratch", "agent"]
+        )
+        XCTAssertEqual(
+            SessionOrdering.moving(["scratch", "main"], before: nil, in: order),
+            ["deploy", "agent", "scratch", "main"]
+        )
+    }
+
+    func testSessionOrderingFallbackMovesIntoTargetSlot() {
+        let order = ["deploy", "scratch", "main", "agent"]
+        XCTAssertEqual(
+            SessionOrdering.moving("deploy", to: "main", in: order),
+            ["scratch", "main", "deploy", "agent"]
+        )
+        XCTAssertEqual(
+            SessionOrdering.moving("agent", to: "scratch", in: order),
+            ["deploy", "agent", "scratch", "main"]
+        )
+    }
+
     func testCaptureCommandTargetsSessionIDsWithMarkers() {
         let command = TmuxProbe.captureCommand(for: [
             session("main", id: "$0"),
