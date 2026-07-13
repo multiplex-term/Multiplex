@@ -10,6 +10,9 @@ final class ConnectionHub {
     private var models: [UUID: HostConnectionModel] = [:]
     /// Fleet-wide alert sink; every model's attention events funnel here.
     private let attention: AttentionCenter?
+    /// Last-known wall state per host — prefills fresh models so a cold
+    /// launch paints tiles instantly while connections rebuild.
+    private let snapshots = DeckSnapshotStore()
 
     init(attention: AttentionCenter? = nil) {
         self.attention = attention
@@ -30,14 +33,27 @@ final class ConnectionHub {
         model.onAttentionAlert = { [attention] alert in
             attention?.handle(alert)
         }
+        model.onSnapshot = { [snapshots] snapshot in
+            snapshots.update(snapshot, for: host.id)
+        }
+        if let snapshot = snapshots.snapshot(for: host.id) {
+            model.restore(from: snapshot)
+        }
         models[host.id] = model
         return model
     }
 
     func dropModel(for hostID: UUID) {
+        snapshots.remove(for: hostID)
         if let model = models.removeValue(forKey: hostID) {
             Task { await model.disconnect() }
         }
+    }
+
+    /// Persist any pending snapshot changes — called when the deck leaves
+    /// the foreground, because suspension freezes the debounce timer.
+    func flushSnapshots() {
+        snapshots.flush()
     }
 }
 
@@ -68,6 +84,10 @@ final class HostConnectionModel {
     /// Set once by `ConnectionHub`; policy and delivery live in
     /// `AttentionCenter`, never here.
     var onAttentionAlert: ((AttentionAlert) -> Void)?
+    /// Fires after every settled probe with the state worth caching for the
+    /// next cold launch (nil when the server/sessions are gone). Set once by
+    /// `ConnectionHub`; persistence lives in `DeckSnapshotStore`, never here.
+    var onSnapshot: ((DeckSnapshot?) -> Void)?
 
     /// Stage timings for the wall's feed pipeline (debug level; read with
     /// `log stream --predicate 'category == "wall"'`).
@@ -87,6 +107,17 @@ final class HostConnectionModel {
 
     var isBusy: Bool {
         phase == .connecting || tmux == .probing
+    }
+
+    /// Prefill the wall's tiles from the previous run's snapshot — only
+    /// before the first live result, and never the attention inputs
+    /// (NEEDS YOU is re-earned by a live capture). The connection phase is
+    /// untouched: the rail's STANDBY → LINKING → CONNECTED stays the truth
+    /// about liveness while the tiles show last-known content.
+    func restore(from snapshot: DeckSnapshot) {
+        guard case .unknown = tmux else { return }
+        tmux = .sessions(snapshot.sessions)
+        miniatures = snapshot.miniatures
     }
 
     /// Connect if needed, then re-probe tmux sessions.
@@ -109,6 +140,11 @@ final class HostConnectionModel {
     }
 
     private func performRefresh() async {
+        // Whether this pass reuses an already-established link — if that
+        // link fails mid-probe (Wi-Fi blip, server restart, socket severed
+        // during suspension), one immediate reconnect beats surfacing
+        // UNREACHABLE and waiting out a full feed interval.
+        let reusedLink = connection != nil && phase == .connected
         do {
             let connection = try await ensureConnection()
             // Only surface .probing before the first result — every later
@@ -121,10 +157,18 @@ final class HostConnectionModel {
             let output = try await deadlined { try await connection.exec(TmuxProbe.probeCommand) }
             let execEnd = ContinuousClock.now
             tmux = TmuxProbe.parse(output)
-            if case .sessions(let sessions) = tmux {
+            switch tmux {
+            case .sessions(let sessions):
                 let tails = TmuxProbe.parseTails(output, sessions: sessions)
                 attentionTails = tails
                 miniatures = tails.mapValues(TmuxProbe.miniatureTail)
+                onSnapshot?(DeckSnapshot(sessions: sessions, miniatures: miniatures))
+            case .noServer, .tmuxMissing:
+                // A settled "nothing there" clears the cache — ghost tiles
+                // at the next launch would outlive the sessions they show.
+                onSnapshot?(nil)
+            case .unknown, .probing, .failed:
+                break
             }
             Self.timing.debug("""
                 \(self.host.name, privacy: .public) probe: exec \
@@ -135,7 +179,18 @@ final class HostConnectionModel {
             lastRefreshed = Date()
             evaluateAttention()
         } catch {
-            markFailed(error)
+            if reusedLink {
+                // Retry silently: the rail keeps reading CONNECTED while a
+                // fresh link is attempted (ensureConnection never downgrades
+                // a non-idle phase), and only a failed retry surfaces.
+                if let connection {
+                    Task { await connection.close() }
+                }
+                connection = nil
+                await performRefresh() // second pass has no link to reuse
+            } else {
+                markFailed(error)
+            }
         }
     }
 
@@ -159,7 +214,20 @@ final class HostConnectionModel {
     }
 
     private func ensureConnection() async throws -> SSHConnection {
-        if let connection, phase == .connected { return connection }
+        if let connection, phase == .connected {
+            // A link whose last successful round-trip is several feed
+            // intervals old was almost certainly severed while the app was
+            // suspended (sockets freeze with the process; peers and NATs
+            // move on). Reusing it burns a whole exec deadline discovering
+            // that — rebuild preemptively instead. State and miniatures
+            // stay, and the rail keeps CONNECTED unless the rebuild fails.
+            let stale = lastRefreshed.map {
+                Date().timeIntervalSince($0) > Self.staleLinkAge
+            } ?? false
+            if !stale { return connection }
+            Task { await connection.close() }
+            self.connection = nil
+        }
         // Only surface .connecting before the first settled phase — same
         // rule as `.probing` above. The wall retries failed hosts every few
         // seconds, and flashing LINKING ↔ UNREACHABLE each cycle makes the
@@ -188,6 +256,10 @@ final class HostConnectionModel {
     /// Deadline for establishing the control connection (TCP + SSH handshake
     /// + auth); longer than an exec round-trip on an already-live link.
     private static let connectDeadline: Double = 15
+    /// Age of the last successful round-trip beyond which an "established"
+    /// link is presumed severed by suspension (several wall ticks — while
+    /// the deck is frontmost, every tick refreshes it).
+    private static let staleLinkAge: TimeInterval = 30
     /// Deadline for one exec round-trip on the established connection.
     /// (nonisolated so it can be a default argument of `deadlined`.)
     private nonisolated static let execDeadline: Double = 10

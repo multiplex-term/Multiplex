@@ -1,7 +1,7 @@
 import Foundation
 
 /// One window inside a tmux session — a cell in the window spine.
-struct TmuxWindow: Identifiable, Hashable {
+struct TmuxWindow: Identifiable, Hashable, Codable {
     var index: Int
     var name: String
     var isActive: Bool
@@ -18,7 +18,7 @@ struct TmuxWindow: Identifiable, Hashable {
 }
 
 /// A tmux session as reported by `tmux list-sessions` / `list-windows`.
-struct TmuxSession: Identifiable, Hashable {
+struct TmuxSession: Identifiable, Hashable, Codable {
     var name: String
     var windows: [TmuxWindow]
     /// Attached client count (`session_attached` is a count, not a flag).
@@ -85,6 +85,15 @@ enum SessionOrdering {
         result.insert(moved, at: targetIndex)
         return result
     }
+}
+
+/// Last-known wall state for one host — what a cold launch paints while the
+/// probe reconnects (the same staleness the wall already shows between
+/// ticks). Attention state is deliberately absent: NEEDS YOU and agent
+/// alerts must be re-earned by a live probe, never restored from disk.
+struct DeckSnapshot: Codable, Equatable {
+    var sessions: [TmuxSession]
+    var miniatures: [String: [String]]
 }
 
 /// What a host's tmux server currently looks like.

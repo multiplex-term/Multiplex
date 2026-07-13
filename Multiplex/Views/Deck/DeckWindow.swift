@@ -32,6 +32,7 @@ private struct DeckSceneReporter: UIViewRepresentable {
 /// settings). Scene bookkeeping and the DEBUG auto-attach hook live here.
 struct DeckWindow: View {
     @Environment(HostStore.self) private var store
+    @Environment(ConnectionHub.self) private var hub
     @Environment(TerminalWorkspace.self) private var workspace
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
@@ -55,10 +56,13 @@ struct DeckWindow: View {
         // the deck exists instead of blocking App initialization.
         .task { await store.refreshFromCloud() }
         // iCloud Keychain sync has no change notification; re-merge the host
-        // mirror whenever the deck comes back to the foreground.
+        // mirror whenever the deck comes back to the foreground. Leaving it,
+        // flush the wall snapshots — suspension freezes their debounce timer.
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task { await store.refreshFromCloud() }
+            } else {
+                hub.flushSnapshots()
             }
         }
         #if DEBUG

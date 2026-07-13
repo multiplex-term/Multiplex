@@ -162,6 +162,10 @@ SwiftUI: Deck window  +  N Terminal windows (WindowGroup(for: TerminalWindowRout
                      ps table + capture tails, polled ~5s per host by
                      FleetWall while the deck is frontmost; background
                      re-probes never surface .probing so tiles don't flicker)
+    DeckSnapshotStore  last-known sessions+miniatures per host (device-local
+                     deck-snapshots.json) — cold launches paint the wall
+                     instantly from it while connections rebuild; attention
+                     state is never cached (re-earned by a live probe)
     TmuxProbe        list-sessions/-windows/-panes + capture-pane + ps command
                      builders and parsers (pure, unit-tested)
     AgentSignature   classifies a pane's CLI agent (Claude Code / Codex) from

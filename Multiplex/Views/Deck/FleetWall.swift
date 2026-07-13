@@ -12,6 +12,7 @@ struct FleetWall: View {
     @Environment(TerminalWorkspace.self) private var workspace
     @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     var addHost: () -> Void
     var editHost: (Host) -> Void
@@ -43,10 +44,20 @@ struct FleetWall: View {
     /// Wall cadence: one concurrent probe round-trip per host per tick.
     private static let feedInterval: Duration = .seconds(5)
 
+    /// Feed-loop identity: restarts on fleet changes AND on scene
+    /// activation, so a deck coming to the foreground ticks immediately
+    /// instead of finishing whatever sleep it was suspended in.
+    private struct FeedID: Hashable {
+        let hosts: [UUID]
+        let active: Bool
+    }
+
     var body: some View {
         platformWall
         .background(Theme.chassis.ignoresSafeArea())
-        .task(id: store.hosts.map(\.id)) { await runFeed() }
+        .task(
+            id: FeedID(hosts: store.hosts.map(\.id), active: scenePhase == .active)
+        ) { await runFeed() }
         .sheet(item: $namingHost) { host in
             NewSessionSheet(
                 host: host,
@@ -134,17 +145,25 @@ struct FleetWall: View {
     /// `.task(id:)` restarts the loop when the fleet changes.
     private func runFeed() async {
         while !Task.isCancelled {
-            if UIApplication.shared.applicationState == .active {
-                // Resolve models on the main actor first, then let every host
-                // run its own probe (one exec round-trip carrying sessions,
-                // agent detection, and miniature tails). One slow host must
-                // not delay the rest of the fleet.
-                let models = store.hosts.map { hub.model(for: $0) }
-                await withTaskGroup(of: Void.self) { group in
-                    for model in models {
-                        group.addTask {
-                            await model.refreshAndWait()
-                        }
+            guard UIApplication.shared.applicationState == .active else {
+                // Not active YET: a cold launch runs the first tick before
+                // the scene activates, and burning a whole feed interval
+                // here read as "~6 s to connect" on a real iPad. Poll
+                // briefly instead — the task id also restarts this loop the
+                // moment the scene turns active, and iOS suspends the
+                // process outright in the background, so this never spins.
+                try? await Task.sleep(for: .milliseconds(200))
+                continue
+            }
+            // Resolve models on the main actor first, then let every host
+            // run its own probe (one exec round-trip carrying sessions,
+            // agent detection, and miniature tails). One slow host must
+            // not delay the rest of the fleet.
+            let models = store.hosts.map { hub.model(for: $0) }
+            await withTaskGroup(of: Void.self) { group in
+                for model in models {
+                    group.addTask {
+                        await model.refreshAndWait()
                     }
                 }
             }
