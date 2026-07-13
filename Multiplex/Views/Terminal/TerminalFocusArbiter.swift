@@ -2,6 +2,7 @@ import SwiftTerm
 import UIKit
 #if DEBUG
 import notify
+import os
 #endif
 
 /// Exactly one terminal holds keyboard focus at a time, app-wide.
@@ -21,10 +22,36 @@ enum TerminalFocusArbiter {
     private static var keyboardVisible = false
     private static var observersInstalled = false
 
+    #if DEBUG
+    private static let keyboardLogger = Logger(
+        subsystem: "app.multiplexterm.multiplex",
+        category: "kbd"
+    )
+    #endif
+
     /// Move keyboard focus to this terminal. No-op if it already has it.
     static func claim(_ view: TerminalView) {
         installObserversIfNeeded()
+        // Stage Manager can transiently clear `isKeyWindow` while the user
+        // moves that very window. The terminal still owns the live input
+        // session and remains first responder during that transition. Do not
+        // call `makeKey()` to "repair" it: that feeds back into UIKit's
+        // keyboard host, reactivating and laying out the floating keyboard on
+        // every window move. The user's window interaction restores key state.
+        if current === view, view.isFirstResponder {
+            #if DEBUG
+            if view.window?.isKeyWindow == false {
+                keyboardLogger.debug("kbd-focus-preserved transientNonKey=true")
+            }
+            #endif
+            return
+        }
         let switching = current !== view
+        #if DEBUG
+        keyboardLogger.debug(
+            "kbd-focus-claim switching=\(switching, privacy: .public) key=\(view.window?.isKeyWindow == true, privacy: .public) responder=\(view.isFirstResponder, privacy: .public)"
+        )
+        #endif
         if switching {
             _ = current?.resignFirstResponder()
             #if os(visionOS)
@@ -36,7 +63,9 @@ enum TerminalFocusArbiter {
             #endif
         }
         current = view
-        view.window?.makeKey()
+        if let window = view.window, !window.isKeyWindow {
+            window.makeKey()
+        }
         if !view.isFirstResponder {
             _ = view.becomeFirstResponder()
         }
@@ -44,7 +73,7 @@ enum TerminalFocusArbiter {
 
     /// Explicit user request for the keyboard (tap or keyboard button).
     ///
-    /// If the terminal already has focus but no real keyboard is on screen —
+    /// If the terminal already has focus but no input UI is on screen —
     /// dismissed while still first responder, or suppressed because the OS
     /// believed a hardware keyboard was available — a plain
     /// becomeFirstResponder is a no-op. Tearing the input session down and
@@ -53,14 +82,17 @@ enum TerminalFocusArbiter {
     /// within one turn can be coalesced into "nothing changed").
     ///
     /// `force` skips the keyboard-visibility check: the keyboard *button*
-    /// always rebuilds, because in hardware-keyboard mode the OS reports a
-    /// tall "shown" keyboard frame while rendering only the accessory row —
-    /// visibility tracking can't tell that apart from a usable keyboard.
-    /// Terminal taps stay unforced so tapping while typing never blips the
-    /// keyboard away.
+    /// always asks UIKit to re-evaluate software-keyboard presentation.
+    /// Terminal taps stay unforced so a visible floating keyboard never
+    /// blips; the app-owned key rail remains independent of this lifecycle.
     static func summon(_ view: TerminalView, force: Bool = false) {
         installObserversIfNeeded()
         if current === view, view.isFirstResponder, force || !keyboardVisible {
+            #if DEBUG
+            keyboardLogger.debug(
+                "kbd-focus-rebuild force=\(force, privacy: .public) visible=\(keyboardVisible, privacy: .public)"
+            )
+            #endif
             _ = view.resignFirstResponder()
             DispatchQueue.main.async {
                 claim(view)
@@ -79,10 +111,9 @@ enum TerminalFocusArbiter {
             forName: UIResponder.keyboardDidShowNotification,
             object: nil,
             queue: .main
-        ) { notification in
-            let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        ) { _ in
             MainActor.assumeIsolated {
-                keyboardVisible = (frame?.height ?? 0) >= KeyboardAvoidance.minRealKeyboardHeight
+                keyboardVisible = true
             }
         }
         center.addObserver(
@@ -93,13 +124,12 @@ enum TerminalFocusArbiter {
             MainActor.assumeIsolated { keyboardVisible = false }
         }
         #if !os(visionOS)
-        // Floating/undocked keyboards never post didShow/didHide — only
-        // frame changes. Without these, `keyboardVisible` stays false while
-        // a floating pill is up, so every terminal tap runs the resign+
-        // rebuild branch below: the pill blinks away and iPadOS may not
-        // re-present it until the app is reactivated. Visibility is pure
-        // geometry (`KeyboardAvoidance.isPresented`), so both directions —
-        // pill appearing, pill flicked away — track from the same frames.
+        // Floating/undocked keyboards can communicate presentation only via
+        // frame changes. A typable frame marks the input session visible, but
+        // Stage Manager can replace it temporarily with a zero-height frame.
+        // That geometry is ambiguous and must preserve the previous state;
+        // otherwise the next terminal tap runs the resign+rebuild branch and
+        // makes the floating keyboard blink away.
         for name in [UIResponder.keyboardWillChangeFrameNotification,
                      UIResponder.keyboardDidChangeFrameNotification] {
             center.addObserver(
@@ -111,8 +141,15 @@ enum TerminalFocusArbiter {
                       notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool != false
                 else { return }
                 MainActor.assumeIsolated {
-                    guard let screen = current?.window?.screen.bounds else { return }
-                    keyboardVisible = KeyboardAvoidance.isPresented(keyboard: frame, screen: screen)
+                    guard let view = current,
+                          let screen = view.window?.screen.bounds
+                    else { return }
+                    if let update = KeyboardAvoidance.visibilityUpdate(
+                        keyboard: frame,
+                        screen: screen
+                    ) {
+                        keyboardVisible = update == .shown
+                    }
                 }
             }
         }
@@ -192,7 +229,9 @@ enum TerminalFocusArbiter {
     /// SwiftUI's automatic avoidance tracks the real keyboard internally
     /// and ignores these, which is fine now that the terminal window opts
     /// out of it. `….debug.kbd.float` = undocked pill mid-screen,
-    /// `….debug.kbd.dock` = full-width docked panel, `….debug.kbd.hide`.
+    /// `….debug.kbd.move` = Stage Manager's zero-height move sequence plus
+    /// an ordinary terminal tap, `….debug.kbd.dock` = full-width docked
+    /// panel, `….debug.kbd.hide`.
     /// visionOS has no window-anchored keyboard (and no `UIWindow.screen`).
     private static func installDebugKeyboardHooks() {
         func post(_ name: Notification.Name, endFrame: CGRect, screen: CGRect) {
@@ -216,7 +255,30 @@ enum TerminalFocusArbiter {
             MainActor.assumeIsolated {
                 guard let screen = current?.window?.screen.bounds else { return }
                 let pill = CGRect(x: screen.midX - 160, y: screen.maxY - 500, width: 320, height: 254)
-                post(UIResponder.keyboardWillChangeFrameNotification, endFrame: pill, screen: screen)
+                // Stage Manager's window-move hot path repeatedly emits the
+                // did-change notification for an already-floating keyboard.
+                post(UIResponder.keyboardDidChangeFrameNotification, endFrame: pill, screen: screen)
+            }
+        }
+        var moveToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.kbd.move", &moveToken, .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                guard let view = current,
+                      let window = view.window
+                else { return }
+                let screen = window.screen.bounds
+                let flat = CGRect(
+                    x: screen.minX,
+                    y: screen.maxY,
+                    width: screen.width,
+                    height: 0
+                )
+                post(UIResponder.keyboardWillChangeFrameNotification, endFrame: flat, screen: screen)
+                post(UIResponder.keyboardWillHideNotification, endFrame: flat, screen: screen)
+                post(UIResponder.keyboardDidChangeFrameNotification, endFrame: flat, screen: screen)
+                summon(view)
             }
         }
         var dockToken: Int32 = 0

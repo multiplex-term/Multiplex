@@ -6,47 +6,39 @@ import UIKit
 import notify
 #endif
 
-/// The iPad terminal's input accessory — a TALLY key rail above the software
-/// keyboard (and the row that docks alone in hardware-keyboard mode),
-/// replacing SwiftTerm's stock white accessory. Keys a remote tmux + CLI
-/// agent session actually needs: ESC, a latching CTRL, TAB, the shell
-/// symbols the iPad keyboard buries behind layer switches, arrows, and
-/// PgUp/PgDn (pagers and CLI agents like Claude Code page with them).
+/// The iPad terminal's app-owned TALLY key rail. It is a normal subview of
+/// the terminal container—not an `inputAccessoryView`. iPadOS rehosts custom
+/// accessories through TextInputUI while a Stage Manager window moves,
+/// repeatedly rebuilding the floating keyboard scene and stalling the UI.
+/// Keeping the rail in Multiplex's own view tree preserves the keys without
+/// registering that keyboard-scene tracking path.
 ///
 /// Every key sends through `TerminalView.send` → the view delegate → the
-/// controller's ordered input pump, so accessory bytes can never reorder
-/// around keystrokes. CTRL rides SwiftTerm's `controlModifier`, which the
-/// next software-keyboard character consumes (and auto-resets — the bar
-/// listens for the reset to release the latch visual). On visionOS the
-/// keyboard floats in its own panel and never shows an accessory.
+/// controller's ordered input pump, so rail bytes can never reorder around
+/// keystrokes. CTRL rides SwiftTerm's `controlModifier`, which the next typed
+/// character consumes; the rail observes that reset to release its latch.
 @MainActor
-final class TerminalKeyBar: UIInputView, UIInputViewAudioFeedback {
+final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     @Observable @MainActor
     final class Model {
         var ctrlLatched = false
     }
 
-    private static let barHeight: CGFloat = 48
+    static let barHeight: CGFloat = 48
 
     private weak var terminal: TerminalView?
     private let model = Model()
-    /// The hosting controller must outlive its view; stored, not parented —
-    /// an accessory has no view-controller hierarchy to join.
     private var host: UIHostingController<KeyBarRow>?
 
     init(terminal: TerminalView) {
         self.terminal = terminal
-        super.init(
-            frame: CGRect(x: 0, y: 0, width: 0, height: Self.barHeight),
-            inputViewStyle: .keyboard
-        )
-        allowsSelfSizing = true
+        super.init(frame: .zero)
+        model.ctrlLatched = terminal.controlModifier
 
         let host = UIHostingController(rootView: KeyBarRow(
             model: model,
             press: { [weak self] key in self?.press(key) }
         ))
-        // The keyboard region would otherwise pad the row inside its own bar.
         host.safeAreaRegions = []
         host.view.backgroundColor = .clear
         host.view.translatesAutoresizingMaskIntoConstraints = false
@@ -59,8 +51,6 @@ final class TerminalKeyBar: UIInputView, UIInputViewAudioFeedback {
         ])
         self.host = host
 
-        // SwiftTerm consumes the control modifier on the next typed
-        // character; selector-based observation needs no deinit cleanup.
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(controlModifierDidReset),
@@ -76,14 +66,13 @@ final class TerminalKeyBar: UIInputView, UIInputViewAudioFeedback {
         fatalError("init(coder:) has not been implemented")
     }
 
-    // UIInputViewAudioFeedback — lets playInputClick() tick like a key.
     var enableInputClicksWhenVisible: Bool { true }
 
     @objc private func controlModifierDidReset() {
         model.ctrlLatched = false
     }
 
-    fileprivate func press(_ key: TerminalKey) {
+    private func press(_ key: TerminalKey) {
         guard let terminal else { return }
         switch key {
         case .esc:
@@ -118,7 +107,7 @@ final class TerminalKeyBar: UIInputView, UIInputViewAudioFeedback {
             click()
             terminal.send(EscapeSequences.cmdPageDown)
         case .dismiss:
-            terminal.resignFirstResponder()
+            _ = terminal.resignFirstResponder()
         }
     }
 
@@ -136,9 +125,10 @@ final class TerminalKeyBar: UIInputView, UIInputViewAudioFeedback {
     /// send path, then a latched CTRL consumed by a software-keyboard 'c' —
     /// at a shell prompt `tmux capture-pane` shows `~|/-^C`.
     func debugExercise() {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
         for symbol in ["~", "|", "/", "-"] { press(.text(symbol)) }
         press(.ctrl)
-        terminal?.insertText("c")
+        terminal.insertText("c")
     }
     #endif
 }
@@ -153,7 +143,7 @@ private enum TerminalKey {
 
 /// The rail: modifiers left, shell symbols center, arrows + dismiss right.
 /// Fixed-size keys so ViewThatFits can actually measure — when the bar is
-/// narrow (accessory-only row in a small Stage Manager window), keep the
+/// narrow (a small Stage Manager window), keep the
 /// path essentials (`~` and `/`) while dropping the less-used symbols first.
 private struct KeyBarRow: View {
     var model: TerminalKeyBar.Model
@@ -274,7 +264,8 @@ enum KeyBarDebugHook {
             "app.multiplexterm.multiplex.debug.keybar", &token, .main
         ) { _ in
             guard let view = TerminalFocusArbiter.current,
-                  let bar = view.inputAccessoryView as? TerminalKeyBar
+                  let bar = view.superview?.subviews
+                    .compactMap({ $0 as? TerminalKeyBar }).first
             else { return }
             bar.debugExercise()
         }

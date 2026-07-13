@@ -11,6 +11,8 @@ import notify
 /// taste; after it is spent, the strip passively becomes the Pro pill until
 /// the next local day (no modal interrupts the terminal).
 struct AgentHelperStrip: View {
+    static let dockedHeight: CGFloat = 48
+
     let agent: AgentKind
     let canShowCommands: Bool
     /// Floating slab (visionOS ornament, UMD chrome) vs full-width bar
@@ -33,6 +35,7 @@ struct AgentHelperStrip: View {
             row
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
+                .frame(height: Self.dockedHeight)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Theme.bezel)
                 .overlay(alignment: .top) {

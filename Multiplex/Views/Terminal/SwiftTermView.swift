@@ -10,10 +10,14 @@ struct SwiftTermView: UIViewRepresentable {
     let controller: TerminalSessionController
     var fontSize: CGFloat
     var theme: TerminalTheme
+    /// Space between terminal content and the iPad key rail for app chrome
+    /// such as the agent helper strip. The rail itself remains bottommost.
+    var bottomChromeHeight: CGFloat = 0
     /// Only the window's active tab claims keyboard focus when it appears.
     var isActive: Bool = true
 
     private static let focusTapName = "multiplex.focus-tap"
+    private static let terminalInsets = UIEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
 
     func makeUIView(context: Context) -> UIView {
         let view: TerminalView
@@ -39,9 +43,12 @@ struct SwiftTermView: UIViewRepresentable {
             // controlModifier ?? controlModifier`). Drop it.
             view.inputAccessoryView = nil
             #else
-            // The TALLY key rail replaces SwiftTerm's stock accessory. Tied
-            // to the view, so it survives tab moves across windows.
-            view.inputAccessoryView = TerminalKeyBar(terminal: view)
+            // Never attach Multiplex chrome as `inputAccessoryView` on iPad.
+            // TextInputUI rehosts custom accessories while a Stage Manager
+            // window moves, reactivating a floating keyboard every frame.
+            // The UIKit container below renders the same TALLY controls as a
+            // normal sibling view instead.
+            view.inputAccessoryView = nil
             #endif
         }
         apply(theme, to: view, coordinator: context.coordinator)
@@ -67,33 +74,50 @@ struct SwiftTermView: UIViewRepresentable {
         tap.delegate = context.coordinator
         view.addGestureRecognizer(tap)
 
-        // The terminal shrinks above the keyboard — including the
-        // accessory-only presentation (hardware keyboard mode), which
-        // keyboardLayoutGuide misses in windowed iPadOS — so the bottom
-        // rows are never covered: the PTY reflows and tmux redraws its
-        // status line above the keyboard. This constraint is the *single*
-        // owner of keyboard clearance: the window opts the terminal out of
-        // SwiftUI's automatic avoidance (TerminalWindow), which mishandles
-        // floating keyboards. On visionOS the keyboard floats in its own
-        // panel and never overlaps the window.
+        // On iPad, the app-owned rail is a normal sibling below the terminal.
+        // Moving its bottom constraint above a genuinely docked keyboard
+        // reflows the PTY once, while floating keyboards reserve nothing and
+        // never enter TextInputUI's custom-accessory path. On visionOS the
+        // keyboard floats in its own panel and never overlaps the window.
         #if os(visionOS)
         let container = UIView()
-        #else
-        let container = KeyboardAvoidingContainer()
-        #endif
         container.addSubview(view)
         view.translatesAutoresizingMaskIntoConstraints = false
-        let bottomConstraint = view.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         NSLayoutConstraint.activate([
-            view.topAnchor.constraint(equalTo: container.topAnchor),
-            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            bottomConstraint,
+            view.topAnchor.constraint(equalTo: container.topAnchor, constant: Self.terminalInsets.top),
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Self.terminalInsets.left),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.terminalInsets.right),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Self.terminalInsets.bottom),
         ])
-        #if !os(visionOS)
-        context.coordinator.installKeyboardAvoidance(container: container, constraint: bottomConstraint)
+        #else
+        let container = KeyboardAvoidingContainer()
+        let keyBar = TerminalKeyBar(terminal: view)
+        container.addSubview(view)
+        container.addSubview(keyBar)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        keyBar.translatesAutoresizingMaskIntoConstraints = false
+        let keyBarBottom = keyBar.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        let terminalBottom = view.bottomAnchor.constraint(
+            equalTo: keyBar.topAnchor,
+            constant: -(Self.terminalInsets.bottom + bottomChromeHeight)
+        )
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: container.topAnchor, constant: Self.terminalInsets.top),
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Self.terminalInsets.left),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.terminalInsets.right),
+            terminalBottom,
+            keyBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            keyBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            keyBar.heightAnchor.constraint(equalToConstant: TerminalKeyBar.barHeight),
+            keyBarBottom,
+        ])
+        context.coordinator.installKeyboardAvoidance(
+            container: container,
+            constraint: keyBarBottom,
+            terminalBottomConstraint: terminalBottom
+        )
         container.onLayout = { [weak coordinator = context.coordinator] in
-            coordinator?.reapplyKeyboardOverlap()
+            coordinator?.containerDidLayout()
         }
         #endif
 
@@ -117,6 +141,11 @@ struct SwiftTermView: UIViewRepresentable {
         if context.coordinator.appliedTheme != theme {
             apply(theme, to: view, coordinator: context.coordinator)
         }
+        #if !os(visionOS)
+        context.coordinator.updateBottomChromeHeight(
+            Self.terminalInsets.bottom + bottomChromeHeight
+        )
+        #endif
     }
 
     func makeCoordinator() -> Coordinator {
@@ -159,35 +188,49 @@ struct SwiftTermView: UIViewRepresentable {
         #if !os(visionOS)
         private weak var avoidingContainer: UIView?
         private var bottomConstraint: NSLayoutConstraint?
+        private var terminalBottomConstraint: NSLayoutConstraint?
         private var keyboardObservers: [NSObjectProtocol] = []
-        /// Last keyboard end-frame (screen coords); nil once hidden. Kept so
-        /// overlap can be re-measured when geometry — not the keyboard —
-        /// changes: Stage Manager shifts the whole window after the
-        /// keyboard notification, and an overlap computed mid-shift leaves
-        /// the input row behind the key rail.
+        private var keyboardPresentation: KeyboardAvoidance.Presentation = .hidden
+        private var keyboardSettleWorkItems: [DispatchWorkItem] = []
+        #if DEBUG
+        private var keyboardLogSettleWorkItem: DispatchWorkItem?
+        #endif
+        /// Last *docked* keyboard end-frame (screen coords); floating frames
+        /// are deliberately discarded. Kept so overlap can be re-measured
+        /// when geometry — not the keyboard — changes after a docked event.
         private var lastKeyboardFrame: CGRect?
 
         deinit {
             for observer in keyboardObservers {
                 NotificationCenter.default.removeObserver(observer)
             }
+            cancelKeyboardSettleRemeasures()
+            #if DEBUG
+            keyboardLogSettleWorkItem?.cancel()
+            #endif
         }
 
-        /// Raise the terminal's bottom edge by however much of the keyboard
-        /// (including the accessory row alone) overlaps the container.
-        /// Floating/split keyboards hover over content by design and reserve
-        /// nothing — `KeyboardAvoidance` makes the docked call.
-        func installKeyboardAvoidance(container: UIView, constraint: NSLayoutConstraint) {
+        /// Move the app-owned rail and terminal above a docked keyboard, and
+        /// publish the same obstruction for the helper strip. Floating/split
+        /// keyboards reserve nothing.
+        func installKeyboardAvoidance(
+            container: UIView,
+            constraint: NSLayoutConstraint,
+            terminalBottomConstraint: NSLayoutConstraint
+        ) {
             avoidingContainer = container
             bottomConstraint = constraint
+            self.terminalBottomConstraint = terminalBottomConstraint
             // didChangeFrame too: some presentations deliver their final
             // geometry (accessory attach, dock/float transitions) only in
             // the did- pass — reacting to will- alone under-insets and the
-            // input row ends up behind the key rail. The handler is
-            // idempotent, so re-measuring is free.
+            // input row ends up behind the key rail. Repeated floating-frame
+            // events are filtered by presentation state before they reach
+            // layout, and docked settle work is coalesced.
             for name in [UIResponder.keyboardWillChangeFrameNotification,
                          UIResponder.keyboardDidChangeFrameNotification,
-                         UIResponder.keyboardWillHideNotification] {
+                         UIResponder.keyboardWillHideNotification,
+                         UIResponder.keyboardDidHideNotification] {
                 keyboardObservers.append(NotificationCenter.default.addObserver(
                     forName: name,
                     object: nil,
@@ -200,40 +243,112 @@ struct SwiftTermView: UIViewRepresentable {
             }
         }
 
+        func updateBottomChromeHeight(_ height: CGFloat) {
+            guard let constraint = terminalBottomConstraint,
+                  constraint.constant != -height
+            else { return }
+            constraint.constant = -height
+            avoidingContainer?.layoutIfNeeded()
+        }
+
         private func applyKeyboardFrame(_ notification: Notification) {
-            if notification.name == UIResponder.keyboardWillHideNotification {
-                lastKeyboardFrame = nil
-            } else if let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
-                lastKeyboardFrame = endFrame
+            guard notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool != false
+            else { return }
+            guard let container = avoidingContainer,
+                  let window = container.window
+            else { return }
+            // Keyboard notifications are process-global. Only the terminal
+            // that owns the app-wide input session may convert geometry or
+            // touch constraints; hidden Stage Manager scenes otherwise do
+            // the same work (and can race a transient UIScreen replacement).
+            guard terminalView === TerminalFocusArbiter.current,
+                  terminalView?.window === window
+            else { return }
+
+            let previousPresentation = keyboardPresentation
+            let endFrame: CGRect?
+            if notification.name == UIResponder.keyboardDidHideNotification {
+                endFrame = nil
+                keyboardPresentation = .hidden
+            } else if let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                endFrame = frame
+                let screenSpace = window.screen.coordinateSpace
+                keyboardPresentation = KeyboardAvoidance.presentation(
+                    keyboard: frame,
+                    screen: screenSpace.bounds
+                )
+            } else if notification.name == UIResponder.keyboardWillHideNotification {
+                endFrame = nil
+                keyboardPresentation = .hidden
+            } else {
+                return
             }
+
+            lastKeyboardFrame = keyboardPresentation == .docked ? endFrame : nil
+
+            // Stage Manager reports the floating keyboard as a zero-height
+            // shortcut frame and can emit will-change, will-hide, then
+            // did-change with that same geometry during one window move.
+            // Classify the frame rather than treating will-hide as definitive;
+            // repeated shortcut/floating events do no layout or timer work.
+            guard KeyboardAvoidance.shouldReapplyFrameChange(
+                from: previousPresentation,
+                to: keyboardPresentation
+            ) else {
+                return
+            }
+
             #if DEBUG
-            if let container = avoidingContainer, let window = container.window {
-                logKeyboardDiagnostics(notification, container: container, window: window)
-            }
+            logKeyboardDiagnostics(notification, container: container, window: window)
             #endif
-            reapplyKeyboardOverlap()
-            // Stage Manager keeps moving the window after the keyboard
-            // animation; re-measure until the geometry has settled.
-            for delay: TimeInterval in [0.35, 0.8] {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                    self?.reapplyKeyboardOverlap()
-                }
+            reapplyKeyboardLayout()
+
+            // Stage Manager can keep moving the window after a real keyboard
+            // transition. Keep the two proven settle points, but replace any
+            // pending pair so a notification burst never fans out unbounded
+            // main-thread layout work.
+            if keyboardPresentation == .docked {
+                scheduleKeyboardSettleRemeasures()
+            } else {
+                cancelKeyboardSettleRemeasures()
             }
         }
 
-        /// Recomputes the inset from the last-seen keyboard frame against
-        /// the container's *current* on-screen position. Idempotent — safe
-        /// to call from layout passes (the constraint guard stops recursion).
-        /// Also publishes `keyboardObstruction` — how far the same docked
-        /// presentations rise above the window's bottom safe-area edge — so
-        /// the helper strip (SwiftUI, below this container) can pad itself
-        /// clear of the key rail instead of being painted over. Measured
-        /// against the *window*, which the keyboard can't move, so the
-        /// published value never feeds back into this layout pass.
-        func reapplyKeyboardOverlap() {
+        private func scheduleKeyboardSettleRemeasures() {
+            cancelKeyboardSettleRemeasures()
+            for delay: TimeInterval in [0.35, 0.8] {
+                let item = DispatchWorkItem { [weak self] in
+                    self?.reapplyKeyboardLayout()
+                }
+                keyboardSettleWorkItems.append(item)
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+            }
+        }
+
+        private func cancelKeyboardSettleRemeasures() {
+            for item in keyboardSettleWorkItems { item.cancel() }
+            keyboardSettleWorkItems.removeAll()
+        }
+
+        /// Window movement causes layout passes even though a floating
+        /// or short/flat keyboard frame has no effect on terminal geometry.
+        /// Only a docked keyboard needs remeasurement as the window moves.
+        func containerDidLayout() {
+            guard terminalView === TerminalFocusArbiter.current else { return }
+            guard keyboardPresentation == .docked else { return }
+            reapplyKeyboardLayout()
+        }
+
+        /// Recomputes rail clearance and `keyboardObstruction` from the last
+        /// docked frame against the current window position. The helper value
+        /// is measured against the window so its SwiftUI padding cannot feed
+        /// back into the measurement.
+        func reapplyKeyboardLayout() {
             guard let container = avoidingContainer,
                   let constraint = bottomConstraint,
-                  let window = container.window
+                  let window = container.window,
+                  terminalView === TerminalFocusArbiter.current,
+                  terminalView?.window === window
             else { return }
             let screenSpace = window.screen.coordinateSpace
             let containerOnScreen = container.convert(container.bounds, to: screenSpace)
@@ -254,29 +369,8 @@ struct SwiftTermView: UIViewRepresentable {
                     obstruction = max(0, restingBottom - endFrame.minY)
                 }
             }
-            // The accessory-only presentation (hardware-keyboard mode) can
-            // report a zero-height end frame pinned to the *window* bottom —
-            // useless geometry — while still rendering the key rail over the
-            // terminal's last rows. The rendered accessory knows its real
-            // frame, so measure it directly — but only when that frame is
-            // itself docked (`accessoryIsDocked`): a floating keyboard drags
-            // the rail around mid-screen, and insetting by a moving pill
-            // resizes the PTY every frame — tmux reflow churn. The docked-
-            // keyboard path above still wins when a taller keyboard is up
-            // (max), and a hidden accessory has no window and adds 0.
-            if let accessory = terminalView?.inputAccessoryView, accessory.window != nil {
-                let onScreen = accessory.convert(accessory.bounds, to: screenSpace)
-                if KeyboardAvoidance.accessoryIsDocked(
-                    accessory: onScreen,
-                    container: containerOnScreen,
-                    screen: screenSpace.bounds
-                ) {
-                    let inContainer = container.convert(onScreen, from: screenSpace)
-                    overlap = max(overlap, container.bounds.maxY - inContainer.minY)
-                    obstruction = max(obstruction, restingBottom - onScreen.minY)
-                }
-            }
             overlap = min(overlap, container.bounds.height * 0.8)
+            obstruction = min(obstruction, window.bounds.height * 0.8)
             MainActor.assumeIsolated {
                 controller.reportKeyboardObstruction(max(0, obstruction))
             }
@@ -299,17 +393,15 @@ struct SwiftTermView: UIViewRepresentable {
             )
             let logLine = { [weak self] (tag: String) in
                 let onScreen = container.convert(container.bounds, to: screenSpace)
-                var accessoryDescription = "none"
-                if let accessory = self?.terminalView?.inputAccessoryView, accessory.window != nil {
-                    let accessoryOnScreen = accessory.convert(accessory.bounds, to: screenSpace)
-                    accessoryDescription = String(describing: accessoryOnScreen)
-                }
                 Logger(subsystem: "app.multiplexterm.multiplex", category: "kbd").debug(
-                    "\(tag, privacy: .public): \(notification.name.rawValue, privacy: .public) end=\(String(describing: endFrame), privacy: .public) docked=\(docked, privacy: .public) container=\(String(describing: onScreen), privacy: .public) accessory=\(accessoryDescription, privacy: .public) constraint=\(self?.bottomConstraint?.constant ?? 0, privacy: .public) safeBottom=\(container.safeAreaInsets.bottom, privacy: .public)"
+                    "\(tag, privacy: .public): \(notification.name.rawValue, privacy: .public) end=\(String(describing: endFrame), privacy: .public) docked=\(docked, privacy: .public) container=\(String(describing: onScreen), privacy: .public) obstruction=\(self?.controller.keyboardObstruction ?? 0, privacy: .public) safeBottom=\(container.safeAreaInsets.bottom, privacy: .public)"
                 )
             }
             logLine("kbd-event")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { logLine("kbd-settled") }
+            keyboardLogSettleWorkItem?.cancel()
+            let item = DispatchWorkItem { logLine("kbd-settled") }
+            keyboardLogSettleWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: item)
         }
         #endif
         #endif
@@ -370,9 +462,10 @@ struct SwiftTermView: UIViewRepresentable {
 }
 
 #if !os(visionOS)
-/// Terminal wrapper that re-measures keyboard overlap on every layout pass:
-/// window resizes (Stage Manager, Split View, rotation) move the terminal
-/// relative to a keyboard that posts no new notification of its own.
+/// Terminal wrapper that offers every layout pass to the keyboard-avoidance
+/// coordinator. Docked geometry is re-measured because Stage Manager, Split
+/// View, and rotation can move the terminal without a keyboard notification;
+/// floating presentations are rejected before measurement.
 private final class KeyboardAvoidingContainer: UIView {
     var onLayout: (() -> Void)?
 

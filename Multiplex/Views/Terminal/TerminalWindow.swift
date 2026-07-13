@@ -47,6 +47,16 @@ struct TerminalWindowRoot: View {
     private var activeController: TerminalSessionController? {
         activeTab.flatMap { workspace.controller(for: $0.id) }
     }
+    private var showsAgentHelper: Bool {
+        shownAgent != nil && activeController?.status == .live
+    }
+    private var terminalBottomChromeHeight: CGFloat {
+        #if os(visionOS)
+        0
+        #else
+        showsAgentHelper ? AgentHelperStrip.dockedHeight : 0
+        #endif
+    }
     private var mergeSources: [TerminalWorkspace.WindowEntry] {
         workspace.mergeSources(for: route.id)
     }
@@ -314,29 +324,23 @@ struct TerminalWindowRoot: View {
                     Rectangle().fill(Theme.bezelHi).frame(height: 1)
                 }
                 paneStack
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        // The strip rests on the window's bottom edge, where
-                        // the docked key rail (hardware-keyboard mode) or
-                        // keyboard would paint straight over it — so it pads
-                        // itself up by the obstruction the terminal's
-                        // keyboard-clearance owner measured, staying tappable
-                        // above the rail. The bezel backfills the gap so a
-                        // dismissing keyboard never flashes the screen
-                        // through it.
+                    .overlay(alignment: .bottom) {
+                        // Reserve this height inside SwiftTermView, then paint
+                        // the helper into that gap immediately above the
+                        // bottommost key rail. Keeping the rail inside the
+                        // UIKit container avoids both TextInputUI accessory
+                        // hosting and a controller-observing SwiftUI cycle.
                         helperStrip(floating: false)
-                            .padding(.bottom, activeController?.keyboardObstruction ?? 0)
-                            .background(Theme.bezel)
+                            .padding(
+                                .bottom,
+                                (activeController?.keyboardObstruction ?? 0)
+                                    + TerminalKeyBar.barHeight
+                            )
                     }
                     // SwiftUI's automatic keyboard avoidance must not touch
-                    // the terminal: its tracker also reserves space for
-                    // *floating* keyboards (and goes stale across
-                    // dock/float transitions), eating the viewport. The
-                    // terminal container's own keyboard-frame handler is the
-                    // single owner of keyboard clearance — docked keyboards
-                    // and the accessory bar inset, floating pills don't
-                    // (`KeyboardAvoidance`); the helper strip above rides
-                    // inside the opt-out and consumes that same measurement
-                    // through `keyboardObstruction`.
+                    // the terminal: floating keyboards reserve no space. The
+                    // terminal container is the single owner of docked
+                    // clearance and publishes the helper-strip obstruction.
                     .ignoresSafeArea(.keyboard)
             }
             .navigationTitle(windowTitle)
@@ -357,6 +361,7 @@ struct TerminalWindowRoot: View {
                     controller: workspace.controller(for: tab.id),
                     hostExists: store.host(id: tab.hostID) != nil,
                     fontSize: fontSize,
+                    bottomChromeHeight: terminalBottomChromeHeight,
                     isActive: isActive,
                     close: { close(tab.id) },
                     closeSession: tab.sessionName != nil && store.host(id: tab.hostID) != nil
@@ -670,6 +675,7 @@ private struct TerminalPane: View {
     let controller: TerminalSessionController?
     let hostExists: Bool
     let fontSize: CGFloat
+    let bottomChromeHeight: CGFloat
     let isActive: Bool
     let close: () -> Void
     /// Kill the remote tmux session, then close the tab. nil when there's
@@ -689,10 +695,9 @@ private struct TerminalPane: View {
                     controller: controller,
                     fontSize: fontSize,
                     theme: themes.selected,
+                    bottomChromeHeight: bottomChromeHeight,
                     isActive: isActive
                 )
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
                 statusOverlay(for: controller)
             } else if !hostExists {
                 missingHost

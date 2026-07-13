@@ -147,9 +147,10 @@ scroll tick to the focused terminal — the same remote path a pan takes
 (wheel report when the app requested mouse tracking, alternate-screen
 cursor key otherwise), so with tmux `mouse on` a scrollup flips
 `#{pane_in_mode}` to 1 (copy-mode scrollback) and scrolldowns exit it, and
-`… -p app.multiplexterm.multiplex.debug.kbd.float` / `….kbd.dock` /
-`….kbd.hide` (iPad only) posts a synthetic keyboard-frame notification
-(floating pill / docked panel / hidden) to exercise keyboard avoidance
+`… -p app.multiplexterm.multiplex.debug.kbd.float` / `….kbd.move` /
+`….kbd.dock` / `….kbd.hide` (iPad only) posts a synthetic keyboard-frame
+notification (floating pill / Stage Manager's zero-height move sequence plus
+a terminal tap / docked panel / hidden) to exercise keyboard avoidance
 headlessly; `SwiftTermView` logs each decision to the unified log
 (subsystem `app.multiplexterm.multiplex`, category `kbd`, debug level — use
 `log stream`, not `log show`).
@@ -242,11 +243,22 @@ views.
   too (`KeyboardAvoidance.isPresented`, pure geometry): **floating/undocked
   keyboards never post didShow/didHide**, and with visibility stuck false a
   terminal tap tears down and rebuilds the input session — the floating pill
-  blinks away and iPadOS may not re-present it until an app switch.
-- **The iPad keyboard accessory is `TerminalKeyBar`, not SwiftTerm's stock
-  `TerminalAccessory`**: a TALLY rail (ESC / latching CTRL / TAB, the shell
-  symbols `~ | / -`, DECCKM-aware autorepeat arrows, dismiss) installed as
-  `inputAccessoryView` when the view is created, so it survives tab moves.
+  blinks away and iPadOS may not re-present it until an app switch. Stage
+  Manager can also report a zero-height frame while the floating keyboard's
+  input session remains active; that geometry is ambiguous, not a hide, and
+  must preserve the arbiter's previous visibility state. Likewise, Stage
+  Manager transiently clears a moving window's `isKeyWindow` flag while its
+  terminal remains first responder; an already-owned focus claim must stay a
+  no-op in that state, never call `makeKey()` to fight the system transition.
+- **The iPad key rail is app-owned chrome, never an `inputAccessoryView`**:
+  `TerminalKeyBar` is a TALLY rail (ESC / latching CTRL / TAB, the shell
+  symbols `~ | / -`, DECCKM-aware autorepeat arrows, dismiss) installed as a
+  normal sibling beneath `TerminalView`. A physical-iPad A/B proved that even
+  assigning the custom rail to `inputAccessoryView` makes TextInputUI rehost it
+  while a Stage Manager window moves, repeatedly reactivating the floating
+  keyboard and stalling the UI. Keep `TerminalView.inputAccessoryView = nil`.
+  The rail is full-width and bottommost; the agent helper strip occupies a
+  fixed gap immediately above it. Both move above a genuinely docked keyboard.
   PgUp/PgDn ride along (autorepeating, `CSI 5~`/`6~`) — pagers and CLI
   agents like Claude Code page their transcripts with them; the narrowest
   rail tier drops them after the symbols.
@@ -373,24 +385,26 @@ views.
   notifications, so the handler re-measures on didChangeFrame, on container
   layout, and again after a settle delay; only bottom-pinned,
   window-spanning frames inset (floating pill/split keyboard reserve
-  nothing). The accessory-only presentation (hardware-keyboard mode) can
-  report a **zero-height** end frame pinned to the window bottom — useless
-  geometry — so the handler also measures the rendered `inputAccessoryView`
-  directly and takes the larger inset; don't trust the notification alone.
-  That rendered frame gets its own docked test (`accessoryIsDocked`) — a
-  floating keyboard carries the rail around mid-screen, and insetting by a
-  moving pill resizes the PTY (tmux reflow) on every drag frame. The rail's
-  bottom-pinning is judged against the **terminal container, not the
-  screen**: fullscreen it lands at the screen bottom, but windowed iPadOS
-  can pin it to the window bottom instead — only a container-spanning rail
-  reaching the container's bottom edge reserves space.
+  nothing). Hardware-keyboard/shortcut presentations can report a
+  **zero-height** end frame; that geometry is deliberately a no-op because the
+  app-owned rail already occupies real layout space. Never infer rail geometry
+  from keyboard notifications or restore direct accessory measurement.
   The helper strip rides inside the opt-out too, but is not sacrificed to
   it: the same handler publishes how far the docked keyboard/rail rises
   above the window's bottom safe-area edge
   (`TerminalSessionController.keyboardObstruction`), and the strip pads
-  itself up by that amount — chips stay tappable above the key rail
+  itself above the rail by that amount — chips stay tappable
   (measured against the *window*, which the keyboard can't move, so the
   published value never feeds back into the container's own inset).
+  Stage Manager also emits `UIKeyboardDidChangeFrameNotification` repeatedly
+  while a window moves with a floating keyboard. Classify presentation before
+  touching layout: after the transition into floating has cleared an old
+  inset, repeated floating notifications and container layout passes are
+  no-ops; repeated zero-height shortcut notifications are no-ops too, while
+  docked settle remeasures are coalesced so notification bursts cannot fan out
+  delayed main-thread work. A real docked keyboard must span the screen; short
+  shortcut frames may match a narrower window only for classification and
+  never produce clearance.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
   entitlement/CloudKit): secrets *and* a JSON host record per host are
   synchronizable keychain items (services `app.multiplexterm.multiplex` /
