@@ -72,6 +72,7 @@ struct TerminalWindowRoot: View {
     var body: some View {
         platformBody
             .task { syncTabs() }
+            .task { entitlements.refreshSlashChipMeter() }
             .task(id: activeTab?.hostID) { await watchAgentPresence() }
             .onChange(of: route.tabs) { syncTabs() }
             // Keyboard focus follows the visible tab…
@@ -99,6 +100,7 @@ struct TerminalWindowRoot: View {
             // a round trip instead of a heartbeat interval.
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
+                    entitlements.refreshSlashChipMeter()
                     activeController?.restoreFocusIfOwner()
                     for tab in route.tabs {
                         workspace.controller(for: tab.id)?.transportForegrounded()
@@ -158,6 +160,11 @@ struct TerminalWindowRoot: View {
         shownAgent = detectedAgent
         while !Task.isCancelled {
             if UIApplication.shared.applicationState == .active {
+                // Reuse the strip's existing five-second agent probe tick to
+                // publish a local-day rollover. This keeps the spent pill
+                // from lingering past midnight without adding a meter timer
+                // or scheduling any reset work of its own.
+                entitlements.refreshSlashChipMeter()
                 model.refresh()
             }
             try? await Task.sleep(for: Self.agentPollInterval)
@@ -170,6 +177,13 @@ struct TerminalWindowRoot: View {
     /// `AgentCommand.submitsAfterPause`); 160 ms clears its burst window
     /// with margin, and Claude Code is indifferent.
     private func send(_ command: AgentCommand, via controller: TerminalSessionController) {
+        // Only slash commands spend the daily free taste. The entitlement
+        // store performs the check and consume as one MainActor operation,
+        // so the final allowed tap sends while a stale/exhausted tap cannot.
+        // A denial stays passive: Observation swaps the strip to its Pro pill
+        // instead of stealing terminal focus with a modal.
+        guard !command.consumesSlashChipTaste || entitlements.consumeSlashChip()
+        else { return }
         controller.sendInput(command.payload)
         guard command.submitsAfterPause else { return }
         Task {
@@ -187,7 +201,7 @@ struct TerminalWindowRoot: View {
               let view = controller.terminalView,
               view === TerminalFocusArbiter.current,
               let agent = shownAgent,
-              entitlements.isPro,
+              entitlements.isPro || entitlements.canUseSlashChip,
               controller.status == .live,
               let command = AgentCommandSet.primary(for: agent)
                   .first(where: { $0.label.hasPrefix("/") })
@@ -368,7 +382,7 @@ struct TerminalWindowRoot: View {
            controller.status == .live {
             AgentHelperStrip(
                 agent: agent,
-                isPro: entitlements.isPro,
+                canShowCommands: entitlements.isPro || entitlements.canUseSlashChip,
                 floating: floating,
                 send: { send($0, via: controller) },
                 openPaywall: { showingPaywall = true }

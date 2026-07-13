@@ -70,9 +70,16 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 - `MULTIPLEX_AUTO_DROP=<local path>` — after auto-attach, drops that file
   into the first tab (the simulator shares the Mac's filesystem): SFTP
   upload + typed path, the same path a real drag takes.
+- `MULTIPLEX_PRO_LOCKED=1` — DEBUG-only free-tier mode for headless gate and
+  daily-meter verification. Unlike the Settings toggle it does not persist;
+  combine it with `MULTIPLEX_AUTO_ATTACH=agent` and the `debug.agentchip`
+  notification to prove exactly ten slash-chip sends.
 - `MULTIPLEX_DECK_SIZE=<w>x<h>` / `MULTIPLEX_TERM_SIZE=<w>x<h>` (visionOS) —
   override a scene's default window size; the simulator can't drag-resize a
   window, so screenshot runs (docs/*.png) request the size they need.
+- `MULTIPLEX_AUTO_PAYWALL=1` — opens the real locked Pro paywall with a
+  deterministic $19.99 storefront preview for App Review screenshot capture;
+  DEBUG only, because simctl launches don't inherit Xcode's StoreKit session.
 
 Pass them through simctl with the `SIMCTL_CHILD_` prefix:
 ```sh
@@ -170,8 +177,11 @@ SwiftUI: Deck window  +  N Terminal windows (WindowGroup(for: TerminalWindowRout
                      builders and parsers (pure, unit-tested)
     AgentSignature   classifies a pane's CLI agent (Claude Code / Codex) from
                      probe output; command sets for the helper strip (pure)
-  EntitlementStore   the Pro gate — UserDefaults stub today, StoreKit 2 later;
-                     all commerce stays inside this one type
+  EntitlementStore   the Pro gate — StoreKit 2 non-consumable ownership,
+                     purchase/restore, transaction updates, and the
+                     device-local daily agent-helper meter; an injected
+                     ProStoreClient keeps the shipping Apple boundary real
+                     while making every app-owned commerce state testable
   TerminalWorkspace  tab controllers keyed by tab id + window directory —
                      merge/split move tabs across windows, shells stay live
   TerminalSessionController   one per tab; owns the input pump + TerminalView
@@ -407,6 +417,24 @@ views.
   layers, verifying the restack recomposites the reference render
   (≤0.5/255 inside the crop). Never edit the three layer PNGs by hand —
   edit `AppIcon.icon` and re-run the bake.
+
+## Store metadata maintenance
+
+`docs/store-metadata.md` is the source-of-truth inventory for the App Store
+listing, Multiplex Pro IAP, automation boundaries, and review assets. Whenever
+a user-visible feature, Free/Pro allocation, price, platform, requirement,
+permission, privacy behavior, or reviewer flow changes, update that document
+and reconcile the matching `fastlane/metadata/`, review notes, release notes,
+`Multiplex.storekit`, and screenshots in the same change. If the paywall or
+Pro value proposition changes, regenerate the real-paywall IAP review assets
+at `docs/appstore/iap-review-screenshot.{png,jpg}` and re-upload them; these are
+private review material, separate from the public `fastlane/screenshots/` set.
+Price changes must also update `EntitlementStore`'s DEBUG review-preview
+default, its tests, and the `MULTIPLEX_AUTO_PAYWALL` wording above; production
+UI still uses StoreKit's localized price.
+Record App Store Connect state only after a dated remote readback. Standard
+`deliver` lanes do not manage IAP metadata/review images; custom Spaceship/API
+automation or the App Store Connect UI is required.
 
 ## Conventions
 

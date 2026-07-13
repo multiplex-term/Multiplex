@@ -128,6 +128,10 @@ enum AgentSignature {
 struct AgentCommand: Identifiable, Hashable {
     var label: String
     var payload: Data
+    /// The command consumes one free-tier daily taste when it is actually
+    /// sent. Keyboard-equivalent helpers (Esc, Shift+Tab, transcript and
+    /// paging) deliberately leave this false.
+    var consumesSlashChipTaste = false
     /// After typing the payload, pause and send CR as a separate write.
     /// Codex's composer treats Enter arriving inside a rapid input burst as
     /// a pasted newline, not a submit (verified against rust-v0.144: burst
@@ -139,7 +143,12 @@ struct AgentCommand: Identifiable, Hashable {
 
     /// A slash command typed, then submitted after the burst-detector pause.
     static func slash(_ name: String) -> AgentCommand {
-        AgentCommand(label: "/\(name)", payload: Data(("/" + name).utf8), submitsAfterPause: true)
+        AgentCommand(
+            label: "/\(name)",
+            payload: Data(("/" + name).utf8),
+            consumesSlashChipTaste: true,
+            submitsAfterPause: true
+        )
     }
 
     /// Interrupt the running turn. Esc in both TUIs.

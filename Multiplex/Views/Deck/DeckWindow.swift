@@ -32,6 +32,7 @@ private struct DeckSceneReporter: UIViewRepresentable {
 /// settings). Scene bookkeeping and the DEBUG auto-attach hook live here.
 struct DeckWindow: View {
     @Environment(HostStore.self) private var store
+    @Environment(EntitlementStore.self) private var entitlements
     @Environment(ConnectionHub.self) private var hub
     @Environment(TerminalWorkspace.self) private var workspace
     @Environment(\.openWindow) private var openWindow
@@ -40,16 +41,18 @@ struct DeckWindow: View {
     @State private var addingHost = false
     @State private var editingHost: Host?
     @State private var showingSettings = false
+    @State private var showingPaywall = false
 
     var body: some View {
         FleetWall(
-            addHost: { addingHost = true },
+            addHost: requestAddHost,
             editHost: { editingHost = $0 },
             openSettings: { showingSettings = true }
         )
         .sheet(isPresented: $addingHost) { AddHostSheet() }
         .sheet(item: $editingHost) { host in AddHostSheet(editing: host) }
         .sheet(isPresented: $showingSettings) { SettingsView() }
+        .sheet(isPresented: $showingPaywall) { ProPaywallView() }
         .background(DeckSceneReporter())
         // Render the local cache first. Synchronizable Keychain reads may
         // involve securityd/iCloud, so cloud reconciliation begins only once
@@ -66,11 +69,39 @@ struct DeckWindow: View {
             }
         }
         #if DEBUG
+        .task { presentPaywallForReviewCaptureIfRequested() }
         .task { await autoAttachIfRequested() }
         #endif
     }
 
+    /// The free tier may create its first host; Pro may create any number.
+    /// This is intentionally only an add-flow intent check. HostStore stays
+    /// ungated so existing records and hosts arriving through Keychain sync
+    /// are never hidden, deleted, or prevented from connecting.
+    private var canAddHost: Bool {
+        entitlements.canAddHost(existingHostCount: store.hosts.count)
+    }
+
+    private func requestAddHost() {
+        if canAddHost {
+            addingHost = true
+        } else {
+            showingPaywall = true
+        }
+    }
+
     #if DEBUG
+    /// Launch with `MULTIPLEX_AUTO_PAYWALL=1` to render the real locked
+    /// paywall immediately for its App Review screenshot. simctl launches do
+    /// not inherit Xcode's StoreKit test session, so EntitlementStore supplies
+    /// the deterministic review price in this DEBUG-only path.
+    private func presentPaywallForReviewCaptureIfRequested() {
+        guard ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_PAYWALL"] == "1"
+        else { return }
+        entitlements.prepareDebugPaywallPreview()
+        showingPaywall = true
+    }
+
     /// Headless-verification hook: `MULTIPLEX_AUTO_ATTACH=<a,b,…>` opens one
     /// terminal window per comma entry through the same route the Attach
     /// button uses; `+` inside an entry groups sessions as tabs of one window

@@ -277,13 +277,13 @@ final class AgentAttentionTests: XCTestCase {
 
         // Explicit lock (DEBUG's absent-key default is unlocked, so set it).
         defaults.set(false, forKey: "MultiplexProUnlocked")
-        let locked = EntitlementStore(defaults: defaults)
+        let locked = EntitlementStore(defaults: defaults, startStoreKit: false)
         center.entitlements = locked
         XCTAssertFalse(locked.isPro)
         XCTAssertFalse(center.isActive)
 
         defaults.set(true, forKey: "MultiplexProUnlocked")
-        let unlocked = EntitlementStore(defaults: defaults)
+        let unlocked = EntitlementStore(defaults: defaults, startStoreKit: false)
         center.entitlements = unlocked
         XCTAssertTrue(unlocked.isPro)
         XCTAssertTrue(center.isActive)    // Pro + switch on → active

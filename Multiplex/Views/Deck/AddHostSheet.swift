@@ -91,7 +91,7 @@ struct AddHostSheet: View {
                     Toggle(isOn: moshToggle) {
                         HStack {
                             Text("Connect with mosh")
-                            if !entitlements.isPro {
+                            if moshRequiresPro {
                                 Spacer()
                                 ChassisBadge("PRO", prominent: true)
                             }
@@ -293,11 +293,21 @@ struct AddHostSheet: View {
     /// Mosh is gated only when a free user tries to turn it on. A host that
     /// already uses mosh (for example, one synced from a Pro device) remains
     /// editable and keeps connecting; free users can always turn it off.
+    /// The saved record's value participates so that reverting your own
+    /// toggle-off within one edit session restores what the record already
+    /// has — that is not new Pro intent. The row's PRO badge mirrors this
+    /// same predicate so it appears exactly when enabling would paywall.
+    private var moshRequiresPro: Bool {
+        !entitlements.canEnableMosh(
+            currentlyEnabled: useMosh || editing?.useMosh == true
+        )
+    }
+
     private var moshToggle: Binding<Bool> {
         Binding(
             get: { useMosh },
             set: { enabled in
-                if enabled, !useMosh, !entitlements.isPro {
+                if enabled, moshRequiresPro {
                     showingPaywall = true
                     return
                 }

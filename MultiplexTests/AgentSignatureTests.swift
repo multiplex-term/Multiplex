@@ -128,11 +128,17 @@ final class AgentSignatureTests: XCTestCase {
         // newline, not a submit).
         XCTAssertEqual(AgentCommand.slash("clear").payload, Data("/clear".utf8))
         XCTAssertTrue(AgentCommand.slash("clear").submitsAfterPause)
+        XCTAssertTrue(AgentCommand.slash("clear").consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.stop.submitsAfterPause)
+        XCTAssertFalse(AgentCommand.stop.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.mode.submitsAfterPause)
+        XCTAssertFalse(AgentCommand.mode.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.transcript.submitsAfterPause)
+        XCTAssertFalse(AgentCommand.transcript.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.pageUp.submitsAfterPause)
+        XCTAssertFalse(AgentCommand.pageUp.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.pageDown.submitsAfterPause)
+        XCTAssertFalse(AgentCommand.pageDown.consumesSlashChipTaste)
     }
 
     func testCommandSetMembership() {
