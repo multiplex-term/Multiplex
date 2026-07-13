@@ -11,8 +11,10 @@ import notify
 /// move input between windows, and multiple live first responders leave the
 /// system keyboard and hardware keys bound to whichever input session came
 /// first. Routing every focus change through this arbiter keeps a single
-/// input session alive: claim resigns the previous terminal and activates
-/// the claimed terminal's scene session.
+/// input session alive: claim resigns the previous terminal and, on visionOS,
+/// activates the claimed terminal's scene session. On iPadOS the user's tap
+/// has already activated its Stage Manager window; requesting activation
+/// again can make the system re-place that existing window.
 @MainActor
 enum TerminalFocusArbiter {
     private(set) static weak var current: TerminalView?
@@ -25,11 +27,13 @@ enum TerminalFocusArbiter {
         let switching = current !== view
         if switching {
             _ = current?.resignFirstResponder()
+            #if os(visionOS)
             if let scene = view.window?.windowScene {
                 UIApplication.shared.activateSceneSession(
                     for: UISceneSessionActivationRequest(session: scene.session)
                 )
             }
+            #endif
         }
         current = view
         view.window?.makeKey()
