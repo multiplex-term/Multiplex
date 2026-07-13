@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Placeholder paywall — the Pro seam ships before the purchase does.
 /// StoreKit 2 lands inside `EntitlementStore` later; this sheet only says
-/// what Pro is. Presented from the locked helper-strip pill and Settings.
+/// what Pro is. Presented from locked feature controls and Settings.
 struct ProPaywallView: View {
     @Environment(EntitlementStore.self) private var entitlements
     @Environment(\.dismiss) private var dismiss
@@ -11,6 +11,13 @@ struct ProPaywallView: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 22) {
                 ChassisLabel("Multiplex Pro", size: 16)
+
+                feature(
+                    "MOSH TRANSPORT",
+                    "Keep terminal connections alive through headset sleep, "
+                    + "network roaming and IP changes. SSH remains the secure "
+                    + "bootstrap and fleet control plane."
+                )
 
                 feature(
                     "AGENT HELPERS",

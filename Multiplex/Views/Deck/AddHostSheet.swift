@@ -3,6 +3,7 @@ import SwiftUI
 /// Add or edit a host. Secrets go straight to the Keychain on save.
 struct AddHostSheet: View {
     @Environment(HostStore.self) private var store
+    @Environment(EntitlementStore.self) private var entitlements
     @Environment(\.dismiss) private var dismiss
 
     var editing: Host?
@@ -21,6 +22,7 @@ struct AddHostSheet: View {
     @State private var workingDirs: [WorkingDir] = []
     @State private var newWorkingDir = ""
     @State private var testState: TestState = .idle
+    @State private var showingPaywall = false
 
     /// Editable row model — a stable identity (not `id: \.self` on the
     /// string) so editing a path in place doesn't tear down the row's
@@ -86,7 +88,15 @@ struct AddHostSheet: View {
                 workingDirsSection
 
                 Section("Transport") {
-                    Toggle("Connect with mosh", isOn: $useMosh)
+                    Toggle(isOn: moshToggle) {
+                        HStack {
+                            Text("Connect with mosh")
+                            if !entitlements.isPro {
+                                Spacer()
+                                ChassisBadge("PRO", prominent: true)
+                            }
+                        }
+                    }
                     if useMosh {
                         TextField("mosh-server path", text: $moshServerPath, prompt: Text("mosh-server"))
                             .font(.mono(12))
@@ -120,6 +130,7 @@ struct AddHostSheet: View {
             }
         }
         .onAppear(perform: populate)
+        .sheet(isPresented: $showingPaywall) { ProPaywallView() }
         // Any edit that could change the outcome retires the shown result —
         // a stale PASSED next to a new address would vouch for the wrong host.
         .onChange(of: testFingerprint) { testState = .idle }
@@ -278,6 +289,22 @@ struct AddHostSheet: View {
     }
 
     // MARK: Validation / persistence
+
+    /// Mosh is gated only when a free user tries to turn it on. A host that
+    /// already uses mosh (for example, one synced from a Pro device) remains
+    /// editable and keeps connecting; free users can always turn it off.
+    private var moshToggle: Binding<Bool> {
+        Binding(
+            get: { useMosh },
+            set: { enabled in
+                if enabled, !useMosh, !entitlements.isPro {
+                    showingPaywall = true
+                    return
+                }
+                useMosh = enabled
+            }
+        )
+    }
 
     private var isValid: Bool {
         !hostname.trimmingCharacters(in: .whitespaces).isEmpty
