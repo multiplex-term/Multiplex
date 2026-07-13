@@ -38,33 +38,56 @@ struct SettingsView: View {
                         }
                         .swipeActions(edge: .trailing) {
                             Button("Delete", role: .destructive) { themes.remove(theme) }
-                            Button("Edit") { editingTheme = theme }
+                            Button("Edit") { requestThemeEditor(theme) }
                         }
                         .contextMenu {
-                            Button("Edit…") { editingTheme = theme }
+                            Button("Edit…") { requestThemeEditor(theme) }
                             duplicateButton(for: theme)
                             Button("Delete", role: .destructive) { themes.remove(theme) }
                         }
                     }
 
                     Button {
-                        editingTheme = themes.selected.asCustom(named: "New Theme")
+                        requestThemeEditor(themes.selected.asCustom(named: "New Theme"))
                     } label: {
-                        Label("New Theme…", systemImage: "plus")
+                        HStack {
+                            Label("New Theme…", systemImage: "plus")
+                            Spacer()
+                            if !entitlements.canMutateCustomThemes {
+                                Text("PRO")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 } header: {
                     Eyebrow("Your Themes")
                 } footer: {
-                    if themes.customThemes.isEmpty {
+                    if !entitlements.canMutateCustomThemes {
+                        Text("Creating, duplicating and editing custom themes requires Multiplex Pro. Existing themes remain selectable.")
+                    } else if themes.customThemes.isEmpty {
                         Text("A new theme starts from the colors of the one selected above.")
                     }
                 }
 
                 Section {
-                    @Bindable var attention = attention
-                    Toggle("Agent Alerts", isOn: $attention.alertsEnabled)
-                        .disabled(!entitlements.isPro)
-                    if !entitlements.isPro {
+                    Toggle("Agent Alerts", isOn: Binding(
+                        // Keep the preference while locked, but present the
+                        // unavailable capability as off. A tap is the intent
+                        // gate: remember that the user wants alerts, then open
+                        // the paywall. AttentionCenter still cannot schedule
+                        // anything until Pro is actually owned.
+                        get: { entitlements.canScheduleAgentAlerts && attention.alertsEnabled },
+                        set: { enabled in
+                            if enabled && !entitlements.canScheduleAgentAlerts {
+                                attention.alertsEnabled = true
+                                showingPaywall = true
+                            } else {
+                                attention.alertsEnabled = enabled
+                            }
+                        }
+                    ))
+                    if !entitlements.canScheduleAgentAlerts {
                         Button("Unlock with Multiplex Pro…") { showingPaywall = true }
                     }
                 } header: {
@@ -74,10 +97,16 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    proRow("Unlimited Hosts")
                     proRow("Mosh Transport")
-                    proRow("Agent Helpers")
+                    proRow("Agent Helpers", freeStatus: "10/day")
                     proRow("Agent Alerts")
-                    Button("About Multiplex Pro…") { showingPaywall = true }
+                    proRow("Custom Themes")
+                    Button(entitlements.isPro
+                           ? "Multiplex Pro Details…"
+                           : "Unlock Multiplex Pro…") {
+                        showingPaywall = true
+                    }
                     #if DEBUG
                     Toggle("Pro unlocked (debug)", isOn: Binding(
                         get: { entitlements.isPro },
@@ -104,21 +133,34 @@ struct SettingsView: View {
     }
 
     /// A Pro feature's lock status row.
-    private func proRow(_ name: String) -> some View {
+    private func proRow(_ name: String, freeStatus: String = "Locked") -> some View {
         HStack {
             Text(name)
             Spacer()
-            Text(entitlements.isPro ? "Unlocked" : "Locked")
+            Text(entitlements.isPro ? "Unlocked" : freeStatus)
                 .foregroundStyle(.secondary)
         }
     }
 
     private func duplicateButton(for theme: TerminalTheme) -> some View {
         Button("Duplicate") {
-            let copy = theme.asCustom(named: "\(theme.name) Copy")
-            themes.add(copy)
-            editingTheme = copy
+            guard entitlements.canMutateCustomThemes else {
+                showingPaywall = true
+                return
+            }
+            editingTheme = theme.asCustom(named: "\(theme.name) Copy")
         }
+    }
+
+    /// Custom-theme mutation is Pro-gated at the edit intent. Existing
+    /// themes remain selectable and deletable, so losing/restoring an
+    /// entitlement never strands the user's current appearance or data.
+    private func requestThemeEditor(_ theme: TerminalTheme) {
+        guard entitlements.canMutateCustomThemes else {
+            showingPaywall = true
+            return
+        }
+        editingTheme = theme
     }
 
     private func save(_ theme: TerminalTheme) {

@@ -62,6 +62,27 @@ Feedback: screenshot in TestFlight, or jhen@bricks.tools
 
 Builds expire after 90 days — ship something monthly or testers go dark.
 
+### Pro transaction sign-off
+
+Xcode 27 beta can load the real local non-consumable catalog, but its 27.0
+simulators mark locally created transactions `invalidDeviceVerification` and
+its pre-27 runtimes cannot load the current StoreKit test session. The required
+unit suite therefore verifies the complete app-owned lifecycle through the
+injected `ProStoreClient` (verified/unverified purchase, pending completion,
+duplicate suppression, Ask-to-Buy decline recovery, restore, authority-ordering
+races, errors, revocation and expiry), while this
+signed TestFlight/Sandbox pass remains mandatory before external beta:
+
+1. Start locked on iPad; buy Pro and verify immediate unlock plus relaunch.
+2. Install the visionOS build with the same sandbox Apple ID; verify the
+   current entitlement unlocks automatically, then exercise Restore.
+3. Exercise a second host, a fresh mosh toggle, unmetered slash chips, alerts,
+   and custom-theme creation on both platforms.
+4. Run Ask to Buy: verify approval unlocks automatically; in a separate run,
+   decline, tap Restore Purchases, and confirm Purchase becomes retryable.
+5. Clear/refund the sandbox purchase; verify new intents relock while existing
+   hosts, synced hosts, existing mosh records and existing themes remain usable.
+
 ## Export compliance
 
 Multiplex does **not** qualify for the "only HTTPS / OS crypto" answer: it
@@ -100,11 +121,14 @@ developer export obligation, not an Apple plist code (not legal advice).
 accounts, no analytics, hosts/secrets live in the user's Keychain/iCloud
 Keychain).
 
-Set up the IAP by hand (deliver doesn't manage IAPs): non-consumable
-`app.multiplexterm.multiplex.pro`, display name **Multiplex Pro**, price tier
-$19.99, Family Sharing on if desired, plus its own review screenshot (the
-paywall screen) — IAPs are reviewed with images too. Submit the IAP together
-with the app version.
+The non-consumable IAP `app.multiplexterm.multiplex.pro` is configured with
+display name **Multiplex Pro**, a $19.99 USA-base/equalized price, all-territory
+availability, review notes, and a fully processed 2064×2752 paywall review
+screenshot (`docs/appstore/iap-review-screenshot.jpg`). App Store Connect now
+reports it `READY_TO_SUBMIT`; submit it together with the first app version.
+Built-in `deliver` does not manage IAP metadata; custom Spaceship
+code can call Apple's public IAP endpoints, including the review-image
+reserve/upload/commit flow.
 
 ### Reviewer demo host — yes, it's required
 
@@ -154,9 +178,11 @@ The same host and credentials serve Beta App Review (TestFlight external) —
 | # | Blocker | Why | Where |
 | --- | --- | --- | --- |
 | 1 | **Host-key TOFU pinning** | `.acceptAnything()` is fine for the sim, indefensible for real users' credentials; also the one security claim reviewers/users will test. | Citadel `.custom` validator; README "Known limits" |
-| 2 | **Real StoreKit 2 purchase** (or hide Pro UI) | A visible "coming soon" purchase button is rejectable (2.1 completeness / 2.3 accuracy). `EntitlementStore` is a stub; RELEASE builds lock Pro with no way to buy. | `Services/EntitlementStore.swift`, `ProPaywallView` |
-| 3 | **Ship all free-tier gates and the IAP together** | Never un-free a feature post-launch (`local-plan/pricing-strategy.md` §7). Gate line decided 2026-07-12: host cap, mosh gate, agent-strip taste meter (§5 there). | pricing-strategy.md |
+| ~~2~~ | ~~**Upload the Pro IAP review screenshot**~~ **Done 2026-07-13** | The 2064×2752 paywall image is fully processed and IAP `6790252556` is `READY_TO_SUBMIT`. | ASC IAP `app.multiplexterm.multiplex.pro` |
+| ~~3~~ | ~~**Ship all free-tier gates and the IAP together**~~ **Code complete 2026-07-13**: one-host add-intent cap, grandfathering mosh toggle, 10/day slash-chip meter, custom-theme mutation gate, and alert scheduling gate all ship with the StoreKit surface. Commerce policy has deterministic lifecycle tests; a live visionOS run proved 11 tap intents produce only 10 slash sends and then the passive reset pill. | Never un-free a feature post-launch (`local-plan/pricing-strategy.md` §7). | pricing-strategy.md |
 | 4 | **Privacy policy live** at `multiplexterm.dev/privacy` | URL is required metadata; draft ready in `docs/appstore/privacy-policy.md`. | — |
 | 5 | **Support URL live** at `multiplexterm.dev` | Required; a page with the app name + contact email is enough. | — |
 | 6 | **France excluded or French encryption declaration filed** | Apple requires the French declaration for standard app-provided crypto only when distributing in France. | ASC availability / App Encryption Documentation |
 | ~~7~~ | ~~App name check~~ **Done 2026-07-12**: record created as "Multiplex — SSH tmux Terminal", bundle id `app.multiplexterm.multiplex`, Apple ID `6790074057`. | — | ASC |
+| 8 | **Run the signed Pro transaction sign-off above** | Simulator StoreKit proves the catalog but Xcode 27 beta cannot verify its local JWS; TestFlight/Sandbox is the authoritative buy-once/cross-device proof. | iPad + Vision Pro, same sandbox Apple ID |
+| 9 | **Confirm the app itself is Free and review storefront coverage** | The current API key receives 403 for app-level price/availability reads even though the IAP itself is `READY_TO_SUBMIT`. | ASC Pricing and Availability |

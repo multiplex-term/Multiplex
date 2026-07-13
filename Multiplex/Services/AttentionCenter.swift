@@ -36,7 +36,9 @@ final class AttentionCenter {
     weak var entitlements: EntitlementStore?
 
     /// Alerts deliver only when the user both owns Pro and left the switch on.
-    var isActive: Bool { (entitlements?.isPro ?? false) && alertsEnabled }
+    var isActive: Bool {
+        (entitlements?.canScheduleAgentAlerts ?? false) && alertsEnabled
+    }
 
     private static let enabledKey = "attention.alertsEnabled"
     private let banner = ForegroundBanner()
@@ -104,6 +106,10 @@ final class AttentionCenter {
     // MARK: Delivery
 
     private func post(_ alert: AttentionAlert) {
+        // This is the final intent gate, adjacent to notification creation.
+        // Callers already avoid doing this work when locked, but repeating
+        // the policy here prevents a future event source from bypassing Pro.
+        guard isActive else { return }
         let content = UNMutableNotificationContent()
         content.title = title(for: alert)
         content.body = body(for: alert)
@@ -125,6 +131,10 @@ final class AttentionCenter {
                 // wall's NEEDS YOU badge remains the in-app surface.
                 _ = try? await center.requestAuthorization(options: [.alert, .sound])
             }
+            // The authorization sheet may have suspended us long enough for
+            // the user to disable alerts or lose the entitlement. Never let
+            // an in-flight request cross that intent boundary.
+            guard isActive else { return }
             try? await center.add(request)
         }
     }

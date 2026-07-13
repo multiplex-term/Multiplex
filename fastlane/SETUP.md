@@ -19,10 +19,17 @@ generate (role: **App Manager**). Download the `.p8` into `fastlane/keys/`
 
 Still to do by hand in the record (deliver doesn't manage these): the
 App Privacy declaration (**Data Not Collected**), age rating (all None → 4+),
-and the IAP (`app.multiplexterm.multiplex.pro`, non-consumable, $19.99) —
-details in `docs/appstore/release-playbook.md`. Export compliance is declared
-as exempt standard encryption in the app plist; distributing in France still
-requires the France-specific step in the playbook.
+and confirmation that the app itself is Free and available in the intended
+storefronts. IAP **6790252556**
+(`app.multiplexterm.multiplex.pro`, non-consumable) is `READY_TO_SUBMIT`: its
+en-US localization, $19.99 USA-base/equalized price, review note,
+availability, and processed 2064×2752 review screenshot were configured
+2026-07-13 through the App Store Connect API. Built-in
+`deliver` still does not manage IAP metadata; a custom Spaceship lane can call
+Apple's public endpoints. Details are in
+`docs/appstore/release-playbook.md`. Export compliance is declared as exempt
+standard encryption in the app plist; distributing in France still requires
+the France-specific step in the playbook.
 
 ## 3. Signing
 

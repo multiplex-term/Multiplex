@@ -297,7 +297,7 @@ struct AddHostSheet: View {
         Binding(
             get: { useMosh },
             set: { enabled in
-                if enabled, !useMosh, !entitlements.isPro {
+                if enabled, !entitlements.canEnableMosh(currentlyEnabled: useMosh) {
                     showingPaywall = true
                     return
                 }

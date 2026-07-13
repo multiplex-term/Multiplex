@@ -23,6 +23,12 @@ packages:
   swift-nio-ssh:
     path: Vendor/swift-nio-ssh
 
+# Developer-only StoreKit catalog. It is referenced by the run scheme rather
+# than copied into the app; release builds fetch the matching product from the
+# App Store.
+fileGroups:
+  - Multiplex.storekit
+
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -41,6 +47,7 @@ schemes:
         Multiplex: all
     run:
       config: Debug
+      storeKitConfiguration: Multiplex.storekit
     archive:
       config: Release
   MultiplexTests:
@@ -77,6 +84,10 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
     dependencies:
+      # In-App Purchase capability has no signing entitlement; linking
+      # StoreKit is the project-level capability marker, with product setup
+      # living in App Store Connect.
+      - sdk: StoreKit.framework
       - package: SwiftTerm
       - package: Citadel
       - package: swift-nio-ssh
@@ -100,8 +111,13 @@ targets:
     supportedDestinations: [iOS, visionOS]
     sources:
       - path: MultiplexTests
+      # StoreKit Test reads the same local catalog used by the Debug run
+      # scheme, keeping automation and interactive purchase testing aligned.
+      - path: Multiplex.storekit
+        buildPhase: resources
     dependencies:
       - target: Multiplex
+      - sdk: StoreKitTest.framework
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

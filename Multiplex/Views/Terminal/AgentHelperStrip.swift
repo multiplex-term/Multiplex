@@ -7,11 +7,12 @@ import notify
 /// attached session's active pane — a lower bezel under the screen. Chips
 /// only ever *type* into the shell (through the same ordered input pump as
 /// the keyboard), so a stale command fails visibly in the agent's own input
-/// box and nothing auto-fires. Pro feature: locked state renders a single
-/// pill that opens the paywall.
+/// box and nothing auto-fires. Free users receive a daily slash-command
+/// taste; after it is spent, the strip passively becomes the Pro pill until
+/// the next local day (no modal interrupts the terminal).
 struct AgentHelperStrip: View {
     let agent: AgentKind
-    let isPro: Bool
+    let canShowCommands: Bool
     /// Floating slab (visionOS ornament, UMD chrome) vs full-width bar
     /// (iPad, docked under the screen).
     var floating = false
@@ -44,10 +45,16 @@ struct AgentHelperStrip: View {
         HStack(spacing: 10) {
             ChassisLabel(agent.displayName, size: 10, color: Theme.signal2)
             Rectangle().fill(Theme.bezelHi).frame(width: 1, height: 14)
-            if isPro {
+            if canShowCommands {
                 chips
             } else {
-                ChassisChip("AGENT HELPERS · PRO", prominent: true, action: openPaywall)
+                VStack(alignment: .leading, spacing: 3) {
+                    ChassisChip("✳ AGENT HELPERS · PRO", prominent: true, action: openPaywall)
+                    Text("Daily slash-command taste resets tomorrow")
+                        .font(.mono(8, weight: .medium))
+                        .foregroundStyle(Theme.signal3)
+                        .lineLimit(1)
+                }
                 Spacer(minLength: 0)
             }
         }
