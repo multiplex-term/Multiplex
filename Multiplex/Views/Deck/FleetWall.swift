@@ -20,11 +20,22 @@ struct FleetWall: View {
     @State private var namingHost: Host?
     @State private var deleteTarget: DeleteTarget?
     @State private var removingHost: Host?
+    @State private var unreachableNotice: UnreachableNotice?
 
     /// Pending delete confirmation — which session on which host.
     private struct DeleteTarget {
         let host: Host
         let session: TmuxSession
+    }
+
+    /// Failure detail captured when the rail's UNREACHABLE status is
+    /// pressed. Capture the text so a background retry cannot replace it
+    /// while the explanation is onscreen.
+    private struct UnreachableNotice: Identifiable {
+        let host: Host
+        let reason: String
+
+        var id: UUID { host.id }
     }
 
     private let columns = [GridItem(.adaptive(minimum: 290, maximum: 360), spacing: 14)]
@@ -69,6 +80,13 @@ struct FleetWall: View {
             Button("Cancel", role: .cancel) {}
         } message: { host in
             Text("Removes “\(host.name)” and its saved secret from this device and your synced devices. tmux sessions on the host keep running.")
+        }
+        .alert(item: $unreachableNotice) { notice in
+            Alert(
+                title: Text("\(notice.host.name) Unreachable"),
+                message: Text(notice.reason),
+                dismissButton: .cancel(Text("OK"))
+            )
         }
     }
 
@@ -279,8 +297,16 @@ struct FleetWall: View {
                 // intrinsically taller and its spinner draws outside the
                 // slot. The pulse carries the "in flight" signal instead.
                 railLabel("LINKING", dot: Theme.signal2, pulsing: true)
-            case .failed:
-                railLabel("UNREACHABLE", dot: Theme.signal3, text: Theme.signal3)
+            case .failed(let reason):
+                Button {
+                    unreachableNotice = UnreachableNotice(host: model.host, reason: reason)
+                } label: {
+                    railLabel("UNREACHABLE", dot: Theme.signal3, text: Theme.signal3)
+                }
+                .buttonStyle(.plain)
+                .chassisHover(2)
+                .accessibilityLabel("\(model.host.name) unreachable")
+                .accessibilityHint("Shows why the host could not be reached")
             case .idle:
                 Text("STANDBY").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal3)
             }
