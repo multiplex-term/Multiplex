@@ -162,29 +162,21 @@ struct CustomAgentCommandPanel: View {
             }
 
             HStack(spacing: 8) {
-                Toggle(isOn: command.autoSubmit) {
-                    ChassisLabel("SUBMIT", size: 8, color: Theme.signal2)
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .fixedSize()
-                .accessibilityLabel("Auto Submit")
-
-                Toggle(isOn: command.showInBar) {
-                    ChassisLabel("BAR", size: 8, color: Theme.signal2)
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .fixedSize()
-                .accessibilityLabel("Show in Bar")
-
-                Toggle(isOn: command.shared) {
-                    ChassisLabel("SHARED", size: 8, color: Theme.signal2)
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .fixedSize()
-                .accessibilityLabel("Shared between Claude Code and Codex")
+                ChassisSwitch(
+                    "SUBMIT",
+                    isOn: command.autoSubmit,
+                    accessibilityLabel: "Auto Submit"
+                )
+                ChassisSwitch(
+                    "BAR",
+                    isOn: command.showInBar,
+                    accessibilityLabel: "Show in Bar"
+                )
+                ChassisSwitch(
+                    "SHARED",
+                    isOn: command.shared,
+                    accessibilityLabel: "Shared between Claude Code and Codex"
+                )
 
                 Spacer(minLength: 8)
 
