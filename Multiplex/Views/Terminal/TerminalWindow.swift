@@ -36,7 +36,7 @@ struct TerminalWindowRoot: View {
     @State private var creatingTab = false
     @State private var newTabFailedHost: String?
     /// Detach long-press picked CLOSE SESSION — destructive, so it confirms
-    /// (same policy as the deck's delete and the ended overlay's chip).
+    /// (same policy as the deck's delete action).
     @State private var confirmingCloseActiveSession = false
 
     /// The wall re-probes only while the deck is open; a terminal window
@@ -61,8 +61,8 @@ struct TerminalWindowRoot: View {
         workspace.mergeSources(for: route.id)
     }
     /// Whether the detach control can offer CLOSE SESSION for the active
-    /// tab — same rule as the ended overlay: there must be a tmux session
-    /// to kill and a host record to kill it on.
+    /// tab: there must be a tmux session to kill and a host record to kill
+    /// it on.
     private var activeTabHasSession: Bool {
         guard let activeTab else { return false }
         return activeTab.sessionName != nil && store.host(id: activeTab.hostID) != nil
@@ -389,9 +389,7 @@ struct TerminalWindowRoot: View {
                     fontSize: fontSize,
                     bottomChromeHeight: terminalBottomChromeHeight,
                     isActive: isActive,
-                    close: { close(tab.id) },
-                    closeSession: tab.sessionName != nil && store.host(id: tab.hostID) != nil
-                        ? { closeSession(tab) } : nil
+                    close: { close(tab.id) }
                 )
                 .opacity(isActive ? 1 : 0)
                 .allowsHitTesting(isActive)
@@ -672,9 +670,8 @@ struct TerminalWindowRoot: View {
         route.removeTab(id: tabID)
     }
 
-    /// The ended overlay's CLOSE SESSION: kill the tmux session on the host
-    /// over its control connection (fire-and-forget, like the wall's delete),
-    /// then close the tab. The tab's own connection is already gone here.
+    /// Kill the tmux session on the host over its control connection
+    /// (fire-and-forget, like the wall's delete), then close the tab.
     private func closeSession(_ tab: TerminalRoute) {
         guard let sessionName = tab.sessionName,
               let host = store.host(id: tab.hostID) else { return }
@@ -712,12 +709,8 @@ private struct TerminalPane: View {
     let bottomChromeHeight: CGFloat
     let isActive: Bool
     let close: () -> Void
-    /// Kill the remote tmux session, then close the tab. nil when there's
-    /// no session to kill (plain shell tab, or the host record is gone).
-    let closeSession: (() -> Void)?
 
     @State private var dropTargeted = false
-    @State private var confirmingCloseSession = false
 
     var body: some View {
         ZStack {
@@ -804,21 +797,9 @@ private struct TerminalPane: View {
                 }
                 HStack(spacing: 12) {
                     ChassisChip("RECONNECT", prominent: true) { controller.reconnect() }
-                    if closeSession != nil {
-                        ChassisChip("CLOSE SESSION") { confirmingCloseSession = true }
-                    }
                     ChassisChip("CLOSE TAB") { close() }
                 }
                 .padding(.top, 4)
-                .alert(
-                    "Close Session",
-                    isPresented: $confirmingCloseSession
-                ) {
-                    Button("Close Session", role: .destructive) { closeSession?() }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("Kills “\(controller.route.sessionName ?? "")” on \(controller.host.name) and everything running in it, then closes the tab.")
-                }
             }
         }
     }
