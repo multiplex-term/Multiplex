@@ -17,6 +17,22 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(themes.selected.name)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+
+                        ThemePreview(theme: themes.selected)
+                    }
+                    .padding(.vertical, 4)
+                    .listRowBackground(Color.clear)
+                } header: {
+                    Eyebrow("Current Theme")
+                } footer: {
+                    Text("This preview updates as soon as you select a theme below.")
+                }
+
+                Section {
                     ForEach(TerminalTheme.builtIns) { theme in
                         ThemeRow(theme: theme, isSelected: themes.selectedID == theme.id) {
                             themes.select(theme)
