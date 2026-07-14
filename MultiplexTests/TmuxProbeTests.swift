@@ -66,7 +66,7 @@ final class TmuxProbeTests: XCTestCase {
         let output = """
         S $0 1 0 main
         W $0 0 1 0 0 editor
-        P $0 0 1 4242 claude ✳ Claude Code
+        P $0 0 0 1 %0 4242 /dev/pts/0 claude ✳ Claude Code
         """
         guard case .sessions(let sessions) = TmuxProbe.parse(output) else {
             return XCTFail("expected .sessions")
@@ -81,7 +81,7 @@ final class TmuxProbeTests: XCTestCase {
         let output = """
         S $0 0 0 agent
         W $0 0 1 0 0 cc
-        P $0 0 1 77 cat ✳ Claude Code
+        P $0 0 0 1 %0 77 /dev/pts/0 cat ✳ Claude Code
         """
         guard case .sessions(let sessions) = TmuxProbe.parse(output) else {
             return XCTFail("expected .sessions")
@@ -94,7 +94,7 @@ final class TmuxProbeTests: XCTestCase {
         let output = """
         S $0 0 0 work
         W $0 0 1 0 0 sh
-        P $0 0 1 100 node
+        P $0 0 0 1 %0 100 /dev/pts/0 node
         MULTIPLEX_PS
           100     1 node /usr/lib/node_modules/@openai/codex/bin/codex.js
           200   100 /usr/lib/node_modules/@openai/codex/vendor/codex
@@ -107,25 +107,32 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertEqual(sessions[0].activeAgent, .codex)
     }
 
-    func testAgentOnlyFromActiveWindowAndPane() {
+    func testAllPanesFeedWallWhileActivePaneFeedsHelpers() {
         let output = """
         S $0 1 0 main
         W $0 0 0 0 0 editor
         W $0 1 1 0 0 agent
-        P $0 0 1 10 claude
-        P $0 1 0 20 claude
-        P $0 1 1 30 zsh
+        P $0 0 0 1 %0 10 /dev/pts/0 claude
+        P $0 1 0 0 %1 20 /dev/pts/1 node
+        P $0 1 1 1 %2 30 /dev/pts/2 zsh
+        MULTIPLEX_PS
+          20 1 node /opt/codex.js
+          21 20 /opt/codex/vendor/codex
         """
         guard case .sessions(let sessions) = TmuxProbe.parse(output) else {
             return XCTFail("expected .sessions")
         }
-        // Window 0 (inactive window, active pane) still records its agent…
+        // Window 0 (inactive window, active pane) still records its agent.
         XCTAssertEqual(sessions[0].windows[0].agent, .claudeCode)
-        // …the inactive pane of window 1 is ignored, so window 1 has none…
+        // Window 1's background Codex is retained for FleetWall, while its
+        // active shell keeps the helper strip off.
         XCTAssertNil(sessions[0].windows[1].agent)
-        // …and the session's activeAgent follows the ACTIVE window's pane —
-        // the one attach keystrokes reach.
+        XCTAssertEqual(sessions[0].windows[1].detectedAgents, [.codex])
         XCTAssertNil(sessions[0].activeAgent)
+        XCTAssertEqual(sessions[0].detectedAgents, [.claudeCode, .codex])
+        XCTAssertEqual(sessions[0].paneCount, 3)
+        XCTAssertEqual(sessions[0].windows[1].paneCount, 2)
+        XCTAssertEqual(sessions[0].windows[1].activePane?.tmuxID, "%2")
     }
 
     func testMalformedAgentLinesNeverHurtSessions() {
@@ -133,7 +140,7 @@ final class TmuxProbeTests: XCTestCase {
         S $0 1 0 main
         W $0 0 1 0 0 editor
         P $0 short
-        P $9 0 1 11 claude
+        P $9 0 0 1 %9 11 /dev/pts/9 claude
         MULTIPLEX_PS
         garbage row
           notpid  1 claude
@@ -148,17 +155,55 @@ final class TmuxProbeTests: XCTestCase {
     func testProbeCommandCarriesDetectionStages() {
         let command = TmuxProbe.probeCommand
         XCTAssertTrue(command.contains("tmux list-panes -a"))
-        XCTAssertTrue(command.contains("#{pane_current_command} #{pane_title}"))
+        XCTAssertTrue(command.contains(
+            "#{pane_id} #{pane_pid} #{pane_tty} #{pane_current_command} #{pane_title}"))
         XCTAssertTrue(command.contains("echo MULTIPLEX_PS"))
         XCTAssertTrue(command.contains("ps -eo pid=,ppid=,args="))
-        // The ps table is clipped to the pane process subtrees host-side —
-        // the full table of a busy host is ~100+ KB per tick.
-        XCTAssertTrue(command.contains(
-            #"awk -v roots="$(tmux list-panes -a -F '#{?pane_active,#{pane_pid},}'"#))
-        XCTAssertTrue(command.contains("substr($0,1,120)"))
+        XCTAssertFalse(command.contains("pid=,ppid=,tty="))
+        // Pane output is reused to build the subtree roots; do not re-run
+        // list-panes just to discover them.
+        XCTAssertEqual(command.components(separatedBy: "tmux list-panes -a").count - 1, 1)
+        XCTAssertTrue(command.contains(#"roots=$(printf '%s\n' "$panes""#))
+        XCTAssertTrue(command.contains(#"if(seen[pid]++)continue"#))
+        XCTAssertTrue(command.contains("substr(a,1,120)"))
         // The original sentinel + fail-soft contract survives.
         XCTAssertTrue(command.contains("MULTIPLEX_NO_TMUX"))
         XCTAssertTrue(command.contains("|| true; "))
+    }
+
+    func testFocusedPaneProbeIsSmallAndParsesTheActiveSplit() {
+        let command = TmuxProbe.activePaneCommand(sessionName: "my project")
+        XCTAssertTrue(command.contains("tmux list-panes -t '=my project'"))
+        XCTAssertTrue(command.contains("-F 'A #{session_id}"))
+        XCTAssertFalse(command.contains("capture-pane"))
+        XCTAssertFalse(command.contains("ps -"))
+
+        let output = """
+        A $3 2 0 0 %8 80 /dev/pts/8 zsh
+        A $3 2 1 1 %9 90 /dev/pts/9 node project agent
+        """
+        let pane = TmuxProbe.parseActivePane(output)
+        XCTAssertEqual(pane?.tmuxID, "%9")
+        XCTAssertEqual(pane?.index, 1)
+        XCTAssertEqual(pane?.pid, 90)
+        XCTAssertEqual(pane?.tty, "/dev/pts/9")
+        XCTAssertEqual(pane?.command, "node")
+        XCTAssertEqual(pane?.title, "project agent")
+    }
+
+    func testFocusedPaneProcessFallbackTargetsOnlyItsTTY() {
+        let command = TmuxProbe.paneProcessCommand(tty: "/dev/pts/9")
+        XCTAssertTrue(command?.contains("ps -t 'pts/9'") == true)
+        XCTAssertTrue(command?.contains("cut -c1-120") == true)
+        XCTAssertNil(TmuxProbe.paneProcessCommand(tty: ""))
+
+        XCTAssertEqual(
+            TmuxProbe.parsePSRows("  10  1 -zsh\n  20 10 codex --model gpt-5"),
+            [
+                PSRow(pid: 10, ppid: 1, args: "-zsh"),
+                PSRow(pid: 20, ppid: 10, args: "codex --model gpt-5"),
+            ]
+        )
     }
 
     func testProbeCommandCarriesCaptureTails() {
@@ -416,7 +461,7 @@ final class TmuxProbeTests: XCTestCase {
         let output = """
         S $0 1 0 main
         W $0 0 1 0 0 editor
-        P $0 0 1 100 node
+        P $0 0 0 1 %0 100 /dev/pts/0 node
         MULTIPLEX_PS
           100 1 node
         MULTIPLEX_TAILS

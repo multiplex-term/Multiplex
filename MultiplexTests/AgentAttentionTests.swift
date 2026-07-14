@@ -254,7 +254,7 @@ final class AgentAttentionTests: XCTestCase {
         let output = """
         S $1 0 1751000000 main
         W $1 0 1 0 0 editor
-        P $1 0 1 4242 2.1.206 ⠂ Create probe.txt file
+        P $1 0 0 1 %1 4242 /dev/pts/1 2.1.206 ⠂ Create probe.txt file
         """
         let sessions = TmuxProbe.parse(output).sessions
         XCTAssertEqual(sessions.first?.activeWindow?.paneTitle, "⠂ Create probe.txt file")

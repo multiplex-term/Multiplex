@@ -1,5 +1,54 @@
 import Foundation
 
+/// One pane inside a tmux window. The probe retains every pane so the wall
+/// can report agents in background splits; `isActive` still identifies the
+/// only pane that receives helper-chip keystrokes.
+struct TmuxPane: Identifiable, Hashable, Codable {
+    var index: Int
+    var isActive: Bool
+    /// tmux's server-wide pane id (`%7`). Unlike an index, this survives
+    /// pane reordering and is shared by linked windows.
+    var tmuxID: String
+    /// Root process tmux started for this pane. Used only to scope the
+    /// fail-soft process-tree fallback.
+    var pid: Int
+    var tty: String
+    var command: String
+    var title: String
+    var agent: AgentKind?
+
+    var id: String { tmuxID.isEmpty ? String(index) : tmuxID }
+
+    /// Stable while the same foreground program owns the pane. OSC titles
+    /// deliberately stay out: agent spinners rewrite them continuously and
+    /// must not invalidate the process fallback cache every frame.
+    var processFingerprint: TmuxPaneFingerprint {
+        TmuxPaneFingerprint(
+            tmuxID: tmuxID,
+            pid: pid,
+            tty: tty,
+            command: command
+        )
+    }
+}
+
+struct TmuxPaneFingerprint: Hashable {
+    var tmuxID: String
+    var pid: Int
+    var tty: String
+    var command: String
+}
+
+/// Result of the terminal window's lightweight focused-pane check.
+/// `isDefinitive == false` means direct signals were inconclusive and the
+/// scoped process query failed; callers retain a result only while the pane
+/// fingerprint itself remains unchanged.
+struct ActivePaneAgentDetection: Equatable {
+    var fingerprint: TmuxPaneFingerprint
+    var agent: AgentKind?
+    var isDefinitive: Bool
+}
+
 /// One window inside a tmux session — a cell in the window spine.
 struct TmuxWindow: Identifiable, Hashable, Codable {
     var index: Int
@@ -13,8 +62,29 @@ struct TmuxWindow: Identifiable, Hashable, Codable {
     /// The active pane's OSC title — both agents encode busy/idle (and
     /// Codex its approval wait) here; `AgentAttention` classifies it.
     var paneTitle: String = ""
+    /// All panes from a live probe. Optional only so device-local snapshots
+    /// written before multi-pane detection continue to decode; new probes
+    /// always populate it.
+    var panes: [TmuxPane]? = nil
 
     var id: Int { index }
+
+    var activePane: TmuxPane? {
+        panes?.first(where: \.isActive)
+    }
+
+    var activeAgent: AgentKind? {
+        activePane?.agent ?? agent
+    }
+
+    var detectedAgents: [AgentKind] {
+        if let panes { return panes.compactMap(\.agent) }
+        return agent.map { [$0] } ?? []
+    }
+
+    var paneCount: Int {
+        panes?.count ?? 1
+    }
 }
 
 /// A tmux session as reported by `tmux list-sessions` / `list-windows`.
@@ -36,9 +106,22 @@ struct TmuxSession: Identifiable, Hashable, Codable {
         windows.first(where: \.isActive)
     }
     /// Agent in the pane an attached client is typing into — the active
-    /// window's active pane. Drives the helper strip and deck telemetry.
+    /// window's active pane. Drives the helper strip; FleetWall separately
+    /// aggregates every detected pane.
     var activeAgent: AgentKind? {
-        activeWindow?.agent
+        activeWindow?.activeAgent
+    }
+    /// Every detected agent pane, including background splits and inactive
+    /// windows. FleetWall uses this broader view; helper chips intentionally
+    /// continue to use `activeAgent`.
+    var detectedAgents: [AgentKind] {
+        windows.flatMap(\.detectedAgents)
+    }
+    var agentPanes: [TmuxPane] {
+        windows.flatMap { $0.panes ?? [] }.filter { $0.agent != nil }
+    }
+    var paneCount: Int {
+        windows.reduce(0) { $0 + $1.paneCount }
     }
 }
 

@@ -84,24 +84,40 @@ enum AgentSignature {
     /// Walk panePID and its descendants (the pane's own process tree —
     /// scoping is what keeps argv matching safe) for the first agent match.
     static func agentInTree(rows: [PSRow], panePID: Int) -> AgentKind? {
-        guard panePID > 0 else { return nil }
+        agentsInTrees(rows: rows, panePIDs: [panePID])[panePID]
+    }
+
+    /// Classify several pane roots from one process snapshot. The full wall
+    /// probe can contain many splits (and linked windows repeat pane PIDs),
+    /// so build the PID indexes once and walk each unique root once instead
+    /// of rebuilding dictionaries for every pane.
+    static func agentsInTrees(rows: [PSRow], panePIDs: [Int]) -> [Int: AgentKind] {
         var children: [Int: [PSRow]] = [:]
         var byPID: [Int: PSRow] = [:]
         for row in rows {
             children[row.ppid, default: []].append(row)
             byPID[row.pid] = row
         }
-        var queue = [panePID]
-        var seen = Set<Int>()
-        // Depth/breadth cap: no pane tree is this big; a cycle in forged
-        // input must not spin.
-        while let pid = queue.first, seen.count < 512 {
-            queue.removeFirst()
-            guard seen.insert(pid).inserted else { continue }
-            if let row = byPID[pid], let kind = match(argv: row.args) { return kind }
-            queue.append(contentsOf: (children[pid] ?? []).map(\.pid))
+
+        var result: [Int: AgentKind] = [:]
+        for panePID in Set(panePIDs) where panePID > 0 {
+            var queue = [panePID]
+            var cursor = 0
+            var seen = Set<Int>()
+            // Depth/breadth cap: no pane tree is this big; a cycle in forged
+            // input must not spin. An index cursor keeps traversal O(n).
+            while cursor < queue.count, seen.count < 512 {
+                let pid = queue[cursor]
+                cursor += 1
+                guard seen.insert(pid).inserted else { continue }
+                if let row = byPID[pid], let kind = match(argv: row.args) {
+                    result[panePID] = kind
+                    break
+                }
+                queue.append(contentsOf: (children[pid] ?? []).map(\.pid))
+            }
         }
-        return nil
+        return result
     }
 
     private static func agentNamed(_ name: String) -> AgentKind? {

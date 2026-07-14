@@ -96,6 +96,16 @@ final class HostConnectionModel {
 
     private var connection: SSHConnection?
     private var refreshTask: Task<Void, Never>?
+    private var activePaneProbeInFlight = false
+    private struct ActiveAgentCacheEntry {
+        var fingerprint: TmuxPaneFingerprint
+        var agent: AgentKind?
+        var expiresAt: Date
+    }
+    /// Pane id → process fallback. Direct comm/title matches never need this;
+    /// wrappers and negative results expire so a long-lived foreground
+    /// process can still change descendants without changing pane identity.
+    private var activeAgentCache: [String: ActiveAgentCacheEntry] = [:]
     private var attentionTracker = AttentionTracker()
     /// Deeper, unclipped capture tails (the miniatures' source parse) —
     /// what the question detector reads.
@@ -133,10 +143,118 @@ final class HostConnectionModel {
     /// probe's single exec round-trip carries the miniature tails too, so
     /// joining it is the whole tick — a first load paints sessions and
     /// miniatures together instead of deferring tails to the next tick.
-    func refreshAndWait() async {
+    func refreshAndWait(ifStaleFor minimumAge: TimeInterval = 0) async {
+        if let refreshTask {
+            await refreshTask.value
+            return
+        }
+        if minimumAge > 0,
+           let lastRefreshed,
+           Date().timeIntervalSince(lastRefreshed) < minimumAge {
+            return
+        }
         refresh()
         let task = refreshTask
         await task?.value
+    }
+
+    /// Fast path for the terminal that currently owns keyboard focus. One
+    /// tiny list-panes exec identifies the pane receiving keystrokes. Direct
+    /// signals resolve most agents immediately; only a changed/expired
+    /// ambiguous pane runs a second query scoped to that pane's TTY.
+    ///
+    /// nil means the lightweight check itself was unavailable. A nonnil,
+    /// non-definitive result still carries the new fingerprint so the UI can
+    /// immediately retire helpers that belonged to a different pane.
+    func detectActiveAgent(in sessionName: String) async -> ActivePaneAgentDetection? {
+        guard !activePaneProbeInFlight,
+              refreshTask == nil,
+              phase == .connected,
+              let connection
+        else { return nil }
+
+        activePaneProbeInFlight = true
+        defer { activePaneProbeInFlight = false }
+
+        guard let output = try? await deadlined(seconds: 3, {
+            try await connection.exec(TmuxProbe.activePaneCommand(sessionName: sessionName))
+        }), let pane = TmuxProbe.parseActivePane(output)
+        else { return nil }
+
+        let fingerprint = pane.processFingerprint
+        if let direct = AgentSignature.classify(command: pane.command, title: pane.title) {
+            cache(agent: direct, for: fingerprint)
+            return ActivePaneAgentDetection(
+                fingerprint: fingerprint,
+                agent: direct,
+                isDefinitive: true
+            )
+        }
+
+        if let cached = activeAgentCache[pane.tmuxID],
+           cached.fingerprint == fingerprint,
+           cached.expiresAt > Date() {
+            return ActivePaneAgentDetection(
+                fingerprint: fingerprint,
+                agent: cached.agent,
+                isDefinitive: true
+            )
+        }
+
+        // A full wall probe may already have classified this pane. Reuse a
+        // positive result, but not a missing one: the host-wide ps stage is
+        // fail-soft, so nil alone cannot prove that its snapshot succeeded.
+        if let known = tmux.sessions
+            .first(where: { $0.name == sessionName })?
+            .windows
+            .flatMap({ $0.panes ?? [] })
+            .first(where: {
+                $0.processFingerprint == fingerprint && $0.agent != nil
+            })?
+            .agent {
+            cache(agent: known, for: fingerprint)
+            return ActivePaneAgentDetection(
+                fingerprint: fingerprint,
+                agent: known,
+                isDefinitive: true
+            )
+        }
+
+        guard let command = TmuxProbe.paneProcessCommand(tty: pane.tty),
+              let processOutput = try? await deadlined(seconds: 3, {
+                  try await connection.exec(command)
+              })
+        else {
+            return ActivePaneAgentDetection(
+                fingerprint: fingerprint,
+                agent: nil,
+                isDefinitive: false
+            )
+        }
+
+        let rows = TmuxProbe.parsePSRows(processOutput)
+        guard !rows.isEmpty else {
+            return ActivePaneAgentDetection(
+                fingerprint: fingerprint,
+                agent: nil,
+                isDefinitive: false
+            )
+        }
+        let agent = AgentSignature.agentInTree(rows: rows, panePID: pane.pid)
+        cache(agent: agent, for: fingerprint)
+        return ActivePaneAgentDetection(
+            fingerprint: fingerprint,
+            agent: agent,
+            isDefinitive: true
+        )
+    }
+
+    private func cache(agent: AgentKind?, for fingerprint: TmuxPaneFingerprint) {
+        activeAgentCache[fingerprint.tmuxID] = ActiveAgentCacheEntry(
+            fingerprint: fingerprint,
+            agent: agent,
+            expiresAt: Date().addingTimeInterval(10)
+        )
     }
 
     private func performRefresh() async {
@@ -159,6 +277,7 @@ final class HostConnectionModel {
             tmux = TmuxProbe.parse(output)
             switch tmux {
             case .sessions(let sessions):
+                seedActiveAgentCache(from: sessions)
                 let tails = TmuxProbe.parseTails(output, sessions: sessions)
                 attentionTails = tails
                 miniatures = tails.mapValues(TmuxProbe.miniatureTail)
@@ -191,6 +310,16 @@ final class HostConnectionModel {
             } else {
                 markFailed(error)
             }
+        }
+    }
+
+    private func seedActiveAgentCache(from sessions: [TmuxSession]) {
+        let panes = sessions.flatMap(\.windows).flatMap { $0.panes ?? [] }
+        let liveIDs = Set(panes.map(\.tmuxID))
+        activeAgentCache = activeAgentCache.filter { liveIDs.contains($0.key) }
+        for pane in panes {
+            guard let agent = pane.agent else { continue }
+            cache(agent: agent, for: pane.processFingerprint)
         }
     }
 
@@ -307,11 +436,13 @@ final class HostConnectionModel {
         var next: [String: PaneAgentState] = [:]
         for session in sessions {
             let window = session.activeWindow
+            let activeAgent = window?.activeAgent
+            let activeTitle = window?.activePane?.title ?? window?.paneTitle ?? ""
             // No detected agent → no state (bells still tracked below).
             var state: PaneAgentState?
-            if let window, window.agent != nil {
+            if activeAgent != nil {
                 state = AgentAttention.classify(
-                    title: window.paneTitle,
+                    title: activeTitle,
                     tail: attentionTails[session.name] ?? []
                 )
                 next[session.name] = state
@@ -328,9 +459,9 @@ final class HostConnectionModel {
                 onAttentionAlert?(AttentionAlert(
                     host: host,
                     sessionName: session.name,
-                    agent: window?.agent,
+                    agent: activeAgent,
                     event: event,
-                    paneTitle: window?.paneTitle ?? ""
+                    paneTitle: activeTitle
                 ))
             }
         }

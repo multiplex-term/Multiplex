@@ -115,6 +115,24 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertNil(AgentSignature.agentInTree(rows: cyclic, panePID: 0))
     }
 
+    func testAgentsInTreesClassifiesMultipleRootsAndDeduplicatesLinkedPane() {
+        let rows = [
+            PSRow(pid: 10, ppid: 1, args: "-zsh"),
+            PSRow(pid: 11, ppid: 10, args: "claude"),
+            PSRow(pid: 20, ppid: 1, args: "-zsh"),
+            PSRow(pid: 21, ppid: 20, args: "node /opt/codex"),
+            PSRow(pid: 30, ppid: 1, args: "-zsh"),
+        ]
+        let agents = AgentSignature.agentsInTrees(
+            rows: rows,
+            panePIDs: [10, 20, 30, 10]
+        )
+        XCTAssertEqual(agents[10], .claudeCode)
+        XCTAssertEqual(agents[20], .codex)
+        XCTAssertNil(agents[30])
+        XCTAssertEqual(agents.count, 2)
+    }
+
     // MARK: command payloads
 
     func testKeyPayloads() {

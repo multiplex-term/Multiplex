@@ -71,8 +71,9 @@ submission.
 
 Current product split:
 
-- Free: one host, full SSH spatial windows/tabs/merge, agent detection and wall
-  telemetry, built-in terminal themes, a most-used tmux shortcut dropdown on
+- Free: one host, full SSH spatial windows/tabs/merge, all-pane agent detection
+  and wall telemetry with active-pane-aware helpers, built-in terminal themes,
+  a most-used tmux shortcut dropdown on
   both platforms (including touch-native copy-mode selection and explicit
   exit), iCloud Keychain sync, and ten slash-command chip taps per local
   calendar day.

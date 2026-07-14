@@ -10,12 +10,23 @@ import Foundation
 /// inside names. Session lines start with S, window lines with W, pane
 /// lines with P (variable-length pane *title* last — it feeds agent
 /// detection, see `AgentSignature`). After the MULTIPLEX_PS sentinel comes
-/// a `ps` process table (clipped host-side to the pane subtrees) for the
+/// a process table (clipped host-side to the pane process subtrees) for the
 /// pane-tree walk, and after MULTIPLEX_TAILS every session's active-pane
 /// capture for the wall miniatures — one exec round-trip carries it all.
 /// Every stage degrades silently — a host where list-panes or ps misbehaves
 /// just loses agent detection, never its session list.
 enum TmuxProbe {
+    private struct PaneInfo {
+        var sessionID: String
+        var windowIndex: Int
+        var pane: TmuxPane
+    }
+
+    private struct WindowKey: Hashable {
+        var sessionID: String
+        var windowIndex: Int
+    }
+
     /// Non-interactive SSH exec often has a minimal PATH, so common tmux
     /// locations (Homebrew, /usr/local) are appended before any command.
     /// Shared with the mosh bootstrap, which has the same problem for
@@ -24,7 +35,7 @@ enum TmuxProbe {
         "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin\"; export PATH; "
 
     /// One exec round-trip carrying everything a wall tick needs: session/
-    /// window/pane listings, the (subtree-clipped) ps table for agent
+    /// window/pane listings, the (pane-subtree-clipped) ps table for agent
     /// detection, and — after the MULTIPLEX_TAILS sentinel — every session's
     /// active-pane capture for the live miniatures. A second capture exec
     /// used to follow the probe; folding it in halves the per-tick channel
@@ -32,15 +43,17 @@ enum TmuxProbe {
     static var probeCommand: String {
         let sessionFormat = "S #{session_id} #{session_attached} #{session_created} #{session_name}"
         let windowFormat = "W #{session_id} #{window_index} #{window_active} #{window_bell_flag} #{window_activity_flag} #{window_name}"
-        // No #{s/…/:} substitution on the command: tmux already normalizes
-        // pane_current_command to a bare word, and s/// needs tmux ≥ 2.9.
-        let paneFormat = "P #{session_id} #{window_index} #{pane_active} #{pane_pid} #{pane_current_command} #{pane_title}"
+        let paneFormat = paneFormat(tag: "P")
         return pathPrefix
             + "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
             + "tmux list-sessions -F '\(sessionFormat)' 2>/dev/null "
             + "&& tmux list-windows -a -F '\(windowFormat)' 2>/dev/null "
-            + "&& tmux list-panes -a -F '\(paneFormat)' 2>/dev/null "
-            + "&& { echo MULTIPLEX_PS; \(psSubtreeCommand); } "
+            // Keep the pane listing in one shell variable: it is printed for
+            // the parser and reused to derive every pane-process root,
+            // avoiding a second list-panes call in the process stage.
+            + "&& panes=$(tmux list-panes -a -F '\(paneFormat)' 2>/dev/null) "
+            + "&& printf '%s\\n' \"$panes\" "
+            + "&& { echo MULTIPLEX_PS; \(psPaneSubtreeCommand); } "
             + "|| true; "
             + "echo MULTIPLEX_TAILS; "
             + "tmux list-sessions -F '#{session_id}' 2>/dev/null | while IFS= read -r s; do "
@@ -49,20 +62,33 @@ enum TmuxProbe {
             + "done; echo MPXE"
     }
 
-    /// The ps stage, clipped to the pane process *subtrees* before it leaves
-    /// the host: the agent tree walk only ever descends from pane PIDs, and
-    /// a busy host's full table is ~100+ KB per tick (dominates the probe's
-    /// payload and its main-actor parse). awk keeps each active pane's PID
-    /// and every transitive child, clipping args to what the walk reads
-    /// (argv[0]/argv[1]). POSIX awk/tr only; any stage failing just loses
-    /// agent detection — never the session list.
-    private static let psSubtreeCommand =
-        #"ps -eo pid=,ppid=,args= 2>/dev/null | awk -v roots="$(tmux list-panes -a -F '#{?pane_active,#{pane_pid},}' 2>/dev/null | tr '\n' ' ')" '"#
-        + "BEGIN{n=split(roots,r,\" \");for(i=1;i<=n;i++)keep[r[i]]=1} "
-        + "{pids[NR]=$1;parent[$1]=$2;line[$1]=substr($0,1,120)} "
-        + "END{f=1;while(f){f=0;for(i=1;i<=NR;i++){p=pids[i];"
-        + "if(!(p in keep)&&(parent[p] in keep)){keep[p]=1;f=1}}}"
-        + "for(i=1;i<=NR;i++)if(pids[i] in keep)print line[pids[i]]}'"
+    /// One host-wide process snapshot, clipped to every tmux pane subtree
+    /// before output crosses SSH. The pane listing already carries each root
+    /// PID, so a queue walk over one ps snapshot avoids both another tmux
+    /// process and awk's repeated whole-table closure. Do not add ps's `tty`
+    /// column here: collecting it costs ~70-110 ms on macOS even though the
+    /// roots already give us stricter scope. Arguments are clipped to
+    /// argv[0]/argv[1] territory. POSIX ps/awk only; failure loses the
+    /// fallback signal, never direct comm/title detection.
+    private static let psPaneSubtreeCommand =
+        #"roots=$(printf '%s\n' "$panes" | awk '$1=="P"{printf "%s ",$7}'); "#
+        + #"ps -eo pid=,ppid=,args= 2>/dev/null | awk -v roots="$roots" '"#
+        + "BEGIN{n=split(roots,r,\" \");for(i=1;i<=n;i++)"
+        + "if(r[i]!=\"\")q[++tail]=r[i]} "
+        + "NF>=3{pid=$1;parent=$2;a=$3;for(i=4;i<=NF;i++)a=a\" \"$i;"
+        + "line[pid]=pid\" \"parent\" \"substr(a,1,120);"
+        + "children[parent]=children[parent]\" \"pid} "
+        + "END{while(head<tail){pid=q[++head];if(seen[pid]++)continue;"
+        + "if(pid in line)print line[pid];n=split(children[pid],c,\" \");"
+        + "for(i=1;i<=n;i++)if(c[i]!=\"\")q[++tail]=c[i]}}'"
+
+    /// Fixed fields precede the only variable-length field (pane_title).
+    /// pane_id makes linked-window duplicates and pane switches stable;
+    /// pane_tty enables the scoped process fallback.
+    private static func paneFormat(tag: String) -> String {
+        "\(tag) #{session_id} #{window_index} #{pane_index} #{pane_active} "
+            + "#{pane_id} #{pane_pid} #{pane_tty} #{pane_current_command} #{pane_title}"
+    }
 
     /// Parse combined probe output into a `TmuxState`.
     static func parse(_ output: String) -> TmuxState {
@@ -73,17 +99,10 @@ enum TmuxProbe {
             var clients: Int
             var created: Date
         }
-        struct PaneInfo {
-            var sessionID: String
-            var windowIndex: Int
-            var pid: Int
-            var command: String
-            var title: String
-        }
         var sessions: [String: SessionInfo] = [:]
         var order: [String] = []
         var windows: [String: [TmuxWindow]] = [:]
-        var activePanes: [PaneInfo] = []
+        var panes: [PaneInfo] = []
         var psRows: [PSRow] = []
         var inPSSection = false
 
@@ -96,16 +115,7 @@ enum TmuxProbe {
                 continue
             }
             if inPSSection {
-                // ps right-aligns numeric columns with leading spaces.
-                let fields = line.split(separator: " ", omittingEmptySubsequences: true)
-                guard fields.count >= 3,
-                      let pid = Int(fields[0]), let ppid = Int(fields[1])
-                else { continue }
-                psRows.append(PSRow(
-                    pid: pid,
-                    ppid: ppid,
-                    args: fields[2...].joined(separator: " ")
-                ))
+                if let row = parsePSRow(line) { psRows.append(row) }
                 continue
             }
             let fields = line.split(separator: " ", omittingEmptySubsequences: false)
@@ -128,17 +138,8 @@ enum TmuxProbe {
                     hasActivity: fields[5] == "1"
                 )
                 windows[fields[1], default: []].append(window)
-            case "P" where fields.count >= 6:
-                // Only the active pane — that's the one attach keystrokes
-                // (and helper chips) reach. Title may legitimately be empty.
-                guard fields[3] == "1" else { continue }
-                activePanes.append(PaneInfo(
-                    sessionID: fields[1],
-                    windowIndex: Int(fields[2]) ?? 0,
-                    pid: Int(fields[4]) ?? 0,
-                    command: fields[5],
-                    title: fields.count > 6 ? fields[6...].joined(separator: " ") : ""
-                ))
+            case "P":
+                if let pane = parsePane(fields, tag: "P") { panes.append(pane) }
             default:
                 continue
             }
@@ -146,18 +147,46 @@ enum TmuxProbe {
 
         guard !order.isEmpty else { return .noServer }
 
-        // Agent detection: cheap comm/title signals first, the pane's
-        // process tree as the authority (catches node/bun wrappers and
-        // macOS's versioned-binary comm). The title lands on the window
-        // either way — `AgentAttention` reads state from it.
-        for pane in activePanes {
-            guard let i = windows[pane.sessionID]?.firstIndex(where: { $0.index == pane.windowIndex })
-            else { continue }
-            windows[pane.sessionID]?[i].paneTitle = pane.title
-            guard let kind = AgentSignature.classify(command: pane.command, title: pane.title)
-                ?? AgentSignature.agentInTree(rows: psRows, panePID: pane.pid)
-            else { continue }
-            windows[pane.sessionID]?[i].agent = kind
+        // Resolve every pane from one shared process index. FleetWall reads
+        // all of them; a terminal helper still follows only the active pane.
+        let unresolvedPIDs = panes.compactMap { info -> Int? in
+            AgentSignature.classify(
+                command: info.pane.command,
+                title: info.pane.title
+            ) == nil ? info.pane.pid : nil
+        }
+        let treeAgents = AgentSignature.agentsInTrees(
+            rows: psRows,
+            panePIDs: unresolvedPIDs
+        )
+        var panesByWindow: [WindowKey: [TmuxPane]] = [:]
+        for info in panes {
+            var pane = info.pane
+            pane.agent = AgentSignature.classify(command: pane.command, title: pane.title)
+                ?? treeAgents[pane.pid]
+            panesByWindow[
+                WindowKey(sessionID: info.sessionID, windowIndex: info.windowIndex),
+                default: []
+            ].append(pane)
+        }
+        for sessionID in Array(windows.keys) {
+            guard var sessionWindows = windows[sessionID] else { continue }
+            for index in sessionWindows.indices {
+                let key = WindowKey(
+                    sessionID: sessionID,
+                    windowIndex: sessionWindows[index].index
+                )
+                guard var windowPanes = panesByWindow[key] else { continue }
+                windowPanes.sort { $0.index < $1.index }
+                sessionWindows[index].panes = windowPanes
+                if let active = windowPanes.first(where: \.isActive) {
+                    // Mirror the legacy fields so old snapshots and the
+                    // attention path retain their original representation.
+                    sessionWindows[index].agent = active.agent
+                    sessionWindows[index].paneTitle = active.title
+                }
+            }
+            windows[sessionID] = sessionWindows
         }
 
         let list = order.compactMap { id -> TmuxSession? in
@@ -171,6 +200,77 @@ enum TmuxProbe {
             )
         }
         return .sessions(list)
+    }
+
+    /// Tiny focused-session query used between full fleet ticks. It lists
+    /// only the current window's panes and carries no capture or process
+    /// table; callers request a TTY-scoped fallback only when direct signals
+    /// and their short cache are inconclusive.
+    static func activePaneCommand(sessionName: String) -> String {
+        pathPrefix
+            + "tmux list-panes -t \("=\(sessionName)".shellQuoted) "
+            + "-F '\(paneFormat(tag: "A"))' 2>/dev/null"
+    }
+
+    static func parseActivePane(_ output: String) -> TmuxPane? {
+        for line in output.split(separator: "\n") {
+            let fields = line.split(separator: " ", omittingEmptySubsequences: false)
+                .map(String.init)
+            if let info = parsePane(fields, tag: "A"), info.pane.isActive {
+                return info.pane
+            }
+        }
+        return nil
+    }
+
+    /// Process rows for one pane TTY. This is separate from the one-second
+    /// pane query and runs only on a pane/foreground-command change or short
+    /// cache expiry, not every tick.
+    static func paneProcessCommand(tty: String) -> String? {
+        let terminal = tty.hasPrefix("/dev/") ? String(tty.dropFirst(5)) : tty
+        guard !terminal.isEmpty else { return nil }
+        return pathPrefix
+            + "ps -t \(terminal.shellQuoted) -o pid=,ppid=,args= 2>/dev/null "
+            + "| cut -c1-120"
+    }
+
+    static func parsePSRows(_ output: String) -> [PSRow] {
+        output.split(separator: "\n").compactMap(parsePSRow)
+    }
+
+    private static func parsePane(_ fields: [String], tag: String) -> PaneInfo? {
+        guard fields.first == tag, fields.count >= 9,
+              let windowIndex = Int(fields[2]),
+              let paneIndex = Int(fields[3]),
+              let pid = Int(fields[6])
+        else { return nil }
+        return PaneInfo(
+            sessionID: fields[1],
+            windowIndex: windowIndex,
+            pane: TmuxPane(
+                index: paneIndex,
+                isActive: fields[4] == "1",
+                tmuxID: fields[5],
+                pid: pid,
+                tty: fields[7],
+                command: fields[8],
+                title: fields.count > 9 ? fields[9...].joined(separator: " ") : "",
+                agent: nil
+            )
+        )
+    }
+
+    private static func parsePSRow(_ line: Substring) -> PSRow? {
+        // ps right-aligns numeric columns with leading spaces.
+        let fields = line.split(separator: " ", omittingEmptySubsequences: true)
+        guard fields.count >= 3,
+              let pid = Int(fields[0]), let ppid = Int(fields[1])
+        else { return nil }
+        return PSRow(
+            pid: pid,
+            ppid: ppid,
+            args: fields[2...].joined(separator: " ")
+        )
     }
 
     // MARK: - Session actions

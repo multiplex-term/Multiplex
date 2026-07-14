@@ -27,9 +27,10 @@ struct TerminalWindowRoot: View {
     @State private var fontSize: CGFloat = 14
     /// Agent shown by the helper strip. Trails `detectedAgent` with a short
     /// grace on loss (two probe ticks) so a transient probe miss doesn't
-    /// flap the strip — but never across a tab switch.
+    /// flap the strip — but never across a tab or pane switch.
     @State private var shownAgent: AgentKind?
     @State private var hideAgentTask: Task<Void, Never>?
+    @State private var activePaneFingerprint: TmuxPaneFingerprint?
     @State private var showingPaywall = false
     /// One new-tab exec in flight at a time — a double tap must not mint
     /// two sessions.
@@ -39,9 +40,12 @@ struct TerminalWindowRoot: View {
     /// (same policy as the deck's delete action).
     @State private var confirmingCloseActiveSession = false
 
-    /// The wall re-probes only while the deck is open; a terminal window
-    /// keeps its own host's probe warm so detection tracks the pane.
-    private static let agentPollInterval: Duration = .seconds(5)
+    /// Full host snapshots stay at the wall's economical cadence. Only the
+    /// app-wide keyboard owner gets the small focused-pane query between
+    /// snapshots, so ten visible spatial windows never become ten fast ps
+    /// loops.
+    private static let hostProbeInterval: Duration = .seconds(5)
+    private static let focusedPaneProbeInterval: Duration = .seconds(1)
 
     private var activeTab: TerminalRoute? { route.activeTab }
     private var activeController: TerminalSessionController? {
@@ -83,7 +87,8 @@ struct TerminalWindowRoot: View {
         platformBody
             .task { syncTabs() }
             .task { entitlements.refreshSlashChipMeter() }
-            .task(id: activeTab?.hostID) { await watchAgentPresence() }
+            .task(id: activeTab?.hostID) { await keepHostProbeWarm() }
+            .task(id: activeTab?.id) { await watchActivePane() }
             #if DEBUG
             .task {
                 await DeckScene.autoAttachIfRequested(
@@ -100,6 +105,7 @@ struct TerminalWindowRoot: View {
                 // No detection grace across tabs — chips must describe the
                 // pane on screen, immediately.
                 hideAgentTask?.cancel()
+                activePaneFingerprint = nil
                 shownAgent = detectedAgent
             }
             .onChange(of: detectedAgent) { _, agent in
@@ -166,27 +172,80 @@ struct TerminalWindowRoot: View {
             #endif
     }
 
-    /// Keep this host's probe fresh while the window is open (the deck only
-    /// polls while it's on screen). `refresh()` is single-flight, so several
-    /// windows on one host still cost one probe per tick.
-    private func watchAgentPresence() async {
+    /// Keep this host's full wall state fresh while a terminal window is
+    /// open. Periodic callers share the model and skip a snapshot completed
+    /// in the previous four seconds, preventing staggered windows plus the
+    /// deck from multiplying the expensive host-wide pass.
+    private func keepHostProbeWarm() async {
         #if DEBUG
         AgentChipDebugHook.install()
         NewTabDebugHook.install()
         #endif
         guard let hostID = activeTab?.hostID, let host = store.host(id: hostID) else { return }
         let model = hub.model(for: host)
-        shownAgent = detectedAgent
         while !Task.isCancelled {
             if UIApplication.shared.applicationState == .active {
-                // Reuse the strip's existing five-second agent probe tick to
+                // Reuse the existing five-second host probe tick to
                 // publish a local-day rollover. This keeps the spent pill
                 // from lingering past midnight without adding a meter timer
                 // or scheduling any reset work of its own.
                 entitlements.refreshSlashChipMeter()
-                model.refresh()
+                await model.refreshAndWait(ifStaleFor: 4)
             }
-            try? await Task.sleep(for: Self.agentPollInterval)
+            try? await Task.sleep(for: Self.hostProbeInterval)
+        }
+    }
+
+    /// Follow pane selection quickly without turning every terminal into a
+    /// full wall poller. TerminalFocusArbiter guarantees at most one window
+    /// reaches the network-heavy branch app-wide.
+    private func watchActivePane() async {
+        guard let activeTab,
+              let sessionName = activeTab.sessionName,
+              let host = store.host(id: activeTab.hostID)
+        else {
+            activePaneFingerprint = nil
+            shownAgent = nil
+            return
+        }
+        let model = hub.model(for: host)
+        shownAgent = detectedAgent
+        activePaneFingerprint = model.tmux.sessions
+            .first(where: { $0.name == sessionName })?
+            .activeWindow?
+            .activePane?
+            .processFingerprint
+
+        // Join the initial full refresh. This establishes the shared control
+        // connection once; the fast path never races a second SSH handshake.
+        await model.refreshAndWait(ifStaleFor: 4)
+
+        while !Task.isCancelled {
+            if UIApplication.shared.applicationState == .active,
+               let view = activeController?.terminalView,
+               TerminalFocusArbiter.current === view {
+                let detection = await model.detectActiveAgent(in: sessionName)
+                // A tab change cancels this task, but an SSH continuation can
+                // finish once more. Never apply that old session's answer to
+                // the newly active tab.
+                guard !Task.isCancelled, self.activeTab?.id == activeTab.id else { return }
+                if let detection { apply(detection) }
+            }
+            try? await Task.sleep(for: Self.focusedPaneProbeInterval)
+        }
+    }
+
+    private func apply(_ detection: ActivePaneAgentDetection) {
+        let changedPane = activePaneFingerprint != detection.fingerprint
+        activePaneFingerprint = detection.fingerprint
+        hideAgentTask?.cancel()
+        if let agent = detection.agent {
+            shownAgent = agent
+        } else if changedPane || detection.isDefinitive {
+            // A pane switch has no grace: commands must never describe the
+            // split the user just left. Confirmed agent exit is equally
+            // immediate; only an inconclusive same-pane probe preserves UI.
+            shownAgent = nil
         }
     }
 

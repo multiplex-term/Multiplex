@@ -369,10 +369,19 @@ views.
   execs `versions/2.1.206`) → ps-tree walk from `pane_pid` matching **argv[0]
   basename only** (never substring — Claude Desktop helpers and
   `--user-data-dir=…/Claude` false-positive otherwise; catches npm Codex,
-  whose node wrapper *spawns* the binary and stays pane leader). Any probe
-  stage failing just disables detection, never the session list. Helper chips
-  only ever *type* through `TerminalSessionController.sendInput` (the same
-  ordered pump as the keyboard; Enter = CR, Esc = 0x1B, Shift+Tab = CSI Z,
+  whose node wrapper *spawns* the binary and stays pane leader). The full
+  five-second probe retains **every pane**, reuses its one `list-panes`
+  result to root one linear, subtree-clipped host-wide ps snapshot, and builds
+  the process index once; FleetWall aggregates all detected split panes,
+  while helper chips deliberately follow only the active pane that receives
+  keystrokes. Between full probes, only `TerminalFocusArbiter.current` runs
+  a one-second, current-window `list-panes` check; ambiguous wrappers get a cached,
+  single-TTY ps fallback, so many open windows never multiply the fast or
+  host-wide work. Periodic deck/window callers also coalesce settled full
+  probes for four seconds. Any stage failing just disables that detection
+  signal, never the session list. Helper chips only ever *type* through
+  `TerminalSessionController.sendInput` (the same ordered pump as the
+  keyboard; Enter = CR, Esc = 0x1B, Shift+Tab = CSI Z,
   Codex's TRANSCRIPT overlay toggle = Ctrl+T; Claude Code's PG UP/PG DN
   chips, CSI `5~`/`6~`, are visionOS-only — iPad's key rail already pages);
   never ship a Ctrl+B payload — it's the remote tmux prefix. The strip and

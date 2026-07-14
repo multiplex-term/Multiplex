@@ -163,7 +163,7 @@ struct FleetWall: View {
             await withTaskGroup(of: Void.self) { group in
                 for model in models {
                     group.addTask {
-                        await model.refreshAndWait()
+                        await model.refreshAndWait(ifStaleFor: 4)
                     }
                 }
             }
@@ -504,6 +504,7 @@ struct FleetWall: View {
             session: session,
             lines: model.miniatures[session.name] ?? [],
             attention: model.attention[session.name],
+            hasLiveAgentState: model.lastRefreshed != nil,
             hasOpenTab: workspace.hasTab(hostID: host.id, sessionName: session.name),
             attach: {
                 focusOrAttach(host, session: session)
@@ -833,9 +834,12 @@ private struct DotPulse: ViewModifier {
 private struct SessionTile: View {
     let session: TmuxSession
     let lines: [String]
-    /// Agent state from the latest probe/capture pass; nil when the active
-    /// pane runs no detected agent.
+    /// Agent state from the latest probe/capture pass for the active pane.
+    /// Background pane title state is folded into the visible tile below.
     let attention: PaneAgentState?
+    /// Pane titles survive in cold-launch snapshots so agent telemetry paints
+    /// immediately, but activity/attention must be re-earned by a live probe.
+    let hasLiveAgentState: Bool
     /// Whether some open terminal window already has this session as a tab
     /// — pressing then focuses that window instead of attaching again.
     let hasOpenTab: Bool
@@ -905,13 +909,15 @@ private struct SessionTile: View {
             }
             // An agent blocked on the user outranks everything else the
             // tile could say — caution, captioned, never tally red.
-            if case .needsYou = attention {
+            if agentNeedsYou {
                 TallyLamp(caption: "NEEDS YOU", color: Theme.caution)
             }
             Spacer(minLength: 6)
             Text(telemetry)
                 .font(.mono(9.5))
                 .foregroundStyle(Theme.signal2)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .padding(.horizontal, 7)
         .padding(.top, 8)
@@ -919,18 +925,57 @@ private struct SessionTile: View {
     }
 
     private var telemetry: String {
-        var parts = ["\(session.windowCount) WIN"]
-        if session.clientCount > 0 {
-            parts.append("\(session.clientCount) CLIENT\(session.clientCount == 1 ? "" : "S")")
+        let hasSplitPanes = session.paneCount > session.windowCount
+        var parts = [hasSplitPanes ? "\(session.windowCount)W" : "\(session.windowCount) WIN"]
+        if hasSplitPanes {
+            parts.append("\(session.paneCount)P")
         }
-        // Free-tier teaser: the wall names a detected agent in telemetry —
-        // and whether it's mid-turn right now.
-        if let agent = session.activeAgent {
-            parts.append(agent.telemetryLabel)
-            if attention == .busy { parts.append("RUNNING") }
+        if session.clientCount > 0 {
+            parts.append(hasSplitPanes
+                ? "\(session.clientCount)C"
+                : "\(session.clientCount) CLIENT\(session.clientCount == 1 ? "" : "S")")
+        }
+        // Free-tier telemetry sees every split. Keep the active kind first,
+        // then stable pane order; repeated kinds get a compact count.
+        for agent in orderedAgentKinds {
+            let count = session.detectedAgents.count { $0 == agent }
+            parts.append(count > 1
+                ? "\(count)×\(agent.telemetryLabel)"
+                : agent.telemetryLabel)
+        }
+        if agentRunning {
+            parts.append("RUNNING")
         }
         parts.append(sessionAge)
         return parts.joined(separator: " · ")
+    }
+
+    private var orderedAgentKinds: [AgentKind] {
+        var result: [AgentKind] = []
+        if let active = session.activeAgent { result.append(active) }
+        for agent in session.detectedAgents where !result.contains(agent) {
+            result.append(agent)
+        }
+        return result
+    }
+
+    private var agentRunning: Bool {
+        if attention == .busy { return true }
+        guard hasLiveAgentState else { return false }
+        return session.agentPanes.contains {
+            AgentAttention.classify(title: $0.title, tail: []) == .busy
+        }
+    }
+
+    private var agentNeedsYou: Bool {
+        if case .needsYou = attention { return true }
+        guard hasLiveAgentState else { return false }
+        return session.agentPanes.contains {
+            if case .needsYou = AgentAttention.classify(title: $0.title, tail: []) {
+                return true
+            }
+            return false
+        }
     }
 
     private var sessionAge: String {
@@ -947,7 +992,10 @@ private struct SessionTile: View {
                     Rectangle()
                         .fill(window.isActive ? Theme.signal : Theme.bezelHi)
                         .frame(height: 2)
-                    Text("\(window.index) \(window.name)")
+                    Text(
+                        "\(window.index) \(window.name)"
+                            + (window.paneCount > 1 ? " · \(window.paneCount)P" : "")
+                    )
                         .font(.mono(8))
                         .kerning(0.4)
                         .textCase(.uppercase)
@@ -974,13 +1022,14 @@ private struct SessionTile: View {
 
     private var spineSummary: String {
         let active = session.windows.first(where: \.isActive).map { "\($0.name) active" } ?? ""
-        return "\(session.windowCount) windows. \(active)"
+        return "\(session.windowCount) windows, \(session.paneCount) panes. \(active)"
     }
 
     private var accessibilitySummary: String {
         var parts = [session.name, session.isAttached ? "live" : "not attached"]
-        if case .needsYou = attention { parts.append("agent needs your input") }
-        parts.append("\(session.windowCount) windows")
+        if agentNeedsYou { parts.append("agent needs your input") }
+        if agentRunning { parts.append("agent running") }
+        parts.append("\(session.windowCount) windows and \(session.paneCount) panes")
         return parts.joined(separator: ", ")
             + (hasOpenTab ? ". Shows its open window" : ". Attach")
     }

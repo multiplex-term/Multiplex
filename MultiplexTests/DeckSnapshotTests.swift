@@ -11,7 +11,19 @@ final class DeckSnapshotTests: XCTestCase {
                         TmuxWindow(
                             index: 0, name: "editor", isActive: true,
                             hasBell: false, hasActivity: true,
-                            agent: .claudeCode, paneTitle: "✳ Claude Code"
+                            agent: .claudeCode, paneTitle: "✳ Claude Code",
+                            panes: [
+                                TmuxPane(
+                                    index: 0, isActive: true, tmuxID: "%0",
+                                    pid: 42, tty: "/dev/pts/0", command: "claude",
+                                    title: "✳ Claude Code", agent: .claudeCode
+                                ),
+                                TmuxPane(
+                                    index: 1, isActive: false, tmuxID: "%1",
+                                    pid: 43, tty: "/dev/pts/1", command: "codex",
+                                    title: "repo", agent: .codex
+                                ),
+                            ]
                         ),
                     ],
                     clientCount: 2,
@@ -30,8 +42,37 @@ final class DeckSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded, snapshot)
         // The bits the wall renders from cache survive verbatim.
         XCTAssertEqual(decoded.sessions[0].activeAgent, .claudeCode)
+        XCTAssertEqual(decoded.sessions[0].detectedAgents, [.claudeCode, .codex])
+        XCTAssertEqual(decoded.sessions[0].paneCount, 2)
         XCTAssertTrue(decoded.sessions[0].isAttached)
         XCTAssertEqual(decoded.miniatures["main"], ["$ make test", "ok"])
+    }
+
+    func testSnapshotWrittenBeforePaneInventoryStillDecodes() throws {
+        let json = """
+        {
+          "sessions": [{
+            "name": "main",
+            "windows": [{
+              "index": 0,
+              "name": "editor",
+              "isActive": true,
+              "hasBell": false,
+              "hasActivity": false,
+              "agent": "codex",
+              "paneTitle": "repo"
+            }],
+            "clientCount": 0,
+            "created": -978307200,
+            "tmuxID": "$0"
+          }],
+          "miniatures": {}
+        }
+        """
+        let decoded = try JSONDecoder().decode(DeckSnapshot.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.sessions[0].activeAgent, .codex)
+        XCTAssertEqual(decoded.sessions[0].detectedAgents, [.codex])
+        XCTAssertEqual(decoded.sessions[0].paneCount, 1)
     }
 
     @MainActor

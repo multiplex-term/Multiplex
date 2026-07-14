@@ -22,11 +22,13 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
   rail of live tiles: each tile streams the session's last lines
   (`capture-pane` over the same control connection, ~5 s cadence while the
   deck is frontmost), wears a captioned red **LIVE** tally when attached, and
-  carries telemetry (windows · clients · age). An unreachable host is a
+  carries telemetry (windows · panes · clients · agents · age). An unreachable host is a
   hatched **NO SIGNAL** tile with a RECONNECT badge.
 - **Session tiles** — the tile's lower bezel is the *window spine*: one
   segment per tmux window, the active one lit, bell/activity flagged with a
-  caution tick. Tapping a tile **Attaches** the session in its own window
+  caution tick. Split panes are counted in the spine, and agent telemetry
+  covers Claude Code / Codex in every pane, not just the foreground split.
+  Tapping a tile **Attaches** the session in its own window
   (`tmux attach-session`). **New Session** runs `tmux new-session -A`.
   **Shell** opens a plain login shell, no tmux.
 - **Terminal windows & tabs** — each terminal is its own SwiftUI scene
@@ -48,6 +50,11 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
   then press **Done** to return to the shell. SwiftTerm renders xterm-256color;
   resizing the window sends PTY window-change to the remote. **Detach** closes
   the active tab's channel — tmux keeps the session; the wall still shows it.
+- **Agent helpers** — when the active tmux pane runs Claude Code or Codex, a
+  context-specific command strip follows it. The focused terminal checks pane
+  selection between full wall ticks, so moving across splits updates helpers
+  in about a second; background panes remain visible in wall telemetry without
+  receiving commands intended for the active pane.
 - **Keyboard focus** — exactly one terminal owns keyboard input at a time
   (`TerminalFocusArbiter`): every visionOS window is its own always-active
   scene, so per-window first responders leave input stuck on the first
