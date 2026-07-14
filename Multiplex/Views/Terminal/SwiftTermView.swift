@@ -94,7 +94,15 @@ struct SwiftTermView: UIViewRepresentable {
         ])
         #else
         let container = KeyboardAvoidingContainer()
-        let keyBar = TerminalKeyBar(terminal: view)
+        let keyBar = TerminalKeyBar(
+            terminal: view,
+            performTmuxShortcut: { [weak controller] shortcut in
+                controller?.performTmuxShortcut(shortcut)
+            },
+            finishTmuxCopyMode: { [weak controller] in
+                controller?.finishTmuxCopyMode()
+            }
+        )
         container.addSubview(view)
         container.addSubview(keyBar)
         view.translatesAutoresizingMaskIntoConstraints = false

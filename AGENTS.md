@@ -64,6 +64,13 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   `MULTIPLEX_AUTO_ATTACH_HOST=devbox` names the target host — without it the
   first host wins, which on a device with iCloud-synced real hosts is NOT
   the seeded devbox (the sim is clean; a Mac/dev device isn't).
+- `MULTIPLEX_AUTO_TMUX_COPY=1` — after auto-attach, waits for the first tab to
+  become live and sends Copy Mode through SwiftTerm → delegate → ordered pump;
+  the harness proves delivery when that session's `#{pane_in_mode}` becomes 1.
+- `MULTIPLEX_AUTO_TMUX_CLOSE=pane|window` — after auto-attach, waits for the
+  first tab to become live and runs the confirmed dropdown close action through
+  its direct SSH control path. Use only with a disposable tmux session and
+  observe the pane/window count host-side.
 - `MULTIPLEX_AUTO_MERGE=1` — after auto-attach, merges every terminal window
   into the first through the same surrender/adopt path the Merge menu uses
   (headless check that moved tabs keep their connections).
@@ -135,6 +142,16 @@ first slash chip in the agent helper strip (inject → pump → PTY → tmux), a
 `… -p app.multiplexterm.multiplex.debug.newtab` runs the focused window's
 "+ TAB" New Session action (control-connection exec → new-session in the
 pane's cwd → tab append → attach), and
+`… -p app.multiplexterm.multiplex.debug.tmuxshortcuts` opens the focused
+iPad terminal's tmux shortcut popover for layout capture, and
+`… -p app.multiplexterm.multiplex.debug.tmuxcopy` sends Copy Mode through
+SwiftTerm and the terminal's ordered input pump, and
+`… -p app.multiplexterm.multiplex.debug.tmuxcopydone` runs the contextual
+Copy Mode HUD's **Done** action through that same path, and
+`… -p app.multiplexterm.multiplex.debug.tmuxclosepane` /
+`….debug.tmuxclosewindow` runs the corresponding already-confirmed destructive
+dropdown action against the focused terminal through its direct SSH control
+path (disposable tmux sessions only), and
 `… -p app.multiplexterm.multiplex.debug.keybar` runs the focused terminal's
 iPad key-bar proof sequence — the four symbol keys plus a latched CTRL
 consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`, and
@@ -142,7 +159,7 @@ consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`, and
 key cluster's proof — ESC and TAB through its send path plus a latched CTRL
 consumed by a typed `c` (a raw-mode `dd bs=1 count=3 | od -c` in the pane
 reads `033 \t 003`; ornament buttons can't be driven synthetically), and
-`… -p app.multiplexterm.multiplex.scrollup` / `….scrolldown` delivers one
+`… -p app.multiplexterm.multiplex.debug.scrollup` / `….debug.scrolldown` delivers one
 scroll tick to the focused terminal — the same remote path a pan takes
 (wheel report when the app requested mouse tracking, alternate-screen
 cursor key otherwise), so with tmux `mouse on` a scrollup flips
@@ -273,6 +290,17 @@ views.
   `commitTextInput` prefers that (invisible) accessory's `controlModifier`
   over the view-level one — `SwiftTermView` nils `inputAccessoryView` there
   so the cluster's latch is authoritative; don't remove that.
+- **Copy Mode is an app-owned interaction state over tmux's remote mode**:
+  the shortcut still sends stock `Ctrl-B [` through SwiftTerm and the ordered
+  pump, then `TerminalSessionController` temporarily disables SwiftTerm mouse
+  reporting and enables `forceRemoteCursorScroll` (tmux can render in the
+  primary buffer, so alternate-screen detection alone is insufficient). Pans
+  continue as cursor keys, while hold/double-tap selection stays local and
+  copies to the device pasteboard. A compact contextual bar keeps the state
+  visible, and its **Done** action sends Escape through the same ordered path;
+  a keyboard Escape clears the state there too. Always restore mouse reporting
+  when the mode ends or the transport closes, or normal tmux touch interaction
+  silently stops.
 - **"Back to deck" activates the existing deck scene** (`DeckScene.session`);
   `openWindow(id: "deck")` would mint a *new* deck window. Symmetrically, a
   deck tile press focuses the window already attached to that session

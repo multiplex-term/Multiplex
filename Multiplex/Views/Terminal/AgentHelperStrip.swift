@@ -12,6 +12,11 @@ import notify
 /// the next local day (no modal interrupts the terminal).
 struct AgentHelperStrip: View {
     static let dockedHeight: CGFloat = 48
+    /// ChassisBadge's 9 pt mono label plus 5 pt vertical padding per side.
+    /// The horizontal scroll viewport must own this cross-axis size; leaving
+    /// it unconstrained lets iPadOS stretch the button container below its
+    /// bordered face.
+    private static let chipHeight: CGFloat = 22
     #if os(visionOS)
     /// Keep the ornament inside the window's resize controls at either
     /// bottom corner. The command row scrolls inside this narrower slab.
@@ -51,6 +56,13 @@ struct AgentHelperStrip: View {
                 .overlay(alignment: .top) {
                     Rectangle().fill(Theme.bezelHi).frame(height: 1)
                 }
+                // This strip is overlaid above the UIKit key rail with a
+                // transparent bottom spacer. A horizontal ScrollView can
+                // retain the overlay's taller proposal on iPadOS and let its
+                // chip faces paint through that spacer, covering the rail.
+                // The docked chassis is physically 48 pt tall; contain every
+                // descendant to that declared surface.
+                .clipped()
         }
     }
 
@@ -78,10 +90,13 @@ struct AgentHelperStrip: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(AgentCommandSet.primary(for: agent)) { command in
-                        ChassisChip(command.label) { send(command) }
+                        commandChip(command)
                     }
                 }
+                .frame(height: Self.chipHeight)
             }
+            .frame(height: Self.chipHeight)
+            .clipped()
             Menu {
                 ForEach(AgentCommandSet.overflow(for: agent)) { command in
                     Button(command.label) { send(command) }
@@ -94,6 +109,31 @@ struct AgentHelperStrip: View {
             .chassisHover(2)
             .accessibilityLabel("More \(agent.displayName) commands")
         }
+    }
+
+    /// Keep the design-system face while owning the button's physical height
+    /// directly. `ChassisChip`'s cross-platform hover wrapper can accept the
+    /// horizontal ScrollView's taller iPad proposal and paint a second dark
+    /// block beneath its bordered label. visionOS still receives the required
+    /// chassis hover treatment; iPad gets the plain touch button it needs.
+    @ViewBuilder
+    private func commandChip(_ command: AgentCommand) -> some View {
+        let button = Button {
+            send(command)
+        } label: {
+            ChassisBadge(command.label)
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .frame(height: Self.chipHeight)
+        .clipped()
+        .accessibilityLabel(command.label.capitalized)
+
+        #if os(visionOS)
+        button.chassisHover(2)
+        #else
+        button
+        #endif
     }
 }
 

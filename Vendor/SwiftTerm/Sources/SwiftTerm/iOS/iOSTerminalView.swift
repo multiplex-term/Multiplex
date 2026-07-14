@@ -868,16 +868,31 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // an alternate-screen app's own scrollback at all. Touch has one scroll
     // gesture, so the pan now scrolls the *remote*: wheel reports when the
     // client asked for mouse events, cursor keys ("alternate scroll") when
-    // the alternate buffer is active without mouse tracking. The primary
-    // buffer without mouse tracking keeps native local scrollback.
+    // the alternate buffer is active without mouse tracking, or while the
+    // host app explicitly presents a remote copy-mode surface. The primary
+    // buffer otherwise keeps native local scrollback.
     var remoteScrollResidual: CGFloat = 0
+
+    /// Multiplex patch: an app-owned tmux copy-mode HUD disables mouse
+    /// reporting so UIKit can select text locally, but tmux may still render
+    /// in the primary buffer. In that narrow state, keep pans remote by
+    /// translating them to cursor keys. Selection drags continue to win in
+    /// `RemoteScrollGestureGate` below.
+    public var forceRemoteCursorScroll: Bool = false {
+        didSet {
+            guard forceRemoteCursorScroll != oldValue else { return }
+            updateRemotePanGesture()
+        }
+    }
 
     /// True when a pan should be forwarded to the remote instead of
     /// scrolling the local scrollback. Terminal.init replays mode changes
     /// through the delegate before `terminal` is assigned — stay nil-safe.
     var remoteScrollApplies: Bool {
         guard let terminal else { return false }
-        return (allowMouseReporting && terminal.mouseMode != .off) || terminal.isCurrentBufferAlternate
+        return forceRemoteCursorScroll
+            || (allowMouseReporting && terminal.mouseMode != .off)
+            || terminal.isCurrentBufferAlternate
     }
 
     @objc func panMouseHandler (_ gestureRecognizer: UIPanGestureRecognizer){
@@ -915,7 +930,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 terminal.sendEvent(buttonFlags: flags, x: grid.col, y: grid.row,
                                    pixelX: hit.pixels.col, pixelY: hit.pixels.row)
             }
-        } else if terminal.isCurrentBufferAlternate {
+        } else if forceRemoteCursorScroll || terminal.isCurrentBufferAlternate {
             for _ in 0..<count {
                 ticks > 0 ? sendKeyUp() : sendKeyDown()
             }

@@ -11,6 +11,91 @@ enum DeckScene {
     static func register(_ newSession: UISceneSession) {
         session = newSession
     }
+
+    #if DEBUG
+    /// Launch automation is shared by deck and terminal roots. iPadOS may
+    /// restore a terminal scene without constructing the deck, so keeping
+    /// this only on `DeckWindow` makes real-device verification silently
+    /// skip its requested attach.
+    static func autoAttachIfRequested(
+        store: HostStore,
+        workspace: TerminalWorkspace,
+        openTerminalWindow: (TerminalWindowRoute) -> Void
+    ) async {
+        guard !autoAttachFired,
+              let list = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ATTACH"],
+              !list.isEmpty else { return }
+        autoAttachFired = true
+        try? await Task.sleep(for: .seconds(5))
+        // MULTIPLEX_AUTO_ATTACH_HOST names the target host — on devices with
+        // iCloud-synced real hosts, `hosts.first` is not the seeded devbox.
+        let host: Host?
+        if let name = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ATTACH_HOST"] {
+            host = store.hosts.first(where: { $0.name == name })
+        } else {
+            host = store.hosts.first
+        }
+        guard let host else { return }
+        var firstTabID: UUID?
+        for entry in list.split(separator: ",") {
+            let tabs = entry.split(separator: "+").map {
+                TerminalRoute(hostID: host.id, mode: .attach(sessionName: String($0)))
+            }
+            guard !tabs.isEmpty else { continue }
+            if firstTabID == nil { firstTabID = tabs.first?.id }
+            openTerminalWindow(TerminalWindowRoute(tabs: tabs))
+            try? await Task.sleep(for: .seconds(1))
+        }
+        // MULTIPLEX_AUTO_TMUX_COPY=1 enters through SwiftTerm's real
+        // send/delegate path; the harness observes `#{pane_in_mode}` = 1.
+        if ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_TMUX_COPY"] == "1",
+           let tabID = firstTabID {
+            for _ in 0..<100 {
+                if workspace.controller(for: tabID)?
+                    .debugSendTmuxShortcutThroughTerminal(.copyMode) == true {
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+        // MULTIPLEX_AUTO_TMUX_CLOSE=pane|window runs the confirmed close
+        // action through the same controller entry point as the dropdown's
+        // second press. A physical-device proof can therefore attach only to
+        // a disposable session and observe its pane/window count from the
+        // host, without synthesizing a screen tap or entering tmux's prompt.
+        if let closeTarget = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_TMUX_CLOSE"],
+           let shortcut: TmuxShortcut = switch closeTarget {
+               case "pane": .closePane
+               case "window": .closeWindow
+               default: nil
+           },
+           let tabID = firstTabID {
+            for _ in 0..<100 {
+                if let controller = workspace.controller(for: tabID),
+                   controller.status == .live {
+                    controller.performTmuxShortcut(shortcut)
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+        if ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_MERGE"] == "1" {
+            try? await Task.sleep(for: .seconds(8))
+            workspace.mergeAllWindows()
+        }
+        if let dropPath = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_DROP"],
+           let tabID = firstTabID {
+            try? await Task.sleep(for: .seconds(8))
+            if let controller = workspace.controller(for: tabID),
+               let data = FileManager.default.contents(atPath: dropPath) {
+                controller.deliverDrop([DroppedFile(
+                    name: (dropPath as NSString).lastPathComponent,
+                    data: data
+                )])
+            }
+        }
+    }
+    #endif
 }
 
 /// Reports the hosting window's scene session to `DeckScene`.
@@ -70,7 +155,13 @@ struct DeckWindow: View {
         }
         #if DEBUG
         .task { presentPaywallForReviewCaptureIfRequested() }
-        .task { await autoAttachIfRequested() }
+        .task {
+            await DeckScene.autoAttachIfRequested(
+                store: store,
+                workspace: workspace,
+                openTerminalWindow: { openWindow(id: "terminal", value: $0) }
+            )
+        }
         #endif
     }
 
@@ -102,60 +193,5 @@ struct DeckWindow: View {
         showingPaywall = true
     }
 
-    /// Headless-verification hook: `MULTIPLEX_AUTO_ATTACH=<a,b,…>` opens one
-    /// terminal window per comma entry through the same route the Attach
-    /// button uses; `+` inside an entry groups sessions as tabs of one window
-    /// (`a+b,c` → window[a,b] + window[c]). Once per process — additional
-    /// deck windows must not re-fire it.
-    private func autoAttachIfRequested() async {
-        guard !DeckScene.autoAttachFired,
-              let list = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ATTACH"],
-              !list.isEmpty else { return }
-        DeckScene.autoAttachFired = true
-        try? await Task.sleep(for: .seconds(5))
-        // MULTIPLEX_AUTO_ATTACH_HOST names the target host — on devices with
-        // iCloud-synced real hosts, `hosts.first` is not the seeded devbox.
-        // A named host that's absent bails outright: silently attaching to
-        // whatever synced host happens to be first is the failure this
-        // variable exists to prevent.
-        let host: Host?
-        if let name = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ATTACH_HOST"] {
-            host = store.hosts.first(where: { $0.name == name })
-        } else {
-            host = store.hosts.first
-        }
-        guard let host else { return }
-        var firstTabID: UUID?
-        for entry in list.split(separator: ",") {
-            let tabs = entry.split(separator: "+").map {
-                TerminalRoute(hostID: host.id, mode: .attach(sessionName: String($0)))
-            }
-            guard !tabs.isEmpty else { continue }
-            if firstTabID == nil { firstTabID = tabs.first?.id }
-            openWindow(id: "terminal", value: TerminalWindowRoute(tabs: tabs))
-            try? await Task.sleep(for: .seconds(1))
-        }
-        // MULTIPLEX_AUTO_MERGE=1: once the windows are up, merge them all
-        // into the first — headless exercise of the surrender/adopt path
-        // the in-window Merge menu uses.
-        if ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_MERGE"] == "1" {
-            try? await Task.sleep(for: .seconds(8))
-            workspace.mergeAllWindows()
-        }
-        // MULTIPLEX_AUTO_DROP=<local path>: drop that file into the first
-        // auto-attached tab — the simulator shares the Mac's filesystem, so
-        // the whole SFTP-upload + typed-path loop runs headlessly.
-        if let dropPath = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_DROP"],
-           let tabID = firstTabID {
-            try? await Task.sleep(for: .seconds(8))
-            if let controller = workspace.controller(for: tabID),
-               let data = FileManager.default.contents(atPath: dropPath) {
-                controller.deliverDrop([DroppedFile(
-                    name: (dropPath as NSString).lastPathComponent,
-                    data: data
-                )])
-            }
-        }
-    }
     #endif
 }

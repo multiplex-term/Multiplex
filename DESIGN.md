@@ -95,7 +95,10 @@ terminal surface edge to edge in the user's theme. Below, the **UMD**
 (under-monitor display — the label strip every broadcast monitor wears) as an
 opaque ornament on visionOS / toolbar equivalents on iPad: `DECK` chip,
 source label (`MAIN · DEVBOX`), status lamp (`LIVE`/`LINK`/`ENDED`), then
-`KBD · A− · A+ · MERGE · DETACH` chips. Connection overlays are chassis
+`KBD · A− · A+ · + TAB · TMUX · MERGE · DETACH` chips. `TMUX` opens a
+custom square-grid TALLY dropdown listing the stock command, friendly action,
+and default `⌃B` binding; iPad carries the same dropdown immediately after the
+keyboard control in its bottom key rail. Connection overlays are chassis
 panels with the same lamp anatomy.
 
 **Tabs.** Multiviewer source labels on an opaque chassis slab (top ornament

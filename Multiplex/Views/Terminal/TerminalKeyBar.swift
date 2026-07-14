@@ -27,11 +27,20 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     static let barHeight: CGFloat = 48
 
     private weak var terminal: TerminalView?
+    private let performTmuxShortcut: (TmuxShortcut) -> Void
+    private let finishTmuxCopyMode: () -> Void
     private let model = Model()
     private var host: UIHostingController<KeyBarRow>?
+    private weak var tmuxPopoverController: UIViewController?
 
-    init(terminal: TerminalView) {
+    init(
+        terminal: TerminalView,
+        performTmuxShortcut: @escaping (TmuxShortcut) -> Void,
+        finishTmuxCopyMode: @escaping () -> Void
+    ) {
         self.terminal = terminal
+        self.performTmuxShortcut = performTmuxShortcut
+        self.finishTmuxCopyMode = finishTmuxCopyMode
         super.init(frame: .zero)
         model.ctrlLatched = terminal.controlModifier
 
@@ -59,6 +68,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         )
         #if DEBUG
         KeyBarDebugHook.install()
+        TmuxShortcutDebugHook.install()
         #endif
     }
 
@@ -108,7 +118,76 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             terminal.send(EscapeSequences.cmdPageDown)
         case .dismiss:
             _ = terminal.resignFirstResponder()
+        case .showTmuxShortcuts:
+            showTmuxShortcuts()
+        case .tmux(let shortcut):
+            click()
+            performTmuxShortcut(shortcut)
         }
+    }
+
+    /// A SwiftUI popover accepts a keyboard-adjusted, full-height proposal
+    /// when the floating iPad keyboard hugs a Stage Manager window. Present
+    /// the same TALLY panel through UIKit so its measured content height is
+    /// authoritative and cannot grow a blank tail over the app-owned rail.
+    private func showTmuxShortcuts() {
+        guard tmuxPopoverController == nil,
+              let presenter = presentingViewController
+        else { return }
+
+        // Stage Manager can make an iPad scene compact enough that UIKit
+        // would otherwise adapt this popover into a full-window form sheet.
+        // Keep a real edge margin and let the shared panel fit the live scene.
+        let sceneWidth = window?.bounds.width ?? presenter.view.bounds.width
+        let panelWidth = min(
+            TmuxShortcutPanel.preferredWidth,
+            max(280, sceneWidth - 24)
+        )
+        let panel = TmuxShortcutPanel(width: panelWidth) { [weak self] shortcut in
+            self?.tmuxPopoverController?.dismiss(animated: true)
+            self?.press(.tmux(shortcut))
+        }
+        let controller = UIHostingController(rootView: panel)
+        tmuxPopoverController = controller
+        // Preserve the popover container boundary, but opt this app-owned
+        // dropdown out of SwiftUI's keyboard safe area. A nearby floating
+        // keyboard otherwise translates the grid after presentation, clipping
+        // its top and leaving the displaced height as an empty bottom tail.
+        controller.safeAreaRegions = .container
+        controller.modalPresentationStyle = .popover
+        controller.view.backgroundColor = UIColor(Theme.bezel)
+
+        let fittingSize = controller.sizeThatFits(in: CGSize(
+            width: panelWidth,
+            height: UIScreen.main.bounds.height
+        ))
+        controller.preferredContentSize = CGSize(
+            width: panelWidth,
+            height: fittingSize.height
+        )
+
+        if let popover = controller.popoverPresentationController {
+            popover.sourceView = self
+            popover.sourceRect = CGRect(
+                x: bounds.maxX - 44,
+                y: bounds.minY,
+                width: 44,
+                height: bounds.height
+            )
+            popover.permittedArrowDirections = .down
+            popover.backgroundColor = UIColor(Theme.bezel)
+            popover.delegate = self
+        }
+        presenter.present(controller, animated: true)
+    }
+
+    private var presentingViewController: UIViewController? {
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let controller = current as? UIViewController { return controller }
+            responder = current.next
+        }
+        return nil
     }
 
     /// Arrows honor DECCKM the same way SwiftTerm's own key handling does.
@@ -121,6 +200,36 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     }
 
     #if DEBUG
+    func debugShowTmuxShortcuts() {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
+        showTmuxShortcuts()
+    }
+
+    /// Sends Copy Mode through the same SwiftTerm delegate and ordered input
+    /// pump used by a real shortcut-row press.
+    func debugSendTmuxCopyMode() {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
+        press(.tmux(.copyMode))
+    }
+
+    /// Runs the contextual HUD's DONE action without synthesizing a screen
+    /// tap, covering controller → SwiftTerm → ordered pump → tmux cancel.
+    func debugFinishTmuxCopyMode() {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
+        finishTmuxCopyMode()
+    }
+
+    /// Physical-device control-path proof for the two destructive rows. The
+    /// notification is the already-confirmed second activation; it enters the
+    /// same `press(.tmux)` branch and controller closure as the real panel.
+    func debugPerformConfirmedTmuxClose(_ shortcut: TmuxShortcut) {
+        guard let terminal,
+              TerminalFocusArbiter.current === terminal,
+              shortcut.requiresDoubleActivation
+        else { return }
+        press(.tmux(shortcut))
+    }
+
     /// Headless proof sequence: the four symbol keys through the bar's own
     /// send path, then a latched CTRL consumed by a software-keyboard 'c' —
     /// at a shell prompt `tmux capture-pane` shows `~|/-^C`.
@@ -133,12 +242,31 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     #endif
 }
 
+extension TerminalKeyBar: UIPopoverPresentationControllerDelegate {
+    /// A compact Stage Manager scene still has room for the content-sized
+    /// dropdown. Never replace the terminal with UIKit's adaptive form sheet.
+    func adaptivePresentationStyle(
+        for controller: UIPresentationController
+    ) -> UIModalPresentationStyle {
+        .none
+    }
+
+    func adaptivePresentationStyle(
+        for controller: UIPresentationController,
+        traitCollection: UITraitCollection
+    ) -> UIModalPresentationStyle {
+        .none
+    }
+}
+
 private enum TerminalKey {
     case esc, ctrl, tab
     case text(String)
     case up, down, left, right
     case pageUp, pageDown
     case dismiss
+    case showTmuxShortcuts
+    case tmux(TmuxShortcut)
 }
 
 /// The rail: modifiers left, shell symbols center, arrows + dismiss right.
@@ -154,6 +282,7 @@ private struct KeyBarRow: View {
             row(symbols: ["~", "|", "/", "-"], withPageKeys: true)
             row(symbols: ["~", "/"], withPageKeys: true)
             row(symbols: ["~", "/"], withPageKeys: false)
+            row(symbols: [], withPageKeys: false)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
@@ -192,6 +321,14 @@ private struct KeyBarRow: View {
             Key(action: { press(.dismiss) }, accessibilityText: "Hide keyboard") {
                 Image(systemName: "keyboard.chevron.compact.down")
                     .font(.system(size: 13, weight: .semibold))
+            }
+            // Keep the tmux dropdown at the rail's trailing edge, directly
+            // right of the keyboard control at every width tier.
+            Key(
+                action: { press(.showTmuxShortcuts) },
+                accessibilityText: "Show tmux shortcuts"
+            ) {
+                Text("TMUX").font(.mono(9, weight: .semibold)).kerning(0.7)
             }
         }
     }
@@ -248,6 +385,76 @@ private struct KeyFace: ButtonStyle {
 }
 
 #if DEBUG
+/// Opens the focused iPad terminal's tmux shortcut popover for real-device
+/// and simulator layout capture without synthesizing a screen tap.
+@MainActor
+enum TmuxShortcutDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.tmuxshortcuts", &token, .main
+        ) { _ in
+            guard let view = TerminalFocusArbiter.current,
+                  let bar = view.superview?.subviews
+                    .compactMap({ $0 as? TerminalKeyBar }).first
+            else { return }
+            bar.debugShowTmuxShortcuts()
+        }
+
+        var copyToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.tmuxcopy", &copyToken, .main
+        ) { _ in
+            guard let view = TerminalFocusArbiter.current,
+                  let bar = view.superview?.subviews
+                    .compactMap({ $0 as? TerminalKeyBar }).first
+            else { return }
+            bar.debugSendTmuxCopyMode()
+        }
+
+        var copyDoneToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.tmuxcopydone", &copyDoneToken, .main
+        ) { _ in
+            guard let view = TerminalFocusArbiter.current,
+                  let bar = view.superview?.subviews
+                    .compactMap({ $0 as? TerminalKeyBar }).first
+            else { return }
+            bar.debugFinishTmuxCopyMode()
+        }
+
+        var closePaneToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.tmuxclosepane",
+            &closePaneToken,
+            .main
+        ) { _ in
+            guard let view = TerminalFocusArbiter.current,
+                  let bar = view.superview?.subviews
+                    .compactMap({ $0 as? TerminalKeyBar }).first
+            else { return }
+            bar.debugPerformConfirmedTmuxClose(.closePane)
+        }
+
+        var closeWindowToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.tmuxclosewindow",
+            &closeWindowToken,
+            .main
+        ) { _ in
+            guard let view = TerminalFocusArbiter.current,
+                  let bar = view.superview?.subviews
+                    .compactMap({ $0 as? TerminalKeyBar }).first
+            else { return }
+            bar.debugPerformConfirmedTmuxClose(.closeWindow)
+        }
+    }
+}
+
 /// Headless-verification hook, same shape as the agent-chip and new-tab
 /// hooks: `xcrun simctl spawn <udid> notifyutil -p
 /// app.multiplexterm.multiplex.debug.keybar` runs the focused terminal's key-bar

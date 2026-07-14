@@ -184,6 +184,34 @@ enum TmuxProbe {
         return pathPrefix + "tmux kill-session -t \(target.shellQuoted)"
     }
 
+    /// Execute a shortcut's destructive action from an SSH exec channel.
+    /// Resolve the session's current pane/window to tmux's own id first:
+    /// pane commands reject `=name` targets on tmux 3.6a, and ids also avoid
+    /// prefix collisions. The UI has already required the second press, so
+    /// these use `kill-*` directly and never open tmux's `:` prompt.
+    static func directShortcutCommand(
+        _ shortcut: TmuxShortcut, sessionName: String
+    ) -> String? {
+        let exactSession = "=\(sessionName)".shellQuoted
+        let lookup: String
+        let kill: String
+        switch shortcut {
+        case .closePane:
+            lookup = "tmux list-panes -t \(exactSession)"
+                + " -F '#{?pane_active,#{pane_id},}' 2>/dev/null | grep -m1 ."
+            kill = "tmux kill-pane -t \"$target\""
+        case .closeWindow:
+            lookup = "tmux list-windows -t \(exactSession)"
+                + " -F '#{?window_active,#{window_id},}' 2>/dev/null | grep -m1 ."
+            kill = "tmux kill-window -t \"$target\""
+        default:
+            return nil
+        }
+        return pathPrefix
+            + "target=$(\(lookup)); "
+            + "if [ -n \"$target\" ]; then \(kill); fi"
+    }
+
     /// Where a drop should land for one session: line 1 is the *active*
     /// pane's working directory (while an agent runs there, the agent's own
     /// cwd — `pane_current_path` follows the foreground process), and a

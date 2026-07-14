@@ -84,6 +84,15 @@ struct TerminalWindowRoot: View {
             .task { syncTabs() }
             .task { entitlements.refreshSlashChipMeter() }
             .task(id: activeTab?.hostID) { await watchAgentPresence() }
+            #if DEBUG
+            .task {
+                await DeckScene.autoAttachIfRequested(
+                    store: store,
+                    workspace: workspace,
+                    openTerminalWindow: { openWindow(id: "terminal", value: $0) }
+                )
+            }
+            #endif
             .onChange(of: route.tabs) { syncTabs() }
             // Keyboard focus follows the visible tab…
             .onChange(of: route.activeTabID) {
@@ -765,6 +774,13 @@ private struct TerminalPane: View {
                 DropTargetVeil()
             }
         }
+        .overlay(alignment: .top) {
+            if isActive, let controller, controller.tmuxCopyModeUIActive {
+                TmuxCopyModeBar(done: controller.finishTmuxCopyMode)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+            }
+        }
         .overlay(alignment: .bottom) {
             if let dropState = controller?.dropState {
                 DropStatusPill(state: dropState)
@@ -829,6 +845,31 @@ private struct TerminalPane: View {
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Theme.bezelHi, lineWidth: 1))
+    }
+}
+
+/// tmux's native copy-mode marker is a tiny `[position/history]` token inside
+/// the terminal grid. This compact contextual bar keeps the mode visible and
+/// gives every platform an obvious way back to the shell.
+private struct TmuxCopyModeBar: View {
+    var done: () -> Void
+
+    var body: some View {
+        HStack(spacing: 18) {
+            TallyLamp(caption: "COPY MODE", color: Theme.caution)
+            ChassisChip("DONE", prominent: true, action: done)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            Theme.bezel,
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.bezelHi, lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
     }
 }
 

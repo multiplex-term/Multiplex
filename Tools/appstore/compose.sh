@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # Keep ids + order in sync with SHOTS in storyboard.html.
-SHOTS=(wall windows agents strip mosh tabs themes)
+SHOTS=(wall windows agents strip mosh tabs themes shortcuts)
 size_for() { # macOS bash 3.2 has no associative arrays
   case "$1" in
     visionos) echo "3840,2160" ;;

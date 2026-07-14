@@ -8,6 +8,7 @@ CONNECT
 CORE FLOW
 - Tap a tile to attach: the session opens in its own window wearing a red LIVE lamp. Attach a second session and place the windows side by side (each terminal is its own spatial window on Vision Pro; on iPad use Stage Manager).
 - MERGE in a terminal's bottom bar pulls another window's session in as a tab; a tab's context menu moves it back out into its own window. The shell stays connected while it moves.
+- TMUX in the Vision Pro bottom bar (or at the right edge of the iPad terminal key bar) opens the custom shortcut dropdown. Choose an action such as New Window, Split Left / Right, or Copy Mode to send its displayed default Ctrl-B binding to the attached tmux client. In Copy Mode, swipe to scroll remote history, hold text for native selection/copy, and press Done to return to the shell.
 - DETACH closes the window; tmux keeps the session running, so its tile stays on the wall.
 
 AGENT FEATURES (Pro)

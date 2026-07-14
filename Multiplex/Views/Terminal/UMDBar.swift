@@ -21,6 +21,8 @@ struct UMDBar: View {
     /// kill (plain shell tab, or the host record is gone).
     var closeSession: (() -> Void)?
 
+    @State private var showingTmuxShortcuts = false
+
     var body: some View {
         HStack(spacing: 14) {
             ChassisChip("DECK", action: showDeck)
@@ -44,6 +46,29 @@ struct UMDBar: View {
             .buttonStyle(.plain)
             .chassisHover(2)
             .accessibilityLabel("New tab: another session in this window")
+            // Custom TALLY dropdown, immediately right of + TAB. Each choice
+            // sends the stock tmux prefix binding through the ordered pump.
+            Button {
+                showingTmuxShortcuts = true
+            } label: {
+                ChassisBadge("TMUX", systemImage: "command")
+            }
+            .buttonStyle(.plain)
+            .chassisHover(2)
+            .disabled(controller?.status != .live)
+            .accessibilityLabel("Show tmux shortcuts")
+            .popover(
+                isPresented: $showingTmuxShortcuts,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .bottom
+            ) {
+                TmuxShortcutPanel { shortcut in
+                    showingTmuxShortcuts = false
+                    controller?.performTmuxShortcut(shortcut)
+                }
+                .presentationCompactAdaptation(.popover)
+                .tmuxShortcutPresentationSizing()
+            }
             if !mergeSources.isEmpty {
                 Menu {
                     ForEach(mergeSources) { entry in

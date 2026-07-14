@@ -30,8 +30,9 @@ than the chassis that frames them, same inversion as the app.
 | 5 | `mosh` | Host sheet with MOSH toggle on + attached session behind | MOSH BUILT IN — ROAM, SLEEP, RESUME | `UDP · RTT 18 MS` ● LIVE |
 | 6 | `tabs` | One window, 3 tabs in the source-label strip | MERGE WINDOWS — SHELLS STAY LIVE | `3 TABS · 1 WINDOW` ● LIVE |
 | 7 | `themes` | Settings theme picker + a Gruvbox-skinned terminal behind | SEVEN THEMES, PLUS YOUR OWN | `GRUVBOX DARK` · THEME |
+| 8 | `shortcuts` | Attached terminal with the custom TMUX dropdown open | TMUX CONTROLS, RIGHT WHERE YOU TYPE | `12 SHORTCUTS · ⌃B` |
 
-Same narrative on both platforms (capture both per shot). 7 ≤ 10 ✓.
+Same narrative on both platforms (capture both per shot). 8 ≤ 10 ✓.
 
 ## Staging rules (what made the current dev captures unusable)
 

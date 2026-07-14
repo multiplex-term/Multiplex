@@ -30,6 +30,13 @@ final class TerminalSessionController {
     private(set) var status: Status = .connecting
     var remoteTitle: String = ""
 
+    /// App-owned interaction state layered over tmux copy mode. While it is
+    /// active, SwiftTerm stops forwarding taps as tmux mouse clicks: pans
+    /// still move through the alternate screen, while a hold/double-tap uses
+    /// iPadOS's native text selection and copies into the local pasteboard.
+    /// The terminal HUD provides the explicit exit path tmux itself lacks.
+    private(set) var tmuxCopyModeUIActive = false
+
     /// How far a *docked* keyboard presentation (software keyboard, or the
     /// accessory-only key rail of hardware-keyboard mode) intrudes above the
     /// window's bottom safe-area edge — published by the terminal's
@@ -89,6 +96,8 @@ final class TerminalSessionController {
 
     func bind(_ view: TerminalView) {
         terminalView = view
+        view.allowMouseReporting = !tmuxCopyModeUIActive
+        view.forceRemoteCursorScroll = tmuxCopyModeUIActive
         if !pendingOutput.isEmpty {
             view.feed(byteArray: [UInt8](pendingOutput)[...])
             pendingOutput.removeAll()
@@ -245,6 +254,7 @@ final class TerminalSessionController {
 
     private func handleClose(reason: String?) {
         stopInputPump()
+        setTmuxCopyModeUIActive(false)
         if case .ended = status { return }
         status = .ended(reason)
     }
@@ -277,7 +287,92 @@ final class TerminalSessionController {
     func sendInput(_ data: Data) {
         guard status == .live else { return }
         inputContinuation?.yield(data)
+        // Both the app-owned DONE action and a hardware/software Escape key
+        // travel through this same delegate path. Restore normal tmux mouse
+        // reporting only after the cancel byte has joined the ordered pump.
+        if tmuxCopyModeUIActive, data == Data([0x1B]) {
+            setTmuxCopyModeUIActive(false)
+        }
     }
+
+    /// Run one command from the shared tmux panel. Ordinary shortcuts enter
+    /// through SwiftTerm exactly like keyboard input. Destructive shortcuts
+    /// were already confirmed by the panel's second press and use an SSH exec
+    /// channel, which avoids the timing-sensitive tmux `:` prompt entirely.
+    func performTmuxShortcut(_ shortcut: TmuxShortcut) {
+        guard status == .live, let sessionName = route.sessionName else { return }
+        if let input = shortcut.bindingInput {
+            guard let terminalView else { return }
+            if shortcut == .copyMode {
+                // Copy mode freezes the remote pane for navigation, but its
+                // default mouse table fights UIKit selection. Switch the
+                // surface to native selection before the binding arrives;
+                // remote pans continue as cursor keys in the alternate screen.
+                setTmuxCopyModeUIActive(true)
+            }
+            terminalView.send(input)
+            return
+        }
+        guard let command = TmuxProbe.directShortcutCommand(
+            shortcut, sessionName: sessionName
+        ) else { return }
+        Task { await executeTmuxControlCommand(command) }
+    }
+
+    /// Leave the contextual copy UI and tmux copy mode together. Escape is
+    /// deliberately sent through SwiftTerm, so DONE, the rail, and a physical
+    /// keyboard all preserve the terminal's single ordered input path.
+    func finishTmuxCopyMode() {
+        guard tmuxCopyModeUIActive else { return }
+        guard status == .live, let terminalView else {
+            setTmuxCopyModeUIActive(false)
+            return
+        }
+        terminalView.send(EscapeSequences.cmdEsc)
+    }
+
+    private func setTmuxCopyModeUIActive(_ active: Bool) {
+        guard tmuxCopyModeUIActive != active else { return }
+        tmuxCopyModeUIActive = active
+        terminalView?.allowMouseReporting = !active
+        terminalView?.forceRemoteCursorScroll = active
+    }
+
+    /// SSH tabs already own an exec-capable connection next to their PTY.
+    /// Mosh tabs deliberately do not, so a destructive user action opens a
+    /// short-lived SSH control connection and closes it after the command.
+    private func executeTmuxControlCommand(_ command: String) async {
+        if let connection {
+            _ = try? await connection.exec(command)
+            return
+        }
+
+        let control = SSHConnection(host: host, secrets: .load(for: host))
+        do {
+            try await control.connect()
+            _ = try await control.exec(command)
+        } catch {
+            // The attached terminal remains the source of truth: a failed
+            // control action leaves it intact instead of ending the tab.
+        }
+        await control.close()
+    }
+
+    #if DEBUG
+    /// Runtime verification only: deliberately enters through SwiftTerm so
+    /// the proof covers TerminalView → delegate → this controller's ordered
+    /// input pump, exactly like a shortcut row selected by the user.
+    @discardableResult
+    func debugSendTmuxShortcutThroughTerminal(_ shortcut: TmuxShortcut) -> Bool {
+        guard status == .live,
+              route.sessionName != nil,
+              shortcut.bindingInput != nil,
+              terminalView != nil
+        else { return false }
+        performTmuxShortcut(shortcut)
+        return true
+    }
+    #endif
 
     func terminalResized(cols: Int, rows: Int) {
         lastCols = cols
@@ -417,6 +512,7 @@ final class TerminalSessionController {
         dropClearTask?.cancel()
         dropState = nil
         stopInputPump()
+        setTmuxCopyModeUIActive(false)
         status = .ended(nil)
         contactLost = false
         let transport = self.transport
@@ -428,6 +524,7 @@ final class TerminalSessionController {
 
     func reconnect() {
         guard case .ended = status else { return }
+        setTmuxCopyModeUIActive(false)
         status = .connecting
         Task { await run() }
     }

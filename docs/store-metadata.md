@@ -72,8 +72,10 @@ submission.
 Current product split:
 
 - Free: one host, full SSH spatial windows/tabs/merge, agent detection and wall
-  telemetry, built-in terminal themes, iCloud Keychain sync, and ten
-  slash-command chip taps per local calendar day.
+  telemetry, built-in terminal themes, a most-used tmux shortcut dropdown on
+  both platforms (including touch-native copy-mode selection and explicit
+  exit), iCloud Keychain sync, and ten slash-command chip taps per local
+  calendar day.
 - Pro: unlimited hosts, mosh, unmetered agent command chips, agent alerts, and
   custom-theme editing.
 - Existing/synced hosts, existing mosh configuration, and existing custom

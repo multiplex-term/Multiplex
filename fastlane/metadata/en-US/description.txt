@@ -13,7 +13,7 @@ MOSH BUILT IN
 With Pro, switch a host to mosh and the session survives sleep, roaming, and IP changes — a native Swift mosh client, no companion app. Made for a headset that suspends and an iPad that hops networks.
 
 A REAL TERMINAL
-Full xterm-256color emulation, hardware keyboard support, live PTY resize, and seven built-in color themes. Pro adds a custom theme editor for background, text, cursor, and all 16 ANSI colors.
+Full xterm-256color emulation, hardware keyboard support, live PTY resize, and a built-in menu for the tmux commands you use most: new and switch windows, split and navigate panes, copy mode, rename, and zoom. Copy mode keeps text selection native and adds a clear Done action. Seven built-in color themes are included. Pro adds a custom theme editor for background, text, cursor, and all 16 ANSI colors.
 
 PRIVATE BY DESIGN
 Hosts and secrets sync between your devices through iCloud Keychain, end-to-end encrypted. Nothing touches our servers — there are none. No account, no analytics, no tracking.

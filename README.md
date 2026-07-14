@@ -40,9 +40,14 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
   cells, a tally dot per tab) on a top ornament (visionOS) / top bar (iPad),
   shown only when a window holds more than one tab; below the window sits the
   **UMD** — the under-monitor display carrying the source label, status lamp,
-  and controls. SwiftTerm renders xterm-256color; resizing the window sends
-  PTY window-change to the remote. **Detach** closes the active tab's
-  channel — tmux keeps the session; the wall still shows it.
+  and controls. A custom TALLY dropdown in the UMD on visionOS and the bottom
+  key rail on iPad lists the most-used stock tmux shortcuts (windows, panes,
+  and copy mode) and sends their default `Ctrl-B` bindings through the same
+  ordered input path as the keyboard. Copy mode becomes a clear contextual
+  state: swipe through remote history, hold text for native selection/copy,
+  then press **Done** to return to the shell. SwiftTerm renders xterm-256color;
+  resizing the window sends PTY window-change to the remote. **Detach** closes
+  the active tab's channel — tmux keeps the session; the wall still shows it.
 - **Keyboard focus** — exactly one terminal owns keyboard input at a time
   (`TerminalFocusArbiter`): every visionOS window is its own always-active
   scene, so per-window first responders leave input stuck on the first
