@@ -142,6 +142,148 @@ struct ChassisSwitch: View {
     }
 }
 
+// MARK: - TALLY forms
+
+/// A section inside a native sheet. The presentation remains a system sheet;
+/// the task surface inside it uses the same squared chassis, divider, and
+/// source-label anatomy as the wall and terminal controls.
+struct TallyFormSection<Content: View>: View {
+    let title: String
+    let detail: String?
+    let content: Content
+
+    init(
+        _ title: String,
+        detail: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.detail = detail
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(spacing: 0) {
+                ChassisLabel(title, size: 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Theme.bezel)
+
+                Rectangle()
+                    .fill(Theme.bezelHi)
+                    .frame(height: 1)
+
+                VStack(spacing: 1) {
+                    content
+                }
+                .background(Theme.bezelHi)
+            }
+            .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.signal2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 2)
+            }
+        }
+    }
+}
+
+/// One full-width row in a Tally form section.
+struct TallyFormRow<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(Theme.chassis)
+    }
+}
+
+/// Persistent SF Pro field label over a mono, screen-dark input well.
+/// Callers own keyboard/autocorrection behavior on the supplied field.
+struct TallyFormField<Field: View>: View {
+    let label: String
+    let field: Field
+
+    init(_ label: String, @ViewBuilder field: () -> Field) {
+        self.label = label
+        self.field = field()
+    }
+
+    var body: some View {
+        TallyFormRow {
+            VStack(alignment: .leading, spacing: 7) {
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.signal2)
+                field
+                    .font(.mono(12))
+                    .foregroundStyle(Theme.signal)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 9)
+                    .background(Theme.screen)
+                    .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+            }
+        }
+    }
+}
+
+/// Square, neutral segmented choice. Selection changes border/face weight,
+/// never semantic color. Each segment is a real button for gaze and touch.
+struct TallyChoiceBar<Value: Hashable>: View {
+    let choices: [(label: String, value: Value)]
+    @Binding var selection: Value
+
+    init(
+        _ choices: [(String, Value)],
+        selection: Binding<Value>
+    ) {
+        self.choices = choices
+        _selection = selection
+    }
+
+    var body: some View {
+        HStack(spacing: 1) {
+            ForEach(choices.indices, id: \.self) { index in
+                let choice = choices[index]
+                let selected = selection == choice.value
+                Button {
+                    selection = choice.value
+                } label: {
+                    ChassisLabel(
+                        choice.label,
+                        size: 9,
+                        color: selected ? Theme.signal : Theme.signal2
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 34)
+                    .background(selected ? Theme.bezelHi : Theme.chassis)
+                    .overlay(Rectangle().strokeBorder(
+                        selected ? Theme.signal2 : Theme.bezelHi,
+                        lineWidth: 1
+                    ))
+                }
+                .buttonStyle(.plain)
+                .chassisHover(2)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .background(Theme.bezelHi)
+        .animation(.easeOut(duration: 0.14), value: selection)
+    }
+}
+
 /// The lit lamp + caption. Tally red is always captioned so it can never
 /// read as an error; other states reuse the same anatomy.
 struct TallyLamp: View {

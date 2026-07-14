@@ -680,12 +680,12 @@ private struct SessionDropTarget: Equatable {
 
 /// The wall's New Session prompt: a name plus what launches in the fresh
 /// shell — the agent quick options that used to hide behind the tile's
-/// long press are the dropdown now. The name prefills the first free
-/// conventional name for the selection (main / claude / codex, then -2,
-/// -3…) so Create is one tap; picking an agent re-prefills it unless the
-/// user already typed their own. An opt-in remembers the submitted launch
-/// choice for the next prompt. Hosts with working directories also get a
-/// "Starts in" picker, defaulting to the first (the host's own default).
+/// long press are an explicit three-way choice now. The name prefills the
+/// first free conventional name for the selection (main / claude / codex,
+/// then -2, -3…) so Create is one tap; picking an agent re-prefills it unless
+/// the user already typed their own. An opt-in remembers the submitted
+/// launch choice for the next prompt. Hosts with working directories also
+/// get a "Starts in" picker, defaulting to the first (the host's own default).
 private struct NewSessionSheet: View {
     let host: Host
     let existingNames: [String]
@@ -722,32 +722,104 @@ private struct NewSessionSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("Name", text: $name)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                    Picker("Launches", selection: $agent) {
-                        Text("Shell only").tag(AgentKind?.none)
-                        Text(AgentKind.claudeCode.displayName).tag(AgentKind?.some(.claudeCode))
-                        Text(AgentKind.codex.displayName).tag(AgentKind?.some(.codex))
-                    }
-                    .pickerStyle(.menu)
-                    if !host.workingDirs.isEmpty {
-                        Picker("Starts in", selection: $directory) {
-                            ForEach(host.workingDirs, id: \.self) { dir in
-                                Text(dir).tag(String?.some(dir))
+            ScrollView {
+                VStack(spacing: 18) {
+                    TallyFormSection("Target host") {
+                        TallyFormRow {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ChassisLabel(host.name, size: 12)
+                                    Text(host.address)
+                                        .font(.mono(10))
+                                        .foregroundStyle(Theme.signal2)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                ChassisBadge(host.useMosh ? "MOSH" : "SSH")
                             }
-                            Text("Home").tag(String?.none)
                         }
-                        .pickerStyle(.menu)
                     }
-                    Toggle("Remember launch choice", isOn: $remembersLastLaunch)
-                } footer: {
-                    Text(detail)
+
+                    TallyFormSection(
+                        "Session identity",
+                        detail: "Shown on the deck and in the terminal window's source label."
+                    ) {
+                        TallyFormField("Name") {
+                            TextField("main", text: $name)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                        }
+                    }
+
+                    TallyFormSection("Launch", detail: launchDetail) {
+                        TallyFormRow {
+                            TallyChoiceBar(launchChoices, selection: $agent)
+                                .accessibilityLabel("What to launch")
+                        }
+                        TallyFormRow {
+                            HStack(spacing: 12) {
+                                ChassisSwitch(
+                                    "REMEMBER",
+                                    isOn: $remembersLastLaunch,
+                                    accessibilityLabel: "Remember launch choice"
+                                )
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 3) {
+                                    ChassisLabel("Command", size: 7, color: Theme.signal3)
+                                    Text(agent?.launchCommand ?? "login shell")
+                                        .font(.mono(9, weight: .medium))
+                                        .foregroundStyle(Theme.signal2)
+                                }
+                            }
+                        }
+                    }
+
+                    TallyFormSection("Directory", detail: directoryDetail) {
+                        if host.workingDirs.isEmpty {
+                            TallyFormRow {
+                                HStack(spacing: 12) {
+                                    Text("Starts in")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(Theme.signal2)
+                                    Spacer()
+                                    Text("HOME")
+                                        .font(.mono(10, weight: .medium))
+                                        .foregroundStyle(Theme.signal)
+                                }
+                            }
+                        } else {
+                            TallyFormField("Starts in") {
+                                Menu {
+                                    ForEach(host.workingDirs, id: \.self) { dir in
+                                        Button(dir) { directory = dir }
+                                    }
+                                    Divider()
+                                    Button("Home") { directory = nil }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Text(directory ?? "Home")
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Image(systemName: "chevron.down")
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .foregroundStyle(Theme.signal2)
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .chassisHover(2)
+                                .accessibilityLabel("Starting directory")
+                            }
+                        }
+                    }
                 }
+                .frame(maxWidth: 600)
+                .padding(18)
+                .frame(maxWidth: .infinity)
             }
+            .background(sheetGround.ignoresSafeArea())
             .navigationTitle("New Session")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -764,6 +836,10 @@ private struct NewSessionSheet: View {
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
+            #if !os(visionOS)
+            .toolbarBackground(Theme.chassis, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            #endif
         }
         .onChange(of: agent) { previous, selected in
             let untouched = name == prefill(for: previous)
@@ -771,20 +847,43 @@ private struct NewSessionSheet: View {
         }
     }
 
+    @ViewBuilder
+    private var sheetGround: some View {
+        #if os(visionOS)
+        Color.clear
+        #else
+        Theme.chassis
+        #endif
+    }
+
+    private var launchChoices: [(String, AgentKind?)] {
+        [
+            ("Shell", nil),
+            (AgentKind.claudeCode.displayName, .claudeCode),
+            (AgentKind.codex.displayName, .codex),
+        ]
+    }
+
     private func prefill(for agent: AgentKind?) -> String {
         TmuxProbe.uniqueSessionName(
             base: agent?.launchCommand ?? "main", existing: existingNames)
     }
 
-    private var detail: String {
-        var text = "Creates a tmux session on \(host.name) and attaches to it."
+    private var launchDetail: String {
+        guard let agent else {
+            return "Creates the tmux session, then attaches to its login shell."
+        }
+        return "Creates the tmux session, types “\(agent.launchCommand)” into its fresh shell, then attaches."
+    }
+
+    private var directoryDetail: String {
+        guard !host.workingDirs.isEmpty else {
+            return "Uses the host's login-shell home directory."
+        }
         if let directory {
-            text += " Starts in \(directory)."
+            return "Starts in \(directory). Choose Home to use the login shell's default."
         }
-        if let agent {
-            text += " Types “\(agent.launchCommand)” into the fresh shell to start \(agent.displayName)."
-        }
-        return text
+        return "Uses the host's login-shell home directory."
     }
 }
 
