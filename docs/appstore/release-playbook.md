@@ -22,9 +22,11 @@ Universal purchase is automatic — one bundle id, buy once, both devices.
 ## Versioning
 
 - `MARKETING_VERSION` lives in `project.yml` — bump by hand per release.
-- Build number = `git rev-list --count HEAD`, injected at archive time by the
-  `archive` lane. Both platform binaries of a release share it; never reuse a
-  (version, build) pair. A hotfix commit bumps it automatically.
+- Build number follows `YYYYMMDDN` (`N` is the day's counter, `0`–`9`). The
+  `archive` and `beta` lanes persist the next value to `project.yml` before
+  generating the project. Both platform binaries of a release share it; never
+  reuse a (version, build) pair. More than ten builds in one day requires the
+  next calendar day.
 
 ## TestFlight cadence
 
