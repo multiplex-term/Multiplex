@@ -12,12 +12,22 @@ import notify
 /// the next local day (no modal interrupts the terminal).
 struct AgentHelperStrip: View {
     static let dockedHeight: CGFloat = 48
+    #if os(visionOS)
+    /// Keep the ornament inside the window's resize controls at either
+    /// bottom corner. The command row scrolls inside this narrower slab.
+    static let maximumFloatingWidth: CGFloat = 760
+    static let floatingEdgeClearance: CGFloat = 60
+    #endif
 
     let agent: AgentKind
     let canShowCommands: Bool
     /// Floating slab (visionOS ornament, UMD chrome) vs full-width bar
     /// (iPad, docked under the screen).
     var floating = false
+    /// Live scene-width constraint supplied by the visionOS terminal window.
+    /// Ornaments otherwise size from their contents and can outgrow a window
+    /// after the user narrows it.
+    var floatingMaximumWidth: CGFloat? = nil
     let send: (AgentCommand) -> Void
     let openPaywall: () -> Void
 
@@ -26,7 +36,7 @@ struct AgentHelperStrip: View {
             row
                 .padding(.horizontal, 16)
                 .padding(.vertical, 9)
-                .frame(maxWidth: 760)
+                .frame(maxWidth: floatingMaximumWidth ?? 760)
                 .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)

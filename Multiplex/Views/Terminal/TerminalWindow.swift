@@ -265,50 +265,65 @@ struct TerminalWindowRoot: View {
 
     #if os(visionOS)
     private var platformBody: some View {
-        paneStack
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(Theme.bezelHi, lineWidth: 1)
-            )
-            .ornament(
-                visibility: route.tabs.count > 1 ? .visible : .hidden,
-                attachmentAnchor: .scene(.top),
-                contentAlignment: .center
-            ) {
-                // Source labels on an opaque chassis slab, not glass — the
-                // tab strip is part of the monitor, not the room.
-                tabStrip
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        Theme.chassis,
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-            .ornament(attachmentAnchor: .scene(.bottom), contentAlignment: .center) {
-                VStack(spacing: 10) {
-                    helperStrip(floating: true)
-                    HStack(spacing: 10) {
-                        // The floating visionOS keyboard has no ESC/CTRL/TAB;
-                        // the chrome carries them (same send path as typing).
-                        TerminalKeyCluster(controller: activeController)
-                        UMDBar(
-                            controller: activeController,
-                            title: umdTitle,
-                            mergeSources: mergeSources,
-                            showDeck: showDeck,
-                            summonKeyboard: { activeController?.summonKeyboard() },
-                            fontDown: { fontSize = max(9, fontSize - 1) },
-                            fontUp: { fontSize = min(32, fontSize + 1) },
-                            newSession: { openNewTab(launching: $0) },
-                            merge: { merge($0) },
-                            detach: { detachActiveTab() },
-                            closeSession: activeTabHasSession
-                                ? { confirmingCloseActiveSession = true } : nil
+        GeometryReader { geometry in
+            paneStack
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .strokeBorder(Theme.bezelHi, lineWidth: 1)
+                )
+                .ornament(
+                    visibility: route.tabs.count > 1 ? .visible : .hidden,
+                    attachmentAnchor: .scene(.top),
+                    contentAlignment: .center
+                ) {
+                    // Source labels on an opaque chassis slab, not glass — the
+                    // tab strip is part of the monitor, not the room.
+                    tabStrip
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            Theme.chassis,
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .ornament(attachmentAnchor: .scene(.bottom), contentAlignment: .center) {
+                    VStack(spacing: 10) {
+                        // An ornament has its own intrinsic width. Clamp the
+                        // long agent row to the live window width so narrowing
+                        // the scene leaves both bottom resize controls clear.
+                        helperStrip(
+                            floating: true,
+                            floatingMaximumWidth: min(
+                                AgentHelperStrip.maximumFloatingWidth,
+                                max(
+                                    1,
+                                    geometry.size.width
+                                        - AgentHelperStrip.floatingEdgeClearance * 2
+                                )
+                            )
                         )
+                        HStack(spacing: 10) {
+                            // The floating visionOS keyboard has no ESC/CTRL/TAB;
+                            // the chrome carries them (same send path as typing).
+                            TerminalKeyCluster(controller: activeController)
+                            UMDBar(
+                                controller: activeController,
+                                title: umdTitle,
+                                mergeSources: mergeSources,
+                                showDeck: showDeck,
+                                summonKeyboard: { activeController?.summonKeyboard() },
+                                fontDown: { fontSize = max(9, fontSize - 1) },
+                                fontUp: { fontSize = min(32, fontSize + 1) },
+                                newSession: { openNewTab(launching: $0) },
+                                merge: { merge($0) },
+                                detach: { detachActiveTab() },
+                                closeSession: activeTabHasSession
+                                    ? { confirmingCloseActiveSession = true } : nil
+                            )
+                        }
                     }
                 }
-            }
+        }
     }
     #else
     private var platformBody: some View {
@@ -396,7 +411,10 @@ struct TerminalWindowRoot: View {
     /// iPad docks it as a bottom inset under the screen, where appearing
     /// resizes the PTY like a keyboard would.
     @ViewBuilder
-    private func helperStrip(floating: Bool) -> some View {
+    private func helperStrip(
+        floating: Bool,
+        floatingMaximumWidth: CGFloat? = nil
+    ) -> some View {
         if let agent = shownAgent,
            let controller = activeController,
            controller.status == .live {
@@ -404,6 +422,7 @@ struct TerminalWindowRoot: View {
                 agent: agent,
                 canShowCommands: entitlements.isPro || entitlements.canUseSlashChip,
                 floating: floating,
+                floatingMaximumWidth: floatingMaximumWidth,
                 send: { send($0, via: controller) },
                 openPaywall: { showingPaywall = true }
             )
