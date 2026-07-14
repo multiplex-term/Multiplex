@@ -301,9 +301,13 @@ views.
   a keyboard Escape clears the state there too. Always restore mouse reporting
   when the mode ends or the transport closes, or normal tmux touch interaction
   silently stops.
-- **"Back to deck" activates the existing deck scene** (`DeckScene.session`);
-  `openWindow(id: "deck")` would mint a *new* deck window. Symmetrically, a
-  deck tile press focuses the window already attached to that session
+- **"Back to deck" reuses the one deck scene**: iPad's data-driven
+  `WindowGroup` always opens `DeckWindowRoute.main`, so
+  `openWindow(id:value:)` raises the matching deck instead of minting another;
+  `DeckScene` also destroys a second legacy/restored iPad session. visionOS
+  still activates the registered `DeckScene.session` explicitly.
+  Symmetrically, a deck tile press focuses the window already attached to that
+  session
   (`TerminalWorkspace.focusTab` → `WindowEntry.reveal` → controller
   `revealWindow()`, which raises the scene *explicitly* — the arbiter only
   does that when focus switches hands); the tile's long-press "Attach in

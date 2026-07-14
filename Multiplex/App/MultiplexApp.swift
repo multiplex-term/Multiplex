@@ -59,16 +59,31 @@ struct MultiplexApp: App {
     }
 
     private var deckScene: some Scene {
+        #if os(visionOS)
         WindowGroup(id: "deck") {
-            DeckWindow()
-                .environment(store)
-                .environment(hub)
-                .environment(themes)
-                .environment(workspace)
-                .environment(entitlements)
-                .environment(attention)
-                .modifier(PlatformChrome())
+            deckWindow
         }
+        #else
+        // iPad has one deck, identified by one stable scene value. Unlike
+        // `openWindow(id:)`, opening this value again raises the existing
+        // window instead of creating another deck.
+        WindowGroup(id: "deck", for: DeckWindowRoute.self) { _ in
+            deckWindow
+        } defaultValue: {
+            .main
+        }
+        #endif
+    }
+
+    private var deckWindow: some View {
+        DeckWindow()
+            .environment(store)
+            .environment(hub)
+            .environment(themes)
+            .environment(workspace)
+            .environment(entitlements)
+            .environment(attention)
+            .modifier(PlatformChrome())
     }
 
     private var terminalScene: some Scene {

@@ -671,10 +671,11 @@ struct TerminalWindowRoot: View {
     }
     #endif
 
-    /// Back to the main screen: brings the EXISTING deck window forward —
-    /// openWindow on a WindowGroup would mint another deck — and only
-    /// creates one when none is alive.
+    /// Back to the main screen. visionOS activates the registered scene;
+    /// iPad uses the deck's stable data value, which raises the matching
+    /// window and creates it only when none exists.
     private func showDeck() {
+        #if os(visionOS)
         if let session = DeckScene.session {
             UIApplication.shared.activateSceneSession(
                 for: UISceneSessionActivationRequest(session: session)
@@ -682,6 +683,9 @@ struct TerminalWindowRoot: View {
         } else {
             openWindow(id: "deck")
         }
+        #else
+        openWindow(id: "deck", value: DeckWindowRoute.main)
+        #endif
     }
 
     // MARK: Tab machinery
