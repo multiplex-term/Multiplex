@@ -1,5 +1,78 @@
 import SwiftUI
 
+/// Breakpoint sizing for the wall's session-tile grid. An adaptive `GridItem`
+/// uses its minimum width to decide when another column fits, so a growing
+/// window repeatedly makes every existing tile jump from 360 back to 290
+/// points. Keep the current column count while the tiles can compress; add a
+/// column only when it fits at the preferred width.
+///
+/// Only the column count may cross into SwiftUI state. The continuously
+/// changing window width is reduced to that count by `onGeometryChange`, so
+/// ordinary resize frames do not rebuild the FleetWall view hierarchy.
+enum FleetTileGridSizing {
+    static let minimumTileWidth: CGFloat = 290
+    static let preferredTileWidth: CGFloat = 360
+    static let gutter: CGFloat = 14
+
+    static func initialColumnCount(availableWidth rawWidth: CGFloat) -> Int {
+        let width = Self.normalized(rawWidth)
+        let preferredFit = Self.maximumColumnCount(
+            tileWidth: Self.preferredTileWidth,
+            availableWidth: width
+        )
+        // The deck's home composition is a two-tile row. Preserve that row
+        // when a restored/narrow initial window can fit both minimum widths;
+        // wider initial windows still start with full-width columns.
+        if preferredFit == 1,
+           Self.requiredWidth(columnCount: 2, tileWidth: Self.minimumTileWidth) <= width {
+            return 2
+        }
+        return preferredFit
+    }
+
+    static func columnCount(current: Int?, availableWidth rawWidth: CGFloat) -> Int {
+        let width = Self.normalized(rawWidth)
+        var count = max(1, current ?? initialColumnCount(availableWidth: width))
+
+        // Growing: never introduce a compressed column. Wait until the new
+        // column and every existing tile can all stay at 360 points.
+        while Self.requiredWidth(
+            columnCount: count + 1,
+            tileWidth: Self.preferredTileWidth
+        ) <= width {
+            count += 1
+        }
+
+        // Shrinking: keep the row intact while every tile remains at least
+        // 290 points, then wrap one or more columns as necessary.
+        while count > 1,
+              Self.requiredWidth(
+                columnCount: count,
+                tileWidth: Self.minimumTileWidth
+              ) > width {
+            count -= 1
+        }
+
+        return count
+    }
+
+    static func requiredWidth(columnCount: Int, tileWidth: CGFloat) -> CGFloat {
+        guard columnCount > 0 else { return 0 }
+        return CGFloat(columnCount) * tileWidth + CGFloat(columnCount - 1) * gutter
+    }
+
+    private static func maximumColumnCount(
+        tileWidth: CGFloat,
+        availableWidth: CGFloat
+    ) -> Int {
+        max(1, Int((availableWidth + gutter) / (tileWidth + gutter)))
+    }
+
+    private static func normalized(_ width: CGFloat) -> CGFloat {
+        width.isFinite ? max(0, width) : 0
+    }
+}
+
 /// The deck: the whole fleet as one broadcast monitor wall. Every host
 /// probes concurrently under a thin rail; every session is a live tile
 /// showing its actual last lines (capture-pane over the host's control
@@ -23,6 +96,7 @@ struct FleetWall: View {
     @State private var removingHost: Host?
     @State private var unreachableNotice: UnreachableNotice?
     @State private var legacyDropTarget: SessionDropTarget?
+    @State private var tileGridColumnCount: Int?
 
     /// Pending delete confirmation — which session on which host.
     private struct DeleteTarget {
@@ -40,7 +114,7 @@ struct FleetWall: View {
         var id: UUID { host.id }
     }
 
-    private let columns = [GridItem(.adaptive(minimum: 290, maximum: 360), spacing: 14)]
+    private static let wallPadding: CGFloat = 26
     /// Wall cadence: one concurrent probe round-trip per host per tick.
     private static let feedInterval: Duration = .seconds(5)
 
@@ -125,19 +199,63 @@ struct FleetWall: View {
     }
 
     private func wall(showHeader: Bool) -> some View {
-        ScrollView {
+        let columns = gridColumns(count: tileGridColumnCount ?? 2)
+
+        return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if showHeader { header }
                 if store.hosts.isEmpty {
                     awaitingSignal
                 } else {
                     ForEach(store.hosts) { host in
-                        hostSection(host)
+                        hostSection(host, columns: columns)
                     }
                 }
             }
-            .padding(26)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Self.wallPadding)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            // Measure a viewport-sized, content-independent surface. If the
+            // grid is between breakpoint updates, its temporary ideal width
+            // must never feed back into the width used to choose columns.
+            Color.clear
+                .allowsHitTesting(false)
+                .onGeometryChange(for: Int.self) { geometry in
+                    FleetTileGridSizing.columnCount(
+                        current: tileGridColumnCount,
+                        availableWidth: max(
+                            0,
+                            geometry.size.width - Self.wallPadding * 2
+                        )
+                    )
+                } action: { count in
+                    guard tileGridColumnCount != count else { return }
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        tileGridColumnCount = count
+                    }
+                }
+        }
+    }
+
+    private func gridColumns(count: Int) -> [GridItem] {
+        Array(
+            repeating: GridItem(
+                .flexible(
+                    // The breakpoint policy enforces the 290pt minimum. A
+                    // zero layout minimum lets a stale count compress for the
+                    // single observation pass instead of widening and
+                    // recentering the entire vertical scroll view.
+                    minimum: 0,
+                    maximum: FleetTileGridSizing.preferredTileWidth
+                ),
+                spacing: FleetTileGridSizing.gutter
+            ),
+            count: count
+        )
     }
 
     /// While this view exists, keep the wall alive: re-probe each host and
@@ -256,12 +374,12 @@ struct FleetWall: View {
     // MARK: Host rail + tiles
 
     @ViewBuilder
-    private func hostSection(_ host: Host) -> some View {
+    private func hostSection(_ host: Host, columns: [GridItem]) -> some View {
         let model = hub.model(for: host)
 
         VStack(alignment: .leading, spacing: 12) {
             rail(host, model: model)
-            tiles(host, model: model)
+            tiles(host, model: model, columns: columns)
         }
         .padding(.bottom, 22)
     }
@@ -373,44 +491,74 @@ struct FleetWall: View {
     }
 
     @ViewBuilder
-    private func tiles(_ host: Host, model: HostConnectionModel) -> some View {
+    private func tiles(
+        _ host: Host,
+        model: HostConnectionModel,
+        columns: [GridItem]
+    ) -> some View {
         switch model.tmux {
         case .sessions(let sessions):
             if #available(iOS 27.0, visionOS 27.0, *) {
                 animatedGrid(
-                    reorderableSessionGrid(host, model: model, sessions: sessions),
+                    reorderableSessionGrid(
+                        host,
+                        model: model,
+                        sessions: sessions,
+                        columns: columns
+                    ),
                     state: model.tmux
                 )
             } else {
                 animatedGrid(
-                    legacySessionGrid(host, model: model, sessions: sessions),
+                    legacySessionGrid(
+                        host,
+                        model: model,
+                        sessions: sessions,
+                        columns: columns
+                    ),
                     state: model.tmux
                 )
             }
         case .noServer:
             animatedGrid(
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                LazyVGrid(
+                    columns: columns,
+                    alignment: .leading,
+                    spacing: FleetTileGridSizing.gutter
+                ) {
                     newSessionTile(host)
                 },
                 state: model.tmux
             )
         case .tmuxMissing:
             animatedGrid(
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                LazyVGrid(
+                    columns: columns,
+                    alignment: .leading,
+                    spacing: FleetTileGridSizing.gutter
+                ) {
                     noteTile("No tmux on host", detail: "You can still open a plain shell.")
                 },
                 state: model.tmux
             )
         case .failed:
             animatedGrid(
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                LazyVGrid(
+                    columns: columns,
+                    alignment: .leading,
+                    spacing: FleetTileGridSizing.gutter
+                ) {
                     noSignalTile(host, model: model)
                 },
                 state: model.tmux
             )
         case .unknown, .probing:
             animatedGrid(
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                LazyVGrid(
+                    columns: columns,
+                    alignment: .leading,
+                    spacing: FleetTileGridSizing.gutter
+                ) {
                     acquiringTile
                 },
                 state: model.tmux
@@ -420,12 +568,19 @@ struct FleetWall: View {
 
     /// OS 27's reorder container is purpose-built for this interaction: a
     /// long press lifts one tile, leaves a placeholder, and makes the other
-    /// tiles move out of the way as the drag crosses the adaptive grid.
+    /// tiles move out of the way as the drag crosses the responsive grid.
     @available(iOS 27.0, visionOS 27.0, *)
     private func reorderableSessionGrid(
-        _ host: Host, model: HostConnectionModel, sessions: [TmuxSession]
+        _ host: Host,
+        model: HostConnectionModel,
+        sessions: [TmuxSession],
+        columns: [GridItem]
     ) -> some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+        LazyVGrid(
+            columns: columns,
+            alignment: .leading,
+            spacing: FleetTileGridSizing.gutter
+        ) {
             newSessionTile(host)
             ForEach(store.orderedSessions(sessions, for: host.id)) { session in
                 sessionTile(host, model: model, session: session)
@@ -451,9 +606,16 @@ struct FleetWall: View {
     /// API. Dropping on a session moves the dragged tile into that tile's
     /// slot; the neutral outline makes the pending destination explicit.
     private func legacySessionGrid(
-        _ host: Host, model: HostConnectionModel, sessions: [TmuxSession]
+        _ host: Host,
+        model: HostConnectionModel,
+        sessions: [TmuxSession],
+        columns: [GridItem]
     ) -> some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+        LazyVGrid(
+            columns: columns,
+            alignment: .leading,
+            spacing: FleetTileGridSizing.gutter
+        ) {
             newSessionTile(host)
             ForEach(store.orderedSessions(sessions, for: host.id)) { session in
                 let target = SessionDropTarget(hostID: host.id, sessionName: session.name)

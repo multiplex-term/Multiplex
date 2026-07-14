@@ -28,12 +28,16 @@ struct MultiplexApp: App {
     var body: some Scene {
         #if os(visionOS)
         // Snug fit for a two-tile wall row: 26pt wall padding either side +
-        // two tiles at the grid's 360pt max + the 14pt gutter wide. Wider
-        // and the row gains dead space (a third column needs 950). 330 is
-        // the shortest visionOS will actually grant at this width (shorter
-        // requests render ~330 anyway — system aspect floor); it shows the
-        // header, host rail, and one full tile row, and more rows scroll.
+        // two tiles at the grid's 360pt preferred width + the 14pt gutter.
+        // Wider windows keep that tile size until another full tile fits (a
+        // third needs 1160), so growing never compresses the existing row.
+        // 330 is the shortest visionOS will actually grant at this width
+        // (shorter requests render ~330 anyway — system aspect floor); it
+        // shows the header, host rail, and one full tile row, and more rows scroll.
         deckScene
+            // Keep the system's resize range tied to the stable scene
+            // boundary below, never to FleetWall's changing grid ideal size.
+            .windowResizability(.contentMinSize)
             .defaultSize(debugSize("MULTIPLEX_DECK_SIZE") ?? CGSize(width: 786, height: 330))
         terminalScene
             .windowStyle(.plain)
@@ -78,6 +82,7 @@ struct MultiplexApp: App {
 
     private var deckWindow: some View {
         DeckWindow()
+            .modifier(DeckWindowSizingBoundary())
             .environment(store)
             .environment(hub)
             .environment(themes)
@@ -102,6 +107,24 @@ struct MultiplexApp: App {
                     .modifier(PlatformChrome())
             }
         }
+    }
+}
+
+/// visionOS derives a regular window's minimum resize constraints from its
+/// root content. FleetWall changes its grid shape at column breakpoints, so
+/// exposing that content size to the scene can make the system clamp the
+/// window during the user's resize gesture. A flexible base owns scene sizing;
+/// the wall fills it as an overlay and therefore cannot resize its own window.
+struct DeckWindowSizingBoundary: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(visionOS)
+        Color.clear
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay { content }
+        #else
+        content
+        #endif
     }
 }
 
