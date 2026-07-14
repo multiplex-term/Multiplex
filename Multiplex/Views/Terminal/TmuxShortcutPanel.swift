@@ -26,7 +26,7 @@ struct TmuxShortcutPanel: View {
             // The title needs breathing room from the rounded top-left
             // corner, without moving or resizing the command grid below it.
             .padding(.top, 6)
-            .padding(.leading, 6)
+            .padding(.leading, 1)
 
             ForEach(TmuxShortcut.Group.allCases, id: \.self) { group in
                 VStack(alignment: .leading, spacing: 6) {

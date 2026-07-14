@@ -52,19 +52,23 @@ struct CustomAgentCommandPanel: View {
     static let preferredWidth: CGFloat = 500
 
     let agent: AgentKind
+    private let width: CGFloat
     let save: ([CustomAgentCommand]) -> Void
     let cancel: () -> Void
 
     @State private var drafts: CustomAgentCommandDrafts
+    @State private var measuredCommandListHeight: CGFloat = 0
     @FocusState private var focusedCommandID: UUID?
 
     init(
         agent: AgentKind,
         commands: [CustomAgentCommand],
+        width: CGFloat = Self.preferredWidth,
         save: @escaping ([CustomAgentCommand]) -> Void,
         cancel: @escaping () -> Void
     ) {
         self.agent = agent
+        self.width = width
         self.save = save
         self.cancel = cancel
         _drafts = State(initialValue: CustomAgentCommandDrafts(
@@ -82,7 +86,7 @@ struct CustomAgentCommandPanel: View {
             divider
             footer
         }
-        .frame(width: Self.preferredWidth)
+        .frame(width: width)
         .fixedSize(horizontal: false, vertical: true)
         .background(Theme.bezel)
         .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
@@ -96,17 +100,22 @@ struct CustomAgentCommandPanel: View {
                 Spacer(minLength: 8)
                 ChassisLabel(agent.displayName, size: 9, color: Theme.customCommand)
             }
+            // Match the tmux shortcuts title origin so both anchored panels
+            // share the same breathing room from the rounded top corner.
+            .padding(.top, 6)
+            .padding(.leading, 1)
+
             Text("Type one or many lines. Auto Submit sends Return after the content; turn it off to leave the text ready to edit.")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.signal2)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(16)
+        .padding(14)
     }
 
     private var commandList: some View {
         ScrollView {
-            LazyVStack(spacing: 1) {
+            VStack(spacing: 1) {
                 // Do not iterate over `$commands`: SwiftUI's collection
                 // binding captures array indices, which become invalid while
                 // a focused row is deleted or moved. Resolve every edit by
@@ -123,8 +132,24 @@ struct CustomAgentCommandPanel: View {
             }
             .background(Theme.bezelHi)
             .padding(12)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: CustomAgentCommandListHeightKey.self,
+                        value: proxy.size.height
+                    )
+                }
+            }
         }
         .frame(height: editorHeight)
+        .scrollDisabled(measuredCommandListHeight <= Self.maximumEditorHeight)
+        .onPreferenceChange(CustomAgentCommandListHeightKey.self) { height in
+            let measuredHeight = ceil(height)
+            guard measuredHeight > 0,
+                  abs(measuredHeight - measuredCommandListHeight) >= 0.5
+            else { return }
+            measuredCommandListHeight = measuredHeight
+        }
     }
 
     private func commandRow(_ command: Binding<CustomAgentCommand>) -> some View {
@@ -266,7 +291,18 @@ struct CustomAgentCommandPanel: View {
     }
 
     private var editorHeight: CGFloat {
-        min(430, max(140, CGFloat(max(1, drafts.commands.count)) * 124 + 24))
+        min(
+            Self.maximumEditorHeight,
+            measuredCommandListHeight > 0
+                ? measuredCommandListHeight
+                : estimatedCommandListHeight
+        )
+    }
+
+    /// Used only for the first layout pass. The measured rendered height takes
+    /// over immediately and follows multiline edits plus ADD/DELETE exactly.
+    private var estimatedCommandListHeight: CGFloat {
+        CGFloat(max(1, drafts.commands.count)) * 102 + 24
     }
 
     private func addCommand() {
@@ -298,6 +334,18 @@ struct CustomAgentCommandPanel: View {
                 drafts.update(updated, id: snapshot.id)
             }
         )
+    }
+}
+
+private extension CustomAgentCommandPanel {
+    static let maximumEditorHeight: CGFloat = 430
+}
+
+private struct CustomAgentCommandListHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

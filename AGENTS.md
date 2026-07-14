@@ -408,6 +408,20 @@ views.
   indices and crashes when a focused row is deleted/reordered while the text
   system delivers a late write. Full research + rationale:
   `local-plan/agent-harness-helpers.md`.
+  **Custom Commands uses the same UIKit-hosted, content-sized iPad popover
+  boundary as tmux shortcuts**: keep `preferredContentSize` derived from
+  `sizeThatFits`, set the hosting controller's `sizingOptions` to
+  `.preferredContentSize` so ADD/DELETE live-resizes the popover, keep
+  `safeAreaRegions = .container`, and disable adaptive sheet presentation. A
+  plain SwiftUI `.popover` accepts a nearby floating keyboard's full-height
+  proposal and grows a large blank bottom tail; a one-shot preferred size
+  clips or overlaps rows after ADD/DELETE. Padding, offsets, or `.fixedSize`
+  alone do not fix either presentation-controller bug. visionOS keeps its
+  native SwiftUI anchored popover. Inside the panel, size the command list from
+  its measured rendered height and cap only the true overflow for scrolling;
+  never restore a command-count multiplier. Multiline rows do not have one
+  stable height, so estimates leave a blank trench above the footer or clip
+  edited content.
 - **File drop = SFTP upload + typed path, never Enter**: a dropped file is
   local and the agent is remote, so the pane uploads it over the tab's own
   connection (Citadel multiplexes the SFTP subsystem next to the PTY;
