@@ -181,6 +181,8 @@ SwiftUI: Deck window  +  N Terminal windows (WindowGroup(for: TerminalWindowRout
                      iCloud Keychain as synchronizable items (KeychainStore)
   ThemeStore         terminal color schemes — TerminalTheme built-ins + custom
                      (themes.json); selected id in UserDefaults; device-local
+  CustomAgentCommandStore  ordered custom helpers per agent (agent-commands.json),
+                     device-local; shared UUIDs mirror into both agent profiles
   ConnectionHub      one HostConnectionModel per host — the probe connection;
                      also feeds the wall's live miniatures (the probe's ONE
                      exec round-trip carries sessions + a pane-subtree-clipped
@@ -394,7 +396,18 @@ views.
   **Slash chips submit with a CR sent ~160 ms after the text** (separate
   write): Codex's composer treats an Enter inside one rapid burst as a pasted
   newline, not a submit — verified against rust-v0.144; Claude Code accepts
-  either. Full research + rationale: `local-plan/agent-harness-helpers.md`.
+  either. Custom commands are stored per agent; `shared` mirrors the same UUID
+  into both profiles, so either editor updates it, unsharing keeps it only in
+  the editor being saved, and deletion removes it from both. Every custom tap
+  uses the same daily meter, ordered pump, and optional delayed CR. `showInBar`
+  controls placement independently of content length; opted-in labels keep the
+  first nine characters and append `...` (newlines/tabs render as `↵` / `⇥`),
+  while opted-out commands remain in MORE. The editor strips invisible terminal
+  controls, including Ctrl-B, before persistence/injection. Its editable rows
+  must resolve bindings by command UUID — `ForEach($commands)` captures array
+  indices and crashes when a focused row is deleted/reordered while the text
+  system delivers a late write. Full research + rationale:
+  `local-plan/agent-harness-helpers.md`.
 - **File drop = SFTP upload + typed path, never Enter**: a dropped file is
   local and the agent is remote, so the pane uploads it over the tab's own
   connection (Citadel multiplexes the SFTP subsystem next to the PTY;

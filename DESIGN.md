@@ -101,6 +101,15 @@ and default `⌃B` binding; iPad carries the same dropdown immediately after the
 keyboard control in its bottom key rail. Connection overlays are chassis
 panels with the same lamp anatomy.
 
+**Agent commands.** The detected agent's helper rail uses the same square
+chassis language. MORE opens an anchored TALLY editor with ordered multiline
+rows plus compact Submit, Bar, and Shared switches. Shared keeps one command
+synchronized in both the Claude Code and Codex rails. Commands opted into a
+rail use `customCommand`, a warm neutral that marks provenance without
+borrowing the red/amber/green state vocabulary. Their labels keep the first
+nine characters and append `...` when truncated (newlines and tabs render as
+`↵` / `⇥`); commands kept off the rail remain in MORE.
+
 **Tabs.** Multiviewer source labels on an opaque chassis slab (top ornament
 on visionOS, top row on iPad, only when a window holds >1 tab): square cells,
 compressed-caps names, one tally dot per tab (red = that shell is live).

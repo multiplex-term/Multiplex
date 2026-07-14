@@ -56,11 +56,18 @@ struct ChassisBadge: View {
     var label: String
     var systemImage: String?
     var prominent = false
+    var color: Color?
 
-    init(_ label: String, systemImage: String? = nil, prominent: Bool = false) {
+    init(
+        _ label: String,
+        systemImage: String? = nil,
+        prominent: Bool = false,
+        color: Color? = nil
+    ) {
         self.label = label
         self.systemImage = systemImage
         self.prominent = prominent
+        self.color = color
     }
 
     var body: some View {
@@ -75,7 +82,7 @@ struct ChassisBadge: View {
                     .kerning(1.1)
             }
         }
-        .foregroundStyle(prominent ? Theme.signal : Theme.signal2)
+        .foregroundStyle(color ?? (prominent ? Theme.signal : Theme.signal2))
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .background(Theme.chassis)

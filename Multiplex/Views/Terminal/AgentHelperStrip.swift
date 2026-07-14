@@ -5,11 +5,11 @@ import notify
 
 /// Quick commands for the CLI agent (Claude Code / Codex) detected in the
 /// attached session's active pane — a lower bezel under the screen. Chips
-/// only ever *type* into the shell (through the same ordered input pump as
-/// the keyboard), so a stale command fails visibly in the agent's own input
-/// box and nothing auto-fires. Free users receive a daily slash-command
-/// taste; after it is spent, the strip passively becomes the Pro pill until
-/// the next local day (no modal interrupts the terminal).
+/// only ever travel through the shell's ordered input pump, so a stale command
+/// fails visibly in the agent's own input box. Auto Submit follows the text
+/// with a delayed Return. Free users receive a daily agent-command taste;
+/// after it is spent, the strip passively becomes the Pro pill until the next
+/// local day (no modal interrupts the terminal).
 struct AgentHelperStrip: View {
     static let dockedHeight: CGFloat = 48
     /// ChassisBadge's 9 pt mono label plus 5 pt vertical padding per side.
@@ -26,6 +26,7 @@ struct AgentHelperStrip: View {
 
     let agent: AgentKind
     let canShowCommands: Bool
+    let customCommands: [CustomAgentCommand]
     /// Floating slab (visionOS ornament, UMD chrome) vs full-width bar
     /// (iPad, docked under the screen).
     var floating = false
@@ -34,36 +35,46 @@ struct AgentHelperStrip: View {
     /// after the user narrows it.
     var floatingMaximumWidth: CGFloat? = nil
     let send: (AgentCommand) -> Void
+    let saveCustomCommands: ([CustomAgentCommand]) -> Void
     let openPaywall: () -> Void
 
+    @State private var showingCustomCommands = false
+    @State private var customCommandEditorID = UUID()
+
     var body: some View {
-        if floating {
-            row
-                .padding(.horizontal, 16)
-                .padding(.vertical, 9)
-                .frame(maxWidth: floatingMaximumWidth ?? 760)
-                .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Theme.bezelHi, lineWidth: 1))
-        } else {
-            row
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .frame(height: Self.dockedHeight)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.bezel)
-                .overlay(alignment: .top) {
-                    Rectangle().fill(Theme.bezelHi).frame(height: 1)
-                }
-                // This strip is overlaid above the UIKit key rail with a
-                // transparent bottom spacer. A horizontal ScrollView can
-                // retain the overlay's taller proposal on iPadOS and let its
-                // chip faces paint through that spacer, covering the rail.
-                // The docked chassis is physically 48 pt tall; contain every
-                // descendant to that declared surface.
-                .clipped()
+        Group {
+            if floating {
+                row
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: floatingMaximumWidth ?? 760)
+                    .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Theme.bezelHi, lineWidth: 1))
+            } else {
+                row
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .frame(height: Self.dockedHeight)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.bezel)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Theme.bezelHi).frame(height: 1)
+                    }
+                    // This strip is overlaid above the UIKit key rail with a
+                    // transparent bottom spacer. A horizontal ScrollView can
+                    // retain the overlay's taller proposal on iPadOS and let its
+                    // chip faces paint through that spacer, covering the rail.
+                    // The docked chassis is physically 48 pt tall; contain every
+                    // descendant to that declared surface.
+                    .clipped()
+            }
         }
+        // A pane switch may replace Claude Code with Codex in the same view
+        // identity. Never let one agent's open drafts relabel or save into the
+        // other agent's profile.
+        .onChange(of: agent) { showingCustomCommands = false }
     }
 
     private var row: some View {
@@ -75,7 +86,7 @@ struct AgentHelperStrip: View {
             } else {
                 VStack(alignment: .leading, spacing: 3) {
                     ChassisChip("✳ AGENT HELPERS · PRO", prominent: true, action: openPaywall)
-                    Text("Free daily slash commands return tomorrow")
+                    Text("Free daily command taps return tomorrow")
                         .font(.mono(8, weight: .medium))
                         .foregroundStyle(Theme.signal3)
                         .lineLimit(1)
@@ -92,6 +103,9 @@ struct AgentHelperStrip: View {
                     ForEach(AgentCommandSet.primary(for: agent)) { command in
                         commandChip(command)
                     }
+                    ForEach(barCustomCommands) { command in
+                        customCommandChip(command)
+                    }
                 }
                 .frame(height: Self.chipHeight)
             }
@@ -101,6 +115,23 @@ struct AgentHelperStrip: View {
                 ForEach(AgentCommandSet.overflow(for: agent)) { command in
                     Button(command.label) { send(command) }
                 }
+                if !moreCustomCommands.isEmpty {
+                    Divider()
+                    Section("Custom") {
+                        ForEach(moreCustomCommands) { command in
+                            Button(command.menuLabel) { send(command.agentCommand) }
+                        }
+                    }
+                }
+                Divider()
+                Button {
+                    // A fresh identity makes CANCEL genuinely discard drafts
+                    // when the same editor is opened again.
+                    customCommandEditorID = UUID()
+                    showingCustomCommands = true
+                } label: {
+                    Label("Custom Commands…", systemImage: "slider.horizontal.3")
+                }
             } label: {
                 ChassisBadge("MORE")
             }
@@ -108,7 +139,33 @@ struct AgentHelperStrip: View {
             .buttonStyle(.plain)
             .chassisHover(2)
             .accessibilityLabel("More \(agent.displayName) commands")
+            .popover(
+                isPresented: $showingCustomCommands,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .bottom
+            ) {
+                CustomAgentCommandPanel(
+                    agent: agent,
+                    commands: customCommands,
+                    save: {
+                        saveCustomCommands($0)
+                        showingCustomCommands = false
+                    },
+                    cancel: { showingCustomCommands = false }
+                )
+                .id(customCommandEditorID)
+                .presentationCompactAdaptation(.popover)
+                .customCommandPresentationSizing()
+            }
         }
+    }
+
+    private var barCustomCommands: [CustomAgentCommand] {
+        customCommands.filter { $0.barLabel != nil }
+    }
+
+    private var moreCustomCommands: [CustomAgentCommand] {
+        customCommands.filter { $0.barLabel == nil }
     }
 
     /// Keep the design-system face while owning the button's physical height
@@ -128,6 +185,31 @@ struct AgentHelperStrip: View {
         .frame(height: Self.chipHeight)
         .clipped()
         .accessibilityLabel(command.label.capitalized)
+
+        #if os(visionOS)
+        button.chassisHover(2)
+        #else
+        button
+        #endif
+    }
+
+    /// User-authored commands use a warmer neutral than stock actions. The
+    /// color carries provenance, not state; auto-submit behavior remains in
+    /// the editor and accessibility copy rather than a semantic signal hue.
+    @ViewBuilder
+    private func customCommandChip(_ command: CustomAgentCommand) -> some View {
+        let button = Button {
+            send(command.agentCommand)
+        } label: {
+            ChassisBadge(command.barLabel ?? command.menuLabel, color: Theme.customCommand)
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .frame(height: Self.chipHeight)
+        .clipped()
+        .accessibilityLabel(
+            "Custom command \(command.menuLabel), \(command.autoSubmit ? "auto submit" : "type only")"
+        )
 
         #if os(visionOS)
         button.chassisHover(2)

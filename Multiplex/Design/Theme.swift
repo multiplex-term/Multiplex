@@ -31,6 +31,10 @@ enum Theme {
     static let signal = Color(hex: 0xF2F3F4)
     static let signal2 = Color(hex: 0x9BA1A6)
     static let signal3 = Color(hex: 0x5C6166)
+    /// Warm neutral reserved for user-authored command copy. It distinguishes
+    /// custom chips from the stock set without borrowing a semantic state
+    /// color (tally/caution/ok) or making them read as more important.
+    static let customCommand = Color(hex: 0xB9AA98)
     /// Dimmed mono text inside miniature screens.
     static let miniText = Color(hex: 0xC8D2D6)
 }

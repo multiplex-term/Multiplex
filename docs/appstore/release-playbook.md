@@ -123,9 +123,11 @@ Keychain).
 
 The non-consumable IAP `app.multiplexterm.multiplex.pro` is configured with
 display name **Multiplex Pro**, a $19.99 USA-base/equalized price, all-territory
-availability, review notes, and a fully processed 2064×2752 paywall review
-screenshot (`docs/appstore/iap-review-screenshot.jpg`). App Store Connect now
-reports it `READY_TO_SUBMIT`; submit it together with the first app version.
+availability, and review notes. App Store Connect reports it
+`READY_TO_SUBMIT`; its 2026-07-13 paywall screenshot is processed, while the
+refreshed 2026-07-14 asset (`docs/appstore/iap-review-screenshot.jpg`) still
+needs upload + processing before submission. Submit the IAP together with the
+first app version.
 Built-in `deliver` does not manage IAP metadata; custom Spaceship
 code can call Apple's public IAP endpoints, including the review-image
 reserve/upload/commit flow.
@@ -178,8 +180,8 @@ The same host and credentials serve Beta App Review (TestFlight external) —
 | # | Blocker | Why | Where |
 | --- | --- | --- | --- |
 | 1 | **Host-key TOFU pinning** | `.acceptAnything()` is fine for the sim, indefensible for real users' credentials; also the one security claim reviewers/users will test. | Citadel `.custom` validator; README "Known limits" |
-| ~~2~~ | ~~**Upload the Pro IAP review screenshot**~~ **Done 2026-07-13** | The 2064×2752 paywall image is fully processed and IAP `6790252556` is `READY_TO_SUBMIT`. | ASC IAP `app.multiplexterm.multiplex.pro` |
-| ~~3~~ | ~~**Ship all free-tier gates and the IAP together**~~ **Code complete 2026-07-13**: one-host add-intent cap, grandfathering mosh toggle, 10/day slash-chip meter, custom-theme mutation gate, and alert scheduling gate all ship with the StoreKit surface. Commerce policy has deterministic lifecycle tests; a live visionOS run proved 11 tap intents produce only 10 slash sends and then the passive reset pill. | Never un-free a feature post-launch (`local-plan/pricing-strategy.md` §7). | pricing-strategy.md |
+| 2 | **Re-upload the refreshed Pro IAP review screenshot** | The 2026-07-13 image is processed and IAP `6790252556` is `READY_TO_SUBMIT`, but the 2026-07-14 local asset reflects the current custom-command wording and still needs upload + processing. | ASC IAP `app.multiplexterm.multiplex.pro` |
+| ~~3~~ | ~~**Ship all free-tier gates and the IAP together**~~ **Code complete 2026-07-13**: one-host add-intent cap, grandfathering mosh toggle, 10/day agent-command meter (built-in or custom), custom-theme mutation gate, and alert scheduling gate all ship with the StoreKit surface. Commerce policy has deterministic lifecycle tests; a live visionOS run proved 11 tap intents produce only 10 command sends and then the passive reset pill. | Never un-free a feature post-launch (`local-plan/pricing-strategy.md` §7). | pricing-strategy.md |
 | 4 | **Privacy policy live** at `multiplexterm.dev/privacy` | URL is required metadata; draft ready in `docs/appstore/privacy-policy.md`. | — |
 | 5 | **Support URL live** at `multiplexterm.dev` | Required; a page with the app name + contact email is enough. | — |
 | 6 | **France excluded or French encryption declaration filed** | Apple requires the French declaration for standard app-provided crypto only when distributing in France. | ASC availability / App Encryption Documentation |

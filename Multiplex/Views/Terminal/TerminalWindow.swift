@@ -16,6 +16,7 @@ import notify
 struct TerminalWindowRoot: View {
     @Environment(HostStore.self) private var store
     @Environment(ConnectionHub.self) private var hub
+    @Environment(CustomAgentCommandStore.self) private var customAgentCommands
     @Environment(TerminalWorkspace.self) private var workspace
     @Environment(EntitlementStore.self) private var entitlements
     @Environment(\.dismiss) private var dismiss
@@ -249,15 +250,16 @@ struct TerminalWindowRoot: View {
         }
     }
 
-    /// Type a helper command into the shell. Slash commands submit with a
-    /// CR sent as a separate, delayed write: Codex's composer treats Enter
-    /// inside one rapid burst as a pasted newline (see
+    /// Type a helper command into the shell. Auto-submitting built-in and
+    /// custom commands send CR as a separate, delayed write: Codex's composer
+    /// treats Enter inside one rapid burst as a pasted newline (see
     /// `AgentCommand.submitsAfterPause`); 160 ms clears its burst window
     /// with margin, and Claude Code is indifferent.
     private func send(_ command: AgentCommand, via controller: TerminalSessionController) {
-        // Only slash commands spend the daily free taste. The entitlement
-        // store performs the check and consume as one MainActor operation,
-        // so the final allowed tap sends while a stale/exhausted tap cannot.
+        // Built-in slash commands and every custom payload spend the daily
+        // free taste. The entitlement store performs check + consume as one
+        // MainActor operation, so the final allowed tap sends while a
+        // stale/exhausted tap cannot.
         // A denial stays passive: Observation swaps the strip to its Pro pill
         // instead of stealing terminal focus with a modal.
         guard !command.consumesSlashChipTaste || entitlements.consumeSlashChip()
@@ -487,9 +489,11 @@ struct TerminalWindowRoot: View {
             AgentHelperStrip(
                 agent: agent,
                 canShowCommands: entitlements.isPro || entitlements.canUseSlashChip,
+                customCommands: customAgentCommands.commands(for: agent),
                 floating: floating,
                 floatingMaximumWidth: floatingMaximumWidth,
                 send: { send($0, via: controller) },
+                saveCustomCommands: { customAgentCommands.replace($0, for: agent) },
                 openPaywall: { showingPaywall = true }
             )
         }

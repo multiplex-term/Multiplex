@@ -54,7 +54,12 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
   context-specific command strip follows it. The focused terminal checks pane
   selection between full wall ticks, so moving across splits updates helpers
   in about a second; background panes remain visible in wall telemetry without
-  receiving commands intended for the active pane.
+  receiving commands intended for the active pane. Each agent can also keep an
+  ordered set of custom commands: content may span multiple lines, Auto Submit
+  is optional, and Show in Bar controls placement independently of length.
+  Bar labels keep the first nine characters and append `...`; commands kept
+  off the bar stay in More. Shared mirrors one editable command into both the
+  Claude Code and Codex helper strips.
 - **Keyboard focus** — exactly one terminal owns keyboard input at a time
   (`TerminalFocusArbiter`): every visionOS window is its own always-active
   scene, so per-window first responders leave input stuck on the first

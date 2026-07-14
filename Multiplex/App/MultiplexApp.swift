@@ -5,6 +5,7 @@ struct MultiplexApp: App {
     @State private var store = HostStore()
     @State private var hub: ConnectionHub
     @State private var themes = ThemeStore()
+    @State private var customAgentCommands = CustomAgentCommandStore()
     @State private var workspace: TerminalWorkspace
     @State private var entitlements: EntitlementStore
     @State private var attention: AttentionCenter
@@ -80,6 +81,7 @@ struct MultiplexApp: App {
             .environment(store)
             .environment(hub)
             .environment(themes)
+            .environment(customAgentCommands)
             .environment(workspace)
             .environment(entitlements)
             .environment(attention)
@@ -93,6 +95,7 @@ struct MultiplexApp: App {
                     .environment(store)
                     .environment(hub)
                     .environment(themes)
+                    .environment(customAgentCommands)
                     .environment(workspace)
                     .environment(entitlements)
                     .environment(attention)

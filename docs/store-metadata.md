@@ -39,7 +39,9 @@ are what `fastlane store_metadata` uploads.
 
 ## Multiplex Pro
 
-Last remote readback: **2026-07-13 — `READY_TO_SUBMIT`**.
+Last remote readback: **2026-07-13 — `READY_TO_SUBMIT`**. The local review
+screenshot was refreshed on 2026-07-14 for the custom-command wording and
+still needs to be re-uploaded and read back before submission.
 
 | Field | Current value |
 | --- | --- |
@@ -52,7 +54,7 @@ Last remote readback: **2026-07-13 — `READY_TO_SUBMIT`**.
 | Family Sharing | Disabled |
 | en-US description | Unlimited hosts, mosh, agent tools & themes. |
 | Availability | All configured territories; automatically include new territories |
-| Review material | Review note plus the processed review screenshot below |
+| Review material | Review note plus a refreshed local screenshot pending re-upload |
 
 The IAP-specific review note is configured in App Store Connect but its
 verbatim text is not currently committed. Before changing it, read back the
@@ -75,10 +77,13 @@ Current product split:
   and wall telemetry with active-pane-aware helpers, built-in terminal themes,
   a most-used tmux shortcut dropdown on
   both platforms (including touch-native copy-mode selection and explicit
-  exit), iCloud Keychain sync, and ten slash-command chip taps per local
-  calendar day.
-- Pro: unlimited hosts, mosh, unmetered agent command chips, agent alerts, and
-  custom-theme editing.
+  exit), iCloud Keychain sync, per-agent custom commands (ordered, multiline,
+  optional Auto Submit and explicit bar placement, with nine-character bar
+  label previews, plus optional sharing between the Claude Code and Codex
+  strips), and ten built-in or custom agent-command chip taps per local calendar
+  day.
+- Pro: unlimited hosts, mosh, unmetered built-in and custom agent command
+  chips, agent alerts, and custom-theme editing.
 - Existing/synced hosts, existing mosh configuration, and existing custom
   themes are never deleted or disabled when Pro is absent.
 
@@ -99,12 +104,13 @@ of the public App Store gallery screenshots.
 
 | Asset | Purpose |
 | --- | --- |
-| [`docs/appstore/iap-review-screenshot.jpg`](appstore/iap-review-screenshot.jpg) | Canonical 2064×2752 JPEG uploaded to App Store Connect (800,625 bytes) |
-| [`docs/appstore/iap-review-screenshot.png`](appstore/iap-review-screenshot.png) | Lossless 2064×2752 source/export retained for regeneration (4,584,585 bytes) |
+| [`docs/appstore/iap-review-screenshot.jpg`](appstore/iap-review-screenshot.jpg) | Canonical 2064×2752 JPEG ready for App Store Connect (805,393 bytes) |
+| [`docs/appstore/iap-review-screenshot.png`](appstore/iap-review-screenshot.png) | Lossless 2064×2752 source/export retained for regeneration (4,584,478 bytes) |
 
-The current image is fully processed in App Store Connect. It shows the real
-locked `ProPaywallView`, including the one-time US $19.99 purchase CTA and
-Restore Purchases action. It is not a hand-built mock. In DEBUG builds,
+The 2026-07-13 image revision is fully processed in App Store Connect; the
+2026-07-14 local replacement above is not uploaded yet. The replacement shows
+the real locked `ProPaywallView`, including the one-time US $19.99 purchase CTA
+and Restore Purchases action. It is not a hand-built mock. In DEBUG builds,
 `MULTIPLEX_AUTO_PAYWALL=1` opens that real paywall with a deterministic $19.99
 storefront preview so the simulator can reproduce the review state without a
 working local StoreKit transaction.

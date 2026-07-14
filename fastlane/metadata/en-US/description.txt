@@ -7,7 +7,7 @@ A WINDOW PER SESSION
 Attach opens the session in its own window. On Vision Pro that means real spatial windows — build logs above your editor, a server dashboard across the room. On iPad every terminal is a real scene: Stage Manager, Split View, external displays. Merge windows into tabs and split them back out — the SSH connection, buffer, and scrollback move with the tab, so shells never drop.
 
 BUILT FOR AI AGENT SESSIONS
-Multiplex spots Claude Code and Codex across every pane in your sessions, right on the wall — see which agents are working and which need you. In a split window, helpers follow the active pane so commands always go to the agent currently receiving your keystrokes. Everyone can try the one-tap command chips each day (stop, /clear, /compact, /resume, model and mode switches, and more). Pro removes the daily command limit and adds a notification the moment an agent finishes a turn, asks a question, or waits for permission. Drop a file from Files onto a terminal and it uploads to the session's working directory, with the remote path typed in for you — ready for the agent to read.
+Multiplex spots Claude Code and Codex across every pane in your sessions, right on the wall — see which agents are working and which need you. In a split window, helpers follow the active pane so commands always go to the agent currently receiving your keystrokes. Everyone can try the one-tap command chips each day (stop, /clear, /compact, /resume, model and mode switches, and more), then add ordered custom commands — single or multiline, with Auto Submit and bar placement under your control, and optional sharing across both agents. Pro removes the daily command limit and adds a notification the moment an agent finishes a turn, asks a question, or waits for permission. Drop a file from Files onto a terminal and it uploads to the session's working directory, with the remote path typed in for you — ready for the agent to read.
 
 MOSH BUILT IN
 With Pro, switch a host to mosh and the session survives sleep, roaming, and IP changes — a native Swift mosh client, no companion app. Made for a headset that suspends and an iPad that hops networks.
@@ -19,7 +19,7 @@ PRIVATE BY DESIGN
 Hosts and secrets sync between your devices through iCloud Keychain, end-to-end encrypted. Nothing touches our servers — there are none. No account, no analytics, no tracking.
 
 MULTIPLEX PRO
-One purchase, no subscription: unlimited hosts, mosh, agent notifications, the unmetered agent command strip, and custom themes — on all your devices. The free app includes one host, the full spatial experience, and 10 slash-command chip taps each day.
+One purchase, no subscription: unlimited hosts, mosh, agent notifications, the unmetered agent command strip, and custom themes — on all your devices. The free app includes one host, the full spatial experience, and 10 built-in or custom agent-command chip taps each day.
 
 WHAT YOU NEED
 A remote host you can reach over SSH (password or OpenSSH ed25519/RSA key) with tmux 1.8 or newer. mosh needs mosh-server on the host. Works with any POSIX login shell.
