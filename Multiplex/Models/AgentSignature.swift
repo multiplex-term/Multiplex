@@ -179,7 +179,7 @@ enum AgentCommandSet {
         case .claudeCode:
             var commands: [AgentCommand] = [
                 .stop, .slash("clear"), .slash("resume"), .slash("compact"),
-                .slash("context"), .slash("model"), .mode,
+                .slash("rewind"), .slash("model"), .slash("effort"), .mode,
             ]
             #if os(visionOS)
             // visionOS has no key rail (SwiftTerm never plumbs an accessory
@@ -189,8 +189,8 @@ enum AgentCommandSet {
             #endif
             return commands
         case .codex:
-            return [.stop, .slash("new"), .slash("resume"), .slash("compact"),
-                    .slash("model"), .slash("permissions"), .slash("review"),
+            return [.stop, .slash("new"), .slash("resume"), .slash("model"),
+                    .slash("permissions"), .slash("review"),
                     .transcript, .mode]
         }
     }
@@ -198,11 +198,11 @@ enum AgentCommandSet {
     static func overflow(for kind: AgentKind) -> [AgentCommand] {
         switch kind {
         case .claudeCode:
-            [.slash("rewind"), .slash("skills"), .slash("agents"),
+            [.slash("context"), .slash("skills"), .slash("agents"),
              .slash("export"), .slash("status"), .slash("usage"),
              .slash("mcp")]
         case .codex:
-            [.slash("diff"), .slash("status"), .slash("fork"),
+            [.slash("compact"), .slash("diff"), .slash("status"), .slash("fork"),
              .slash("init"), .slash("mention"), .slash("skills"),
              .slash("plan"), .slash("usage")]
         }

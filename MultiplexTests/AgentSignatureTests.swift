@@ -144,10 +144,24 @@ final class AgentSignatureTests: XCTestCase {
     func testCommandSetMembership() {
         // Ctrl+T toggles Codex's transcript overlay; Claude Code has no
         // such binding.
-        XCTAssertTrue(AgentCommandSet.primary(for: .codex).contains(.transcript))
+        let codexPrimary = AgentCommandSet.primary(for: .codex)
+        let codexOverflow = AgentCommandSet.overflow(for: .codex)
+        XCTAssertTrue(codexPrimary.contains(.transcript))
         XCTAssertFalse(AgentCommandSet.primary(for: .claudeCode).contains(.transcript))
 
+        // Compacting is occasionally useful in Codex, but does not need a
+        // permanent slot in the command bar.
+        XCTAssertFalse(codexPrimary.contains(.slash("compact")))
+        XCTAssertTrue(codexOverflow.contains(.slash("compact")))
+
         let claude = AgentCommandSet.primary(for: .claudeCode)
+        let claudeOverflow = AgentCommandSet.overflow(for: .claudeCode)
+        XCTAssertTrue(claude.contains(.slash("effort")))
+        XCTAssertFalse(claudeOverflow.contains(.slash("effort")))
+        XCTAssertTrue(claude.contains(.slash("rewind")))
+        XCTAssertFalse(claudeOverflow.contains(.slash("rewind")))
+        XCTAssertFalse(claude.contains(.slash("context")))
+        XCTAssertTrue(claudeOverflow.contains(.slash("context")))
         #if os(visionOS)
         // No key rail on visionOS — transcript paging rides the strip.
         XCTAssertEqual(Array(claude.suffix(2)), [.pageUp, .pageDown])
@@ -156,7 +170,7 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertFalse(claude.contains(.pageUp))
         XCTAssertFalse(claude.contains(.pageDown))
         #endif
-        XCTAssertFalse(AgentCommandSet.primary(for: .codex).contains(.pageUp))
+        XCTAssertFalse(codexPrimary.contains(.pageUp))
     }
 
     func testEveryCommandIsSafeToType() {
