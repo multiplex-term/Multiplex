@@ -14,7 +14,13 @@ struct SingleWindowShell: View {
 
     @State private var terminalRoute: TerminalWindowRoute
     @State private var compactShowsTerminal: Bool
+    /// Keeps the first responder off the navigation's critical path. The
+    /// first software-keyboard setup can synchronously occupy the main actor;
+    /// the terminal should start moving before UIKit does that cold work.
+    @State private var terminalFocusReady = true
     @State private var deckRailVisible = true
+
+    private static let navigationResponse: TimeInterval = 0.3
 
     init(initialRoute: TerminalWindowRoute? = nil) {
         let route = initialRoute ?? TerminalWindowRoute(tabs: [])
@@ -194,7 +200,8 @@ struct SingleWindowShell: View {
                     openTerminalRoute: openTerminalRoute,
                     revealTab: revealTab,
                     tabsEmptied: terminalTabsEmptied,
-                    terminalFocusAllowed: expanded || compactShowsTerminal
+                    terminalFocusAllowed: (expanded || compactShowsTerminal)
+                        && terminalFocusReady
                 )
             )
         }
@@ -215,7 +222,9 @@ struct SingleWindowShell: View {
     }
 
     private var shellAnimation: Animation? {
-        reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)
+        reduceMotion
+            ? nil
+            : .spring(response: Self.navigationResponse, dampingFraction: 1)
     }
 
     /// Every incoming window route becomes tabs in this shell. AUTO_ATTACH
@@ -223,19 +232,24 @@ struct SingleWindowShell: View {
     /// to the same ordered tab list.
     private func openTerminalRoute(_ incoming: TerminalWindowRoute) {
         guard !incoming.tabs.isEmpty else { return }
+        let isColdStart = terminalRoute.tabs.isEmpty
+        if isColdStart { terminalFocusReady = false }
         terminalRoute.merge(incoming.tabs)
         if let selected = incoming.activeTab?.id ?? incoming.tabs.first?.id {
             terminalRoute.activate(selected)
         }
         compactShowsTerminal = true
-        focusAfterNavigation(tabID: terminalRoute.activeTabID)
+        focusAfterNavigation(
+            tabID: terminalRoute.activeTabID,
+            deferringColdStart: isColdStart
+        )
     }
 
     /// TerminalWorkspace's existing press-to-focus lookup calls this reveal
     /// closure for an already-open session instead of creating a duplicate.
     private func revealTab(_ tabID: UUID) {
         compactShowsTerminal = true
-        focusAfterNavigation(tabID: tabID)
+        focusAfterNavigation(tabID: tabID, deferringColdStart: false)
     }
 
     private func showDeck(expanded: Bool) {
@@ -244,19 +258,45 @@ struct SingleWindowShell: View {
         } else {
             releaseTerminalFocus()
             compactShowsTerminal = false
+            // Cancel any still-pending cold-focus gate. Its delayed claim
+            // sees the hidden stage and no-ops; a later warm reveal can focus
+            // immediately, including after rotating into expanded layout.
+            terminalFocusReady = true
         }
     }
 
     private func terminalTabsEmptied() {
+        terminalFocusReady = true
         releaseTerminalFocus()
         compactShowsTerminal = false
         deckRailVisible = true
     }
 
-    private func focusAfterNavigation(tabID: UUID?) {
+    /// A cold `becomeFirstResponder()` initializes TextInputUI and can block
+    /// the main actor long enough to delay the shell's first rendered motion.
+    /// Let the navigation spring get underway before asking for the keyboard.
+    /// Warm returns only yield one run-loop turn, preserving their existing
+    /// immediate focus behavior. Reduced Motion still gets one frame
+    /// to commit the static stage change before keyboard setup begins.
+    private func focusAfterNavigation(
+        tabID: UUID?,
+        deferringColdStart: Bool
+    ) {
         guard let tabID else { return }
-        DispatchQueue.main.async {
+        let claim = {
+            guard compactShowsTerminal,
+                  terminalRoute.activeTabID == tabID
+            else { return }
+            terminalFocusReady = true
             workspace.controller(for: tabID)?.focusTerminal()
+        }
+        if deferringColdStart {
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + (reduceMotion ? 0.05 : Self.navigationResponse),
+                execute: claim
+            )
+        } else {
+            DispatchQueue.main.async(execute: claim)
         }
     }
 
