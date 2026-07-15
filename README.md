@@ -16,10 +16,10 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
 ## What it does
 
 - **The wall (deck)** — add SSH hosts (password or OpenSSH ed25519/RSA key,
-  secrets in the Keychain); hosts and secrets sync to your other devices
-  through iCloud Keychain — end-to-end encrypted, nothing touches a server of
-  ours. Every host probes concurrently over an exec channel and renders as a
-  rail of live tiles: each tile streams the session's last lines
+  secrets in the Keychain); hosts, command setups, and secrets sync to your
+  other devices through iCloud Keychain — end-to-end encrypted, nothing
+  touches a server of ours. Every host probes concurrently over an exec channel
+  and renders as a rail of live tiles: each tile streams the session's last lines
   (`capture-pane` over the same control connection, ~5 s cadence while the
   deck is frontmost), wears a captioned red **LIVE** tally when attached, and
   carries telemetry (windows · panes · clients · agents · age). An unreachable host is a
@@ -54,13 +54,15 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
   context-specific command strip follows it. The focused terminal checks pane
   selection between full wall ticks, so moving across splits updates helpers
   in about a second; background panes remain visible in wall telemetry without
-  receiving commands intended for the active pane. Every built-in can be moved
-  independently between the bar and More. Each agent can also keep an ordered
-  set of custom commands: content may span multiple lines, Auto Submit is
-  optional, and Show in Bar controls placement independently of length. Bar
-  labels keep the first nine characters and append `...`; commands kept off the
-  bar stay in More. Shared mirrors one editable command into both the Claude
-  Code and Codex helper strips.
+  receiving commands intended for the active pane. Each host remembers its own
+  command setup: every built-in can be moved independently between the bar and
+  More, and each agent can keep an ordered set of custom commands. Content may
+  span multiple lines, Auto Submit is optional, and Show in Bar controls
+  placement independently of length. Bar labels keep the first nine characters
+  and append `...`; commands kept off the bar stay in More. Shared mirrors one
+  editable command into both agent strips on that host without changing another
+  host's setup. Command Setup is stored with the host record and follows it to
+  other devices through end-to-end encrypted iCloud Keychain sync.
 - **Keyboard focus** — exactly one terminal owns keyboard input at a time
   (`TerminalFocusArbiter`): every visionOS window is its own always-active
   scene, so per-window first responders leave input stuck on the first
@@ -81,7 +83,8 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
 SwiftUI (Deck window + N Terminal windows, each an ordered set of tabs)
    │
    ├── HostStore            hosts.json local cache; secrets + host records
-   │                        sync across devices via iCloud Keychain
+   │                        (including command setups) sync via iCloud Keychain
+   ├── AgentCommandConfiguration  pure per-host/agent helper layouts + commands
    ├── ThemeStore           terminal color schemes: built-ins + custom
    │                        (themes.json), selection in UserDefaults
    ├── ConnectionHub        one HostConnectionModel per host (probe connection)

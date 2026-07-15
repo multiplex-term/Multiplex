@@ -524,7 +524,12 @@ struct AddHostSheet: View {
     /// The form's current values as a Host record — what Save persists and
     /// what Test Connection dials, so the two can never disagree.
     private func formHost() -> Host {
-        var host = editing ?? Host(name: "", hostname: "", username: "")
+        // Start from the live record, not the snapshot that opened the sheet:
+        // another scene or iCloud may have updated its synced command setup
+        // while this form was open, and saving connection fields must retain it.
+        var host = editing.flatMap { store.host(id: $0.id) }
+            ?? editing
+            ?? Host(name: "", hostname: "", username: "")
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         host.name = trimmedName.isEmpty ? hostname : trimmedName
         host.hostname = hostname.trimmingCharacters(in: .whitespaces)

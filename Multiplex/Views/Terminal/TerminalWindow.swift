@@ -34,7 +34,6 @@ struct TerminalWindowRoot: View {
 
     @Environment(HostStore.self) private var store
     @Environment(ConnectionHub.self) private var hub
-    @Environment(CustomAgentCommandStore.self) private var customAgentCommands
     @Environment(TerminalWorkspace.self) private var workspace
     @Environment(EntitlementStore.self) private var entitlements
     @Environment(\.dismiss) private var dismiss
@@ -132,6 +131,10 @@ struct TerminalWindowRoot: View {
     var body: some View {
         platformBody
             .task { syncTabs() }
+            // A restored terminal scene may exist without constructing the
+            // deck. Refresh the mirrored Host record here too so its command
+            // setup can arrive from another device before the editor opens.
+            .task { await store.refreshFromCloud() }
             .task { entitlements.refreshSlashChipMeter() }
             .task(id: activeTab?.hostID) { await keepHostProbeWarm() }
             .task(id: activeTab?.id) { await watchActivePane() }
@@ -183,6 +186,7 @@ struct TerminalWindowRoot: View {
             // a round trip instead of a heartbeat interval.
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
+                    Task { await store.refreshFromCloud() }
                     entitlements.refreshSlashChipMeter()
                     activeController?.restoreFocusIfOwner(
                         allowed: terminalFocusAllowed
@@ -339,13 +343,16 @@ struct TerminalWindowRoot: View {
         guard let controller = activeController,
               let view = controller.terminalView,
               view === TerminalFocusArbiter.current,
+              let activeTab,
               let agent = shownAgent,
               entitlements.isPro || entitlements.canUseSlashChip,
               controller.status == .live,
               let command = AgentCommandSet.commands(
                   in: .bar,
                   for: agent,
-                  placementOverrides: customAgentCommands.builtInPlacements(for: agent)
+                  placementOverrides: store.agentCommandConfiguration(
+                      for: activeTab.hostID
+                  ).builtInPlacements(for: agent)
               ).first(where: { $0.label.hasPrefix("/") })
         else { return }
         send(command, via: controller)
@@ -609,23 +616,30 @@ struct TerminalWindowRoot: View {
         floating: Bool,
         floatingMaximumWidth: CGFloat? = nil
     ) -> some View {
-        if let agent = shownAgent,
+        if let activeTab,
+           let agent = shownAgent,
            let controller = activeController,
            controller.status == .live {
+            let commandConfiguration = store.agentCommandConfiguration(
+                for: activeTab.hostID
+            )
             AgentHelperStrip(
                 agent: agent,
                 canShowCommands: entitlements.isPro || entitlements.canUseSlashChip,
-                builtInPlacements: customAgentCommands.builtInPlacements(for: agent),
-                customCommands: customAgentCommands.commands(for: agent),
+                builtInPlacements: commandConfiguration.builtInPlacements(
+                    for: agent
+                ),
+                customCommands: commandConfiguration.commands(for: agent),
                 floating: floating,
                 floatingMaximumWidth: floatingMaximumWidth,
                 contentSafeArea: floating ? EdgeInsets() : contentSafeArea,
                 send: { send($0, via: controller) },
                 saveCommandConfiguration: { commands, placements in
-                    customAgentCommands.replace(
+                    store.replaceAgentCommandConfiguration(
                         commands,
                         builtInPlacements: placements,
-                        for: agent
+                        for: agent,
+                        hostID: activeTab.hostID
                     )
                 },
                 openPaywall: { showingPaywall = true },
@@ -634,6 +648,10 @@ struct TerminalWindowRoot: View {
                     return TerminalFocusArbiter.current === terminalView
                 }
             )
+            // A tab switch can keep the same detected agent while changing
+            // hosts. Reset any open drafts so they cannot save into the host
+            // now behind the terminal surface.
+            .id(activeTab.hostID)
         }
     }
 

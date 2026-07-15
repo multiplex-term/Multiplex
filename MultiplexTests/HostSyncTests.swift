@@ -104,6 +104,8 @@ final class HostSyncTests: XCTestCase {
         XCTAssertNil(host.moshServerPath)
         XCTAssertNil(host.moshPorts)
         XCTAssertEqual(host.workingDirs, [])
+        XCTAssertTrue(host.agentCommandConfiguration.isEmpty)
+        XCTAssertEqual(host.agentCommandConfigurationVersion, 0)
     }
 
     func testHostRoundTripsThroughRecordEncoding() throws {
@@ -111,6 +113,118 @@ final class HostSyncTests: XCTestCase {
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(Host.self, from: data)
         XCTAssertEqual(decoded, original)
+    }
+
+    func testNewerCloudCommandSetupWinsWithTheHostRecord() {
+        var local = host("devbox", updatedAt: Date(timeIntervalSince1970: 1000))
+        var remote = local
+        let remoteCommand = CustomAgentCommand(content: "/from-ipad")
+        remote.agentCommandConfiguration.replace(
+            [remoteCommand],
+            builtInPlacements: ["/clear": .more],
+            for: .claudeCode
+        )
+        remote.updatedAt = Date(timeIntervalSince1970: 2000)
+
+        let resolution = HostSync.merge(
+            local: [local],
+            cloud: [remote],
+            mirrored: [local.id]
+        )
+
+        XCTAssertEqual(resolution.hosts, [remote])
+        XCTAssertEqual(
+            resolution.hosts[0].agentCommandConfiguration.commands(
+                for: .claudeCode
+            ),
+            [remoteCommand]
+        )
+        XCTAssertTrue(resolution.toPush.isEmpty)
+    }
+
+    func testNewerLegacyCloudEditCannotEraseLocalCommandSetup() {
+        var local = host("devbox", updatedAt: Date(timeIntervalSince1970: 1000))
+        let command = CustomAgentCommand(content: "/keep-me")
+        local.agentCommandConfiguration.replace(
+            [command],
+            builtInPlacements: ["/clear": .more],
+            for: .claudeCode
+        )
+
+        var legacyRemote = local
+        legacyRemote.name = "renamed-on-old-ipad"
+        legacyRemote.agentCommandConfiguration = AgentCommandConfiguration()
+        legacyRemote.agentCommandConfigurationVersion = 0
+        legacyRemote.updatedAt = Date(timeIntervalSince1970: 2000)
+
+        let resolution = HostSync.merge(
+            local: [local],
+            cloud: [legacyRemote],
+            mirrored: [local.id]
+        )
+
+        XCTAssertEqual(resolution.hosts[0].name, "renamed-on-old-ipad")
+        XCTAssertEqual(
+            resolution.hosts[0].agentCommandConfiguration.commands(
+                for: .claudeCode
+            ),
+            [command]
+        )
+        XCTAssertEqual(resolution.hosts[0].agentCommandConfigurationVersion, 1)
+        XCTAssertEqual(resolution.toPush, resolution.hosts)
+    }
+
+    func testNewerLegacyLocalEditMergesCloudCommandsBeforeRepublishing() {
+        var remote = host("devbox", updatedAt: Date(timeIntervalSince1970: 1000))
+        let command = CustomAgentCommand(content: "/from-vision-pro")
+        remote.agentCommandConfiguration.replace(
+            [command],
+            builtInPlacements: [:],
+            for: .codex
+        )
+
+        var legacyLocal = remote
+        legacyLocal.hostname = "edited-by-old-build.example.com"
+        legacyLocal.agentCommandConfiguration = AgentCommandConfiguration()
+        legacyLocal.agentCommandConfigurationVersion = 0
+        legacyLocal.updatedAt = Date(timeIntervalSince1970: 2000)
+
+        let resolution = HostSync.merge(
+            local: [legacyLocal],
+            cloud: [remote],
+            mirrored: [remote.id]
+        )
+
+        XCTAssertEqual(
+            resolution.hosts[0].hostname,
+            "edited-by-old-build.example.com"
+        )
+        XCTAssertEqual(
+            resolution.hosts[0].agentCommandConfiguration.commands(for: .codex),
+            [command]
+        )
+        XCTAssertEqual(resolution.toPush, resolution.hosts)
+    }
+
+    func testCommandSetupDoesNotChangeProbeConnectionConfiguration() {
+        let original = host("devbox")
+        var commandsEdited = original
+        commandsEdited.agentCommandConfiguration.replace(
+            [CustomAgentCommand(content: "/review")],
+            builtInPlacements: [:],
+            for: .claudeCode
+        )
+        commandsEdited.updatedAt = .now
+
+        XCTAssertTrue(
+            original.hasSameConnectionModelConfiguration(as: commandsEdited)
+        )
+
+        var addressEdited = commandsEdited
+        addressEdited.hostname = "new.example.com"
+        XCTAssertFalse(
+            original.hasSameConnectionModelConfiguration(as: addressEdited)
+        )
     }
 
     func testHostMoshFieldsRoundTripThroughRecordEncoding() throws {

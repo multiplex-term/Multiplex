@@ -87,6 +87,9 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 - `MULTIPLEX_AUTO_PAYWALL=1` — opens the real locked Pro paywall with a
   deterministic $19.99 storefront preview for App Review screenshot capture;
   DEBUG only, because simctl launches don't inherit Xcode's StoreKit session.
+- `MULTIPLEX_AUTO_HOST_SETTINGS=1` — opens the first host's edit sheet to
+  regression-check the Observation environment across the shell/scene sheet
+  boundary (a missing HostStore is a fatal error, not a recoverable blank).
 - `MULTIPLEX_FORCE_SHELL=1|0` — DEBUG-only override for the single-window
   shell decision. `1` forces the real shell on and `0` forces classic
   multi-window mode on any device. Without an override, iPhone always uses
@@ -196,12 +199,12 @@ SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
          Shell = real FleetWall + one ordered TerminalWindowRoute tab set
          a terminal window/shell = ordered tabs; each tab a TerminalRoute
   HostStore          hosts.json local cache; secrets + host records sync via
-                     iCloud Keychain as synchronizable items (KeychainStore)
+                     iCloud Keychain as synchronizable items (KeychainStore);
+                     host records include per-host agent command configuration
   ThemeStore         terminal color schemes — TerminalTheme built-ins + custom
                      (themes.json); selected id in UserDefaults; device-local
-  CustomAgentCommandStore  built-in Bar/More overrides + ordered custom helpers
-                     per agent (agent-commands.json), device-local; shared UUIDs
-                     mirror custom rows into both agent profiles
+  AgentCommandConfiguration  pure per-host built-in Bar/More overrides + ordered
+                     custom helpers; shared UUIDs mirror between agent profiles
   ConnectionHub      one HostConnectionModel per host — the probe connection;
                      also feeds the wall's live miniatures (the probe's ONE
                      exec round-trip carries sessions + a pane-subtree-clipped
@@ -457,14 +460,21 @@ views.
   **Slash chips submit with a CR sent ~160 ms after the text** (separate
   write): Codex's composer treats an Enter inside one rapid burst as a pasted
   newline, not a submit — verified against rust-v0.144; Claude Code accepts
-  either. Built-in Bar/More choices persist per agent as deviations from the
-  curated defaults (stale/default-valued overrides are discarded, so future
-  command-set updates still land correctly). Custom commands are stored per
-  agent; `shared` mirrors the same UUID into both profiles, so either editor
-  updates it, unsharing keeps it only in the editor being saved, and deletion
-  removes it from both. Every custom tap uses the same daily meter, ordered
-  pump, and optional delayed CR. `showInBar` controls custom placement
-  independently of content length; opted-in labels keep the first nine
+  either. Built-in Bar/More choices persist per host and agent as deviations
+  from the curated defaults (stale/default-valued overrides are discarded, so
+  future command-set updates still land correctly). Custom commands use the
+  same host-and-agent scope; `shared` mirrors the same UUID only between that
+  host's two profiles, so either editor updates it, unsharing keeps it only in
+  the editor being saved, and deletion removes it from both without touching
+  another host. The configuration is part of the Codable Host record, so every
+  save bumps `Host.updatedAt` and mirrors through synchronizable iCloud Keychain.
+  The former device-local `agent-commands.json` (both global and short-lived
+  host-scoped shapes) is a launch fallback, then migrates into Host only after
+  the first cloud merge; a schema version distinguishes an intentionally empty
+  synced setup from a pre-migration record, and malformed legacy JSON is kept
+  rather than silently cleared. Every custom tap uses the same daily meter,
+  ordered pump, and optional delayed CR. `showInBar` controls custom
+  placement independently of content length; opted-in labels keep the first nine
   characters and append `...` (newlines/tabs render as `↵` / `⇥`), while
   opted-out commands remain in MORE. The editor strips invisible terminal
   controls, including Ctrl-B, before persistence/injection. Its editable rows
@@ -556,13 +566,17 @@ views.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
   entitlement/CloudKit): secrets *and* a JSON host record per host are
   synchronizable keychain items (services `app.multiplexterm.multiplex` /
-  `….multiplex.hosts`). Every keychain query must pass
+  `….multiplex.hosts`). The host record includes agent custom commands and
+  built-in Bar/More placement, so Command Setup follows that host across
+  devices. Every keychain query must pass
   `kSecAttrSynchronizable(Any)` — omitting it silently matches only
   device-local items. `HostSync.merge` (pure, unit-tested) reconciles
-  hosts.json with the mirror: last writer wins by `Host.updatedAt`; a
-  locally-persisted mirrored-IDs set distinguishes "new local host → publish"
-  from "peer deleted it → drop". Keychain sync has no change notification —
-  the deck re-merges on scenePhase `.active`.
+  hosts.json with the mirror: last writer wins by `Host.updatedAt`, but a
+  legacy-schema winner first inherits the modern peer's command setup so an
+  unrelated edit from an older app cannot erase it; a locally-persisted
+  mirrored-IDs set distinguishes "new local host → publish" from "peer deleted
+  it → drop". Keychain sync has no change notification — deck and restored
+  terminal roots re-merge on scenePhase `.active`.
 - **App icon is a hand-authored Icon Composer package** (`AppIcon.icon` at
   the repo root; spec + bake-off record in `DESIGN.md`). icon.json lists
   groups frontmost-first. Validate/render headlessly with `xcrun actool

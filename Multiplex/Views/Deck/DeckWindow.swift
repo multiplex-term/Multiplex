@@ -163,8 +163,19 @@ struct DeckWindow: View {
             editHost: { editingHost = $0 },
             openSettings: { showingSettings = true }
         )
-        .sheet(isPresented: $addingHost) { AddHostSheet() }
-        .sheet(item: $editingHost) { host in AddHostSheet(editing: host) }
+        // Explicitly bridge Observation environments across the scene sheet
+        // boundary. iOS 27 can otherwise present this sheet from the shell's
+        // nested deck host without carrying HostStore, causing a fatal lookup.
+        .sheet(isPresented: $addingHost) {
+            AddHostSheet()
+                .environment(store)
+                .environment(entitlements)
+        }
+        .sheet(item: $editingHost) { host in
+            AddHostSheet(editing: host)
+                .environment(store)
+                .environment(entitlements)
+        }
         .sheet(isPresented: $showingSettings) { SettingsView() }
         .sheet(isPresented: $showingPaywall) { ProPaywallView() }
         .alert("Local Network Access Is Off", isPresented: $showingLocalNetworkAlert) {
@@ -209,6 +220,7 @@ struct DeckWindow: View {
         }
         #if DEBUG
         .task { presentPaywallForReviewCaptureIfRequested() }
+        .task { await presentHostSettingsForVerificationIfRequested() }
         .task {
             await DeckScene.autoAttachIfRequested(
                 store: store,
@@ -241,6 +253,22 @@ struct DeckWindow: View {
     }
 
     #if DEBUG
+    /// Headless regression hook for the Observation environment crossing the
+    /// deck's sheet boundary. A missing HostStore used to fatal as Host
+    /// Settings opened from the compact shell.
+    private func presentHostSettingsForVerificationIfRequested() async {
+        guard ProcessInfo.processInfo.environment[
+            "MULTIPLEX_AUTO_HOST_SETTINGS"
+        ] == "1" else { return }
+        for _ in 0..<50 {
+            if let host = store.hosts.first {
+                editingHost = host
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
     /// Launch with `MULTIPLEX_AUTO_PAYWALL=1` to render the real locked
     /// paywall immediately for its App Review screenshot. simctl launches do
     /// not inherit Xcode's StoreKit test session, so EntitlementStore supplies

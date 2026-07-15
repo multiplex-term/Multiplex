@@ -81,11 +81,8 @@ final class CustomAgentCommandTests: XCTestCase {
         XCTAssertEqual(drafts.command(id: second.id)?.content, "second")
     }
 
-    func testStoreMigratesLegacyPlacementWithoutExpandingTheBar() throws {
-        let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("agent-commands-legacy-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
-
+    func testLegacyPlacementMigrationDoesNotExpandTheBar() throws {
+        let hostID = UUID()
         let shortID = UUID()
         let longID = UUID()
         let tabID = UUID()
@@ -101,10 +98,13 @@ final class CustomAgentCommandTests: XCTestCase {
           }
         ]
         """
-        try Data(json.utf8).write(to: file)
 
-        let commands = CustomAgentCommandStore(fileURL: file)
-            .commands(for: .claudeCode)
+        let source = try XCTUnwrap(
+            CustomAgentCommandMigration.decode(Data(json.utf8))
+        )
+        let commands = source.configuration(for: hostID).commands(
+            for: .claudeCode
+        )
 
         XCTAssertEqual(commands.map(\.showInBar), [true, false, false])
         XCTAssertEqual(commands.map(\.shared), [false, false, false])
@@ -112,10 +112,6 @@ final class CustomAgentCommandTests: XCTestCase {
     }
 
     func testSharedCommandMirrorsAndStaysEditableFromEitherAgent() throws {
-        let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("agent-commands-shared-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
-
         let claudeOnly = CustomAgentCommand(content: "/claude")
         let shared = CustomAgentCommand(
             content: "review everything",
@@ -123,42 +119,53 @@ final class CustomAgentCommandTests: XCTestCase {
             showInBar: true,
             shared: true
         )
-        let store = CustomAgentCommandStore(fileURL: file)
+        var configuration = AgentCommandConfiguration()
 
-        store.replace([claudeOnly, shared], for: .claudeCode)
-        XCTAssertEqual(store.commands(for: .claudeCode), [claudeOnly, shared])
-        XCTAssertEqual(store.commands(for: .codex), [shared])
+        configuration.replace(
+            [claudeOnly, shared],
+            builtInPlacements: [:],
+            for: .claudeCode
+        )
+        XCTAssertEqual(
+            configuration.commands(for: .claudeCode),
+            [claudeOnly, shared]
+        )
+        XCTAssertEqual(configuration.commands(for: .codex), [shared])
 
         var editedFromCodex = shared
         editedFromCodex.content = "review and test everything"
         editedFromCodex.autoSubmit = false
-        store.replace([editedFromCodex], for: .codex)
+        configuration.replace(
+            [editedFromCodex],
+            builtInPlacements: [:],
+            for: .codex
+        )
 
         XCTAssertEqual(
-            store.commands(for: .claudeCode),
+            configuration.commands(for: .claudeCode),
             [claudeOnly, editedFromCodex]
         )
-        XCTAssertEqual(store.commands(for: .codex), [editedFromCodex])
+        XCTAssertEqual(configuration.commands(for: .codex), [editedFromCodex])
 
-        let relaunched = CustomAgentCommandStore(fileURL: file)
-        XCTAssertEqual(
-            relaunched.commands(for: .claudeCode),
-            [claudeOnly, editedFromCodex]
+        let data = try JSONEncoder().encode(configuration)
+        var relaunched = try JSONDecoder().decode(
+            AgentCommandConfiguration.self,
+            from: data
         )
-        XCTAssertEqual(relaunched.commands(for: .codex), [editedFromCodex])
+        XCTAssertEqual(relaunched, configuration)
 
         var codexOnly = editedFromCodex
         codexOnly.shared = false
-        relaunched.replace([codexOnly], for: .codex)
+        relaunched.replace(
+            [codexOnly],
+            builtInPlacements: [:],
+            for: .codex
+        )
         XCTAssertEqual(relaunched.commands(for: .claudeCode), [claudeOnly])
         XCTAssertEqual(relaunched.commands(for: .codex), [codexOnly])
     }
 
     func testSharedCommandReplacesEquivalentLocalActionAndDeletesFromBoth() {
-        let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("agent-commands-shared-delete-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
-
         let local = CustomAgentCommand(
             content: "/review",
             autoSubmit: true,
@@ -170,39 +177,42 @@ final class CustomAgentCommandTests: XCTestCase {
             showInBar: true,
             shared: true
         )
-        let store = CustomAgentCommandStore(fileURL: file)
+        var configuration = AgentCommandConfiguration()
 
-        store.replace([local], for: .codex)
-        store.replace([shared], for: .claudeCode)
-        XCTAssertEqual(store.commands(for: .claudeCode), [shared])
-        XCTAssertEqual(store.commands(for: .codex), [shared])
+        configuration.replace(
+            [local],
+            builtInPlacements: [:],
+            for: .codex
+        )
+        configuration.replace(
+            [shared],
+            builtInPlacements: [:],
+            for: .claudeCode
+        )
+        XCTAssertEqual(configuration.commands(for: .claudeCode), [shared])
+        XCTAssertEqual(configuration.commands(for: .codex), [shared])
 
-        store.replace([], for: .codex)
-        XCTAssertTrue(store.commands(for: .claudeCode).isEmpty)
-        XCTAssertTrue(store.commands(for: .codex).isEmpty)
+        configuration.replace(
+            [],
+            builtInPlacements: [:],
+            for: .codex
+        )
+        XCTAssertTrue(configuration.commands(for: .claudeCode).isEmpty)
+        XCTAssertTrue(configuration.commands(for: .codex).isEmpty)
+        XCTAssertTrue(configuration.isEmpty)
     }
 
-    func testStoreRepairsOneSidedSharedCommandOnLoad() throws {
-        let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("agent-commands-shared-load-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
-
+    func testConfigurationRepairsOneSidedSharedCommandOnDecode() throws {
         let shared = CustomAgentCommand(content: "/shared", shared: true)
-        let data = try JSONEncoder().encode([
-            LegacyProfile(agent: .claudeCode, commands: [shared]),
+        let configuration = AgentCommandConfiguration(profiles: [
+            .init(agent: .claudeCode, commands: [shared]),
         ])
-        try data.write(to: file)
 
-        let store = CustomAgentCommandStore(fileURL: file)
-        XCTAssertEqual(store.commands(for: .claudeCode), [shared])
-        XCTAssertEqual(store.commands(for: .codex), [shared])
+        XCTAssertEqual(configuration.commands(for: .claudeCode), [shared])
+        XCTAssertEqual(configuration.commands(for: .codex), [shared])
     }
 
-    func testStorePersistsSeparateOrderedProfiles() throws {
-        let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("agent-commands-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
-
+    func testConfigurationPersistsOrderedProfilesAndNormalizedPlacements() throws {
         let claude = [
             CustomAgentCommand(content: "/review", autoSubmit: true),
             CustomAgentCommand(
@@ -211,83 +221,210 @@ final class CustomAgentCommandTests: XCTestCase {
                 showInBar: false
             ),
         ]
-        let codex = [
-            CustomAgentCommand(content: "/status", autoSubmit: true),
-        ]
+        let codex = [CustomAgentCommand(content: "/status")]
+        var configuration = AgentCommandConfiguration()
 
-        let store = CustomAgentCommandStore(fileURL: file)
-        store.replace(claude, for: .claudeCode)
-        store.replace(codex, for: .codex)
-
-        let relaunched = CustomAgentCommandStore(fileURL: file)
-        XCTAssertEqual(relaunched.commands(for: .claudeCode), claude)
-        XCTAssertEqual(relaunched.commands(for: .codex), codex)
-
-        relaunched.replace([], for: .claudeCode)
-        let afterDelete = CustomAgentCommandStore(fileURL: file)
-        XCTAssertTrue(afterDelete.commands(for: .claudeCode).isEmpty)
-        XCTAssertEqual(afterDelete.commands(for: .codex), codex)
-    }
-
-    func testStorePersistsBuiltInPlacementOverridesWithoutCustomCommands() throws {
-        let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("agent-command-placements-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
-
-        let store = CustomAgentCommandStore(fileURL: file)
-        store.replace(
-            [],
+        configuration.replace(
+            claude,
             builtInPlacements: [
                 "/clear": .more,
                 "/context": .bar,
-                // Stock choices and stale IDs should not fossilize in JSON.
+                // Defaults and stale IDs must not fossilize in Host JSON.
                 "/resume": .bar,
                 "removed-command": .more,
             ],
             for: .claudeCode
         )
+        configuration.replace(
+            codex,
+            builtInPlacements: [:],
+            for: .codex
+        )
 
-        let expected: [String: AgentCommandPlacement] = [
+        let expectedPlacements: [String: AgentCommandPlacement] = [
             "/clear": .more,
             "/context": .bar,
         ]
-        XCTAssertEqual(store.builtInPlacements(for: .claudeCode), expected)
-        XCTAssertTrue(store.commands(for: .claudeCode).isEmpty)
-        XCTAssertTrue(store.builtInPlacements(for: .codex).isEmpty)
-
-        let relaunched = CustomAgentCommandStore(fileURL: file)
-        XCTAssertEqual(relaunched.builtInPlacements(for: .claudeCode), expected)
-
-        // A custom-only save must retain the independently configured stock
-        // layout rather than silently restoring defaults.
-        let custom = CustomAgentCommand(content: "/review")
-        relaunched.replace([custom], for: .claudeCode)
-        XCTAssertEqual(relaunched.commands(for: .claudeCode), [custom])
-        XCTAssertEqual(relaunched.builtInPlacements(for: .claudeCode), expected)
-
-        relaunched.replace(
-            [custom],
-            builtInPlacements: [:],
-            for: .claudeCode
+        XCTAssertEqual(configuration.commands(for: .claudeCode), claude)
+        XCTAssertEqual(configuration.commands(for: .codex), codex)
+        XCTAssertEqual(
+            configuration.builtInPlacements(for: .claudeCode),
+            expectedPlacements
         )
-        let reset = CustomAgentCommandStore(fileURL: file)
-        XCTAssertTrue(reset.builtInPlacements(for: .claudeCode).isEmpty)
-        XCTAssertEqual(reset.commands(for: .claudeCode), [custom])
+
+        let data = try JSONEncoder().encode(configuration)
+        let decoded = try JSONDecoder().decode(
+            AgentCommandConfiguration.self,
+            from: data
+        )
+        XCTAssertEqual(decoded, configuration)
     }
 
-    func testStoreFailsSoftOnMalformedJSON() throws {
-        let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("agent-commands-bad-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
-        try Data("not json".utf8).write(to: file)
+    func testHostRecordRoundTripCarriesCommandSetupForKeychainSync() throws {
+        let custom = CustomAgentCommand(
+            content: "review this host",
+            autoSubmit: false,
+            shared: true
+        )
+        var host = Host(
+            name: "devbox",
+            hostname: "dev.example.com",
+            username: "dev"
+        )
+        host.agentCommandConfiguration.replace(
+            [custom],
+            builtInPlacements: ["/clear": .more],
+            for: .claudeCode
+        )
 
-        let store = CustomAgentCommandStore(fileURL: file)
-        XCTAssertTrue(store.commands(for: .claudeCode).isEmpty)
-        XCTAssertTrue(store.commands(for: .codex).isEmpty)
+        let data = try JSONEncoder().encode(host)
+        let decoded = try JSONDecoder().decode(Host.self, from: data)
+
+        XCTAssertEqual(decoded, host)
+        XCTAssertEqual(
+            decoded.agentCommandConfiguration.commands(for: .claudeCode),
+            [custom]
+        )
+        XCTAssertEqual(
+            decoded.agentCommandConfiguration.commands(for: .codex),
+            [custom]
+        )
+        XCTAssertEqual(
+            decoded.agentCommandConfiguration.builtInPlacements(
+                for: .claudeCode
+            ),
+            ["/clear": .more]
+        )
+        XCTAssertEqual(decoded.agentCommandConfigurationVersion, 1)
+    }
+
+    func testHostStoreSaveWritesLocalCacheAndSynchronizableMirror() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("host-command-store-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = Host(
+            name: "sync-test",
+            hostname: "sync.example.com",
+            username: "dev"
+        )
+        defer { KeychainStore.deleteHostRecord(for: host.id) }
+        let hostsURL = directory.appendingPathComponent("hosts.json")
+        try JSONEncoder().encode([host]).write(to: hostsURL)
+
+        let store = HostStore(directory: directory, knownMirroredIDs: [])
+        let custom = CustomAgentCommand(
+            content: "review from every device",
+            autoSubmit: false
+        )
+        store.replaceAgentCommandConfiguration(
+            [custom],
+            builtInPlacements: ["/clear": .more],
+            for: .claudeCode,
+            hostID: host.id
+        )
+
+        let localHosts = try JSONDecoder().decode(
+            [Host].self,
+            from: Data(contentsOf: hostsURL)
+        )
+        XCTAssertEqual(
+            localHosts[0].agentCommandConfiguration.commands(for: .claudeCode),
+            [custom]
+        )
+
+        let mirrored = KeychainStore.hostRecords()
+            .compactMap { try? JSONDecoder().decode(Host.self, from: $0) }
+            .first { $0.id == host.id }
+        let mirroredHost = try XCTUnwrap(mirrored)
+        XCTAssertEqual(
+            mirroredHost.agentCommandConfiguration.commands(for: .claudeCode),
+            [custom]
+        )
+        XCTAssertEqual(
+            mirroredHost.agentCommandConfiguration.builtInPlacements(
+                for: .claudeCode
+            ),
+            ["/clear": .more]
+        )
+        XCTAssertGreaterThan(mirroredHost.updatedAt, host.updatedAt)
+    }
+
+    func testMigrationKeepsHostsIndependentAndScopedEmptyShadowsGlobal() throws {
+        let studioID = UUID()
+        let serverID = UUID()
+        let clearedID = UUID()
+        let legacy = CustomAgentCommand(content: "/legacy")
+        let studio = CustomAgentCommand(content: "/studio", shared: true)
+        let data = try JSONEncoder().encode([
+            LegacyProfile(
+                agent: .claudeCode,
+                commands: [legacy],
+                builtInPlacements: ["/clear": .more]
+            ),
+            LegacyProfile(
+                hostID: studioID,
+                agent: .claudeCode,
+                commands: [studio],
+                builtInPlacements: ["/context": .bar]
+            ),
+            // An explicit host-scoped empty profile means this host cleared
+            // the former global setup and must not inherit it during migration.
+            LegacyProfile(
+                hostID: clearedID,
+                agent: .claudeCode,
+                commands: []
+            ),
+        ])
+        let source = try XCTUnwrap(CustomAgentCommandMigration.decode(data))
+
+        let studioConfiguration = source.configuration(for: studioID)
+        XCTAssertEqual(
+            studioConfiguration.commands(for: .claudeCode),
+            [studio]
+        )
+        XCTAssertEqual(studioConfiguration.commands(for: .codex), [studio])
+        XCTAssertEqual(
+            studioConfiguration.builtInPlacements(for: .claudeCode),
+            ["/context": .bar]
+        )
+
+        let serverConfiguration = source.configuration(for: serverID)
+        XCTAssertEqual(
+            serverConfiguration.commands(for: .claudeCode),
+            [legacy]
+        )
+        XCTAssertEqual(
+            serverConfiguration.builtInPlacements(for: .claudeCode),
+            ["/clear": .more]
+        )
+        XCTAssertTrue(source.configuration(for: clearedID).isEmpty)
+    }
+
+    func testMigrationFailsSoftOnMalformedJSON() {
+        XCTAssertNil(CustomAgentCommandMigration.decode(Data("not json".utf8)))
     }
 
     private struct LegacyProfile: Codable {
+        var hostID: UUID?
         var agent: AgentKind
         var commands: [CustomAgentCommand]
+        var builtInPlacements: [String: AgentCommandPlacement]
+
+        init(
+            hostID: UUID? = nil,
+            agent: AgentKind,
+            commands: [CustomAgentCommand],
+            builtInPlacements: [String: AgentCommandPlacement] = [:]
+        ) {
+            self.hostID = hostID
+            self.agent = agent
+            self.commands = commands
+            self.builtInPlacements = builtInPlacements
+        }
     }
 }

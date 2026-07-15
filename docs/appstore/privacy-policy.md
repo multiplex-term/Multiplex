@@ -17,9 +17,9 @@ credentials, keys, terminal content, or usage.
 ## Where your data lives
 
 - **Host records and secrets** (addresses, usernames, passwords, private
-  keys) are stored in the device Keychain. If iCloud Keychain is enabled,
-  Apple syncs them between your devices **end-to-end encrypted**; we cannot
-  read them, and neither can Apple.
+  keys, and each host's agent-command setup) are stored in the device Keychain.
+  If iCloud Keychain is enabled, Apple syncs them between your devices
+  **end-to-end encrypted**; we cannot read them, and neither can Apple.
 - **Terminal traffic** flows directly between your device and your servers
   over SSH (or mosh), encrypted in transit. It never passes through any
   third party of ours.

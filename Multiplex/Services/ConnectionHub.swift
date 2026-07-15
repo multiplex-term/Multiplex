@@ -20,12 +20,14 @@ final class ConnectionHub {
 
     func model(for host: Host) -> HostConnectionModel {
         if let existing = models[host.id] {
-            if existing.host == host { return existing }
-            // The record changed under the model — edited locally or synced
-            // from another device. The old model keeps probing the old
-            // address with the old credentials (and would report CONNECTED
-            // against an endpoint the record no longer names), so replace
-            // it and let the wall's next tick connect fresh.
+            if existing.host.hasSameConnectionModelConfiguration(as: host) {
+                return existing
+            }
+            // Connection-relevant record data changed under the model —
+            // edited locally or synced from another device. The old model
+            // would keep probing stale settings, so replace it and let the
+            // wall's next tick connect fresh. Synced helper-command edits are
+            // deliberately excluded: changing a chip must not drop the probe.
             let stale = existing
             Task { await stale.disconnect() }
         }

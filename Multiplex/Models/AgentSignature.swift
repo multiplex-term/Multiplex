@@ -187,7 +187,7 @@ struct AgentCommand: Identifiable, Hashable {
 }
 
 /// Where one built-in helper appears. The stock command set supplies the
-/// default; device-local user overrides move individual commands between the
+/// default; per-host synced overrides move individual commands between the
 /// scrolling bar and MORE without changing the bytes they type.
 enum AgentCommandPlacement: String, Codable, Hashable {
     case bar

@@ -26,11 +26,28 @@ enum HostSync {
 
         for host in local {
             if let remote = cloudByID[host.id] {
+                // Host-level last-writer-wins remains the policy, but a peer
+                // running an older build cannot express command setup at all.
+                // Enrich that legacy record from the modern side before
+                // choosing the timestamp winner, then republish if the cloud
+                // copy was missing the field. This prevents an unrelated edit
+                // on an old device from erasing synced custom commands.
+                let enrichedLocal = preservingAgentCommands(
+                    in: host,
+                    from: remote
+                )
+                let enrichedRemote = preservingAgentCommands(
+                    in: remote,
+                    from: host
+                )
                 if host.updatedAt > remote.updatedAt {
-                    resolution.hosts.append(host)
-                    resolution.toPush.append(host)
+                    resolution.hosts.append(enrichedLocal)
+                    resolution.toPush.append(enrichedLocal)
                 } else {
-                    resolution.hosts.append(remote)
+                    resolution.hosts.append(enrichedRemote)
+                    if enrichedRemote != remote {
+                        resolution.toPush.append(enrichedRemote)
+                    }
                 }
             } else if mirrored.contains(host.id) {
                 resolution.removedIDs.insert(host.id)
@@ -46,5 +63,22 @@ enum HostSync {
             .sorted { ($0.name, $0.id.uuidString) < ($1.name, $1.id.uuidString) }
         resolution.hosts.append(contentsOf: adopted)
         return resolution
+    }
+
+    /// Fill only a schema absence. Once both records carry a versioned setup,
+    /// their ordinary host timestamps remain authoritative, including an
+    /// intentionally empty configuration.
+    private static func preservingAgentCommands(
+        in destination: Host,
+        from source: Host
+    ) -> Host {
+        guard destination.agentCommandConfigurationVersion
+                < source.agentCommandConfigurationVersion
+        else { return destination }
+        var enriched = destination
+        enriched.agentCommandConfiguration = source.agentCommandConfiguration
+        enriched.agentCommandConfigurationVersion =
+            source.agentCommandConfigurationVersion
+        return enriched
     }
 }

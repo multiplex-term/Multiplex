@@ -13,6 +13,12 @@ final class HostStore {
     private(set) var hosts: [Host] = []
 
     private let fileURL: URL
+    private let legacyAgentCommandsURL: URL
+    private let persistsDevicePreferences: Bool
+    /// Decoded once at launch. A malformed legacy file remains untouched and
+    /// blocks migration rather than silently clearing the user's commands.
+    private var legacyAgentCommandSource: CustomAgentCommandMigration.Source?
+    private let canMigrateLegacyAgentCommands: Bool
 
     /// Host IDs this device has confirmed in the Keychain mirror. Lets the
     /// merge tell "new local host, publish it" apart from "a peer deleted
@@ -25,18 +31,41 @@ final class HostStore {
     private static let sessionOrdersKey = "MultiplexSessionOrders"
     private var isRefreshingFromCloud = false
 
-    init() {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    init(
+        directory overrideDirectory: URL? = nil,
+        knownMirroredIDs: Set<UUID>? = nil
+    ) {
+        let dir = overrideDirectory ?? FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Multiplex", isDirectory: true)
+        persistsDevicePreferences = overrideDirectory == nil
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("hosts.json")
-        mirroredIDs = Set(
+        let legacyURL = dir.appendingPathComponent("agent-commands.json")
+        legacyAgentCommandsURL = legacyURL
+        let decodedLegacySource: CustomAgentCommandMigration.Source?
+        let legacyMigrationIsSafe: Bool
+        if FileManager.default.fileExists(atPath: legacyURL.path) {
+            let data = try? Data(contentsOf: legacyURL)
+            decodedLegacySource = data.flatMap(
+                CustomAgentCommandMigration.decode
+            )
+            legacyMigrationIsSafe = decodedLegacySource != nil
+        } else {
+            decodedLegacySource = .empty
+            legacyMigrationIsSafe = true
+        }
+        legacyAgentCommandSource = decodedLegacySource
+        canMigrateLegacyAgentCommands = legacyMigrationIsSafe
+        mirroredIDs = knownMirroredIDs ?? Set(
             (UserDefaults.standard.stringArray(forKey: Self.mirroredIDsKey) ?? [])
                 .compactMap(UUID.init)
         )
-        sessionOrders = Self.loadSessionOrders()
+        // An injected directory is a persistence test boundary; do not pull
+        // unrelated device presentation preferences into that isolated store.
+        sessionOrders = overrideDirectory == nil ? Self.loadSessionOrders() : [:]
         load()
-        seedFromEnvironmentIfNeeded()
+        if overrideDirectory == nil { seedFromEnvironmentIfNeeded() }
     }
 
     func add(_ host: Host) {
@@ -92,6 +121,42 @@ final class HostStore {
         hosts.first { $0.id == id }
     }
 
+    /// The synced setup, with the former local JSON as a launch-time fallback
+    /// until the first cloud reconciliation commits that data into Host.
+    func agentCommandConfiguration(for hostID: UUID) -> AgentCommandConfiguration {
+        guard let host = host(id: hostID) else {
+            return AgentCommandConfiguration()
+        }
+        guard host.agentCommandConfigurationVersion == 0 else {
+            return host.agentCommandConfiguration
+        }
+        return legacyAgentCommandSource?.configuration(for: hostID)
+            ?? host.agentCommandConfiguration
+    }
+
+    func replaceAgentCommandConfiguration(
+        _ commands: [CustomAgentCommand],
+        builtInPlacements: [String: AgentCommandPlacement],
+        for agent: AgentKind,
+        hostID: UUID
+    ) {
+        guard let host = host(id: hostID) else { return }
+        var configuration = agentCommandConfiguration(for: hostID)
+        configuration.replace(
+            commands,
+            builtInPlacements: builtInPlacements,
+            for: agent
+        )
+        guard host.agentCommandConfigurationVersion == 0
+                || configuration != host.agentCommandConfiguration
+        else { return }
+
+        var updated = host
+        updated.agentCommandConfiguration = configuration
+        updated.agentCommandConfigurationVersion = 1
+        update(updated)
+    }
+
     // MARK: - Session presentation order
 
     func orderedSessions(_ sessions: [TmuxSession], for hostID: UUID) -> [TmuxSession] {
@@ -136,6 +201,7 @@ final class HostStore {
             return KeychainStore.hostRecords()
         }.value
         syncWithCloud(records: records)
+        migrateLegacyAgentCommandConfigurationsIfNeeded()
     }
 
     private func load() {
@@ -148,6 +214,39 @@ final class HostStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(hosts) else { return }
         try? data.write(to: fileURL, options: .atomic)
+    }
+
+    /// After cloud records have won/lost by their normal `updatedAt` policy,
+    /// move any still-legacy hosts to the synced schema and mirror them. This
+    /// ordering prevents a stale device-local file from replacing a command
+    /// setup that already arrived from an updated peer.
+    private func migrateLegacyAgentCommandConfigurationsIfNeeded() {
+        guard canMigrateLegacyAgentCommands,
+              let source = legacyAgentCommandSource,
+              !hosts.isEmpty
+        else { return }
+
+        var migrated: [Host] = []
+        let timestamp = Date.now
+        for index in hosts.indices
+        where hosts[index].agentCommandConfigurationVersion == 0 {
+            hosts[index].agentCommandConfiguration = source.configuration(
+                for: hosts[index].id
+            )
+            hosts[index].agentCommandConfigurationVersion = 1
+            hosts[index].updatedAt = timestamp
+            migrated.append(hosts[index])
+        }
+
+        if !migrated.isEmpty {
+            save()
+            for host in migrated { mirror(host) }
+        }
+
+        if FileManager.default.fileExists(atPath: legacyAgentCommandsURL.path) {
+            try? FileManager.default.removeItem(at: legacyAgentCommandsURL)
+        }
+        legacyAgentCommandSource = .empty
     }
 
     private func move(_ host: Host, offset: Int) {
@@ -176,6 +275,7 @@ final class HostStore {
     }
 
     private func persistSessionOrders() {
+        guard persistsDevicePreferences else { return }
         let raw = Dictionary(uniqueKeysWithValues: sessionOrders.map { ($0.key.uuidString, $0.value) })
         guard !raw.isEmpty else {
             UserDefaults.standard.removeObject(forKey: Self.sessionOrdersKey)
@@ -222,6 +322,7 @@ final class HostStore {
     }
 
     private func persistMirroredIDs() {
+        guard persistsDevicePreferences else { return }
         UserDefaults.standard.set(mirroredIDs.map(\.uuidString).sorted(), forKey: Self.mirroredIDsKey)
     }
 

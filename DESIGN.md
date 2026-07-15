@@ -104,11 +104,14 @@ panels with the same lamp anatomy.
 **Agent commands.** The detected agent's helper rail uses the same square
 chassis language. MORE opens an anchored TALLY editor: a collapsed Built-in
 accordion reveals compact Bar/More choices, followed by ordered multiline
-custom rows with Submit, Bar, and Shared switches. Shared keeps one custom
-command synchronized in both the Claude Code and Codex rails. Commands opted into a rail use
-`customCommand`, a warm neutral that marks provenance without borrowing the
-red/amber/green state vocabulary. Their labels keep the first nine characters
-and append `...` when truncated (newlines and tabs render as `↵` / `⇥`);
+custom rows with Submit, Bar, and Shared switches. Each host retains an
+independent setup that follows its host through iCloud Keychain; Shared keeps
+one custom command synchronized in that host's Claude Code and Codex rails
+without changing another host. Commands opted into a rail use `customCommand`,
+a warm neutral that marks provenance without
+borrowing the red/amber/green state vocabulary. Their labels keep the first
+nine characters and append `...` when truncated (newlines and tabs render as
+`↵` / `⇥`);
 commands kept off the rail remain in MORE.
 
 **Tabs.** Multiviewer source labels on an opaque chassis slab (top ornament

@@ -77,15 +77,17 @@ Current product split:
   and wall telemetry with active-pane-aware helpers, built-in terminal themes,
   a most-used tmux shortcut dropdown on
   both platforms (including touch-native copy-mode selection and explicit
-  exit), iCloud Keychain sync, per-agent built-in command placement between Bar
-  and More, custom commands (ordered, multiline, optional Auto Submit and
-  explicit bar placement, with nine-character bar label previews, plus optional
-  sharing between the Claude Code and Codex strips), and ten built-in or custom
-  agent-command chip taps per local calendar day.
+  exit), iCloud Keychain host/secret/command-setup sync, per-host/per-agent
+  built-in command placement between Bar and More, custom commands (ordered,
+  multiline, optional Auto Submit and explicit bar placement, with
+  nine-character bar label previews, plus optional sharing between that host's
+  Claude Code and Codex strips), and
+  ten built-in or custom agent-command chip taps per local calendar day.
 - Pro: unlimited hosts, mosh, unmetered built-in and custom agent command
   chips, agent alerts, and custom-theme editing.
-- Existing/synced hosts, existing mosh configuration, and existing custom
-  themes are never deleted or disabled when Pro is absent.
+- Existing/synced hosts, existing mosh configuration, existing custom themes,
+  and migrated per-device command setups are never deleted or disabled when Pro
+  is absent.
 
 When this split changes, update this document, the local StoreKit catalog,
 the app description and release notes, review notes, paywall copy, affected
