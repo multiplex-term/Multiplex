@@ -71,6 +71,42 @@ enum TerminalFocusArbiter {
         }
     }
 
+    /// Relinquish focus when an in-scene terminal stage navigates back to
+    /// the deck. Only the current owner may release the app-wide input
+    /// session; hidden/inactive tabs cannot disturb another terminal.
+    static func release(_ view: TerminalView) {
+        guard current === view else { return }
+        #if DEBUG
+        keyboardLogger.debug("kbd-focus-release")
+        #endif
+        _ = view.resignFirstResponder()
+        current = nil
+        keyboardVisible = false
+    }
+
+    /// Reassert a scene's prior focus only when its hosting surface is still
+    /// visible. A compact single-window shell keeps TerminalView mounted behind
+    /// its deck; UIKit can nevertheless restore that hidden responder while
+    /// foregrounding. In the disallowed case, resign even if UIKit restored
+    /// the responder after the arbiter owner had already been cleared.
+    static func restore(_ view: TerminalView, allowed: Bool) {
+        guard allowed else {
+            #if DEBUG
+            keyboardLogger.debug("kbd-focus-restore-refused hiddenStage=true")
+            #endif
+            _ = view.resignFirstResponder()
+            if current === view {
+                current = nil
+                keyboardVisible = false
+            } else if current == nil {
+                keyboardVisible = false
+            }
+            return
+        }
+        guard current === view || current == nil else { return }
+        claim(view)
+    }
+
     /// Explicit user request for the keyboard (tap or keyboard button).
     ///
     /// If the terminal already has focus but no input UI is on screen —

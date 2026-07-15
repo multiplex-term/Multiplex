@@ -81,9 +81,49 @@ struct MultiplexApp: App {
         #endif
     }
 
+    @ViewBuilder
     private var deckWindow: some View {
-        DeckWindow()
-            .modifier(DeckWindowSizingBoundary())
+        configuredRoot(
+            SceneShellGate {
+                MultiWindowDeckRoot()
+                    .modifier(DeckWindowSizingBoundary())
+            } shell: {
+                SingleWindowShell()
+            }
+        )
+    }
+
+    private var terminalScene: some Scene {
+        WindowGroup(id: "terminal", for: TerminalWindowRoute.self) { $route in
+            terminalRoot($route)
+        }
+    }
+
+    @ViewBuilder
+    private func terminalRoot(_ route: Binding<TerminalWindowRoute?>) -> some View {
+        configuredRoot(
+            SceneShellGate {
+                if let binding = Binding(route) {
+                    TerminalWindowRoot(route: binding)
+                } else {
+                    // Classic multi-window mode historically leaves a
+                    // value-less terminal scene empty.
+                    EmptyView()
+                }
+            } shell: {
+                if let binding = Binding(route) {
+                    SingleWindowShell(initialRoute: binding.wrappedValue)
+                } else {
+                    // iOS 27 can connect this value-less group first on a
+                    // phone, so it must still be a complete shell root.
+                    SingleWindowShell()
+                }
+            }
+        )
+    }
+
+    private func configuredRoot<Content: View>(_ content: Content) -> some View {
+        content
             .environment(store)
             .environment(hub)
             .environment(themes)
@@ -94,21 +134,20 @@ struct MultiplexApp: App {
             .environment(localNetworkAccess)
             .modifier(PlatformChrome())
     }
+}
 
-    private var terminalScene: some Scene {
-        WindowGroup(id: "terminal", for: TerminalWindowRoute.self) { $route in
-            if let binding = Binding($route) {
-                TerminalWindowRoot(route: binding)
-                    .environment(store)
-                    .environment(hub)
-                    .environment(themes)
-                    .environment(customAgentCommands)
-                    .environment(workspace)
-                    .environment(entitlements)
-                    .environment(attention)
-                    .modifier(PlatformChrome())
-            }
-        }
+/// Classic deck presentation: the injected opener is exactly the existing
+/// `openWindow(id:value:)` route. Shell mode supplies a different opener from
+/// inside `SingleWindowShell`, leaving this path unchanged for windowed iPad
+/// and visionOS.
+private struct MultiWindowDeckRoot: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        DeckWindow(terminalOpener: TerminalRouteOpener(
+            destination: .window,
+            action: { openWindow(id: "terminal", value: $0) }
+        ))
     }
 }
 

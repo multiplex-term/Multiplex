@@ -80,6 +80,8 @@ struct ChassisBadge: View {
                 Text(label)
                     .font(.mono(9, weight: .semibold))
                     .kerning(1.1)
+                    .lineLimit(1)
+                    .fixedSize()
             }
         }
         .foregroundStyle(color ?? (prominent ? Theme.signal : Theme.signal2))

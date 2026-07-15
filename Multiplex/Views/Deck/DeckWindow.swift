@@ -142,9 +142,13 @@ struct DeckWindow: View {
     @Environment(ConnectionHub.self) private var hub
     @Environment(TerminalWorkspace.self) private var workspace
     @Environment(LocalNetworkAccessMonitor.self) private var localNetworkAccess
-    @Environment(\.openWindow) private var openWindow
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+
+    let terminalOpener: TerminalRouteOpener
+    var wallPresentation: FleetWall.Presentation = .standard
+    var selectedTerminal: TerminalRoute? = nil
+    var shellSafeArea = EdgeInsets()
 
     @State private var addingHost = false
     @State private var editingHost: Host?
@@ -159,6 +163,10 @@ struct DeckWindow: View {
 
     var body: some View {
         FleetWall(
+            terminalOpener: terminalOpener,
+            presentation: wallPresentation,
+            selectedTerminal: selectedTerminal,
+            shellSafeArea: shellSafeArea,
             addHost: requestAddHost,
             editHost: { editingHost = $0 },
             openSettings: { showingSettings = true }
@@ -213,7 +221,7 @@ struct DeckWindow: View {
             await DeckScene.autoAttachIfRequested(
                 store: store,
                 workspace: workspace,
-                openTerminalWindow: { openWindow(id: "terminal", value: $0) }
+                openTerminalWindow: { terminalOpener($0) }
             )
         }
         #endif

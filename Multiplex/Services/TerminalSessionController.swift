@@ -110,6 +110,14 @@ final class TerminalSessionController {
         TerminalFocusArbiter.claim(terminalView)
     }
 
+    /// The single-window shell navigated back to its deck. Focus ownership
+    /// still goes through the app-wide arbiter even though both surfaces live
+    /// in one scene.
+    func releaseFocus() {
+        guard let terminalView else { return }
+        TerminalFocusArbiter.release(terminalView)
+    }
+
     /// Bring this tab's hosting window scene forward and take keyboard
     /// focus — the deck tile's press-to-focus path. The scene raise is
     /// explicit: the arbiter only activates a scene when focus *switches*
@@ -143,11 +151,9 @@ final class TerminalSessionController {
     /// Scene became active again: re-assert focus only if this terminal is
     /// (or nothing is) the app-wide owner — every window's scene activates
     /// at once on foreground, and they must not steal from each other.
-    func restoreFocusIfOwner() {
-        guard let terminalView,
-              TerminalFocusArbiter.current === terminalView || TerminalFocusArbiter.current == nil
-        else { return }
-        TerminalFocusArbiter.claim(terminalView)
+    func restoreFocusIfOwner(allowed: Bool = true) {
+        guard let terminalView else { return }
+        TerminalFocusArbiter.restore(terminalView, allowed: allowed)
     }
 
     func start() {

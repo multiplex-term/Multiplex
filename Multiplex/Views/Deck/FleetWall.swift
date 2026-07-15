@@ -80,13 +80,28 @@ enum FleetTileGridSizing {
 /// hosts render in the composition as NO SIGNAL tiles instead of hiding
 /// behind a selection — there is no sidebar on purpose.
 struct FleetWall: View {
+    enum Presentation: Equatable {
+        case standard
+        case shellCompact
+        case shellRail
+    }
+
     @Environment(HostStore.self) private var store
     @Environment(ConnectionHub.self) private var hub
     @Environment(TerminalWorkspace.self) private var workspace
-    @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
+    var terminalOpener: TerminalRouteOpener
+    var presentation: Presentation = .standard
+    var selectedTerminal: TerminalRoute?
+    /// Safe-area insets the shell spends on the wall instead of reserving
+    /// them: chassis, rules, and the scroll viewport reach the window's
+    /// physical edges, and the wall restores these as content padding — so
+    /// tiles pass beneath the home indicator while staying clear of the
+    /// Dynamic Island. Classic deck scenes leave this zero and retain their
+    /// existing layout.
+    var shellSafeArea = EdgeInsets()
     var addHost: () -> Void
     var editHost: (Host) -> Void
     var openSettings: () -> Void
@@ -114,7 +129,9 @@ struct FleetWall: View {
         var id: UUID { host.id }
     }
 
-    private static let wallPadding: CGFloat = 26
+    private var wallPadding: CGFloat {
+        presentation == .shellRail ? 12 : 26
+    }
     /// Wall cadence: one concurrent probe round-trip per host per tick.
     private static let feedInterval: Duration = .seconds(5)
 
@@ -178,28 +195,56 @@ struct FleetWall: View {
 
     @ViewBuilder
     private var platformWall: some View {
-        #if os(visionOS)
-        wall(showHeader: true)
-        #else
-        if #available(iOS 26.0, *) {
-            // iPadOS window controls occupy the leading edge of the title
-            // bar, but don't contribute a safe-area inset to arbitrary
-            // content. Put the deck rail in the system toolbar so MULTIPLEX
-            // is laid out around those controls instead of underneath them.
-            NavigationStack {
-                wall(showHeader: false)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbarBackground(Theme.chassis, for: .navigationBar)
-                    .toolbar { deckToolbar }
-            }
+        if presentation != .standard {
+            shellWall
         } else {
+            #if os(visionOS)
             wall(showHeader: true)
+            #else
+            if #available(iOS 26.0, *) {
+                // iPadOS window controls occupy the leading edge of the title
+                // bar, but don't contribute a safe-area inset to arbitrary
+                // content. Put the classic deck rail in the system toolbar
+                // so MULTIPLEX is laid out around those controls instead of
+                // underneath them. The in-scene shell has no window controls
+                // and keeps its TALLY header full-bleed in the wall itself.
+                NavigationStack {
+                    wall(showHeader: false)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbarBackground(Theme.chassis, for: .navigationBar)
+                        .toolbar { deckToolbar }
+                }
+            } else {
+                wall(showHeader: true)
+            }
+            #endif
         }
-        #endif
+    }
+
+    /// Shell decks use a fixed TALLY header. Only the host sections scroll,
+    /// and their viewport extends beneath the bottom safe area while content
+    /// receives the equivalent inset as trailing breathing room.
+    private var shellWall: some View {
+        VStack(spacing: 0) {
+            header
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, wallPadding + shellSafeArea.leading)
+                .padding(.trailing, wallPadding + shellSafeArea.trailing)
+                .padding(.top, min(wallPadding, 16))
+                .background(Theme.chassis)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(Theme.bezelHi).frame(height: 1)
+                }
+
+            wall(showHeader: false)
+                .ignoresSafeArea(.container, edges: .bottom)
+        }
     }
 
     private func wall(showHeader: Bool) -> some View {
-        let columns = gridColumns(count: tileGridColumnCount ?? 2)
+        let columns = gridColumns(
+            count: tileGridColumnCount ?? (presentation == .standard ? 2 : 1)
+        )
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -212,8 +257,14 @@ struct FleetWall: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(Self.wallPadding)
+            .frame(
+                maxWidth: .infinity,
+                alignment: presentation == .shellCompact ? .center : .leading
+            )
+            .padding(.leading, wallPadding + shellSafeArea.leading)
+            .padding(.trailing, wallPadding + shellSafeArea.trailing)
+            .padding(.top, presentation == .standard ? wallPadding : 0)
+            .padding(.bottom, wallPadding + shellSafeArea.bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
@@ -227,7 +278,8 @@ struct FleetWall: View {
                         current: tileGridColumnCount,
                         availableWidth: max(
                             0,
-                            geometry.size.width - Self.wallPadding * 2
+                            geometry.size.width - wallPadding * 2
+                                - shellSafeArea.leading - shellSafeArea.trailing
                         )
                     )
                 } action: { count in
@@ -256,6 +308,10 @@ struct FleetWall: View {
             ),
             count: count
         )
+    }
+
+    private var gridAlignment: HorizontalAlignment {
+        presentation == .shellCompact ? .center : .leading
     }
 
     /// While this view exists, keep the wall alive: re-probe each host and
@@ -321,17 +377,70 @@ struct FleetWall: View {
     }
     #endif
 
+    @ViewBuilder
     private var header: some View {
+        if presentation == .shellRail {
+            HStack(alignment: .center, spacing: 8) {
+                ChassisLabel("Multiplex", size: 13)
+                Spacer(minLength: 4)
+                Text(fleetSummary)
+                    .font(.mono(8.5))
+                    .foregroundStyle(Theme.signal2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                ChassisChip("", systemImage: "plus", action: addHost)
+                    .accessibilityLabel("Add host")
+                ChassisChip("", systemImage: "gearshape", action: openSettings)
+                    .accessibilityLabel("Settings")
+            }
+            .padding(.bottom, 12)
+        } else if presentation == .shellCompact {
+            ViewThatFits(in: .horizontal) {
+                shellCompactHeader(showsSummary: true, iconOnly: false)
+                shellCompactHeader(showsSummary: false, iconOnly: false)
+                shellCompactHeader(showsSummary: false, iconOnly: true)
+            }
+            .padding(.bottom, 16)
+        } else {
+            HStack(alignment: .center, spacing: 10) {
+                ChassisLabel("Multiplex", size: 15)
+                Spacer()
+                Text(fleetSummary)
+                    .font(.mono(11))
+                    .foregroundStyle(Theme.signal2)
+                ChassisChip("HOST", systemImage: "plus", action: addHost)
+                ChassisChip("SETTINGS", systemImage: "gearshape", action: openSettings)
+            }
+            .padding(.bottom, 16)
+        }
+    }
+
+    private func shellCompactHeader(
+        showsSummary: Bool,
+        iconOnly: Bool
+    ) -> some View {
         HStack(alignment: .center, spacing: 10) {
             ChassisLabel("Multiplex", size: 15)
-            Spacer()
-            Text(fleetSummary)
-                .font(.mono(11))
-                .foregroundStyle(Theme.signal2)
-            ChassisChip("HOST", systemImage: "plus", action: addHost)
-            ChassisChip("SETTINGS", systemImage: "gearshape", action: openSettings)
+                .fixedSize()
+            Spacer(minLength: 4)
+            if showsSummary {
+                Text(fleetSummary)
+                    .font(.mono(11))
+                    .foregroundStyle(Theme.signal2)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            ChassisChip(iconOnly ? "" : "HOST", systemImage: "plus", action: addHost)
+                .fixedSize()
+                .accessibilityLabel("Add host")
+            ChassisChip(
+                iconOnly ? "" : "SETTINGS",
+                systemImage: "gearshape",
+                action: openSettings
+            )
+            .fixedSize()
+            .accessibilityLabel("Settings")
         }
-        .padding(.bottom, 16)
     }
 
     private var fleetSummary: String {
@@ -386,32 +495,59 @@ struct FleetWall: View {
 
     private func rail(_ host: Host, model: HostConnectionModel) -> some View {
         let connected = model.phase == .connected
-        return VStack(alignment: .leading, spacing: 10) {
-            Rectangle().fill(Theme.bezel).frame(height: 1)
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                ChassisLabel(host.name, size: 12)
-                Text(host.address)
-                    .font(.mono(11))
-                    .foregroundStyle(Theme.signal2)
-                Spacer()
-                railStatus(model)
-                // The SHELL chip is the row's tallest element — inserting/
-                // removing it with the phase resizes the whole rail. Keep
-                // its slot in every phase and fade it instead.
-                ChassisChip("SHELL") {
-                    open(TerminalRoute(hostID: host.id, mode: .shell))
+        return Group {
+            if presentation == .shellRail {
+                VStack(alignment: .leading, spacing: 8) {
+                    Rectangle().fill(Theme.bezel).frame(height: 1)
+                    HStack(spacing: 8) {
+                        ChassisLabel(host.name, size: 11)
+                        Spacer(minLength: 4)
+                        railStatus(model)
+                        hostMenu(host)
+                    }
+                    HStack(spacing: 8) {
+                        Text(host.address)
+                            .font(.mono(9.5))
+                            .foregroundStyle(Theme.signal2)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        shellChip(host, connected: connected)
+                    }
                 }
-                .opacity(connected ? 1 : 0)
-                .allowsHitTesting(connected)
-                .disabled(!connected)
-                .accessibilityHidden(!connected)
-                hostMenu(host)
-            }
-            .contentShape(Rectangle())
-            .contextMenu {
-                hostMenuActions(host)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    Rectangle().fill(Theme.bezel).frame(height: 1)
+                    HStack(alignment: .firstTextBaseline, spacing: 14) {
+                        ChassisLabel(host.name, size: 12)
+                        Text(host.address)
+                            .font(.mono(11))
+                            .foregroundStyle(Theme.signal2)
+                            .lineLimit(2)
+                        Spacer()
+                        railStatus(model)
+                        // The SHELL chip is the row's tallest element —
+                        // inserting/removing it with the phase resizes the
+                        // whole rail. Keep its slot and fade it instead.
+                        shellChip(host, connected: connected)
+                        hostMenu(host)
+                    }
+                }
             }
         }
+        .contentShape(Rectangle())
+        .contextMenu {
+            hostMenuActions(host)
+        }
+    }
+
+    private func shellChip(_ host: Host, connected: Bool) -> some View {
+        ChassisChip("SHELL") {
+            open(TerminalRoute(hostID: host.id, mode: .shell))
+        }
+        .opacity(connected ? 1 : 0)
+        .allowsHitTesting(connected)
+        .disabled(!connected)
+        .accessibilityHidden(!connected)
     }
 
     /// Visible host controls. Edit is most needed when a host is
@@ -523,7 +659,7 @@ struct FleetWall: View {
             animatedGrid(
                 LazyVGrid(
                     columns: columns,
-                    alignment: .leading,
+                    alignment: gridAlignment,
                     spacing: FleetTileGridSizing.gutter
                 ) {
                     newSessionTile(host)
@@ -534,7 +670,7 @@ struct FleetWall: View {
             animatedGrid(
                 LazyVGrid(
                     columns: columns,
-                    alignment: .leading,
+                    alignment: gridAlignment,
                     spacing: FleetTileGridSizing.gutter
                 ) {
                     noteTile("No tmux on host", detail: "You can still open a plain shell.")
@@ -545,7 +681,7 @@ struct FleetWall: View {
             animatedGrid(
                 LazyVGrid(
                     columns: columns,
-                    alignment: .leading,
+                    alignment: gridAlignment,
                     spacing: FleetTileGridSizing.gutter
                 ) {
                     noSignalTile(host, model: model)
@@ -556,7 +692,7 @@ struct FleetWall: View {
             animatedGrid(
                 LazyVGrid(
                     columns: columns,
-                    alignment: .leading,
+                    alignment: gridAlignment,
                     spacing: FleetTileGridSizing.gutter
                 ) {
                     acquiringTile
@@ -578,7 +714,7 @@ struct FleetWall: View {
     ) -> some View {
         LazyVGrid(
             columns: columns,
-            alignment: .leading,
+            alignment: gridAlignment,
             spacing: FleetTileGridSizing.gutter
         ) {
             newSessionTile(host)
@@ -613,7 +749,7 @@ struct FleetWall: View {
     ) -> some View {
         LazyVGrid(
             columns: columns,
-            alignment: .leading,
+            alignment: gridAlignment,
             spacing: FleetTileGridSizing.gutter
         ) {
             newSessionTile(host)
@@ -668,6 +804,11 @@ struct FleetWall: View {
             attention: model.attention[session.name],
             hasLiveAgentState: model.lastRefreshed != nil,
             hasOpenTab: workspace.hasTab(hostID: host.id, sessionName: session.name),
+            compact: presentation == .shellRail,
+            selected: selectedTerminal?.hostID == host.id
+                && selectedTerminal?.sessionName == session.name,
+            duplicateAttachTitle: terminalOpener.duplicateAttachTitle,
+            openTabAccessibilityText: terminalOpener.openTabAccessibilityText,
             attach: {
                 focusOrAttach(host, session: session)
             },
@@ -702,7 +843,10 @@ struct FleetWall: View {
             VStack {
                 ChassisLabel("+ New Session", size: 11, color: Theme.signal2)
             }
-            .frame(maxWidth: .infinity, minHeight: 138)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: presentation == .shellRail ? 92 : 138
+            )
             .overlay(
                 Rectangle().strokeBorder(
                     Theme.bezelHi,
@@ -723,7 +867,10 @@ struct FleetWall: View {
                     HatchedScreen()
                     ChassisLabel("No Signal", size: 13, color: Theme.signal3)
                 }
-                .frame(maxWidth: .infinity, minHeight: 96)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: presentation == .shellRail ? 64 : 96
+                )
                 HStack {
                     ChassisLabel(host.name, size: 12, color: Theme.signal3)
                     Spacer()
@@ -747,7 +894,10 @@ struct FleetWall: View {
             ProgressView().controlSize(.small)
             ChassisLabel("Acquiring signal", size: 10, color: Theme.signal3)
         }
-        .frame(maxWidth: .infinity, minHeight: 138)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: presentation == .shellRail ? 92 : 138
+        )
         .background(Theme.screen)
         .padding(5)
         .background(Theme.bezel)
@@ -759,7 +909,10 @@ struct FleetWall: View {
             ChassisLabel(title, size: 11, color: Theme.signal3)
             Text(detail).font(.footnote).foregroundStyle(Theme.signal2)
         }
-        .frame(maxWidth: .infinity, minHeight: 138)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: presentation == .shellRail ? 92 : 138
+        )
         .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
     }
 
@@ -809,7 +962,7 @@ struct FleetWall: View {
     }
 
     private func open(_ route: TerminalRoute) {
-        openWindow(id: "terminal", value: TerminalWindowRoute(tab: route))
+        terminalOpener(TerminalWindowRoute(tab: route))
     }
 }
 
@@ -1104,6 +1257,12 @@ private struct SessionTile: View {
     /// Whether some open terminal window already has this session as a tab
     /// — pressing then focuses that window instead of attaching again.
     let hasOpenTab: Bool
+    /// Expanded shell rails use the approved mini-tile anatomy while keeping
+    /// the same live capture, state, actions, and reorder behavior.
+    let compact: Bool
+    let selected: Bool
+    let duplicateAttachTitle: String
+    let openTabAccessibilityText: String
     let attach: () -> Void
     let attachNewWindow: () -> Void
     let delete: () -> Void
@@ -1113,11 +1272,14 @@ private struct SessionTile: View {
             VStack(spacing: 0) {
                 screen
                 umd
-                segmentStrip
+                if !compact { segmentStrip }
             }
-            .padding(5)
+            .padding(compact ? 4 : 5)
             .background(Theme.bezel)
-            .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+            .overlay(Rectangle().strokeBorder(
+                selected ? Theme.signal2 : Theme.bezelHi,
+                lineWidth: selected ? 1.5 : 1
+            ))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1127,7 +1289,7 @@ private struct SessionTile: View {
         // make the card read as if it shrank under the finger.
         .contentShape(.dragPreview, Rectangle())
         .contextMenu {
-            Button("Attach in New Window", action: attachNewWindow)
+            Button(duplicateAttachTitle, action: attachNewWindow)
             Button("Delete Session…", role: .destructive, action: delete)
         }
         .accessibilityLabel(accessibilitySummary)
@@ -1141,7 +1303,10 @@ private struct SessionTile: View {
                     .font(.mono(11))
                     .foregroundStyle(Theme.signal3)
             } else {
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                ForEach(
+                    Array(lines.prefix(compact ? 3 : lines.count).enumerated()),
+                    id: \.offset
+                ) { _, line in
                     Text(line.isEmpty ? " " : line)
                         .font(.mono(11))
                         .foregroundStyle(Theme.miniText.opacity(0.78))
@@ -1149,14 +1314,18 @@ private struct SessionTile: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 76, alignment: .topLeading)
-        .padding(10)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: compact ? 56 : 76,
+            alignment: .topLeading
+        )
+        .padding(compact ? 8 : 10)
         .background(Theme.screen)
     }
 
     private var umd: some View {
         HStack(spacing: 9) {
-            ChassisLabel(session.name, size: 12)
+            ChassisLabel(session.name, size: compact ? 10 : 12)
             // The badge is taller than the lamp, so swapping them resizes
             // the tile on every attach/detach. The badge keeps its slot in
             // both states (hidden under the lamp) to pin the row's height.
@@ -1174,14 +1343,16 @@ private struct SessionTile: View {
                 TallyLamp(caption: "NEEDS YOU", color: Theme.caution)
             }
             Spacer(minLength: 6)
-            Text(telemetry)
-                .font(.mono(9.5))
-                .foregroundStyle(Theme.signal2)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+            if !compact {
+                Text(telemetry)
+                    .font(.mono(9.5))
+                    .foregroundStyle(Theme.signal2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
         }
-        .padding(.horizontal, 7)
-        .padding(.top, 8)
+        .padding(.horizontal, compact ? 6 : 7)
+        .padding(.top, compact ? 6 : 8)
         .padding(.bottom, 5)
     }
 
@@ -1292,6 +1463,6 @@ private struct SessionTile: View {
         if agentRunning { parts.append("agent running") }
         parts.append("\(session.windowCount) windows and \(session.paneCount) panes")
         return parts.joined(separator: ", ")
-            + (hasOpenTab ? ". Shows its open window" : ". Attach")
+            + (hasOpenTab ? ". \(openTabAccessibilityText)" : ". Attach")
     }
 }

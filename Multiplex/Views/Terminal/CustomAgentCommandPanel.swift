@@ -186,51 +186,104 @@ struct CustomAgentCommandPanel: View {
                     .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
             }
 
-            HStack(spacing: 8) {
-                ChassisSwitch(
-                    "SUBMIT",
-                    isOn: command.autoSubmit,
-                    accessibilityLabel: "Auto Submit"
-                )
-                ChassisSwitch(
-                    "BAR",
-                    isOn: command.showInBar,
-                    accessibilityLabel: "Show in Bar"
-                )
-                ChassisSwitch(
-                    "SHARED",
-                    isOn: command.shared,
-                    accessibilityLabel: "Shared between Claude Code and Codex"
-                )
-
-                Spacer(minLength: 8)
-
-                ChassisLabel(
-                    placementLabel,
-                    size: 8,
-                    color: command.wrappedValue.showInBar
-                        ? Theme.customCommand
-                        : Theme.signal3
-                )
-
-                rowButton(
-                    "arrow.up",
-                    label: "Move command up",
-                    disabled: index == 0
-                ) { moveCommand(id: id, offset: -1) }
-                rowButton(
-                    "arrow.down",
-                    label: "Move command down",
-                    disabled: index >= drafts.commands.count - 1
-                ) { moveCommand(id: id, offset: 1) }
-                rowButton("trash", label: "Delete command") {
-                    deleteCommand(id: id)
-                }
-            }
+            commandControls(
+                command,
+                id: id,
+                index: index,
+                placementLabel: placementLabel
+            )
             .padding(.leading, 28)
         }
         .padding(10)
         .background(Theme.chassis)
+    }
+
+    /// Preserve the existing one-line iPad anatomy when it fits. Phone-width
+    /// panels fall back to two measured lines: switches first, then placement
+    /// and row actions. Fixed intrinsic switch widths make ViewThatFits choose
+    /// the fallback instead of satisfying the proposal by truncating captions.
+    private func commandControls(
+        _ command: Binding<CustomAgentCommand>,
+        id: UUID,
+        index: Int,
+        placementLabel: String
+    ) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                commandSwitches(command)
+                Spacer(minLength: 8)
+                commandPlacementLabel(placementLabel, command: command)
+                commandRowActions(id: id, index: index)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                commandSwitches(command)
+                HStack(spacing: 8) {
+                    commandPlacementLabel(placementLabel, command: command)
+                    Spacer(minLength: 8)
+                    commandRowActions(id: id, index: index)
+                }
+            }
+        }
+    }
+
+    private func commandSwitches(
+        _ command: Binding<CustomAgentCommand>
+    ) -> some View {
+        HStack(spacing: 8) {
+            ChassisSwitch(
+                "SUBMIT",
+                isOn: command.autoSubmit,
+                accessibilityLabel: "Auto Submit"
+            )
+            .fixedSize(horizontal: true, vertical: false)
+            ChassisSwitch(
+                "BAR",
+                isOn: command.showInBar,
+                accessibilityLabel: "Show in Bar"
+            )
+            .fixedSize(horizontal: true, vertical: false)
+            ChassisSwitch(
+                "SHARED",
+                isOn: command.shared,
+                accessibilityLabel: "Shared between Claude Code and Codex"
+            )
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func commandPlacementLabel(
+        _ placementLabel: String,
+        command: Binding<CustomAgentCommand>
+    ) -> some View {
+        ChassisLabel(
+            placementLabel,
+            size: 8,
+            color: command.wrappedValue.showInBar
+                ? Theme.customCommand
+                : Theme.signal3
+        )
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func commandRowActions(id: UUID, index: Int) -> some View {
+        HStack(spacing: 8) {
+            rowButton(
+                "arrow.up",
+                label: "Move command up",
+                disabled: index == 0
+            ) { moveCommand(id: id, offset: -1) }
+            rowButton(
+                "arrow.down",
+                label: "Move command down",
+                disabled: index >= drafts.commands.count - 1
+            ) { moveCommand(id: id, offset: 1) }
+            rowButton("trash", label: "Delete command") {
+                deleteCommand(id: id)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func rowButton(

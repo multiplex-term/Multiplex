@@ -13,6 +13,15 @@ struct SwiftTermView: UIViewRepresentable {
     /// Space between terminal content and the iPad key rail for app chrome
     /// such as the agent helper strip. The rail itself remains bottommost.
     var bottomChromeHeight: CGFloat = 0
+    /// Side safe areas this pane spans. The pane's screen and the rail's
+    /// bezel paint through them; the grid and the keys keep clear, because a
+    /// landscape Dynamic Island sits mid-edge — squarely over text rows.
+    var contentSafeArea = EdgeInsets()
+    /// Whether this pane runs to the window's bottom edge, which makes the
+    /// rail rest there instead of on the safe-area boundary. Nothing else
+    /// derives that resting edge from the container's live frame: the helper
+    /// strip's clearance is measured from it, and would feed back.
+    var railOwnsBottomSafeArea = false
     /// Only the window's active tab claims keyboard focus when it appears.
     var isActive: Bool = true
 
@@ -103,6 +112,8 @@ struct SwiftTermView: UIViewRepresentable {
                 controller?.finishTmuxCopyMode()
             }
         )
+        keyBar.contentSafeArea = contentSafeArea
+        context.coordinator.keyBar = keyBar
         container.addSubview(view)
         container.addSubview(keyBar)
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -116,10 +127,21 @@ struct SwiftTermView: UIViewRepresentable {
             equalTo: keyBar.topAnchor,
             constant: -(Self.terminalInsets.bottom + bottomChromeHeight)
         )
+        // The container spans whatever side safe areas the shell handed it,
+        // and the pane's screen paints across them. The grid does not: it
+        // rides these constants back inside the readable region.
+        let terminalLeading = view.leadingAnchor.constraint(
+            equalTo: container.leadingAnchor,
+            constant: Self.terminalInsets.left + contentSafeArea.leading
+        )
+        let terminalTrailing = view.trailingAnchor.constraint(
+            equalTo: container.trailingAnchor,
+            constant: -(Self.terminalInsets.right + contentSafeArea.trailing)
+        )
         NSLayoutConstraint.activate([
             terminalTop,
-            view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Self.terminalInsets.left),
-            view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.terminalInsets.right),
+            terminalLeading,
+            terminalTrailing,
             terminalBottom,
             keyBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             keyBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -130,7 +152,9 @@ struct SwiftTermView: UIViewRepresentable {
             container: container,
             constraint: keyBarBottom,
             terminalTopConstraint: terminalTop,
-            terminalBottomConstraint: terminalBottom
+            terminalBottomConstraint: terminalBottom,
+            terminalLeadingConstraint: terminalLeading,
+            terminalTrailingConstraint: terminalTrailing
         )
         container.onLayout = { [weak coordinator = context.coordinator] in
             coordinator?.containerDidLayout()
@@ -162,6 +186,11 @@ struct SwiftTermView: UIViewRepresentable {
         context.coordinator.updateBottomChromeHeight(
             Self.terminalInsets.bottom + bottomChromeHeight
         )
+        context.coordinator.updateContentSafeArea(
+            leading: contentSafeArea.leading,
+            trailing: contentSafeArea.trailing
+        )
+        context.coordinator.railOwnsBottomSafeArea = railOwnsBottomSafeArea
         if fontChanged {
             context.coordinator.terminalMetricsDidChange()
         }
@@ -206,10 +235,14 @@ struct SwiftTermView: UIViewRepresentable {
         }
 
         #if !os(visionOS)
+        weak var keyBar: TerminalKeyBar?
+        var railOwnsBottomSafeArea = false
         private weak var avoidingContainer: UIView?
         private var bottomConstraint: NSLayoutConstraint?
         private var terminalTopConstraint: NSLayoutConstraint?
         private var terminalBottomConstraint: NSLayoutConstraint?
+        private var terminalLeadingConstraint: NSLayoutConstraint?
+        private var terminalTrailingConstraint: NSLayoutConstraint?
         private var keyboardObservers: [NSObjectProtocol] = []
         private var keyboardPresentation: KeyboardAvoidance.Presentation = .hidden
         private var keyboardSettleWorkItems: [DispatchWorkItem] = []
@@ -238,12 +271,16 @@ struct SwiftTermView: UIViewRepresentable {
             container: UIView,
             constraint: NSLayoutConstraint,
             terminalTopConstraint: NSLayoutConstraint,
-            terminalBottomConstraint: NSLayoutConstraint
+            terminalBottomConstraint: NSLayoutConstraint,
+            terminalLeadingConstraint: NSLayoutConstraint,
+            terminalTrailingConstraint: NSLayoutConstraint
         ) {
             avoidingContainer = container
             bottomConstraint = constraint
             self.terminalTopConstraint = terminalTopConstraint
             self.terminalBottomConstraint = terminalBottomConstraint
+            self.terminalLeadingConstraint = terminalLeadingConstraint
+            self.terminalTrailingConstraint = terminalTrailingConstraint
             // didChangeFrame too: some presentations deliver their final
             // geometry (accessory attach, dock/float transitions) only in
             // the did- pass — reacting to will- alone under-insets and the
@@ -271,6 +308,26 @@ struct SwiftTermView: UIViewRepresentable {
                   constraint.constant != -height
             else { return }
             constraint.constant = -height
+            avoidingContainer?.layoutIfNeeded()
+        }
+
+        /// Rotating a phone moves the Island's band from one long edge to the
+        /// other, and hiding the deck rail hands the leading band to this
+        /// pane. Both change the grid's clearance without rebuilding it.
+        func updateContentSafeArea(leading: CGFloat, trailing: CGFloat) {
+            keyBar?.contentSafeArea = EdgeInsets(
+                top: 0, leading: leading, bottom: 0, trailing: trailing
+            )
+            guard let leadingConstraint = terminalLeadingConstraint,
+                  let trailingConstraint = terminalTrailingConstraint
+            else { return }
+            let leadingConstant = SwiftTermView.terminalInsets.left + leading
+            let trailingConstant = -(SwiftTermView.terminalInsets.right + trailing)
+            guard leadingConstraint.constant != leadingConstant
+                    || trailingConstraint.constant != trailingConstant
+            else { return }
+            leadingConstraint.constant = leadingConstant
+            trailingConstraint.constant = trailingConstant
             avoidingContainer?.layoutIfNeeded()
         }
 
@@ -417,11 +474,14 @@ struct SwiftTermView: UIViewRepresentable {
             let screenSpace = window.screen.coordinateSpace
             let containerOnScreen = container.convert(container.bounds, to: screenSpace)
             let windowOnScreen = window.convert(window.bounds, to: screenSpace)
-            // The helper's interactive content rests on the window's bottom
-            // safe-area edge. Keep that stable reference even though its
-            // passive background paints through the protected rounded corner;
-            // the keyboard cannot move it, so this value cannot feed back.
-            let restingBottom = windowOnScreen.maxY - window.safeAreaInsets.bottom
+            // The helper's interactive content rests directly on the rail,
+            // which rests on the window's bottom safe-area edge — or on the
+            // window's edge itself where the shell hands its pane the home
+            // indicator's strip. Either way the reference comes from the
+            // window and a static fact about this pane, never from the
+            // container's live frame: the strip's own padding would feed back.
+            let restingBottom = windowOnScreen.maxY
+                - (railOwnsBottomSafeArea ? 0 : window.safeAreaInsets.bottom)
             var overlap: CGFloat = 0
             var obstruction: CGFloat = 0
             if let endFrame = lastKeyboardFrame {
