@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// Breakpoint sizing for the wall's session-tile grid. An adaptive `GridItem`
-/// uses its minimum width to decide when another column fits, so a growing
-/// window repeatedly makes every existing tile jump from 360 back to 290
-/// points. Keep the current column count while the tiles can compress; add a
-/// column only when it fits at the preferred width.
+/// Breakpoint sizing for the wall's session-tile grid. Tiles expand toward the
+/// preferred width, but a new column enters as soon as every tile can retain
+/// the compact minimum. This keeps an iPad mini's two-tile portrait row and
+/// three-tile landscape row intact instead of orphaning the last tile.
 ///
 /// Only the column count may cross into SwiftUI state. The continuously
 /// changing window width is reduced to that count by `onGeometryChange`, so
@@ -16,29 +15,22 @@ enum FleetTileGridSizing {
 
     static func initialColumnCount(availableWidth rawWidth: CGFloat) -> Int {
         let width = Self.normalized(rawWidth)
-        let preferredFit = Self.maximumColumnCount(
-            tileWidth: Self.preferredTileWidth,
+        return Self.maximumColumnCount(
+            tileWidth: Self.minimumTileWidth,
             availableWidth: width
         )
-        // The deck's home composition is a two-tile row. Preserve that row
-        // when a restored/narrow initial window can fit both minimum widths;
-        // wider initial windows still start with full-width columns.
-        if preferredFit == 1,
-           Self.requiredWidth(columnCount: 2, tileWidth: Self.minimumTileWidth) <= width {
-            return 2
-        }
-        return preferredFit
     }
 
     static func columnCount(current: Int?, availableWidth rawWidth: CGFloat) -> Int {
         let width = Self.normalized(rawWidth)
         var count = max(1, current ?? initialColumnCount(availableWidth: width))
 
-        // Growing: never introduce a compressed column. Wait until the new
-        // column and every existing tile can all stay at 360 points.
+        // Growing: use the same compact threshold as shrinking. This also
+        // lets the real viewport recover after SwiftUI reports a transient
+        // narrow width during presentation.
         while Self.requiredWidth(
             columnCount: count + 1,
-            tileWidth: Self.preferredTileWidth
+            tileWidth: Self.minimumTileWidth
         ) <= width {
             count += 1
         }

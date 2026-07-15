@@ -34,7 +34,39 @@ final class FleetTileGridSizingTests: XCTestCase {
         XCTAssertEqual(count, 2)
     }
 
-    func testGrowingDoesNotAddACompressedColumn() {
+    func testIPadMiniPortraitRecoversTwoColumnsAfterNarrowGeometryPass() {
+        // iPad mini portrait is 744pt wide. The standard wall leaves 26pt on
+        // each side, so its 692pt grid comfortably fits two minimum-width
+        // tiles even if an earlier presentation pass recorded one column.
+        let availableWidth: CGFloat = 744 - 26 * 2
+        let narrowPass = FleetTileGridSizing.columnCount(
+            current: nil,
+            availableWidth: 0
+        )
+
+        let recovered = FleetTileGridSizing.columnCount(
+            current: narrowPass,
+            availableWidth: availableWidth
+        )
+
+        XCTAssertEqual(narrowPass, 1)
+        XCTAssertEqual(recovered, 2)
+    }
+
+    func testIPadMiniLandscapeFitsThreeCompactColumns() {
+        // Rotating the same device leaves 1,081pt after standard wall
+        // padding. Three tiles fit at 351pt each and should stay on one row.
+        let availableWidth: CGFloat = 1_133 - 26 * 2
+
+        let count = FleetTileGridSizing.columnCount(
+            current: 2,
+            availableWidth: availableWidth
+        )
+
+        XCTAssertEqual(count, 3)
+    }
+
+    func testGrowingAddsACompactColumnWhenMinimumWidthFits() {
         let twoPreferred = FleetTileGridSizing.requiredWidth(
             columnCount: 2,
             tileWidth: FleetTileGridSizing.preferredTileWidth
@@ -50,10 +82,10 @@ final class FleetTileGridSizingTests: XCTestCase {
             availableWidth: threeMinimum
         )
 
-        XCTAssertEqual(count, 2)
+        XCTAssertEqual(count, 3)
     }
 
-    func testInitialLargerWindowDoesNotStartWithACompressedColumn() {
+    func testInitialLargerWindowUsesCompactColumnWhenMinimumWidthFits() {
         let threeMinimum = FleetTileGridSizing.requiredWidth(
             columnCount: 3,
             tileWidth: FleetTileGridSizing.minimumTileWidth
@@ -61,7 +93,7 @@ final class FleetTileGridSizingTests: XCTestCase {
 
         let count = FleetTileGridSizing.initialColumnCount(availableWidth: threeMinimum)
 
-        XCTAssertEqual(count, 2)
+        XCTAssertEqual(count, 3)
     }
 
     func testGrowingAddsColumnWhenEveryTileFitsAtPreferredWidth() {
@@ -140,7 +172,7 @@ final class FleetTileGridSizingTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
-    func testLargerRowsUseTheSameNoCompressionThreshold() {
+    func testLargerRowsUseTheSameCompactThreshold() {
         let threePreferred = FleetTileGridSizing.requiredWidth(
             columnCount: 3,
             tileWidth: FleetTileGridSizing.preferredTileWidth
@@ -155,14 +187,14 @@ final class FleetTileGridSizingTests: XCTestCase {
         )
         let initial = FleetTileGridSizing.initialColumnCount(availableWidth: threePreferred)
 
-        let compressedCount = FleetTileGridSizing.columnCount(
+        let compactCount = FleetTileGridSizing.columnCount(
             current: initial,
             availableWidth: fourMinimum
         )
-        XCTAssertEqual(compressedCount, 3)
+        XCTAssertEqual(compactCount, 4)
 
         let fullWidthCount = FleetTileGridSizing.columnCount(
-            current: compressedCount,
+            current: compactCount,
             availableWidth: fourPreferred
         )
         XCTAssertEqual(fullWidthCount, 4)
