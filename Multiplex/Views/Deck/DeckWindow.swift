@@ -219,7 +219,7 @@ struct DeckWindow: View {
         #endif
     }
 
-    /// The free tier may create its first host; Pro may create any number.
+    /// The free tier may create up to two hosts; Pro may create any number.
     /// This is intentionally only an add-flow intent check. HostStore stays
     /// ungated so existing records and hosts arriving through Keychain sync
     /// are never hidden, deleted, or prevented from connecting.

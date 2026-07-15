@@ -166,13 +166,15 @@ final class EntitlementStoreTests: XCTestCase {
         XCTFail("Timed out waiting for \(description)")
     }
 
-    func testFreeHostGateAppliesOnlyWhenAddingPastFirstHost() {
+    func testFreeHostGateAllowsTwoHosts() {
         let (defaults, name) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: name) }
         let store = lockedStore(defaults: defaults)
 
+        XCTAssertEqual(EntitlementStore.freeHostLimit, 2)
         XCTAssertTrue(store.canAddHost(existingHostCount: 0))
-        XCTAssertFalse(store.canAddHost(existingHostCount: 1))
+        XCTAssertTrue(store.canAddHost(existingHostCount: 1))
+        XCTAssertFalse(store.canAddHost(existingHostCount: 2))
         XCTAssertFalse(store.canAddHost(existingHostCount: 8))
 
         #if DEBUG

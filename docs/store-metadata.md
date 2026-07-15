@@ -40,7 +40,7 @@ are what `fastlane store_metadata` uploads.
 ## Multiplex Pro
 
 Last remote readback: **2026-07-13 — `READY_TO_SUBMIT`**. The local review
-screenshot was refreshed on 2026-07-14 for the custom-command wording and
+screenshot was refreshed on 2026-07-15 for the two-host free-tier wording and
 still needs to be re-uploaded and read back before submission.
 
 | Field | Current value |
@@ -73,7 +73,7 @@ submission.
 
 Current product split:
 
-- Free: one host, full SSH spatial windows/tabs/merge, all-pane agent detection
+- Free: two hosts, full SSH spatial windows/tabs/merge, all-pane agent detection
   and wall telemetry with active-pane-aware helpers, built-in terminal themes,
   a most-used tmux shortcut dropdown on
   both platforms (including touch-native copy-mode selection and explicit
@@ -104,11 +104,11 @@ of the public App Store gallery screenshots.
 
 | Asset | Purpose |
 | --- | --- |
-| [`docs/appstore/iap-review-screenshot.jpg`](appstore/iap-review-screenshot.jpg) | Canonical 2064×2752 JPEG ready for App Store Connect (805,393 bytes) |
-| [`docs/appstore/iap-review-screenshot.png`](appstore/iap-review-screenshot.png) | Lossless 2064×2752 source/export retained for regeneration (4,584,478 bytes) |
+| [`docs/appstore/iap-review-screenshot.jpg`](appstore/iap-review-screenshot.jpg) | Canonical 2064×2752 JPEG ready for App Store Connect (714,227 bytes) |
+| [`docs/appstore/iap-review-screenshot.png`](appstore/iap-review-screenshot.png) | Lossless 2064×2752 source/export retained for regeneration (3,907,546 bytes) |
 
 The 2026-07-13 image revision is fully processed in App Store Connect; the
-2026-07-14 local replacement above is not uploaded yet. The replacement shows
+2026-07-15 local replacement above is not uploaded yet. The replacement shows
 the real locked `ProPaywallView`, including the one-time US $19.99 purchase CTA
 and Restore Purchases action. It is not a hand-built mock. In DEBUG builds,
 `MULTIPLEX_AUTO_PAYWALL=1` opens that real paywall with a deterministic $19.99

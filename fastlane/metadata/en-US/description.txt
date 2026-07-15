@@ -19,7 +19,7 @@ PRIVATE BY DESIGN
 Hosts and secrets sync between your devices through iCloud Keychain, end-to-end encrypted. Nothing touches our servers — there are none. No account, no analytics, no tracking.
 
 MULTIPLEX PRO
-One purchase, no subscription: unlimited hosts, mosh, agent notifications, the unmetered agent command strip, and custom themes — on all your devices. The free app includes one host, the full spatial experience, and 10 built-in or custom agent-command chip taps each day.
+One purchase, no subscription: unlimited hosts, mosh, agent notifications, the unmetered agent command strip, and custom themes — on all your devices. The free app includes two hosts, the full spatial experience, and 10 built-in or custom agent-command chip taps each day.
 
 WHAT YOU NEED
 A remote host you can reach over SSH (password or OpenSSH ed25519/RSA key) with tmux 1.8 or newer. mosh needs mosh-server on the host. Works with any POSIX login shell.

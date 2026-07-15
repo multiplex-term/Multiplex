@@ -170,6 +170,7 @@ struct ProStoreClient {
 @Observable
 final class EntitlementStore {
     static let proProductID = "app.multiplexterm.multiplex.pro"
+    static let freeHostLimit = 2
     static let dailySlashChipLimit = 10
 
     enum CommerceState: Equatable {
@@ -263,10 +264,10 @@ final class EntitlementStore {
         commerceOperation != nil
     }
 
-    /// The free tier permits one host. Existing/synced hosts are never
+    /// The free tier permits two hosts. Existing/synced hosts are never
     /// removed or disconnected; callers enforce this only before an add.
     func canAddHost(existingHostCount: Int) -> Bool {
-        isPro || existingHostCount < 1
+        isPro || existingHostCount < Self.freeHostLimit
     }
 
     /// Turning on mosh is Pro intent; a record that already has it remains

@@ -3,6 +3,7 @@ Multiplex 1.0 — first release.
 • The wall: every tmux session as a live monitor, before you attach
 • A spatial window per session on Vision Pro; real scenes on iPad
 • Tabs, merge, and split — shells stay connected while windows move
+• Two hosts included free; Multiplex Pro unlocks unlimited hosts
 • A custom tmux shortcut menu, with touch-native copy mode, in the Vision Pro UMD and iPad key bar
 • Claude Code / Codex detection across split panes, with active-pane helpers, editable and shareable custom commands, Pro alerts, and one-tap command chips
 • mosh built in (Pro): sessions survive sleep, roaming, and IP changes
