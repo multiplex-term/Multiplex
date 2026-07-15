@@ -123,7 +123,7 @@ Xcode-launched runs), and `launchctl unsetenv` them afterwards. Use
 `MULTIPLEX_AUTO_ATTACH_HOST=devbox` here — real synced hosts exist on a Mac.
 Also note DeviceHub bridges the Mac keyboard to *simulators* at the HID
 layer, so synthetic events (`osascript`/System Events) never reach a sim —
-but they DO reach the Mac app itself, which is how the Ctrl-chord fix was
+but they DO reach the Mac app itself, which is how the Mac keyboard paths were
 verified headlessly.
 
 Drive a live session from the Mac side to see bytes stream in:
@@ -261,15 +261,17 @@ views.
     mouse off (`performRemoteScroll`; the scroll view's own pan is disabled
     while remote scroll applies, so plain-shell tabs keep native local
     scrollback); and on iOS-app-on-Mac ("Designed for iPad") hardware
-    Ctrl+character chords ride a `GCKeyboard` HID bridge — UIKit's
-    UIKeyboardImpl translates those chords through the Cocoa key-binding
-    table (Ctrl+C → `noop:`, the "Unsupported action selector noop:" log)
-    and drops them *before* pressesBegan, insertText, or responder
-    UIKeyCommands (`wantsPriorityOverSystemBehavior` included) ever run, so
-    GameController is the only layer that still sees them; the bridge sends
-    the control byte (kitty-encoded when enhancement flags are on) to the
-    first-responder TerminalView in the key window, and never installs on
-    real iPads. Sample apps trimmed.
+    Escape is claimed by a priority no-op `UIKeyCommand` on iOS-app-on-Mac,
+    preventing the Mac text system's default `cancelOperation:` from resigning
+    terminal/window focus while SwiftTerm's normal `pressesBegan` path sends
+    the key exactly once. Ctrl+character chords need a separate `GCKeyboard`
+    HID bridge: UIKit maps them through the Cocoa key-binding table (Ctrl+C →
+    `noop:`, the "Unsupported action selector noop:" log) and drops them
+    *before* pressesBegan, insertText, or responder UIKeyCommands
+    (`wantsPriorityOverSystemBehavior` included) ever run. The bridge sends the
+    control byte (kitty-encoded when enhancement flags are on) to the
+    first-responder TerminalView in the key window and never installs on real
+    iPads. Sample apps trimmed.
   - When bumping either, re-apply the patches and diff before trusting it.
 - **Citadel pinned to exactly 0.12.0**: 0.12.1 moved its swift-nio-ssh dep to an
   unaudited personal fork. Don't bump without review — this is the transport.

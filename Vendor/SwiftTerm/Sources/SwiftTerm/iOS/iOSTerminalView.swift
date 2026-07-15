@@ -545,6 +545,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return true
         case #selector(resetCmd(_:)):
             return true
+        case #selector(consumeMacEscape(_:)):
+            return ProcessInfo.processInfo.isiOSAppOnMac
         default:
             //print ("canPerformAction invoked for \(action)")
             return false
@@ -2225,6 +2227,26 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
  
+    /// Claim Escape before the Mac text system applies its default cancel
+    /// behavior. The normal `pressesBegan` path owns byte delivery; this no-op
+    /// command only keeps the terminal and its window focused.
+    open override var keyCommands: [UIKeyCommand]? {
+        guard ProcessInfo.processInfo.isiOSAppOnMac else {
+            return super.keyCommands
+        }
+        var commands = super.keyCommands ?? []
+        let escape = UIKeyCommand(
+            input: UIKeyCommand.inputEscape,
+            modifierFlags: [],
+            action: #selector(consumeMacEscape(_:))
+        )
+        escape.wantsPriorityOverSystemBehavior = true
+        commands.append(escape)
+        return commands
+    }
+
+    @objc private func consumeMacEscape(_ sender: UIKeyCommand) {}
+
     open override func becomeFirstResponder() -> Bool {
         let response = super.becomeFirstResponder()
         if response {
