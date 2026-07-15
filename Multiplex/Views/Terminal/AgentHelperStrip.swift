@@ -40,6 +40,9 @@ struct AgentHelperStrip: View {
     let send: (AgentCommand) -> Void
     let saveCustomCommands: ([CustomAgentCommand]) -> Void
     let openPaywall: () -> Void
+    /// Lets DEBUG layout hooks select the one helper strip whose terminal
+    /// owns app-wide focus without introducing another focus authority.
+    let isFocusOwner: () -> Bool
 
     @State private var showingCustomCommands = false
     @State private var customCommandEditorID = UUID()
@@ -78,6 +81,15 @@ struct AgentHelperStrip: View {
         // identity. Never let one agent's open drafts relabel or save into the
         // other agent's profile.
         .onChange(of: agent) { showingCustomCommands = false }
+        #if DEBUG
+        .onAppear { CustomCommandsDebugHook.install() }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .multiplexDebugCustomCommands
+        )) { _ in
+            guard isFocusOwner() else { return }
+            openCustomCommandEditor()
+        }
+        #endif
     }
 
     private var row: some View {
@@ -169,10 +181,7 @@ struct AgentHelperStrip: View {
             }
             Divider()
             Button {
-                // A fresh identity makes CANCEL genuinely discard drafts
-                // when the same editor is opened again.
-                customCommandEditorID = UUID()
-                showingCustomCommands = true
+                openCustomCommandEditor()
             } label: {
                 Label("Custom Commands…", systemImage: "slider.horizontal.3")
             }
@@ -183,6 +192,13 @@ struct AgentHelperStrip: View {
         .buttonStyle(.plain)
         .chassisHover(2)
         .accessibilityLabel("More \(agent.displayName) commands")
+    }
+
+    private func openCustomCommandEditor() {
+        // A fresh identity makes CANCEL genuinely discard drafts when the
+        // same editor is opened again, including a DEBUG notification reopen.
+        customCommandEditorID = UUID()
+        showingCustomCommands = true
     }
 
     private var barCustomCommands: [CustomAgentCommand] {
@@ -402,6 +418,31 @@ private struct CustomAgentCommandPopoverPresenter: UIViewRepresentable {
 #if DEBUG
 extension Notification.Name {
     static let multiplexDebugAgentChip = Notification.Name("MultiplexDebugAgentChip")
+    static let multiplexDebugCustomCommands = Notification.Name(
+        "MultiplexDebugCustomCommands"
+    )
+}
+
+/// Opens the focused terminal's real Custom Commands editor for layout
+/// capture. AgentHelperStrip performs the final focus-owner check so a Darwin
+/// notification never presents panels from several terminal scenes.
+@MainActor
+enum CustomCommandsDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.customcommands", &token, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugCustomCommands,
+                object: nil
+            )
+        }
+    }
 }
 
 /// Headless-verification hook: `xcrun simctl spawn <udid> notifyutil -p

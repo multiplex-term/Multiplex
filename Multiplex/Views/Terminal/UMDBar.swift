@@ -4,6 +4,11 @@ import SwiftUI
 /// label, captioned status lamp, and the window's controls as chassis
 /// chips. Deliberately opaque — the UMD is hardware, not glass.
 struct UMDBar: View {
+    enum Style {
+        case regular
+        case shell
+    }
+
     var controller: TerminalSessionController?
     var title: String
     var mergeSources: [TerminalWorkspace.WindowEntry]
@@ -20,10 +25,23 @@ struct UMDBar: View {
     /// dropdown's destructive alternative. nil when there's no session to
     /// kill (plain shell tab, or the host record is gone).
     var closeSession: (() -> Void)?
+    var style: Style = .regular
+    var deckControlLabel = "DECK"
+    var availableWidth: CGFloat?
 
     @State private var showingTmuxShortcuts = false
 
+    @ViewBuilder
     var body: some View {
+        switch style {
+        case .regular:
+            regularBar
+        case .shell:
+            shellBar
+        }
+    }
+
+    private var regularBar: some View {
         HStack(spacing: 14) {
             ChassisChip("DECK", action: showDeck)
             divider
@@ -33,42 +51,10 @@ struct UMDBar: View {
             ChassisChip("KBD", action: summonKeyboard)
             ChassisChip("A−", action: fontDown)
             ChassisChip("A+", action: fontUp)
-            // Dropdown: a fresh session in the same directory, plain or
-            // launching an agent — mirrors the deck's New Session options.
-            Menu {
-                Button("New Session") { newSession(nil) }
-                Button(AgentKind.claudeCode.displayName) { newSession(.claudeCode) }
-                Button(AgentKind.codex.displayName) { newSession(.codex) }
-            } label: {
-                ChassisBadge("TAB", systemImage: "plus")
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .chassisHover(2)
-            .accessibilityLabel("New tab: another session in this window")
+            newTabMenu
             // Custom TALLY dropdown, immediately right of + TAB. Each choice
             // sends the stock tmux prefix binding through the ordered pump.
-            Button {
-                showingTmuxShortcuts = true
-            } label: {
-                ChassisBadge("TMUX", systemImage: "command")
-            }
-            .buttonStyle(.plain)
-            .chassisHover(2)
-            .disabled(controller?.status != .live)
-            .accessibilityLabel("Show tmux shortcuts")
-            .popover(
-                isPresented: $showingTmuxShortcuts,
-                attachmentAnchor: .rect(.bounds),
-                arrowEdge: .bottom
-            ) {
-                TmuxShortcutPanel { shortcut in
-                    showingTmuxShortcuts = false
-                    controller?.performTmuxShortcut(shortcut)
-                }
-                .presentationCompactAdaptation(.popover)
-                .tmuxShortcutPresentationSizing()
-            }
+            tmuxShortcutButton
             if !mergeSources.isEmpty {
                 Menu {
                     ForEach(mergeSources) { entry in
@@ -119,6 +105,142 @@ struct UMDBar: View {
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Theme.bezelHi, lineWidth: 1))
+    }
+
+    /// Slim in-scene UMD. The common path stays visible at phone width;
+    /// secondary actions move into one neutral overflow menu. At a genuinely
+    /// wide terminal pane ViewThatFits restores the direct chips.
+    private var shellBar: some View {
+        ViewThatFits(in: .horizontal) {
+            shellRow(showsDirectActions: true)
+            shellRow(showsDirectActions: false)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Theme.bezel)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.bezelHi).frame(height: 1)
+        }
+    }
+
+    private func shellRow(showsDirectActions: Bool) -> some View {
+        HStack(spacing: 9) {
+            ChassisChip(deckControlLabel, action: showDeck)
+                .fixedSize()
+            ChassisLabel(title, size: 11)
+                .layoutPriority(1)
+            statusCluster
+                .fixedSize()
+            Spacer(minLength: 4)
+            ChassisChip("KBD", action: summonKeyboard)
+                .fixedSize()
+            if showsDirectActions {
+                ChassisChip("A−", action: fontDown).fixedSize()
+                ChassisChip("A+", action: fontUp).fixedSize()
+                newTabMenu.fixedSize()
+                tmuxShortcutButton.fixedSize()
+                detachControl.fixedSize()
+            } else {
+                overflowMenu.fixedSize()
+            }
+        }
+    }
+
+    private var newTabMenu: some View {
+        Menu {
+            Button("New Session") { newSession(nil) }
+            Button(AgentKind.claudeCode.displayName) { newSession(.claudeCode) }
+            Button(AgentKind.codex.displayName) { newSession(.codex) }
+        } label: {
+            ChassisBadge("TAB", systemImage: "plus")
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .chassisHover(2)
+        .accessibilityLabel("New tab: another session in this window")
+    }
+
+    private var tmuxShortcutButton: some View {
+        tmuxPopover(
+            Button {
+                showingTmuxShortcuts = true
+            } label: {
+                ChassisBadge("TMUX", systemImage: "command")
+            }
+            .buttonStyle(.plain)
+            .chassisHover(2)
+            .disabled(controller?.status != .live)
+            .accessibilityLabel("Show tmux shortcuts")
+        )
+    }
+
+    private var overflowMenu: some View {
+        Menu {
+            Section("Text Size") {
+                Button("Smaller Text", action: fontDown)
+                Button("Larger Text", action: fontUp)
+            }
+            Menu("New Tab") {
+                Button("New Session") { newSession(nil) }
+                Button(AgentKind.claudeCode.displayName) {
+                    newSession(.claudeCode)
+                }
+                Button(AgentKind.codex.displayName) {
+                    newSession(.codex)
+                }
+            }
+            Divider()
+            Button("Detach", action: detach)
+            if let closeSession {
+                Button("Close Session", role: .destructive, action: closeSession)
+            }
+        } label: {
+            ChassisBadge("", systemImage: "ellipsis")
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .chassisHover(2)
+        .accessibilityLabel("Terminal actions")
+    }
+
+    @ViewBuilder
+    private var detachControl: some View {
+        if let closeSession {
+            Menu {
+                Button("Detach", action: detach)
+                Button("Close Session", role: .destructive, action: closeSession)
+            } label: {
+                ChassisBadge("DETACH", prominent: true)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .chassisHover(2)
+            .accessibilityLabel("Detach or close the session")
+        } else {
+            ChassisChip("DETACH", prominent: true, action: detach)
+        }
+    }
+
+    private func tmuxPopover<Control: View>(_ control: Control) -> some View {
+        control.popover(
+            isPresented: $showingTmuxShortcuts,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            TmuxShortcutPanel(width: shortcutPanelWidth) { shortcut in
+                showingTmuxShortcuts = false
+                controller?.performTmuxShortcut(shortcut)
+            }
+            .presentationCompactAdaptation(.popover)
+            .tmuxShortcutPresentationSizing()
+        }
+    }
+
+    private var shortcutPanelWidth: CGFloat {
+        min(
+            TmuxShortcutPanel.preferredWidth,
+            max(280, (availableWidth ?? TmuxShortcutPanel.preferredWidth + 24) - 24)
+        )
     }
 
     private var divider: some View {

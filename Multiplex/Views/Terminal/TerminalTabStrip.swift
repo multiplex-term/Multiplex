@@ -19,6 +19,7 @@ struct TerminalTabStrip: View {
     let activate: (UUID) -> Void
     let split: (UUID) -> Void
     let close: (UUID) -> Void
+    var allowsSplit = true
 
     var body: some View {
         HStack(spacing: 4) {
@@ -56,7 +57,7 @@ struct TerminalTabStrip: View {
         .buttonStyle(.plain)
         .chassisHover(3)
         .contextMenu {
-            if items.count > 1 {
+            if items.count > 1, allowsSplit {
                 Button {
                     split(item.id)
                 } label: {

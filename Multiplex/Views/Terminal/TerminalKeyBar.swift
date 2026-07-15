@@ -270,9 +270,10 @@ private enum TerminalKey {
 }
 
 /// The rail: modifiers left, shell symbols center, arrows + dismiss right.
-/// Fixed-size keys so ViewThatFits can actually measure — when the bar is
-/// narrow (a small Stage Manager window), keep the
-/// path essentials (`~` and `/`) while dropping the less-used symbols first.
+/// Fixed-size keys let ViewThatFits measure every tier honestly. The original
+/// iPad ladder stays first; phone tiers compact the key metric only after page
+/// keys and symbols are gone. Regular phones retain TMUX; the final 375-point
+/// tier drops it while every terminal lifeline key remains available.
 private struct KeyBarRow: View {
     var model: TerminalKeyBar.Model
     var press: (TerminalKey) -> Void
@@ -280,11 +281,28 @@ private struct KeyBarRow: View {
     var body: some View {
         ViewThatFits(in: .horizontal) {
             row(symbols: ["~", "|", "/", "-"], withPageKeys: true)
+                .padding(.horizontal, 8)
             row(symbols: ["~", "/"], withPageKeys: true)
+                .padding(.horizontal, 8)
             row(symbols: ["~", "/"], withPageKeys: false)
+                .padding(.horizontal, 8)
             row(symbols: [], withPageKeys: false)
+                .padding(.horizontal, 8)
+            row(
+                symbols: [],
+                withPageKeys: false,
+                showsTmux: true,
+                metric: .compactWithTmux
+            )
+            .padding(.horizontal, 1)
+            row(
+                symbols: [],
+                withPageKeys: false,
+                showsTmux: false,
+                metric: .compact
+            )
+            .padding(.horizontal, 8)
         }
-        .padding(.horizontal, 8)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity)
         .background(Theme.bezel)
@@ -293,58 +311,113 @@ private struct KeyBarRow: View {
         }
     }
 
-    private func row(symbols: [String], withPageKeys: Bool) -> some View {
-        HStack(spacing: 6) {
-            capsKey("ESC", .esc, "Escape")
-            capsKey("CTRL", .ctrl, "Control", latched: model.ctrlLatched)
-            capsKey("TAB", .tab, "Tab")
-            Spacer(minLength: 12)
+    private func row(
+        symbols: [String],
+        withPageKeys: Bool,
+        showsTmux: Bool = true,
+        metric: KeyMetric = .regular
+    ) -> some View {
+        HStack(spacing: metric.spacing) {
+            capsKey("ESC", .esc, "Escape", metric: metric)
+            capsKey(
+                "CTRL",
+                .ctrl,
+                "Control",
+                latched: model.ctrlLatched,
+                metric: metric
+            )
+            capsKey("TAB", .tab, "Tab", metric: metric)
+            Spacer(minLength: metric.groupGap)
             if !symbols.isEmpty {
                 ForEach(symbols, id: \.self) { symbol in
-                    Key(action: { press(.text(symbol)) }, accessibilityText: symbol) {
+                    Key(
+                        action: { press(.text(symbol)) },
+                        width: metric.keyWidth,
+                        accessibilityText: symbol
+                    ) {
                         Text(symbol).font(.mono(15))
                     }
                 }
-                Spacer(minLength: 12)
+                Spacer(minLength: metric.groupGap)
             }
             if withPageKeys {
                 // Page keys scroll pagers and CLI-agent transcripts
                 // (Claude Code pages with PgUp/PgDn); they autorepeat
                 // like the arrows.
-                arrowKey("arrow.up.to.line", .pageUp, "Page up")
-                arrowKey("arrow.down.to.line", .pageDown, "Page down")
+                arrowKey("arrow.up.to.line", .pageUp, "Page up", metric: metric)
+                arrowKey("arrow.down.to.line", .pageDown, "Page down", metric: metric)
             }
-            arrowKey("arrow.left", .left, "Arrow left")
-            arrowKey("arrow.down", .down, "Arrow down")
-            arrowKey("arrow.up", .up, "Arrow up")
-            arrowKey("arrow.right", .right, "Arrow right")
-            Key(action: { press(.dismiss) }, accessibilityText: "Hide keyboard") {
+            arrowKey("arrow.left", .left, "Arrow left", metric: metric)
+            arrowKey("arrow.down", .down, "Arrow down", metric: metric)
+            arrowKey("arrow.up", .up, "Arrow up", metric: metric)
+            arrowKey("arrow.right", .right, "Arrow right", metric: metric)
+            Key(
+                action: { press(.dismiss) },
+                width: metric.keyWidth,
+                accessibilityText: "Hide keyboard"
+            ) {
                 Image(systemName: "keyboard.chevron.compact.down")
                     .font(.system(size: 13, weight: .semibold))
             }
-            // Keep the tmux dropdown at the rail's trailing edge, directly
-            // right of the keyboard control at every width tier.
-            Key(
-                action: { press(.showTmuxShortcuts) },
-                accessibilityText: "Show tmux shortcuts"
-            ) {
-                Text("TMUX").font(.mono(9, weight: .semibold)).kerning(0.7)
+            if showsTmux {
+                // Keep the tmux dropdown at the rail's trailing edge until
+                // the essentials-only phone tier takes over.
+                Key(
+                    action: { press(.showTmuxShortcuts) },
+                    width: metric.keyWidth,
+                    accessibilityText: "Show tmux shortcuts"
+                ) {
+                    Text("TMUX").font(.mono(9, weight: .semibold)).kerning(0.7)
+                }
             }
         }
     }
 
     private func capsKey(
-        _ label: String, _ key: TerminalKey, _ accessibility: String, latched: Bool = false
+        _ label: String,
+        _ key: TerminalKey,
+        _ accessibility: String,
+        latched: Bool = false,
+        metric: KeyMetric = .regular
     ) -> some View {
-        Key(action: { press(key) }, latched: latched, accessibilityText: accessibility) {
+        Key(
+            action: { press(key) },
+            width: metric.keyWidth,
+            latched: latched,
+            accessibilityText: accessibility
+        ) {
             Text(label).font(.mono(11, weight: .semibold)).kerning(1.1)
         }
     }
 
-    private func arrowKey(_ icon: String, _ key: TerminalKey, _ accessibility: String) -> some View {
-        Key(action: { press(key) }, repeats: true, accessibilityText: accessibility) {
+    private func arrowKey(
+        _ icon: String,
+        _ key: TerminalKey,
+        _ accessibility: String,
+        metric: KeyMetric = .regular
+    ) -> some View {
+        Key(
+            action: { press(key) },
+            width: metric.keyWidth,
+            repeats: true,
+            accessibilityText: accessibility
+        ) {
             Image(systemName: icon).font(.system(size: 12, weight: .semibold))
         }
+    }
+
+    private struct KeyMetric {
+        let keyWidth: CGFloat
+        let spacing: CGFloat
+        let groupGap: CGFloat
+
+        static let regular = KeyMetric(keyWidth: 46, spacing: 6, groupGap: 12)
+        static let compactWithTmux = KeyMetric(
+            keyWidth: 40,
+            spacing: 3,
+            groupGap: 1
+        )
+        static let compact = KeyMetric(keyWidth: 40, spacing: 4, groupGap: 4)
     }
 }
 
@@ -352,6 +425,7 @@ private struct KeyBarRow: View {
 /// inverts the face — prominence, not color, marks the held modifier.
 private struct Key<Label: View>: View {
     var action: () -> Void
+    var width: CGFloat = 46
     var repeats = false
     var latched = false
     var accessibilityText: String
@@ -360,7 +434,7 @@ private struct Key<Label: View>: View {
     var body: some View {
         Button(action: action) {
             label()
-                .frame(width: 46, height: 34)
+                .frame(width: width, height: 34)
                 .contentShape(Rectangle())
         }
         .buttonStyle(KeyFace(latched: latched))

@@ -14,6 +14,16 @@ import notify
 /// Chrome is the Tally identity: a chassis-framed screen with multiviewer
 /// source-label tabs on top and the under-monitor display (UMD) below.
 struct TerminalWindowRoot: View {
+    struct ShellConfiguration {
+        var deckControlLabel: String
+        var availableWidth: CGFloat
+        var showDeck: () -> Void
+        var openTerminalRoute: (TerminalWindowRoute) -> Void
+        var revealTab: (UUID) -> Void
+        var tabsEmptied: () -> Void
+        var terminalFocusAllowed: Bool
+    }
+
     @Environment(HostStore.self) private var store
     @Environment(ConnectionHub.self) private var hub
     @Environment(CustomAgentCommandStore.self) private var customAgentCommands
@@ -24,8 +34,24 @@ struct TerminalWindowRoot: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @Binding var route: TerminalWindowRoute
+    var shell: ShellConfiguration?
 
-    @State private var fontSize: CGFloat = 14
+    init(
+        route: Binding<TerminalWindowRoute>,
+        shell: ShellConfiguration? = nil
+    ) {
+        _route = route
+        self.shell = shell
+        #if os(visionOS)
+        _fontSize = State(initialValue: 14)
+        #else
+        _fontSize = State(
+            initialValue: UIDevice.current.userInterfaceIdiom == .phone ? 12 : 14
+        )
+        #endif
+    }
+
+    @State private var fontSize: CGFloat
     /// Agent shown by the helper strip. Trails `detectedAgent` with a short
     /// grace on loss (two probe ticks) so a transient probe miss doesn't
     /// flap the strip — but never across a tab or pane switch.
@@ -52,6 +78,9 @@ struct TerminalWindowRoot: View {
     private var activeController: TerminalSessionController? {
         activeTab.flatMap { workspace.controller(for: $0.id) }
     }
+    private var terminalFocusAllowed: Bool {
+        shell?.terminalFocusAllowed ?? true
+    }
     private var showsAgentHelper: Bool {
         shownAgent != nil && activeController?.status == .live
     }
@@ -63,7 +92,7 @@ struct TerminalWindowRoot: View {
         #endif
     }
     private var mergeSources: [TerminalWorkspace.WindowEntry] {
-        workspace.mergeSources(for: route.id)
+        shell == nil ? workspace.mergeSources(for: route.id) : []
     }
     /// Whether the detach control can offer CLOSE SESSION for the active
     /// tab: there must be a tmux session to kill and a host record to kill
@@ -95,14 +124,26 @@ struct TerminalWindowRoot: View {
                 await DeckScene.autoAttachIfRequested(
                     store: store,
                     workspace: workspace,
-                    openTerminalWindow: { openWindow(id: "terminal", value: $0) }
+                    openTerminalWindow: { route in
+                        if let shell {
+                            shell.openTerminalRoute(route)
+                        } else {
+                            openWindow(id: "terminal", value: route)
+                        }
+                    }
                 )
             }
             #endif
             .onChange(of: route.tabs) { syncTabs() }
+            .onChange(of: terminalFocusAllowed) { _, allowed in
+                guard !allowed else { return }
+                activeController?.restoreFocusIfOwner(allowed: false)
+            }
             // Keyboard focus follows the visible tab…
             .onChange(of: route.activeTabID) {
-                activeController?.focusTerminal()
+                if terminalFocusAllowed {
+                    activeController?.focusTerminal()
+                }
                 // No detection grace across tabs — chips must describe the
                 // pane on screen, immediately.
                 hideAgentTask?.cancel()
@@ -127,7 +168,9 @@ struct TerminalWindowRoot: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     entitlements.refreshSlashChipMeter()
-                    activeController?.restoreFocusIfOwner()
+                    activeController?.restoreFocusIfOwner(
+                        allowed: terminalFocusAllowed
+                    )
                     for tab in route.tabs {
                         workspace.controller(for: tab.id)?.transportForegrounded()
                     }
@@ -333,8 +376,17 @@ struct TerminalWindowRoot: View {
 
     // MARK: Layout
 
-    #if os(visionOS)
+    @ViewBuilder
     private var platformBody: some View {
+        if let shell {
+            shellBody(shell)
+        } else {
+            classicPlatformBody
+        }
+    }
+
+    #if os(visionOS)
+    private var classicPlatformBody: some View {
         GeometryReader { geometry in
             paneStack
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -396,7 +448,7 @@ struct TerminalWindowRoot: View {
         }
     }
     #else
-    private var platformBody: some View {
+    private var classicPlatformBody: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 if route.tabs.count > 1 {
@@ -408,42 +460,92 @@ struct TerminalWindowRoot: View {
                     .background(Theme.chassis)
                     Rectangle().fill(Theme.bezelHi).frame(height: 1)
                 }
-                paneStack
-                    .overlay(alignment: .bottom) {
-                        // Reserve this height inside SwiftTermView, then paint
-                        // the helper into that gap immediately above the
-                        // bottommost key rail. Keeping the rail inside the
-                        // UIKit container avoids both TextInputUI accessory
-                        // hosting and a controller-observing SwiftUI cycle.
-                        helperStrip(floating: false)
-                            .padding(
-                                .bottom,
-                                (activeController?.keyboardObstruction ?? 0)
-                                    + TerminalKeyBar.barHeight
-                            )
-                    }
-                    // A real docked keyboard makes SwiftUI apply the window's
-                    // bottom safe area twice: once to this surface and once
-                    // to the helper's published clearance. Extend through
-                    // that region only while docked so the tmux row, helper,
-                    // and UIKit rail share one baseline. Hidden/floating
-                    // modes keep controls inside the rounded-corner boundary.
-                    .ignoresSafeArea(
-                        .container,
-                        edges: (activeController?.keyboardObstruction ?? 0) > 0
-                            ? .bottom : []
-                    )
-                    // SwiftUI's automatic keyboard avoidance must not touch
-                    // the terminal: floating keyboards reserve no space. The
-                    // terminal container is the single owner of docked
-                    // clearance and publishes the helper-strip obstruction.
-                    .ignoresSafeArea(.keyboard)
+                iOSPaneSurface
             }
             .navigationTitle(windowTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Theme.chassis, for: .navigationBar)
             .toolbar { toolbarContent }
         }
+    }
+    #endif
+
+    private func shellBody(_ configuration: ShellConfiguration) -> some View {
+        VStack(spacing: 0) {
+            UMDBar(
+                controller: activeController,
+                title: umdTitle,
+                mergeSources: [],
+                showDeck: configuration.showDeck,
+                summonKeyboard: { activeController?.summonKeyboard() },
+                fontDown: { fontSize = max(9, fontSize - 1) },
+                fontUp: { fontSize = min(32, fontSize + 1) },
+                newSession: { openNewTab(launching: $0) },
+                merge: { _ in },
+                detach: { detachActiveTab() },
+                closeSession: activeTabHasSession
+                    ? { confirmingCloseActiveSession = true } : nil,
+                style: .shell,
+                deckControlLabel: configuration.deckControlLabel,
+                availableWidth: configuration.availableWidth
+            )
+            if route.tabs.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    tabStrip
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                }
+                .background(Theme.chassis)
+                Rectangle().fill(Theme.bezelHi).frame(height: 1)
+            }
+            #if os(visionOS)
+            paneStack
+                .overlay(alignment: .bottom) {
+                    VStack(spacing: 8) {
+                        helperStrip(
+                            floating: true,
+                            floatingMaximumWidth: max(
+                                1,
+                                configuration.availableWidth - 24
+                            )
+                        )
+                        TerminalKeyCluster(controller: activeController)
+                    }
+                    .padding(.bottom, 10)
+                }
+            #else
+            iOSPaneSurface
+            #endif
+        }
+        .background(Theme.chassis)
+    }
+
+    #if !os(visionOS)
+    private var iOSPaneSurface: some View {
+        paneStack
+            .overlay(alignment: .bottom) {
+                // Reserve this height inside SwiftTermView, then paint the
+                // helper into that gap immediately above the bottommost key
+                // rail. Keeping the rail inside the UIKit container avoids
+                // both TextInputUI accessory hosting and a controller cycle.
+                helperStrip(floating: false)
+                    .padding(
+                        .bottom,
+                        (activeController?.keyboardObstruction ?? 0)
+                            + TerminalKeyBar.barHeight
+                    )
+            }
+            // A real docked keyboard makes SwiftUI apply the window's bottom
+            // safe area twice. Extend through it only while docked so the
+            // tmux row, helper, and UIKit rail share one baseline.
+            .ignoresSafeArea(
+                .container,
+                edges: (activeController?.keyboardObstruction ?? 0) > 0
+                    ? .bottom : []
+            )
+            // SwiftUI's automatic avoidance must not touch the terminal:
+            // the container is the sole owner of docked clearance.
+            .ignoresSafeArea(.keyboard)
     }
     #endif
 
@@ -459,6 +561,7 @@ struct TerminalWindowRoot: View {
                     fontSize: fontSize,
                     bottomChromeHeight: terminalBottomChromeHeight,
                     isActive: isActive,
+                    focusAllowed: terminalFocusAllowed,
                     close: { close(tab.id) }
                 )
                 .opacity(isActive ? 1 : 0)
@@ -494,7 +597,11 @@ struct TerminalWindowRoot: View {
                 floatingMaximumWidth: floatingMaximumWidth,
                 send: { send($0, via: controller) },
                 saveCustomCommands: { customAgentCommands.replace($0, for: agent) },
-                openPaywall: { showingPaywall = true }
+                openPaywall: { showingPaywall = true },
+                isFocusOwner: {
+                    guard let terminalView = controller.terminalView else { return false }
+                    return TerminalFocusArbiter.current === terminalView
+                }
             )
         }
     }
@@ -517,7 +624,8 @@ struct TerminalWindowRoot: View {
             items: tabItems,
             activate: { route.activate($0) },
             split: { split($0) },
-            close: { close($0) }
+            close: { close($0) },
+            allowsSplit: shell == nil
         )
     }
 
@@ -679,6 +787,10 @@ struct TerminalWindowRoot: View {
     /// iPad uses the deck's stable data value, which raises the matching
     /// window and creates it only when none exists.
     private func showDeck() {
+        if let shell {
+            shell.showDeck()
+            return
+        }
         #if os(visionOS)
         if let session = DeckScene.session {
             UIApplication.shared.activateSceneSession(
@@ -701,10 +813,14 @@ struct TerminalWindowRoot: View {
     private func syncTabs() {
         if route.tabs.isEmpty {
             workspace.unregisterWindow(id: route.id)
-            // Plain DismissAction, not dismissWindow(id:value:) — the scene's
-            // committed value can lag the just-emptied binding, and a value
-            // mismatch would silently leave a ghost window behind.
-            dismiss()
+            if let shell {
+                shell.tabsEmptied()
+            } else {
+                // Plain DismissAction, not dismissWindow(id:value:) — the
+                // scene's committed value can lag the just-emptied binding,
+                // and a mismatch would silently leave a ghost window behind.
+                dismiss()
+            }
             return
         }
         for tab in route.tabs {
@@ -714,9 +830,13 @@ struct TerminalWindowRoot: View {
             id: route.id,
             tabs: route.tabs,
             label: windowLabel,
-            reveal: { [route = $route, workspace] tabID in
+            reveal: { [route = $route, workspace, shell] tabID in
                 route.wrappedValue.activate(tabID)
-                workspace.controller(for: tabID)?.revealWindow()
+                if let shell {
+                    shell.revealTab(tabID)
+                } else {
+                    workspace.controller(for: tabID)?.revealWindow()
+                }
             },
             surrender: { [route = $route] in
                 let tabs = route.wrappedValue.tabs
@@ -742,8 +862,14 @@ struct TerminalWindowRoot: View {
     }
 
     private func close(_ tabID: UUID) {
+        if shell != nil {
+            workspace.controller(for: tabID)?.releaseFocus()
+        }
         workspace.closeTab(tabID)
         route.removeTab(id: tabID)
+        if shell != nil, route.tabs.isEmpty {
+            syncTabs()
+        }
     }
 
     /// Kill the tmux session on the host over its control connection
@@ -768,6 +894,7 @@ struct TerminalWindowRoot: View {
     }
 
     private func split(_ tabID: UUID) {
+        guard shell == nil else { return }
         guard route.tabs.count > 1, let tab = route.removeTab(id: tabID) else { return }
         openWindow(id: "terminal", value: TerminalWindowRoute(tab: tab))
     }
@@ -784,6 +911,7 @@ private struct TerminalPane: View {
     let fontSize: CGFloat
     let bottomChromeHeight: CGFloat
     let isActive: Bool
+    let focusAllowed: Bool
     let close: () -> Void
 
     @State private var dropTargeted = false
@@ -810,7 +938,7 @@ private struct TerminalPane: View {
                     fontSize: fontSize,
                     theme: themes.selected,
                     bottomChromeHeight: bottomChromeHeight,
-                    isActive: isActive
+                    isActive: isActive && focusAllowed
                 )
                 statusOverlay(for: controller)
             } else if !hostExists {
@@ -820,7 +948,9 @@ private struct TerminalPane: View {
         // A shell that (re)connects claims focus outright — if its tab is
         // the one on screen.
         .onChange(of: controller?.status) { _, status in
-            if status == .live, isActive { controller?.focusTerminal() }
+            if status == .live, isActive, focusAllowed {
+                controller?.focusTerminal()
+            }
         }
         // Dropped files upload into the pane's cwd, then their paths get
         // typed into the session (never submitted). tmux tabs only — a

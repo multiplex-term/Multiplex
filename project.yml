@@ -76,8 +76,20 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
           UISceneConfigurations: {}
+        # iPhone is single-scene: without this override iOS 27 connects a
+        # second (empty) scene on phones, composing two windows into one
+        # screen. iPad/visionOS keep multi-scene from the base manifest.
+        UIApplicationSceneManifest~iphone:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations: {}
         UILaunchScreen:
           UIColorName: AppBackground
+        # iPhone (Debug-only device family, see TARGETED_DEVICE_FAMILY below):
+        # the un-suffixed key applies to iPhone; the ~ipad override wins on iPad.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationPortraitUpsideDown
@@ -100,6 +112,12 @@ targets:
         CURRENT_PROJECT_VERSION: "202607130"
         TARGETED_DEVICE_FAMILY: "2,7"
         SUPPORTS_MACCATALYST: NO
+      configs:
+        # iPhone remains a Debug-only destination for single-window shell
+        # verification. Release archives stay iPad + Vision Pro until phone
+        # distribution is deliberately enabled.
+        Debug:
+          TARGETED_DEVICE_FAMILY: "1,2,7"
         # Export compliance: Multiplex implements only published,
         # industry-standard crypto (SSH and AES-OCB). Apple's NO value means
         # "no non-exempt encryption," not "no encryption"; no Apple

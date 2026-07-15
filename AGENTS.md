@@ -87,6 +87,12 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 - `MULTIPLEX_AUTO_PAYWALL=1` — opens the real locked Pro paywall with a
   deterministic $19.99 storefront preview for App Review screenshot capture;
   DEBUG only, because simctl launches don't inherit Xcode's StoreKit session.
+- `MULTIPLEX_FORCE_SHELL=1|0` — DEBUG-only override for the single-window
+  shell decision. `1` forces the real shell on and `0` forces classic
+  multi-window mode on any device. Without an override, iPhone always uses
+  the shell, iPad uses it only when the connected `UIWindowScene.isFullScreen`
+  is true, and visionOS never uses it. The once-per-scene-connect decision is
+  logged under subsystem `app.multiplexterm.multiplex`, category `shell`.
 
 Pass them through simctl with the `SIMCTL_CHILD_` prefix:
 ```sh
@@ -94,6 +100,15 @@ SIMCTL_CHILD_MULTIPLEX_SEED_HOST=.../state/seed.json \
 SIMCTL_CHILD_MULTIPLEX_AUTO_ATTACH=main \
 xcrun simctl launch <UDID> app.multiplexterm.multiplex
 ```
+
+**iOS 27 scene/screenshot notes:** a first-ever install can connect an empty
+scene and show only the chassis; uninstall the app from that simulator, then
+install and launch it once more. A freshly booted simulator can take 10–15 s
+to paint its first frame (wait at least 12 s before an iPhone screenshot).
+Keep the `UIApplicationSceneManifest~iphone` single-scene override: without it,
+iOS 27 can connect and composite a second scene on the phone panel. Device
+Hub resize mode can report a resized app canvas while `simctl io screenshot`
+still rasterizes the native panel, so use a native-canvas device for captures.
 
 **iOS-app-on-Mac** ("My Mac (Designed for iPad)"): the same hooks work, with
 two twists. The app is sandboxed, so `MULTIPLEX_SEED_HOST` must point at a
@@ -144,6 +159,8 @@ first slash chip in the agent helper strip (inject → pump → PTY → tmux), a
 pane's cwd → tab append → attach), and
 `… -p app.multiplexterm.multiplex.debug.tmuxshortcuts` opens the focused
 iPad terminal's tmux shortcut popover for layout capture, and
+`… -p app.multiplexterm.multiplex.debug.customcommands` opens the focused
+terminal's Custom Commands editor for layout capture, and
 `… -p app.multiplexterm.multiplex.debug.tmuxcopy` sends Copy Mode through
 SwiftTerm and the terminal's ordered input pump, and
 `… -p app.multiplexterm.multiplex.debug.tmuxcopydone` runs the contextual
@@ -175,8 +192,9 @@ headlessly; `SwiftTermView` logs each decision to the unified log
 ## Architecture
 
 ```
-SwiftUI: Deck window  +  N Terminal windows (WindowGroup(for: TerminalWindowRoute))
-                         a window = ordered tabs; each tab a TerminalRoute (one shell)
+SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
+         Shell = real FleetWall + one ordered TerminalWindowRoute tab set
+         a terminal window/shell = ordered tabs; each tab a TerminalRoute
   HostStore          hosts.json local cache; secrets + host records sync via
                      iCloud Keychain as synchronizable items (KeychainStore)
   ThemeStore         terminal color schemes — TerminalTheme built-ins + custom
@@ -269,6 +287,11 @@ views.
   Manager transiently clears a moving window's `isKeyWindow` flag while its
   terminal remains first responder; an already-owned focus claim must stay a
   no-op in that state, never call `makeKey()` to fight the system transition.
+  The compact single-window shell's deck is also a focus-exclusion surface:
+  terminals stay mounted behind it, so scene restoration must pass stage
+  visibility through `TerminalFocusArbiter.restore` and refuse/resign a hidden
+  responder. Otherwise foregrounding sees the deliberately cleared owner as
+  an invitation to restore the keyboard over the deck.
 - **The iPad key rail is app-owned chrome, never an `inputAccessoryView`**:
   `TerminalKeyBar` is a TALLY rail (ESC / latching CTRL / TAB, the shell
   symbols `~ | / -`, DECCKM-aware autorepeat arrows, dismiss) installed as a
@@ -279,8 +302,11 @@ views.
   The rail is full-width and bottommost; the agent helper strip occupies a
   fixed gap immediately above it. Both move above a genuinely docked keyboard.
   PgUp/PgDn ride along (autorepeating, `CSI 5~`/`6~`) — pagers and CLI
-  agents like Claude Code page their transcripts with them; the narrowest
-  rail tier drops them after the symbols.
+  agents like Claude Code page their transcripts with them. Narrow tiers drop
+  page keys, then symbols; a 390 pt phone tier compacts keys to 40 pt while
+  retaining TMUX. The final 372 pt tier drops TMUX, and the shell UMD overflow
+  deliberately has no duplicate tmux entry. ESC/CTRL/TAB, all four arrows,
+  and dismiss never leave the rail.
   Every key sends through `TerminalView.send` → delegate → the controller's
   ordered pump (never a side channel); CTRL rides SwiftTerm's public
   `controlModifier`, consumed by the next typed character — the bar observes
@@ -535,8 +561,9 @@ automation or the App Store Connect UI is required.
 
 ## Conventions
 
-- Bundle id `app.multiplexterm.multiplex`; device families iPad + Vision Pro only
-  (no iPhone). Min visionOS 1.0 / iOS 17.
+- Bundle id `app.multiplexterm.multiplex`; Release device families remain iPad
+  + Vision Pro, while Debug also includes iPhone for shell verification. Min
+  visionOS 1.0 / iOS 17.
 - Design tokens live in `Theme.swift` — the TALLY identity: graphite chassis
   (`#17181A`), screens darker than their frames (`#0A0B0C`), tally red
   (`#E5484D`) spent ONLY on live state and always captioned. Use tokens, don't
