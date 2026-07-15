@@ -17,5 +17,6 @@ tmux new-session -d -s build /usr/local/bin/demo-build-loop
 tmux new-session -d -s logs /usr/local/bin/demo-worker-log
 tmux new-session -d -s agent -n cc /usr/local/bin/demo-agent-cc
 tmux new-window -t agent:1 -n cx /usr/local/bin/demo-agent-cx
+tmux new-window -t agent:2 -n pi /usr/local/bin/demo-agent-pi
 tmux select-window -t agent:0
 SEED

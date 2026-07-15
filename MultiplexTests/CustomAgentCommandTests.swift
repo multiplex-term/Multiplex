@@ -111,7 +111,7 @@ final class CustomAgentCommandTests: XCTestCase {
         XCTAssertEqual(commands.map(\.barLabel), ["/review", nil, nil])
     }
 
-    func testSharedCommandMirrorsAndStaysEditableFromEitherAgent() throws {
+    func testSharedCommandMirrorsAndStaysEditableFromAnyAgent() throws {
         let claudeOnly = CustomAgentCommand(content: "/claude")
         let shared = CustomAgentCommand(
             content: "review everything",
@@ -131,21 +131,23 @@ final class CustomAgentCommandTests: XCTestCase {
             [claudeOnly, shared]
         )
         XCTAssertEqual(configuration.commands(for: .codex), [shared])
+        XCTAssertEqual(configuration.commands(for: .pi), [shared])
 
-        var editedFromCodex = shared
-        editedFromCodex.content = "review and test everything"
-        editedFromCodex.autoSubmit = false
+        var editedFromPi = shared
+        editedFromPi.content = "review and test everything"
+        editedFromPi.autoSubmit = false
         configuration.replace(
-            [editedFromCodex],
+            [editedFromPi],
             builtInPlacements: [:],
-            for: .codex
+            for: .pi
         )
 
         XCTAssertEqual(
             configuration.commands(for: .claudeCode),
-            [claudeOnly, editedFromCodex]
+            [claudeOnly, editedFromPi]
         )
-        XCTAssertEqual(configuration.commands(for: .codex), [editedFromCodex])
+        XCTAssertEqual(configuration.commands(for: .codex), [editedFromPi])
+        XCTAssertEqual(configuration.commands(for: .pi), [editedFromPi])
 
         let data = try JSONEncoder().encode(configuration)
         var relaunched = try JSONDecoder().decode(
@@ -154,18 +156,19 @@ final class CustomAgentCommandTests: XCTestCase {
         )
         XCTAssertEqual(relaunched, configuration)
 
-        var codexOnly = editedFromCodex
-        codexOnly.shared = false
+        var piOnly = editedFromPi
+        piOnly.shared = false
         relaunched.replace(
-            [codexOnly],
+            [piOnly],
             builtInPlacements: [:],
-            for: .codex
+            for: .pi
         )
         XCTAssertEqual(relaunched.commands(for: .claudeCode), [claudeOnly])
-        XCTAssertEqual(relaunched.commands(for: .codex), [codexOnly])
+        XCTAssertTrue(relaunched.commands(for: .codex).isEmpty)
+        XCTAssertEqual(relaunched.commands(for: .pi), [piOnly])
     }
 
-    func testSharedCommandReplacesEquivalentLocalActionAndDeletesFromBoth() {
+    func testSharedCommandReplacesEquivalentLocalActionAndDeletesFromAll() {
         let local = CustomAgentCommand(
             content: "/review",
             autoSubmit: true,
@@ -191,14 +194,16 @@ final class CustomAgentCommandTests: XCTestCase {
         )
         XCTAssertEqual(configuration.commands(for: .claudeCode), [shared])
         XCTAssertEqual(configuration.commands(for: .codex), [shared])
+        XCTAssertEqual(configuration.commands(for: .pi), [shared])
 
         configuration.replace(
             [],
             builtInPlacements: [:],
-            for: .codex
+            for: .pi
         )
         XCTAssertTrue(configuration.commands(for: .claudeCode).isEmpty)
         XCTAssertTrue(configuration.commands(for: .codex).isEmpty)
+        XCTAssertTrue(configuration.commands(for: .pi).isEmpty)
         XCTAssertTrue(configuration.isEmpty)
     }
 
@@ -210,6 +215,7 @@ final class CustomAgentCommandTests: XCTestCase {
 
         XCTAssertEqual(configuration.commands(for: .claudeCode), [shared])
         XCTAssertEqual(configuration.commands(for: .codex), [shared])
+        XCTAssertEqual(configuration.commands(for: .pi), [shared])
     }
 
     func testConfigurationPersistsOrderedProfilesAndNormalizedPlacements() throws {
@@ -222,6 +228,7 @@ final class CustomAgentCommandTests: XCTestCase {
             ),
         ]
         let codex = [CustomAgentCommand(content: "/status")]
+        let pi = [CustomAgentCommand(content: "/tree")]
         var configuration = AgentCommandConfiguration()
 
         configuration.replace(
@@ -240,6 +247,11 @@ final class CustomAgentCommandTests: XCTestCase {
             builtInPlacements: [:],
             for: .codex
         )
+        configuration.replace(
+            pi,
+            builtInPlacements: ["/tree": .more, "/session": .bar],
+            for: .pi
+        )
 
         let expectedPlacements: [String: AgentCommandPlacement] = [
             "/clear": .more,
@@ -247,6 +259,8 @@ final class CustomAgentCommandTests: XCTestCase {
         ]
         XCTAssertEqual(configuration.commands(for: .claudeCode), claude)
         XCTAssertEqual(configuration.commands(for: .codex), codex)
+        XCTAssertEqual(configuration.commands(for: .pi), pi)
+        XCTAssertEqual(configuration.profiles.map(\.agent), AgentKind.allCases)
         XCTAssertEqual(
             configuration.builtInPlacements(for: .claudeCode),
             expectedPlacements
@@ -258,6 +272,56 @@ final class CustomAgentCommandTests: XCTestCase {
             from: data
         )
         XCTAssertEqual(decoded, configuration)
+    }
+
+    func testPiProfileEncodingRemainsReadableByLegacyTwoAgentBuild() throws {
+        let claude = CustomAgentCommand(content: "/review")
+        let pi = CustomAgentCommand(content: "/tree")
+        var configuration = AgentCommandConfiguration()
+        configuration.replace(
+            [claude],
+            builtInPlacements: ["/clear": .more],
+            for: .claudeCode
+        )
+        configuration.replace(
+            [pi],
+            builtInPlacements: ["/tree": .more],
+            for: .pi
+        )
+
+        let data = try JSONEncoder().encode(configuration)
+        let legacy = try JSONDecoder().decode(
+            LegacyTwoAgentConfiguration.self,
+            from: data
+        )
+
+        // Pi lives in a new ignored key, never in the strict legacy array.
+        XCTAssertEqual(legacy.profiles.map(\.agent), [.claudeCode])
+        XCTAssertEqual(legacy.profiles[0].commands, [claude])
+        XCTAssertEqual(legacy.profiles[0].builtInPlacements, ["/clear": .more])
+
+        // A real legacy save drops the unknown Pi keys. Current code must
+        // recognize that round-trip as marker 0 rather than certifying an
+        // intentionally empty Pi profile.
+        let legacyRoundTrip = try JSONEncoder().encode(legacy)
+        let recovered = try JSONDecoder().decode(
+            AgentCommandConfiguration.self,
+            from: legacyRoundTrip
+        )
+        XCTAssertEqual(recovered.piProfileVersion, 0)
+        XCTAssertEqual(recovered.commands(for: .claudeCode), [claude])
+        XCTAssertEqual(
+            recovered.builtInPlacements(for: .claudeCode),
+            ["/clear": .more]
+        )
+        XCTAssertTrue(recovered.commands(for: .pi).isEmpty)
+
+        let current = try JSONDecoder().decode(
+            AgentCommandConfiguration.self,
+            from: data
+        )
+        XCTAssertEqual(current.commands(for: .pi), [pi])
+        XCTAssertEqual(current.builtInPlacements(for: .pi), ["/tree": .more])
     }
 
     func testHostRecordRoundTripCarriesCommandSetupForKeychainSync() throws {
@@ -287,6 +351,10 @@ final class CustomAgentCommandTests: XCTestCase {
         )
         XCTAssertEqual(
             decoded.agentCommandConfiguration.commands(for: .codex),
+            [custom]
+        )
+        XCTAssertEqual(
+            decoded.agentCommandConfiguration.commands(for: .pi),
             [custom]
         )
         XCTAssertEqual(
@@ -388,6 +456,7 @@ final class CustomAgentCommandTests: XCTestCase {
             [studio]
         )
         XCTAssertEqual(studioConfiguration.commands(for: .codex), [studio])
+        XCTAssertEqual(studioConfiguration.commands(for: .pi), [studio])
         XCTAssertEqual(
             studioConfiguration.builtInPlacements(for: .claudeCode),
             ["/context": .bar]
@@ -426,5 +495,20 @@ final class CustomAgentCommandTests: XCTestCase {
             self.commands = commands
             self.builtInPlacements = builtInPlacements
         }
+    }
+
+    private enum LegacyTwoAgentKind: String, Codable {
+        case claudeCode
+        case codex
+    }
+
+    private struct LegacyTwoAgentProfile: Codable {
+        var agent: LegacyTwoAgentKind
+        var commands: [CustomAgentCommand]
+        var builtInPlacements: [String: AgentCommandPlacement]
+    }
+
+    private struct LegacyTwoAgentConfiguration: Codable {
+        var profiles: [LegacyTwoAgentProfile]
     }
 }

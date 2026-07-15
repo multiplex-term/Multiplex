@@ -135,7 +135,7 @@ struct SettingsView: View {
                 } header: {
                     Eyebrow("Pro")
                 } footer: {
-                    Text("Mosh keeps terminal connections alive through sleep and network changes. Agent Helpers shows built-in and custom quick commands when Claude Code or Codex is running, and Agent Alerts notifies you when an unwatched session needs you. SSH terminals, agent detection and the deck's live state stay free.")
+                    Text("Mosh keeps terminal connections alive through sleep and network changes. Agent Helpers shows built-in and custom quick commands when Claude Code, Codex, or Pi is running, and Agent Alerts notifies you when an unwatched supported session needs you. SSH terminals, agent detection and the deck's live state stay free.")
                 }
             }
             .sheet(isPresented: $showingPaywall) { ProPaywallView() }

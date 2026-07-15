@@ -50,7 +50,8 @@ under `Tools/dev-sshd/state/`, never touches `~/.ssh`) with demo tmux sessions:
 
 The `agent` session fakes CLI agents for the helper strip: window `cc` sets
 the `✳ Claude Code` OSC title (title signal), window `cx` runs `exec -a codex
-cat` (ps-tree signal); both run `cat`, which echoes injected bytes so
+cat` (ps-tree signal), and window `pi` sets `π - harness` plus `exec -a pi
+cat`; all run `cat`, which echoes injected bytes so
 `tmux capture-pane -t agent:0 -p` shows what a chip typed.
 
 The simulator shares the Mac's network, so launch with these **DEBUG-only** env
@@ -217,7 +218,7 @@ SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
                      state is never cached (re-earned by a live probe)
     TmuxProbe        list-sessions/-windows/-panes + capture-pane + ps command
                      builders and parsers (pure, unit-tested)
-    AgentSignature   classifies a pane's CLI agent (Claude Code / Codex) from
+    AgentSignature   classifies a pane's CLI agent (Claude Code / Codex / Pi) from
                      probe output; command sets for the helper strip (pure)
   EntitlementStore   the Pro gate — StoreKit 2 non-consumable ownership,
                      purchase/restore, transaction updates, and the
@@ -436,12 +437,15 @@ views.
   (which could reorder bytes). Citadel already sets `TCP_NODELAY`.
 - **Agent detection is multi-signal and fail-soft** (`AgentSignature`, fed by
   the probe's P lines + `MULTIPLEX_PS` ps table): `pane_current_command`
-  (`claude` on Linux, `codex` everywhere) → pane title (`✳ Claude Code`,
-  undocumented Claude behavior) → bare-semver comm (macOS native launcher
-  execs `versions/2.1.206`) → ps-tree walk from `pane_pid` matching **argv[0]
+  (`claude` on Linux, `codex` everywhere, native `pi`) → pane title
+  (`✳ Claude Code`, undocumented Claude behavior; `π - …` while Pi's
+  npm `node` wrapper still owns the pane—Pi leaves that title stale on exit)
+  → bare-semver comm (macOS native Claude launcher execs
+  `versions/2.1.206`) → ps-tree walk from `pane_pid` matching **argv[0]
   basename only** (never substring — Claude Desktop helpers and
   `--user-data-dir=…/Claude` false-positive otherwise; catches npm Codex,
-  whose node wrapper *spawns* the binary and stays pane leader). The full
+  whose node wrapper *spawns* the binary and stays pane leader, plus npm Pi,
+  whose tmux comm remains `node` while its process title becomes `pi`). The full
   five-second probe retains **every pane**, reuses its one `list-panes`
   result to root one linear, subtree-clipped host-wide ps snapshot, and builds
   the process index once; FleetWall aggregates all detected split panes,
@@ -454,22 +458,31 @@ views.
   signal, never the session list. Helper chips only ever *type* through
   `TerminalSessionController.sendInput` (the same ordered pump as the
   keyboard; Enter = CR, Esc = 0x1B, Shift+Tab = CSI Z,
-  Codex's TRANSCRIPT overlay toggle = Ctrl+T; Claude Code's PG UP/PG DN
+  Codex's TRANSCRIPT overlay toggle = Ctrl+T; Pi's THINK / TOOLS / THINKING
+  helpers are Shift+Tab / Ctrl+O / Ctrl+T; Claude Code's PG UP/PG DN
   chips, CSI `5~`/`6~`, are visionOS-only — iPad's key rail already pages);
   never ship a Ctrl+B payload — it's the remote tmux prefix. The strip and
   agent alerts (`AttentionCenter`) are the Pro-gated surfaces; detection and
   the wall's telemetry (agent token, NEEDS YOU badge, RUNNING) stay free.
+  Pi's OSC title is intentionally static while it works, so Pi detection and
+  helpers are supported but its attention state remains fail-soft idle; do not
+  claim Pi RUNNING/turn-ended alerts without a separate reliable signal.
   **Slash chips submit with a CR sent ~160 ms after the text** (separate
   write): Codex's composer treats an Enter inside one rapid burst as a pasted
-  newline, not a submit — verified against rust-v0.144; Claude Code accepts
-  either. Built-in Bar/More choices persist per host and agent as deviations
-  from the curated defaults (stale/default-valued overrides are discarded, so
+  newline, not a submit — verified against rust-v0.144; the delayed shape is
+  also accepted by Claude Code and Pi. Built-in Bar/More choices persist per
+  host and agent as deviations from the curated defaults (stale/default-valued
+  overrides are discarded, so
   future command-set updates still land correctly). Custom commands use the
-  same host-and-agent scope; `shared` mirrors the same UUID only between that
-  host's two profiles, so either editor updates it, unsharing keeps it only in
-  the editor being saved, and deletion removes it from both without touching
-  another host. The configuration is part of the Codable Host record, so every
-  save bumps `Host.updatedAt` and mirrors through synchronizable iCloud Keychain.
+  same host-and-agent scope; `shared` mirrors the same UUID across that host's
+  Claude Code, Codex, and Pi profiles, so any editor updates it, unsharing keeps
+  it only in the editor being saved, and deletion removes it from all three
+  without touching another host. Pi is encoded in a separate nested key so
+  older two-agent builds can still decode the Host; a presence marker lets
+  `HostSync` restore Pi from another current-schema peer if an older peer drops
+  that unknown key during an edit.
+  The configuration is part of the Codable Host record, so every save bumps
+  `Host.updatedAt` and mirrors through synchronizable iCloud Keychain.
   The former device-local `agent-commands.json` (both global and short-lived
   host-scoped shapes) is a launch fallback, then migrates into Host only after
   the first cloud merge; a schema version distinguishes an intentionally empty

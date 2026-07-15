@@ -289,8 +289,8 @@ struct CustomAgentCommandPanel: View {
             command.wrappedValue.shared,
             command.wrappedValue.showInBar
         ) {
-        case (true, true): "BOTH · \(barLabel ?? "EMPTY")"
-        case (true, false): "BOTH · MORE"
+        case (true, true): "ALL · \(barLabel ?? "EMPTY")"
+        case (true, false): "ALL · MORE"
         case (false, true): "BAR · \(barLabel ?? "EMPTY")"
         case (false, false): "MORE"
         }
@@ -375,7 +375,7 @@ struct CustomAgentCommandPanel: View {
             ChassisSwitch(
                 "SHARED",
                 isOn: command.shared,
-                accessibilityLabel: "Shared between Claude Code and Codex"
+                accessibilityLabel: "Shared across Claude Code, Codex, and Pi"
             )
             .fixedSize(horizontal: true, vertical: false)
         }
@@ -450,7 +450,7 @@ struct CustomAgentCommandPanel: View {
                     Circle()
                         .fill(Theme.signal3)
                         .frame(width: 6, height: 6)
-                    Text("Shared keeps one editable command synchronized in Claude Code and Codex.")
+                    Text("Shared keeps one editable command synchronized across Claude Code, Codex, and Pi.")
                         .font(.mono(8, weight: .medium))
                         .foregroundStyle(Theme.signal2)
                 }

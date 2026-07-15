@@ -440,13 +440,14 @@ final class HostConnectionModel {
             let window = session.activeWindow
             let activeAgent = window?.activeAgent
             let activeTitle = window?.activePane?.title ?? window?.paneTitle ?? ""
-            // No detected agent → no state (bells still tracked below).
-            var state: PaneAgentState?
-            if activeAgent != nil {
-                state = AgentAttention.classify(
-                    title: activeTitle,
-                    tail: attentionTails[session.name] ?? []
-                )
+            // No detected agent, or an agent without verified attention
+            // signals, means no state (bells are still tracked below).
+            let state = AgentAttention.classifyVerified(
+                title: activeTitle,
+                tail: attentionTails[session.name] ?? [],
+                agent: activeAgent
+            )
+            if let state {
                 next[session.name] = state
             }
             let events = attentionTracker.update(

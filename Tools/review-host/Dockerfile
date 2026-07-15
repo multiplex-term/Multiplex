@@ -31,13 +31,15 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 COPY sshd_review.conf /etc/ssh/sshd_config.d/60-review.conf
 COPY scripts/mosh-server-wrapper /usr/bin/mosh-server
 COPY scripts/demo-server-log scripts/demo-worker-log scripts/demo-build-loop \
-     scripts/demo-agent-cc scripts/demo-agent-cx scripts/seed-review-sessions \
+     scripts/demo-agent-cc scripts/demo-agent-cx scripts/demo-agent-pi \
+     scripts/seed-review-sessions \
      /usr/local/bin/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod 755 /usr/bin/mosh-server /entrypoint.sh \
         /usr/local/bin/demo-server-log /usr/local/bin/demo-worker-log \
         /usr/local/bin/demo-build-loop /usr/local/bin/demo-agent-cc \
-        /usr/local/bin/demo-agent-cx /usr/local/bin/seed-review-sessions
+        /usr/local/bin/demo-agent-cx /usr/local/bin/demo-agent-pi \
+        /usr/local/bin/seed-review-sessions
 
 # Host keys persist in a volume: once the app ships TOFU pinning, a stable
 # key across container rebuilds is part of being a well-behaved SSH host.

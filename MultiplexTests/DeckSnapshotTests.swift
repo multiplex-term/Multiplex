@@ -23,6 +23,11 @@ final class DeckSnapshotTests: XCTestCase {
                                     pid: 43, tty: "/dev/pts/1", command: "codex",
                                     title: "repo", agent: .codex
                                 ),
+                                TmuxPane(
+                                    index: 2, isActive: false, tmuxID: "%2",
+                                    pid: 44, tty: "/dev/pts/2", command: "node",
+                                    title: "π - repo", agent: .pi
+                                ),
                             ]
                         ),
                     ],
@@ -42,8 +47,8 @@ final class DeckSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded, snapshot)
         // The bits the wall renders from cache survive verbatim.
         XCTAssertEqual(decoded.sessions[0].activeAgent, .claudeCode)
-        XCTAssertEqual(decoded.sessions[0].detectedAgents, [.claudeCode, .codex])
-        XCTAssertEqual(decoded.sessions[0].paneCount, 2)
+        XCTAssertEqual(decoded.sessions[0].detectedAgents, [.claudeCode, .codex, .pi])
+        XCTAssertEqual(decoded.sessions[0].paneCount, 3)
         XCTAssertTrue(decoded.sessions[0].isAttached)
         XCTAssertEqual(decoded.miniatures["main"], ["$ make test", "ok"])
     }

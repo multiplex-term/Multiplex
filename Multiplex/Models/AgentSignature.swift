@@ -1,15 +1,17 @@
 import Foundation
 
 /// Which CLI agent is driving a tmux pane.
-enum AgentKind: String, Hashable, Codable {
+enum AgentKind: String, Hashable, Codable, CaseIterable {
     case claudeCode
     case codex
+    case pi
 
     /// Strip header / accessibility voice.
     var displayName: String {
         switch self {
         case .claudeCode: "Claude Code"
         case .codex: "Codex"
+        case .pi: "Pi"
         }
     }
 
@@ -18,6 +20,7 @@ enum AgentKind: String, Hashable, Codable {
         switch self {
         case .claudeCode: "CLAUDE"
         case .codex: "CODEX"
+        case .pi: "PI"
         }
     }
 
@@ -28,6 +31,18 @@ enum AgentKind: String, Hashable, Codable {
         switch self {
         case .claudeCode: "claude"
         case .codex: "codex"
+        case .pi: "pi"
+        }
+    }
+
+    /// Whether the agent exposes title/dialog transitions that the attention
+    /// classifier has been verified against. Pi's identifying title remains
+    /// static while work runs, so detection and helpers stay available while
+    /// attention deliberately fails soft.
+    var hasVerifiedAttentionSignals: Bool {
+        switch self {
+        case .claudeCode, .codex: true
+        case .pi: false
         }
     }
 }
@@ -41,21 +56,27 @@ struct PSRow: Hashable {
 
 /// How Multiplex recognizes an agent from probe output. All rules verified
 /// against real processes on 2026-07-10 (Claude Code v2.1.206, Codex
-/// rust-v0.144.x) — see local-plan/agent-harness-helpers.md §1.1 for the
-/// experiment matrix. Everything here is pure and pinned by
-/// AgentSignatureTests; when an agent changes its signature, this file and
-/// its tests are the whole blast radius.
+/// rust-v0.144.x) and 2026-07-15 (Pi v0.80.7, npm + native) — see
+/// local-plan/agent-harness-helpers.md §1.1 for the original experiment
+/// matrix. Everything here is pure and pinned by AgentSignatureTests; when
+/// an agent changes its signature, this file and its tests are the whole
+/// blast radius.
 enum AgentSignature {
     /// Cheap first pass over one pane's `#{pane_current_command}` +
     /// `#{pane_title}`. Order matters.
     static func classify(command: String, title: String) -> AgentKind? {
-        if command == "codex" { return .codex }
-        // Linux reads argv[0] → "claude"; macOS reads the executable comm.
-        if command == "claude" { return .claudeCode }
+        // Exact process signals always beat a stale OSC title.
+        if let direct = agentNamed(command) { return direct }
         // Claude Code sets its pane title via OSC 0/2 (undocumented, stable
         // through v2.1.x). Never match bare "claude" — the default title is
         // whatever a shell prompt wrote there, often a hostname.
         if title.contains("Claude Code") || title.hasPrefix("✳ ") { return .claudeCode }
+        // Pi's npm entrypoint remains `node` to tmux on macOS, while its
+        // interactive UI writes this narrow OSC title. Pi leaves that title
+        // behind after returning to the shell, so it is authoritative only
+        // while the observed npm wrapper still owns the pane. Native Pi
+        // reports `pi` above; overridden titles fall through to the ps walk.
+        if command == "node", title.hasPrefix("π - ") { return .pi }
         // macOS native launcher: ~/.local/bin/claude is a symlink into
         // versions/<semver>, and the BSD comm is the resolved file's
         // basename — a bare version number. Nothing else realistically runs
@@ -124,6 +145,7 @@ enum AgentSignature {
         switch name {
         case "claude": .claudeCode
         case "codex": .codex
+        case "pi": .pi
         default: nil
         }
     }
@@ -145,14 +167,13 @@ struct AgentCommand: Identifiable, Hashable {
     var label: String
     var payload: Data
     /// The command consumes one free-tier daily taste when it is actually
-    /// sent. Keyboard-equivalent helpers (Esc, Shift+Tab, transcript and
-    /// paging) deliberately leave this false.
+    /// sent. Keyboard-equivalent helpers deliberately leave this false.
     var consumesSlashChipTaste = false
     /// After typing the payload, pause and send CR as a separate write.
     /// Codex's composer treats Enter arriving inside a rapid input burst as
     /// a pasted newline, not a submit (verified against rust-v0.144: burst
     /// "/new\r" leaves the text sitting in the composer; a CR ≥120 ms later
-    /// submits). Claude Code's input doesn't care either way.
+    /// submits). The other supported agents accept the delayed shape too.
     var submitsAfterPause = false
 
     var id: String { label }
@@ -167,18 +188,27 @@ struct AgentCommand: Identifiable, Hashable {
         )
     }
 
-    /// Interrupt the running turn. Esc in both TUIs.
+    /// Interrupt the running turn. Esc in every supported TUI.
     static let stop = AgentCommand(label: "STOP", payload: Data([0x1B]))
 
     /// Cycle permission / collaboration mode — Shift+Tab, which terminals
-    /// send as CSI Z. A fixed default binding in both TUIs. Never ship a
-    /// Ctrl+B payload here: that's the remote tmux prefix and gets eaten.
+    /// send as CSI Z. A fixed default binding in Claude Code and Codex. Never
+    /// ship a Ctrl+B payload here: that's the remote tmux prefix and gets eaten.
     static let mode = AgentCommand(label: "MODE", payload: Data([0x1B, 0x5B, 0x5A]))
+
+    /// Cycle Pi's thinking level. Pi also binds Shift+Tab, but calling this
+    /// MODE would misdescribe its effect.
+    static let think = AgentCommand(label: "THINK", payload: Data([0x1B, 0x5B, 0x5A]))
 
     /// Toggle Codex's transcript overlay — Ctrl+T (0x14), a fixed default
     /// binding in the rust TUI. Only the tmux prefix (Ctrl+B) is special;
     /// Ctrl+T passes through to the pane untouched.
     static let transcript = AgentCommand(label: "TRANSCRIPT", payload: Data([0x14]))
+
+    /// Pi's default bindings. Ctrl+O expands/collapses tool output; Ctrl+T
+    /// expands/collapses thinking blocks (users can remap them in Pi).
+    static let tools = AgentCommand(label: "TOOLS", payload: Data([0x0F]))
+    static let thinking = AgentCommand(label: "THINKING", payload: Data([0x14]))
 
     /// Page the agent's transcript — PgUp/PgDn are CSI 5~/6~ (fixed; unlike
     /// arrows they have no DECCKM variant). Claude Code pages with them.
@@ -197,6 +227,7 @@ enum AgentCommandPlacement: String, Codable, Hashable {
 /// The curated command sets, one place to tune. Slash lists verified
 /// 2026-07-10 — Claude Code v2.1.x docs; Codex rust-v0.144.1 slash_command.rs
 /// (note: Codex renamed /approvals → /permissions and dropped /undo).
+/// Pi's list was verified against v0.80.7 on 2026-07-15.
 enum AgentCommandSet {
     static func primary(for kind: AgentKind) -> [AgentCommand] {
         switch kind {
@@ -216,6 +247,9 @@ enum AgentCommandSet {
             return [.stop, .slash("new"), .slash("resume"), .slash("model"),
                     .slash("permissions"), .slash("review"),
                     .transcript, .mode]
+        case .pi:
+            return [.stop, .slash("new"), .slash("resume"), .slash("compact"),
+                    .slash("model"), .slash("tree"), .think, .tools]
         }
     }
 
@@ -229,6 +263,10 @@ enum AgentCommandSet {
             [.slash("compact"), .slash("diff"), .slash("status"), .slash("fork"),
              .slash("init"), .slash("mention"), .slash("skills"),
              .slash("plan"), .slash("usage")]
+        case .pi:
+            [.slash("session"), .slash("fork"), .slash("clone"),
+             .slash("settings"), .slash("scoped-models"), .slash("copy"),
+             .thinking, .slash("reload"), .slash("hotkeys")]
         }
     }
 

@@ -995,9 +995,9 @@ private struct SessionDropTarget: Equatable {
 
 /// The wall's New Session prompt: a name plus what launches in the fresh
 /// shell — the agent quick options that used to hide behind the tile's
-/// long press are an explicit three-way choice now. The name prefills the
-/// first free conventional name for the selection (main / claude / codex,
-/// then -2, -3…) so Create is one tap; picking an agent re-prefills it unless
+/// long press are explicit choices now. The name prefills the first free
+/// conventional name for the selection (main / claude / codex / pi, then
+/// -2, -3…) so Create is one tap; picking an agent re-prefills it unless
 /// the user already typed their own. An opt-in remembers the submitted
 /// launch choice for the next prompt. Hosts with working directories also
 /// get a "Starts in" picker, defaulting to the first (the host's own default).
@@ -1172,11 +1172,9 @@ private struct NewSessionSheet: View {
     }
 
     private var launchChoices: [(String, AgentKind?)] {
-        [
-            ("Shell", nil),
-            (AgentKind.claudeCode.displayName, .claudeCode),
-            (AgentKind.codex.displayName, .codex),
-        ]
+        [("Shell", nil)] + AgentKind.allCases.map {
+            ($0.displayName, Optional($0))
+        }
     }
 
     private func prefill(for agent: AgentKind?) -> String {
@@ -1395,7 +1393,11 @@ private struct SessionTile: View {
         if attention == .busy { return true }
         guard hasLiveAgentState else { return false }
         return session.agentPanes.contains {
-            AgentAttention.classify(title: $0.title, tail: []) == .busy
+            AgentAttention.classifyVerified(
+                title: $0.title,
+                tail: [],
+                agent: $0.agent
+            ) == .busy
         }
     }
 
@@ -1403,7 +1405,11 @@ private struct SessionTile: View {
         if case .needsYou = attention { return true }
         guard hasLiveAgentState else { return false }
         return session.agentPanes.contains {
-            if case .needsYou = AgentAttention.classify(title: $0.title, tail: []) {
+            if case .some(.needsYou) = AgentAttention.classifyVerified(
+                title: $0.title,
+                tail: [],
+                agent: $0.agent
+            ) {
                 return true
             }
             return false

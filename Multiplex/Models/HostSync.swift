@@ -32,12 +32,12 @@ enum HostSync {
                 // choosing the timestamp winner, then republish if the cloud
                 // copy was missing the field. This prevents an unrelated edit
                 // on an old device from erasing synced custom commands.
-                let enrichedLocal = preservingAgentCommands(
-                    in: host,
+                let enrichedLocal = preservingPiAgentCommands(
+                    in: preservingAgentCommands(in: host, from: remote),
                     from: remote
                 )
-                let enrichedRemote = preservingAgentCommands(
-                    in: remote,
+                let enrichedRemote = preservingPiAgentCommands(
+                    in: preservingAgentCommands(in: remote, from: host),
                     from: host
                 )
                 if host.updatedAt > remote.updatedAt {
@@ -79,6 +79,21 @@ enum HostSync {
         enriched.agentCommandConfiguration = source.agentCommandConfiguration
         enriched.agentCommandConfigurationVersion =
             source.agentCommandConfigurationVersion
+        return enriched
+    }
+
+    /// Pi profiles live in a new nested coding key so older builds can still
+    /// decode a Host. Such a build necessarily drops that unknown key when it
+    /// saves an unrelated edit; restore only Pi from the current-schema peer,
+    /// preserving the older build's valid Claude Code/Codex changes.
+    private static func preservingPiAgentCommands(
+        in destination: Host,
+        from source: Host
+    ) -> Host {
+        var enriched = destination
+        enriched.agentCommandConfiguration.preservePiProfile(
+            from: source.agentCommandConfiguration
+        )
         return enriched
     }
 }

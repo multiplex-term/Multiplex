@@ -59,8 +59,8 @@ struct TmuxWindow: Identifiable, Hashable, Codable {
     /// CLI agent detected in this window's *active* pane — the pane that
     /// receives keystrokes when the session is attached.
     var agent: AgentKind?
-    /// The active pane's OSC title — both agents encode busy/idle (and
-    /// Codex its approval wait) here; `AgentAttention` classifies it.
+    /// The active pane's OSC title — Claude Code and Codex encode busy/idle
+    /// (and Codex its approval wait) here; `AgentAttention` classifies it.
     var paneTitle: String = ""
     /// All panes from a live probe. Optional only so device-local snapshots
     /// written before multi-pane detection continue to decode; new probes

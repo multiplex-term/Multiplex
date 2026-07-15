@@ -5,6 +5,6 @@ Multiplex 1.0 — first release.
 • Tabs, merge, and split — shells stay connected while windows move
 • Two hosts included free; Multiplex Pro unlocks unlimited hosts
 • A custom tmux shortcut menu, with touch-native copy mode, in the Vision Pro UMD and iPad key bar
-• Claude Code / Codex detection across split panes, with active-pane helpers, synced per-host chip placement and custom commands, sharing across both agents on that host, and Pro alerts
+• Claude Code / Codex / Pi detection across split panes, with active-pane helpers, synced per-host chip placement and custom commands, sharing across all three agents on that host, and Claude Code/Codex Pro alerts
 • mosh built in (Pro): sessions survive sleep, roaming, and IP changes
 • File drops, built-in themes, Pro custom themes, iCloud Keychain host sync

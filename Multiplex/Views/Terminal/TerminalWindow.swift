@@ -761,8 +761,9 @@ struct TerminalWindowRoot: View {
     private var newTabMenu: some View {
         Menu {
             Button("New Session") { openNewTab(launching: nil) }
-            Button(AgentKind.claudeCode.displayName) { openNewTab(launching: .claudeCode) }
-            Button(AgentKind.codex.displayName) { openNewTab(launching: .codex) }
+            ForEach(AgentKind.allCases, id: \.self) { agent in
+                Button(agent.displayName) { openNewTab(launching: agent) }
+            }
         } label: {
             ChassisBadge("TAB", systemImage: "plus")
         }

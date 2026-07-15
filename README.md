@@ -27,7 +27,7 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
 - **Session tiles** — the tile's lower bezel is the *window spine*: one
   segment per tmux window, the active one lit, bell/activity flagged with a
   caution tick. Split panes are counted in the spine, and agent telemetry
-  covers Claude Code / Codex in every pane, not just the foreground split.
+  covers Claude Code / Codex / Pi in every pane, not just the foreground split.
   Tapping a tile **Attaches** the session in its own window
   (`tmux attach-session`). **New Session** runs `tmux new-session -A`.
   **Shell** opens a plain login shell, no tmux.
@@ -50,7 +50,7 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
   then press **Done** to return to the shell. SwiftTerm renders xterm-256color;
   resizing the window sends PTY window-change to the remote. **Detach** closes
   the active tab's channel — tmux keeps the session; the wall still shows it.
-- **Agent helpers** — when the active tmux pane runs Claude Code or Codex, a
+- **Agent helpers** — when the active tmux pane runs Claude Code, Codex, or Pi, a
   context-specific command strip follows it. The focused terminal checks pane
   selection between full wall ticks, so moving across splits updates helpers
   in about a second; background panes remain visible in wall telemetry without
@@ -60,9 +60,9 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
   span multiple lines, Auto Submit is optional, and Show in Bar controls
   placement independently of length. Bar labels keep the first nine characters
   and append `...`; commands kept off the bar stay in More. Shared mirrors one
-  editable command into both agent strips on that host without changing another
-  host's setup. Command Setup is stored with the host record and follows it to
-  other devices through end-to-end encrypted iCloud Keychain sync.
+  editable command into all three agent strips on that host without changing
+  another host's setup. Command Setup is stored with the host record and
+  follows it to other devices through end-to-end encrypted iCloud Keychain sync.
 - **Keyboard focus** — exactly one terminal owns keyboard input at a time
   (`TerminalFocusArbiter`): every visionOS window is its own always-active
   scene, so per-window first responders leave input stuck on the first
