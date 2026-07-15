@@ -98,13 +98,14 @@ struct CustomAgentCommandPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+                .fixedSize(horizontal: false, vertical: true)
             divider
             commandList
             divider
             footer
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(width: width)
-        .fixedSize(horizontal: false, vertical: true)
         .background(Theme.bezel)
         .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
         .presentationBackground(Theme.bezel)
@@ -172,7 +173,11 @@ struct CustomAgentCommandPanel: View {
                 }
             }
         }
-        .frame(height: editorHeight)
+        // The fitted height is the ideal, not an inflexible requirement. When
+        // UIKit shortens an anchored popover above a docked keyboard, only
+        // this scroll viewport contracts; the header and action footer remain
+        // visible instead of the oversized panel being centred and clipped.
+        .frame(minHeight: 0, idealHeight: editorHeight, maxHeight: editorHeight)
         .onPreferenceChange(CustomAgentCommandListHeightKey.self) { height in
             let measuredHeight = ceil(height)
             guard measuredHeight > 0,
