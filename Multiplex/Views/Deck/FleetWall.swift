@@ -1466,3 +1466,97 @@ private struct SessionTile: View {
             + (hasOpenTab ? ". \(openTabAccessibilityText)" : ". Attach")
     }
 }
+
+#if DEBUG
+private enum FleetWallPreviewData {
+    static let host = Host(
+        name: "devbox",
+        hostname: "127.0.0.1",
+        port: 2222,
+        username: "jhen",
+        workingDirs: ["~/workspace/Multiplex", "~/workspace"]
+    )
+
+    static let session = TmuxSession(
+        name: "agent",
+        windows: [
+            TmuxWindow(
+                index: 0,
+                name: "codex",
+                isActive: true,
+                hasBell: false,
+                hasActivity: true,
+                agent: .codex,
+                paneTitle: "Action Required | ~/workspace/Multiplex",
+                panes: [
+                    TmuxPane(
+                        index: 0,
+                        isActive: true,
+                        tmuxID: "%1",
+                        pid: 101,
+                        tty: "ttys001",
+                        command: "codex",
+                        title: "Action Required | ~/workspace/Multiplex",
+                        agent: .codex
+                    ),
+                ]
+            ),
+            TmuxWindow(
+                index: 1,
+                name: "logs",
+                isActive: false,
+                hasBell: true,
+                hasActivity: false,
+                agent: nil
+            ),
+        ],
+        clientCount: 1,
+        created: Date().addingTimeInterval(-7_200),
+        tmuxID: "$1"
+    )
+}
+
+#Preview("Session tile") {
+    SessionTile(
+        session: FleetWallPreviewData.session,
+        lines: [
+            "$ codex",
+            "Review the preview coverage",
+            "Waiting for approval…",
+        ],
+        attention: .needsYou(.permission),
+        hasLiveAgentState: true,
+        hasOpenTab: true,
+        compact: false,
+        selected: true,
+        duplicateAttachTitle: "Attach in New Window",
+        openTabAccessibilityText: "Shows its open window",
+        attach: {},
+        attachNewWindow: {},
+        delete: {}
+    )
+    .frame(width: 360)
+    .padding()
+    .background(Theme.chassis)
+}
+
+#Preview("New session sheet") {
+    NewSessionSheet(
+        host: FleetWallPreviewData.host,
+        existingNames: ["main", "scratch"],
+        create: { _, _, _ in },
+        preferences: NewSessionPreferences(
+            defaults: UserDefaults(
+                suiteName: "app.multiplexterm.multiplex.preview.new-session"
+            )!
+        )
+    )
+}
+
+#Preview("Hatched screen") {
+    HatchedScreen()
+        .frame(width: 360, height: 180)
+        .padding()
+        .background(Theme.chassis)
+}
+#endif

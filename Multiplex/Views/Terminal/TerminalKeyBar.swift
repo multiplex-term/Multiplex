@@ -568,6 +568,24 @@ enum KeyBarDebugHook {
     }
 }
 #endif
+
+#if DEBUG
+#Preview("iPad Key Bar") {
+    KeyBarRow(
+        model: TerminalKeyBar.Model(),
+        press: { _ in }
+    )
+    .frame(width: 1024, height: TerminalKeyBar.barHeight)
+}
+
+#Preview("Compact Key Bar") {
+    KeyBarRow(
+        model: TerminalKeyBar.Model(),
+        press: { _ in }
+    )
+    .frame(width: 390, height: TerminalKeyBar.barHeight)
+}
+#endif
 #endif
 
 #if os(visionOS)
@@ -700,6 +718,11 @@ enum KeyClusterDebugHook {
             NotificationCenter.default.post(name: .multiplexDebugKeyCluster, object: nil)
         }
     }
+}
+
+#Preview("Terminal Key Cluster") {
+    TerminalKeyCluster(controller: nil)
+        .padding()
 }
 #endif
 #endif

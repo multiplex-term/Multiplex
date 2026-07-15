@@ -118,6 +118,11 @@ targets:
         # distribution is deliberately enabled.
         Debug:
           TARGETED_DEVICE_FAMILY: "1,2,7"
+          # SwiftUI Canvas requires an unoptimized app module. Keep these
+          # explicit so previews cannot inherit an optimized build plan.
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+          ENABLE_PREVIEWS: YES
+          ENABLE_DEBUG_DYLIB: YES
         # Export compliance: Multiplex implements only published,
         # industry-standard crypto (SSH and AES-OCB). Apple's NO value means
         # "no non-exempt encryption," not "no encryption"; no Apple

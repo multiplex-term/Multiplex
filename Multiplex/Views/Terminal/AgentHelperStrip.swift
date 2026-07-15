@@ -498,4 +498,48 @@ enum AgentChipDebugHook {
         }
     }
 }
+
+#Preview("Agent Helpers") {
+    let commands = [
+        CustomAgentCommand(
+            content: "Review the current diff",
+            autoSubmit: true,
+            showInBar: true
+        ),
+        CustomAgentCommand(
+            content: "Explain the failing tests",
+            autoSubmit: false,
+            showInBar: false,
+            shared: true
+        ),
+    ]
+
+    #if os(visionOS)
+    AgentHelperStrip(
+        agent: .codex,
+        canShowCommands: true,
+        builtInPlacements: [:],
+        customCommands: commands,
+        floating: true,
+        floatingMaximumWidth: 720,
+        send: { _ in },
+        saveCommandConfiguration: { _, _ in },
+        openPaywall: {},
+        isFocusOwner: { false }
+    )
+    .padding()
+    #else
+    AgentHelperStrip(
+        agent: .codex,
+        canShowCommands: true,
+        builtInPlacements: [:],
+        customCommands: commands,
+        send: { _ in },
+        saveCommandConfiguration: { _, _ in },
+        openPaywall: {},
+        isFocusOwner: { false }
+    )
+    .frame(width: 760)
+    #endif
+}
 #endif

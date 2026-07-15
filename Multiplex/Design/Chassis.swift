@@ -321,3 +321,120 @@ extension View {
             .hoverEffect(.highlight)
     }
 }
+
+#if DEBUG
+private struct ChassisSwitchPreviewHarness: View {
+    @State private var isOn = true
+
+    var body: some View {
+        ChassisSwitch("SUBMIT", isOn: $isOn, accessibilityLabel: "Auto Submit")
+    }
+}
+
+private struct TallyFormFieldPreviewHarness: View {
+    @State private var value = "devbox"
+
+    var body: some View {
+        TallyFormField("Name") {
+            TextField("Host name", text: $value)
+        }
+    }
+}
+
+private struct TallyChoiceBarPreviewHarness: View {
+    private enum Choice: Hashable {
+        case shell
+        case codex
+    }
+
+    @State private var selection = Choice.shell
+
+    var body: some View {
+        TallyChoiceBar(
+            [("SHELL", Choice.shell), ("CODEX", Choice.codex)],
+            selection: $selection
+        )
+    }
+}
+
+#Preview("Chassis Label") {
+    ChassisLabel("devbox · production", size: 12)
+        .padding()
+        .background(Theme.chassis)
+}
+
+#Preview("Chassis Chip") {
+    HStack(spacing: 10) {
+        ChassisChip("DECK", action: {})
+        ChassisChip("ATTACH", systemImage: "play.fill", prominent: true, action: {})
+    }
+    .padding()
+    .background(Theme.chassis)
+}
+
+#Preview("Chassis Badge") {
+    HStack(spacing: 10) {
+        ChassisBadge("SSH")
+        ChassisBadge("LIVE", prominent: true)
+    }
+    .padding()
+    .background(Theme.chassis)
+}
+
+#Preview("Chassis Switch") {
+    ChassisSwitchPreviewHarness()
+        .padding()
+        .background(Theme.chassis)
+}
+
+#Preview("Tally Form Section") {
+    TallyFormSection(
+        "Host identity",
+        detail: "The source label and address shown on the fleet wall."
+    ) {
+        TallyFormRow {
+            ChassisLabel("devbox", size: 11)
+        }
+    }
+    .padding()
+    .frame(width: 420)
+    .background(Theme.chassis)
+}
+
+#Preview("Tally Form Row") {
+    TallyFormRow {
+        HStack {
+            ChassisLabel("Transport", size: 10)
+            Spacer()
+            ChassisBadge("MOSH")
+        }
+    }
+    .frame(width: 380)
+    .padding()
+    .background(Theme.chassis)
+}
+
+#Preview("Tally Form Field") {
+    TallyFormFieldPreviewHarness()
+        .frame(width: 380)
+        .padding()
+        .background(Theme.chassis)
+}
+
+#Preview("Tally Choice Bar") {
+    TallyChoiceBarPreviewHarness()
+        .frame(width: 300)
+        .padding()
+        .background(Theme.chassis)
+}
+
+#Preview("Tally Lamp") {
+    HStack(spacing: 18) {
+        TallyLamp()
+        TallyLamp(caption: "LINK", color: Theme.caution)
+        TallyLamp(caption: "READY", color: Theme.ok)
+    }
+    .padding()
+    .background(Theme.chassis)
+}
+#endif

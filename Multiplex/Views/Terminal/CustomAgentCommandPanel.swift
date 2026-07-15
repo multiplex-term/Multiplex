@@ -563,3 +563,28 @@ extension View {
         #endif
     }
 }
+
+#if DEBUG
+#Preview("Command Setup") {
+    CustomAgentCommandPanel(
+        agent: .codex,
+        commands: [
+            CustomAgentCommand(
+                content: "Review the current diff",
+                autoSubmit: true,
+                showInBar: true
+            ),
+            CustomAgentCommand(
+                content: "Explain the failing tests\nand suggest the smallest fix.",
+                autoSubmit: false,
+                showInBar: false,
+                shared: true
+            ),
+        ],
+        save: { _, _ in },
+        cancel: {}
+    )
+    .padding()
+    .background(Theme.chassis)
+}
+#endif

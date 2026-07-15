@@ -275,3 +275,28 @@ private extension TerminalTheme {
         ansi.indices.contains(index) ? ansi[index] : foreground
     }
 }
+
+#if DEBUG
+#Preview("Theme Preview") {
+    VStack(spacing: 18) {
+        ThemePreview(theme: .tally)
+        ThemePreview(theme: .solarizedLight, compact: true)
+            .frame(width: 180)
+    }
+    .padding()
+    .frame(width: 440)
+    .background(Theme.chassis)
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Theme Row") {
+    VStack(spacing: 8) {
+        ThemeRow(theme: .tally, isSelected: true, select: {})
+        ThemeRow(theme: .nord, isSelected: false, select: {})
+    }
+    .padding()
+    .frame(width: 520)
+    .background(Theme.chassis)
+    .preferredColorScheme(.dark)
+}
+#endif

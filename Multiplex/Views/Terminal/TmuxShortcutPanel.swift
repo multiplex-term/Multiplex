@@ -171,3 +171,9 @@ private struct TmuxShortcutRowStyle: ButtonStyle {
             }
     }
 }
+
+#if DEBUG
+#Preview("tmux shortcuts") {
+    TmuxShortcutPanel { _ in }
+}
+#endif

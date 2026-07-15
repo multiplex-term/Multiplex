@@ -111,3 +111,12 @@ struct Eyebrow: View {
             .foregroundStyle(.secondary)
     }
 }
+
+#if DEBUG
+#Preview("Eyebrow") {
+    Eyebrow("Terminal theme")
+        .padding()
+        .background(Theme.chassis)
+        .preferredColorScheme(.dark)
+}
+#endif

@@ -84,3 +84,38 @@ struct TerminalTabStrip: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("Terminal tabs") {
+    TerminalTabStrip(
+        items: [
+            .init(
+                id: UUID(),
+                title: "agent",
+                hostName: "devbox",
+                controller: nil,
+                isActive: true
+            ),
+            .init(
+                id: UUID(),
+                title: "deploy",
+                hostName: "prod",
+                controller: nil,
+                isActive: false
+            ),
+            .init(
+                id: UUID(),
+                title: "scratch",
+                hostName: "devbox",
+                controller: nil,
+                isActive: false
+            ),
+        ],
+        activate: { _ in },
+        split: { _ in },
+        close: { _ in }
+    )
+    .padding()
+    .background(Theme.chassis)
+}
+#endif

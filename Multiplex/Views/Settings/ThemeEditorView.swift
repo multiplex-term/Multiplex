@@ -142,3 +142,15 @@ struct ThemeEditorView: View {
         )
     }
 }
+
+#if DEBUG
+#Preview("Theme Editor") {
+    NavigationStack {
+        ThemeEditorView(
+            theme: TerminalTheme.tally.asCustom(named: "Tally Custom"),
+            onSave: { _ in }
+        )
+    }
+    .preferredColorScheme(.dark)
+}
+#endif

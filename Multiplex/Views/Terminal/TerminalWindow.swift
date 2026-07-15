@@ -1106,6 +1106,14 @@ private struct TmuxCopyModeBar: View {
 }
 
 #if DEBUG
+#Preview("Copy mode bar") {
+    TmuxCopyModeBar(done: {})
+        .padding()
+        .background(Theme.screen)
+}
+#endif
+
+#if DEBUG
 extension Notification.Name {
     static let multiplexDebugNewTab = Notification.Name("MultiplexDebugNewTab")
 }

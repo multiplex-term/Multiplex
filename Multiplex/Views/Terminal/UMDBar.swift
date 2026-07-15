@@ -273,3 +273,44 @@ struct UMDBar: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("UMD bar") {
+    UMDBar(
+        controller: nil,
+        title: "agent · devbox",
+        mergeSources: [],
+        showDeck: {},
+        summonKeyboard: {},
+        fontDown: {},
+        fontUp: {},
+        newSession: { _ in },
+        merge: { _ in },
+        detach: {},
+        closeSession: {}
+    )
+    .padding()
+    .background(Theme.chassis)
+}
+
+#Preview("Shell UMD bar") {
+    UMDBar(
+        controller: nil,
+        title: "agent",
+        mergeSources: [],
+        showDeck: {},
+        summonKeyboard: {},
+        fontDown: {},
+        fontUp: {},
+        newSession: { _ in },
+        merge: { _ in },
+        detach: {},
+        closeSession: {},
+        style: .shell,
+        deckControlLabel: "WALL",
+        availableWidth: 540
+    )
+    .frame(width: 540)
+    .background(Theme.chassis)
+}
+#endif

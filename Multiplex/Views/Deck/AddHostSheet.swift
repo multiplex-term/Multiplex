@@ -602,3 +602,17 @@ private struct RevealableSecureField: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("Revealable secure field") {
+    TallyFormField("Password") {
+        RevealableSecureField(
+            "Password",
+            text: .constant("correct horse battery staple")
+        )
+    }
+    .padding()
+    .frame(width: 420)
+    .background(Theme.chassis)
+}
+#endif

@@ -80,3 +80,25 @@ struct DropTargetVeil: View {
         .allowsHitTesting(false)
     }
 }
+
+#if DEBUG
+#Preview("Upload progress") {
+    DropStatusPill(
+        state: .uploading(name: "release-notes.md", fraction: 0.62)
+    )
+    .padding()
+    .background(Theme.chassis)
+}
+
+#Preview("Upload failed") {
+    DropStatusPill(state: .failed("Mosh tabs cannot upload files"))
+        .padding()
+        .background(Theme.chassis)
+}
+
+#Preview("Drop target") {
+    DropTargetVeil()
+        .frame(width: 480, height: 280)
+        .background(Theme.screen)
+}
+#endif
