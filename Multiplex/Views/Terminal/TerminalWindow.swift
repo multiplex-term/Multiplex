@@ -17,6 +17,11 @@ struct TerminalWindowRoot: View {
     struct ShellConfiguration {
         var deckControlLabel: String
         var availableWidth: CGFloat
+        /// Safe-area insets the shell hands to this pane rather than
+        /// reserving them. The pane's screen and every bar's bezel paint to
+        /// the physical edge; the grid, the UMD chips, the tabs, and the key
+        /// rail all keep their content inside these.
+        var contentSafeArea = EdgeInsets()
         var showDeck: () -> Void
         var openTerminalRoute: (TerminalWindowRoute) -> Void
         var revealTab: (UUID) -> Void
@@ -80,6 +85,11 @@ struct TerminalWindowRoot: View {
     }
     private var terminalFocusAllowed: Bool {
         shell?.terminalFocusAllowed ?? true
+    }
+    /// Only the in-scene shell spends the side safe areas on its panes; a
+    /// classic terminal scene is laid out inside them already.
+    private var contentSafeArea: EdgeInsets {
+        shell?.contentSafeArea ?? EdgeInsets()
     }
     private var showsAgentHelper: Bool {
         shownAgent != nil && activeController?.status == .live
@@ -487,12 +497,14 @@ struct TerminalWindowRoot: View {
                     ? { confirmingCloseActiveSession = true } : nil,
                 style: .shell,
                 deckControlLabel: configuration.deckControlLabel,
-                availableWidth: configuration.availableWidth
+                availableWidth: configuration.availableWidth,
+                contentSafeArea: configuration.contentSafeArea
             )
             if route.tabs.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
                     tabStrip
-                        .padding(.horizontal, 10)
+                        .padding(.leading, 10 + configuration.contentSafeArea.leading)
+                        .padding(.trailing, 10 + configuration.contentSafeArea.trailing)
                         .padding(.vertical, 6)
                 }
                 .background(Theme.chassis)
@@ -560,6 +572,7 @@ struct TerminalWindowRoot: View {
                     hostExists: store.host(id: tab.hostID) != nil,
                     fontSize: fontSize,
                     bottomChromeHeight: terminalBottomChromeHeight,
+                    contentSafeArea: contentSafeArea,
                     isActive: isActive,
                     focusAllowed: terminalFocusAllowed,
                     close: { close(tab.id) }
@@ -595,6 +608,7 @@ struct TerminalWindowRoot: View {
                 customCommands: customAgentCommands.commands(for: agent),
                 floating: floating,
                 floatingMaximumWidth: floatingMaximumWidth,
+                contentSafeArea: floating ? EdgeInsets() : contentSafeArea,
                 send: { send($0, via: controller) },
                 saveCustomCommands: { customAgentCommands.replace($0, for: agent) },
                 openPaywall: { showingPaywall = true },
@@ -910,6 +924,7 @@ private struct TerminalPane: View {
     let hostExists: Bool
     let fontSize: CGFloat
     let bottomChromeHeight: CGFloat
+    var contentSafeArea = EdgeInsets()
     let isActive: Bool
     let focusAllowed: Bool
     let close: () -> Void
@@ -938,6 +953,7 @@ private struct TerminalPane: View {
                     fontSize: fontSize,
                     theme: themes.selected,
                     bottomChromeHeight: bottomChromeHeight,
+                    contentSafeArea: contentSafeArea,
                     isActive: isActive && focusAllowed
                 )
                 statusOverlay(for: controller)

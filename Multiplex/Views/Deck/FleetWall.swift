@@ -95,10 +95,13 @@ struct FleetWall: View {
     var terminalOpener: TerminalRouteOpener
     var presentation: Presentation = .standard
     var selectedTerminal: TerminalRoute?
-    /// The shell deliberately lets its scroll viewport extend beneath the
-    /// home indicator, then restores this inset as scroll-content padding.
-    /// Classic deck scenes leave it at zero and retain their existing layout.
-    var shellBottomSafeAreaInset: CGFloat = 0
+    /// Safe-area insets the shell spends on the wall instead of reserving
+    /// them: chassis, rules, and the scroll viewport reach the window's
+    /// physical edges, and the wall restores these as content padding — so
+    /// tiles pass beneath the home indicator while staying clear of the
+    /// Dynamic Island. Classic deck scenes leave this zero and retain their
+    /// existing layout.
+    var shellSafeArea = EdgeInsets()
     var addHost: () -> Void
     var editHost: (Host) -> Void
     var openSettings: () -> Void
@@ -225,7 +228,8 @@ struct FleetWall: View {
         VStack(spacing: 0) {
             header
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, wallPadding)
+                .padding(.leading, wallPadding + shellSafeArea.leading)
+                .padding(.trailing, wallPadding + shellSafeArea.trailing)
                 .padding(.top, min(wallPadding, 16))
                 .background(Theme.chassis)
                 .overlay(alignment: .bottom) {
@@ -257,12 +261,10 @@ struct FleetWall: View {
                 maxWidth: .infinity,
                 alignment: presentation == .shellCompact ? .center : .leading
             )
-            .padding(.horizontal, wallPadding)
+            .padding(.leading, wallPadding + shellSafeArea.leading)
+            .padding(.trailing, wallPadding + shellSafeArea.trailing)
             .padding(.top, presentation == .standard ? wallPadding : 0)
-            .padding(
-                .bottom,
-                wallPadding + (presentation == .standard ? 0 : shellBottomSafeAreaInset)
-            )
+            .padding(.bottom, wallPadding + shellSafeArea.bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
@@ -277,6 +279,7 @@ struct FleetWall: View {
                         availableWidth: max(
                             0,
                             geometry.size.width - wallPadding * 2
+                                - shellSafeArea.leading - shellSafeArea.trailing
                         )
                     )
                 } action: { count in

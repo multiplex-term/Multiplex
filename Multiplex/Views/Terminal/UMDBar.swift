@@ -28,6 +28,9 @@ struct UMDBar: View {
     var style: Style = .regular
     var deckControlLabel = "DECK"
     var availableWidth: CGFloat?
+    /// Shell panes may span a landscape screen's side safe areas. The bar's
+    /// bezel fills them; its chips keep clear of the rounded corners.
+    var contentSafeArea = EdgeInsets()
 
     @State private var showingTmuxShortcuts = false
 
@@ -115,7 +118,8 @@ struct UMDBar: View {
             shellRow(showsDirectActions: true)
             shellRow(showsDirectActions: false)
         }
-        .padding(.horizontal, 10)
+        .padding(.leading, 10 + contentSafeArea.leading)
+        .padding(.trailing, 10 + contentSafeArea.trailing)
         .padding(.vertical, 8)
         .background(Theme.bezel)
         .overlay(alignment: .bottom) {

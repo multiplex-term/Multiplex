@@ -22,9 +22,19 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     @Observable @MainActor
     final class Model {
         var ctrlLatched = false
+        /// Side safe areas the pane spans. The rail's bezel fills them; the
+        /// keys stay inside, clear of the Dynamic Island and the corners.
+        var contentSafeArea = EdgeInsets()
     }
 
     static let barHeight: CGFloat = 48
+
+    /// Set by `SwiftTermView` whenever the shell's pane spans a side safe
+    /// area — the keys inset, the bezel does not.
+    var contentSafeArea: EdgeInsets {
+        get { model.contentSafeArea }
+        set { model.contentSafeArea = newValue }
+    }
 
     private weak var terminal: TerminalView?
     private let performTmuxShortcut: (TmuxShortcut) -> Void
@@ -304,6 +314,11 @@ private struct KeyBarRow: View {
             .padding(.horizontal, 8)
         }
         .padding(.vertical, 7)
+        // Inside the ViewThatFits' proposal, so a pane spanning the Island's
+        // band still measures its tiers against the width the keys can use —
+        // and outside the background, which keeps running to the edge.
+        .padding(.leading, model.contentSafeArea.leading)
+        .padding(.trailing, model.contentSafeArea.trailing)
         .frame(maxWidth: .infinity)
         .background(Theme.bezel)
         .overlay(alignment: .top) {

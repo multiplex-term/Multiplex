@@ -37,6 +37,9 @@ struct AgentHelperStrip: View {
     /// Ornaments otherwise size from their contents and can outgrow a window
     /// after the user narrows it.
     var floatingMaximumWidth: CGFloat? = nil
+    /// Side safe areas the docked strip's pane spans. Its chassis fills them;
+    /// its chips keep clear, like the key rail directly below.
+    var contentSafeArea = EdgeInsets()
     let send: (AgentCommand) -> Void
     let saveCustomCommands: ([CustomAgentCommand]) -> Void
     let openPaywall: () -> Void
@@ -60,7 +63,8 @@ struct AgentHelperStrip: View {
                             .strokeBorder(Theme.bezelHi, lineWidth: 1))
             } else {
                 row
-                    .padding(.horizontal, 12)
+                    .padding(.leading, 12 + contentSafeArea.leading)
+                    .padding(.trailing, 12 + contentSafeArea.trailing)
                     .padding(.vertical, 7)
                     .frame(height: Self.dockedHeight)
                     .frame(maxWidth: .infinity, alignment: .leading)

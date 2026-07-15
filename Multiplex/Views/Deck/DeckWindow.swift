@@ -148,7 +148,7 @@ struct DeckWindow: View {
     let terminalOpener: TerminalRouteOpener
     var wallPresentation: FleetWall.Presentation = .standard
     var selectedTerminal: TerminalRoute? = nil
-    var shellBottomSafeAreaInset: CGFloat = 0
+    var shellSafeArea = EdgeInsets()
 
     @State private var addingHost = false
     @State private var editingHost: Host?
@@ -166,7 +166,7 @@ struct DeckWindow: View {
             terminalOpener: terminalOpener,
             presentation: wallPresentation,
             selectedTerminal: selectedTerminal,
-            shellBottomSafeAreaInset: shellBottomSafeAreaInset,
+            shellSafeArea: shellSafeArea,
             addHost: requestAddHost,
             editHost: { editingHost = $0 },
             openSettings: { showingSettings = true }

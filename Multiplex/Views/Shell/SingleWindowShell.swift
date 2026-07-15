@@ -23,30 +23,76 @@ struct SingleWindowShell: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let safeArea = geometry.safeAreaInsets
+            // A landscape phone insets both long edges by the Dynamic
+            // Island's band. This reader stays inside them — an ignoring one
+            // reports the edges it spans as zero — so the stack below spans
+            // them explicitly and every pane is handed its own clearance.
+            // The breakpoint keeps measuring the width panes can really use.
             let expanded = SingleWindowShellLayout.isExpanded(width: geometry.size.width)
+            let fullWidth = geometry.size.width + safeArea.leading + safeArea.trailing
+            // The rail carries its own leading clearance: the frame spans the
+            // Island's band so the wall's chassis and rules reach the physical
+            // edge, while FleetWall pads its content back out of it.
             let deckWidth = expanded
-                ? (deckRailVisible ? min(SingleWindowShellLayout.deckRailWidth, geometry.size.width) : 0)
-                : geometry.size.width
+                ? (deckRailVisible
+                    ? min(
+                        SingleWindowShellLayout.deckRailWidth + safeArea.leading,
+                        fullWidth
+                    )
+                    : 0)
+                : fullWidth
             let terminalWidth = expanded
-                ? max(0, geometry.size.width - deckWidth)
-                : geometry.size.width
+                ? max(0, fullWidth - deckWidth)
+                : fullWidth
+            // The shell is laid out inside the vertical safe area, but the
+            // deck's scroll viewport is meant to reach the window's bottom
+            // edge: FleetWall restores the same inset as scroll-content
+            // padding, so tiles pass beneath the home indicator (and a docked
+            // keyboard) instead of stopping short of it. The terminal stage
+            // keeps the plain safe-area height — its key rail is pinned to
+            // the container's bottom, which must stay above the indicator.
+            let deckHeight = geometry.size.height + safeArea.bottom
+            // Each pane keeps its content clear of the bands its own frame
+            // spans — a hidden rail hands the Island's band to the terminal,
+            // and a compact deck spans both. iOS reports both landscape edges
+            // as unsafe without saying which one carries the Island, and the
+            // Island sits mid-edge, over text rows: neither band is safe to
+            // read in, so surfaces fill them and content stays out.
+            let terminalOriginX = expanded ? deckWidth : 0
 
-            ZStack(alignment: .leading) {
+            ZStack(alignment: .topLeading) {
                 deck(
                     expanded: expanded,
-                    bottomSafeAreaInset: geometry.safeAreaInsets.bottom
+                    safeArea: EdgeInsets(
+                        top: 0,
+                        leading: safeArea.leading,
+                        bottom: safeArea.bottom,
+                        trailing: max(0, deckWidth - (fullWidth - safeArea.trailing))
+                    )
                 )
-                    .frame(width: deckWidth, height: geometry.size.height)
+                    .frame(width: deckWidth, height: deckHeight)
                     .clipped()
                     .opacity(expanded || !compactShowsTerminal ? 1 : 0)
                     .allowsHitTesting(expanded ? deckRailVisible : !compactShowsTerminal)
                     .zIndex(0)
 
-                terminalStage(expanded: expanded, availableWidth: terminalWidth)
+                terminalStage(
+                    expanded: expanded,
+                    availableWidth: terminalWidth
+                        - max(0, safeArea.leading - terminalOriginX)
+                        - safeArea.trailing,
+                    contentSafeArea: EdgeInsets(
+                        top: 0,
+                        leading: max(0, safeArea.leading - terminalOriginX),
+                        bottom: 0,
+                        trailing: safeArea.trailing
+                    )
+                )
                     .frame(width: terminalWidth, height: geometry.size.height)
                     .offset(x: expanded
                         ? deckWidth
-                        : (compactShowsTerminal ? 0 : geometry.size.width))
+                        : (compactShowsTerminal ? 0 : fullWidth))
                     .opacity(expanded || compactShowsTerminal ? 1 : 0)
                     .allowsHitTesting(expanded || compactShowsTerminal)
                     .zIndex(1)
@@ -54,13 +100,27 @@ struct SingleWindowShell: View {
                 if expanded, deckRailVisible {
                     Rectangle()
                         .fill(Theme.bezelHi)
-                        .frame(width: 1, height: geometry.size.height)
+                        .frame(width: 1, height: deckHeight)
                         .offset(x: deckWidth - 1)
                         .allowsHitTesting(false)
                         .zIndex(2)
                 }
             }
-            .frame(width: geometry.size.width, height: geometry.size.height)
+            // Both panes are placed from the leading edge and the terminal
+            // rides an `.offset`, which never claims width. The stack is
+            // therefore narrower than the shell, and an unaligned frame
+            // would center it — in landscape that pushed the deck inward and
+            // ran the terminal off the screen's trailing edge.
+            .frame(
+                width: fullWidth,
+                height: geometry.size.height,
+                alignment: .topLeading
+            )
+            // Spend the side safe areas rather than letting SwiftUI reserve
+            // them: each pane fills its band with chassis and screen, and is
+            // handed the inset back so only content that must stay legible —
+            // tiles, chips, keys — keeps clear of the Island and the corners.
+            .ignoresSafeArea(.container, edges: .horizontal)
             .background(Theme.chassis.ignoresSafeArea())
             .animation(shellAnimation, value: compactShowsTerminal)
             .animation(shellAnimation, value: deckRailVisible)
@@ -86,7 +146,7 @@ struct SingleWindowShell: View {
 
     private func deck(
         expanded: Bool,
-        bottomSafeAreaInset: CGFloat
+        safeArea: EdgeInsets
     ) -> some View {
         DeckWindow(
             terminalOpener: TerminalRouteOpener(
@@ -95,12 +155,16 @@ struct SingleWindowShell: View {
             ),
             wallPresentation: expanded ? .shellRail : .shellCompact,
             selectedTerminal: terminalRoute.activeTab,
-            shellBottomSafeAreaInset: bottomSafeAreaInset
+            shellSafeArea: safeArea
         )
     }
 
     @ViewBuilder
-    private func terminalStage(expanded: Bool, availableWidth: CGFloat) -> some View {
+    private func terminalStage(
+        expanded: Bool,
+        availableWidth: CGFloat,
+        contentSafeArea: EdgeInsets
+    ) -> some View {
         if terminalRoute.tabs.isEmpty {
             emptyTerminal
         } else {
@@ -111,6 +175,7 @@ struct SingleWindowShell: View {
                         ? (deckRailVisible ? "◧ HIDE" : "◧ DECK")
                         : "‹ DECK",
                     availableWidth: availableWidth,
+                    contentSafeArea: contentSafeArea,
                     showDeck: { showDeck(expanded: expanded) },
                     openTerminalRoute: openTerminalRoute,
                     revealTab: revealTab,

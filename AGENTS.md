@@ -292,6 +292,27 @@ views.
   visibility through `TerminalFocusArbiter.restore` and refuse/resign a hidden
   responder. Otherwise foregrounding sees the deliberately cleared owner as
   an invitation to restore the keyboard over the deck.
+- **The shell spends the safe areas; its panes hand back the clearance**
+  (`SingleWindowShell`). Its `GeometryReader` deliberately stays *inside* the
+  safe area — one that ignores an edge reports that edge's inset as zero, and
+  the insets are the whole point — then the pane stack spans the bands and
+  each pane restores its own: FleetWall as wall padding (`shellSafeArea`),
+  the terminal's chrome and grid as content insets (`contentSafeArea`, down to
+  the key rail's own `KeyBarRow` padding, which sits *inside* the ViewThatFits
+  proposal so tier choice measures usable width, and outside the bezel, which
+  runs on). So chassis, rules, bezels, and the terminal's screen reach the
+  physical edge while tiles, chips, keys, and text stay legible. Two traps:
+  **a landscape Dynamic Island sits mid-edge — over text rows, not just the
+  corners — and iOS reports both landscape edges as unsafe without saying
+  which one holds it** (a 180° flip is layout-invisible, insets are
+  symmetric), so no band is ever safe to read in, whichever looks empty; and
+  the deck's viewport alone takes `height + safeArea.bottom` so tiles scroll
+  under the home indicator and a docked keyboard, while the terminal stage
+  keeps the plain safe-area height — its rail is pinned to the container's
+  bottom. Also note the panes are placed with `.offset`, which claims no
+  width: the stack is narrower than the shell, so its frame must align
+  `.topLeading` or SwiftUI centers the lot (that shifted the deck inward and
+  ran the terminal off-screen in landscape).
 - **The iPad key rail is app-owned chrome, never an `inputAccessoryView`**:
   `TerminalKeyBar` is a TALLY rail (ESC / latching CTRL / TAB, the shell
   symbols `~ | / -`, DECCKM-aware autorepeat arrows, dismiss) installed as a
