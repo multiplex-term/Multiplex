@@ -10,6 +10,7 @@ struct SingleWindowShell: View {
     @Environment(TerminalWorkspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     @State private var terminalRoute: TerminalWindowRoute
     @State private var compactShowsTerminal: Bool
@@ -45,14 +46,23 @@ struct SingleWindowShell: View {
             let terminalWidth = expanded
                 ? max(0, fullWidth - deckWidth)
                 : fullWidth
-            // The shell is laid out inside the vertical safe area, but the
-            // deck's scroll viewport is meant to reach the window's bottom
-            // edge: FleetWall restores the same inset as scroll-content
-            // padding, so tiles pass beneath the home indicator (and a docked
-            // keyboard) instead of stopping short of it. The terminal stage
-            // keeps the plain safe-area height — its key rail is pinned to
-            // the container's bottom, which must stay above the indicator.
+            // This reader is inset by whichever bottom region applies, so
+            // adding it back always lands on the window's bottom edge —
+            // keyboard or not. The deck's scroll viewport always wants that:
+            // FleetWall restores the strip as content padding, so tiles pass
+            // beneath the home indicator (and a docked keyboard) instead of
+            // stopping short of it.
             let deckHeight = geometry.size.height + safeArea.bottom
+            // Only a phone held in landscape — the one layout with a compact
+            // vertical size class — is short enough to spend the home
+            // indicator's strip on the key rail. Everywhere with room to
+            // spare the rail keeps the standard clearance and the pane's
+            // bezel simply paints through it. When the rail does take the
+            // strip, SwiftTermView's container becomes the sole owner of
+            // docked-keyboard clearance, exactly as in a classic window.
+            let railTakesBottomStrip = verticalSizeClass == .compact
+            let terminalHeight = geometry.size.height
+                + (railTakesBottomStrip ? safeArea.bottom : 0)
             // Each pane keeps its content clear of the bands its own frame
             // spans — a hidden rail hands the Island's band to the terminal,
             // and a compact deck spans both. iOS reports both landscape edges
@@ -87,9 +97,10 @@ struct SingleWindowShell: View {
                         leading: max(0, safeArea.leading - terminalOriginX),
                         bottom: 0,
                         trailing: safeArea.trailing
-                    )
+                    ),
+                    railOwnsBottomSafeArea: railTakesBottomStrip
                 )
-                    .frame(width: terminalWidth, height: geometry.size.height)
+                    .frame(width: terminalWidth, height: terminalHeight)
                     .offset(x: expanded
                         ? deckWidth
                         : (compactShowsTerminal ? 0 : fullWidth))
@@ -113,14 +124,15 @@ struct SingleWindowShell: View {
             // ran the terminal off the screen's trailing edge.
             .frame(
                 width: fullWidth,
-                height: geometry.size.height,
+                height: deckHeight,
                 alignment: .topLeading
             )
-            // Spend the side safe areas rather than letting SwiftUI reserve
-            // them: each pane fills its band with chassis and screen, and is
-            // handed the inset back so only content that must stay legible —
-            // tiles, chips, keys — keeps clear of the Island and the corners.
-            .ignoresSafeArea(.container, edges: .horizontal)
+            // Spend the safe areas rather than letting SwiftUI reserve them:
+            // each pane fills its band with chassis and screen, and is handed
+            // the inset back to spend on its own content — so what must stay
+            // legible (tiles, chips, text) keeps clear of the Island and the
+            // corners, while the deck's tiles scroll on through the bottom.
+            .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
             .background(Theme.chassis.ignoresSafeArea())
             .animation(shellAnimation, value: compactShowsTerminal)
             .animation(shellAnimation, value: deckRailVisible)
@@ -163,7 +175,8 @@ struct SingleWindowShell: View {
     private func terminalStage(
         expanded: Bool,
         availableWidth: CGFloat,
-        contentSafeArea: EdgeInsets
+        contentSafeArea: EdgeInsets,
+        railOwnsBottomSafeArea: Bool
     ) -> some View {
         if terminalRoute.tabs.isEmpty {
             emptyTerminal
@@ -176,6 +189,7 @@ struct SingleWindowShell: View {
                         : "‹ DECK",
                     availableWidth: availableWidth,
                     contentSafeArea: contentSafeArea,
+                    railOwnsBottomSafeArea: railOwnsBottomSafeArea,
                     showDeck: { showDeck(expanded: expanded) },
                     openTerminalRoute: openTerminalRoute,
                     revealTab: revealTab,

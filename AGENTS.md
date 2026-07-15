@@ -306,10 +306,22 @@ views.
   corners — and iOS reports both landscape edges as unsafe without saying
   which one holds it** (a 180° flip is layout-invisible, insets are
   symmetric), so no band is ever safe to read in, whichever looks empty; and
-  the deck's viewport alone takes `height + safeArea.bottom` so tiles scroll
-  under the home indicator and a docked keyboard, while the terminal stage
-  keeps the plain safe-area height — its rail is pinned to the container's
-  bottom. Also note the panes are placed with `.offset`, which claims no
+  the bottom is the one strip content *does* take. Both heights are
+  `height + safeArea.bottom` — this reader is inset by whichever bottom region
+  applies, so adding it back always lands on the window's edge, keyboard or
+  not. The deck always takes it and restores it as scroll padding; the key
+  rail takes it **only at a compact vertical size class** — a phone in
+  landscape, the one layout short enough to spend the home indicator's strip
+  on chrome (portrait and iPad keep the standard clearance and just paint the
+  bezel through it). Where the rail does take it, its resting edge moves, so
+  `SwiftTermView.railOwnsBottomSafeArea` moves `restingBottom` with it —
+  otherwise `keyboardObstruction` (measured from that edge) stops matching the
+  container's own overlap and the helper strip lands *on* the rail. It stays a
+  static fact per pane, never read from the container's live frame: the
+  strip's padding would feed back. Spanning the bottom also hands the docked
+  keyboard back to `SwiftTermView`'s container, the documented sole owner —
+  the shell's own SwiftUI avoidance no longer reaches that pane.
+  Also note the panes are placed with `.offset`, which claims no
   width: the stack is narrower than the shell, so its frame must align
   `.topLeading` or SwiftUI centers the lot (that shifted the deck inward and
   ran the terminal off-screen in landscape).

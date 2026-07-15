@@ -22,6 +22,9 @@ struct TerminalWindowRoot: View {
         /// the physical edge; the grid, the UMD chips, the tabs, and the key
         /// rail all keep their content inside these.
         var contentSafeArea = EdgeInsets()
+        /// The shell's pane runs to the window's bottom edge, so the rail
+        /// rests there rather than on the safe-area boundary.
+        var railOwnsBottomSafeArea = false
         var showDeck: () -> Void
         var openTerminalRoute: (TerminalWindowRoute) -> Void
         var revealTab: (UUID) -> Void
@@ -90,6 +93,9 @@ struct TerminalWindowRoot: View {
     /// classic terminal scene is laid out inside them already.
     private var contentSafeArea: EdgeInsets {
         shell?.contentSafeArea ?? EdgeInsets()
+    }
+    private var railOwnsBottomSafeArea: Bool {
+        shell?.railOwnsBottomSafeArea ?? false
     }
     private var showsAgentHelper: Bool {
         shownAgent != nil && activeController?.status == .live
@@ -573,6 +579,7 @@ struct TerminalWindowRoot: View {
                     fontSize: fontSize,
                     bottomChromeHeight: terminalBottomChromeHeight,
                     contentSafeArea: contentSafeArea,
+                    railOwnsBottomSafeArea: railOwnsBottomSafeArea,
                     isActive: isActive,
                     focusAllowed: terminalFocusAllowed,
                     close: { close(tab.id) }
@@ -925,6 +932,7 @@ private struct TerminalPane: View {
     let fontSize: CGFloat
     let bottomChromeHeight: CGFloat
     var contentSafeArea = EdgeInsets()
+    var railOwnsBottomSafeArea = false
     let isActive: Bool
     let focusAllowed: Bool
     let close: () -> Void
@@ -954,6 +962,7 @@ private struct TerminalPane: View {
                     theme: themes.selected,
                     bottomChromeHeight: bottomChromeHeight,
                     contentSafeArea: contentSafeArea,
+                    railOwnsBottomSafeArea: railOwnsBottomSafeArea,
                     isActive: isActive && focusAllowed
                 )
                 statusOverlay(for: controller)

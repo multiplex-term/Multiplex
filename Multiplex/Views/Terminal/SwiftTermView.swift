@@ -17,6 +17,11 @@ struct SwiftTermView: UIViewRepresentable {
     /// bezel paint through them; the grid and the keys keep clear, because a
     /// landscape Dynamic Island sits mid-edge — squarely over text rows.
     var contentSafeArea = EdgeInsets()
+    /// Whether this pane runs to the window's bottom edge, which makes the
+    /// rail rest there instead of on the safe-area boundary. Nothing else
+    /// derives that resting edge from the container's live frame: the helper
+    /// strip's clearance is measured from it, and would feed back.
+    var railOwnsBottomSafeArea = false
     /// Only the window's active tab claims keyboard focus when it appears.
     var isActive: Bool = true
 
@@ -185,6 +190,7 @@ struct SwiftTermView: UIViewRepresentable {
             leading: contentSafeArea.leading,
             trailing: contentSafeArea.trailing
         )
+        context.coordinator.railOwnsBottomSafeArea = railOwnsBottomSafeArea
         if fontChanged {
             context.coordinator.terminalMetricsDidChange()
         }
@@ -230,6 +236,7 @@ struct SwiftTermView: UIViewRepresentable {
 
         #if !os(visionOS)
         weak var keyBar: TerminalKeyBar?
+        var railOwnsBottomSafeArea = false
         private weak var avoidingContainer: UIView?
         private var bottomConstraint: NSLayoutConstraint?
         private var terminalTopConstraint: NSLayoutConstraint?
@@ -467,11 +474,14 @@ struct SwiftTermView: UIViewRepresentable {
             let screenSpace = window.screen.coordinateSpace
             let containerOnScreen = container.convert(container.bounds, to: screenSpace)
             let windowOnScreen = window.convert(window.bounds, to: screenSpace)
-            // The helper's interactive content rests on the window's bottom
-            // safe-area edge. Keep that stable reference even though its
-            // passive background paints through the protected rounded corner;
-            // the keyboard cannot move it, so this value cannot feed back.
-            let restingBottom = windowOnScreen.maxY - window.safeAreaInsets.bottom
+            // The helper's interactive content rests directly on the rail,
+            // which rests on the window's bottom safe-area edge — or on the
+            // window's edge itself where the shell hands its pane the home
+            // indicator's strip. Either way the reference comes from the
+            // window and a static fact about this pane, never from the
+            // container's live frame: the strip's own padding would feed back.
+            let restingBottom = windowOnScreen.maxY
+                - (railOwnsBottomSafeArea ? 0 : window.safeAreaInsets.bottom)
             var overlap: CGFloat = 0
             var obstruction: CGFloat = 0
             if let endFrame = lastKeyboardFrame {
