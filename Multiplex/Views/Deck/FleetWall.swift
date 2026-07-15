@@ -226,7 +226,7 @@ struct FleetWall: View {
             header
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, wallPadding)
-                .padding(.top, wallPadding)
+                .padding(.top, min(wallPadding, 16))
                 .background(Theme.chassis)
                 .overlay(alignment: .bottom) {
                     Rectangle().fill(Theme.bezelHi).frame(height: 1)
@@ -519,6 +519,7 @@ struct FleetWall: View {
                         Text(host.address)
                             .font(.mono(11))
                             .foregroundStyle(Theme.signal2)
+                            .lineLimit(2)
                         Spacer()
                         railStatus(model)
                         // The SHELL chip is the row's tallest element —
