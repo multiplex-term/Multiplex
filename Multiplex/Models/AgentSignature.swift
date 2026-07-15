@@ -186,6 +186,14 @@ struct AgentCommand: Identifiable, Hashable {
     static let pageDown = AgentCommand(label: "PG DN", payload: Data([0x1B, 0x5B, 0x36, 0x7E]))
 }
 
+/// Where one built-in helper appears. The stock command set supplies the
+/// default; device-local user overrides move individual commands between the
+/// scrolling bar and MORE without changing the bytes they type.
+enum AgentCommandPlacement: String, Codable, Hashable {
+    case bar
+    case more
+}
+
 /// The curated command sets, one place to tune. Slash lists verified
 /// 2026-07-10 — Claude Code v2.1.x docs; Codex rust-v0.144.1 slash_command.rs
 /// (note: Codex renamed /approvals → /permissions and dropped /undo).
@@ -222,5 +230,63 @@ enum AgentCommandSet {
              .slash("init"), .slash("mention"), .slash("skills"),
              .slash("plan"), .slash("usage")]
         }
+    }
+
+    /// Every built-in in stable display order: stock bar commands first,
+    /// followed by stock MORE commands. Moving a command changes only which
+    /// destination filters it out; relative order remains deterministic.
+    static func all(for kind: AgentKind) -> [AgentCommand] {
+        primary(for: kind) + overflow(for: kind)
+    }
+
+    static func commands(
+        in placement: AgentCommandPlacement,
+        for kind: AgentKind,
+        placementOverrides: [String: AgentCommandPlacement] = [:]
+    ) -> [AgentCommand] {
+        all(for: kind).filter { command in
+            resolvedPlacement(
+                for: command.id,
+                kind: kind,
+                placementOverrides: placementOverrides
+            ) == placement
+        }
+    }
+
+    static func defaultPlacement(
+        for commandID: String,
+        kind: AgentKind
+    ) -> AgentCommandPlacement? {
+        if primary(for: kind).contains(where: { $0.id == commandID }) { return .bar }
+        if overflow(for: kind).contains(where: { $0.id == commandID }) { return .more }
+        return nil
+    }
+
+    static func resolvedPlacement(
+        for commandID: String,
+        kind: AgentKind,
+        placementOverrides: [String: AgentCommandPlacement]
+    ) -> AgentCommandPlacement? {
+        guard let stockPlacement = defaultPlacement(for: commandID, kind: kind)
+        else { return nil }
+        return placementOverrides[commandID] ?? stockPlacement
+    }
+
+    /// Persist only meaningful deviations from the current stock layout.
+    /// Stale commands disappear when an upstream agent removes/renames one,
+    /// while future built-ins still arrive in their curated default location.
+    static func normalizedPlacementOverrides(
+        _ placementOverrides: [String: AgentCommandPlacement],
+        for kind: AgentKind
+    ) -> [String: AgentCommandPlacement] {
+        var normalized: [String: AgentCommandPlacement] = [:]
+        for command in all(for: kind) {
+            guard let override = placementOverrides[command.id],
+                  let stockPlacement = defaultPlacement(for: command.id, kind: kind),
+                  override != stockPlacement
+            else { continue }
+            normalized[command.id] = override
+        }
+        return normalized
     }
 }

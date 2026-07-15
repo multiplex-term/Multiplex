@@ -1,7 +1,8 @@
 import Foundation
 import Observation
 
-/// Device-local custom helper commands. Agent-specific rows remain independent;
+/// Device-local helper customization: user-authored commands plus per-agent
+/// placement overrides for the built-in set. Custom rows remain independent;
 /// a shared row is mirrored with the same UUID into both profiles so either
 /// editor can update it without creating divergent copies. This mirrors
 /// ThemeStore: user-authored data is pretty-printed JSON in Application
@@ -11,6 +12,9 @@ import Observation
 @Observable
 final class CustomAgentCommandStore {
     private(set) var commandsByAgent: [AgentKind: [CustomAgentCommand]] = [:]
+    private(set) var builtInPlacementsByAgent: [
+        AgentKind: [String: AgentCommandPlacement]
+    ] = [:]
 
     private let fileURL: URL
 
@@ -34,11 +38,36 @@ final class CustomAgentCommandStore {
         commandsByAgent[agent] ?? []
     }
 
+    func builtInPlacements(
+        for agent: AgentKind
+    ) -> [String: AgentCommandPlacement] {
+        builtInPlacementsByAgent[agent] ?? [:]
+    }
+
+    /// Custom-only callers retain whatever built-in layout the user already
+    /// chose. The editor uses the overload below to save both atomically.
     func replace(_ commands: [CustomAgentCommand], for agent: AgentKind) {
+        replace(
+            commands,
+            builtInPlacements: builtInPlacements(for: agent),
+            for: agent
+        )
+    }
+
+    func replace(
+        _ commands: [CustomAgentCommand],
+        builtInPlacements: [String: AgentCommandPlacement],
+        for agent: AgentKind
+    ) {
         let previous = commandsByAgent[agent] ?? []
         let resolved = CustomAgentCommand.normalized(commands)
+        let resolvedPlacements = AgentCommandSet.normalizedPlacementOverrides(
+            builtInPlacements,
+            for: agent
+        )
 
         setProfile(resolved, for: agent)
+        setBuiltInPlacements(resolvedPlacements, for: agent)
 
         // The edited profile is authoritative for every shared row it
         // previously contained. Unsharing or deleting withdraws that UUID
@@ -65,19 +94,33 @@ final class CustomAgentCommandStore {
               let profiles = try? JSONDecoder().decode([Profile].self, from: data)
         else { return }
 
-        var loaded: [AgentKind: [CustomAgentCommand]] = [:]
-        for profile in profiles where loaded[profile.agent] == nil {
+        var loadedCommands: [AgentKind: [CustomAgentCommand]] = [:]
+        var loadedPlacements: [AgentKind: [String: AgentCommandPlacement]] = [:]
+        var seenAgents = Set<AgentKind>()
+        for profile in profiles where seenAgents.insert(profile.agent).inserted {
             let commands = CustomAgentCommand.normalized(profile.commands)
-            if !commands.isEmpty { loaded[profile.agent] = commands }
+            let placements = AgentCommandSet.normalizedPlacementOverrides(
+                profile.builtInPlacements,
+                for: profile.agent
+            )
+            if !commands.isEmpty { loadedCommands[profile.agent] = commands }
+            if !placements.isEmpty { loadedPlacements[profile.agent] = placements }
         }
-        commandsByAgent = loaded
+        commandsByAgent = loadedCommands
+        builtInPlacementsByAgent = loadedPlacements
         reconcileSharedCommands()
     }
 
     private func save() {
         let profiles = [AgentKind.claudeCode, .codex].compactMap { agent -> Profile? in
-            guard let commands = commandsByAgent[agent], !commands.isEmpty else { return nil }
-            return Profile(agent: agent, commands: commands)
+            let commands = commandsByAgent[agent] ?? []
+            let placements = builtInPlacementsByAgent[agent] ?? [:]
+            guard !commands.isEmpty || !placements.isEmpty else { return nil }
+            return Profile(
+                agent: agent,
+                commands: commands,
+                builtInPlacements: placements
+            )
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -88,6 +131,36 @@ final class CustomAgentCommandStore {
     private struct Profile: Codable {
         var agent: AgentKind
         var commands: [CustomAgentCommand]
+        var builtInPlacements: [String: AgentCommandPlacement]
+
+        init(
+            agent: AgentKind,
+            commands: [CustomAgentCommand],
+            builtInPlacements: [String: AgentCommandPlacement] = [:]
+        ) {
+            self.agent = agent
+            self.commands = commands
+            self.builtInPlacements = builtInPlacements
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case agent
+            case commands
+            case builtInPlacements
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            agent = try container.decode(AgentKind.self, forKey: .agent)
+            commands = try container.decodeIfPresent(
+                [CustomAgentCommand].self,
+                forKey: .commands
+            ) ?? []
+            builtInPlacements = try container.decodeIfPresent(
+                [String: AgentCommandPlacement].self,
+                forKey: .builtInPlacements
+            ) ?? [:]
+        }
     }
 
     private static let supportedAgents: [AgentKind] = [.claudeCode, .codex]
@@ -104,6 +177,17 @@ final class CustomAgentCommandStore {
             commandsByAgent.removeValue(forKey: agent)
         } else {
             commandsByAgent[agent] = commands
+        }
+    }
+
+    private func setBuiltInPlacements(
+        _ placements: [String: AgentCommandPlacement],
+        for agent: AgentKind
+    ) {
+        if placements.isEmpty {
+            builtInPlacementsByAgent.removeValue(forKey: agent)
+        } else {
+            builtInPlacementsByAgent[agent] = placements
         }
     }
 

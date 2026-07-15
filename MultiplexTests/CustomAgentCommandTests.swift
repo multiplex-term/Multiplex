@@ -229,6 +229,52 @@ final class CustomAgentCommandTests: XCTestCase {
         XCTAssertEqual(afterDelete.commands(for: .codex), codex)
     }
 
+    func testStorePersistsBuiltInPlacementOverridesWithoutCustomCommands() throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("agent-command-placements-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        let store = CustomAgentCommandStore(fileURL: file)
+        store.replace(
+            [],
+            builtInPlacements: [
+                "/clear": .more,
+                "/context": .bar,
+                // Stock choices and stale IDs should not fossilize in JSON.
+                "/resume": .bar,
+                "removed-command": .more,
+            ],
+            for: .claudeCode
+        )
+
+        let expected: [String: AgentCommandPlacement] = [
+            "/clear": .more,
+            "/context": .bar,
+        ]
+        XCTAssertEqual(store.builtInPlacements(for: .claudeCode), expected)
+        XCTAssertTrue(store.commands(for: .claudeCode).isEmpty)
+        XCTAssertTrue(store.builtInPlacements(for: .codex).isEmpty)
+
+        let relaunched = CustomAgentCommandStore(fileURL: file)
+        XCTAssertEqual(relaunched.builtInPlacements(for: .claudeCode), expected)
+
+        // A custom-only save must retain the independently configured stock
+        // layout rather than silently restoring defaults.
+        let custom = CustomAgentCommand(content: "/review")
+        relaunched.replace([custom], for: .claudeCode)
+        XCTAssertEqual(relaunched.commands(for: .claudeCode), [custom])
+        XCTAssertEqual(relaunched.builtInPlacements(for: .claudeCode), expected)
+
+        relaunched.replace(
+            [custom],
+            builtInPlacements: [:],
+            for: .claudeCode
+        )
+        let reset = CustomAgentCommandStore(fileURL: file)
+        XCTAssertTrue(reset.builtInPlacements(for: .claudeCode).isEmpty)
+        XCTAssertEqual(reset.commands(for: .claudeCode), [custom])
+    }
+
     func testStoreFailsSoftOnMalformedJSON() throws {
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent("agent-commands-bad-\(UUID().uuidString).json")

@@ -45,26 +45,37 @@ final class CustomAgentCommandDrafts {
     }
 }
 
-/// Anchored TALLY editor for one agent's custom helper commands. Rows remain
-/// drafts until DONE, so delete/reorder is forgiving and tapping outside or
-/// CANCEL discards the whole edit session.
+/// Anchored TALLY editor for one agent's built-in placement and custom helper
+/// commands. Every choice remains a draft until DONE, so edits are forgiving
+/// and tapping outside or CANCEL discards the whole session.
 struct CustomAgentCommandPanel: View {
     static let preferredWidth: CGFloat = 500
 
     let agent: AgentKind
     private let width: CGFloat
-    let save: ([CustomAgentCommand]) -> Void
+    let save: (
+        [CustomAgentCommand],
+        [String: AgentCommandPlacement]
+    ) -> Void
     let cancel: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var drafts: CustomAgentCommandDrafts
+    @State private var builtInPlacementOverrides: [String: AgentCommandPlacement]
+    @State private var isBuiltInExpanded = false
     @State private var measuredCommandListHeight: CGFloat = 0
     @FocusState private var focusedCommandID: UUID?
 
     init(
         agent: AgentKind,
         commands: [CustomAgentCommand],
+        builtInPlacements: [String: AgentCommandPlacement] = [:],
         width: CGFloat = Self.preferredWidth,
-        save: @escaping ([CustomAgentCommand]) -> Void,
+        save: @escaping (
+            [CustomAgentCommand],
+            [String: AgentCommandPlacement]
+        ) -> Void,
         cancel: @escaping () -> Void
     ) {
         self.agent = agent
@@ -76,6 +87,12 @@ struct CustomAgentCommandPanel: View {
                 ? [CustomAgentCommand(content: "")]
                 : commands
         ))
+        _builtInPlacementOverrides = State(initialValue:
+            AgentCommandSet.normalizedPlacementOverrides(
+                builtInPlacements,
+                for: agent
+            )
+        )
     }
 
     var body: some View {
@@ -96,7 +113,7 @@ struct CustomAgentCommandPanel: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                ChassisLabel("CUSTOM COMMANDS", size: 13)
+                ChassisLabel("COMMAND SETUP", size: 13)
                 Spacer(minLength: 8)
                 ChassisLabel(agent.displayName, size: 9, color: Theme.customCommand)
             }
@@ -105,7 +122,7 @@ struct CustomAgentCommandPanel: View {
             .padding(.top, 6)
             .padding(.leading, 1)
 
-            Text("Type one or many lines. Auto Submit sends Return after the content; turn it off to leave the text ready to edit.")
+            Text("Place each built-in in Bar or More. Custom content may span many lines; turn Submit off to leave it ready to edit.")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.signal2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -114,8 +131,22 @@ struct CustomAgentCommandPanel: View {
     }
 
     private var commandList: some View {
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 1) {
+                builtInAccordionHeader
+                if isBuiltInExpanded {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 210), spacing: 1)],
+                        spacing: 1
+                    ) {
+                        ForEach(builtInCommands) { command in
+                            builtInCommandRow(command)
+                        }
+                    }
+                    .transition(.opacity)
+                }
+
+                commandSectionHeader("CUSTOM", detail: "ORDERED")
                 // Do not iterate over `$commands`: SwiftUI's collection
                 // binding captures array indices, which become invalid while
                 // a focused row is deleted or moved. Resolve every edit by
@@ -142,7 +173,6 @@ struct CustomAgentCommandPanel: View {
             }
         }
         .frame(height: editorHeight)
-        .scrollDisabled(measuredCommandListHeight <= Self.maximumEditorHeight)
         .onPreferenceChange(CustomAgentCommandListHeightKey.self) { height in
             let measuredHeight = ceil(height)
             guard measuredHeight > 0,
@@ -150,6 +180,100 @@ struct CustomAgentCommandPanel: View {
             else { return }
             measuredCommandListHeight = measuredHeight
         }
+    }
+
+    private var builtInCommands: [AgentCommand] {
+        AgentCommandSet.all(for: agent)
+    }
+
+    private var builtInAccordionHeader: some View {
+        Button(action: toggleBuiltInCommands) {
+            HStack(spacing: 10) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Theme.signal2)
+                    .rotationEffect(.degrees(isBuiltInExpanded ? 90 : 0))
+                    .frame(width: 12)
+                ChassisLabel("BUILT-IN", size: 9)
+                Spacer(minLength: 8)
+                ChassisLabel(
+                    "\(builtInCommands.count) ITEMS · BAR / MORE",
+                    size: 8,
+                    color: Theme.signal3
+                )
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.bezel)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .chassisHover(2)
+        .accessibilityLabel("Built-in commands")
+        .accessibilityValue(isBuiltInExpanded ? "Expanded" : "Collapsed")
+        .accessibilityHint("Shows placement controls for built-in commands")
+    }
+
+    private func commandSectionHeader(
+        _ title: String,
+        detail: String
+    ) -> some View {
+        HStack(spacing: 10) {
+            ChassisLabel(title, size: 9)
+            Spacer(minLength: 8)
+            ChassisLabel(detail, size: 8, color: Theme.signal3)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Theme.bezel)
+    }
+
+    private func builtInCommandRow(_ command: AgentCommand) -> some View {
+        HStack(spacing: 10) {
+            Text(command.label)
+                .font(.mono(10, weight: .semibold))
+                .foregroundStyle(Theme.signal2)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            TallyChoiceBar(
+                [("BAR", AgentCommandPlacement.bar),
+                 ("MORE", AgentCommandPlacement.more)],
+                selection: builtInPlacementBinding(for: command)
+            )
+            .frame(width: 112)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+        .background(Theme.chassis)
+    }
+
+    private func builtInPlacementBinding(
+        for command: AgentCommand
+    ) -> Binding<AgentCommandPlacement> {
+        Binding(
+            get: {
+                AgentCommandSet.resolvedPlacement(
+                    for: command.id,
+                    kind: agent,
+                    placementOverrides: builtInPlacementOverrides
+                ) ?? .more
+            },
+            set: { placement in
+                guard let stockPlacement = AgentCommandSet.defaultPlacement(
+                    for: command.id,
+                    kind: agent
+                ) else { return }
+                var overrides = builtInPlacementOverrides
+                if placement == stockPlacement {
+                    overrides.removeValue(forKey: command.id)
+                } else {
+                    overrides[command.id] = placement
+                }
+                builtInPlacementOverrides = overrides
+            }
+        )
     }
 
     private func commandRow(_ command: Binding<CustomAgentCommand>) -> some View {
@@ -313,7 +437,7 @@ struct CustomAgentCommandPanel: View {
                     Circle()
                         .fill(Theme.customCommand)
                         .frame(width: 6, height: 6)
-                    Text("Bar keeps the first 9 characters and adds ... when needed; turn it off to use More.")
+                    Text("Built-ins and custom commands each live in Bar or More; custom Bar labels keep 9 characters.")
                         .font(.mono(8, weight: .medium))
                         .foregroundStyle(Theme.signal2)
                 }
@@ -332,7 +456,13 @@ struct CustomAgentCommandPanel: View {
                 Spacer(minLength: 12)
                 ChassisChip("CANCEL", action: cancel)
                 ChassisChip("DONE", prominent: true) {
-                    save(CustomAgentCommand.normalized(drafts.commands))
+                    save(
+                        CustomAgentCommand.normalized(drafts.commands),
+                        AgentCommandSet.normalizedPlacementOverrides(
+                            builtInPlacementOverrides,
+                            for: agent
+                        )
+                    )
                 }
             }
         }
@@ -355,7 +485,18 @@ struct CustomAgentCommandPanel: View {
     /// Used only for the first layout pass. The measured rendered height takes
     /// over immediately and follows multiline edits plus ADD/DELETE exactly.
     private var estimatedCommandListHeight: CGFloat {
-        CGFloat(max(1, drafts.commands.count)) * 102 + 24
+        if isBuiltInExpanded { return Self.maximumEditorHeight }
+        return CGFloat(max(1, drafts.commands.count)) * 102 + 60
+    }
+
+    private func toggleBuiltInCommands() {
+        if reduceMotion {
+            isBuiltInExpanded.toggle()
+        } else {
+            withAnimation(.spring(response: 0.3, dampingFraction: 1)) {
+                isBuiltInExpanded.toggle()
+            }
+        }
     }
 
     private func addCommand() {

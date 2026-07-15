@@ -191,6 +191,43 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertFalse(codexPrimary.contains(.pageUp))
     }
 
+    func testBuiltInPlacementOverridesMoveCommandsWithoutChangingDefaults() {
+        let overrides: [String: AgentCommandPlacement] = [
+            "/clear": .more,
+            "/context": .bar,
+            "removed-command": .bar,
+        ]
+
+        let bar = AgentCommandSet.commands(
+            in: .bar,
+            for: .claudeCode,
+            placementOverrides: overrides
+        )
+        let more = AgentCommandSet.commands(
+            in: .more,
+            for: .claudeCode,
+            placementOverrides: overrides
+        )
+
+        XCTAssertFalse(bar.contains(.slash("clear")))
+        XCTAssertTrue(more.contains(.slash("clear")))
+        XCTAssertTrue(bar.contains(.slash("context")))
+        XCTAssertFalse(more.contains(.slash("context")))
+        XCTAssertEqual(
+            AgentCommandSet.normalizedPlacementOverrides(
+                overrides,
+                for: .claudeCode
+            ),
+            ["/clear": .more, "/context": .bar]
+        )
+
+        // Choices matching the curated layout are not persisted as overrides.
+        XCTAssertTrue(AgentCommandSet.normalizedPlacementOverrides(
+            ["/clear": .bar, "/context": .more],
+            for: .claudeCode
+        ).isEmpty)
+    }
+
     func testEveryCommandIsSafeToType() {
         for kind in [AgentKind.claudeCode, .codex] {
             let all = AgentCommandSet.primary(for: kind) + AgentCommandSet.overflow(for: kind)

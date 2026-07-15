@@ -29,6 +29,7 @@ struct AgentHelperStrip: View {
 
     let agent: AgentKind
     let canShowCommands: Bool
+    let builtInPlacements: [String: AgentCommandPlacement]
     let customCommands: [CustomAgentCommand]
     /// Floating slab (visionOS ornament, UMD chrome) vs full-width bar
     /// (iPad, docked under the screen).
@@ -41,7 +42,10 @@ struct AgentHelperStrip: View {
     /// its chips keep clear, like the key rail directly below.
     var contentSafeArea = EdgeInsets()
     let send: (AgentCommand) -> Void
-    let saveCustomCommands: ([CustomAgentCommand]) -> Void
+    let saveCommandConfiguration: (
+        [CustomAgentCommand],
+        [String: AgentCommandPlacement]
+    ) -> Void
     let openPaywall: () -> Void
     /// Lets DEBUG layout hooks select the one helper strip whose terminal
     /// owns app-wide focus without introducing another focus authority.
@@ -119,7 +123,7 @@ struct AgentHelperStrip: View {
         HStack(spacing: 6) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    ForEach(AgentCommandSet.primary(for: agent)) { command in
+                    ForEach(barBuiltInCommands) { command in
                         commandChip(command)
                     }
                     ForEach(barCustomCommands) { command in
@@ -140,8 +144,9 @@ struct AgentHelperStrip: View {
                 CustomAgentCommandPanel(
                     agent: agent,
                     commands: customCommands,
-                    save: {
-                        saveCustomCommands($0)
+                    builtInPlacements: builtInPlacements,
+                    save: { commands, placements in
+                        saveCommandConfiguration(commands, placements)
                         showingCustomCommands = false
                     },
                     cancel: { showingCustomCommands = false }
@@ -157,9 +162,10 @@ struct AgentHelperStrip: View {
                         isPresented: $showingCustomCommands,
                         agent: agent,
                         commands: customCommands,
+                        builtInPlacements: builtInPlacements,
                         editorID: customCommandEditorID,
-                        save: {
-                            saveCustomCommands($0)
+                        save: { commands, placements in
+                            saveCommandConfiguration(commands, placements)
                             showingCustomCommands = false
                         },
                         cancel: { showingCustomCommands = false }
@@ -172,7 +178,7 @@ struct AgentHelperStrip: View {
 
     private var moreMenu: some View {
         Menu {
-            ForEach(AgentCommandSet.overflow(for: agent)) { command in
+            ForEach(moreBuiltInCommands) { command in
                 Button(command.label) { send(command) }
             }
             if !moreCustomCommands.isEmpty {
@@ -187,7 +193,7 @@ struct AgentHelperStrip: View {
             Button {
                 openCustomCommandEditor()
             } label: {
-                Label("Custom Commands…", systemImage: "slider.horizontal.3")
+                Label("Customize Commands…", systemImage: "slider.horizontal.3")
             }
         } label: {
             ChassisBadge("MORE")
@@ -203,6 +209,22 @@ struct AgentHelperStrip: View {
         // same editor is opened again, including a DEBUG notification reopen.
         customCommandEditorID = UUID()
         showingCustomCommands = true
+    }
+
+    private var barBuiltInCommands: [AgentCommand] {
+        AgentCommandSet.commands(
+            in: .bar,
+            for: agent,
+            placementOverrides: builtInPlacements
+        )
+    }
+
+    private var moreBuiltInCommands: [AgentCommand] {
+        AgentCommandSet.commands(
+            in: .more,
+            for: agent,
+            placementOverrides: builtInPlacements
+        )
     }
 
     private var barCustomCommands: [CustomAgentCommand] {
@@ -265,7 +287,7 @@ struct AgentHelperStrip: View {
 }
 
 #if !os(visionOS)
-/// UIKit-backed iPad presentation for the Custom Commands editor. SwiftUI's
+/// UIKit-backed iPad presentation for the Command Setup editor. SwiftUI's
 /// popover host accepts a keyboard-adjusted, full-height proposal when the
 /// floating keyboard sits near MORE, inflating the panel with a blank bottom
 /// tail. As with the tmux shortcuts panel, the measured content size is the
@@ -275,8 +297,12 @@ private struct CustomAgentCommandPopoverPresenter: UIViewRepresentable {
 
     let agent: AgentKind
     let commands: [CustomAgentCommand]
+    let builtInPlacements: [String: AgentCommandPlacement]
     let editorID: UUID
-    let save: ([CustomAgentCommand]) -> Void
+    let save: (
+        [CustomAgentCommand],
+        [String: AgentCommandPlacement]
+    ) -> Void
     let cancel: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -349,8 +375,11 @@ private struct CustomAgentCommandPopoverPresenter: UIViewRepresentable {
             let panel = CustomAgentCommandPanel(
                 agent: parent.agent,
                 commands: parent.commands,
+                builtInPlacements: parent.builtInPlacements,
                 width: panelWidth,
-                save: { [weak self] commands in self?.parent.save(commands) },
+                save: { [weak self] commands, placements in
+                    self?.parent.save(commands, placements)
+                },
                 cancel: { [weak self] in self?.parent.cancel() }
             )
             .id(parent.editorID)
@@ -427,7 +456,7 @@ extension Notification.Name {
     )
 }
 
-/// Opens the focused terminal's real Custom Commands editor for layout
+/// Opens the focused terminal's real Command Setup editor for layout
 /// capture. AgentHelperStrip performs the final focus-owner check so a Darwin
 /// notification never presents panels from several terminal scenes.
 @MainActor

@@ -342,8 +342,11 @@ struct TerminalWindowRoot: View {
               let agent = shownAgent,
               entitlements.isPro || entitlements.canUseSlashChip,
               controller.status == .live,
-              let command = AgentCommandSet.primary(for: agent)
-                  .first(where: { $0.label.hasPrefix("/") })
+              let command = AgentCommandSet.commands(
+                  in: .bar,
+                  for: agent,
+                  placementOverrides: customAgentCommands.builtInPlacements(for: agent)
+              ).first(where: { $0.label.hasPrefix("/") })
         else { return }
         send(command, via: controller)
     }
@@ -612,12 +615,19 @@ struct TerminalWindowRoot: View {
             AgentHelperStrip(
                 agent: agent,
                 canShowCommands: entitlements.isPro || entitlements.canUseSlashChip,
+                builtInPlacements: customAgentCommands.builtInPlacements(for: agent),
                 customCommands: customAgentCommands.commands(for: agent),
                 floating: floating,
                 floatingMaximumWidth: floatingMaximumWidth,
                 contentSafeArea: floating ? EdgeInsets() : contentSafeArea,
                 send: { send($0, via: controller) },
-                saveCustomCommands: { customAgentCommands.replace($0, for: agent) },
+                saveCommandConfiguration: { commands, placements in
+                    customAgentCommands.replace(
+                        commands,
+                        builtInPlacements: placements,
+                        for: agent
+                    )
+                },
                 openPaywall: { showingPaywall = true },
                 isFocusOwner: {
                     guard let terminalView = controller.terminalView else { return false }

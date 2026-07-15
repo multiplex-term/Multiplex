@@ -160,7 +160,7 @@ pane's cwd → tab append → attach), and
 `… -p app.multiplexterm.multiplex.debug.tmuxshortcuts` opens the focused
 iPad terminal's tmux shortcut popover for layout capture, and
 `… -p app.multiplexterm.multiplex.debug.customcommands` opens the focused
-terminal's Custom Commands editor for layout capture, and
+terminal's Command Setup editor for layout capture, and
 `… -p app.multiplexterm.multiplex.debug.tmuxcopy` sends Copy Mode through
 SwiftTerm and the terminal's ordered input pump, and
 `… -p app.multiplexterm.multiplex.debug.tmuxcopydone` runs the contextual
@@ -199,8 +199,9 @@ SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
                      iCloud Keychain as synchronizable items (KeychainStore)
   ThemeStore         terminal color schemes — TerminalTheme built-ins + custom
                      (themes.json); selected id in UserDefaults; device-local
-  CustomAgentCommandStore  ordered custom helpers per agent (agent-commands.json),
-                     device-local; shared UUIDs mirror into both agent profiles
+  CustomAgentCommandStore  built-in Bar/More overrides + ordered custom helpers
+                     per agent (agent-commands.json), device-local; shared UUIDs
+                     mirror custom rows into both agent profiles
   ConnectionHub      one HostConnectionModel per host — the probe connection;
                      also feeds the wall's live miniatures (the probe's ONE
                      exec round-trip carries sessions + a pane-subtree-clipped
@@ -455,19 +456,22 @@ views.
   **Slash chips submit with a CR sent ~160 ms after the text** (separate
   write): Codex's composer treats an Enter inside one rapid burst as a pasted
   newline, not a submit — verified against rust-v0.144; Claude Code accepts
-  either. Custom commands are stored per agent; `shared` mirrors the same UUID
-  into both profiles, so either editor updates it, unsharing keeps it only in
-  the editor being saved, and deletion removes it from both. Every custom tap
-  uses the same daily meter, ordered pump, and optional delayed CR. `showInBar`
-  controls placement independently of content length; opted-in labels keep the
-  first nine characters and append `...` (newlines/tabs render as `↵` / `⇥`),
-  while opted-out commands remain in MORE. The editor strips invisible terminal
+  either. Built-in Bar/More choices persist per agent as deviations from the
+  curated defaults (stale/default-valued overrides are discarded, so future
+  command-set updates still land correctly). Custom commands are stored per
+  agent; `shared` mirrors the same UUID into both profiles, so either editor
+  updates it, unsharing keeps it only in the editor being saved, and deletion
+  removes it from both. Every custom tap uses the same daily meter, ordered
+  pump, and optional delayed CR. `showInBar` controls custom placement
+  independently of content length; opted-in labels keep the first nine
+  characters and append `...` (newlines/tabs render as `↵` / `⇥`), while
+  opted-out commands remain in MORE. The editor strips invisible terminal
   controls, including Ctrl-B, before persistence/injection. Its editable rows
   must resolve bindings by command UUID — `ForEach($commands)` captures array
   indices and crashes when a focused row is deleted/reordered while the text
   system delivers a late write. Full research + rationale:
   `local-plan/agent-harness-helpers.md`.
-  **Custom Commands uses the same UIKit-hosted, content-sized iPad popover
+  **Command Setup uses the same UIKit-hosted, content-sized iPad popover
   boundary as tmux shortcuts**: keep `preferredContentSize` derived from
   `sizeThatFits`, set the hosting controller's `sizingOptions` to
   `.preferredContentSize` so ADD/DELETE live-resizes the popover, keep
@@ -476,11 +480,12 @@ views.
   proposal and grows a large blank bottom tail; a one-shot preferred size
   clips or overlaps rows after ADD/DELETE. Padding, offsets, or `.fixedSize`
   alone do not fix either presentation-controller bug. visionOS keeps its
-  native SwiftUI anchored popover. Inside the panel, size the command list from
-  its measured rendered height and cap only the true overflow for scrolling;
-  never restore a command-count multiplier. Multiline rows do not have one
-  stable height, so estimates leave a blank trench above the footer or clip
-  edited content.
+  native SwiftUI anchored popover. The header/footer stay fixed around one
+  vertical scroll owner; built-in placement rows live in a collapsed-by-default
+  accordion so custom rows remain the common path. Size that scroll content
+  from its measured rendered height and cap only true overflow; never restore a
+  command-count multiplier. Multiline rows do not have one stable height, so
+  estimates leave a blank trench above the footer or clip edited content.
 - **File drop = SFTP upload + typed path, never Enter**: a dropped file is
   local and the agent is remote, so the pane uploads it over the tab's own
   connection (Citadel multiplexes the SFTP subsystem next to the PTY;
