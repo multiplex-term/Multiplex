@@ -9,6 +9,7 @@ struct MultiplexApp: App {
     @State private var workspace: TerminalWorkspace
     @State private var entitlements: EntitlementStore
     @State private var attention: AttentionCenter
+    @State private var localNetworkAccess = LocalNetworkAccessMonitor()
 
     init() {
         // Attention wiring: every probe's events funnel through one center,
@@ -90,6 +91,7 @@ struct MultiplexApp: App {
             .environment(workspace)
             .environment(entitlements)
             .environment(attention)
+            .environment(localNetworkAccess)
             .modifier(PlatformChrome())
     }
 

@@ -141,13 +141,21 @@ struct DeckWindow: View {
     @Environment(EntitlementStore.self) private var entitlements
     @Environment(ConnectionHub.self) private var hub
     @Environment(TerminalWorkspace.self) private var workspace
+    @Environment(LocalNetworkAccessMonitor.self) private var localNetworkAccess
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var addingHost = false
     @State private var editingHost: Host?
     @State private var showingSettings = false
     @State private var showingPaywall = false
+    @State private var showingLocalNetworkAlert = false
+
+    private struct LocalNetworkCheckID: Hashable {
+        let hosts: [Host]
+        let active: Bool
+    }
 
     var body: some View {
         FleetWall(
@@ -159,11 +167,36 @@ struct DeckWindow: View {
         .sheet(item: $editingHost) { host in AddHostSheet(editing: host) }
         .sheet(isPresented: $showingSettings) { SettingsView() }
         .sheet(isPresented: $showingPaywall) { ProPaywallView() }
+        .alert("Local Network Access Is Off", isPresented: $showingLocalNetworkAlert) {
+            Button("Open Settings") { openAppSettings() }
+            Button("Not Now", role: .cancel) {}
+        } message: {
+            Text("Multiplex can’t reach SSH hosts on your local network. Turn on Local Network access in Settings.")
+        }
         .background(DeckSceneReporter())
         // Render the local cache first. Synchronizable Keychain reads may
         // involve securityd/iCloud, so cloud reconciliation begins only once
         // the deck exists instead of blocking App initialization.
         .task { await store.refreshFromCloud() }
+        .task(
+            id: LocalNetworkCheckID(
+                hosts: store.hosts,
+                active: scenePhase == .active
+            )
+        ) {
+            if scenePhase == .active {
+                localNetworkAccess.check(hosts: store.hosts)
+            } else {
+                localNetworkAccess.suspend()
+            }
+        }
+        .onChange(of: localNetworkAccess.denialRevision) { _, revision in
+            guard revision > 0, scenePhase == .active else { return }
+            showingLocalNetworkAlert = true
+        }
+        .onChange(of: localNetworkAccess.isDenied) { _, denied in
+            if !denied { showingLocalNetworkAlert = false }
+        }
         // iCloud Keychain sync has no change notification; re-merge the host
         // mirror whenever the deck comes back to the foreground. Leaving it,
         // flush the wall snapshots — suspension freezes their debounce timer.
@@ -200,6 +233,11 @@ struct DeckWindow: View {
         } else {
             showingPaywall = true
         }
+    }
+
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        openURL(url)
     }
 
     #if DEBUG
