@@ -191,4 +191,3 @@ End-to-end in the **visionOS 26.4 simulator** against the harness above
   is one tap (tmux keeps the session — that's the point of tmux).
 - The remote-command PATH fixups assume a POSIX-ish login shell (bash/zsh);
   csh/fish users may need tmux on the default PATH.
-- iPhone is out of scope (iPad + Vision Pro device families).

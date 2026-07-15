@@ -10,9 +10,9 @@
 #   bundle exec fastlane store_screenshots     # push fastlane/screenshots → App Store Connect
 #
 # The Xcode project is XcodeGen-generated: every lane regenerates it first, so
-# lanes work from a clean checkout. Build numbers use YYYYMMDDN, where N is
-# the day's upload counter (0–9); both platform binaries of one release share
-# the same number.
+# lanes work from a clean checkout. Build numbers continue from the latest
+# TestFlight upload for the selected platform(s); both platform binaries of a
+# combined release share the same number.
 
 default_platform(:ios)
 
@@ -32,24 +32,29 @@ def asc_api_key
   )
 end
 
-def bump_build_number
+def next_build_number(api_key:, platforms:)
   project_file = File.expand_path("../project.yml", __dir__)
   project = File.read(project_file)
-  match = project.match(/^\s*CURRENT_PROJECT_VERSION:\s*[\"']?(\d+)[\"']?\s*$/)
-  UI.user_error!("CURRENT_PROJECT_VERSION is missing from project.yml") unless match
+  current_match = project.match(/^\s*CURRENT_PROJECT_VERSION:\s*[\"']?(\d+)[\"']?\s*$/)
+  UI.user_error!("CURRENT_PROJECT_VERSION is missing from project.yml") unless current_match
+  version_match = project.match(/^\s*MARKETING_VERSION:\s*[\"']?([^\s\"']+)[\"']?\s*$/)
+  UI.user_error!("MARKETING_VERSION is missing from project.yml") unless version_match
 
-  current = match[1]
-  parsed = current.match(/\A(\d{8})(\d)\z/)
-  UI.user_error!("CURRENT_PROJECT_VERSION must use YYYYMMDDN (got #{current})") unless parsed
+  current = current_match[1]
+  version = version_match[1]
+  latest_numbers = platforms.map do |platform|
+    app_platform = DESTINATIONS.fetch(platform)[:pilot]
+    latest = latest_testflight_build_number(
+      api_key: api_key,
+      version: version,
+      platform: app_platform,
+      initial_build_number: 0,
+    ).to_s
+    UI.user_error!("Latest #{app_platform} build number is not an integer: #{latest}") unless latest.match?(/\A\d+\z/)
+    latest.to_i
+  end
 
-  today = Time.now.strftime("%Y%m%d")
-  current_date, current_suffix = parsed.captures
-  UI.user_error!("CURRENT_PROJECT_VERSION #{current} is later than today") if current_date > today
-
-  suffix = current_date == today ? current_suffix.to_i + 1 : 0
-  UI.user_error!("All ten build numbers for #{today} have been used") if suffix > 9
-
-  next_number = "#{today}#{suffix}"
+  next_number = (latest_numbers.max + 1).to_s
   updated = project.sub(
     /^(\s*CURRENT_PROJECT_VERSION:\s*)[\"']?#{Regexp.escape(current)}[\"']?\s*$/,
     "\\1\"#{next_number}\"",
@@ -57,7 +62,7 @@ def bump_build_number
   UI.user_error!("Could not update CURRENT_PROJECT_VERSION in project.yml") if updated == project
 
   File.write(project_file, updated)
-  UI.message("Build number: #{next_number}")
+  UI.message("Build number: #{next_number} (latest TestFlight build: #{latest_numbers.max})")
   next_number
 end
 
@@ -98,7 +103,7 @@ desc "Archive one platform for App Store distribution (platform:ios|visionos)"
 lane :archive do |options|
   platform = options.fetch(:platform)
   dest = DESTINATIONS.fetch(platform)
-  number = options[:build_number] || bump_build_number
+  number = options[:build_number] || next_build_number(api_key: asc_api_key, platforms: [platform])
   generate_project unless options[:skip_generate]
   gym(
     project: PROJECT,
@@ -115,9 +120,9 @@ desc "Upload to TestFlight. platform:ios|visionos or omit for both. external:tru
 lane :beta do |options|
   platforms = options[:platform] ? [options[:platform]] : DESTINATIONS.keys
   platforms.each { |platform| DESTINATIONS.fetch(platform) }
-  number = bump_build_number
-  generate_project
   api_key = asc_api_key
+  number = next_build_number(api_key: api_key, platforms: platforms)
+  generate_project
   platforms.each do |platform|
     ipa = archive(platform: platform, build_number: number, skip_generate: true)
     upload_to_testflight(

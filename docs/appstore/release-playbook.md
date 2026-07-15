@@ -22,11 +22,11 @@ Universal purchase is automatic — one bundle id, buy once, both devices.
 ## Versioning
 
 - `MARKETING_VERSION` lives in `project.yml` — bump by hand per release.
-- Build number follows `YYYYMMDDN` (`N` is the day's counter, `0`–`9`). The
-  `archive` and `beta` lanes persist the next value to `project.yml` before
-  generating the project. Both platform binaries of a release share it; never
-  reuse a (version, build) pair. More than ten builds in one day requires the
-  next calendar day.
+- The `archive` and `beta` lanes read the latest TestFlight build for the
+  selected platform(s) and current `MARKETING_VERSION`, add one, then persist
+  that value to `project.yml` before generating the project. A combined upload
+  gives both platform binaries the same number; never reuse a (version, build)
+  pair on the same platform.
 
 ## TestFlight cadence
 

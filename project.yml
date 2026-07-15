@@ -84,8 +84,7 @@ targets:
           UISceneConfigurations: {}
         UILaunchScreen:
           UIColorName: AppBackground
-        # iPhone (Debug-only device family, see TARGETED_DEVICE_FAMILY below):
-        # the un-suffixed key applies to iPhone; the ~ipad override wins on iPad.
+        # The un-suffixed key applies to iPhone; the ~ipad override wins on iPad.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
@@ -109,15 +108,14 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.multiplexterm.multiplex
         PRODUCT_NAME: Multiplex
         MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "202607130"
-        TARGETED_DEVICE_FAMILY: "2,7"
+        CURRENT_PROJECT_VERSION: "70"
+        # One target produces the universal iOS binary (iPhone + iPad) and the
+        # separate visionOS binary. Fastlane archives Release, so family 1 must
+        # live in the base setting rather than in a Debug-only override.
+        TARGETED_DEVICE_FAMILY: "1,2,7"
         SUPPORTS_MACCATALYST: NO
       configs:
-        # iPhone remains a Debug-only destination for single-window shell
-        # verification. Release archives stay iPad + Vision Pro until phone
-        # distribution is deliberately enabled.
         Debug:
-          TARGETED_DEVICE_FAMILY: "1,2,7"
           # SwiftUI Canvas requires an unoptimized app module. Keep these
           # explicit so previews cannot inherit an optimized build plan.
           SWIFT_OPTIMIZATION_LEVEL: "-Onone"
