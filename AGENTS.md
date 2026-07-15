@@ -363,11 +363,12 @@ views.
   a keyboard Escape clears the state there too. Always restore mouse reporting
   when the mode ends or the transport closes, or normal tmux touch interaction
   silently stops.
-- **"Back to deck" reuses the one deck scene**: iPad's data-driven
-  `WindowGroup` always opens `DeckWindowRoute.main`, so
-  `openWindow(id:value:)` raises the matching deck instead of minting another;
-  `DeckScene` also destroys a second legacy/restored iPad session. visionOS
-  still activates the registered `DeckScene.session` explicitly.
+- **"Back to deck" reuses the one deck scene**: the data-driven `WindowGroup`
+  always opens `DeckWindowRoute.main`, so `openWindow(id:value:)` raises the
+  matching deck instead of minting another; `DeckScene` also destroys a second
+  legacy/restored session. Keep visionOS on this SwiftUI route too — activating
+  its `UISceneSession` directly can reset a user-resized deck to the scene's
+  default size.
   Symmetrically, a deck tile press focuses the window already attached to that
   session
   (`TerminalWorkspace.focusTab` → `WindowEntry.reveal` → controller

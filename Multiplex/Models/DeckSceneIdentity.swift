@@ -1,8 +1,8 @@
 import Foundation
 
-/// The deck is the app's one fleet-wide monitor wall. Giving its iPad
-/// `WindowGroup` a stable data value lets `openWindow(id:value:)` reactivate
-/// the existing window instead of minting another one.
+/// The deck is the app's one fleet-wide monitor wall. Giving its `WindowGroup`
+/// a stable data value lets `openWindow(id:value:)` reactivate the existing
+/// window instead of minting another one.
 enum DeckWindowRoute: String, Codable, Hashable {
     case main
 }

@@ -814,25 +814,16 @@ struct TerminalWindowRoot: View {
     }
     #endif
 
-    /// Back to the main screen. visionOS activates the registered scene;
-    /// iPad uses the deck's stable data value, which raises the matching
-    /// window and creates it only when none exists.
+    /// Back to the main screen. The deck's stable data value raises the
+    /// matching window and creates it only when none exists. Keep this on the
+    /// SwiftUI presentation path: direct scene activation on visionOS can
+    /// reset a user-resized deck to the scene's default size.
     private func showDeck() {
         if let shell {
             shell.showDeck()
             return
         }
-        #if os(visionOS)
-        if let session = DeckScene.session {
-            UIApplication.shared.activateSceneSession(
-                for: UISceneSessionActivationRequest(session: session)
-            )
-        } else {
-            openWindow(id: "deck")
-        }
-        #else
         openWindow(id: "deck", value: DeckWindowRoute.main)
-        #endif
     }
 
     // MARK: Tab machinery

@@ -65,20 +65,15 @@ struct MultiplexApp: App {
     }
 
     private var deckScene: some Scene {
-        #if os(visionOS)
-        WindowGroup(id: "deck") {
-            deckWindow
-        }
-        #else
-        // iPad has one deck, identified by one stable scene value. Unlike
-        // `openWindow(id:)`, opening this value again raises the existing
-        // window instead of creating another deck.
+        // The deck has one stable data identity on every platform. Opening
+        // that value raises the existing scene instead of creating another;
+        // on visionOS this also avoids direct UIKit activation, which can
+        // reapply the scene's default size to a user-resized window.
         WindowGroup(id: "deck", for: DeckWindowRoute.self) { _ in
             deckWindow
         } defaultValue: {
             .main
         }
-        #endif
     }
 
     @ViewBuilder

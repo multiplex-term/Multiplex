@@ -1,22 +1,15 @@
 import SwiftUI
 
 /// Tracks the live deck window's scene plus one-shot state that must not
-/// repeat per window. On iPad, the data-driven scene identity prevents new
-/// duplicates and this registry removes any second deck restored from legacy
-/// or raced relaunch state.
+/// repeat per window. The data-driven scene identity prevents new duplicates;
+/// this registry removes any second deck restored from legacy or raced
+/// relaunch state.
 @MainActor
 enum DeckScene {
-    #if os(visionOS)
-    private(set) static weak var session: UISceneSession?
-    #else
     private static var sessions = SingletonSceneRegistry<UISceneSession, String>()
-    #endif
     static var autoAttachFired = false
 
     static func register(_ newSession: UISceneSession) {
-        #if os(visionOS)
-        session = newSession
-        #else
         guard sessions.register(
             newSession,
             id: newSession.persistentIdentifier
@@ -25,12 +18,11 @@ enum DeckScene {
         // WindowGroup restoration can reconnect more than one old deck
         // session before SwiftUI has enough value state to coalesce them.
         // Permanently discard the later session so it cannot return on the
-        // next launch or remain in the iPad app switcher.
+        // next launch or remain in the system's window history.
         UIApplication.shared.requestSceneSessionDestruction(
             newSession,
             options: nil
         )
-        #endif
     }
 
     #if DEBUG
