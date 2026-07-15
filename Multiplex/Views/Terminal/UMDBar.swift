@@ -153,8 +153,9 @@ struct UMDBar: View {
     private var newTabMenu: some View {
         Menu {
             Button("New Session") { newSession(nil) }
-            Button(AgentKind.claudeCode.displayName) { newSession(.claudeCode) }
-            Button(AgentKind.codex.displayName) { newSession(.codex) }
+            ForEach(AgentKind.allCases, id: \.self) { agent in
+                Button(agent.displayName) { newSession(agent) }
+            }
         } label: {
             ChassisBadge("TAB", systemImage: "plus")
         }
@@ -186,11 +187,8 @@ struct UMDBar: View {
             }
             Menu("New Tab") {
                 Button("New Session") { newSession(nil) }
-                Button(AgentKind.claudeCode.displayName) {
-                    newSession(.claudeCode)
-                }
-                Button(AgentKind.codex.displayName) {
-                    newSession(.codex)
+                ForEach(AgentKind.allCases, id: \.self) { agent in
+                    Button(agent.displayName) { newSession(agent) }
                 }
             }
             Divider()

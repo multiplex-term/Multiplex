@@ -5,8 +5,8 @@ import Foundation
 /// Claude Code v2.1.206 and Codex rust-v0.144.1 inside tmux 3.6a on
 /// 2026-07-11; the experiment captures live in local-plan/agent-attention.md.
 enum PaneAgentState: Equatable {
-    /// Turn in flight — both TUIs prefix their OSC title with a Braille
-    /// spinner glyph (U+2800…U+28FF) while working.
+    /// Turn in flight — Claude Code and Codex prefix their OSC title with a
+    /// Braille spinner glyph (U+2800…U+28FF) while working.
     case busy
     /// Composer up, waiting for a prompt.
     case idle
@@ -64,6 +64,18 @@ enum AgentAttention {
     /// in the tail), so a match here is a dialog that is up *now*.
     static let questionWindow = 15
 
+    /// Classify only agents whose outside-the-pane signals are known. Keeping
+    /// this boundary here prevents a newly detected agent from accidentally
+    /// inheriting Claude/Codex alerts or RUNNING telemetry.
+    static func classifyVerified(
+        title: String,
+        tail: [String],
+        agent: AgentKind?
+    ) -> PaneAgentState? {
+        guard agent?.hasVerifiedAttentionSignals == true else { return nil }
+        return classify(title: title, tail: tail)
+    }
+
     static func classify(title: String, tail: [String]) -> PaneAgentState {
         // Codex names the state outright while waiting for approval:
         // "[ ! ] Action Required | <cwd>" (blinks [ ! ] / [ . ]).
@@ -75,7 +87,7 @@ enum AgentAttention {
         return .idle
     }
 
-    /// Both agents prefix the title with a Braille spinner char while a
+    /// Claude Code and Codex prefix the title with a Braille spinner while a
     /// turn is in flight (Claude Code: "⠂ Create probe.txt file", Codex:
     /// "⠦ wd") and drop it when the turn ends ("✳ …" / bare cwd).
     static func hasSpinnerPrefix(_ title: String) -> Bool {

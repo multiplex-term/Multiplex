@@ -206,6 +206,156 @@ final class HostSyncTests: XCTestCase {
         XCTAssertEqual(resolution.toPush, resolution.hosts)
     }
 
+    func testNewerOldPeerEditCannotErasePiProfile() {
+        var local = host("devbox", updatedAt: Date(timeIntervalSince1970: 1000))
+        let piCommand = CustomAgentCommand(content: "/tree")
+        local.agentCommandConfiguration.replace(
+            [piCommand],
+            builtInPlacements: ["/tree": .more],
+            for: .pi
+        )
+
+        var oldPeer = local
+        oldPeer.hostname = "edited-on-old-ipad.example.com"
+        let newerClaudeCommand = CustomAgentCommand(content: "/from-old-ipad")
+        oldPeer.agentCommandConfiguration = AgentCommandConfiguration(
+            profiles: [
+                .init(agent: .claudeCode, commands: [newerClaudeCommand]),
+            ],
+            // Simulates a build that ignored and then dropped the Pi keys.
+            piProfileVersion: 0
+        )
+        oldPeer.updatedAt = Date(timeIntervalSince1970: 2000)
+
+        let resolution = HostSync.merge(
+            local: [local],
+            cloud: [oldPeer],
+            mirrored: [local.id]
+        )
+
+        let merged = resolution.hosts[0]
+        XCTAssertEqual(merged.hostname, "edited-on-old-ipad.example.com")
+        XCTAssertEqual(
+            merged.agentCommandConfiguration.commands(for: .claudeCode),
+            [newerClaudeCommand]
+        )
+        XCTAssertEqual(
+            merged.agentCommandConfiguration.commands(for: .pi),
+            [piCommand]
+        )
+        XCTAssertEqual(
+            merged.agentCommandConfiguration.builtInPlacements(for: .pi),
+            ["/tree": .more]
+        )
+        XCTAssertEqual(merged.agentCommandConfiguration.piProfileVersion, 1)
+        XCTAssertEqual(resolution.toPush, resolution.hosts)
+    }
+
+    func testCurrentClaudeEditOfLegacyRecordStillRecoversPiFromPeer() {
+        var survivor = host("devbox", updatedAt: Date(timeIntervalSince1970: 1000))
+        let piCommand = CustomAgentCommand(content: "/tree")
+        survivor.agentCommandConfiguration.replace(
+            [piCommand],
+            builtInPlacements: ["/tree": .more],
+            for: .pi
+        )
+
+        var editedLegacy = survivor
+        editedLegacy.agentCommandConfiguration = AgentCommandConfiguration(
+            profiles: [],
+            piProfileVersion: 0
+        )
+        editedLegacy.agentCommandConfiguration.replace(
+            [CustomAgentCommand(content: "/from-current-device")],
+            builtInPlacements: [:],
+            for: .claudeCode
+        )
+        XCTAssertEqual(
+            editedLegacy.agentCommandConfiguration.piProfileVersion,
+            0
+        )
+        editedLegacy.updatedAt = Date(timeIntervalSince1970: 2000)
+
+        let resolution = HostSync.merge(
+            local: [survivor],
+            cloud: [editedLegacy],
+            mirrored: [survivor.id]
+        )
+
+        let configuration = resolution.hosts[0].agentCommandConfiguration
+        XCTAssertEqual(
+            configuration.commands(for: .claudeCode).map(\.content),
+            ["/from-current-device"]
+        )
+        XCTAssertEqual(configuration.commands(for: .pi), [piCommand])
+        XCTAssertEqual(configuration.piProfileVersion, 1)
+        XCTAssertEqual(resolution.toPush, resolution.hosts)
+    }
+
+    func testOldPeerDeletionDoesNotResurrectPiSharedCopy() {
+        var local = host("devbox", updatedAt: Date(timeIntervalSince1970: 1000))
+        let shared = CustomAgentCommand(content: "/review", shared: true)
+        local.agentCommandConfiguration.replace(
+            [shared],
+            builtInPlacements: [:],
+            for: .claudeCode
+        )
+
+        var oldPeer = local
+        oldPeer.agentCommandConfiguration = AgentCommandConfiguration(
+            profiles: [],
+            piProfileVersion: 0
+        )
+        oldPeer.updatedAt = Date(timeIntervalSince1970: 2000)
+
+        let resolution = HostSync.merge(
+            local: [local],
+            cloud: [oldPeer],
+            mirrored: [local.id]
+        )
+
+        XCTAssertTrue(resolution.hosts[0].agentCommandConfiguration.isEmpty)
+        XCTAssertEqual(
+            resolution.hosts[0].agentCommandConfiguration.piProfileVersion,
+            1
+        )
+        XCTAssertEqual(resolution.toPush, resolution.hosts)
+    }
+
+    func testOldPeerUnshareDoesNotReshareFromPiCopy() {
+        var local = host("devbox", updatedAt: Date(timeIntervalSince1970: 1000))
+        let shared = CustomAgentCommand(content: "/review", shared: true)
+        local.agentCommandConfiguration.replace(
+            [shared],
+            builtInPlacements: [:],
+            for: .claudeCode
+        )
+
+        var codexOnly = shared
+        codexOnly.shared = false
+        var oldPeer = local
+        oldPeer.agentCommandConfiguration = AgentCommandConfiguration(
+            profiles: [
+                .init(agent: .codex, commands: [codexOnly]),
+            ],
+            piProfileVersion: 0
+        )
+        oldPeer.updatedAt = Date(timeIntervalSince1970: 2000)
+
+        let resolution = HostSync.merge(
+            local: [local],
+            cloud: [oldPeer],
+            mirrored: [local.id]
+        )
+
+        let configuration = resolution.hosts[0].agentCommandConfiguration
+        XCTAssertTrue(configuration.commands(for: .claudeCode).isEmpty)
+        XCTAssertEqual(configuration.commands(for: .codex), [codexOnly])
+        XCTAssertTrue(configuration.commands(for: .pi).isEmpty)
+        XCTAssertEqual(configuration.piProfileVersion, 1)
+        XCTAssertEqual(resolution.toPush, resolution.hosts)
+    }
+
     func testCommandSetupDoesNotChangeProbeConnectionConfiguration() {
         let original = host("devbox")
         var commandsEdited = original

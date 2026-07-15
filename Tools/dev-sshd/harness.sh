@@ -99,11 +99,14 @@ demo() {
     # a different real detection path — see local-plan/agent-harness-helpers.md):
     #   cc: OSC pane title "✳ Claude Code" (the title signal)
     #   cx: argv[0] "codex" via exec -a   (the ps-tree signal)
-    # Both run `cat`, which echoes injected bytes — so capture-pane shows
+    #   pi: OSC pane title "π - harness" + argv[0] "pi"
+    # All run `cat`, which echoes injected bytes — so capture-pane shows
     # what a helper chip typed.
     "$TMUX_BIN" new-session -d -s agent -n cc \
         'printf "\033]2;✳ Claude Code\033\\"; exec -a claude cat'
     "$TMUX_BIN" new-window -t agent:1 -n cx 'exec -a codex cat'
+    "$TMUX_BIN" new-window -t agent:2 -n pi \
+        'printf "\033]2;π - harness\033\\"; exec -a pi cat'
     "$TMUX_BIN" select-window -t agent:0
 
     "$TMUX_BIN" list-sessions

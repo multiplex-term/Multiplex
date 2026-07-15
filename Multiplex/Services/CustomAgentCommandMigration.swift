@@ -63,7 +63,7 @@ enum CustomAgentCommandMigration {
         }
     }
 
-    private static let supportedAgents: [AgentKind] = [.claudeCode, .codex]
+    private static let supportedAgents = AgentKind.allCases
 
     static func decode(_ data: Data) -> Source? {
         guard let profiles = try? JSONDecoder().decode(

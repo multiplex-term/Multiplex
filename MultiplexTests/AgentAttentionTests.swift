@@ -7,6 +7,45 @@ import XCTest
 /// blocks below are verbatim captures; when an agent's TUI shifts, this
 /// file is where the new truth lands.
 final class AgentAttentionTests: XCTestCase {
+    func testOnlyAgentsWithVerifiedAttentionSignalsParticipate() {
+        XCTAssertTrue(AgentKind.claudeCode.hasVerifiedAttentionSignals)
+        XCTAssertTrue(AgentKind.codex.hasVerifiedAttentionSignals)
+        XCTAssertFalse(AgentKind.pi.hasVerifiedAttentionSignals)
+
+        let permissionTail = [
+            "❯ 1. Yes",
+            "  2. No",
+            "Enter to select",
+            "Do you want to proceed?",
+        ]
+        // Pi has neither a verified RUNNING title transition nor verified
+        // question/permission shapes. Exercise those paths independently so
+        // adding a generic classifier rule cannot silently opt Pi back in.
+        XCTAssertNil(AgentAttention.classifyVerified(
+            title: "⠙ working",
+            tail: [],
+            agent: .pi
+        ))
+        XCTAssertNil(AgentAttention.classifyVerified(
+            title: "π - repo",
+            tail: permissionTail,
+            agent: .pi
+        ))
+        XCTAssertNil(AgentAttention.classifyVerified(
+            title: "⠙ working",
+            tail: permissionTail,
+            agent: nil
+        ))
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "⠙ working",
+                tail: [],
+                agent: .codex
+            ),
+            .busy
+        )
+    }
+
     // MARK: Title state machine
 
     func testTitleIdleStates() {
@@ -15,6 +54,9 @@ final class AgentAttentionTests: XCTestCase {
         XCTAssertEqual(AgentAttention.classify(title: "✳ Claude Code", tail: []), .idle)
         XCTAssertEqual(AgentAttention.classify(title: "✳ Write haiku about terminals", tail: []), .idle)
         XCTAssertEqual(AgentAttention.classify(title: "wd", tail: []), .idle)
+        // Pi's title identifies the TUI but stays static during work; without
+        // a reliable transition signal attention deliberately fails soft.
+        XCTAssertEqual(AgentAttention.classify(title: "π - Multiplex", tail: []), .idle)
         XCTAssertEqual(AgentAttention.classify(title: "Jhen-MBPr14.local", tail: []), .idle)
         XCTAssertEqual(AgentAttention.classify(title: "", tail: []), .idle)
     }
@@ -154,6 +196,7 @@ final class AgentAttentionTests: XCTestCase {
         // The launch default carries no task; Codex titles carry a cwd.
         XCTAssertNil(AgentAttention.taskSummary(title: "✳ Claude Code", agent: .claudeCode))
         XCTAssertNil(AgentAttention.taskSummary(title: "⠦ wd", agent: .codex))
+        XCTAssertNil(AgentAttention.taskSummary(title: "π - Multiplex", agent: .pi))
         XCTAssertNil(AgentAttention.taskSummary(title: "", agent: .claudeCode))
     }
 

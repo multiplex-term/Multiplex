@@ -3,14 +3,15 @@ import XCTest
 
 /// Pins the agent-detection rules to the experiment matrix recorded in
 /// local-plan/agent-harness-helpers.md §1.1 (Claude Code v2.1.206, Codex
-/// rust-v0.144.x, tmux 3.6a — 2026-07-10). When an agent changes its
-/// signature, this file is where the new truth lands.
+/// rust-v0.144.x, Pi v0.80.7, tmux 3.6a — 2026-07-10/15). When an agent
+/// changes its signature, this file is where the new truth lands.
 final class AgentSignatureTests: XCTestCase {
     // MARK: classify — comm + title first pass
 
     func testClassifyByCommand() {
         XCTAssertEqual(AgentSignature.classify(command: "claude", title: ""), .claudeCode)
         XCTAssertEqual(AgentSignature.classify(command: "codex", title: ""), .codex)
+        XCTAssertEqual(AgentSignature.classify(command: "pi", title: ""), .pi)
         XCTAssertNil(AgentSignature.classify(command: "zsh", title: ""))
         // Interpreter comm alone must NOT classify — the tree walk decides.
         XCTAssertNil(AgentSignature.classify(command: "node", title: ""))
@@ -35,16 +36,41 @@ final class AgentSignatureTests: XCTestCase {
             AgentSignature.classify(command: "sleep", title: "✳ fixing the parser"), .claudeCode)
         XCTAssertEqual(
             AgentSignature.classify(command: "zsh", title: "some Claude Code session"), .claudeCode)
+        // npm Pi remains `node` to tmux and identifies the interactive UI
+        // with a narrow OSC title.
+        XCTAssertEqual(
+            AgentSignature.classify(command: "node", title: "π - repo"), .pi)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "node", title: "π - refactor - repo"), .pi)
         // tmux's default pane title is empty; shell prompts often write a
         // hostname. Neither may classify — and bare "claude" never matches.
         XCTAssertNil(AgentSignature.classify(command: "zsh", title: ""))
         XCTAssertNil(AgentSignature.classify(command: "zsh", title: "devbox.local"))
         XCTAssertNil(AgentSignature.classify(command: "zsh", title: "claude-notes.local"))
+        XCTAssertNil(AgentSignature.classify(command: "node", title: "pi project"))
+        XCTAssertNil(AgentSignature.classify(command: "node", title: "π calculations"))
+        XCTAssertNil(AgentSignature.classify(command: "node", title: "π"))
+    }
+
+    func testStalePiTitleDoesNotClassifyReturnedShell() {
+        // Pi does not clear its OSC title on exit. Common shells and ordinary
+        // foreground commands must therefore ignore the stale title; the
+        // authoritative ps fallback can still recognize a live Pi process.
+        for command in ["sh", "bash", "zsh", "fish", "cat"] {
+            XCTAssertNil(
+                AgentSignature.classify(command: command, title: "π - repo"),
+                "stale Pi title classified \(command)"
+            )
+        }
     }
 
     func testCommandBeatsTitle() {
         XCTAssertEqual(
             AgentSignature.classify(command: "codex", title: "✳ Claude Code"), .codex)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "claude", title: "π - repo"), .claudeCode)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "pi", title: "✳ Claude Code"), .pi)
     }
 
     // MARK: argv matching — exact argv[0] basename + interpreter rule
@@ -52,6 +78,8 @@ final class AgentSignatureTests: XCTestCase {
     func testMatchArgv() {
         XCTAssertEqual(AgentSignature.match(argv: "claude --effort max"), .claudeCode)
         XCTAssertEqual(AgentSignature.match(argv: "/home/dev/.local/bin/codex"), .codex)
+        XCTAssertEqual(AgentSignature.match(argv: "pi"), .pi)
+        XCTAssertEqual(AgentSignature.match(argv: "/usr/local/bin/pi"), .pi)
         XCTAssertEqual(
             AgentSignature.match(argv: "node /usr/lib/node_modules/.bin/claude"), .claudeCode)
         XCTAssertEqual(AgentSignature.match(argv: "bun /x/bin/codex resume"), .codex)
@@ -64,7 +92,9 @@ final class AgentSignatureTests: XCTestCase {
             argv: "/Applications/Claude.app/Contents/MacOS/Claude Helper --type=utility"))
         XCTAssertNil(AgentSignature.match(argv: "vim --user-data-dir=/Users/x/Claude"))
         XCTAssertNil(AgentSignature.match(argv: "claudette"))
+        XCTAssertNil(AgentSignature.match(argv: "pico"))
         XCTAssertNil(AgentSignature.match(argv: "tail -f claude.log"))
+        XCTAssertNil(AgentSignature.match(argv: "tail -f pi.log"))
         XCTAssertNil(AgentSignature.match(argv: ""))
     }
 
@@ -94,6 +124,9 @@ final class AgentSignatureTests: XCTestCase {
     func testAgentInTreeMatchesThePaneRootItself() {
         let rows = [PSRow(pid: 50, ppid: 1, args: "claude")]
         XCTAssertEqual(AgentSignature.agentInTree(rows: rows, panePID: 50), .claudeCode)
+
+        let piRows = [PSRow(pid: 60, ppid: 1, args: "/opt/pi/bin/pi")]
+        XCTAssertEqual(AgentSignature.agentInTree(rows: piRows, panePID: 60), .pi)
     }
 
     func testAgentInTreeScopesToThePane() {
@@ -122,15 +155,18 @@ final class AgentSignatureTests: XCTestCase {
             PSRow(pid: 20, ppid: 1, args: "-zsh"),
             PSRow(pid: 21, ppid: 20, args: "node /opt/codex"),
             PSRow(pid: 30, ppid: 1, args: "-zsh"),
+            PSRow(pid: 40, ppid: 1, args: "-zsh"),
+            PSRow(pid: 41, ppid: 40, args: "pi"),
         ]
         let agents = AgentSignature.agentsInTrees(
             rows: rows,
-            panePIDs: [10, 20, 30, 10]
+            panePIDs: [10, 20, 30, 40, 10]
         )
         XCTAssertEqual(agents[10], .claudeCode)
         XCTAssertEqual(agents[20], .codex)
         XCTAssertNil(agents[30])
-        XCTAssertEqual(agents.count, 2)
+        XCTAssertEqual(agents[40], .pi)
+        XCTAssertEqual(agents.count, 3)
     }
 
     // MARK: command payloads
@@ -138,7 +174,10 @@ final class AgentSignatureTests: XCTestCase {
     func testKeyPayloads() {
         XCTAssertEqual(AgentCommand.stop.payload, Data([0x1B]))                 // Esc
         XCTAssertEqual(AgentCommand.mode.payload, Data([0x1B, 0x5B, 0x5A]))     // CSI Z
+        XCTAssertEqual(AgentCommand.think.payload, Data([0x1B, 0x5B, 0x5A]))    // CSI Z
         XCTAssertEqual(AgentCommand.transcript.payload, Data([0x14]))           // Ctrl+T
+        XCTAssertEqual(AgentCommand.tools.payload, Data([0x0F]))                // Ctrl+O
+        XCTAssertEqual(AgentCommand.thinking.payload, Data([0x14]))             // Ctrl+T
         XCTAssertEqual(AgentCommand.pageUp.payload, Data([0x1B, 0x5B, 0x35, 0x7E]))   // CSI 5~
         XCTAssertEqual(AgentCommand.pageDown.payload, Data([0x1B, 0x5B, 0x36, 0x7E])) // CSI 6~
         // Slash chips type text only; the CR is a separate delayed write
@@ -151,8 +190,14 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertFalse(AgentCommand.stop.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.mode.submitsAfterPause)
         XCTAssertFalse(AgentCommand.mode.consumesSlashChipTaste)
+        XCTAssertFalse(AgentCommand.think.submitsAfterPause)
+        XCTAssertFalse(AgentCommand.think.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.transcript.submitsAfterPause)
         XCTAssertFalse(AgentCommand.transcript.consumesSlashChipTaste)
+        XCTAssertFalse(AgentCommand.tools.submitsAfterPause)
+        XCTAssertFalse(AgentCommand.tools.consumesSlashChipTaste)
+        XCTAssertFalse(AgentCommand.thinking.submitsAfterPause)
+        XCTAssertFalse(AgentCommand.thinking.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.pageUp.submitsAfterPause)
         XCTAssertFalse(AgentCommand.pageUp.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.pageDown.submitsAfterPause)
@@ -189,6 +234,18 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertFalse(claude.contains(.pageDown))
         #endif
         XCTAssertFalse(codexPrimary.contains(.pageUp))
+
+        let pi = AgentCommandSet.primary(for: .pi)
+        let piOverflow = AgentCommandSet.overflow(for: .pi)
+        XCTAssertEqual(
+            pi,
+            [.stop, .slash("new"), .slash("resume"), .slash("compact"),
+             .slash("model"), .slash("tree"), .think, .tools]
+        )
+        XCTAssertTrue(piOverflow.contains(.thinking))
+        XCTAssertTrue(piOverflow.contains(.slash("copy")))
+        XCTAssertFalse(pi.contains(.mode))
+        XCTAssertFalse(pi.contains(.transcript))
     }
 
     func testBuiltInPlacementOverridesMoveCommandsWithoutChangingDefaults() {
@@ -229,7 +286,7 @@ final class AgentSignatureTests: XCTestCase {
     }
 
     func testEveryCommandIsSafeToType() {
-        for kind in [AgentKind.claudeCode, .codex] {
+        for kind in AgentKind.allCases {
             let all = AgentCommandSet.primary(for: kind) + AgentCommandSet.overflow(for: kind)
             XCTAssertFalse(all.isEmpty)
             for command in all {

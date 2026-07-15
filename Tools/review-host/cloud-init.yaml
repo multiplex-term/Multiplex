@@ -93,6 +93,13 @@ write_files:
       #!/bin/bash
       exec -a codex cat
 
+  - path: /usr/local/bin/demo-agent-pi
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      printf '\033]2;π - review\033\\'
+      exec -a pi cat
+
   - path: /usr/local/bin/seed-review-sessions
     permissions: "0755"
     content: |
@@ -115,6 +122,7 @@ write_files:
       tmux new-session -d -s logs /usr/local/bin/demo-worker-log
       tmux new-session -d -s agent -n cc /usr/local/bin/demo-agent-cc
       tmux new-window -t agent:1 -n cx /usr/local/bin/demo-agent-cx
+      tmux new-window -t agent:2 -n pi /usr/local/bin/demo-agent-pi
       tmux select-window -t agent:0
       SEED
 

@@ -26,7 +26,7 @@ struct ProPaywallView: View {
                         )
                         feature(
                             "AGENT HELPERS + ALERTS",
-                            "Use Claude Code and Codex quick commands without the daily limit, and get a banner when an unwatched session needs you."
+                            "Use Claude Code, Codex, and Pi quick commands without the daily limit, and get a banner when an unwatched supported session needs you."
                         )
                         feature(
                             "CUSTOM THEMES",

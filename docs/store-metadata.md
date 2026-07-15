@@ -80,8 +80,8 @@ Current product split:
   exit), iCloud Keychain host/secret/command-setup sync, per-host/per-agent
   built-in command placement between Bar and More, custom commands (ordered,
   multiline, optional Auto Submit and explicit bar placement, with
-  nine-character bar label previews, plus optional sharing between that host's
-  Claude Code and Codex strips), and
+  nine-character bar label previews, plus optional sharing across that host's
+  Claude Code, Codex, and Pi strips), and
   ten built-in or custom agent-command chip taps per local calendar day.
 - Pro: unlimited hosts, mosh, unmetered built-in and custom agent command
   chips, agent alerts, and custom-theme editing.

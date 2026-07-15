@@ -6,7 +6,7 @@ import UIKit
 import notify
 #endif
 
-/// Quick commands for the CLI agent (Claude Code / Codex) detected in the
+/// Quick commands for the CLI agent (Claude Code / Codex / Pi) detected in the
 /// attached session's active pane — a lower bezel under the screen. Chips
 /// only ever travel through the shell's ordered input pump, so a stale command
 /// fails visibly in the agent's own input box. Auto Submit follows the text
@@ -85,9 +85,9 @@ struct AgentHelperStrip: View {
                     .clipped()
             }
         }
-        // A pane switch may replace Claude Code with Codex in the same view
-        // identity. Never let one agent's open drafts relabel or save into the
-        // other agent's profile.
+        // A pane switch may replace one agent with another in the same view
+        // identity. Never let one agent's open drafts relabel or save into a
+        // different agent's profile.
         .onChange(of: agent) { showingCustomCommands = false }
         #if DEBUG
         .onAppear { CustomCommandsDebugHook.install() }

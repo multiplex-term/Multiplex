@@ -89,6 +89,21 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertEqual(sessions[0].activeAgent, .claudeCode)
     }
 
+    func testPiAgentFromUnicodeTitleTailRejoin() {
+        // npm Pi reports `node` to tmux on macOS; its OSC title is the cheap
+        // signal that keeps the focused helper update to one exec round-trip.
+        let output = """
+        S $0 0 0 agent
+        W $0 0 1 0 0 pi
+        P $0 0 0 1 %0 88 /dev/pts/0 node π - Multiplex
+        """
+        guard case .sessions(let sessions) = TmuxProbe.parse(output) else {
+            return XCTFail("expected .sessions")
+        }
+        XCTAssertEqual(sessions[0].activeAgent, .pi)
+        XCTAssertEqual(sessions[0].activeWindow?.paneTitle, "π - Multiplex")
+    }
+
     func testAgentViaProcessTreeSection() {
         // npm codex: pane comm is node, title empty — the ps walk decides.
         let output = """
@@ -105,6 +120,20 @@ final class TmuxProbeTests: XCTestCase {
         }
         // …and pid 300's stray claude outside the pane tree must not win.
         XCTAssertEqual(sessions[0].activeAgent, .codex)
+    }
+
+    func testPiAgentViaProcessTreeWhenTitleWasOverridden() {
+        let output = """
+        S $0 0 0 work
+        W $0 0 1 0 0 sh
+        P $0 0 0 1 %0 400 /dev/pts/0 node custom title
+        MULTIPLEX_PS
+          400     1 pi
+        """
+        guard case .sessions(let sessions) = TmuxProbe.parse(output) else {
+            return XCTFail("expected .sessions")
+        }
+        XCTAssertEqual(sessions[0].activeAgent, .pi)
     }
 
     func testAllPanesFeedWallWhileActivePaneFeedsHelpers() {
@@ -189,6 +218,20 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertEqual(pane?.tty, "/dev/pts/9")
         XCTAssertEqual(pane?.command, "node")
         XCTAssertEqual(pane?.title, "project agent")
+    }
+
+    func testFocusedPaneProbePreservesPiTitleForDirectClassification() {
+        let pane = TmuxProbe.parseActivePane(
+            "A $3 2 1 1 %9 90 /dev/pts/9 node π - Multiplex"
+        )
+        XCTAssertEqual(pane?.title, "π - Multiplex")
+        XCTAssertEqual(
+            AgentSignature.classify(
+                command: pane?.command ?? "",
+                title: pane?.title ?? ""
+            ),
+            .pi
+        )
     }
 
     func testFocusedPaneProcessFallbackTargetsOnlyItsTTY() {

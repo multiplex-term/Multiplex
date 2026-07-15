@@ -37,6 +37,17 @@ final class NewSessionPreferencesTests: XCTestCase {
         XCTAssertEqual(reloaded.rememberedAgent, .codex)
     }
 
+    func testPersistsRememberedPiAcrossInstances() {
+        NewSessionPreferences(defaults: defaults).save(
+            remembersLastLaunch: true,
+            agent: .pi
+        )
+
+        let reloaded = NewSessionPreferences(defaults: defaults)
+        XCTAssertTrue(reloaded.remembersLastLaunch)
+        XCTAssertEqual(reloaded.rememberedAgent, .pi)
+    }
+
     func testCanRememberShellOnly() {
         let preferences = NewSessionPreferences(defaults: defaults)
         preferences.save(remembersLastLaunch: true, agent: nil)

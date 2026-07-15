@@ -1,0 +1,5 @@
+#!/bin/bash
+# Pi detection stub — the OSC title and exact argv[0] mirror Pi's two
+# observed signatures. `cat` echoes helper-chip bytes for App Review.
+printf '\033]2;π - review\033\\'
+exec -a pi cat
