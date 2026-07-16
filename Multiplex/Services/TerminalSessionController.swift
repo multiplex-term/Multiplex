@@ -637,17 +637,28 @@ final class TerminalSessionController {
             let result: AgentSessionHistory.ReadResult? =
                 try await withControlConnection { [route] connection in
                     let cwd: String?
+                    let preferredSessionID: String?
                     if let sessionName = route.sessionName {
                         let output = try await connection.exec(
-                            AgentSessionHistory.paneCwdCommand(sessionName: sessionName)
+                            AgentSessionHistory.paneContextCommand(
+                                sessionName: sessionName,
+                                agent: agent
+                            )
                         )
-                        cwd = AgentSessionHistory.parsePaneCwd(output)
+                        let context = AgentSessionHistory.parsePaneContext(output)
+                        cwd = context?.cwd
+                        preferredSessionID = context?.agentSessionID
                     } else {
                         cwd = shellCwd
+                        preferredSessionID = nil
                     }
                     guard let cwd else { return nil }
                     let output = try await connection.exec(
-                        AgentSessionHistory.readCommand(agent: agent, cwd: cwd)
+                        AgentSessionHistory.readCommand(
+                            agent: agent,
+                            cwd: cwd,
+                            preferredSessionID: preferredSessionID
+                        )
                     )
                     return AgentSessionHistory.parseReadOutput(output, agent: agent)
                 }
@@ -713,15 +724,24 @@ final class TerminalSessionController {
                 case .needsYou: return .failed("ANSWER THE AGENT FIRST")
                 case .idle: break
                 }
-                guard let needle = AgentSessionHistory.needle(
+                let needles = AgentSessionHistory.needles(
                     for: message, paneColumns: prologue.paneWidth
-                ) else { return .failed("MESSAGE TOO SHORT TO FIND") }
-                if AgentSessionHistory.captureContains(prologue.capture, needle: needle) {
+                )
+                guard !needles.isEmpty else {
+                    return .failed("MESSAGE TOO SHORT TO FIND")
+                }
+                // A row-1 match is Claude's sticky header for the current
+                // turn, not the message boundary. Let the remote finder seek
+                // through that assistant response; only a lower prompt row is
+                // already a valid landing point.
+                if AgentSessionHistory.captureMatch(
+                    prologue.capture, needles: needles
+                ) == .visiblePrompt {
                     return .found(sessionID: prologue.sessionID, pages: 0)
                 }
                 let findOutput = try await connection.exec(
                     AgentSessionHistory.jumpFindCommand(
-                        sessionID: prologue.sessionID, needle: needle
+                        sessionID: prologue.sessionID, needles: needles
                     )
                 )
                 switch AgentSessionHistory.parseJumpFind(findOutput) {
@@ -764,19 +784,18 @@ final class TerminalSessionController {
         historyJumpTask?.cancel()
     }
 
-    /// BACK TO LIVE from `.jumped`: overshooting PgDn presses, never Esc —
-    /// a turn may have started since the search verified idle.
+    /// BACK TO LIVE from `.jumped`: Claude's Ctrl+End scroll-bottom binding,
+    /// never Esc — a turn may have started since the search verified idle.
     func finishHistoryJump() {
         guard case .jumped(_, let pages) = historyJump else { return }
         let sessionID = historyJumpSessionID
         historyJump = nil
         historyJumpSessionID = nil
-        guard pages > 0, let sessionID else { return }
+        guard let sessionID else { return }
         returnTranscriptToLive(sessionID: sessionID, pages: pages)
     }
 
     private func returnTranscriptToLive(sessionID: String, pages: Int) {
-        guard pages > 0 else { return }
         Task { [weak self] in
             _ = try? await self?.withControlConnection { connection in
                 try await connection.exec(

@@ -526,29 +526,37 @@ views.
 - **HISTORY reads the agent's own session file; jump drives the TUI's own
   pager** (`AgentSessionHistory`, pure + fixture-tested; Pro via
   `canBrowseAgentHistory`). The control path resolves the pane cwd
-  (`list-panes -F`, same 3.6a discipline as drops), locates the newest
-  matching session file — `~/.claude/projects/<cwd with every
-  non-alphanumeric flattened to ->`, `~/.codex/sessions/*/*/*/rollout-*`
-  matched by the head line's `"cwd":"…"`, `~/.pi/agent/sessions/<-cwd with
-  /→- and a trailing -->` (all verified against real files 2026-07-16) —
-  and tails it behind sentinels with server-side grep pre-filters (Claude
-  files reach tens of MB and its `type:"user"` lines are mostly tool
-  results; `<task-notification>`-style wrapper turns are filtered
-  app-side). Newest-mtime is the deliberate correlation rule (it is what
-  `claude --continue` / `pi -c` resume). **Claude Code ≥2.x owns the
-  alternate screen under tmux — its transcript never enters tmux
-  scrollback**, so copy-mode search can't find it; jump is instead ONE exec
-  that loops send-keys PPage → sleep → capture → grep server-side
-  (RTT-independent), stops on match / two identical consecutive captures
-  (top) / a 40-page cap, and self-restores with PgDn on a miss. Jumps are
-  gated on `AgentAttention` idle first, and every restore path uses PgDn
-  overshoot, **never Esc** — Esc interrupts a running turn. Long prompts
-  render as ONE `…`-truncated row at pane width, so the search needle is a
-  ≤60-column first-line prefix (wide glyphs cost two columns); pure-paste
-  messages match nothing and stay peek-only. While `.finding`, the
-  terminal's input pump is locked and a veil says so; `.shell` tabs list
-  history through the probe's cwd stage (`readlink /proc`, `lsof`
-  fallback) but never jump. Plan + verified experiment record:
+  (`list-panes -F`, same 3.6a discipline as drops). For Claude Code it also
+  walks descendants of `#{pane_pid}` and reads Claude's live
+  `~/.claude/sessions/<pid>.json` registry, selecting that exact
+  `~/.claude/projects/<munged-cwd>/<sessionId>.jsonl`; **do not regress to
+  newest-mtime-only** — multiple Claude panes in one cwd are common, and the
+  wrong file makes every JUMP miss. Missing/older registries fail soft to
+  newest mtime. Codex scans `~/.codex/sessions/*/*/*/rollout-*`, filtering
+  the head `"cwd":"…"`; Pi uses the newest file under
+  `~/.pi/agent/sessions/<-cwd with /→- and a trailing -->` (all verified
+  against real files 2026-07-16). Reads are sentinel-framed with server-side
+  grep pre-filters (Claude files reach tens of MB and its `type:"user"`
+  lines are mostly tool results; `<task-notification>`-style wrapper turns
+  are filtered app-side). **Claude Code ≥2.x owns the alternate screen under
+  tmux — its transcript never enters tmux scrollback**, so copy-mode search
+  can't find it; jump is instead ONE server-side exec (RTT-independent).
+  Matching is structural: only Claude's `❯` user rows count, never assistant
+  echoes/tool output. **A matching row 1 is not the message** — Claude pins
+  that turn header throughout its assistant response (observed for 40+ pages).
+  The finder therefore scans backward to the target turn, then seeks its real
+  beginning in four-PageUp batches (400-half-page safety cap); after crossing
+  into the prior turn it refines forward until the target returns. Captures
+  are polled until stable. Misses, cancellation, and BACK TO LIVE use Claude's
+  Ctrl+End scroll-bottom binding in constant time, **never Esc** — Esc can
+  interrupt a running turn. Long prompts render as ONE `…`-truncated row at
+  pane width, so search uses a ≤60-column normalized first-line prefix,
+  retrying a 24-column fallback only after a full primary miss (wide glyphs
+  cost two columns).
+  Pure-paste messages can match nothing and remain effectively peek-only.
+  While `.finding`, the terminal's input pump is locked and a veil says so;
+  `.shell` tabs list history through the probe's cwd stage (`readlink /proc`,
+  `lsof` fallback) but never jump. Plan + verified experiment record:
   `local-plan/agent-message-history.md`.
 - **File attach/drop = SFTP upload + typed path, never Enter**: compatible
   SSH-backed tmux tabs carry one free FILE menu in the UMD/classic iPad toolbar

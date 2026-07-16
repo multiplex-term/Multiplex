@@ -151,14 +151,28 @@ final class AgentSessionHistoryTests: XCTestCase {
     // MARK: Command builders
 
     func testReadCommandShapes() {
+        let sessionID = "359827c7-0214-435f-b01b-0ce0dbb29b06"
         let claude = AgentSessionHistory.readCommand(
-            agent: .claudeCode, cwd: "/Users/dev/app"
+            agent: .claudeCode,
+            cwd: "/Users/dev/app",
+            preferredSessionID: sessionID
         )
         XCTAssertTrue(claude.contains("$HOME/.claude/projects/"))
         XCTAssertTrue(claude.contains("'-Users-dev-app'"))
+        XCTAssertTrue(claude.contains("sid='\(sessionID)'"))
+        XCTAssertTrue(claude.contains("$d/$sid.jsonl"))
+        XCTAssertTrue(claude.contains("[ -n \"$f\" ] || f=$(ls -t"))
         XCTAssertTrue(claude.contains("grep -av '\"tool_use_id\"'"))
         XCTAssertTrue(claude.contains("tail -c \(AgentSessionHistory.tailByteBudget)"))
         XCTAssertTrue(claude.hasSuffix("true"))
+
+        let invalid = AgentSessionHistory.readCommand(
+            agent: .claudeCode,
+            cwd: "/Users/dev/app",
+            preferredSessionID: "../../etc/passwd"
+        )
+        XCTAssertTrue(invalid.contains("sid=''"))
+        XCTAssertFalse(invalid.contains("../../etc/passwd"))
 
         let codex = AgentSessionHistory.readCommand(agent: .codex, cwd: "/Users/dev/app")
         XCTAssertTrue(codex.contains(".codex/sessions"))
@@ -170,16 +184,46 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertTrue(pi.contains("'--Users-dev-app--'"))
     }
 
-    func testPaneCwdCommandUsesExactSessionTarget() {
-        let command = AgentSessionHistory.paneCwdCommand(sessionName: "ma in")
+    func testPaneContextCommandUsesExactTargetAndClaudeProcessRegistry() {
+        let command = AgentSessionHistory.paneContextCommand(
+            sessionName: "ma in", agent: .claudeCode
+        )
         XCTAssertTrue(command.contains("list-panes -t '=ma in'"))
         XCTAssertTrue(command.contains("pane_current_path"))
+        XCTAssertTrue(command.contains("pane_pid"))
+        XCTAssertTrue(command.contains("$HOME/.claude/sessions/$p.json"))
+        XCTAssertTrue(command.contains("sessionId"))
         XCTAssertFalse(command.contains("display-message"))
-        XCTAssertEqual(
-            AgentSessionHistory.parsePaneCwd("/Users/dev/app\n"),
-            "/Users/dev/app"
+
+        let codex = AgentSessionHistory.paneContextCommand(
+            sessionName: "main", agent: .codex
         )
-        XCTAssertNil(AgentSessionHistory.parsePaneCwd("no path here\n"))
+        XCTAssertTrue(codex.contains("pane_current_path"))
+        XCTAssertFalse(codex.contains(".claude/sessions"))
+    }
+
+    func testPaneContextParsesAndValidatesPreferredSessionID() {
+        let id = "359827C7-0214-435F-B01B-0CE0DBB29B06"
+        XCTAssertEqual(
+            AgentSessionHistory.parsePaneContext(
+                "noise\nMULTIPLEX_HIST_CWD /Users/dev/my app\n"
+                    + "MULTIPLEX_HIST_AGENT_SESSION \(id)\n"
+            ),
+            AgentSessionHistory.PaneContext(
+                cwd: "/Users/dev/my app",
+                agentSessionID: id.lowercased()
+            )
+        )
+        XCTAssertEqual(
+            AgentSessionHistory.parsePaneContext(
+                "MULTIPLEX_HIST_CWD /Users/dev/app\n"
+                    + "MULTIPLEX_HIST_AGENT_SESSION ../../etc/passwd\n"
+            ),
+            AgentSessionHistory.PaneContext(
+                cwd: "/Users/dev/app", agentSessionID: nil
+            )
+        )
+        XCTAssertNil(AgentSessionHistory.parsePaneContext("no path here\n"))
     }
 
     // MARK: Needle
@@ -208,13 +252,25 @@ final class AgentSessionHistoryTests: XCTestCase {
         )
     }
 
-    func testNeedleCutsAtControlCharactersAndTrimsTrailingSpace() {
+    func testNeedleNormalizesWhitespaceAndDropsControls() {
         XCTAssertEqual(
             AgentSessionHistory.needle(
-                for: message("run this \tthing"), paneColumns: 80
+                for: message("  run   this \t thing\u{0007} now  "),
+                paneColumns: 80
             ),
-            "run this"
+            "run this thing now"
         )
+    }
+
+    func testNeedlesIncludeShortFallbackForRenderedTruncation() {
+        let values = AgentSessionHistory.needles(
+            for: message(String(repeating: "abcdefghij ", count: 10)),
+            paneColumns: 100
+        )
+        XCTAssertEqual(values.count, 2)
+        XCTAssertEqual(values[0].count, AgentSessionHistory.needleMaximum)
+        XCTAssertLessThanOrEqual(values[1].count, AgentSessionHistory.needleFallbackMaximum)
+        XCTAssertTrue(values[0].hasPrefix(values[1]))
     }
 
     func testNeedleCountsWideCharactersDouble() {
@@ -253,14 +309,25 @@ final class AgentSessionHistoryTests: XCTestCase {
 
     func testJumpFindCommandShape() {
         let command = AgentSessionHistory.jumpFindCommand(
-            sessionID: "$4", needle: "it's here"
+            sessionID: "$4", needles: ["it's here", "it's"]
         )
         XCTAssertTrue(command.contains("sid='$4'"))
-        XCTAssertTrue(command.contains("n='it'\\''s here'"))
+        XCTAssertTrue(command.contains("n1='it'\\''s here'"))
+        XCTAssertTrue(command.contains("n2='it'\\''s'"))
         XCTAssertTrue(command.contains("send-keys -t \"$sid\" PPage"))
-        XCTAssertTrue(command.contains("grep -Fq -- \"$n\""))
+        XCTAssertTrue(command.contains("grep -Fq -- \"$needle\""))
+        XCTAssertTrue(command.contains("needle=\"$n1\"; search"))
+        XCTAssertTrue(command.contains("needle=\"$n2\"; search"))
+        XCTAssertTrue(command.contains("❯[[:space:]]*//p"))
+        XCTAssertTrue(command.contains("tr '\\t\\r' '  '"))
+        XCTAssertFalse(command.contains("tr '\\t\\r\\n'"))
+        XCTAssertTrue(command.contains("-lt \(AgentSessionHistory.pageSettlePollCap)"))
         XCTAssertTrue(command.contains("-lt \(AgentSessionHistory.pageCap)"))
+        XCTAssertTrue(command.contains("-lt \(AgentSessionHistory.pinnedSeekPageCap)"))
+        XCTAssertTrue(command.contains("-lt \(AgentSessionHistory.pinnedSeekBatch)"))
+        XCTAssertTrue(command.contains("trap 'keep=1; restore; exit 1' HUP INT TERM"))
         XCTAssertTrue(command.contains("NPage"))
+        XCTAssertTrue(command.contains("C-End"))
         XCTAssertTrue(command.hasSuffix("true"))
     }
 
@@ -278,17 +345,46 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertNil(AgentSessionHistory.parseJumpFind("nothing"))
     }
 
-    func testJumpReturnOvershootsAndClamps() {
-        let command = AgentSessionHistory.jumpReturnCommand(sessionID: "$1", pages: 7)
-        XCTAssertTrue(command.contains("-lt 9"))
-        let clamped = AgentSessionHistory.jumpReturnCommand(sessionID: "$1", pages: 500)
-        XCTAssertTrue(clamped.contains("-lt \(AgentSessionHistory.pageCap + 2)"))
+    func testJumpReturnUsesConstantTimeScrollBottom() {
+        let command = AgentSessionHistory.jumpReturnCommand(sessionID: "$1", pages: 500)
+        XCTAssertTrue(command.contains("send-keys -t '$1' C-End"))
+        XCTAssertFalse(command.contains("NPage"))
+        XCTAssertFalse(command.contains("Escape"))
     }
 
-    func testCaptureContains() {
-        XCTAssertTrue(AgentSessionHistory.captureContains(
-            ["a", "❯ Fix the parser and more"], needle: "Fix the parser"
-        ))
-        XCTAssertFalse(AgentSessionHistory.captureContains(["a"], needle: "missing"))
+    func testCaptureDistinguishesVisiblePromptFromPinnedTurnHeader() {
+        XCTAssertEqual(
+            AgentSessionHistory.captureMatch(
+                ["a", "  ❯\u{00A0}Fix   the parser and more"],
+                needles: ["Fix the parser"]
+            ),
+            .visiblePrompt
+        )
+        XCTAssertEqual(
+            AgentSessionHistory.captureMatch(
+                ["❯ A deliberately changed suffix"],
+                needles: ["A deliberately different full prompt", "A deliberately"]
+            ),
+            .pinnedPrompt
+        )
+    }
+
+    func testCaptureRejectsAssistantAndHeaderEchoes() {
+        let capture = [
+            "✳ Fix the parser",                // task/header echo
+            "⏺ I'll Fix the parser now",       // assistant echo
+            "  Fix the parser",                // wrapped assistant prose
+            "❯ A different user prompt",
+        ]
+        XCTAssertEqual(
+            AgentSessionHistory.captureMatch(capture, needles: ["Fix the parser"]),
+            .none
+        )
+        XCTAssertEqual(
+            AgentSessionHistory.captureMatch(
+                ["a"], needles: ["missing", "still missing"]
+            ),
+            .none
+        )
     }
 }
