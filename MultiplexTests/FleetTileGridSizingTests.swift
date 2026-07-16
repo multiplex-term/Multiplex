@@ -199,4 +199,78 @@ final class FleetTileGridSizingTests: XCTestCase {
         )
         XCTAssertEqual(fullWidthCount, 4)
     }
+
+    // MARK: Columns the wall has tiles to fill
+
+    /// A width allowing four columns for a host holding three tiles: the
+    /// fourth has nothing to show, and taking it would compress all three to
+    /// 302pt to clear a slot that stays empty.
+    func testColumnsStopAtTheTilesThereAreToFillThem() {
+        let fourMinimum = FleetTileGridSizing.requiredWidth(
+            columnCount: 4,
+            tileWidth: FleetTileGridSizing.minimumTileWidth
+        )
+        let availableColumns = FleetTileGridSizing.columnCount(
+            current: nil,
+            availableWidth: fourMinimum
+        )
+        XCTAssertEqual(availableColumns, 4)
+
+        let count = FleetTileGridSizing.columnCount(
+            availableColumns: availableColumns,
+            tileCount: 3
+        )
+
+        XCTAssertEqual(count, 3)
+    }
+
+    /// The complaint this stage exists for: with the count pinned to the
+    /// tiles, widening past what they need leaves their share growing, never
+    /// shrinking, so it can only be clamped by the grid's preferred width.
+    func testWideningAWallPastItsTilesNeverShrinksTheirShare() {
+        let tileCount = 3
+        var previousShare: CGFloat = 0
+
+        for width in stride(from: 900.0, through: 3_000, by: 1) {
+            let count = FleetTileGridSizing.columnCount(
+                availableColumns: FleetTileGridSizing.columnCount(
+                    current: nil,
+                    availableWidth: width
+                ),
+                tileCount: tileCount
+            )
+            XCTAssertLessThanOrEqual(count, tileCount, "width \(width)")
+
+            let share = (width - CGFloat(count - 1) * FleetTileGridSizing.gutter)
+                / CGFloat(count)
+            XCTAssertGreaterThanOrEqual(share, previousShare, "width \(width)")
+            previousShare = share
+        }
+    }
+
+    /// A row with tiles to spare keeps every column the width allows — the
+    /// stage this change adds must not touch the full-row case.
+    func testFullRowKeepsEveryColumnTheWidthAllows() {
+        XCTAssertEqual(
+            FleetTileGridSizing.columnCount(availableColumns: 3, tileCount: 3),
+            3
+        )
+        XCTAssertEqual(
+            FleetTileGridSizing.columnCount(availableColumns: 3, tileCount: 9),
+            3
+        )
+    }
+
+    /// A host still probing renders one tile, and a wall of empty hosts must
+    /// not collapse to a zero-column grid.
+    func testWallWithNoTilesYetKeepsASingleColumn() {
+        XCTAssertEqual(
+            FleetTileGridSizing.columnCount(availableColumns: 4, tileCount: 1),
+            1
+        )
+        XCTAssertEqual(
+            FleetTileGridSizing.columnCount(availableColumns: 4, tileCount: 0),
+            1
+        )
+    }
 }

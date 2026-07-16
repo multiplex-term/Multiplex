@@ -1,17 +1,37 @@
 import SwiftUI
 
-/// Breakpoint sizing for the wall's session-tile grid. Tiles expand toward the
-/// preferred width, but a new column enters as soon as every tile can retain
-/// the compact minimum. This keeps an iPad mini's two-tile portrait row and
-/// three-tile landscape row intact instead of orphaning the last tile.
+/// Breakpoint sizing for the wall's session-tile grid, in two stages: how many
+/// columns the width *allows*, then how many the wall has tiles to *fill*.
 ///
-/// Only the column count may cross into SwiftUI state. The continuously
-/// changing window width is reduced to that count by `onGeometryChange`, so
-/// ordinary resize frames do not rebuild the FleetWall view hierarchy.
+/// Width first. Tiles expand toward the preferred width, but a new column
+/// enters as soon as every tile can retain the compact minimum. This keeps an
+/// iPad mini's two-tile portrait row and three-tile landscape row intact
+/// instead of orphaning the last tile.
+///
+/// Then the tiles. A wall can be wider than the fullest host has tiles for, and
+/// an unfillable column is not free — every tile in the row gives up width to
+/// make room for it, so a three-tile host on a four-column wall would show
+/// three compressed tiles beside an empty slot, and compress further the wider
+/// the wall got. The count therefore stops at the tiles that exist: surplus
+/// width goes to those tiles until they reach the preferred width and then
+/// simply stays empty, which is the honest answer when a viewport is larger
+/// than the fleet in it.
+///
+/// Only the width stage may cross into SwiftUI state. The continuously changing
+/// window width is reduced to that count by `onGeometryChange`, so ordinary
+/// resize frames do not rebuild the FleetWall view hierarchy; the tile stage is
+/// then folded in where the grid is built, since sessions arrive on the probe's
+/// cadence rather than the window's.
 enum FleetTileGridSizing {
     static let minimumTileWidth: CGFloat = 290
     static let preferredTileWidth: CGFloat = 360
     static let gutter: CGFloat = 14
+
+    /// The wall's final column count: never more columns than there are tiles
+    /// to put in them.
+    static func columnCount(availableColumns: Int, tileCount: Int) -> Int {
+        max(1, min(availableColumns, tileCount))
+    }
 
     static func initialColumnCount(availableWidth rawWidth: CGFloat) -> Int {
         let width = Self.normalized(rawWidth)
@@ -235,7 +255,11 @@ struct FleetWall: View {
 
     private func wall(showHeader: Bool) -> some View {
         let columns = gridColumns(
-            count: tileGridColumnCount ?? (presentation == .standard ? 2 : 1)
+            count: FleetTileGridSizing.columnCount(
+                availableColumns: tileGridColumnCount
+                    ?? (presentation == .standard ? 2 : 1),
+                tileCount: tileCount
+            )
         )
 
         return ScrollView {
@@ -283,6 +307,24 @@ struct FleetWall: View {
                     }
                 }
         }
+    }
+
+    /// How many tiles the fullest host section has to show: its sessions plus
+    /// the new-session tile, or the lone tile a probing, unreachable, or
+    /// tmux-less host renders.
+    ///
+    /// One count for the whole wall, taken from the fullest section, so tiles
+    /// stay the same size across hosts — a shorter section leaves its trailing
+    /// slots empty rather than widening its own tiles out of step with the
+    /// sections above and below it.
+    private var tileCount: Int {
+        let counts = store.hosts.map { host -> Int in
+            if case .sessions(let sessions) = hub.model(for: host).tmux {
+                return sessions.count + 1
+            }
+            return 1
+        }
+        return counts.max() ?? 1
     }
 
     private func gridColumns(count: Int) -> [GridItem] {
