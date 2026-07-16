@@ -81,6 +81,19 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertEqual(result?.messages.map(\.reachable), [false, true])
     }
 
+    func testImageMessageKeepsTextAfterDataBlanking() {
+        // What the read command yields for a pasted-screenshot prompt after
+        // the sed pass blanked the base64: the text block still lists.
+        let body = """
+        {"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":""}},{"type":"text","text":"[Image #1] there is a problem, bottom area should be full width"}]},"timestamp":"2026-07-16T10:00:00.000Z"}
+        """
+        let result = AgentSessionHistory.parseReadOutput(wrapped(body))
+        XCTAssertEqual(
+            result?.messages.map(\.text),
+            ["[Image #1] there is a problem, bottom area should be full width"]
+        )
+    }
+
     func testSlashCommandsAreActionsNotPrompts() {
         let body = """
         {"type":"user","message":{"role":"user","content":"/create-pr with a title"}}
@@ -168,6 +181,15 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertTrue(command.contains("$d/$sid.jsonl"))
         XCTAssertTrue(command.contains("[ -n \"$f\" ] || f=$(ls -t"))
         XCTAssertTrue(command.contains("grep -av '\"tool_use_id\"'"))
+        // Attachment base64 is blanked BEFORE the byte cut, or one pasted
+        // screenshot crowds every older prompt out of the window.
+        XCTAssertTrue(command.contains(
+            "sed -E 's/\"data\":\"[A-Za-z0-9+\\/=]{200,}\"/\"data\":\"\"/g'"
+        ))
+        XCTAssertTrue(
+            command.range(of: "sed -E")!.lowerBound
+                < command.range(of: "tail -c")!.lowerBound
+        )
         XCTAssertTrue(command.contains("tail -c \(AgentSessionHistory.tailByteBudget)"))
         XCTAssertTrue(command.hasSuffix("true"))
 

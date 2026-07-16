@@ -542,7 +542,10 @@ views.
   newest mtime. Reads are sentinel-framed with server-side grep pre-filters
   (Claude files reach tens of MB and its `type:"user"` lines are mostly
   tool results; `<task-notification>`-style wrapper turns are filtered
-  app-side). **Claude Code ≥2.x owns the alternate screen under tmux — its
+  app-side), and long base64 `"data"` values are blanked BEFORE the tail
+  byte cut — one pasted screenshot is a single 380 KB user line that
+  otherwise crowds every older prompt out of the list (observed in a real
+  5-prompt session that listed only 2). **Claude Code ≥2.x owns the alternate screen under tmux — its
   transcript never enters tmux scrollback**, so copy-mode search can't find
   it; jump is ONE server-side exec (RTT-independent). The pager facts the
   walk is built on (verified 2.1.211): PgUp/PgDn move half the transcript

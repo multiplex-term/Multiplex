@@ -163,6 +163,14 @@ enum AgentSessionHistory {
             + "echo MULTIPLEX_HIST_BEGIN; "
             + "grep -a '\"type\":\"user\"' \"$f\" 2>/dev/null"
             + " | grep -av '\"tool_use_id\"'"
+            // One pasted screenshot inlines hundreds of KB of base64 into a
+            // single user line and would eat the whole tail budget, cutting
+            // every older prompt out of the list (observed: a 380 KB line in
+            // a 5-prompt session). Blank long base64 "data" values before
+            // the cut — the parser reads text blocks only, and an escaped
+            // \"data\" inside typed prompt text can't match the unescaped
+            // JSON key.
+            + " | sed -E 's/\"data\":\"[A-Za-z0-9+\\/=]{200,}\"/\"data\":\"\"/g'"
             + " | tail -c \(tailByteBudget); "
             + "echo; echo MULTIPLEX_HIST_END; "
             + "else echo MULTIPLEX_HIST_NOFILE; fi; true"
