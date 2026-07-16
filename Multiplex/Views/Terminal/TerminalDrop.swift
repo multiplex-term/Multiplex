@@ -91,7 +91,7 @@ struct DropTargetVeil: View {
 }
 
 #Preview("Upload failed") {
-    DropStatusPill(state: .failed("Mosh tabs cannot upload files"))
+    DropStatusPill(state: .failed("File upload requires tmux over SSH"))
         .padding()
         .background(Theme.chassis)
 }

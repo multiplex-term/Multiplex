@@ -20,13 +20,17 @@ credentials, keys, terminal content, or usage.
   keys, and each host's agent-command setup) are stored in the device Keychain.
   If iCloud Keychain is enabled, Apple syncs them between your devices
   **end-to-end encrypted**; we cannot read them, and neither can Apple.
-- **Terminal traffic** flows directly between your device and your servers
-  over SSH (or mosh), encrypted in transit. It never passes through any
-  third party of ours.
+- **Terminal traffic and files you choose to attach** flow directly between
+  your device and your servers over SSH (or mosh for terminal traffic),
+  encrypted in transit. Selected files, photos, and camera captures never
+  pass through any server of ours.
 - **Themes and preferences** are stored locally on device.
 
 ## Permissions the app may request
 
+- **Camera** — only after you choose Camera from the terminal's FILE menu on
+  iPad, to capture a photo you explicitly send to your remote SSH session.
+  Optional; Photos and Files use Apple's system pickers.
 - **Notifications** — only to alert you when a CLI agent in one of your
   sessions finishes or needs input. Processed entirely on device; optional.
 - **Local Network** — only to connect to SSH hosts on your own network.

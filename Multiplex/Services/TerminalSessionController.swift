@@ -561,17 +561,20 @@ final class TerminalSessionController {
         Task { await moshSession.nudge() }
     }
 
-    // MARK: File drops
+    // MARK: File attachments and drops
 
-    /// Files dropped on this tab's pane: upload each into the active
-    /// pane's working directory over this tab's own connection, then type
-    /// the resulting paths through the input pump — no Enter, the user
-    /// finishes the prompt. One drop batch at a time.
+    /// Files selected from terminal chrome or dropped on this tab's pane:
+    /// upload each into the active pane's working directory over this tab's
+    /// own connection, then type the resulting paths through the input pump
+    /// — no Enter, the user finishes the prompt. One batch at a time.
     func deliverDrop(_ files: [DroppedFile]) {
-        if host.useMosh, status == .live, dropTask == nil, !files.isEmpty {
-            // No SFTP channel under a mosh tab; say so instead of shrugging.
+        if (host.useMosh || route.sessionName == nil),
+           status == .live, dropTask == nil, !files.isEmpty {
+            // Mosh has no SFTP channel, while a plain shell has no tmux pane
+            // whose foreground cwd can be resolved. Say so instead of
+            // silently discarding the user's attach/drop intent.
             dropClearTask?.cancel()
-            dropState = .failed("File drops need an SSH tab")
+            dropState = .failed("File upload requires tmux over SSH")
             dropClearTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled else { return }

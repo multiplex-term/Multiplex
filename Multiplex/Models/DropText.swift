@@ -1,6 +1,7 @@
 import Foundation
 
-/// A file caught by a terminal-pane drop: a filename and its bytes.
+/// A file selected from terminal chrome or caught by a pane drop: its name
+/// and bytes, ready for the shared upload pipeline.
 struct DroppedFile {
     var name: String
     var data: Data
@@ -11,11 +12,11 @@ struct DropError: Error {
     let message: String
 }
 
-/// Pure text/naming logic for file drops. Everything that becomes a remote
-/// filename or gets typed into the session goes through here — the typed
-/// text is *composer input*, never shell input, but it's sanitized and
-/// quoted anyway so it stays inert even if it lands at a shell prompt
-/// (stale agent detection).
+/// Pure text/naming logic for file attachments and drops. Everything that
+/// becomes a remote filename or gets typed into the session goes through
+/// here — the typed text is *composer input*, never shell input, but it's
+/// sanitized and quoted anyway so it stays inert even if it lands at a
+/// shell prompt (stale agent detection).
 enum DropText {
     /// v1 cap — the payload passes through memory and one SFTP session.
     static let maxBytes = 64 * 1024 * 1024
@@ -24,6 +25,27 @@ enum DropText {
     /// the working tree. The folder self-ignores (it gets a `*` .gitignore),
     /// so it never shows up in `git status`.
     static let dropsDirectoryName = ".multiplex-drops"
+
+    /// Stable local-time name for camera captures and Photos items that do
+    /// not expose an original filename. The content type supplies its real
+    /// extension; camera JPEGs use the default.
+    static func photoName(
+        at date: Date = Date(),
+        filenameExtension: String = "jpg",
+        timeZone: TimeZone = .current
+    ) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+
+        let trimmedExtension = filenameExtension
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+        let resolvedExtension = trimmedExtension.isEmpty ? "jpg" : trimmedExtension
+        return "photo-\(formatter.string(from: date)).\(resolvedExtension)"
+    }
 
     /// A name safe to create remotely and to type: path separators and
     /// control characters collapse to "_", a leading "-" or "." gets a "_"

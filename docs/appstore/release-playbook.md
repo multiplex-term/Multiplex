@@ -164,6 +164,8 @@ The same host and credentials serve Beta App Review (TestFlight external) —
 
 ### Expected review friction
 
+- **Camera permission** — requested in context only after FILE → Camera on
+  iPad; Photos and Files use system pickers without broad library access.
 - **Notifications permission** — requested in context (first agent event),
   purpose string ready; fine.
 - **Local Network prompt** — only fires for LAN addresses; the demo host is

@@ -74,6 +74,7 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         ITSAppUsesNonExemptEncryption: false
+        NSCameraUsageDescription: Multiplex uses the camera only when you take a photo to send to your remote SSH session.
         NSLocalNetworkUsageDescription: Multiplex connects to SSH hosts on your local network.
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true

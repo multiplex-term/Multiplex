@@ -759,6 +759,8 @@ struct TerminalWindowRoot: View {
                 .accessibilityLabel("Agent needs you")
         }
         newTabMenu
+        FileAttachMenu(controller: activeController)
+            .fixedSize()
         keyboardButton
         fontButtons
         if !mergeSources.isEmpty {
@@ -1037,21 +1039,18 @@ private struct TerminalPane: View {
             }
         }
         // Dropped files upload into the pane's cwd, then their paths get
-        // typed into the session (never submitted). tmux tabs only — a
-        // plain shell has no pane to ask for a cwd.
+        // typed into the session (never submitted). Unsupported live tabs
+        // still accept the intent so the shared controller can explain the
+        // SSH-tmux requirement in its status pill.
         .onDrop(of: [.item], isTargeted: $dropTargeted) { providers in
-            guard let controller,
-                  controller.status == .live,
-                  controller.route.sessionName != nil
-            else { return false }
+            guard let controller, controller.status == .live else { return false }
             Task { @MainActor in
                 controller.deliverDrop(await TerminalDropCatcher.load(providers))
             }
             return true
         }
         .overlay {
-            if dropTargeted, controller?.status == .live,
-               controller?.route.sessionName != nil {
+            if dropTargeted, controller?.status == .live {
                 DropTargetVeil()
             }
         }

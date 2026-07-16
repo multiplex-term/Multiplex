@@ -2,6 +2,26 @@ import XCTest
 @testable import Multiplex
 
 final class DropTextTests: XCTestCase {
+    // MARK: Photo names
+
+    func testPhotoNameUsesCaptureTimestampAndContentExtension() {
+        let epoch = Date(timeIntervalSince1970: 0)
+        let utc = TimeZone(secondsFromGMT: 0)!
+
+        XCTAssertEqual(
+            DropText.photoName(at: epoch, timeZone: utc),
+            "photo-19700101-000000.jpg"
+        )
+        XCTAssertEqual(
+            DropText.photoName(
+                at: epoch,
+                filenameExtension: ".HEIC",
+                timeZone: utc
+            ),
+            "photo-19700101-000000.heic"
+        )
+    }
+
     // MARK: Sanitizing
 
     func testSanitizedNamePassesNormalNamesThrough() {

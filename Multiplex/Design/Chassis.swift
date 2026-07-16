@@ -75,6 +75,10 @@ struct ChassisBadge: View {
             if let systemImage {
                 Image(systemName: systemImage)
                     .font(.system(size: 9, weight: .semibold))
+                    // SF Symbols have different intrinsic ascents (paperclip
+                    // is taller than plus). A fixed slot keeps every chassis
+                    // badge on the same control height.
+                    .frame(width: 10, height: 10)
             }
             if !label.isEmpty {
                 Text(label)

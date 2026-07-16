@@ -20,7 +20,8 @@ behavior, or App Review flow changes.
 | Target release model | Free download with one non-consumable Pro unlock; confirm the base-app price manually |
 | Primary category | Developer Tools |
 | Secondary category | Utilities |
-| Privacy declaration | Target: Data Not Collected; set/confirm manually in App Store Connect |
+| Privacy declaration | Target: Data Not Collected; selected files/photos and camera captures go directly to the user's SSH host; set/confirm manually in App Store Connect |
+| Runtime permissions | Camera only after FILE → Camera on iPad; Local Network only for LAN hosts; Notifications only for enabled agent alerts. Photos/Files use system pickers. |
 | Age rating | Target: all questionnaire answers None → 4+; complete/confirm manually |
 | Base-app price | Free; confirm in App Store Connect before submission |
 | Storefronts | Confirm intended coverage in App Store Connect; France needs the encryption step in the release playbook |
@@ -76,9 +77,11 @@ Current product split:
 - Free: two hosts, full SSH spatial windows/tabs/merge, all-pane agent detection
   and wall telemetry with foreground-aware helpers in tmux panes and plain SSH
   shells (including direct-shell NEEDS YOU chrome), built-in terminal themes,
-  a most-used tmux shortcut dropdown on
-  both platforms (including touch-native copy-mode selection and explicit
-  exit), iCloud Keychain host/secret/command-setup sync, per-host/per-agent
+  free file attachment on SSH-backed tmux tabs from Files/Photos (plus camera
+  on iPad) and drag-and-drop through the same SSH upload path, a most-used tmux
+  shortcut dropdown on both platforms (including touch-native copy-mode
+  selection and explicit exit), iCloud Keychain host/secret/command-setup sync,
+  per-host/per-agent
   built-in command placement between Bar and More, custom commands (ordered,
   multiline, optional Auto Submit and explicit bar placement, with
   nine-character bar label previews, plus optional sharing across that host's

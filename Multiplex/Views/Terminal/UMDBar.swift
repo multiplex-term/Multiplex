@@ -57,7 +57,8 @@ struct UMDBar: View {
             ChassisChip("A−", action: fontDown)
             ChassisChip("A+", action: fontUp)
             newTabMenu
-            // Custom TALLY dropdown, immediately right of + TAB. Each choice
+            FileAttachMenu(controller: controller)
+            // Custom TALLY dropdown, immediately right of FILE. Each choice
             // sends the stock tmux prefix binding through the ordered pump.
             if showsTmuxShortcuts {
                 tmuxShortcutButton
@@ -146,6 +147,7 @@ struct UMDBar: View {
                 ChassisChip("A−", action: fontDown).fixedSize()
                 ChassisChip("A+", action: fontUp).fixedSize()
                 newTabMenu.fixedSize()
+                FileAttachMenu(controller: controller).fixedSize()
                 if showsTmuxShortcuts {
                     tmuxShortcutButton.fixedSize()
                 }
@@ -197,6 +199,7 @@ struct UMDBar: View {
                     Button(agent.displayName) { newSession(agent) }
                 }
             }
+            FileAttachMenu(controller: controller, labelStyle: .submenu)
             Divider()
             Button("Detach", action: detach)
             if let closeSession {

@@ -421,8 +421,8 @@ views.
   `MoshSession` (actor) owns the `NWConnection` and re-creates the socket on
   failure / better-path / prolonged silence — that's mosh's port hop and the
   roaming/sleep story; `scenePhase .active` nudges it to heartbeat at once.
-  mosh tabs have no exec surface, so **file drops are refused with a message,
-  not silently dropped**.
+  mosh tabs have no exec surface, so **FILE is hidden; pane drops are refused
+  with a message, not silently dropped**.
 - **Tabs move between windows without dropping the shell**: a terminal
   window's scene value (`TerminalWindowRoute`) *is* its tab list — merge/split
   mutate the window-value binding, never close-and-reopen windows. Controllers
@@ -516,9 +516,13 @@ views.
   from its measured rendered height and cap only true overflow; never restore a
   command-count multiplier. Multiline rows do not have one stable height, so
   estimates leave a blank trench above the footer or clip edited content.
-- **File drop = SFTP upload + typed path, never Enter**: a dropped file is
-  local and the agent is remote, so the pane uploads it over the tab's own
-  connection (Citadel multiplexes the SFTP subsystem next to the PTY;
+- **File attach/drop = SFTP upload + typed path, never Enter**: compatible
+  SSH-backed tmux tabs carry one free FILE menu in the UMD/classic iPad toolbar
+  (Camera on iPad/iPhone, Photos and Files everywhere); every picker result
+  and every pane drop becomes `[DroppedFile]` and enters
+  `TerminalSessionController.deliverDrop`. A file is local and the agent is
+  remote, so the pane uploads it over the tab's
+  own connection (Citadel multiplexes the SFTP subsystem next to the PTY;
   `.forceCreate` = O_EXCL makes collision renames race-free) into the
   pane's cwd (`#{pane_current_path}` — follows the foreground process,
   i.e. the agent's own cwd; $HOME + absolute typed paths only if it's
@@ -533,9 +537,14 @@ views.
   (`$N`) instead; `=name` works only for session/window targets
   (kill-session, list-panes). The
   typed text is composer input but still sanitized/quoted (`DropText`,
-  pure + tested) so it stays inert at a shell prompt. tmux tabs only;
-  plain `.shell` tabs have no pane to ask for a cwd (and mosh tabs have no
-  SFTP surface — the pill says so). Plan: `local-plan/file-drop.md`.
+  pure + tested) so it stays inert at a shell prompt. tmux-over-SSH tabs only;
+  plain `.shell` tabs have no pane to ask for a cwd and mosh tabs have no
+  SFTP surface, so both hide FILE; direct pane drops still refuse through the
+  same status pill. Picker URLs keep their security-scoped grant open during
+  reads; Photos items retain their content-type extension, and camera captures
+  are 0.9 JPEGs named by
+  `DropText.photoName`. Plans: `local-plan/file-drop.md` and
+  `local-plan/file-attach-button.md`.
 - **iPad keyboard clearance has exactly one owner** — the terminal
   container's keyboard-frame handler in `SwiftTermView`, gated by the pure
   `KeyboardAvoidance.isDocked` (unit-tested). The terminal window opts out

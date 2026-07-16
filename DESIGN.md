@@ -95,11 +95,13 @@ terminal surface edge to edge in the user's theme. Below, the **UMD**
 (under-monitor display — the label strip every broadcast monitor wears) as an
 opaque ornament on visionOS / toolbar equivalents on iPad: `DECK` chip,
 source label (`MAIN · DEVBOX`), status lamp (`LIVE`/`LINK`/`ENDED`), then
-`KBD · A− · A+ · + TAB · TMUX · MERGE · DETACH` chips. `TMUX` opens a
-custom square-grid TALLY dropdown listing the stock command, friendly action,
-and default `⌃B` binding; iPad carries the same dropdown immediately after the
-keyboard control in its bottom key rail. Connection overlays are chassis
-panels with the same lamp anatomy.
+`KBD · A− · A+ · + TAB · FILE · TMUX · MERGE · DETACH` chips. On an
+SSH-backed tmux tab, `FILE` opens Camera (iPad/iPhone), Photos, and Files
+pickers and rejoins the terminal's existing SFTP drop path; mosh and plain
+shell tabs omit it. `TMUX` opens a custom square-grid TALLY dropdown
+listing the stock command, friendly action, and default `⌃B` binding; iPad
+carries the same dropdown immediately after the keyboard control in its bottom
+key rail. Connection overlays are chassis panels with the same lamp anatomy.
 
 **Agent commands.** The detected agent's helper rail uses the same square
 chassis language. MORE opens an anchored TALLY editor: a collapsed Built-in

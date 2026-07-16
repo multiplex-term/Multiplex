@@ -47,8 +47,11 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
   and copy mode) and sends their default `Ctrl-B` bindings through the same
   ordered input path as the keyboard. Copy mode becomes a clear contextual
   state: swipe through remote history, hold text for native selection/copy,
-  then press **Done** to return to the shell. SwiftTerm renders xterm-256color;
-  resizing the window sends PTY window-change to the remote. **Detach** closes
+  then press **Done** to return to the shell. On SSH-backed tmux tabs,
+  **FILE** attaches from Photos or Files (plus Camera on iPad), uploads into
+  the active pane's working directory, and types the remote path without
+  submitting; dropping a file on the terminal uses the same path. SwiftTerm renders xterm-256color; resizing
+  the window sends PTY window-change to the remote. **Detach** closes
   the active tab's channel — tmux keeps the session; the wall still shows it.
 - **Agent helpers** — when the active tmux pane **or a plain SSH shell** runs
   Claude Code, Codex, or Pi, a context-specific command strip follows it. The

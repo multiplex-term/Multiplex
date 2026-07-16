@@ -9,7 +9,8 @@ CORE FLOW
 - The free tier can save two hosts; Multiplex Pro removes the host limit.
 - Tap a tile to attach: the session opens in its own window wearing a red LIVE lamp. Attach a second session and place the windows side by side (each terminal is its own spatial window on Vision Pro; on iPad use Stage Manager).
 - MERGE in a terminal's bottom bar pulls another window's session in as a tab; a tab's context menu moves it back out into its own window. The shell stays connected while it moves.
-- TMUX in the Vision Pro bottom bar (or at the right edge of the iPad terminal key bar) opens the custom shortcut dropdown. Choose an action such as New Window, Split Left / Right, or Copy Mode to send its displayed default Ctrl-B binding to the attached tmux client. In Copy Mode, swipe to scroll remote history, hold text for native selection/copy, and press Done to return to the shell.
+- TMUX in the Vision Pro bottom bar (or iPad key bar) opens the shortcut menu. Pick New Window, Split, or Copy Mode to send its displayed default Ctrl-B binding. In Copy Mode, swipe history, hold to select/copy, and press Done to exit.
+- FILE attaches Photos/Files (and Camera on iPad), uploads into the active pane's working directory, and types the remote path without Return. Drops use the same pipeline.
 - DETACH closes the window; tmux keeps the session running, so its tile stays on the wall.
 
 AGENT FEATURES (Pro)
@@ -22,6 +23,7 @@ MOSH (Pro)
 - With Pro unlocked, edit the demo host, enable MOSH, and re-attach: the connection bootstraps over SSH, then runs over UDP and survives network changes.
 
 PERMISSIONS
+- Camera: only after FILE → Camera on iPad; capture goes directly to the SSH host. Photos/Files need no library access.
 - Local Network: requested only when a host address is on the local network. The demo host is on the public internet, so you may never see this prompt.
 - Notifications: agent alerts, as above.
 
