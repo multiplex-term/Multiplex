@@ -87,19 +87,23 @@ struct MoshPacketLayer {
     mutating func open(_ datagram: Data, now: UInt64) -> Opened? {
         // 8 nonce + 16 tag + 4 timestamps is the smallest honest packet.
         guard datagram.count >= 28 else { return nil }
-        let bytes = [UInt8](datagram)
-        let nonceValue = bytes[0 ..< 8].reduce(UInt64(0)) { $0 << 8 | UInt64($1) }
+        let nonceValue = datagram.prefix(8).reduce(UInt64(0)) {
+            $0 << 8 | UInt64($1)
+        }
 
         // Reject our own reflected packets before paying for the AEAD.
         guard nonceValue & ~Self.sequenceMask == direction.receiveBit else { return nil }
 
         guard let plaintext = aead.open(
-            Data(bytes[8...]), nonce: Self.nonceBytes(nonceValue)
+            datagram.dropFirst(8), nonce: Self.nonceBytes(nonceValue)
         ), plaintext.count >= 4 else { return nil }
 
-        let plain = [UInt8](plaintext)
-        let timestamp = UInt16(plain[0]) << 8 | UInt16(plain[1])
-        let reply = UInt16(plain[2]) << 8 | UInt16(plain[3])
+        let start = plaintext.startIndex
+        let timestamp = UInt16(plaintext[start]) << 8
+            | UInt16(plaintext[plaintext.index(after: start)])
+        let replyStart = plaintext.index(start, offsetBy: 2)
+        let reply = UInt16(plaintext[replyStart]) << 8
+            | UInt16(plaintext[plaintext.index(after: replyStart)])
 
         let sequence = nonceValue & Self.sequenceMask
         let isNew = sequence >= expectedReceiverSequence
@@ -125,7 +129,7 @@ struct MoshPacketLayer {
             }
         }
 
-        return Opened(payload: Data(plain[4...]), isNew: isNew)
+        return Opened(payload: plaintext.dropFirst(4), isNew: isNew)
     }
 
     // MARK: - Helpers

@@ -18,11 +18,21 @@ enum MoshFragmentWire {
     }
 
     static func decode(_ data: Data) -> (id: UInt64, number: UInt16, final: Bool, contents: Data)? {
-        let bytes = [UInt8](data)
-        guard bytes.count >= headerLength else { return nil }
-        let id = bytes[0 ..< 8].reduce(UInt64(0)) { $0 << 8 | UInt64($1) }
-        let combined = UInt16(bytes[8]) << 8 | UInt16(bytes[9])
-        return (id, combined & 0x7FFF, combined & 0x8000 != 0, Data(bytes[headerLength...]))
+        guard data.count >= headerLength else { return nil }
+        let start = data.startIndex
+        let idEnd = data.index(start, offsetBy: 8)
+        let id = data[start ..< idEnd].reduce(UInt64(0)) {
+            $0 << 8 | UInt64($1)
+        }
+        let numberEnd = data.index(idEnd, offsetBy: 2)
+        let combined = UInt16(data[idEnd]) << 8
+            | UInt16(data[data.index(after: idEnd)])
+        return (
+            id,
+            combined & 0x7FFF,
+            combined & 0x8000 != 0,
+            data[numberEnd...]
+        )
     }
 }
 
@@ -50,7 +60,10 @@ struct MoshFragmenter {
                 id: id,
                 number: UInt16(out.count),
                 final: final,
-                contents: bytes.subdata(in: bytes.startIndex + offset ..< bytes.startIndex + end)
+                contents: bytes[
+                    bytes.index(bytes.startIndex, offsetBy: offset)
+                        ..< bytes.index(bytes.startIndex, offsetBy: end)
+                ]
             ))
             offset = end
         } while offset < bytes.count
@@ -79,6 +92,14 @@ struct MoshFragmentAssembly {
         if id != currentID {
             reset()
             currentID = id
+        }
+
+        // Almost every mosh instruction fits one datagram. Return its payload
+        // slice directly instead of inserting it into a dictionary and copying
+        // it straight back out into an assembly buffer.
+        if number == 0, final {
+            reset()
+            return contents
         }
 
         if pieces.updateValue(contents, forKey: number) == nil {

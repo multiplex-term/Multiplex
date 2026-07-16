@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 import SwiftTerm
 import UIKit
 
@@ -108,12 +109,24 @@ final class TerminalSessionController {
     /// threshold. Input still queues and the link self-heals; the chrome
     /// just shows it truthfully. Always false on SSH tabs.
     private(set) var contactLost = false
-    private var pendingOutput = Data()
+    private var pendingOutput: [UInt8] = []
+    /// One short-delay drain per transport run replaces a MainActor Task and a
+    /// Data→Array copy for every network chunk. Parsing remains on the main
+    /// actor because SwiftTerm's view/delegate/display machinery is UIKit.
+    private var outputCoalescer: TerminalOutputCoalescer?
     private var lastCols = 80
     private var lastRows = 24
     private var started = false
+    private var transportGeneration = 0
+    private var runTask: Task<Void, Never>?
     private var inputTask: Task<Void, Never>?
     private var inputContinuation: AsyncStream<Data>.Continuation?
+    private struct TerminalSize: Sendable {
+        var cols: Int
+        var rows: Int
+    }
+    private var resizeTask: Task<Void, Never>?
+    private var resizeContinuation: AsyncStream<TerminalSize>.Continuation?
     /// Background cadence for a plain PTY. The focused TerminalWindow may
     /// request a faster refresh, coalesced by the same in-flight/staleness
     /// gates; tmux tabs continue to use ConnectionHub's fleet probe.
@@ -150,7 +163,7 @@ final class TerminalSessionController {
         view.allowMouseReporting = !tmuxCopyModeUIActive
         view.forceRemoteCursorScroll = tmuxCopyModeUIActive
         if !pendingOutput.isEmpty {
-            view.feed(byteArray: [UInt8](pendingOutput)[...])
+            view.feed(byteArray: pendingOutput[...])
             pendingOutput.removeAll()
         }
     }
@@ -210,48 +223,99 @@ final class TerminalSessionController {
     func start() {
         guard !started else { return }
         started = true
-        Task { await run() }
+        beginTransportRun()
     }
 
-    private func run() async {
-        if host.useMosh {
-            await runMosh()
-        } else {
-            await runSSH()
+    private func beginTransportRun() {
+        transportGeneration &+= 1
+        let generation = transportGeneration
+        let output = TerminalOutputCoalescer { [weak self] bytes in
+            guard let self, self.transportGeneration == generation else { return }
+            self.feed(bytes)
+        }
+        outputCoalescer = output
+        runTask?.cancel()
+        runTask = Task { [weak self] in
+            guard let self else { return }
+            await self.run(generation: generation, output: output)
+            if self.transportGeneration == generation {
+                self.runTask = nil
+            }
         }
     }
 
-    private func runSSH() async {
-        let connection = SSHConnection(host: host, secrets: .load(for: host))
+    private func run(
+        generation: Int,
+        output: TerminalOutputCoalescer
+    ) async {
+        if host.useMosh {
+            await runMosh(generation: generation, output: output)
+        } else {
+            await runSSH(generation: generation, output: output)
+        }
+    }
+
+    private func runSSH(
+        generation: Int,
+        output: TerminalOutputCoalescer
+    ) async {
+        let secrets = await HostSecrets.loadOffMain(for: host)
+        guard transportGeneration == generation, !Task.isCancelled else { return }
+        let connection = SSHConnection(host: host, secrets: secrets)
+        guard transportGeneration == generation else {
+            await connection.close()
+            return
+        }
         self.connection = connection
         transport = connection
         do {
             try await connection.connect()
+            try Task.checkCancellation()
+            guard transportGeneration == generation,
+                  self.connection === connection
+            else {
+                await connection.close()
+                return
+            }
+            let openedSize = TerminalSize(cols: lastCols, rows: lastRows)
             try await connection.openShell(
                 command: route.remoteCommand,
-                cols: lastCols,
-                rows: lastRows,
-                onData: { [weak self] data in
-                    Task { @MainActor [weak self] in
-                        self?.feed(data)
-                    }
+                cols: openedSize.cols,
+                rows: openedSize.rows,
+                onData: { data in
+                    output.append(data)
                 },
                 onClose: { [weak self] reason in
                     Task { @MainActor [weak self] in
-                        self?.handleClose(reason: reason)
+                        self?.handleClose(
+                            reason: reason,
+                            generation: generation,
+                            output: output
+                        )
                     }
                 }
             )
-            startInputPump(for: connection)
+            try Task.checkCancellation()
+            guard transportGeneration == generation,
+                  self.connection === connection
+            else {
+                await connection.close()
+                return
+            }
+            startTransportPumps(for: connection, openedAt: openedSize)
             status = .live
             startDirectShellMonitoring()
         } catch {
+            await connection.close()
+            guard transportGeneration == generation,
+                  self.connection === connection
+            else { return }
             let message = (error as? SSHConnectionError)?.userMessage(host: host)
                 ?? "Couldn't reach \(host.name). \(error.localizedDescription)"
             status = .ended(message)
             self.connection = nil
             transport = nil
-            await connection.close()
+            outputCoalescer = nil
         }
     }
 
@@ -259,56 +323,83 @@ final class TerminalSessionController {
     /// session itself rides UDP — resilient to roaming and sleep. The
     /// deck's probe (and file drops) stay SSH; this tab simply has no
     /// exec surface.
-    private func runMosh() async {
+    private func runMosh(
+        generation: Int,
+        output: TerminalOutputCoalescer
+    ) async {
         contactLost = false
         do {
+            let secrets = await HostSecrets.loadOffMain(for: host)
+            try Task.checkCancellation()
+            guard transportGeneration == generation else { return }
             let target = try await MoshBootstrap.start(
                 host: host,
-                secrets: .load(for: host),
+                secrets: secrets,
                 remoteCommand: route.moshRemoteCommand
             )
-            let session = try MoshSession(target: target, cols: lastCols, rows: lastRows)
+            try Task.checkCancellation()
+            guard transportGeneration == generation else { return }
+            let openedSize = TerminalSize(cols: lastCols, rows: lastRows)
+            let session = try MoshSession(
+                target: target,
+                cols: openedSize.cols,
+                rows: openedSize.rows
+            )
             moshSession = session
             transport = session
             try await session.open(
-                onData: { [weak self] data in
-                    Task { @MainActor [weak self] in
-                        self?.feed(data)
-                    }
+                onData: { data in
+                    output.append(data)
                 },
                 onClose: { [weak self] reason in
                     Task { @MainActor [weak self] in
-                        self?.handleClose(reason: reason)
+                        self?.handleClose(
+                            reason: reason,
+                            generation: generation,
+                            output: output
+                        )
                     }
                 },
                 onContact: { [weak self] lost in
                     Task { @MainActor [weak self] in
+                        guard self?.transportGeneration == generation else { return }
                         self?.contactLost = lost
                     }
                 }
             )
-            startInputPump(for: session)
+            try Task.checkCancellation()
+            guard transportGeneration == generation,
+                  moshSession === session
+            else {
+                await session.close()
+                return
+            }
+            startTransportPumps(for: session, openedAt: openedSize)
             status = .live
             startDirectShellMonitoring()
         } catch {
+            let session = moshSession
+            await session?.close()
+            guard transportGeneration == generation,
+                  moshSession === session
+            else { return }
             let message = (error as? MoshBootstrapError)?.userMessage(host: host)
                 ?? (error as? MoshSession.Failure)?.userMessage(host: host)
                 ?? (error as? SSHConnectionError)?.userMessage(host: host)
                 ?? "Couldn't reach \(host.name) over mosh. \(error.localizedDescription)"
             status = .ended(message)
-            let session = moshSession
             moshSession = nil
             transport = nil
-            Task { await session?.close() }
+            outputCoalescer = nil
         }
     }
 
-    private func feed(_ data: Data) {
+    private func feed(_ bytes: [UInt8]) {
         guard let terminalView else {
-            pendingOutput.append(data)
+            pendingOutput.append(contentsOf: bytes)
             return
         }
-        terminalView.feed(byteArray: [UInt8](data)[...])
+        terminalView.feed(byteArray: bytes[...])
     }
 
     /// OSC title updates are also the no-exec fallback signal for direct mosh
@@ -331,13 +422,30 @@ final class TerminalSessionController {
         }
     }
 
-    private func handleClose(reason: String?) {
-        stopInputPump()
+    private func handleClose(
+        reason: String?,
+        generation: Int,
+        output: TerminalOutputCoalescer
+    ) {
+        // Network callbacks enqueue bytes synchronously before their close
+        // callback. Flush that final tail before ending the run, then ignore a
+        // late close from any superseded transport generation.
+        output.flush()
+        guard transportGeneration == generation,
+              outputCoalescer === output
+        else { return }
+        stopTransportPumps()
         stopDirectShellMonitoring()
         setTmuxCopyModeUIActive(false)
         resetHistoryState()
-        if case .ended = status { return }
         status = .ended(reason)
+        contactLost = false
+        let endedTransport = transport
+        transport = nil
+        connection = nil
+        moshSession = nil
+        outputCoalescer = nil
+        Task { await endedTransport?.close() }
     }
 
     // MARK: Plain-shell agent monitoring
@@ -491,6 +599,48 @@ final class TerminalSessionController {
         inputTask = nil
     }
 
+    /// Resize callbacks can arrive for every layout pass while a window is
+    /// dragged. Keep only the newest dimensions and let one ordered task talk
+    /// to the transport, rather than minting an unbounded task per callback.
+    private func startResizePump(for transport: any TerminalTransport) {
+        stopResizePump()
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: TerminalSize.self,
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        resizeContinuation = continuation
+        resizeTask = Task {
+            for await size in stream {
+                try? await transport.resize(cols: size.cols, rows: size.rows)
+            }
+        }
+    }
+
+    private func stopResizePump() {
+        resizeContinuation?.finish()
+        resizeContinuation = nil
+        resizeTask?.cancel()
+        resizeTask = nil
+    }
+
+    private func startTransportPumps(
+        for transport: any TerminalTransport,
+        openedAt size: TerminalSize
+    ) {
+        startInputPump(for: transport)
+        startResizePump(for: transport)
+        // Layout may have changed while the handshake/open call was awaiting;
+        // reconcile once with the newest geometry before normal coalescing.
+        if lastCols != size.cols || lastRows != size.rows {
+            resizeContinuation?.yield(TerminalSize(cols: lastCols, rows: lastRows))
+        }
+    }
+
+    private func stopTransportPumps() {
+        stopInputPump()
+        stopResizePump()
+    }
+
     // MARK: Terminal view events
 
     func sendInput(_ data: Data) {
@@ -570,7 +720,8 @@ final class TerminalSessionController {
             return
         }
 
-        let control = SSHConnection(host: host, secrets: .load(for: host))
+        let secrets = await HostSecrets.loadOffMain(for: host)
+        let control = SSHConnection(host: host, secrets: secrets)
         do {
             try await control.connect()
             _ = try await control.exec(command)
@@ -589,7 +740,8 @@ final class TerminalSessionController {
         _ body: (SSHConnection) async throws -> T
     ) async throws -> T {
         if let connection { return try await body(connection) }
-        let control = SSHConnection(host: host, secrets: .load(for: host))
+        let secrets = await HostSecrets.loadOffMain(for: host)
+        let control = SSHConnection(host: host, secrets: secrets)
         try await control.connect()
         do {
             let value = try await body(control)
@@ -865,10 +1017,11 @@ final class TerminalSessionController {
     #endif
 
     func terminalResized(cols: Int, rows: Int) {
+        guard cols != lastCols || rows != lastRows else { return }
         lastCols = cols
         lastRows = rows
-        guard status == .live, let transport else { return }
-        Task { try? await transport.resize(cols: cols, rows: rows) }
+        guard status == .live else { return }
+        resizeContinuation?.yield(TerminalSize(cols: cols, rows: rows))
     }
 
     /// Scene became active again: a mosh transport heartbeats immediately
@@ -915,28 +1068,36 @@ final class TerminalSessionController {
     private func performDrop(_ files: [DroppedFile], over connection: SSHConnection) async {
         do {
             let destination = try await dropDestination(over: connection)
-            var typedPaths: [String] = []
-            for file in files {
+            let uploads = try files.map { file -> SSHUpload in
                 guard file.data.count <= DropText.maxBytes else {
                     throw DropError(message: "\(file.name) is over 64 MB")
                 }
-                dropState = .uploading(name: file.name, fraction: 0)
-                let finalName = try await connection.uploadFile(
-                    file.data,
-                    toDirectory: destination.directory,
-                    preferredName: DropText.sanitizedName(file.name),
-                    prepareGitIgnoredDirectory: destination.prepareGitIgnoredDirectory,
-                    onProgress: { [weak self] fraction in
-                        Task { @MainActor [weak self] in
-                            guard case .uploading = self?.dropState else { return }
-                            self?.dropState = .uploading(name: file.name, fraction: fraction)
-                        }
-                    }
+                return SSHUpload(
+                    data: file.data,
+                    preferredName: DropText.sanitizedName(file.name)
                 )
+            }
+            let displayNames = files.map(\.name)
+            dropState = .uploading(name: files[0].name, fraction: 0)
+            let finalNames = try await connection.uploadFiles(
+                uploads,
+                toDirectory: destination.directory,
+                prepareGitIgnoredDirectory: destination.prepareGitIgnoredDirectory,
+                onProgress: { [weak self] index, fraction in
+                    Task { @MainActor [weak self] in
+                        guard case .uploading = self?.dropState else { return }
+                        self?.dropState = .uploading(
+                            name: displayNames[index],
+                            fraction: fraction
+                        )
+                    }
+                }
+            )
+            let typedPaths = finalNames.map { finalName in
                 // Relative names read best in a prompt, but only when the
                 // file verifiably sits under the pane's cwd.
-                typedPaths.append(destination.typedPrefix.map { $0 + finalName }
-                    ?? destination.directory + "/" + finalName)
+                destination.typedPrefix.map { $0 + finalName }
+                    ?? destination.directory + "/" + finalName
             }
             dropState = nil
             sendInput(Data(DropText.typedPaths(typedPaths).utf8))
@@ -1007,7 +1168,12 @@ final class TerminalSessionController {
         dropTask = nil
         dropClearTask?.cancel()
         dropState = nil
-        stopInputPump()
+        outputCoalescer?.flush()
+        transportGeneration &+= 1
+        runTask?.cancel()
+        runTask = nil
+        outputCoalescer = nil
+        stopTransportPumps()
         stopDirectShellMonitoring()
         setTmuxCopyModeUIActive(false)
         resetHistoryState()
@@ -1025,6 +1191,63 @@ final class TerminalSessionController {
         setTmuxCopyModeUIActive(false)
         resetHistoryState()
         status = .connecting
-        Task { await run() }
+        beginTransportRun()
+    }
+}
+
+/// Receives transport data on NIO / Network.framework queues, then presents
+/// one compact byte array to SwiftTerm per short display interval. A terminal
+/// still parses every byte in order; only cross-thread hops and array copies
+/// are coalesced.
+private final class TerminalOutputCoalescer: @unchecked Sendable {
+    private struct State {
+        var chunks: [Data] = []
+        var byteCount = 0
+        var drainScheduled = false
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let deliver: @MainActor ([UInt8]) -> Void
+
+    init(deliver: @escaping @MainActor ([UInt8]) -> Void) {
+        self.deliver = deliver
+    }
+
+    func append(_ data: Data) {
+        guard !data.isEmpty else { return }
+        let schedule = state.withLock { state -> Bool in
+            state.chunks.append(data)
+            state.byteCount += data.count
+            guard !state.drainScheduled else { return false }
+            state.drainScheduled = true
+            return true
+        }
+        guard schedule else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(2)) { [weak self] in
+            self?.drain()
+        }
+    }
+
+    @MainActor
+    func flush() {
+        drain()
+    }
+
+    @MainActor
+    private func drain() {
+        let batch = state.withLock { state -> ([Data], Int) in
+            let batch = (state.chunks, state.byteCount)
+            state.chunks.removeAll(keepingCapacity: true)
+            state.byteCount = 0
+            state.drainScheduled = false
+            return batch
+        }
+        guard batch.1 > 0 else { return }
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(batch.1)
+        for chunk in batch.0 {
+            bytes.append(contentsOf: chunk)
+        }
+        deliver(bytes)
     }
 }

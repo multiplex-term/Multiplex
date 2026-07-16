@@ -85,6 +85,26 @@ enum FleetTileGridSizing {
     }
 }
 
+/// Narrow Observation boundary for one host. Capture-pane text and attention
+/// changes now invalidate only that host section; the parent wall observes
+/// the lightweight fleet/session summaries used for global layout.
+private struct HostSectionObservation<Content: View>: View {
+    let model: HostConnectionModel
+    let content: (HostConnectionModel) -> Content
+
+    init(
+        model: HostConnectionModel,
+        @ViewBuilder content: @escaping (HostConnectionModel) -> Content
+    ) {
+        self.model = model
+        self.content = content
+    }
+
+    var body: some View {
+        content(model)
+    }
+}
+
 /// The deck: the whole fleet as one broadcast monitor wall. Every host
 /// probes concurrently under a thin rail; every session is a live tile
 /// showing its actual last lines (capture-pane over the host's control
@@ -263,13 +283,16 @@ struct FleetWall: View {
         )
 
         return ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 if showHeader { header }
                 if store.hosts.isEmpty {
                     awaitingSignal
                 } else {
                     ForEach(store.hosts) { host in
-                        hostSection(host, columns: columns)
+                        let model = hub.model(for: host)
+                        HostSectionObservation(model: model) { observed in
+                            hostSection(host, model: observed, columns: columns)
+                        }
                     }
                 }
             }
@@ -319,10 +342,7 @@ struct FleetWall: View {
     /// sections above and below it.
     private var tileCount: Int {
         let counts = store.hosts.map { host -> Int in
-            if case .sessions(let sessions) = hub.model(for: host).tmux {
-                return sessions.count + 1
-            }
-            return 1
+            max(1, hub.model(for: host).sessionCount + 1)
         }
         return counts.max() ?? 1
     }
@@ -352,6 +372,18 @@ struct FleetWall: View {
     /// refresh its miniatures. Skips work while the app is backgrounded;
     /// `.task(id:)` restarts the loop when the fleet changes.
     private func runFeed() async {
+        let models = store.hosts.map { hub.model(for: $0) }
+        await withTaskGroup(of: Void.self) { group in
+            for model in models {
+                group.addTask { await runFeed(for: model) }
+            }
+        }
+    }
+
+    /// Each host owns its cadence. A black-holed SSH link can consume its
+    /// ten-second deadline without stretching healthy hosts from five to
+    /// fifteen seconds between live captures.
+    private func runFeed(for model: HostConnectionModel) async {
         while !Task.isCancelled {
             guard UIApplication.shared.applicationState == .active else {
                 // Not active YET: a cold launch runs the first tick before
@@ -360,22 +392,13 @@ struct FleetWall: View {
                 // briefly instead — the task id also restarts this loop the
                 // moment the scene turns active, and iOS suspends the
                 // process outright in the background, so this never spins.
-                try? await Task.sleep(for: .milliseconds(200))
+                do { try await Task.sleep(for: .milliseconds(200)) }
+                catch { return }
                 continue
             }
-            // Resolve models on the main actor first, then let every host
-            // run its own probe (one exec round-trip carrying sessions,
-            // agent detection, and miniature tails). One slow host must
-            // not delay the rest of the fleet.
-            let models = store.hosts.map { hub.model(for: $0) }
-            await withTaskGroup(of: Void.self) { group in
-                for model in models {
-                    group.addTask {
-                        await model.refreshAndWait(ifStaleFor: 4)
-                    }
-                }
-            }
-            try? await Task.sleep(for: Self.feedInterval)
+            await model.refreshAndWait(ifStaleFor: 4)
+            do { try await Task.sleep(for: Self.feedInterval) }
+            catch { return }
         }
     }
 
@@ -479,7 +502,7 @@ struct FleetWall: View {
 
     private var fleetSummary: String {
         let sessions = store.hosts.reduce(0) { count, host in
-            count + hub.model(for: host).tmux.sessions.count
+            count + hub.model(for: host).sessionCount
         }
         let hosts = store.hosts.count
         return "\(hosts) HOST\(hosts == 1 ? "" : "S") · \(sessions) SESSION\(sessions == 1 ? "" : "S")"
@@ -517,9 +540,11 @@ struct FleetWall: View {
     // MARK: Host rail + tiles
 
     @ViewBuilder
-    private func hostSection(_ host: Host, columns: [GridItem]) -> some View {
-        let model = hub.model(for: host)
-
+    private func hostSection(
+        _ host: Host,
+        model: HostConnectionModel,
+        columns: [GridItem]
+    ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             rail(host, model: model)
             tiles(host, model: model, columns: columns)
@@ -836,7 +861,7 @@ struct FleetWall: View {
             session: session,
             lines: model.miniatures[session.name] ?? [],
             attention: model.attention[session.name],
-            hasLiveAgentState: model.lastRefreshed != nil,
+            hasLiveAgentState: model.hasLiveProbe,
             hasOpenTab: workspace.hasTab(hostID: host.id, sessionName: session.name),
             compact: presentation == .shellRail,
             selected: selectedTerminal?.hostID == host.id
@@ -864,7 +889,27 @@ struct FleetWall: View {
         if reduceMotion {
             grid
         } else {
-            grid.animation(.easeOut(duration: 0.3), value: state)
+            grid.animation(.easeOut(duration: 0.3), value: gridIdentity(for: state))
+        }
+    }
+
+    private enum GridIdentity: Hashable {
+        case unknown
+        case probing
+        case sessions([String])
+        case noServer
+        case tmuxMissing
+        case failed
+    }
+
+    private func gridIdentity(for state: TmuxState) -> GridIdentity {
+        switch state {
+        case .unknown: .unknown
+        case .probing: .probing
+        case .sessions(let sessions): .sessions(sessions.map(\.name))
+        case .noServer: .noServer
+        case .tmuxMissing: .tmuxMissing
+        case .failed: .failed
         }
     }
 

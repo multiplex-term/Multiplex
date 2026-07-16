@@ -17,6 +17,15 @@ struct HostSecrets: Sendable {
             passphrase: KeychainStore.get(for: host.id, kind: .keyPassphrase)
         )
     }
+
+    /// Synchronizable Keychain reads may consult securityd/iCloud state and
+    /// occasionally take long enough to miss frames. Connection setup is
+    /// already asynchronous, so keep that blocking work off the UI actor.
+    static func loadOffMain(for host: Host) async -> HostSecrets {
+        await Task.detached(priority: .userInitiated) {
+            load(for: host)
+        }.value
+    }
 }
 
 enum SSHConnectionError: Error {
@@ -39,6 +48,11 @@ enum SSHConnectionError: Error {
     }
 }
 
+struct SSHUpload {
+    var data: Data
+    var preferredName: String
+}
+
 /// One SSH connection: exec channels for probing, plus at most one
 /// interactive PTY shell. Built on Citadel (SwiftNIO SSH).
 actor SSHConnection {
@@ -46,6 +60,11 @@ actor SSHConnection {
     private let secrets: HostSecrets
 
     private var client: SSHClient?
+    /// Actor methods are reentrant at awaits. Join concurrent callers to one
+    /// handshake instead of opening duplicate TCP/SSH transports when a user
+    /// action lands during a background connection attempt.
+    private var connectTask: Task<SSHClient, Error>?
+    private var connectGeneration = 0
     private var stdinWriter: TTYStdinWriter?
     private var shellTask: Task<Void, Never>?
     /// Set by `close()`. A connect that was abandoned on a deadline can
@@ -62,30 +81,49 @@ actor SSHConnection {
 
     func connect() async throws {
         guard client == nil else { return }
-        let method = try authenticationMethod()
+        guard !isClosed else { throw SSHConnectionError.notConnected }
+        let task: Task<SSHClient, Error>
+        let generation: Int
+        if let inFlight = connectTask {
+            task = inFlight
+            generation = connectGeneration
+        } else {
+            let method = try authenticationMethod()
+            connectGeneration &+= 1
+            generation = connectGeneration
+            task = Task {
+                try await SSHClient.connect(
+                    host: host.hostname,
+                    port: host.port,
+                    authenticationMethod: method,
+                    hostKeyValidator: .acceptAnything(),
+                    reconnect: .never
+                )
+            }
+            connectTask = task
+        }
         do {
-            client = try await SSHClient.connect(
-                host: host.hostname,
-                port: host.port,
-                authenticationMethod: method,
-                hostKeyValidator: .acceptAnything(),
-                reconnect: .never
-            )
+            let connected = try await task.value
+            guard generation == connectGeneration, !isClosed else {
+                try? await connected.close()
+                throw SSHConnectionError.notConnected
+            }
+            client = connected
+            connectTask = nil
         } catch let error as SSHConnectionError {
+            if generation == connectGeneration { connectTask = nil }
             throw error
         } catch {
+            if generation == connectGeneration { connectTask = nil }
             throw SSHConnectionError.connectFailed(shortDescription(of: error))
-        }
-        if isClosed {
-            let late = client
-            client = nil
-            try? await late?.close()
-            throw SSHConnectionError.notConnected
         }
     }
 
     func close() async {
         isClosed = true
+        connectGeneration &+= 1
+        connectTask?.cancel()
+        connectTask = nil
         shellTask?.cancel()
         shellTask = nil
         stdinWriter = nil
@@ -135,18 +173,17 @@ actor SSHConnection {
 
     // MARK: SFTP (file drops)
 
-    /// Upload one dropped file into `directory`, resolving name collisions
+    /// Upload dropped files into `directory`, resolving name collisions
     /// atomically (`.forceCreate` = O_EXCL, so two clients can't clobber
-    /// each other) and reporting whole-file progress. Returns the file
-    /// name actually used. Rides the same connection as the shell — Citadel
-    /// multiplexes the SFTP subsystem channel alongside the PTY.
-    func uploadFile(
-        _ data: Data,
+    /// each other) and reporting per-file progress. The batch shares one
+    /// SFTP subsystem/channel instead of negotiating one per attachment.
+    /// Returns the file names actually used in request order.
+    func uploadFiles(
+        _ uploads: [SSHUpload],
         toDirectory directory: String,
-        preferredName: String,
         prepareGitIgnoredDirectory: Bool = false,
-        onProgress: @escaping @Sendable (Double) -> Void
-    ) async throws -> String {
+        onProgress: @escaping @Sendable (_ index: Int, _ fraction: Double) -> Void
+    ) async throws -> [String] {
         guard let client else { throw SSHConnectionError.notConnected }
         return try await client.withSFTP { sftp in
             if prepareGitIgnoredDirectory {
@@ -162,46 +199,53 @@ actor SSHConnection {
                     try? await gitignore.close()
                 }
             }
-            var file: SFTPFile?
-            var name = preferredName
-            for attempt in 0..<8 {
-                let candidate = DropText.candidate(preferredName, attempt: attempt)
-                let path = directory.hasSuffix("/")
-                    ? directory + candidate
-                    : directory + "/" + candidate
+            var names: [String] = []
+            names.reserveCapacity(uploads.count)
+            for (index, upload) in uploads.enumerated() {
+                var file: SFTPFile?
+                var name = upload.preferredName
+                for attempt in 0..<8 {
+                    let candidate = DropText.candidate(upload.preferredName, attempt: attempt)
+                    let path = directory.hasSuffix("/")
+                        ? directory + candidate
+                        : directory + "/" + candidate
+                    do {
+                        file = try await sftp.openFile(
+                            filePath: path,
+                            flags: [.write, .create, .forceCreate]
+                        )
+                        name = candidate
+                        break
+                    } catch {
+                        // Usually "already exists" (O_EXCL); a persistent
+                        // error (permissions, bad dir) surfaces on last try.
+                        if attempt == 7 { throw error }
+                    }
+                }
+                guard let file else {
+                    throw DropError(message: "Couldn't create \(upload.preferredName)")
+                }
                 do {
-                    file = try await sftp.openFile(
-                        filePath: path,
-                        flags: [.write, .create, .forceCreate]
-                    )
-                    name = candidate
-                    break
+                    let chunkSize = 512 * 1024
+                    var offset = 0
+                    while offset < upload.data.count {
+                        let end = min(offset + chunkSize, upload.data.count)
+                        try await file.write(
+                            ByteBuffer(bytes: upload.data[offset..<end]),
+                            at: UInt64(offset)
+                        )
+                        offset = end
+                        onProgress(index, Double(offset) / Double(upload.data.count))
+                    }
+                    if upload.data.isEmpty { onProgress(index, 1) }
+                    try await file.close()
+                    names.append(name)
                 } catch {
-                    // Usually "already exists" (O_EXCL); a persistent error
-                    // (permissions, bad dir) surfaces after the last try.
-                    if attempt == 7 { throw error }
+                    try? await file.close()
+                    throw error
                 }
             }
-            guard let file else { throw DropError(message: "Couldn't create \(preferredName)") }
-            do {
-                let chunkSize = 512 * 1024
-                var offset = 0
-                while offset < data.count {
-                    let end = min(offset + chunkSize, data.count)
-                    try await file.write(
-                        ByteBuffer(bytes: data[offset..<end]),
-                        at: UInt64(offset)
-                    )
-                    offset = end
-                    onProgress(Double(offset) / Double(data.count))
-                }
-                if data.isEmpty { onProgress(1) }
-                try await file.close()
-            } catch {
-                try? await file.close()
-                throw error
-            }
-            return name
+            return names
         }
     }
 
