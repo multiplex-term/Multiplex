@@ -24,6 +24,7 @@ final class AgentSessionHistoryTests: XCTestCase {
         {"type":"user","message":{"role":"user","content":"Fix the probe parser"},"timestamp":"2026-07-16T03:01:02.500Z"}
         {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"big"}]}}
         {"type":"user","message":{"role":"user","content":"<task-notification>agent finished</task-notification>"}}
+        {"type":"user","message":{"role":"user","content":"<command-message>compact</command-message>\\n<command-name>/compact</command-name>"}}
         {"type":"user","message":{"role":"user","content":"<command-name>/clear</command-name>"}}
         {"type":"user","message":{"role":"user","content":[{"type":"text","text":"Now run the tests"},{"type":"image","source":{}}]},"timestamp":"2026-07-16T03:05:00.000Z"}
         {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"\\"type\\":\\"user\\" echoed in prose"}]}}
@@ -37,7 +38,77 @@ final class AgentSessionHistoryTests: XCTestCase {
             "Now run the tests",
         ])
         XCTAssertEqual(result.messages.map(\.ordinal), [0, 1])
+        XCTAssertEqual(result.messages.map(\.reachable), [true, true])
         XCTAssertNotNil(result.messages[0].timestamp)
+    }
+
+    func testCompactBoundaryMarksOlderPromptsUnreachable() {
+        // The compact summary is itself a type:user entry (no isMeta): it
+        // must not appear as a prompt, and everything before it is gone
+        // from the rendered transcript — peek-only.
+        let body = """
+        {"type":"user","message":{"role":"user","content":"Old prompt one"}}
+        {"type":"user","message":{"role":"user","content":"Old prompt two"}}
+        {"type":"user","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context…"}}
+        {"type":"user","message":{"role":"user","content":"Fresh prompt"}}
+        """
+        let result = AgentSessionHistory.parseReadOutput(wrapped(body))
+        XCTAssertEqual(result?.messages.map(\.text), [
+            "Old prompt one", "Old prompt two", "Fresh prompt",
+        ])
+        XCTAssertEqual(result?.messages.map(\.reachable), [false, false, true])
+
+        // The oracle index only carries turns that can still render.
+        let entries = AgentSessionHistory.needleEntries(
+            for: result?.messages ?? [], paneColumns: 100
+        )
+        XCTAssertEqual(entries.map(\.index), [2])
+    }
+
+    func testTypedCompactCommandIsAlsoABoundary() {
+        // 2.1.211 records manual /compact as a plain "/compact" user line
+        // (no isCompactSummary entry) plus <command-…> wrappers.
+        let body = """
+        {"type":"user","message":{"role":"user","content":"Old prompt"}}
+        {"type":"user","message":{"role":"user","content":"/compact"}}
+        {"type":"user","message":{"role":"user","content":"<command-name>/compact</command-name>\\n<command-message>compact</command-message>"}}
+        {"type":"user","message":{"role":"user","content":"Fresh prompt"}}
+        """
+        let result = AgentSessionHistory.parseReadOutput(wrapped(body))
+        XCTAssertEqual(result?.messages.map(\.text), ["Old prompt", "Fresh prompt"])
+        XCTAssertEqual(result?.messages.map(\.reachable), [false, true])
+    }
+
+    func testSlashCommandsAreActionsNotPrompts() {
+        let body = """
+        {"type":"user","message":{"role":"user","content":"/create-pr with a title"}}
+        {"type":"user","message":{"role":"user","content":"/slack:standup"}}
+        {"type":"user","message":{"role":"user","content":"/etc/hosts is broken, fix it"}}
+        """
+        let result = AgentSessionHistory.parseReadOutput(wrapped(body))
+        XCTAssertEqual(result?.messages.map(\.text), ["/etc/hosts is broken, fix it"])
+        XCTAssertTrue(AgentSessionHistory.isSlashCommand("/compact"))
+        XCTAssertTrue(AgentSessionHistory.isSlashCommand("/rewind now"))
+        XCTAssertFalse(AgentSessionHistory.isSlashCommand("/etc/hosts is broken"))
+        XCTAssertFalse(AgentSessionHistory.isSlashCommand("not /a command"))
+    }
+
+    func testCompactBoundarySurvivesMessageCapSlice() {
+        var lines = (0..<8).map {
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"early \($0)\"}}"
+        }
+        lines.append("{\"type\":\"user\",\"isCompactSummary\":true,\"message\":{\"role\":\"user\",\"content\":\"summary\"}}")
+        lines += (0..<60).map {
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"late \($0)\"}}"
+        }
+        let result = AgentSessionHistory.parseReadOutput(
+            wrapped(lines.joined(separator: "\n"))
+        )
+        // The early prompts fell off the 50-message cap entirely; everything
+        // kept is post-compact and reachable.
+        XCTAssertEqual(result?.messages.count, AgentSessionHistory.maxMessages)
+        XCTAssertEqual(result?.messages.first?.text, "late 10")
+        XCTAssertTrue(result?.messages.allSatisfy(\.reachable) ?? false)
     }
 
     func testNoFileSentinelMeansEmptyResult() {

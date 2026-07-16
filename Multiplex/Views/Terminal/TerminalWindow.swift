@@ -410,9 +410,10 @@ struct TerminalWindowRoot: View {
     }
 
     /// Headless jump proof: load the focused pane's history and jump to the
-    /// OLDEST prompt — the deepest exercise of the pipeline (cwd resolve →
-    /// session file → parse → idle gate → remote find loop). Host-side
-    /// capture-pane then shows the old prompt on screen.
+    /// oldest REACHABLE prompt (prompts behind a /compact boundary are
+    /// peek-only by design) — the deepest exercise of the pipeline (cwd
+    /// resolve → session file → parse → idle gate → remote oracle walk).
+    /// Host-side capture-pane then shows the old prompt on screen.
     private func debugJumpToOldestMessage() {
         guard let controller = activeController,
               let view = controller.terminalView,
@@ -427,7 +428,7 @@ struct TerminalWindowRoot: View {
                 try? await Task.sleep(for: .milliseconds(100))
             }
             guard case .loaded(_, let messages, true) = controller.agentHistory,
-                  let oldest = messages.first
+                  let oldest = messages.first(where: \.reachable)
             else { return }
             controller.startHistoryJump(to: oldest)
             controller.closeAgentHistory()

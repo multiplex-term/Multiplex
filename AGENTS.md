@@ -561,10 +561,19 @@ views.
   turn. Long prompts render as ONE `…`-truncated row at pane width, so
   needles are ≤60-column normalized first-line prefixes (wide glyphs cost
   two columns); pure-paste messages can match nothing and remain peek-only;
-  identical prompts land on the nearest twin. While `.finding`, the
-  terminal's input pump is locked and a veil says so; `.shell` tabs list
-  history through the probe's cwd stage (`readlink /proc`, `lsof` fallback)
-  but never jump. Plan + verified experiment record:
+  identical prompts land on the nearest twin. Slash commands are actions,
+  not prompts: the file records them BOTH as bare "/cmd" user lines and as
+  `<command-…>` wrappers (either tag order), and all are filtered from the
+  list. **`/compact` (typed form on 2.1.211, `isCompactSummary` entries
+  from auto-compact/older versions) and `/clear` reset the rendered
+  transcript** — prompts before the boundary keep peek but carry
+  `reachable=false`, which withholds JUMP; don't "fix" that by searching
+  harder, the pager genuinely cannot reach them. Only `.finding` blocks a
+  new jump: a lingering JUMPED state is superseded directly (the
+  normalized start makes chaining safe). While `.finding`, the terminal's
+  input pump is locked and a veil says so; `.shell` tabs list history
+  through the probe's cwd stage (`readlink /proc`, `lsof` fallback) but
+  never jump. Plan + verified experiment record:
   `local-plan/agent-message-history.md`.
 - **File attach/drop = SFTP upload + typed path, never Enter**: compatible
   SSH-backed tmux tabs carry one free FILE menu in the UMD/classic iPad toolbar

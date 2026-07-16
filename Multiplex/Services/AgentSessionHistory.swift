@@ -11,6 +11,11 @@ struct AgentUserMessage: Identifiable, Hashable {
     var ordinal: Int
     var text: String
     var timestamp: Date?
+    /// Whether the rendered transcript can still contain this prompt.
+    /// `/compact` resets Claude's pager view: prompts older than the last
+    /// compact boundary exist only in the file — peek works, JUMP would
+    /// walk to the top and miss, so it is withheld.
+    var reachable: Bool = true
 
     var id: Int { ordinal }
 
@@ -189,41 +194,100 @@ enum AgentSessionHistory {
             }
         }
         guard filePath != nil else { return nil }
-        let parsed = candidates.compactMap(message(fromLine:))
+        var parsed: [AgentUserMessage] = []
+        // Prompts older than the last `/compact` are gone from the rendered
+        // transcript; track the boundary so JUMP is withheld for them.
+        var reachableFrom = 0
+        for line in candidates {
+            switch classifyLine(line) {
+            case .prompt(let message):
+                parsed.append(message)
+            case .compactBoundary:
+                reachableFrom = parsed.count
+            case .ignored:
+                continue
+            }
+        }
         let kept = parsed.suffix(maxMessages)
+        let dropped = parsed.count - kept.count
+        let boundary = max(0, reachableFrom - dropped)
         return ReadResult(
             filePath: filePath,
             messages: kept.enumerated().map { index, message in
                 var message = message
                 message.ordinal = index
+                message.reachable = index >= boundary
                 return message
             }
         )
     }
 
-    /// One candidate JSONL line → a user prompt, or nil for everything else
-    /// (tool results, meta entries, system wrappers, the partial first line
-    /// of a byte-bounded tail).
-    static func message(fromLine line: Substring) -> AgentUserMessage? {
+    enum ParsedLine: Equatable {
+        case prompt(AgentUserMessage)
+        /// A compact summary entry: Claude replaced the rendered transcript
+        /// with it — everything parsed before is file-only history.
+        case compactBoundary
+        case ignored
+    }
+
+    /// One candidate JSONL line → a user prompt, the compact boundary, or
+    /// nothing (tool results, meta entries, system wrappers, slash
+    /// commands, the partial first line of a byte-bounded tail).
+    static func classifyLine(_ line: Substring) -> ParsedLine {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("{"),
               let data = trimmed.data(using: .utf8),
               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        else { return nil }
+        else { return .ignored }
+        // Older Claude versions / auto-compaction write a summary entry;
+        // 2.1.211's manual /compact instead records the typed command as a
+        // plain user line. Both reset the rendered transcript.
+        if object["isCompactSummary"] as? Bool == true { return .compactBoundary }
         guard let text = claudeCodeText(from: object), isDisplayablePrompt(text)
-        else { return nil }
-        return AgentUserMessage(
+        else { return .ignored }
+        let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isTranscriptResettingCommand(content) { return .compactBoundary }
+        if isSlashCommand(content) { return .ignored }
+        return .prompt(AgentUserMessage(
             ordinal: 0,
             text: text,
             timestamp: (object["timestamp"] as? String).flatMap(parseTimestamp)
-        )
+        ))
+    }
+
+    /// `/compact` and `/clear` replace the rendered transcript — prompts
+    /// before them are file-only history.
+    private static func isTranscriptResettingCommand(_ text: String) -> Bool {
+        for command in ["/compact", "/clear"] {
+            if text == command || text.hasPrefix(command + " ") { return true }
+        }
+        return false
+    }
+
+    /// Typed slash commands appear as bare user lines ("/create-pr …") next
+    /// to their `<command-…>` wrapper entries. They are actions, not
+    /// prompts: the TUI renders them specially and collapses them, so they
+    /// are neither listed nor used as jump targets. A path-like "/etc/hosts
+    /// broke" deliberately does not match.
+    static func isSlashCommand(_ text: String) -> Bool {
+        guard text.hasPrefix("/") else { return false }
+        let word = text.dropFirst().prefix { character in
+            character.isLetter || character.isNumber
+                || character == "-" || character == "_" || character == ":"
+        }
+        guard !word.isEmpty else { return false }
+        let rest = text.dropFirst(1 + word.count)
+        return rest.isEmpty || rest.first == " "
     }
 
     /// System-injected turns recorded as user messages. Grown empirically —
     /// see the plan doc's pollution taxonomy; extend when a new wrapper
-    /// appears rather than loosening the parser.
+    /// appears rather than loosening the parser. Slash commands write
+    /// `<command-message>…</command-message>\n<command-name>/…` (message
+    /// first), so both tags are needed.
     private static let systemWrapperTags = [
         "<task-notification>",
+        "<command-message>",
         "<command-name>",
         "<local-command-stdout>",
         "<system-reminder>",
@@ -350,12 +414,14 @@ enum AgentSessionHistory {
 
     /// The oracle's full index: a needle per loaded message that has one.
     /// Messages whose rendering can't be matched (too short, pure-paste)
-    /// simply read as unknown turns during navigation.
+    /// simply read as unknown turns during navigation; pre-compact prompts
+    /// no longer render at all, so they stay out of the index.
     static func needleEntries(
         for messages: [AgentUserMessage], paneColumns: Int
     ) -> [JumpNeedle] {
         messages.compactMap { message in
-            needle(for: message, paneColumns: paneColumns).map {
+            guard message.reachable else { return nil }
+            return needle(for: message, paneColumns: paneColumns).map {
                 JumpNeedle(index: message.ordinal, text: $0)
             }
         }

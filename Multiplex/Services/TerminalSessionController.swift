@@ -695,11 +695,16 @@ final class TerminalSessionController {
     func startHistoryJump(to message: AgentUserMessage) {
         guard status == .live,
               let sessionName = route.sessionName,
-              historyJump == nil,
               !tmuxCopyModeUIActive,
               case .loaded(let agent, let messages, true) = agentHistory,
-              agent == .claudeCode
+              agent == .claudeCode,
+              message.reachable
         else { return }
+        // Only an in-flight search blocks a new jump. A lingering `.jumped`
+        // state is superseded directly — the find script normalizes to live
+        // first, so chaining jumps needs no manual BACK TO LIVE.
+        if case .finding = historyJump { return }
+        historyJumpSessionID = nil
         let preview = String(message.firstLine.prefix(24))
         historyJump = .finding(preview: preview)
         historyJumpTask = Task { [weak self] in

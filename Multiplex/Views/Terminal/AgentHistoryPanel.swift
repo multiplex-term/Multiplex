@@ -130,7 +130,10 @@ struct AgentHistoryPanel: View {
             .accessibilityLabel(
                 expanded ? "Collapse message" : "Expand message"
             )
-            if jumpAvailable {
+            if jumpAvailable, message.reachable {
+                // Prompts older than the last /compact no longer render in
+                // Claude's transcript — the file remembers them (peek), the
+                // pager can't reach them (no JUMP).
                 Button {
                     controller.startHistoryJump(to: message)
                     dismiss()
