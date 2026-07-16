@@ -495,7 +495,8 @@ struct TerminalWindowRoot: View {
                                 merge: { merge($0) },
                                 detach: { detachActiveTab() },
                                 closeSession: activeTabHasSession
-                                    ? { confirmingCloseActiveSession = true } : nil
+                                    ? { confirmingCloseActiveSession = true } : nil,
+                                showsTmuxShortcuts: activeTab?.sessionName != nil
                             )
                         }
                     }
@@ -540,6 +541,7 @@ struct TerminalWindowRoot: View {
                 detach: { detachActiveTab() },
                 closeSession: activeTabHasSession
                     ? { confirmingCloseActiveSession = true } : nil,
+                showsTmuxShortcuts: activeTab?.sessionName != nil,
                 style: .shell,
                 deckControlLabel: configuration.deckControlLabel,
                 availableWidth: configuration.availableWidth,
@@ -1019,7 +1021,8 @@ private struct TerminalPane: View {
                     bottomChromeHeight: bottomChromeHeight,
                     contentSafeArea: contentSafeArea,
                     railOwnsBottomSafeArea: railOwnsBottomSafeArea,
-                    isActive: isActive && focusAllowed
+                    isActive: isActive && focusAllowed,
+                    showsTmuxShortcuts: controller.route.sessionName != nil
                 )
                 statusOverlay(for: controller)
             } else if !hostExists {

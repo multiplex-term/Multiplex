@@ -25,6 +25,8 @@ struct UMDBar: View {
     /// dropdown's destructive alternative. nil when there's no session to
     /// kill (plain shell tab, or the host record is gone).
     var closeSession: (() -> Void)?
+    /// Plain login shells have no tmux server or bindings to expose.
+    var showsTmuxShortcuts = true
     var style: Style = .regular
     var deckControlLabel = "DECK"
     var availableWidth: CGFloat?
@@ -57,7 +59,9 @@ struct UMDBar: View {
             newTabMenu
             // Custom TALLY dropdown, immediately right of + TAB. Each choice
             // sends the stock tmux prefix binding through the ordered pump.
-            tmuxShortcutButton
+            if showsTmuxShortcuts {
+                tmuxShortcutButton
+            }
             if !mergeSources.isEmpty {
                 Menu {
                     ForEach(mergeSources) { entry in
@@ -142,7 +146,9 @@ struct UMDBar: View {
                 ChassisChip("A−", action: fontDown).fixedSize()
                 ChassisChip("A+", action: fontUp).fixedSize()
                 newTabMenu.fixedSize()
-                tmuxShortcutButton.fixedSize()
+                if showsTmuxShortcuts {
+                    tmuxShortcutButton.fixedSize()
+                }
                 detachControl.fixedSize()
             } else {
                 overflowMenu.fixedSize()

@@ -24,6 +24,8 @@ struct SwiftTermView: UIViewRepresentable {
     var railOwnsBottomSafeArea = false
     /// Only the window's active tab claims keyboard focus when it appears.
     var isActive: Bool = true
+    /// A plain login shell has no tmux bindings to offer in the iPad rail.
+    var showsTmuxShortcuts = true
 
     private static let focusTapName = "multiplex.focus-tap"
     // Keep breathing room around the terminal chassis, but let tmux's status
@@ -110,7 +112,8 @@ struct SwiftTermView: UIViewRepresentable {
             },
             finishTmuxCopyMode: { [weak controller] in
                 controller?.finishTmuxCopyMode()
-            }
+            },
+            showsTmuxShortcuts: showsTmuxShortcuts
         )
         keyBar.contentSafeArea = contentSafeArea
         context.coordinator.keyBar = keyBar

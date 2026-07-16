@@ -39,6 +39,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     private weak var terminal: TerminalView?
     private let performTmuxShortcut: (TmuxShortcut) -> Void
     private let finishTmuxCopyMode: () -> Void
+    private let showsTmuxShortcuts: Bool
     private let model = Model()
     private var host: UIHostingController<KeyBarRow>?
     private weak var tmuxPopoverController: UIViewController?
@@ -46,16 +47,19 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     init(
         terminal: TerminalView,
         performTmuxShortcut: @escaping (TmuxShortcut) -> Void,
-        finishTmuxCopyMode: @escaping () -> Void
+        finishTmuxCopyMode: @escaping () -> Void,
+        showsTmuxShortcuts: Bool
     ) {
         self.terminal = terminal
         self.performTmuxShortcut = performTmuxShortcut
         self.finishTmuxCopyMode = finishTmuxCopyMode
+        self.showsTmuxShortcuts = showsTmuxShortcuts
         super.init(frame: .zero)
         model.ctrlLatched = terminal.controlModifier
 
         let host = UIHostingController(rootView: KeyBarRow(
             model: model,
+            showsTmuxShortcuts: showsTmuxShortcuts,
             press: { [weak self] key in self?.press(key) }
         ))
         host.safeAreaRegions = []
@@ -286,18 +290,20 @@ private enum TerminalKey {
 /// tier drops it while every terminal lifeline key remains available.
 private struct KeyBarRow: View {
     var model: TerminalKeyBar.Model
+    var showsTmuxShortcuts: Bool
     var press: (TerminalKey) -> Void
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            row(symbols: ["~", "|", "/", "-"], withPageKeys: true)
+            row(symbols: ["~", "|", "/", "-"], withPageKeys: true, showsTmux: showsTmuxShortcuts)
                 .padding(.horizontal, 8)
-            row(symbols: ["~", "/"], withPageKeys: true)
+            row(symbols: ["~", "/"], withPageKeys: true, showsTmux: showsTmuxShortcuts)
                 .padding(.horizontal, 8)
-            row(symbols: ["~", "/"], withPageKeys: false)
+            row(symbols: ["~", "/"], withPageKeys: false, showsTmux: showsTmuxShortcuts)
                 .padding(.horizontal, 8)
-            row(symbols: [], withPageKeys: false)
+            row(symbols: [], withPageKeys: false, showsTmux: showsTmuxShortcuts)
                 .padding(.horizontal, 8)
+            if showsTmuxShortcuts {
             row(
                 symbols: [],
                 withPageKeys: false,
@@ -305,6 +311,7 @@ private struct KeyBarRow: View {
                 metric: .compactWithTmux
             )
             .padding(.horizontal, 1)
+            }
             row(
                 symbols: [],
                 withPageKeys: false,
@@ -573,6 +580,7 @@ enum KeyBarDebugHook {
 #Preview("iPad Key Bar") {
     KeyBarRow(
         model: TerminalKeyBar.Model(),
+        showsTmuxShortcuts: true,
         press: { _ in }
     )
     .frame(width: 1024, height: TerminalKeyBar.barHeight)
@@ -581,6 +589,7 @@ enum KeyBarDebugHook {
 #Preview("Compact Key Bar") {
     KeyBarRow(
         model: TerminalKeyBar.Model(),
+        showsTmuxShortcuts: true,
         press: { _ in }
     )
     .frame(width: 390, height: TerminalKeyBar.barHeight)
