@@ -253,10 +253,12 @@ views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5), patched
     to declare the `NIO` product it imports (Xcode 27's module resolution
     rejects the undeclared import). Also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.13.0, patched three times (all marked `Multiplex patch`):
+  - `SwiftTerm` — 1.13.0, patched four times (all marked `Multiplex patch`):
     `keyboardType` is settable (upstream is get-only), letting terminals
-    default to `.asciiCapable` (English) instead of the user's IME; pans
-    scroll the *remote* instead of reporting click-drags — wheel button
+    default to `.asciiCapable` (English) instead of the user's IME; UIKit taps
+    encode xterm button 0 (primary/left), not button 1 (middle), so mouse-aware
+    TUI click targets receive them; pans scroll the *remote* instead of
+    reporting click-drags — wheel button
     events when the client requested mouse tracking (tmux `mouse on` scrolls
     its own scrollback), DECCKM-aware arrows in the alternate screen with
     mouse off (`performRemoteScroll`; the scroll view's own pan is disabled

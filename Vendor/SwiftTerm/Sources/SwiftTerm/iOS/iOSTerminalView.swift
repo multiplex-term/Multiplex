@@ -660,7 +660,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     func encodeFlags (release: Bool) -> Int
     {
         let encodedFlags = terminal.encodeButton(
-            button: 1,
+            // Multiplex patch: a UIKit tap is the primary (left) button.
+            // SwiftTerm hard-coded xterm button 1 (middle), so mouse-aware
+            // TUI targets such as Claude Code's jump-to-bottom ignored taps.
+            button: 0,
             release: release,
             shift: false,
             meta: false,
