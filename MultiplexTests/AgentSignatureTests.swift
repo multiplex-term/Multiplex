@@ -169,6 +169,96 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(agents.count, 3)
     }
 
+    // MARK: plain-shell foreground probe + in-band fallback
+
+    func testShellAgentProbeFindsForegroundNativeAgent() {
+        let output = """
+        noise from a remote profile
+        MULTIPLEX_SHELL_PS
+        100 1 100 100 /home/dev/.local/bin/claude --effort max
+        """
+        XCTAssertEqual(ShellAgentProbe.parse(output), .available(.claudeCode))
+    }
+
+    func testShellAgentProbeFindsForegroundWrapperChild() {
+        let output = """
+        MULTIPLEX_SHELL_PS
+        100 1 100 200 -zsh
+        200 100 200 200 node /opt/codex/bin/codex.js
+        201 200 200 200 /opt/codex/vendor/codex
+        """
+        XCTAssertEqual(ShellAgentProbe.parse(output), .available(.codex))
+    }
+
+    func testShellAgentProbeIgnoresSuspendedBackgroundAgent() {
+        // tpgid 100 says the shell owns the tty; the Codex job's pgid 200
+        // is not foreground and must not leave helpers/attention behind.
+        let output = """
+        MULTIPLEX_SHELL_PS
+        100 1 100 100 -zsh
+        200 100 200 100 codex
+        """
+        XCTAssertEqual(ShellAgentProbe.parse(output), .available(nil))
+    }
+
+    func testShellAgentProbeDistinguishesUnavailableFromNoAgent() {
+        XCTAssertEqual(ShellAgentProbe.parse(""), .unavailable)
+        XCTAssertEqual(
+            ShellAgentProbe.parse("MULTIPLEX_SHELL_PS\nunsupported ps output"),
+            .unavailable
+        )
+        XCTAssertEqual(
+            ShellAgentProbe.parse("MULTIPLEX_SHELL_PS\n10 1 10 10 -bash"),
+            .available(nil)
+        )
+        XCTAssertTrue(ShellAgentProbe.command.contains("$PPID"))
+        XCTAssertTrue(ShellAgentProbe.command.contains("pgid=,tpgid="))
+    }
+
+    func testDirectTerminalFallbackUsesOnlyVerifiedSignatures() {
+        XCTAssertEqual(
+            AgentSignature.classifyTerminal(
+                title: "✳ Claude Code",
+                visibleLines: [],
+                isAlternateScreen: false,
+                previous: nil
+            ),
+            .claudeCode
+        )
+        XCTAssertEqual(
+            AgentSignature.classifyTerminal(
+                title: "Multiplex",
+                visibleLines: ["│ >_ OpenAI Codex (v0.144.4) │"],
+                isAlternateScreen: true,
+                previous: nil
+            ),
+            .codex
+        )
+        XCTAssertEqual(
+            AgentSignature.classifyTerminal(
+                title: "⠦ Multiplex",
+                visibleLines: [],
+                isAlternateScreen: true,
+                previous: .codex
+            ),
+            .codex
+        )
+        // Pi's title is known to stay stale after exit; only the SSH process
+        // probe may authorize it in a direct shell.
+        XCTAssertNil(AgentSignature.classifyTerminal(
+            title: "π - repo",
+            visibleLines: [],
+            isAlternateScreen: false,
+            previous: nil
+        ))
+        XCTAssertNil(AgentSignature.classifyTerminal(
+            title: "ordinary shell",
+            visibleLines: ["the docs mention OpenAI Codex without a version masthead"],
+            isAlternateScreen: false,
+            previous: nil
+        ))
+    }
+
     // MARK: command payloads
 
     func testKeyPayloads() {

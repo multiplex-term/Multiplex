@@ -454,7 +454,19 @@ views.
   a one-second, current-window `list-panes` check; ambiguous wrappers get a cached,
   single-TTY ps fallback, so many open windows never multiply the fast or
   host-wide work. Periodic deck/window callers also coalesce settled full
-  probes for four seconds. Any stage failing just disables that detection
+  probes for four seconds. **Plain `.shell` tabs use their own PTY authority,
+  not the tmux model**: `ShellAgentProbe` opens an exec channel on the tab's
+  existing SSH transport, uses that channel's `$PPID` to find its sibling PTY
+  under sshd, and classifies only the tty's foreground pgid/tpgid (a suspended
+  background agent must not leave helpers behind). Each direct shell polls at
+  the five-second attention cadence; only the app-wide focus owner asks at one
+  second. Claude/Codex title + visible-screen signatures are a narrow fallback
+  for direct mosh shells or hosts whose `ps` cannot expose process groups; Pi's
+  stale OSC title is intentionally not trusted without the SSH process probe.
+  A direct shell has no wall tile, so NEEDS YOU appears in its UMD (or the
+  classic iPad toolbar); its alert identity is the tab UUID, preventing two
+  same-host “shell” tabs from replacing each other's notification. Any stage
+  failing just disables that detection
   signal, never the session list. Helper chips only ever *type* through
   `TerminalSessionController.sendInput` (the same ordered pump as the
   keyboard; Enter = CR, Esc = 0x1B, Shift+Tab = CSI Z,

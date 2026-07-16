@@ -28,7 +28,14 @@ final class TerminalSessionController {
     private weak var attention: AttentionCenter?
 
     private(set) var status: Status = .connecting
-    var remoteTitle: String = ""
+    private(set) var remoteTitle: String = ""
+
+    /// Plain-shell agent state comes from that tab's own PTY rather than the
+    /// tmux fleet probe. It drives the same helper strip and attention UI as
+    /// an attached pane; nil for tmux routes and when no supported foreground
+    /// agent is running.
+    private(set) var directShellAgent: AgentKind?
+    private(set) var directShellAttention: PaneAgentState?
 
     /// App-owned interaction state layered over tmux copy mode. While it is
     /// active, SwiftTerm stops forwarding taps as tmux mouse clicks: pans
@@ -73,6 +80,16 @@ final class TerminalSessionController {
     private var started = false
     private var inputTask: Task<Void, Never>?
     private var inputContinuation: AsyncStream<Data>.Continuation?
+    /// Background cadence for a plain PTY. The focused TerminalWindow may
+    /// request a faster refresh, coalesced by the same in-flight/staleness
+    /// gates; tmux tabs continue to use ConnectionHub's fleet probe.
+    private var directShellMonitorTask: Task<Void, Never>?
+    private var directShellProbeGenerationInFlight: Int?
+    private var lastDirectShellProbe: Date?
+    private var directShellMonitorGeneration = 0
+    private var terminalAgentHint: AgentKind?
+    private var directShellAttentionAgent: AgentKind?
+    private var directShellAttentionTracker = AttentionTracker()
     private(set) var dropState: DropState?
     private var dropTask: Task<Void, Never>?
     private var dropClearTask: Task<Void, Never>?
@@ -193,6 +210,7 @@ final class TerminalSessionController {
             )
             startInputPump(for: connection)
             status = .live
+            startDirectShellMonitoring()
         } catch {
             let message = (error as? SSHConnectionError)?.userMessage(host: host)
                 ?? "Couldn't reach \(host.name). \(error.localizedDescription)"
@@ -237,6 +255,7 @@ final class TerminalSessionController {
             )
             startInputPump(for: session)
             status = .live
+            startDirectShellMonitoring()
         } catch {
             let message = (error as? MoshBootstrapError)?.userMessage(host: host)
                 ?? (error as? MoshSession.Failure)?.userMessage(host: host)
@@ -258,11 +277,158 @@ final class TerminalSessionController {
         terminalView.feed(byteArray: [UInt8](data)[...])
     }
 
+    /// OSC title updates are also the no-exec fallback signal for direct mosh
+    /// shells. SSH shells use the foreground process probe as authority, but
+    /// retaining Claude/Codex's explicit title here prevents a very fast turn
+    /// from erasing the identifying idle title before the next poll.
+    func terminalTitleChanged(_ title: String) {
+        remoteTitle = title
+        guard route.sessionName == nil else { return }
+        let screen = terminalScreenSnapshot()
+        if let hint = AgentSignature.classifyTerminal(
+            title: title,
+            visibleLines: screen.lines,
+            isAlternateScreen: screen.isAlternate,
+            previous: directShellAgent ?? terminalAgentHint
+        ) {
+            terminalAgentHint = hint
+        } else if !AgentAttention.hasSpinnerPrefix(title) {
+            terminalAgentHint = nil
+        }
+    }
+
     private func handleClose(reason: String?) {
         stopInputPump()
+        stopDirectShellMonitoring()
         setTmuxCopyModeUIActive(false)
         if case .ended = status { return }
         status = .ended(reason)
+    }
+
+    // MARK: Plain-shell agent monitoring
+
+    private static let directShellProbeInterval: Duration = .seconds(5)
+
+    private func startDirectShellMonitoring() {
+        guard route.sessionName == nil else { return }
+        directShellMonitorTask?.cancel()
+        directShellMonitorGeneration &+= 1
+        directShellMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.refreshDirectShellAgent(ifStaleFor: 4)
+                try? await Task.sleep(for: Self.directShellProbeInterval)
+            }
+        }
+    }
+
+    /// Refresh a plain shell's foreground-agent observation. Background tabs
+    /// call at the fleet's five-second cadence; the one app-wide focus owner
+    /// asks once per second so its helper strip follows process changes
+    /// promptly. Concurrent callers collapse into the in-flight operation.
+    func refreshDirectShellAgent(ifStaleFor minimumAge: TimeInterval = 0) async {
+        guard route.sessionName == nil,
+              status == .live,
+              directShellProbeGenerationInFlight == nil
+        else { return }
+        if minimumAge > 0,
+           let lastDirectShellProbe,
+           Date().timeIntervalSince(lastDirectShellProbe) < minimumAge {
+            return
+        }
+
+        let generation = directShellMonitorGeneration
+        directShellProbeGenerationInFlight = generation
+        defer {
+            if directShellProbeGenerationInFlight == generation {
+                directShellProbeGenerationInFlight = nil
+            }
+        }
+        let probedConnection = connection
+        let outcome: ShellAgentProbe.Outcome
+        if let probedConnection {
+            do {
+                outcome = ShellAgentProbe.parse(
+                    try await probedConnection.exec(ShellAgentProbe.command)
+                )
+            } catch {
+                outcome = .unavailable
+            }
+        } else {
+            // A direct mosh shell deliberately has no retained SSH control
+            // surface; use the narrow in-band title/screen fallback below.
+            outcome = .unavailable
+        }
+
+        guard generation == directShellMonitorGeneration,
+              status == .live,
+              connection === probedConnection
+        else { return }
+        lastDirectShellProbe = Date()
+        let screen = terminalScreenSnapshot()
+        let agent: AgentKind?
+        switch outcome {
+        case .available(let detected):
+            // Definitive even when nil: this is what clears stale titles and
+            // helper UI as soon as the foreground agent exits.
+            agent = detected
+        case .unavailable:
+            agent = AgentSignature.classifyTerminal(
+                title: remoteTitle,
+                visibleLines: screen.lines,
+                isAlternateScreen: screen.isAlternate,
+                previous: directShellAgent ?? terminalAgentHint
+            )
+        }
+        publishDirectShellObservation(agent: agent, tail: screen.lines)
+    }
+
+    private func publishDirectShellObservation(agent: AgentKind?, tail: [String]) {
+        if directShellAttentionAgent != agent {
+            directShellAttentionTracker.reset()
+            directShellAttentionAgent = agent
+        }
+        directShellAgent = agent
+        let state = AgentAttention.classifyVerified(
+            title: remoteTitle,
+            tail: tail,
+            agent: agent
+        )
+        directShellAttention = state
+        let events = directShellAttentionTracker.update(
+            session: route.id.uuidString,
+            state: state,
+            hasBell: false
+        )
+        if let event = events.max(by: { $0.priority < $1.priority }) {
+            attention?.handleDirectShellEvent(event, agent: agent, from: self)
+        }
+    }
+
+    private func terminalScreenSnapshot() -> (lines: [String], isAlternate: Bool) {
+        guard let terminalView else { return ([], false) }
+        let terminal = terminalView.getTerminal()
+        let rows = max(0, terminal.getDims().rows)
+        let lines = (0..<rows).compactMap { row in
+            terminal.getLine(row: row)?.translateToString(
+                trimRight: true,
+                skipNullCellsFollowingWide: true
+            )
+        }
+        return (lines, terminal.isCurrentBufferAlternate)
+    }
+
+    private func stopDirectShellMonitoring() {
+        directShellMonitorTask?.cancel()
+        directShellMonitorTask = nil
+        directShellMonitorGeneration &+= 1
+        directShellProbeGenerationInFlight = nil
+        lastDirectShellProbe = nil
+        terminalAgentHint = nil
+        directShellAgent = nil
+        directShellAttention = nil
+        directShellAttentionAgent = nil
+        directShellAttentionTracker.reset()
     }
 
     // MARK: Input pump
@@ -518,6 +684,7 @@ final class TerminalSessionController {
         dropClearTask?.cancel()
         dropState = nil
         stopInputPump()
+        stopDirectShellMonitoring()
         setTmuxCopyModeUIActive(false)
         status = .ended(nil)
         contactLost = false

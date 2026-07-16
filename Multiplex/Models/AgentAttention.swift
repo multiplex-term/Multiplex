@@ -47,6 +47,10 @@ enum AttentionEvent: Equatable {
 struct AttentionAlert {
     var host: Host
     var sessionName: String
+    /// Present for an event emitted by a plain-shell tab. tmux probe events
+    /// remain session-scoped because the same remote session may have more
+    /// than one attached client, while every plain shell is its own process.
+    var tabID: UUID? = nil
     var agent: AgentKind?
     var event: AttentionEvent
     var paneTitle: String

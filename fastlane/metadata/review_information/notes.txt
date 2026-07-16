@@ -1,4 +1,4 @@
-Multiplex is an SSH client: every feature needs a remote host running tmux. A dedicated demo server is provisioned for review, so nothing has to be installed on your side.
+Multiplex is an SSH client: the live wall and persistent session features need a remote host running tmux; plain SSH shells do not. A dedicated tmux demo server is provisioned for review, so nothing has to be installed on your side.
 
 CONNECT
 1. Launch Multiplex and tap + HOST.

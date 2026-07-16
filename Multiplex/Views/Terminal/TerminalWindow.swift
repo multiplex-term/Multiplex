@@ -117,12 +117,14 @@ struct TerminalWindowRoot: View {
         return activeTab.sessionName != nil && store.host(id: activeTab.hostID) != nil
     }
 
-    /// Agent in the pane this tab's keystrokes reach, per the latest probe.
+    /// Agent receiving this tab's keystrokes. tmux routes read the shared
+    /// host probe; a plain shell reads its own PTY's foreground-process probe.
     private var detectedAgent: AgentKind? {
-        guard let activeTab,
-              let sessionName = activeTab.sessionName,
-              let host = store.host(id: activeTab.hostID)
-        else { return nil }
+        guard let activeTab else { return nil }
+        guard let sessionName = activeTab.sessionName else {
+            return activeController?.directShellAgent
+        }
+        guard let host = store.host(id: activeTab.hostID) else { return nil }
         return hub.model(for: host).tmux.sessions
             .first { $0.name == sessionName }?
             .activeAgent
@@ -265,13 +267,40 @@ struct TerminalWindowRoot: View {
     /// reaches the network-heavy branch app-wide.
     private func watchActivePane() async {
         guard let activeTab,
-              let sessionName = activeTab.sessionName,
               let host = store.host(id: activeTab.hostID)
         else {
             activePaneFingerprint = nil
             shownAgent = nil
             return
         }
+
+        // A plain login shell has no tmux pane to ask. Its controller probes
+        // the foreground process group through the PTY's own SSH transport;
+        // only the app-wide focus owner requests the one-second fast cadence.
+        guard let sessionName = activeTab.sessionName else {
+            activePaneFingerprint = nil
+            shownAgent = activeController?.directShellAgent
+            while !Task.isCancelled {
+                if UIApplication.shared.applicationState == .active,
+                   let controller = activeController,
+                   let view = controller.terminalView,
+                   TerminalFocusArbiter.current === view {
+                    await controller.refreshDirectShellAgent(ifStaleFor: 0.8)
+                    guard !Task.isCancelled,
+                          self.activeTab?.id == activeTab.id
+                    else { return }
+                    // A successful foreground-process observation is
+                    // definitive. Do not apply the full-probe grace period:
+                    // after the agent exits, stale helpers in a normal shell
+                    // could type into the user's prompt.
+                    hideAgentTask?.cancel()
+                    shownAgent = controller.directShellAgent
+                }
+                try? await Task.sleep(for: Self.focusedPaneProbeInterval)
+            }
+            return
+        }
+
         let model = hub.model(for: host)
         shownAgent = detectedAgent
         activePaneFingerprint = model.tmux.sessions
@@ -720,6 +749,13 @@ struct TerminalWindowRoot: View {
 
     @ViewBuilder
     private func primaryToolbarActions(trailingPadding: CGFloat) -> some View {
+        if case .needsYou = activeController?.directShellAttention {
+            // A classic iPad plain shell has no wall tile or bottom UMD; keep
+            // the same captioned state in its toolbar instead.
+            TallyLamp(caption: "NEEDS YOU", color: Theme.caution)
+                .fixedSize()
+                .accessibilityLabel("Agent needs you")
+        }
         newTabMenu
         keyboardButton
         fontButtons

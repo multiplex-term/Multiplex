@@ -50,13 +50,16 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
   then press **Done** to return to the shell. SwiftTerm renders xterm-256color;
   resizing the window sends PTY window-change to the remote. **Detach** closes
   the active tab's channel — tmux keeps the session; the wall still shows it.
-- **Agent helpers** — when the active tmux pane runs Claude Code, Codex, or Pi, a
-  context-specific command strip follows it. The focused terminal checks pane
-  selection between full wall ticks, so moving across splits updates helpers
+- **Agent helpers** — when the active tmux pane **or a plain SSH shell** runs
+  Claude Code, Codex, or Pi, a context-specific command strip follows it. The
+  focused terminal checks process selection between full wall ticks, so moving
+  across splits or starting/exiting an agent at a normal prompt updates helpers
   in about a second; background panes remain visible in wall telemetry without
-  receiving commands intended for the active pane. Each host remembers its own
-  command setup: every built-in can be moved independently between the bar and
-  More, and each agent can keep an ordered set of custom commands. Content may
+  receiving commands intended for the active process. Plain shells also show a
+  captioned **NEEDS YOU** state in their own chrome because they have no wall tile.
+  Each host remembers its own command setup: every built-in can be moved
+  independently between the bar and More, and each agent can keep an ordered
+  set of custom commands. Content may
   span multiple lines, Auto Submit is optional, and Show in Bar controls
   placement independently of length. Bar labels keep the first nine characters
   and append `...`; commands kept off the bar stay in More. Shared mirrors one
@@ -93,7 +96,7 @@ SwiftUI (Deck window + N Terminal windows, each an ordered set of tabs)
    │                        merge/split move tabs across windows, shells stay live
    └── TerminalSessionController   one per tab
           └── SSHConnection (actor) ── Citadel ── SwiftNIO SSH
-                 ├── exec channel      tmux probing
+                 ├── exec channel      tmux probing + plain-PTY agent detection
                  └── PTY shell channel bytes ⇄ SwiftTerm.TerminalView
 ```
 

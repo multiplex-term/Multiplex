@@ -86,6 +86,46 @@ enum AgentSignature {
         return nil
     }
 
+    /// In-band fallback for a plain shell whose transport has no SSH exec
+    /// surface (a direct mosh shell), or whose remote `ps` cannot expose
+    /// pgid/tpgid. SSH plain shells normally use `ShellAgentProbe` instead,
+    /// because process identity is authoritative and clears cleanly on exit.
+    ///
+    /// Keep this deliberately narrow: Claude identifies itself in its OSC
+    /// title, Codex has a versioned screen masthead and a unique approval
+    /// title, and a spinner may only preserve an already-known kind. Pi's OSC
+    /// title is omitted because Pi leaves it stale after exit.
+    static func classifyTerminal(
+        title: String,
+        visibleLines: [String],
+        isAlternateScreen: Bool,
+        previous: AgentKind?
+    ) -> AgentKind? {
+        if title.contains("Claude Code") || title.hasPrefix("✳ ") {
+            return .claudeCode
+        }
+        if title.contains("Action Required |") {
+            return .codex
+        }
+
+        let codexMasthead = visibleLines.contains { line in
+            line.contains("OpenAI Codex") && line.contains("(v")
+        }
+        if codexMasthead { return .codex }
+
+        if AgentAttention.hasSpinnerPrefix(title),
+           let previous,
+           previous.hasVerifiedAttentionSignals {
+            return previous
+        }
+        // Codex normally owns the alternate screen for its whole lifetime;
+        // its masthead can scroll out after a long turn, so preserve a
+        // previously established identity until the TUI restores the shell's
+        // normal buffer. The process probe remains authoritative on SSH.
+        if previous == .codex, isAlternateScreen { return .codex }
+        return nil
+    }
+
     /// Authority pass: does this ps row's argv belong to an agent?
     /// Matches argv[0] basename exactly — NEVER substring-of-args (Claude
     /// Desktop helpers, Zed's claude-agent-sdk, and --user-data-dir=…/Claude

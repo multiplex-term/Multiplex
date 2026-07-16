@@ -559,7 +559,7 @@ struct SwiftTermView: UIViewRepresentable {
 
         func setTerminalTitle(source: TerminalView, title: String) {
             MainActor.assumeIsolated {
-                controller.remoteTitle = title
+                controller.terminalTitleChanged(title)
             }
         }
 

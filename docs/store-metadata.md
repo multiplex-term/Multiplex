@@ -74,7 +74,8 @@ submission.
 Current product split:
 
 - Free: two hosts, full SSH spatial windows/tabs/merge, all-pane agent detection
-  and wall telemetry with active-pane-aware helpers, built-in terminal themes,
+  and wall telemetry with foreground-aware helpers in tmux panes and plain SSH
+  shells (including direct-shell NEEDS YOU chrome), built-in terminal themes,
   a most-used tmux shortcut dropdown on
   both platforms (including touch-native copy-mode selection and explicit
   exit), iCloud Keychain host/secret/command-setup sync, per-host/per-agent
@@ -84,7 +85,8 @@ Current product split:
   Claude Code, Codex, and Pi strips), and
   ten built-in or custom agent-command chip taps per local calendar day.
 - Pro: unlimited hosts, mosh, unmetered built-in and custom agent command
-  chips, agent alerts, and custom-theme editing.
+  chips, Claude Code/Codex agent alerts from tmux sessions and plain shells,
+  and custom-theme editing.
 - Existing/synced hosts, existing mosh configuration, existing custom themes,
   and migrated per-device command setups are never deleted or disabled when Pro
   is absent.

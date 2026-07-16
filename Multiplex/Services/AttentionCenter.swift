@@ -65,6 +65,28 @@ final class AttentionCenter {
         post(alert)
     }
 
+    /// Attention edge classified from a plain shell's own PTY. There is no
+    /// tmux session for the fleet model to map back through the workspace, so
+    /// the emitting controller is also the exact focus target and stable
+    /// notification identity.
+    func handleDirectShellEvent(
+        _ event: AttentionEvent,
+        agent: AgentKind?,
+        from controller: TerminalSessionController
+    ) {
+        guard isActive,
+              TerminalFocusArbiter.current !== controller.terminalView
+        else { return }
+        post(AttentionAlert(
+            host: controller.host,
+            sessionName: controller.route.displayName,
+            tabID: controller.route.id,
+            agent: agent,
+            event: event,
+            paneTitle: controller.remoteTitle
+        ))
+    }
+
     /// In-band BEL from an attached tab's byte stream. Opt-in remote config
     /// (Claude Code hooks / terminal_bell, Codex tui.notifications) rings
     /// through the PTY; tmux forwards the active window's bell to attached
@@ -80,6 +102,7 @@ final class AttentionCenter {
         post(AttentionAlert(
             host: controller.host,
             sessionName: controller.route.displayName,
+            tabID: controller.route.id,
             agent: nil,
             event: .bell,
             paneTitle: controller.remoteTitle
@@ -114,11 +137,14 @@ final class AttentionCenter {
         content.title = title(for: alert)
         content.body = body(for: alert)
         content.sound = .default
-        content.threadIdentifier = "\(alert.host.id)-\(alert.sessionName)"
-        // One live banner per session: a newer event replaces a stale one
-        // instead of stacking.
+        let sourceID = alert.tabID?.uuidString ?? alert.sessionName
+        content.threadIdentifier = "\(alert.host.id)-\(sourceID)"
+        // One live banner per tmux session or plain-shell tab: a newer event
+        // replaces a stale one instead of stacking. Two plain shells on the
+        // same host both display as “shell,” so their tab UUIDs must keep
+        // their requests distinct.
         let request = UNNotificationRequest(
-            identifier: "attention-\(alert.host.id)-\(alert.sessionName)",
+            identifier: "attention-\(alert.host.id)-\(sourceID)",
             content: content,
             trigger: nil
         )

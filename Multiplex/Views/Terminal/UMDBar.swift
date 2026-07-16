@@ -252,9 +252,20 @@ struct UMDBar: View {
     /// The window's lamp: LIVE (tally, captioned), LINK while the shell
     /// connects, ENDED when the channel closed. A mosh tab that's live but
     /// out of contact reads NO LINK — the session is intact and self-heals,
-    /// so it's caution, not a fault.
-    @ViewBuilder
+    /// so it's caution, not a fault. A direct shell has no wall tile, so its
+    /// app-owned UMD also carries the same captioned NEEDS YOU state that a
+    /// tmux session would show on the wall.
     private var statusCluster: some View {
+        HStack(spacing: 8) {
+            connectionStatus
+            if case .needsYou = controller?.directShellAttention {
+                TallyLamp(caption: "NEEDS YOU", color: Theme.caution)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var connectionStatus: some View {
         switch controller?.status {
         case .live:
             if controller?.contactLost == true {
