@@ -120,7 +120,7 @@ struct ChassisSwitch: View {
     var body: some View {
         Button { isOn.toggle() } label: {
             HStack(spacing: 7) {
-                track
+                ChassisSwitchIndicator(isOn: isOn)
                 ChassisLabel(label, size: 8, color: isOn ? Theme.signal : Theme.signal2)
             }
         }
@@ -132,19 +132,37 @@ struct ChassisSwitch: View {
             Toggle(accessibilityLabel ?? label.capitalized, isOn: $isOn)
         }
     }
+}
 
-    private var track: some View {
+/// The switch face is shared by compact inline switches and full-width form
+/// fields. Form controls get a larger face; neither size spends semantic color.
+private struct ChassisSwitchIndicator: View {
+    enum Scale {
+        case compact
+        case form
+
+        var width: CGFloat { self == .compact ? 26 : 36 }
+        var height: CGFloat { self == .compact ? 14 : 20 }
+        var thumb: CGFloat { self == .compact ? 8 : 12 }
+        var inset: CGFloat { self == .compact ? 3 : 4 }
+    }
+
+    let isOn: Bool
+    var scale = Scale.compact
+
+    var body: some View {
         Rectangle()
             .fill(isOn ? Theme.bezelHi : Theme.screen)
             .overlay(alignment: isOn ? .trailing : .leading) {
                 Rectangle()
                     .fill(isOn ? Theme.signal : Theme.signal3)
-                    .frame(width: 8, height: 8)
-                    .padding(3)
+                    .frame(width: scale.thumb, height: scale.thumb)
+                    .padding(scale.inset)
             }
             .overlay(Rectangle().strokeBorder(
                 isOn ? Theme.signal2 : Theme.bezelHi, lineWidth: 1))
-            .frame(width: 26, height: 14)
+            .frame(width: scale.width, height: scale.height)
+            .accessibilityHidden(true)
     }
 }
 
@@ -214,6 +232,74 @@ struct TallyFormRow<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .background(Theme.chassis)
+    }
+}
+
+/// A full-width boolean setting: readable SF Pro title at the leading edge,
+/// a regular TALLY switch at the trailing edge, and one 48-point press target
+/// across the entire row. Compact `ChassisSwitch` remains for dense controls.
+struct TallyFormBoolField: View {
+    let title: String
+    @Binding var isOn: Bool
+    let status: String?
+    let statusIsProminent: Bool
+    let accessibilityLabel: String?
+    let accessibilityHint: String?
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    init(
+        _ title: String,
+        isOn: Binding<Bool>,
+        status: String? = nil,
+        statusIsProminent: Bool = false,
+        accessibilityLabel: String? = nil,
+        accessibilityHint: String? = nil
+    ) {
+        self.title = title
+        _isOn = isOn
+        self.status = status
+        self.statusIsProminent = statusIsProminent
+        self.accessibilityLabel = accessibilityLabel
+        self.accessibilityHint = accessibilityHint
+    }
+
+    var body: some View {
+        Button { isOn.toggle() } label: {
+            HStack(spacing: 10) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.signal)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+
+                if let status {
+                    ChassisBadge(status, prominent: statusIsProminent)
+                }
+
+                Spacer(minLength: 12)
+
+                ChassisSwitchIndicator(isOn: isOn, scale: .form)
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(TallyFormBoolFieldButtonStyle())
+        .chassisHover(2)
+        .opacity(isEnabled ? 1 : 0.4)
+        .animation(.easeOut(duration: 0.14), value: isOn)
+        .accessibilityRepresentation {
+            Toggle(accessibilityLabel ?? title, isOn: $isOn)
+                .accessibilityHint(accessibilityHint ?? "")
+        }
+    }
+}
+
+private struct TallyFormBoolFieldButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed ? Theme.bezel : Theme.chassis)
     }
 }
 
@@ -347,6 +433,20 @@ private struct TallyFormFieldPreviewHarness: View {
     }
 }
 
+private struct TallyFormBoolFieldPreviewHarness: View {
+    @State private var isOn = false
+
+    var body: some View {
+        TallyFormBoolField(
+            "Agent alerts",
+            isOn: $isOn,
+            status: "PRO",
+            statusIsProminent: true,
+            accessibilityHint: "Requires Multiplex Pro"
+        )
+    }
+}
+
 private struct TallyChoiceBarPreviewHarness: View {
     private enum Choice: Hashable {
         case shell
@@ -422,6 +522,13 @@ private struct TallyChoiceBarPreviewHarness: View {
 
 #Preview("Tally Form Field") {
     TallyFormFieldPreviewHarness()
+        .frame(width: 380)
+        .padding()
+        .background(Theme.chassis)
+}
+
+#Preview("Tally Bool Field") {
+    TallyFormBoolFieldPreviewHarness()
         .frame(width: 380)
         .padding()
         .background(Theme.chassis)

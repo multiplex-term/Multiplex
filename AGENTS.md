@@ -654,9 +654,11 @@ automation or the App Store Connect UI is required.
   hardcode colors; **color is state, never decoration** (actions are neutral
   chips). Components live in `Chassis.swift`: `ChassisLabel` (compressed caps
   — rails, tile names, UMD titles), `ChassisChip`/`ChassisBadge` (square
-  actions), `TallyLamp` (captioned state lamp), `ChassisSwitch` (square slide
-  toggle, caption trailing, monochrome state — chassis surfaces use it instead
-  of the system Toggle's green pill). Monospace (`Font.mono`) stays
+  actions), `TallyLamp` (captioned state lamp), `ChassisSwitch` (compact square
+  slide toggle, caption trailing), and `TallyFormBoolField` (full-width 48 pt
+  field, SF Pro title left, switch right, whole row tappable). Both switch
+  forms use monochrome state instead of the system Toggle's green pill.
+  Monospace (`Font.mono`) stays
   the identity/data voice (addresses, telemetry, screen content); body copy
   stays SF Pro.
 - **visionOS hover**: use `chassisHover(_:)` on every custom Button/Menu —

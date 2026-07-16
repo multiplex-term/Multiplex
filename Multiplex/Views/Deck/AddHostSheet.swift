@@ -164,19 +164,15 @@ struct AddHostSheet: View {
 
     private var transportSection: some View {
         TallyFormSection("Transport", detail: transportDetail) {
-            TallyFormRow {
-                HStack(spacing: 12) {
-                    ChassisSwitch(
-                        "MOSH",
-                        isOn: moshToggle,
-                        accessibilityLabel: "Connect with mosh"
-                    )
-                    Spacer()
-                    if moshRequiresPro {
-                        ChassisBadge("PRO", prominent: true)
-                    }
-                }
-            }
+            TallyFormBoolField(
+                "Connect with mosh",
+                isOn: moshToggle,
+                status: moshRequiresPro ? "PRO" : nil,
+                statusIsProminent: true,
+                accessibilityHint: moshRequiresPro
+                    ? "Requires Multiplex Pro"
+                    : nil
+            )
 
             if useMosh {
                 TallyFormField("mosh-server") {

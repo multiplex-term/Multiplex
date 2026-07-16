@@ -122,7 +122,9 @@ compressed-caps names, one tally dot per tab (red = that shell is live).
 
 **Sheets** (Add Host, Settings, theme editor) stay platform-native with mono
 identity fields and eyebrow section labels — transient chrome doesn't wear
-the chassis.
+the chassis. Full-width boolean settings use a 48-point field row: SF Pro title
+left, a regular monochrome TALLY switch right, and the entire row as the press
+and hover target. Compact captioned switches remain for dense inline controls.
 
 ## App icon — the Carrier mark
 

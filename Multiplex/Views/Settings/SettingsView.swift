@@ -149,19 +149,15 @@ struct SettingsView: View {
             "Agent alerts",
             detail: "Posts a banner when Claude Code or Codex finishes a turn, asks a question, or wants permission in a session you are not typing in. Multiplex must remain open. Requires Pro."
         ) {
-            TallyFormRow {
-                HStack(spacing: 12) {
-                    ChassisSwitch(
-                        "ALERTS",
-                        isOn: agentAlertsBinding,
-                        accessibilityLabel: "Agent Alerts"
-                    )
-                    Spacer()
-                    if !entitlements.canScheduleAgentAlerts {
-                        ChassisBadge("PRO", prominent: true)
-                    }
-                }
-            }
+            TallyFormBoolField(
+                "Agent alerts",
+                isOn: agentAlertsBinding,
+                status: entitlements.canScheduleAgentAlerts ? nil : "PRO",
+                statusIsProminent: true,
+                accessibilityHint: entitlements.canScheduleAgentAlerts
+                    ? nil
+                    : "Requires Multiplex Pro"
+            )
 
             if !entitlements.canScheduleAgentAlerts {
                 TallyFormRow {
@@ -226,16 +222,14 @@ struct SettingsView: View {
             }
 
             #if DEBUG
-            TallyFormRow {
-                ChassisSwitch(
-                    "PRO DEBUG",
-                    isOn: Binding(
-                        get: { entitlements.isPro },
-                        set: { entitlements.setDebugUnlocked($0) }
-                    ),
-                    accessibilityLabel: "Pro unlocked debug override"
-                )
-            }
+            TallyFormBoolField(
+                "Pro debug override",
+                isOn: Binding(
+                    get: { entitlements.isPro },
+                    set: { entitlements.setDebugUnlocked($0) }
+                ),
+                accessibilityLabel: "Pro unlocked debug override"
+            )
             #endif
         }
     }
