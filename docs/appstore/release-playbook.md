@@ -128,9 +128,10 @@ The non-consumable IAP `app.multiplexterm.multiplex.pro` is configured with
 display name **Multiplex Pro**, a $19.99 USA-base/equalized price, all-territory
 availability, and review notes. App Store Connect reports it
 `READY_TO_SUBMIT`; its 2026-07-13 paywall screenshot is processed, while the
-refreshed 2026-07-15 asset (`docs/appstore/iap-review-screenshot.jpg`) still
-needs upload + processing before submission. Submit the IAP together with the
-first app version.
+refreshed 2026-07-16 asset (`docs/appstore/iap-review-screenshot.jpg`, updated
+for the Pro prompt-history copy; full-screen capture, not the earlier Stage
+Manager staging) still needs upload + processing before submission. Submit the
+IAP together with the first app version.
 Built-in `deliver` does not manage IAP metadata; custom Spaceship
 code can call Apple's public IAP endpoints, including the review-image
 reserve/upload/commit flow.

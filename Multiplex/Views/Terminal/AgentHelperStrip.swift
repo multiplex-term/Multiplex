@@ -31,6 +31,12 @@ struct AgentHelperStrip: View {
     let canShowCommands: Bool
     let builtInPlacements: [String: AgentCommandPlacement]
     let customCommands: [CustomAgentCommand]
+    /// Backs the HISTORY chip (session-file prompts + jump). nil when the
+    /// tab can't read session files (mosh plain shells, unresolved cwd).
+    var historyController: TerminalSessionController? = nil
+    /// Free tier: the chip shows but routes to the paywall — HISTORY is a
+    /// Pro helper like agent alerts.
+    var historyLocked = false
     /// Floating slab (visionOS ornament, UMD chrome) vs full-width bar
     /// (iPad, docked under the screen).
     var floating = false
@@ -53,6 +59,7 @@ struct AgentHelperStrip: View {
 
     @State private var showingCustomCommands = false
     @State private var customCommandEditorID = UUID()
+    @State private var showingHistory = false
 
     var body: some View {
         Group {
@@ -87,15 +94,31 @@ struct AgentHelperStrip: View {
         }
         // A pane switch may replace one agent with another in the same view
         // identity. Never let one agent's open drafts relabel or save into a
-        // different agent's profile.
-        .onChange(of: agent) { showingCustomCommands = false }
+        // different agent's profile — or keep another agent's history open.
+        .onChange(of: agent) {
+            showingCustomCommands = false
+            showingHistory = false
+        }
         #if DEBUG
-        .onAppear { CustomCommandsDebugHook.install() }
+        .onAppear {
+            CustomCommandsDebugHook.install()
+            AgentHistoryDebugHook.install()
+        }
         .onReceive(NotificationCenter.default.publisher(
             for: .multiplexDebugCustomCommands
         )) { _ in
             guard isFocusOwner() else { return }
             openCustomCommandEditor()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .multiplexDebugAgentHistory
+        )) { _ in
+            guard isFocusOwner(),
+                  let historyController,
+                  historyController.canOfferAgentHistory,
+                  !historyLocked
+            else { return }
+            showingHistory = true
         }
         #endif
     }
@@ -169,6 +192,54 @@ struct AgentHelperStrip: View {
                             showingCustomCommands = false
                         },
                         cancel: { showingCustomCommands = false }
+                    )
+                    .allowsHitTesting(false)
+                }
+            #endif
+            historyButton
+        }
+    }
+
+    /// The HISTORY chip: session-file prompts for the pane's agent. Free
+    /// tier routes to the paywall; hidden entirely when the tab has no way
+    /// to read session files.
+    @ViewBuilder
+    private var historyButton: some View {
+        if let historyController, historyController.canOfferAgentHistory {
+            let button = Button {
+                if historyLocked {
+                    openPaywall()
+                } else {
+                    showingHistory = true
+                }
+            } label: {
+                ChassisBadge("HIST")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Message history for \(agent.displayName)")
+
+            #if os(visionOS)
+            button
+                .chassisHover(2)
+                .popover(
+                    isPresented: $showingHistory,
+                    attachmentAnchor: .rect(.bounds),
+                    arrowEdge: .bottom
+                ) {
+                    AgentHistoryPanel(
+                        agent: agent,
+                        controller: historyController,
+                        dismiss: { showingHistory = false }
+                    )
+                    .presentationCompactAdaptation(.popover)
+                }
+            #else
+            button
+                .background {
+                    AgentHistoryPopoverPresenter(
+                        isPresented: $showingHistory,
+                        agent: agent,
+                        controller: historyController
                     )
                     .allowsHitTesting(false)
                 }
@@ -454,6 +525,31 @@ extension Notification.Name {
     static let multiplexDebugCustomCommands = Notification.Name(
         "MultiplexDebugCustomCommands"
     )
+    static let multiplexDebugAgentHistory = Notification.Name(
+        "MultiplexDebugAgentHistory"
+    )
+}
+
+/// Opens the focused terminal's HISTORY panel for layout capture and
+/// headless checks — the strip's focus-owner guard keeps one notification
+/// from presenting panels in several scenes.
+@MainActor
+enum AgentHistoryDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.msghistory", &token, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugAgentHistory,
+                object: nil
+            )
+        }
+    }
 }
 
 /// Opens the focused terminal's real Command Setup editor for layout

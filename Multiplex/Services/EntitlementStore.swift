@@ -278,6 +278,9 @@ final class EntitlementStore {
 
     var canMutateCustomThemes: Bool { isPro }
     var canScheduleAgentAlerts: Bool { isPro }
+    /// The HISTORY surface (reading agent session files + jump-to-message)
+    /// is a Pro helper like the strip's commands; detection stays free.
+    var canBrowseAgentHistory: Bool { isPro }
 
     /// Slash commands alone consume the taste meter. Keyboard-equivalent
     /// helper chips do not call this API.

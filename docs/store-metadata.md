@@ -89,7 +89,10 @@ Current product split:
   ten built-in or custom agent-command chip taps per local calendar day.
 - Pro: unlimited hosts, mosh, unmetered built-in and custom agent command
   chips, Claude Code/Codex agent alerts from tmux sessions and plain shells,
-  and custom-theme editing.
+  the HISTORY panel (each agent session's prompt history read from the
+  agent's own session file — Claude Code, Codex, and Pi — with full text
+  where the TUI truncates, plus jump-back-to-message for Claude Code on
+  tmux tabs), and custom-theme editing.
 - Existing/synced hosts, existing mosh configuration, and existing custom
   themes are never deleted or disabled when Pro is absent.
 

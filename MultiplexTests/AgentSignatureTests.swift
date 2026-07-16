@@ -177,7 +177,10 @@ final class AgentSignatureTests: XCTestCase {
         MULTIPLEX_SHELL_PS
         100 1 100 100 /home/dev/.local/bin/claude --effort max
         """
-        XCTAssertEqual(ShellAgentProbe.parse(output), .available(.claudeCode))
+        XCTAssertEqual(
+            ShellAgentProbe.parse(output),
+            .available(.claudeCode, workingDirectory: nil)
+        )
     }
 
     func testShellAgentProbeFindsForegroundWrapperChild() {
@@ -187,7 +190,10 @@ final class AgentSignatureTests: XCTestCase {
         200 100 200 200 node /opt/codex/bin/codex.js
         201 200 200 200 /opt/codex/vendor/codex
         """
-        XCTAssertEqual(ShellAgentProbe.parse(output), .available(.codex))
+        XCTAssertEqual(
+            ShellAgentProbe.parse(output),
+            .available(.codex, workingDirectory: nil)
+        )
     }
 
     func testShellAgentProbeIgnoresSuspendedBackgroundAgent() {
@@ -198,7 +204,36 @@ final class AgentSignatureTests: XCTestCase {
         100 1 100 100 -zsh
         200 100 200 100 codex
         """
-        XCTAssertEqual(ShellAgentProbe.parse(output), .available(nil))
+        XCTAssertEqual(
+            ShellAgentProbe.parse(output),
+            .available(nil, workingDirectory: nil)
+        )
+    }
+
+    func testShellAgentProbeReportsForegroundWorkingDirectory() {
+        let output = """
+        MULTIPLEX_SHELL_PS
+        100 1 100 200 -zsh
+        200 100 200 200 claude
+        MULTIPLEX_SHELL_CWD
+        /Users/dev/project
+        """
+        XCTAssertEqual(
+            ShellAgentProbe.parse(output),
+            .available(.claudeCode, workingDirectory: "/Users/dev/project")
+        )
+        // A cwd stage that produced garbage (no absolute path) degrades to
+        // detection-only, and cwd lines must never be read as ps rows.
+        let garbled = """
+        MULTIPLEX_SHELL_PS
+        200 100 200 200 claude
+        MULTIPLEX_SHELL_CWD
+        readlink: not found
+        """
+        XCTAssertEqual(
+            ShellAgentProbe.parse(garbled),
+            .available(.claudeCode, workingDirectory: nil)
+        )
     }
 
     func testShellAgentProbeDistinguishesUnavailableFromNoAgent() {
@@ -209,10 +244,12 @@ final class AgentSignatureTests: XCTestCase {
         )
         XCTAssertEqual(
             ShellAgentProbe.parse("MULTIPLEX_SHELL_PS\n10 1 10 10 -bash"),
-            .available(nil)
+            .available(nil, workingDirectory: nil)
         )
         XCTAssertTrue(ShellAgentProbe.command.contains("$PPID"))
         XCTAssertTrue(ShellAgentProbe.command.contains("pgid=,tpgid="))
+        XCTAssertTrue(ShellAgentProbe.command.contains("/proc/$fg/cwd"))
+        XCTAssertTrue(ShellAgentProbe.command.contains("lsof -a -p"))
     }
 
     func testDirectTerminalFallbackUsesOnlyVerifiedSignatures() {

@@ -165,6 +165,13 @@ pane's cwd → tab append → attach), and
 iPad terminal's tmux shortcut popover for layout capture, and
 `… -p app.multiplexterm.multiplex.debug.customcommands` opens the focused
 terminal's Command Setup editor for layout capture, and
+`… -p app.multiplexterm.multiplex.debug.msghistory` opens the focused
+terminal's agent HISTORY panel (session-file prompt list) for layout
+capture, and
+`… -p app.multiplexterm.multiplex.debug.msgjump` / `….debug.msgjumpback`
+jumps the focused Claude Code terminal to its oldest session-file prompt
+and runs BACK TO LIVE — host-side `tmux capture-pane` proves both (the old
+prompt appears at the top of the pane, then the live tail returns), and
 `… -p app.multiplexterm.multiplex.debug.tmuxcopy` sends Copy Mode through
 SwiftTerm and the terminal's ordered input pump, and
 `… -p app.multiplexterm.multiplex.debug.tmuxcopydone` runs the contextual
@@ -516,6 +523,33 @@ views.
   from its measured rendered height and cap only true overflow; never restore a
   command-count multiplier. Multiline rows do not have one stable height, so
   estimates leave a blank trench above the footer or clip edited content.
+- **HISTORY reads the agent's own session file; jump drives the TUI's own
+  pager** (`AgentSessionHistory`, pure + fixture-tested; Pro via
+  `canBrowseAgentHistory`). The control path resolves the pane cwd
+  (`list-panes -F`, same 3.6a discipline as drops), locates the newest
+  matching session file — `~/.claude/projects/<cwd with every
+  non-alphanumeric flattened to ->`, `~/.codex/sessions/*/*/*/rollout-*`
+  matched by the head line's `"cwd":"…"`, `~/.pi/agent/sessions/<-cwd with
+  /→- and a trailing -->` (all verified against real files 2026-07-16) —
+  and tails it behind sentinels with server-side grep pre-filters (Claude
+  files reach tens of MB and its `type:"user"` lines are mostly tool
+  results; `<task-notification>`-style wrapper turns are filtered
+  app-side). Newest-mtime is the deliberate correlation rule (it is what
+  `claude --continue` / `pi -c` resume). **Claude Code ≥2.x owns the
+  alternate screen under tmux — its transcript never enters tmux
+  scrollback**, so copy-mode search can't find it; jump is instead ONE exec
+  that loops send-keys PPage → sleep → capture → grep server-side
+  (RTT-independent), stops on match / two identical consecutive captures
+  (top) / a 40-page cap, and self-restores with PgDn on a miss. Jumps are
+  gated on `AgentAttention` idle first, and every restore path uses PgDn
+  overshoot, **never Esc** — Esc interrupts a running turn. Long prompts
+  render as ONE `…`-truncated row at pane width, so the search needle is a
+  ≤60-column first-line prefix (wide glyphs cost two columns); pure-paste
+  messages match nothing and stay peek-only. While `.finding`, the
+  terminal's input pump is locked and a veil says so; `.shell` tabs list
+  history through the probe's cwd stage (`readlink /proc`, `lsof`
+  fallback) but never jump. Plan + verified experiment record:
+  `local-plan/agent-message-history.md`.
 - **File attach/drop = SFTP upload + typed path, never Enter**: compatible
   SSH-backed tmux tabs carry one free FILE menu in the UMD/classic iPad toolbar
   (Camera on iPad/iPhone, Photos and Files everywhere); every picker result
