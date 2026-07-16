@@ -123,11 +123,11 @@ struct AgentHelperStrip: View {
         HStack(spacing: 6) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    ForEach(barBuiltInCommands) { command in
-                        commandChip(command)
-                    }
                     ForEach(barCustomCommands) { command in
                         customCommandChip(command)
+                    }
+                    ForEach(barBuiltInCommands) { command in
+                        commandChip(command)
                     }
                 }
                 .frame(height: Self.chipHeight)
