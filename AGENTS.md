@@ -489,17 +489,9 @@ views.
   same host-and-agent scope; `shared` mirrors the same UUID across that host's
   Claude Code, Codex, and Pi profiles, so any editor updates it, unsharing keeps
   it only in the editor being saved, and deletion removes it from all three
-  without touching another host. Pi is encoded in a separate nested key so
-  older two-agent builds can still decode the Host; a presence marker lets
-  `HostSync` restore Pi from another current-schema peer if an older peer drops
-  that unknown key during an edit.
-  The configuration is part of the Codable Host record, so every save bumps
-  `Host.updatedAt` and mirrors through synchronizable iCloud Keychain.
-  The former device-local `agent-commands.json` (both global and short-lived
-  host-scoped shapes) is a launch fallback, then migrates into Host only after
-  the first cloud merge; a schema version distinguishes an intentionally empty
-  synced setup from a pre-migration record, and malformed legacy JSON is kept
-  rather than silently cleared. Every custom tap uses the same daily meter,
+  without touching another host. The configuration is part of the Codable Host
+  record, so every save bumps `Host.updatedAt` and mirrors through
+  synchronizable iCloud Keychain. Every custom tap uses the same daily meter,
   ordered pump, and optional delayed CR. `showInBar` controls custom
   placement independently of content length; opted-in labels keep the first nine
   characters and append `...` (newlines/tabs render as `↵` / `⇥`), while
@@ -598,12 +590,10 @@ views.
   devices. Every keychain query must pass
   `kSecAttrSynchronizable(Any)` — omitting it silently matches only
   device-local items. `HostSync.merge` (pure, unit-tested) reconciles
-  hosts.json with the mirror: last writer wins by `Host.updatedAt`, but a
-  legacy-schema winner first inherits the modern peer's command setup so an
-  unrelated edit from an older app cannot erase it; a locally-persisted
-  mirrored-IDs set distinguishes "new local host → publish" from "peer deleted
-  it → drop". Keychain sync has no change notification — deck and restored
-  terminal roots re-merge on scenePhase `.active`.
+  hosts.json with the mirror: last writer wins by `Host.updatedAt`; a
+  locally-persisted mirrored-IDs set distinguishes "new local host → publish"
+  from "peer deleted it → drop". Keychain sync has no change notification —
+  deck and restored terminal roots re-merge on scenePhase `.active`.
 - **App icon is a hand-authored Icon Composer package** (`AppIcon.icon` at
   the repo root; spec + bake-off record in `DESIGN.md`). icon.json lists
   groups frontmost-first. Validate/render headlessly with `xcrun actool

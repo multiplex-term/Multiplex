@@ -37,10 +37,6 @@ struct Host: Identifiable, Codable, Hashable {
     /// This is part of the mirrored host record so the setup follows the host
     /// to the user's other devices through iCloud Keychain.
     var agentCommandConfiguration = AgentCommandConfiguration()
-    /// Zero only when decoding a host record written before command setups
-    /// joined the synced schema. Distinguishes a deliberate empty setup from
-    /// a record that still needs the one-time local JSON migration.
-    var agentCommandConfigurationVersion = 1
     /// Bumped on every user edit. When the same host arrives from another
     /// device via the Keychain mirror, the newer record wins.
     var updatedAt: Date = .distantPast
@@ -51,9 +47,8 @@ struct Host: Identifiable, Codable, Hashable {
 }
 
 // Decoding lives in an extension so the memberwise initializer survives.
-// Post-schema fields are optional on decode: a hosts.json or mirrored record
-// written by an older build must not drop the whole list. Command setup keeps
-// an explicit version so "missing in old record" differs from "saved empty".
+// Post-schema fields are optional on decode so one incomplete hosts.json or
+// mirrored record does not drop the whole list.
 extension Host {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -71,10 +66,6 @@ extension Host {
             AgentCommandConfiguration.self,
             forKey: .agentCommandConfiguration
         ) ?? AgentCommandConfiguration()
-        agentCommandConfigurationVersion = try container.decodeIfPresent(
-            Int.self,
-            forKey: .agentCommandConfigurationVersion
-        ) ?? 0
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
     }
 
@@ -86,8 +77,6 @@ extension Host {
         var rhs = other
         lhs.agentCommandConfiguration = AgentCommandConfiguration()
         rhs.agentCommandConfiguration = AgentCommandConfiguration()
-        lhs.agentCommandConfigurationVersion = 0
-        rhs.agentCommandConfigurationVersion = 0
         lhs.updatedAt = .distantPast
         rhs.updatedAt = .distantPast
         return lhs == rhs

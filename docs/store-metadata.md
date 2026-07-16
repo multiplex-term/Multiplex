@@ -87,9 +87,8 @@ Current product split:
 - Pro: unlimited hosts, mosh, unmetered built-in and custom agent command
   chips, Claude Code/Codex agent alerts from tmux sessions and plain shells,
   and custom-theme editing.
-- Existing/synced hosts, existing mosh configuration, existing custom themes,
-  and migrated per-device command setups are never deleted or disabled when Pro
-  is absent.
+- Existing/synced hosts, existing mosh configuration, and existing custom
+  themes are never deleted or disabled when Pro is absent.
 
 When this split changes, update this document, the local StoreKit catalog,
 the app description and release notes, review notes, paywall copy, affected

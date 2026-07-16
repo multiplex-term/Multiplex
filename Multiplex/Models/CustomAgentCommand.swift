@@ -132,44 +132,6 @@ struct CustomAgentCommand: Identifiable, Codable, Hashable {
         DuplicateKey(content: normalizedContent, autoSubmit: autoSubmit)
             == DuplicateKey(content: other.normalizedContent, autoSubmit: other.autoSubmit)
     }
-
-    // MARK: Persistence compatibility
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case content
-        case autoSubmit
-        case showInBar
-        case shared
-    }
-
-    /// Commands saved before `showInBar` existed keep their former placement:
-    /// short single-line-safe labels stay on the bar, while long commands and
-    /// labels containing a tab remain in MORE until the user opts them in.
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        content = try container.decode(String.self, forKey: .content)
-        autoSubmit = try container.decodeIfPresent(Bool.self, forKey: .autoSubmit) ?? true
-        if let storedPlacement = try container.decodeIfPresent(Bool.self, forKey: .showInBar) {
-            showInBar = storedPlacement
-        } else {
-            let legacyContent = Self.normalizeContent(content)
-            showInBar = !legacyContent.isEmpty
-                && legacyContent.count <= Self.maximumBarLabelLength
-                && !legacyContent.contains("\t")
-        }
-        shared = try container.decodeIfPresent(Bool.self, forKey: .shared) ?? false
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(content, forKey: .content)
-        try container.encode(autoSubmit, forKey: .autoSubmit)
-        try container.encode(showInBar, forKey: .showInBar)
-        try container.encode(shared, forKey: .shared)
-    }
 }
 
 /// The complete helper setup for one host. It is part of the Codable `Host`
@@ -191,44 +153,13 @@ struct AgentCommandConfiguration: Codable, Hashable {
             self.commands = commands
             self.builtInPlacements = builtInPlacements
         }
-
-        private enum CodingKeys: String, CodingKey {
-            case agent
-            case commands
-            case builtInPlacements
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            agent = try container.decode(AgentKind.self, forKey: .agent)
-            commands = try container.decodeIfPresent(
-                [CustomAgentCommand].self,
-                forKey: .commands
-            ) ?? []
-            builtInPlacements = try container.decodeIfPresent(
-                [String: AgentCommandPlacement].self,
-                forKey: .builtInPlacements
-            ) ?? [:]
-        }
     }
 
     private(set) var profiles: [Profile]
 
-    /// Pi is encoded outside the legacy `profiles` array. Builds that predate
-    /// Pi decode that array with a strict two-case AgentKind; putting `.pi`
-    /// there would make the entire mirrored Host record undecodable. The
-    /// marker also lets HostSync recognize when an older peer decoded and
-    /// re-encoded the configuration, dropping the unknown Pi key.
-    private(set) var piProfileVersion: Int
-
-    private static let currentPiProfileVersion = 1
     private static let supportedAgents = AgentKind.allCases
 
-    init(
-        profiles: [Profile] = [],
-        piProfileVersion: Int = Self.currentPiProfileVersion
-    ) {
-        self.piProfileVersion = max(0, piProfileVersion)
+    init(profiles: [Profile] = []) {
         var seenAgents = Set<AgentKind>()
         self.profiles = profiles.compactMap { profile in
             guard seenAgents.insert(profile.agent).inserted else { return nil }
@@ -265,14 +196,6 @@ struct AgentCommandConfiguration: Codable, Hashable {
         builtInPlacements: [String: AgentCommandPlacement],
         for agent: AgentKind
     ) {
-        // A current build may be editing a record that an older peer already
-        // round-tripped without Pi's unknown coding keys. A Claude/Codex edit
-        // cannot certify that missing Pi state; keep marker 0 so HostSync can
-        // still recover it from a current-schema peer. Editing Pi itself is
-        // authoritative and establishes the current schema.
-        if agent == .pi {
-            piProfileVersion = Self.currentPiProfileVersion
-        }
         let previous = self.commands(for: agent)
         let resolved = CustomAgentCommand.normalized(commands)
         let resolvedPlacements = AgentCommandSet.normalizedPlacementOverrides(
@@ -309,76 +232,17 @@ struct AgentCommandConfiguration: Codable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case profiles
-        case piProfile
-        case piProfileVersion
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let legacyProfiles = try container.decodeIfPresent(
-            [Profile].self,
-            forKey: .profiles
-        ) ?? []
-        let encodedPiProfile = try container.decodeIfPresent(
-            Profile.self,
-            forKey: .piProfile
-        )
-        let validPiProfile = encodedPiProfile.flatMap {
-            $0.agent == .pi ? $0 : nil
-        }
-        let carriedPiProfile = legacyProfiles.first { $0.agent == .pi }
-        let piProfile = validPiProfile ?? carriedPiProfile
-        let storedVersion = try container.decodeIfPresent(
-            Int.self,
-            forKey: .piProfileVersion
-        )
-        self.init(
-            profiles: legacyProfiles.filter { $0.agent != .pi }
-                + (piProfile.map { [$0] } ?? []),
-            piProfileVersion: storedVersion
-                ?? (piProfile == nil ? 0 : Self.currentPiProfileVersion)
-        )
+        let profiles = try container.decode([Profile].self, forKey: .profiles)
+        self.init(profiles: profiles)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(
-            profiles.filter { $0.agent != .pi },
-            forKey: .profiles
-        )
-        try container.encodeIfPresent(profile(for: .pi), forKey: .piProfile)
-        try container.encode(piProfileVersion, forKey: .piProfileVersion)
-    }
-
-    /// Restore only the Pi profile that an older peer could not retain,
-    /// leaving that peer's newer Claude Code/Codex edits intact.
-    mutating func preservePiProfile(from source: AgentCommandConfiguration) {
-        guard piProfileVersion < source.piProfileVersion else { return }
-        // The older peer *can* edit shared rows through its Claude/Codex
-        // profiles. If it deleted or unshared one there, restoring Pi's stale
-        // shared copy would make reconciliation resurrect that explicit edit.
-        // Preserve Pi-only rows unconditionally; preserve a shared row only
-        // while the destination still carries that UUID as shared.
-        let retainedSharedIDs = Set(
-            profiles
-                .filter { $0.agent != .pi }
-                .flatMap(\.commands)
-                .filter(\.shared)
-                .map(\.id)
-        )
-        profiles.removeAll { $0.agent == .pi }
-        if var sourceProfile = source.profile(for: .pi) {
-            sourceProfile.commands.removeAll {
-                $0.shared && !retainedSharedIDs.contains($0.id)
-            }
-            if !sourceProfile.commands.isEmpty
-                || !sourceProfile.builtInPlacements.isEmpty {
-                profiles.append(sourceProfile)
-            }
-        }
-        piProfileVersion = source.piProfileVersion
-        sortProfiles()
-        reconcileSharedCommands()
+        try container.encode(profiles, forKey: .profiles)
     }
 
     private func profile(for agent: AgentKind) -> Profile? {
@@ -420,7 +284,7 @@ struct AgentCommandConfiguration: Codable, Hashable {
         }
     }
 
-    /// Repair one-sided shared rows from older or manually edited records.
+    /// Normalize one-sided shared rows loaded from persistence.
     private mutating func reconcileSharedCommands() {
         let sharedCommands = Self.supportedAgents.flatMap {
             commands(for: $0).filter(\.shared)

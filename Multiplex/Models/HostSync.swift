@@ -26,28 +26,11 @@ enum HostSync {
 
         for host in local {
             if let remote = cloudByID[host.id] {
-                // Host-level last-writer-wins remains the policy, but a peer
-                // running an older build cannot express command setup at all.
-                // Enrich that legacy record from the modern side before
-                // choosing the timestamp winner, then republish if the cloud
-                // copy was missing the field. This prevents an unrelated edit
-                // on an old device from erasing synced custom commands.
-                let enrichedLocal = preservingPiAgentCommands(
-                    in: preservingAgentCommands(in: host, from: remote),
-                    from: remote
-                )
-                let enrichedRemote = preservingPiAgentCommands(
-                    in: preservingAgentCommands(in: remote, from: host),
-                    from: host
-                )
                 if host.updatedAt > remote.updatedAt {
-                    resolution.hosts.append(enrichedLocal)
-                    resolution.toPush.append(enrichedLocal)
+                    resolution.hosts.append(host)
+                    resolution.toPush.append(host)
                 } else {
-                    resolution.hosts.append(enrichedRemote)
-                    if enrichedRemote != remote {
-                        resolution.toPush.append(enrichedRemote)
-                    }
+                    resolution.hosts.append(remote)
                 }
             } else if mirrored.contains(host.id) {
                 resolution.removedIDs.insert(host.id)
@@ -63,37 +46,5 @@ enum HostSync {
             .sorted { ($0.name, $0.id.uuidString) < ($1.name, $1.id.uuidString) }
         resolution.hosts.append(contentsOf: adopted)
         return resolution
-    }
-
-    /// Fill only a schema absence. Once both records carry a versioned setup,
-    /// their ordinary host timestamps remain authoritative, including an
-    /// intentionally empty configuration.
-    private static func preservingAgentCommands(
-        in destination: Host,
-        from source: Host
-    ) -> Host {
-        guard destination.agentCommandConfigurationVersion
-                < source.agentCommandConfigurationVersion
-        else { return destination }
-        var enriched = destination
-        enriched.agentCommandConfiguration = source.agentCommandConfiguration
-        enriched.agentCommandConfigurationVersion =
-            source.agentCommandConfigurationVersion
-        return enriched
-    }
-
-    /// Pi profiles live in a new nested coding key so older builds can still
-    /// decode a Host. Such a build necessarily drops that unknown key when it
-    /// saves an unrelated edit; restore only Pi from the current-schema peer,
-    /// preserving the older build's valid Claude Code/Codex changes.
-    private static func preservingPiAgentCommands(
-        in destination: Host,
-        from source: Host
-    ) -> Host {
-        var enriched = destination
-        enriched.agentCommandConfiguration.preservePiProfile(
-            from: source.agentCommandConfiguration
-        )
-        return enriched
     }
 }

@@ -81,36 +81,6 @@ final class CustomAgentCommandTests: XCTestCase {
         XCTAssertEqual(drafts.command(id: second.id)?.content, "second")
     }
 
-    func testLegacyPlacementMigrationDoesNotExpandTheBar() throws {
-        let hostID = UUID()
-        let shortID = UUID()
-        let longID = UUID()
-        let tabID = UUID()
-        let json = """
-        [
-          {
-            "agent": "claudeCode",
-            "commands": [
-              {"id": "\(shortID)", "content": "/review", "autoSubmit": true},
-              {"id": "\(longID)", "content": "explain this", "autoSubmit": false},
-              {"id": "\(tabID)", "content": "one\\ttwo", "autoSubmit": true}
-            ]
-          }
-        ]
-        """
-
-        let source = try XCTUnwrap(
-            CustomAgentCommandMigration.decode(Data(json.utf8))
-        )
-        let commands = source.configuration(for: hostID).commands(
-            for: .claudeCode
-        )
-
-        XCTAssertEqual(commands.map(\.showInBar), [true, false, false])
-        XCTAssertEqual(commands.map(\.shared), [false, false, false])
-        XCTAssertEqual(commands.map(\.barLabel), ["/review", nil, nil])
-    }
-
     func testSharedCommandMirrorsAndStaysEditableFromAnyAgent() throws {
         let claudeOnly = CustomAgentCommand(content: "/claude")
         let shared = CustomAgentCommand(
@@ -207,7 +177,7 @@ final class CustomAgentCommandTests: XCTestCase {
         XCTAssertTrue(configuration.isEmpty)
     }
 
-    func testConfigurationRepairsOneSidedSharedCommandOnDecode() throws {
+    func testConfigurationRepairsOneSidedSharedCommandOnInitialization() {
         let shared = CustomAgentCommand(content: "/shared", shared: true)
         let configuration = AgentCommandConfiguration(profiles: [
             .init(agent: .claudeCode, commands: [shared]),
@@ -274,56 +244,6 @@ final class CustomAgentCommandTests: XCTestCase {
         XCTAssertEqual(decoded, configuration)
     }
 
-    func testPiProfileEncodingRemainsReadableByLegacyTwoAgentBuild() throws {
-        let claude = CustomAgentCommand(content: "/review")
-        let pi = CustomAgentCommand(content: "/tree")
-        var configuration = AgentCommandConfiguration()
-        configuration.replace(
-            [claude],
-            builtInPlacements: ["/clear": .more],
-            for: .claudeCode
-        )
-        configuration.replace(
-            [pi],
-            builtInPlacements: ["/tree": .more],
-            for: .pi
-        )
-
-        let data = try JSONEncoder().encode(configuration)
-        let legacy = try JSONDecoder().decode(
-            LegacyTwoAgentConfiguration.self,
-            from: data
-        )
-
-        // Pi lives in a new ignored key, never in the strict legacy array.
-        XCTAssertEqual(legacy.profiles.map(\.agent), [.claudeCode])
-        XCTAssertEqual(legacy.profiles[0].commands, [claude])
-        XCTAssertEqual(legacy.profiles[0].builtInPlacements, ["/clear": .more])
-
-        // A real legacy save drops the unknown Pi keys. Current code must
-        // recognize that round-trip as marker 0 rather than certifying an
-        // intentionally empty Pi profile.
-        let legacyRoundTrip = try JSONEncoder().encode(legacy)
-        let recovered = try JSONDecoder().decode(
-            AgentCommandConfiguration.self,
-            from: legacyRoundTrip
-        )
-        XCTAssertEqual(recovered.piProfileVersion, 0)
-        XCTAssertEqual(recovered.commands(for: .claudeCode), [claude])
-        XCTAssertEqual(
-            recovered.builtInPlacements(for: .claudeCode),
-            ["/clear": .more]
-        )
-        XCTAssertTrue(recovered.commands(for: .pi).isEmpty)
-
-        let current = try JSONDecoder().decode(
-            AgentCommandConfiguration.self,
-            from: data
-        )
-        XCTAssertEqual(current.commands(for: .pi), [pi])
-        XCTAssertEqual(current.builtInPlacements(for: .pi), ["/tree": .more])
-    }
-
     func testHostRecordRoundTripCarriesCommandSetupForKeychainSync() throws {
         let custom = CustomAgentCommand(
             content: "review this host",
@@ -363,7 +283,6 @@ final class CustomAgentCommandTests: XCTestCase {
             ),
             ["/clear": .more]
         )
-        XCTAssertEqual(decoded.agentCommandConfigurationVersion, 1)
     }
 
     func testHostStoreSaveWritesLocalCacheAndSynchronizableMirror() throws {
@@ -420,95 +339,5 @@ final class CustomAgentCommandTests: XCTestCase {
             ["/clear": .more]
         )
         XCTAssertGreaterThan(mirroredHost.updatedAt, host.updatedAt)
-    }
-
-    func testMigrationKeepsHostsIndependentAndScopedEmptyShadowsGlobal() throws {
-        let studioID = UUID()
-        let serverID = UUID()
-        let clearedID = UUID()
-        let legacy = CustomAgentCommand(content: "/legacy")
-        let studio = CustomAgentCommand(content: "/studio", shared: true)
-        let data = try JSONEncoder().encode([
-            LegacyProfile(
-                agent: .claudeCode,
-                commands: [legacy],
-                builtInPlacements: ["/clear": .more]
-            ),
-            LegacyProfile(
-                hostID: studioID,
-                agent: .claudeCode,
-                commands: [studio],
-                builtInPlacements: ["/context": .bar]
-            ),
-            // An explicit host-scoped empty profile means this host cleared
-            // the former global setup and must not inherit it during migration.
-            LegacyProfile(
-                hostID: clearedID,
-                agent: .claudeCode,
-                commands: []
-            ),
-        ])
-        let source = try XCTUnwrap(CustomAgentCommandMigration.decode(data))
-
-        let studioConfiguration = source.configuration(for: studioID)
-        XCTAssertEqual(
-            studioConfiguration.commands(for: .claudeCode),
-            [studio]
-        )
-        XCTAssertEqual(studioConfiguration.commands(for: .codex), [studio])
-        XCTAssertEqual(studioConfiguration.commands(for: .pi), [studio])
-        XCTAssertEqual(
-            studioConfiguration.builtInPlacements(for: .claudeCode),
-            ["/context": .bar]
-        )
-
-        let serverConfiguration = source.configuration(for: serverID)
-        XCTAssertEqual(
-            serverConfiguration.commands(for: .claudeCode),
-            [legacy]
-        )
-        XCTAssertEqual(
-            serverConfiguration.builtInPlacements(for: .claudeCode),
-            ["/clear": .more]
-        )
-        XCTAssertTrue(source.configuration(for: clearedID).isEmpty)
-    }
-
-    func testMigrationFailsSoftOnMalformedJSON() {
-        XCTAssertNil(CustomAgentCommandMigration.decode(Data("not json".utf8)))
-    }
-
-    private struct LegacyProfile: Codable {
-        var hostID: UUID?
-        var agent: AgentKind
-        var commands: [CustomAgentCommand]
-        var builtInPlacements: [String: AgentCommandPlacement]
-
-        init(
-            hostID: UUID? = nil,
-            agent: AgentKind,
-            commands: [CustomAgentCommand],
-            builtInPlacements: [String: AgentCommandPlacement] = [:]
-        ) {
-            self.hostID = hostID
-            self.agent = agent
-            self.commands = commands
-            self.builtInPlacements = builtInPlacements
-        }
-    }
-
-    private enum LegacyTwoAgentKind: String, Codable {
-        case claudeCode
-        case codex
-    }
-
-    private struct LegacyTwoAgentProfile: Codable {
-        var agent: LegacyTwoAgentKind
-        var commands: [CustomAgentCommand]
-        var builtInPlacements: [String: AgentCommandPlacement]
-    }
-
-    private struct LegacyTwoAgentConfiguration: Codable {
-        var profiles: [LegacyTwoAgentProfile]
     }
 }
