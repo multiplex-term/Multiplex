@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The app's settings surface, opened from the deck. Independent of any host —
-/// today it holds terminal themes; future preferences slot in as new sections.
+/// App-wide settings, opened from the deck: terminal appearance, agent alerts,
+/// and the Multiplex Pro entitlement. Host-specific options live with the host.
 struct SettingsView: View {
     @Environment(ThemeStore.self) private var themes
     @Environment(EntitlementStore.self) private var entitlements
@@ -15,131 +15,22 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(themes.selected.name)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-
-                        ThemePreview(theme: themes.selected)
-                    }
-                    .padding(.vertical, 4)
-                    .listRowBackground(Color.clear)
-                } header: {
-                    Eyebrow("Current Theme")
-                } footer: {
-                    Text("This preview updates as soon as you select a theme below.")
+            ScrollView {
+                VStack(spacing: 18) {
+                    currentThemeSection
+                    builtInThemesSection
+                    customThemesSection
+                    alertsSection
+                    proSection
                 }
-
-                Section {
-                    ForEach(TerminalTheme.builtIns) { theme in
-                        ThemeRow(theme: theme, isSelected: themes.selectedID == theme.id) {
-                            themes.select(theme)
-                        }
-                        .contextMenu {
-                            duplicateButton(for: theme)
-                        }
-                    }
-                } header: {
-                    Eyebrow("Terminal Theme")
-                } footer: {
-                    Text("Applies to every terminal window, live. Themes recolor the terminal surface only — the deck and window chrome keep the Tally chassis.")
-                }
-
-                Section {
-                    ForEach(themes.customThemes) { theme in
-                        ThemeRow(theme: theme, isSelected: themes.selectedID == theme.id) {
-                            themes.select(theme)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            Button("Delete", role: .destructive) { themes.remove(theme) }
-                            Button("Edit") { requestThemeEditor(theme) }
-                        }
-                        .contextMenu {
-                            Button("Edit…") { requestThemeEditor(theme) }
-                            duplicateButton(for: theme)
-                            Button("Delete", role: .destructive) { themes.remove(theme) }
-                        }
-                    }
-
-                    Button {
-                        requestThemeEditor(themes.selected.asCustom(named: "New Theme"))
-                    } label: {
-                        HStack {
-                            Label("New Theme…", systemImage: "plus")
-                            Spacer()
-                            if !entitlements.canMutateCustomThemes {
-                                Text("PRO")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                } header: {
-                    Eyebrow("Your Themes")
-                } footer: {
-                    if !entitlements.canMutateCustomThemes {
-                        Text("Creating, duplicating and editing custom themes requires Multiplex Pro. Existing themes remain selectable.")
-                    } else if themes.customThemes.isEmpty {
-                        Text("A new theme starts from the colors of the one selected above.")
-                    }
-                }
-
-                Section {
-                    Toggle("Agent Alerts", isOn: Binding(
-                        // Keep the preference while locked, but present the
-                        // unavailable capability as off. A tap is the intent
-                        // gate: remember that the user wants alerts, then open
-                        // the paywall. AttentionCenter still cannot schedule
-                        // anything until Pro is actually owned.
-                        get: { entitlements.canScheduleAgentAlerts && attention.alertsEnabled },
-                        set: { enabled in
-                            if enabled && !entitlements.canScheduleAgentAlerts {
-                                attention.alertsEnabled = true
-                                showingPaywall = true
-                            } else {
-                                attention.alertsEnabled = enabled
-                            }
-                        }
-                    ))
-                    if !entitlements.canScheduleAgentAlerts {
-                        Button("Unlock with Multiplex Pro…") { showingPaywall = true }
-                    }
-                } header: {
-                    Eyebrow("Alerts")
-                } footer: {
-                    Text("Posts a banner when Claude Code or Codex finishes a turn, asks a question, or wants permission to run something — in any session you're not currently typing in. Works while Multiplex is open; sessions keep running either way. Requires Multiplex Pro.")
-                }
-
-                Section {
-                    proRow("Unlimited Hosts")
-                    proRow("Mosh Transport")
-                    proRow(
-                        "Agent Helpers",
-                        freeStatus: "\(EntitlementStore.dailySlashChipLimit)/day"
-                    )
-                    proRow("Agent Alerts")
-                    proRow("Custom Themes")
-                    Button(entitlements.isPro
-                           ? "Multiplex Pro Details…"
-                           : "Unlock Multiplex Pro…") {
-                        showingPaywall = true
-                    }
-                    #if DEBUG
-                    Toggle("Pro unlocked (debug)", isOn: Binding(
-                        get: { entitlements.isPro },
-                        set: { entitlements.setDebugUnlocked($0) }
-                    ))
-                    #endif
-                } header: {
-                    Eyebrow("Pro")
-                } footer: {
-                    Text("Mosh keeps terminal connections alive through sleep and network changes. Agent Helpers shows built-in and custom quick commands when Claude Code, Codex, or Pi is running, and Agent Alerts notifies you when an unwatched supported session needs you. SSH terminals, agent detection and the deck's live state stay free.")
-                }
+                .frame(maxWidth: 680)
+                .padding(18)
+                .frame(maxWidth: .infinity)
             }
+            .background(sheetGround.ignoresSafeArea())
             .sheet(isPresented: $showingPaywall) { ProPaywallView() }
             .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -148,27 +39,224 @@ struct SettingsView: View {
             .navigationDestination(item: $editingTheme) { theme in
                 ThemeEditorView(theme: theme, onSave: save)
             }
+            #if DEBUG
+            .task { presentThemeEditorForVerificationIfRequested() }
+            #endif
+            #if !os(visionOS)
+            .toolbarBackground(Theme.chassis, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            #endif
+        }
+    }
+
+    @ViewBuilder
+    private var sheetGround: some View {
+        #if os(visionOS)
+        Color.clear
+        #else
+        Theme.chassis
+        #endif
+    }
+
+    private var currentThemeSection: some View {
+        TallyFormSection(
+            "Current theme",
+            detail: "Selections apply to every terminal immediately. The deck and window chrome always keep the Tally chassis."
+        ) {
+            TallyFormRow {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            ChassisLabel(themes.selected.name, size: 12)
+                            Text("TERMINAL SURFACE")
+                                .font(.mono(8, weight: .medium))
+                                .kerning(1)
+                                .foregroundStyle(Theme.signal3)
+                        }
+                        Spacer()
+                        ChassisBadge("ACTIVE", prominent: true)
+                    }
+
+                    ThemePreview(theme: themes.selected)
+                }
+            }
+        }
+    }
+
+    private var builtInThemesSection: some View {
+        TallyFormSection(
+            "Built-in themes",
+            detail: "Choose a terminal palette. Press and hold a theme to duplicate it as a custom starting point."
+        ) {
+            ForEach(TerminalTheme.builtIns) { theme in
+                ThemeRow(theme: theme, isSelected: themes.selectedID == theme.id) {
+                    themes.select(theme)
+                }
+                .contextMenu {
+                    Button("Duplicate") { duplicate(theme) }
+                }
+            }
+        }
+    }
+
+    private var customThemesSection: some View {
+        TallyFormSection("Your themes", detail: customThemesDetail) {
+            if themes.customThemes.isEmpty {
+                TallyFormRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ChassisLabel("No custom themes", size: 10, color: Theme.signal3)
+                        Text("Start from the active palette, then tune its surface and ANSI colors.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.signal2)
+                    }
+                }
+            } else {
+                ForEach(themes.customThemes) { theme in
+                    ThemeRow(
+                        theme: theme,
+                        isSelected: themes.selectedID == theme.id,
+                        select: { themes.select(theme) },
+                        edit: { requestThemeEditor(theme) },
+                        duplicate: { duplicate(theme) },
+                        delete: { themes.remove(theme) }
+                    )
+                }
+            }
+
+            TallyFormRow {
+                HStack(spacing: 12) {
+                    ChassisChip("NEW THEME", systemImage: "plus") {
+                        requestThemeEditor(themes.selected.asCustom(named: "New Theme"))
+                    }
+                    Spacer()
+                    if !entitlements.canMutateCustomThemes {
+                        ChassisBadge("PRO", prominent: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private var customThemesDetail: String {
+        if !entitlements.canMutateCustomThemes {
+            return "Creating, duplicating, and editing custom themes requires Multiplex Pro. Existing themes remain selectable and deletable."
+        }
+        return "New themes begin with the active palette. Use the row menu to edit, duplicate, or delete one."
+    }
+
+    private var alertsSection: some View {
+        TallyFormSection(
+            "Agent alerts",
+            detail: "Posts a banner when Claude Code or Codex finishes a turn, asks a question, or wants permission in a session you are not typing in. Multiplex must remain open. Requires Pro."
+        ) {
+            TallyFormRow {
+                HStack(spacing: 12) {
+                    ChassisSwitch(
+                        "ALERTS",
+                        isOn: agentAlertsBinding,
+                        accessibilityLabel: "Agent Alerts"
+                    )
+                    Spacer()
+                    if !entitlements.canScheduleAgentAlerts {
+                        ChassisBadge("PRO", prominent: true)
+                    }
+                }
+            }
+
+            if !entitlements.canScheduleAgentAlerts {
+                TallyFormRow {
+                    ChassisChip("VIEW MULTIPLEX PRO") { showingPaywall = true }
+                }
+            }
+        }
+    }
+
+    /// Keep the preference while locked, but present the unavailable capability
+    /// as off. A tap remembers the intent and opens the paywall; AttentionCenter
+    /// still cannot schedule anything until Pro is owned.
+    private var agentAlertsBinding: Binding<Bool> {
+        Binding(
+            get: { entitlements.canScheduleAgentAlerts && attention.alertsEnabled },
+            set: { enabled in
+                if enabled && !entitlements.canScheduleAgentAlerts {
+                    attention.alertsEnabled = true
+                    showingPaywall = true
+                } else {
+                    attention.alertsEnabled = enabled
+                }
+            }
+        )
+    }
+
+    private var proSection: some View {
+        TallyFormSection(
+            "Multiplex Pro",
+            detail: "Pro adds unlimited hosts, mosh, unlimited agent-helper commands, alerts, and custom themes. SSH terminals, agent detection, and the wall's live state stay free."
+        ) {
+            TallyFormRow {
+                HStack(spacing: 12) {
+                    ChassisLabel(
+                        entitlements.isPro ? "Pro unlocked" : "Free tier",
+                        size: 11
+                    )
+                    Spacer()
+                    ChassisBadge(
+                        entitlements.isPro ? "UNLOCKED" : "FREE",
+                        prominent: entitlements.isPro
+                    )
+                }
+            }
+
+            proRow("Unlimited Hosts")
+            proRow("Mosh Transport")
+            proRow(
+                "Agent Helpers",
+                freeStatus: "\(EntitlementStore.dailySlashChipLimit) / DAY"
+            )
+            proRow("Agent Alerts")
+            proRow("Custom Themes")
+
+            TallyFormRow {
+                ChassisChip(
+                    entitlements.isPro ? "PRO DETAILS" : "UNLOCK MULTIPLEX PRO",
+                    prominent: true
+                ) {
+                    showingPaywall = true
+                }
+            }
+
+            #if DEBUG
+            TallyFormRow {
+                ChassisSwitch(
+                    "PRO DEBUG",
+                    isOn: Binding(
+                        get: { entitlements.isPro },
+                        set: { entitlements.setDebugUnlocked($0) }
+                    ),
+                    accessibilityLabel: "Pro unlocked debug override"
+                )
+            }
+            #endif
         }
     }
 
     /// A Pro feature's lock status row.
     private func proRow(_ name: String, freeStatus: String = "Locked") -> some View {
-        HStack {
-            Text(name)
-            Spacer()
-            Text(entitlements.isPro ? "Unlocked" : freeStatus)
-                .foregroundStyle(.secondary)
+        TallyFormRow {
+            HStack(spacing: 12) {
+                ChassisLabel(name, size: 9, color: Theme.signal2)
+                Spacer()
+                ChassisBadge(entitlements.isPro ? "INCLUDED" : freeStatus.uppercased())
+            }
         }
     }
 
-    private func duplicateButton(for theme: TerminalTheme) -> some View {
-        Button("Duplicate") {
-            guard entitlements.canMutateCustomThemes else {
-                showingPaywall = true
-                return
-            }
-            editingTheme = theme.asCustom(named: "\(theme.name) Copy")
+    private func duplicate(_ theme: TerminalTheme) {
+        guard entitlements.canMutateCustomThemes else {
+            showingPaywall = true
+            return
         }
+        editingTheme = theme.asCustom(named: "\(theme.name) Copy")
     }
 
     /// Custom-theme mutation is Pro-gated at the edit intent. Existing
@@ -190,30 +278,112 @@ struct SettingsView: View {
             themes.update(theme)
         }
     }
+
+    #if DEBUG
+    private func presentThemeEditorForVerificationIfRequested() {
+        guard ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_SETTINGS"] == "theme"
+        else { return }
+        editingTheme = themes.selected.asCustom(named: "Tally Custom")
+    }
+    #endif
 }
 
-/// One selectable theme: live swatch, name, selection mark.
+/// One selectable theme: live terminal preview, identity, status, and optional
+/// custom-theme actions kept outside the selection button's hit target.
 private struct ThemeRow: View {
     let theme: TerminalTheme
     let isSelected: Bool
     let select: () -> Void
+    var edit: (() -> Void)?
+    var duplicate: (() -> Void)?
+    var delete: (() -> Void)?
 
+    @ViewBuilder
     var body: some View {
-        Button(action: select) {
-            HStack(spacing: 14) {
-                ThemePreview(theme: theme, compact: true)
-                    .frame(width: 148)
-                Text(theme.name)
-                    .foregroundStyle(.primary)
-                Spacer()
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? Theme.signal : Theme.bezelHi)
-                    .imageScale(.large)
-            }
-            .padding(.vertical, 4)
+        if hasActions {
+            row.contextMenu { actions }
+        } else {
+            row
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(theme.name)\(isSelected ? ", selected" : "")")
+    }
+
+    private var row: some View {
+        HStack(spacing: 1) {
+            Button(action: select) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 14) {
+                        ThemePreview(theme: theme, compact: true)
+                            .frame(width: 148)
+                        identity
+                        Spacer(minLength: 12)
+                        selectionBadge
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            identity
+                            Spacer(minLength: 8)
+                            selectionBadge
+                        }
+                        ThemePreview(theme: theme, compact: true)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(isSelected ? Theme.bezel : Theme.chassis)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .chassisHover(2)
+            .accessibilityLabel("\(theme.name) theme")
+            .accessibilityValue(isSelected ? "Selected" : "Not selected")
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+
+            if hasActions {
+                Menu {
+                    actions
+                } label: {
+                    ChassisBadge("", systemImage: "ellipsis")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .chassisHover(2)
+                .accessibilityLabel("Actions for \(theme.name)")
+            }
+        }
+        .background(Theme.bezelHi)
+    }
+
+    private var identity: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ChassisLabel(theme.name, size: 11)
+            Text(theme.isBuiltIn ? "BUILT-IN PALETTE" : "CUSTOM PALETTE")
+                .font(.mono(8, weight: .medium))
+                .kerning(1)
+                .foregroundStyle(Theme.signal3)
+                .lineLimit(1)
+        }
+    }
+
+    private var selectionBadge: some View {
+        ChassisBadge(isSelected ? "ACTIVE" : "SELECT", prominent: isSelected)
+    }
+
+    private var hasActions: Bool {
+        edit != nil || duplicate != nil || delete != nil
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        if let edit {
+            Button("Edit…", action: edit)
+        }
+        if let duplicate {
+            Button("Duplicate", action: duplicate)
+        }
+        if let delete {
+            Button("Delete", role: .destructive, action: delete)
+        }
     }
 }
 
@@ -233,14 +403,12 @@ struct ThemePreview: View {
         }
         .padding(compact ? 10 : 16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            Color(theme.background),
-            in: RoundedRectangle(cornerRadius: compact ? 9 : 14, style: .continuous)
-        )
+        .background(Color(theme.background))
         .overlay(
-            RoundedRectangle(cornerRadius: compact ? 9 : 14, style: .continuous)
-                .strokeBorder(Theme.bezelHi, lineWidth: 1)
+            Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1)
         )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Preview of the \(theme.name) terminal theme")
     }
 
     private var fontSize: CGFloat { compact ? 10 : 13 }
@@ -260,7 +428,7 @@ struct ThemePreview: View {
     private var ansiStrip: some View {
         HStack(spacing: compact ? 3 : 4) {
             ForEach(compact ? Array(0..<8) : Array(0..<16), id: \.self) { index in
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                Rectangle()
                     .fill(Color(theme.ansi(index)))
                     .frame(width: compact ? 8 : 12, height: compact ? 8 : 12)
             }

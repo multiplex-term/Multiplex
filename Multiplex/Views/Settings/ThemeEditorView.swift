@@ -20,27 +20,45 @@ struct ThemeEditorView: View {
         VStack(spacing: 0) {
             livePreview
 
-            Divider()
+            ScrollView {
+                VStack(spacing: 18) {
+                    TallyFormSection(
+                        "Theme identity",
+                        detail: "Shown in Settings and anywhere this palette is selected."
+                    ) {
+                        TallyFormField("Name") {
+                            TextField("Midnight", text: $draft.name)
+                        }
+                    }
 
-            Form {
-                Section("Name") {
-                    TextField("Name", text: $draft.name, prompt: Text("Midnight"))
-                }
+                    TallyFormSection(
+                        "Surface",
+                        detail: "The terminal's canvas, text, and insertion cursor."
+                    ) {
+                        surfacePicker("Background", keyPath: \.background)
+                        surfacePicker("Text", keyPath: \.foreground)
+                        surfacePicker("Cursor", keyPath: \.cursor)
+                    }
 
-                Section("Surface") {
-                    surfacePicker("Background", keyPath: \.background)
-                    surfacePicker("Text", keyPath: \.foreground)
-                    surfacePicker("Cursor", keyPath: \.cursor)
-                }
+                    TallyFormSection(
+                        "ANSI · Normal",
+                        detail: "The eight standard colors emitted by terminal programs."
+                    ) {
+                        ansiPickers(0..<8)
+                    }
 
-                Section("ANSI · Normal") {
-                    ansiPickers(0..<8)
+                    TallyFormSection(
+                        "ANSI · Bright",
+                        detail: "The high-intensity variants used for bold and bright output."
+                    ) {
+                        ansiPickers(8..<16)
+                    }
                 }
-
-                Section("ANSI · Bright") {
-                    ansiPickers(8..<16)
-                }
+                .frame(maxWidth: 680)
+                .padding(18)
+                .frame(maxWidth: .infinity)
             }
+            .background(sheetGround.ignoresSafeArea())
         }
         .navigationTitle(draft.name.isEmpty ? "Theme" : draft.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -53,38 +71,54 @@ struct ThemeEditorView: View {
                 .disabled(draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
+        #if !os(visionOS)
+        .toolbarBackground(Theme.chassis, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        #endif
     }
 
-    /// Lives outside the Form so only the controls scroll. The draft still
+    @ViewBuilder
+    private var sheetGround: some View {
+        #if os(visionOS)
+        Color.clear
+        #else
+        Theme.chassis
+        #endif
+    }
+
+    /// Lives outside the ScrollView so only the controls scroll. The draft still
     /// drives it directly, keeping every color change visible in context.
     private var livePreview: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Eyebrow("Live Preview")
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                ChassisLabel("Live preview", size: 10)
+                Spacer()
+                Text(draft.name.isEmpty ? "UNTITLED" : draft.name.uppercased())
+                    .font(.mono(8, weight: .semibold))
+                    .kerning(1)
+                    .foregroundStyle(Theme.signal3)
+                    .lineLimit(1)
+            }
             ThemePreview(theme: draft)
-            Text("Updates as you change the surface and ANSI colors below.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .frame(maxWidth: 680)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial)
+        .background(Theme.chassis)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.bezelHi).frame(height: 1)
+        }
     }
 
     private func ansiPickers(_ range: Range<Int>) -> some View {
         ForEach(range, id: \.self) { index in
-            HStack(spacing: 8) {
-                ColorPicker(
-                    TerminalTheme.ansiNames[index],
-                    selection: ansiBinding(index),
-                    supportsOpacity: false
-                )
-                resetButton(
-                    TerminalTheme.ansiNames[index],
-                    isDisabled: draft.ansi[index] == initialTheme.ansi[index]
-                ) {
-                    draft.ansi[index] = initialTheme.ansi[index]
-                }
+            colorPickerRow(
+                TerminalTheme.ansiNames[index],
+                color: draft.ansi[index],
+                selection: ansiBinding(index),
+                resetIsDisabled: draft.ansi[index] == initialTheme.ansi[index]
+            ) {
+                draft.ansi[index] = initialTheme.ansi[index]
             }
         }
     }
@@ -93,13 +127,38 @@ struct ThemeEditorView: View {
         _ label: String,
         keyPath: WritableKeyPath<TerminalTheme, ThemeColor>
     ) -> some View {
-        HStack(spacing: 8) {
-            ColorPicker(label, selection: binding(keyPath), supportsOpacity: false)
-            resetButton(
-                label,
-                isDisabled: draft[keyPath: keyPath] == initialTheme[keyPath: keyPath]
-            ) {
-                draft[keyPath: keyPath] = initialTheme[keyPath: keyPath]
+        colorPickerRow(
+            label,
+            color: draft[keyPath: keyPath],
+            selection: binding(keyPath),
+            resetIsDisabled: draft[keyPath: keyPath] == initialTheme[keyPath: keyPath]
+        ) {
+            draft[keyPath: keyPath] = initialTheme[keyPath: keyPath]
+        }
+    }
+
+    private func colorPickerRow(
+        _ label: String,
+        color: ThemeColor,
+        selection: Binding<Color>,
+        resetIsDisabled: Bool,
+        reset: @escaping () -> Void
+    ) -> some View {
+        TallyFormRow {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.signal)
+                    Text(color.hexString)
+                        .font(.mono(9, weight: .medium))
+                        .foregroundStyle(Theme.signal3)
+                }
+                Spacer()
+                ColorPicker(label, selection: selection, supportsOpacity: false)
+                    .labelsHidden()
+                    .accessibilityLabel(label)
+                resetButton(label, isDisabled: resetIsDisabled, action: reset)
             }
         }
     }
@@ -110,13 +169,13 @@ struct ThemeEditorView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Image(systemName: "arrow.counterclockwise")
-                .frame(width: 30, height: 30)
-                .contentShape(Rectangle())
+            ChassisBadge("", systemImage: "arrow.counterclockwise")
+                .frame(width: 36, height: 36)
         }
-        .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
+        .buttonStyle(.plain)
+        .chassisHover(2)
         .disabled(isDisabled)
+        .opacity(isDisabled ? 0.35 : 1)
         .accessibilityLabel("Reset \(label)")
     }
 

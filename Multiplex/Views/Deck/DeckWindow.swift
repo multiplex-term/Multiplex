@@ -220,6 +220,7 @@ struct DeckWindow: View {
         }
         #if DEBUG
         .task { presentPaywallForReviewCaptureIfRequested() }
+        .task { presentSettingsForVerificationIfRequested() }
         .task { await presentHostSettingsForVerificationIfRequested() }
         .task {
             await DeckScene.autoAttachIfRequested(
@@ -253,6 +254,14 @@ struct DeckWindow: View {
     }
 
     #if DEBUG
+    /// Launch with `MULTIPLEX_AUTO_SETTINGS=1|theme` to open the global
+    /// Settings sheet for deterministic layout and entitlement-gate screenshots.
+    private func presentSettingsForVerificationIfRequested() {
+        guard let request = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_SETTINGS"],
+              ["1", "theme"].contains(request) else { return }
+        showingSettings = true
+    }
+
     /// Headless regression hook for the Observation environment crossing the
     /// deck's sheet boundary. A missing HostStore used to fatal as Host
     /// Settings opened from the compact shell.

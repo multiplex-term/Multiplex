@@ -88,6 +88,9 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 - `MULTIPLEX_AUTO_PAYWALL=1` — opens the real locked Pro paywall with a
   deterministic $19.99 storefront preview for App Review screenshot capture;
   DEBUG only, because simctl launches don't inherit Xcode's StoreKit session.
+- `MULTIPLEX_AUTO_SETTINGS=1|theme` — opens the global Settings sheet for
+  headless layout and entitlement-state capture; `theme` pushes its theme
+  editor for the same treatment.
 - `MULTIPLEX_AUTO_HOST_SETTINGS=1` — opens the first host's edit sheet to
   regression-check the Observation environment across the shell/scene sheet
   boundary (a missing HostStore is a fatal error, not a recoverable blank).
