@@ -7,7 +7,7 @@ Multiplex 1.0 — first release.
 • A custom tmux shortcut menu, with touch-native copy mode, in the Vision Pro UMD and iPad key bar
 • Touch and pointer clicks for mouse-aware terminal apps
 • Multilingual system-keyboard and IME input, plus hardware keyboard support
-• Claude Code / Codex / Pi detection across split panes and plain SSH shells, with foreground-aware helpers, synced per-host chip placement and custom commands, sharing across all three agents on that host, and Claude Code/Codex Pro alerts
+• Claude Code / Codex / Pi detection across split panes and plain SSH shells, with foreground-aware helpers, synced per-host chip placement and custom commands, sharing across all three agents on that host, Claude Code/Codex Pro alerts, and a Claude Code prompt-history panel with jump-back-to-message (Pro)
 • mosh built in (Pro): sessions survive sleep, roaming, and IP changes
 • File attachments from Photos or Files, camera capture on iPad, and terminal drag-and-drop
 • Built-in themes, Pro custom themes, iCloud Keychain host sync

@@ -36,6 +36,9 @@ final class TerminalSessionController {
     /// agent is running.
     private(set) var directShellAgent: AgentKind?
     private(set) var directShellAttention: PaneAgentState?
+    /// The foreground process group's cwd, when the shell probe could reveal
+    /// it — a plain shell's only source for locating agent session files.
+    private(set) var directShellWorkingDirectory: String?
 
     /// App-owned interaction state layered over tmux copy mode. While it is
     /// active, SwiftTerm stops forwarding taps as tmux mouse clicks: pans
@@ -43,6 +46,37 @@ final class TerminalSessionController {
     /// iPadOS's native text selection and copies into the local pasteboard.
     /// The terminal HUD provides the explicit exit path tmux itself lacks.
     private(set) var tmuxCopyModeUIActive = false
+
+    /// The HISTORY surface: user prompts read from the agent's own session
+    /// file on the host (see `AgentSessionHistory`). Present while the panel
+    /// is open; cleared on dismiss so a stale list never reopens.
+    enum AgentHistoryStatus: Equatable {
+        case loading
+        case loaded(
+            agent: AgentKind,
+            messages: [AgentUserMessage],
+            jumpAvailable: Bool
+        )
+        case unavailable(String)
+    }
+    private(set) var agentHistory: AgentHistoryStatus?
+    private var historyLoadTask: Task<Void, Never>?
+
+    /// Jump-to-message drives Claude Code's own PgUp pager over the control
+    /// path. While `.finding`, the terminal's input is locked (a keystroke
+    /// would interleave with the remote paging); `.jumped` keeps a BACK TO
+    /// LIVE exit visible until the user returns or types.
+    enum HistoryJumpPhase: Equatable {
+        case finding(preview: String)
+        case jumped(preview: String, pages: Int)
+    }
+    private(set) var historyJump: HistoryJumpPhase?
+    private var historyJumpTask: Task<Void, Never>?
+    private var historyJumpSessionID: String?
+    /// Transient status pill ("AGENT IS BUSY", "NOT IN THE VISIBLE
+    /// TRANSCRIPT") — jump failures are outcomes, not errors.
+    private(set) var historyNotice: String?
+    private var historyNoticeClearTask: Task<Void, Never>?
 
     /// How far a *docked* keyboard presentation (software keyboard, or the
     /// accessory-only key rail of hardware-keyboard mode) intrudes above the
@@ -301,6 +335,7 @@ final class TerminalSessionController {
         stopInputPump()
         stopDirectShellMonitoring()
         setTmuxCopyModeUIActive(false)
+        resetHistoryState()
         if case .ended = status { return }
         status = .ended(reason)
     }
@@ -368,10 +403,11 @@ final class TerminalSessionController {
         let screen = terminalScreenSnapshot()
         let agent: AgentKind?
         switch outcome {
-        case .available(let detected):
+        case .available(let detected, let workingDirectory):
             // Definitive even when nil: this is what clears stale titles and
             // helper UI as soon as the foreground agent exits.
             agent = detected
+            directShellWorkingDirectory = workingDirectory
         case .unavailable:
             agent = AgentSignature.classifyTerminal(
                 title: remoteTitle,
@@ -427,6 +463,7 @@ final class TerminalSessionController {
         terminalAgentHint = nil
         directShellAgent = nil
         directShellAttention = nil
+        directShellWorkingDirectory = nil
         directShellAttentionAgent = nil
         directShellAttentionTracker.reset()
     }
@@ -458,6 +495,16 @@ final class TerminalSessionController {
 
     func sendInput(_ data: Data) {
         guard status == .live else { return }
+        // While the jump search pages the remote transcript, a keystroke
+        // would interleave with the automated PgUp stream — the FINDING veil
+        // is the visible contract for this lock.
+        if case .finding = historyJump { return }
+        if case .jumped = historyJump {
+            // Typing (or Escape) returns Claude Code's pager to the live
+            // tail on its own; drop the app-side state with it.
+            historyJump = nil
+            historyJumpSessionID = nil
+        }
         inputContinuation?.yield(data)
         // Both the app-owned DONE action and a hardware/software Escape key
         // travel through this same delegate path. Restore normal tmux mouse
@@ -473,6 +520,10 @@ final class TerminalSessionController {
     /// channel, which avoids the timing-sensitive tmux `:` prompt entirely.
     func performTmuxShortcut(_ shortcut: TmuxShortcut) {
         guard status == .live, let sessionName = route.sessionName else { return }
+        // The jump search owns the pane while it pages; a shortcut now would
+        // either be dropped by the input lock (leaving copy-mode UI stuck
+        // half-armed) or race the remote script.
+        if case .finding = historyJump { return }
         if let input = shortcut.bindingInput {
             guard let terminalView else { return }
             if shortcut == .copyMode {
@@ -530,6 +581,273 @@ final class TerminalSessionController {
         await control.close()
     }
 
+    /// SSH tabs reuse their own exec-capable connection; a mosh tab opens
+    /// one short-lived control connection for the whole closure, so a
+    /// multi-exec flow (history read, jump prologue + find) pays a single
+    /// handshake instead of one per command.
+    private func withControlConnection<T: Sendable>(
+        _ body: (SSHConnection) async throws -> T
+    ) async throws -> T {
+        if let connection { return try await body(connection) }
+        let control = SSHConnection(host: host, secrets: .load(for: host))
+        try await control.connect()
+        do {
+            let value = try await body(control)
+            await control.close()
+            return value
+        } catch {
+            await control.close()
+            throw error
+        }
+    }
+
+    // MARK: Agent message history (HISTORY surface + jump-to-message)
+
+    /// Whether this tab can read agent session files at all: tmux routes
+    /// resolve the pane cwd over the control path (mosh included — SSH stays
+    /// the control plane); a plain shell needs its probe-discovered cwd and
+    /// its own exec surface (direct mosh shells have neither).
+    var canOfferAgentHistory: Bool {
+        guard status == .live else { return false }
+        if route.sessionName != nil { return true }
+        return connection != nil && directShellWorkingDirectory != nil
+    }
+
+    /// The HISTORY panel opened: read the active session file's user
+    /// prompts. Reloaded on every open — the file is append-only and the
+    /// bounded tail read is cheap. Claude Code only: the session-file
+    /// surface concentrates on the one agent whose pager jump is exact.
+    func openAgentHistory(for agent: AgentKind) {
+        guard status == .live, agent == .claudeCode else { return }
+        historyLoadTask?.cancel()
+        agentHistory = .loading
+        historyLoadTask = Task { [weak self] in
+            await self?.loadAgentHistory(agent)
+        }
+    }
+
+    func closeAgentHistory() {
+        historyLoadTask?.cancel()
+        historyLoadTask = nil
+        agentHistory = nil
+    }
+
+    private func loadAgentHistory(_ agent: AgentKind) async {
+        let shellCwd = directShellWorkingDirectory
+        do {
+            let result: AgentSessionHistory.ReadResult? =
+                try await withControlConnection { [route] connection in
+                    let cwd: String?
+                    let preferredSessionID: String?
+                    if let sessionName = route.sessionName {
+                        let output = try await connection.exec(
+                            AgentSessionHistory.paneContextCommand(
+                                sessionName: sessionName
+                            )
+                        )
+                        let context = AgentSessionHistory.parsePaneContext(output)
+                        cwd = context?.cwd
+                        preferredSessionID = context?.agentSessionID
+                    } else {
+                        cwd = shellCwd
+                        preferredSessionID = nil
+                    }
+                    guard let cwd else { return nil }
+                    let output = try await connection.exec(
+                        AgentSessionHistory.readCommand(
+                            cwd: cwd,
+                            preferredSessionID: preferredSessionID
+                        )
+                    )
+                    return AgentSessionHistory.parseReadOutput(output)
+                }
+            guard !Task.isCancelled, agentHistory != nil else { return }
+            guard let result else {
+                agentHistory = .unavailable("NO WORKING DIRECTORY")
+                return
+            }
+            guard result.filePath != nil else {
+                agentHistory = .unavailable("NO SESSION FILE")
+                return
+            }
+            agentHistory = .loaded(
+                agent: agent,
+                messages: result.messages,
+                jumpAvailable: route.sessionName != nil && agent == .claudeCode
+            )
+        } catch {
+            guard !Task.isCancelled, agentHistory != nil else { return }
+            agentHistory = .unavailable("HISTORY UNAVAILABLE")
+        }
+    }
+
+    private enum HistoryJumpOutcome {
+        case found(sessionID: String, pages: Int)
+        case failed(String)
+    }
+
+    /// Scroll the live Claude Code transcript back to `message`: verify the
+    /// agent is idle (paging a running turn fights streaming repaints, and
+    /// the restore path must never need Esc), then run the one-exec remote
+    /// header-oracle walk — see `AgentSessionHistory.jumpFindCommand`. The
+    /// full loaded message list rides along: every pinned turn header the
+    /// pager shows is matched against it, so each step is directed.
+    func startHistoryJump(to message: AgentUserMessage) {
+        guard status == .live,
+              let sessionName = route.sessionName,
+              !tmuxCopyModeUIActive,
+              case .loaded(let agent, let messages, true) = agentHistory,
+              agent == .claudeCode,
+              message.reachable
+        else { return }
+        // Only an in-flight search blocks a new jump. A lingering `.jumped`
+        // state is superseded directly — the find script normalizes to live
+        // first, so chaining jumps needs no manual BACK TO LIVE.
+        if case .finding = historyJump { return }
+        historyJumpSessionID = nil
+        let preview = String(message.firstLine.prefix(24))
+        historyJump = .finding(preview: preview)
+        historyJumpTask = Task { [weak self] in
+            await self?.runHistoryJump(
+                message: message,
+                allMessages: messages,
+                sessionName: sessionName,
+                preview: preview
+            )
+        }
+    }
+
+    private func runHistoryJump(
+        message: AgentUserMessage,
+        allMessages: [AgentUserMessage],
+        sessionName: String,
+        preview: String
+    ) async {
+        let outcome: HistoryJumpOutcome
+        do {
+            outcome = try await withControlConnection { connection in
+                let prologueOutput = try await connection.exec(
+                    AgentSessionHistory.jumpPrologueCommand(sessionName: sessionName)
+                )
+                guard let prologue = AgentSessionHistory.parseJumpPrologue(prologueOutput)
+                else { return .failed("SESSION NOT FOUND") }
+                switch AgentAttention.classify(
+                    title: prologue.paneTitle, tail: prologue.capture
+                ) {
+                case .busy: return .failed("AGENT IS BUSY")
+                case .needsYou: return .failed("ANSWER THE AGENT FIRST")
+                case .idle: break
+                }
+                let targetNeedles = AgentSessionHistory.needles(
+                    for: message, paneColumns: prologue.paneWidth
+                )
+                guard let targetPrimary = targetNeedles.first else {
+                    return .failed("MESSAGE TOO SHORT TO FIND")
+                }
+                let entries = AgentSessionHistory.needleEntries(
+                    for: allMessages, paneColumns: prologue.paneWidth
+                )
+                // Identical prompts ("commit") share one needle: tell the
+                // walk how many NEWER twins to climb past so it lands on
+                // the requested one, not the nearest.
+                let newerTwins = entries.filter {
+                    $0.index > message.ordinal && $0.text == targetPrimary
+                }.count
+                let findOutput = try await connection.exec(
+                    AgentSessionHistory.jumpFindCommand(
+                        sessionID: prologue.sessionID,
+                        needles: entries,
+                        targetIndex: message.ordinal,
+                        targetNeedles: targetNeedles,
+                        newerTwinCount: newerTwins
+                    )
+                )
+                switch AgentSessionHistory.parseJumpFind(findOutput) {
+                case .found(let pages):
+                    return .found(sessionID: prologue.sessionID, pages: pages)
+                case .top, .exhausted:
+                    // The remote script already restored the live view.
+                    return .failed("NOT IN THE VISIBLE TRANSCRIPT")
+                case nil:
+                    return .failed("SEARCH FAILED")
+                }
+            }
+        } catch {
+            outcome = .failed("SEARCH FAILED")
+        }
+
+        switch outcome {
+        case .found(let sessionID, let pages):
+            if Task.isCancelled || historyJump == nil {
+                // Cancelled mid-find but the search landed: put the pane
+                // back rather than leaving it silently paged.
+                returnTranscriptToLive(sessionID: sessionID, pages: pages)
+                return
+            }
+            historyJumpSessionID = sessionID
+            historyJump = .jumped(preview: preview, pages: pages)
+        case .failed(let reason):
+            guard !Task.isCancelled, historyJump != nil else { return }
+            historyJump = nil
+            showHistoryNotice(reason)
+        }
+    }
+
+    /// CANCEL during `.finding`. The remote script is already running and
+    /// finishes on its own (it self-restores on a miss); a late FOUND result
+    /// is answered with a restore in `runHistoryJump`.
+    func cancelHistoryJump() {
+        guard case .finding = historyJump else { return }
+        historyJump = nil
+        historyJumpTask?.cancel()
+    }
+
+    /// BACK TO LIVE from `.jumped`: Claude's Ctrl+End scroll-bottom binding,
+    /// never Esc — a turn may have started since the search verified idle.
+    func finishHistoryJump() {
+        guard case .jumped(_, let pages) = historyJump else { return }
+        let sessionID = historyJumpSessionID
+        historyJump = nil
+        historyJumpSessionID = nil
+        guard let sessionID else { return }
+        returnTranscriptToLive(sessionID: sessionID, pages: pages)
+    }
+
+    private func returnTranscriptToLive(sessionID: String, pages: Int) {
+        Task { [weak self] in
+            _ = try? await self?.withControlConnection { connection in
+                try await connection.exec(
+                    AgentSessionHistory.jumpReturnCommand(
+                        sessionID: sessionID, pages: pages
+                    )
+                )
+            }
+        }
+    }
+
+    private func showHistoryNotice(_ text: String) {
+        historyNoticeClearTask?.cancel()
+        historyNotice = text
+        historyNoticeClearTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            self?.historyNotice = nil
+        }
+    }
+
+    private func resetHistoryState() {
+        historyLoadTask?.cancel()
+        historyLoadTask = nil
+        agentHistory = nil
+        historyJumpTask?.cancel()
+        historyJumpTask = nil
+        historyJump = nil
+        historyJumpSessionID = nil
+        historyNoticeClearTask?.cancel()
+        historyNoticeClearTask = nil
+        historyNotice = nil
+    }
+
     #if DEBUG
     /// Runtime verification only: deliberately enters through SwiftTerm so
     /// the proof covers TerminalView → delegate → this controller's ordered
@@ -568,6 +886,9 @@ final class TerminalSessionController {
     /// own connection, then type the resulting paths through the input pump
     /// — no Enter, the user finishes the prompt. One batch at a time.
     func deliverDrop(_ files: [DroppedFile]) {
+        // The jump search owns the pane's input while it pages; the FINDING
+        // veil is visible over the drop target for its few seconds.
+        if case .finding = historyJump { return }
         if (host.useMosh || route.sessionName == nil),
            status == .live, dropTask == nil, !files.isEmpty {
             // Mosh has no SFTP channel, while a plain shell has no tmux pane
@@ -689,6 +1010,7 @@ final class TerminalSessionController {
         stopInputPump()
         stopDirectShellMonitoring()
         setTmuxCopyModeUIActive(false)
+        resetHistoryState()
         status = .ended(nil)
         contactLost = false
         let transport = self.transport
@@ -701,6 +1023,7 @@ final class TerminalSessionController {
     func reconnect() {
         guard case .ended = status else { return }
         setTmuxCopyModeUIActive(false)
+        resetHistoryState()
         status = .connecting
         Task { await run() }
     }

@@ -168,6 +168,13 @@ pane's cwd → tab append → attach), and
 iPad terminal's tmux shortcut popover for layout capture, and
 `… -p app.multiplexterm.multiplex.debug.customcommands` opens the focused
 terminal's Command Setup editor for layout capture, and
+`… -p app.multiplexterm.multiplex.debug.msghistory` opens the focused
+terminal's agent HISTORY panel (session-file prompt list) for layout
+capture, and
+`… -p app.multiplexterm.multiplex.debug.msgjump` / `….debug.msgjumpback`
+jumps the focused Claude Code terminal to its oldest session-file prompt
+and runs BACK TO LIVE — host-side `tmux capture-pane` proves both (the old
+prompt appears at the top of the pane, then the live tail returns), and
 `… -p app.multiplexterm.multiplex.debug.tmuxcopy` sends Copy Mode through
 SwiftTerm and the terminal's ordered input pump, and
 `… -p app.multiplexterm.multiplex.debug.tmuxcopydone` runs the contextual
@@ -523,6 +530,72 @@ views.
   from its measured rendered height and cap only true overflow; never restore a
   command-count multiplier. Multiline rows do not have one stable height, so
   estimates leave a blank trench above the footer or clip edited content.
+- **HISTORY reads Claude Code's own session file; jump walks Claude's pager
+  with the header oracle** (`AgentSessionHistory`, pure + fixture-tested;
+  Pro via `canBrowseAgentHistory`). **Claude Code only** — Codex/Pi history
+  was deliberately withdrawn 2026-07-16; do not re-add a lesser variant
+  without a mechanism as exact as this one. The control path resolves the
+  pane cwd (`list-panes -F`, same 3.6a discipline as drops), walks
+  descendants of `#{pane_pid}`, and reads Claude's live
+  `~/.claude/sessions/<pid>.json` registry, selecting that exact
+  `~/.claude/projects/<munged-cwd>/<sessionId>.jsonl`; **do not regress to
+  newest-mtime-only** — multiple Claude panes in one cwd are common, and the
+  wrong file makes every JUMP miss. Missing/older registries fail soft to
+  newest mtime. Reads are sentinel-framed with server-side grep pre-filters
+  (Claude files reach tens of MB and its `type:"user"` lines are mostly
+  tool results; `<task-notification>`-style wrapper turns are filtered
+  app-side), and long base64 `"data"` values are blanked BEFORE the tail
+  byte cut — one pasted screenshot is a single 380 KB user line that
+  otherwise crowds every older prompt out of the list (observed in a real
+  5-prompt session that listed only 2). **Claude Code ≥2.x owns the alternate screen under tmux — its
+  transcript never enters tmux scrollback**, so copy-mode search can't find
+  it; jump is ONE server-side exec (RTT-independent). The pager facts the
+  walk is built on (verified 2.1.211): PgUp/PgDn move half the transcript
+  region; **row 1 of a scrolled view is the sticky `❯` header of the turn
+  that owns the top row** (banner region → no `❯`), and it coexists with
+  real `❯` rows below; Ctrl+End is scroll-bottom, Ctrl+Home scroll-top; no
+  line-granular scroll exists. The find therefore ships the WHOLE loaded
+  message list as an index (longest-needle-first, 1-based; an awk classifier
+  reports `pin` = which known turn owns row 1, `real` = the target's actual
+  `❯` row, bottom chrome excluded so a drafted composer can't false-match):
+  normalize to live, then every step is directed — pin newer than target →
+  batched PgUp, pin == target → smaller batches through its response, pin
+  older → single PgDn approach from above, unknown pins ride the current
+  direction. Landing is deterministic: accept only a real row in the TOP
+  half; a lower sighting takes one PgDn (half-page steps cannot skip the
+  window). Two upward crossings past the target without its row = needle
+  mismatch → one retry with the 24-column fallback, then an honest miss.
+  The 400-send budget is a runaway stop, not a search radius — there is no
+  blind page cap anymore. Misses, cancellation traps, and BACK TO LIVE use
+  Ctrl+End in constant time, **never Esc** — Esc can interrupt a running
+  turn. Long prompts render as ONE `…`-truncated row at pane width, so
+  needles are ≤60-column normalized first-line prefixes (wide glyphs cost
+  two columns); pure-paste messages can match nothing and remain peek-only.
+  **Identical prompts ("commit") are counted from the bottom**: family pins
+  always read as the target's turn, each twin's row is counted once at its
+  first appearance while climbing, and the (newer-twin-count + 1)-th
+  sighting is the requested one — with every upward batch capped under one
+  viewport (`twinSafeBatch`) so a twin row can never slip between captures;
+  counting only happens on upward motion. Slash commands are actions,
+  not prompts: the file records them BOTH as bare "/cmd" user lines and as
+  `<command-…>` wrappers (either tag order), and all are filtered from the
+  list. **Only the typed `/compact` line is a transcript-reset boundary**
+  (verified on 2.1.211: the view drops to the fresh banner; an empty-session
+  failure writes nothing; `/clear` starts a whole new session file, so its
+  rule is dormant-defensive) — prompts before it keep peek but carry
+  `reachable=false`, which withholds JUMP; don't "fix" that by searching
+  harder, the pager genuinely cannot reach them. `isCompactSummary` entries
+  are deliberately NOT boundaries: they come from auto-compaction and
+  continued-out-of-context sessions, which keep the rendered transcript —
+  treating them as resets hid working JUMP buttons (user-reported). The
+  asymmetry rules the tie: a wrongly hidden button is unexplainable, a
+  wrongly shown one ends in the honest miss pill. Only `.finding` blocks a
+  new jump: a lingering JUMPED state is superseded directly (the
+  normalized start makes chaining safe). While `.finding`, the terminal's
+  input pump is locked and a veil says so; `.shell` tabs list history
+  through the probe's cwd stage (`readlink /proc`, `lsof` fallback) but
+  never jump. Plan + verified experiment record:
+  `local-plan/agent-message-history.md`.
 - **File attach/drop = SFTP upload + typed path, never Enter**: compatible
   SSH-backed tmux tabs carry one free FILE menu in the UMD/classic iPad toolbar
   (Camera on iPad/iPhone, Photos and Files everywhere); every picker result

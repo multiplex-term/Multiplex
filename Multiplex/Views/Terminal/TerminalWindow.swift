@@ -235,6 +235,16 @@ struct TerminalWindowRoot: View {
             .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugNewTab)) { _ in
                 debugNewTab()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugMessageJump)) { _ in
+                debugJumpToOldestMessage()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugMessageJumpBack)) { _ in
+                guard let controller = activeController,
+                      let view = controller.terminalView,
+                      view === TerminalFocusArbiter.current
+                else { return }
+                controller.finishHistoryJump()
+            }
             #endif
     }
 
@@ -246,6 +256,7 @@ struct TerminalWindowRoot: View {
         #if DEBUG
         AgentChipDebugHook.install()
         NewTabDebugHook.install()
+        MessageJumpDebugHook.install()
         #endif
         guard let hostID = activeTab?.hostID, let host = store.host(id: hostID) else { return }
         let model = hub.model(for: host)
@@ -396,6 +407,32 @@ struct TerminalWindowRoot: View {
               view === TerminalFocusArbiter.current
         else { return }
         openNewTab(launching: nil)
+    }
+
+    /// Headless jump proof: load the focused pane's history and jump to the
+    /// oldest REACHABLE prompt (prompts behind a /compact boundary are
+    /// peek-only by design) — the deepest exercise of the pipeline (cwd
+    /// resolve → session file → parse → idle gate → remote oracle walk).
+    /// Host-side capture-pane then shows the old prompt on screen.
+    private func debugJumpToOldestMessage() {
+        guard let controller = activeController,
+              let view = controller.terminalView,
+              view === TerminalFocusArbiter.current,
+              let agent = shownAgent
+        else { return }
+        Task {
+            controller.openAgentHistory(for: agent)
+            for _ in 0..<60 {
+                if case .loaded = controller.agentHistory { break }
+                if case .unavailable = controller.agentHistory { return }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            guard case .loaded(_, let messages, true) = controller.agentHistory,
+                  let oldest = messages.first(where: \.reachable)
+            else { return }
+            controller.startHistoryJump(to: oldest)
+            controller.closeAgentHistory()
+        }
     }
     #endif
 
@@ -661,6 +698,8 @@ struct TerminalWindowRoot: View {
                     for: agent
                 ),
                 customCommands: commandConfiguration.commands(for: agent),
+                historyController: controller,
+                historyLocked: !entitlements.canBrowseAgentHistory,
                 floating: floating,
                 floatingMaximumWidth: floatingMaximumWidth,
                 contentSafeArea: floating ? EdgeInsets() : contentSafeArea,
@@ -1026,6 +1065,12 @@ private struct TerminalPane: View {
                     isActive: isActive && focusAllowed,
                     showsTmuxShortcuts: controller.route.sessionName != nil
                 )
+                if case .finding = controller.historyJump {
+                    // The remote find loop owns the pane: the veil makes the
+                    // input lock visible and swallows touches until the
+                    // search resolves or is cancelled.
+                    HistoryFindingVeil()
+                }
                 statusOverlay(for: controller)
             } else if !hostExists {
                 missingHost
@@ -1061,11 +1106,31 @@ private struct TerminalPane: View {
                     .padding(.top, 12)
             }
         }
-        .overlay(alignment: .bottom) {
-            if let dropState = controller?.dropState {
-                DropStatusPill(state: dropState)
-                    .padding(.bottom, 12)
+        // Trailing, not centered: the find loop stops on the page where the
+        // message entered from the top, so the jumped-to line is usually the
+        // FIRST row — a centered bar would sit right on it.
+        .overlay(alignment: .topTrailing) {
+            if isActive, let controller, !controller.tmuxCopyModeUIActive,
+               let phase = controller.historyJump {
+                HistoryJumpBar(
+                    phase: phase,
+                    cancel: controller.cancelHistoryJump,
+                    backToLive: controller.finishHistoryJump
+                )
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
             }
+        }
+        .overlay(alignment: .bottom) {
+            VStack(spacing: 8) {
+                if let notice = controller?.historyNotice {
+                    HistoryNoticePill(text: notice)
+                }
+                if let dropState = controller?.dropState {
+                    DropStatusPill(state: dropState)
+                }
+            }
+            .padding(.bottom, 12)
         }
     }
 
@@ -1153,17 +1218,118 @@ private struct TmuxCopyModeBar: View {
     }
 }
 
+/// Jump-to-message state over the terminal: FINDING while the remote script
+/// pages the transcript (input is locked, the veil below explains why), and
+/// JUMPED once the message is on screen, with the explicit way back.
+private struct HistoryJumpBar: View {
+    let phase: TerminalSessionController.HistoryJumpPhase
+    var cancel: () -> Void
+    var backToLive: () -> Void
+
+    var body: some View {
+        HStack(spacing: 18) {
+            switch phase {
+            case .finding(let preview):
+                TallyLamp(caption: "FINDING", color: Theme.caution)
+                previewLabel(preview)
+                ChassisChip("CANCEL", action: cancel)
+            case .jumped(let preview, _):
+                TallyLamp(caption: "JUMPED", color: Theme.caution)
+                previewLabel(preview)
+                ChassisChip("BACK TO LIVE", prominent: true, action: backToLive)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            Theme.bezel,
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.bezelHi, lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
+    }
+
+    private func previewLabel(_ preview: String) -> some View {
+        Text(preview)
+            .font(.mono(10))
+            .foregroundStyle(Theme.signal2)
+            .lineLimit(1)
+            .frame(maxWidth: 220)
+    }
+}
+
+/// Dims the pane and swallows touches while the jump search drives the
+/// remote pager — the visible face of the controller's input lock.
+private struct HistoryFindingVeil: View {
+    var body: some View {
+        ZStack {
+            Theme.screen.opacity(0.72)
+            VStack(spacing: 10) {
+                ProgressView()
+                ChassisLabel("SEARCHING TRANSCRIPT", size: 10, color: Theme.signal2)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+/// Transient jump outcome ("AGENT IS BUSY", "NOT IN THE VISIBLE
+/// TRANSCRIPT") — same chassis voice as the drop pill beside it.
+private struct HistoryNoticePill: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(Theme.caution).frame(width: 5, height: 5)
+            Text(text)
+                .font(.mono(10))
+                .foregroundStyle(Theme.signal2)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Theme.bezel)
+        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+}
+
 #if DEBUG
 #Preview("Copy mode bar") {
     TmuxCopyModeBar(done: {})
         .padding()
         .background(Theme.screen)
 }
+
+#Preview("History jump bars") {
+    VStack(spacing: 12) {
+        HistoryJumpBar(
+            phase: .finding(preview: "Fix the probe parser"),
+            cancel: {},
+            backToLive: {}
+        )
+        HistoryJumpBar(
+            phase: .jumped(preview: "Fix the probe parser", pages: 7),
+            cancel: {},
+            backToLive: {}
+        )
+        HistoryNoticePill(text: "NOT IN THE VISIBLE TRANSCRIPT")
+    }
+    .padding()
+    .background(Theme.screen)
+}
 #endif
 
 #if DEBUG
 extension Notification.Name {
     static let multiplexDebugNewTab = Notification.Name("MultiplexDebugNewTab")
+    static let multiplexDebugMessageJump = Notification.Name("MultiplexDebugMessageJump")
+    static let multiplexDebugMessageJumpBack = Notification.Name(
+        "MultiplexDebugMessageJumpBack"
+    )
 }
 
 /// Headless-verification hook, same shape as `AgentChipDebugHook`:
@@ -1183,6 +1349,36 @@ enum NewTabDebugHook {
             "app.multiplexterm.multiplex.debug.newtab", &token, .main
         ) { _ in
             NotificationCenter.default.post(name: .multiplexDebugNewTab, object: nil)
+        }
+    }
+}
+
+/// `….debug.msgjump` jumps the focused Claude Code terminal to its oldest
+/// session-file prompt; `….debug.msgjumpback` runs BACK TO LIVE. Host-side
+/// capture-pane proves both: the old prompt appears, then the live tail
+/// returns.
+@MainActor
+enum MessageJumpDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var jumpToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.msgjump", &jumpToken, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugMessageJump, object: nil
+            )
+        }
+        var backToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.msgjumpback", &backToken, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugMessageJumpBack, object: nil
+            )
         }
     }
 }
