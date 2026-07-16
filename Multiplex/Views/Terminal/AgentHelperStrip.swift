@@ -88,8 +88,11 @@ struct AgentHelperStrip: View {
                     // retain the overlay's taller proposal on iPadOS and let its
                     // chip faces paint through that spacer, covering the rail.
                     // The docked chassis is physically 48 pt tall; contain every
-                    // descendant to that declared surface.
+                    // descendant's pixels and hit testing to that declared
+                    // surface. Clipping alone does not bound SwiftUI's
+                    // interaction region.
                     .clipped()
+                    .contentShape(.interaction, Rectangle())
             }
         }
         // A pane switch may replace one agent with another in the same view

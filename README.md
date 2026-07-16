@@ -50,9 +50,11 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
   then press **Done** to return to the shell. On SSH-backed tmux tabs,
   **FILE** attaches from Photos or Files (plus Camera on iPad), uploads into
   the active pane's working directory, and types the remote path without
-  submitting; dropping a file on the terminal uses the same path. SwiftTerm renders xterm-256color; resizing
-  the window sends PTY window-change to the remote. **Detach** closes
-  the active tab's channel — tmux keeps the session; the wall still shows it.
+  submitting; dropping a file on the terminal uses the same path. SwiftTerm
+  renders xterm-256color, sends taps and pointer clicks to mouse-aware TUIs as
+  primary-button events, and reports window resizing to the remote PTY.
+  **Detach** closes the active tab's channel — tmux keeps the session; the wall
+  still shows it.
 - **Agent helpers** — when the active tmux pane **or a plain SSH shell** runs
   Claude Code, Codex, or Pi, a context-specific command strip follows it. The
   focused terminal checks process selection between full wall ticks, so moving
@@ -112,7 +114,7 @@ with any POSIX-ish login shell, and channel close = clean detach.
 
 | Library | Version | Why |
 | --- | --- | --- |
-| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | 1.13.0, vendored | The only mature native-Swift terminal emulator view; declares visionOS support; MIT. Vendored at `Vendor/SwiftTerm` (rev `8e7a1e1`) with one patch: `keyboardType` is settable so the terminal defaults to an ASCII-capable (English) keyboard instead of the user's IME. |
+| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | 1.13.0, vendored | The only mature native-Swift terminal emulator view; declares visionOS support; MIT. Vendored at `Vendor/SwiftTerm` (rev `8e7a1e1`) with Multiplex input patches for the ASCII keyboard default, primary-button taps, remote scrolling, copy-mode selection, and iOS-app-on-Mac hardware keys. |
 | [Citadel](https://github.com/orlandos-nl/Citadel) | 0.12.0 (exact) | Async/await SSH on SwiftNIO: PTY shell + resize, exec, and OpenSSH key parsing (ed25519/RSA, encrypted keys included). |
 
 **Supply-chain note.** Citadel is deliberately pinned to **0.12.0**: 0.12.1

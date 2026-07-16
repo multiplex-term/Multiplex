@@ -88,6 +88,9 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 - `MULTIPLEX_AUTO_PAYWALL=1` — opens the real locked Pro paywall with a
   deterministic $19.99 storefront preview for App Review screenshot capture;
   DEBUG only, because simctl launches don't inherit Xcode's StoreKit session.
+- `MULTIPLEX_AUTO_SETTINGS=1|theme` — opens the global Settings sheet for
+  headless layout and entitlement-state capture; `theme` pushes its theme
+  editor for the same treatment.
 - `MULTIPLEX_AUTO_HOST_SETTINGS=1` — opens the first host's edit sheet to
   regression-check the Observation environment across the shell/scene sheet
   boundary (a missing HostStore is a fatal error, not a recoverable blank).
@@ -260,10 +263,12 @@ views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5), patched
     to declare the `NIO` product it imports (Xcode 27's module resolution
     rejects the undeclared import). Also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.13.0, patched three times (all marked `Multiplex patch`):
+  - `SwiftTerm` — 1.13.0, patched four times (all marked `Multiplex patch`):
     `keyboardType` is settable (upstream is get-only), letting terminals
-    default to `.asciiCapable` (English) instead of the user's IME; pans
-    scroll the *remote* instead of reporting click-drags — wheel button
+    default to `.asciiCapable` (English) instead of the user's IME; UIKit taps
+    encode xterm button 0 (primary/left), not button 1 (middle), so mouse-aware
+    TUI click targets receive them; pans scroll the *remote* instead of
+    reporting click-drags — wheel button
     events when the client requested mouse tracking (tmux `mouse on` scrolls
     its own scrollback), DECCKM-aware arrows in the alternate screen with
     mouse off (`performRemoteScroll`; the scroll view's own pan is disabled
