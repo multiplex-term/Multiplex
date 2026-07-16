@@ -1560,8 +1560,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // iOS Keyboard input
     
     // UITextInputTraits
-    // Multiplex patch: settable so hosts can request an ASCII-capable
-    // (English) layout instead of the user's default IME. Was get-only.
+    // Multiplex patch: settable so the host app can choose its keyboard
+    // policy. Multiplex keeps `.default`, preserving the user's selected
+    // language and multistage IME. Was get-only upstream.
     public var keyboardType: UIKeyboardType = .`default`
     
     public var keyboardAppearance: UIKeyboardAppearance = .`default`
