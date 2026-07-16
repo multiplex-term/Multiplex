@@ -741,17 +741,25 @@ final class TerminalSessionController {
                 let targetNeedles = AgentSessionHistory.needles(
                     for: message, paneColumns: prologue.paneWidth
                 )
-                guard !targetNeedles.isEmpty else {
+                guard let targetPrimary = targetNeedles.first else {
                     return .failed("MESSAGE TOO SHORT TO FIND")
                 }
+                let entries = AgentSessionHistory.needleEntries(
+                    for: allMessages, paneColumns: prologue.paneWidth
+                )
+                // Identical prompts ("commit") share one needle: tell the
+                // walk how many NEWER twins to climb past so it lands on
+                // the requested one, not the nearest.
+                let newerTwins = entries.filter {
+                    $0.index > message.ordinal && $0.text == targetPrimary
+                }.count
                 let findOutput = try await connection.exec(
                     AgentSessionHistory.jumpFindCommand(
                         sessionID: prologue.sessionID,
-                        needles: AgentSessionHistory.needleEntries(
-                            for: allMessages, paneColumns: prologue.paneWidth
-                        ),
+                        needles: entries,
                         targetIndex: message.ordinal,
-                        targetNeedles: targetNeedles
+                        targetNeedles: targetNeedles,
+                        newerTwinCount: newerTwins
                     )
                 )
                 switch AgentSessionHistory.parseJumpFind(findOutput) {

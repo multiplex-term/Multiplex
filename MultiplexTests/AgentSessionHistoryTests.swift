@@ -359,7 +359,7 @@ final class AgentSessionHistoryTests: XCTestCase {
         // The classifier is one awk program fed through env (needle list,
         // the ❯ prefix, the current target); its verdict is eval'd.
         XCTAssertTrue(command.contains("MPXNDL=\"$ndl\" MPXPFX='❯' MPXTGT=\"$tgt\""))
-        XCTAssertTrue(command.contains("printf \"pin=%d real=%d h=%d\\n\""))
+        XCTAssertTrue(command.contains("printf \"pin=%d fam=%d real=%d h=%d\\n\""))
         XCTAssertTrue(command.contains("h - \(AgentSessionHistory.bottomChromeRows)"))
         XCTAssertTrue(command.contains("gsub(\"\\302\\240\""))
         // Navigation branches: landing threshold, inside-body batch, far
@@ -386,6 +386,46 @@ final class AgentSessionHistoryTests: XCTestCase {
         let program = command.components(separatedBy: "prog='")[1]
             .components(separatedBy: "'; ")[0]
         XCTAssertFalse(program.contains("'"))
+    }
+
+    func testJumpFindCommandCountsDuplicateTwinsFromTheBottom() {
+        let command = AgentSessionHistory.jumpFindCommand(
+            sessionID: "$0",
+            needles: [
+                .init(index: 1, text: "commit"),
+                .init(index: 3, text: "top bar: right area toggle"),
+                .init(index: 4, text: "commit"),
+            ],
+            targetIndex: 1,
+            targetNeedles: ["commit"],
+            newerTwinCount: 1
+        )
+        // The walk knows one newer twin must scroll past first…
+        XCTAssertTrue(command.contains("t=2; k=1;"))
+        XCTAssertTrue(command.contains("[ \"$seen\" -gt \"$k\" ]"))
+        // …family pins read as the target's own turn…
+        XCTAssertTrue(command.contains("fam=%d"))
+        XCTAssertTrue(command.contains("if [ \"$fam\" = 1 ]; then pin=$t; fi"))
+        // …and every upward batch stays under one viewport so no twin row
+        // can slip through between captures.
+        XCTAssertTrue(command.contains("stepk \(AgentSessionHistory.twinSafeBatch) PPage"))
+        XCTAssertFalse(command.contains("stepk \(AgentSessionHistory.oracleFarBatch) PPage"))
+        // Equal-length duplicate needles embed in deterministic ordinal
+        // order.
+        XCTAssertTrue(
+            command.range(of: "'2\tcommit'")!.lowerBound
+                < command.range(of: "'5\tcommit'")!.lowerBound
+        )
+
+        // A unique target keeps the fast batches.
+        let unique = AgentSessionHistory.jumpFindCommand(
+            sessionID: "$0",
+            needles: [.init(index: 0, text: "only prompt")],
+            targetIndex: 0,
+            targetNeedles: ["only prompt"]
+        )
+        XCTAssertTrue(unique.contains("k=0;"))
+        XCTAssertTrue(unique.contains("stepk \(AgentSessionHistory.oracleFarBatch) PPage"))
     }
 
     func testJumpFindCommandSurvivesEmptyOracle() {

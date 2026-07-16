@@ -568,8 +568,13 @@ views.
   Ctrl+End in constant time, **never Esc** — Esc can interrupt a running
   turn. Long prompts render as ONE `…`-truncated row at pane width, so
   needles are ≤60-column normalized first-line prefixes (wide glyphs cost
-  two columns); pure-paste messages can match nothing and remain peek-only;
-  identical prompts land on the nearest twin. Slash commands are actions,
+  two columns); pure-paste messages can match nothing and remain peek-only.
+  **Identical prompts ("commit") are counted from the bottom**: family pins
+  always read as the target's turn, each twin's row is counted once at its
+  first appearance while climbing, and the (newer-twin-count + 1)-th
+  sighting is the requested one — with every upward batch capped under one
+  viewport (`twinSafeBatch`) so a twin row can never slip between captures;
+  counting only happens on upward motion. Slash commands are actions,
   not prompts: the file records them BOTH as bare "/cmd" user lines and as
   `<command-…>` wrappers (either tag order), and all are filtered from the
   list. **Only the typed `/compact` line is a transcript-reset boundary**

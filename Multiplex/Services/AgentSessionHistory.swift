@@ -54,6 +54,11 @@ enum AgentSessionHistory {
     /// Steps per settle while inside the target turn's own response; the
     /// landing rules recover an overshoot in a step or two.
     static let oracleBodyBatch = 4
+    /// Upward batch when the target's needle is shared by other prompts:
+    /// two half-pages stay under one viewport of rows, so a twin's row can
+    /// never pass through unseen between captures — the from-the-bottom
+    /// count stays exact.
+    static let twinSafeBatch = 2
     /// Needles longer than this never help — the target line must fit a
     /// pane row anyway.
     static let needleMaximum = 60
@@ -521,8 +526,12 @@ enum AgentSessionHistory {
     ///          matching no known message (wrapper/meta turns, turns older
     ///          than the loaded list), -1 when row 1 is not a `❯` row (the
     ///          banner region above the first turn).
-    ///   real — first row 2..(h-chrome) whose `❯` text starts with the
-    ///          target needle: the actual prompt row, on screen.
+    ///   fam  — 1 when the row-1 header itself starts with the target
+    ///          needle. Identical prompts ("commit") share one needle, so
+    ///          the pin INDEX cannot say which twin's response we are in;
+    ///          the driver treats any family pin as the target's turn.
+    ///   real — first (topmost) row 2..(h-chrome) whose `❯` text starts
+    ///          with the target needle: an actual prompt row, on screen.
     ///   h    — capture height, for the landing threshold.
     ///
     /// Matching is prefix-only over normalized text and never looks at
@@ -534,10 +543,11 @@ enum AgentSessionHistory {
         + "BEGIN { m = split(ENVIRON[\"MPXNDL\"], L, \"\\n\"); "
         + "pfx = ENVIRON[\"MPXPFX\"]; tgt = ENVIRON[\"MPXTGT\"] } "
         + "{ rows[NR] = $0 } "
-        + "END { h = NR; pin = -1; real = 0; "
+        + "END { h = NR; pin = -1; fam = 0; real = 0; "
         + "line = rows[1]; sub(/^ +/, \"\", line); "
         + "if (index(line, pfx) == 1) { "
         + "txt = norm(substr(line, length(pfx) + 1)); pin = 0; "
+        + "if (tgt != \"\" && index(txt, tgt) == 1) { fam = 1 } "
         + "for (i = 1; i <= m; i++) { split(L[i], kv, \"\\t\"); "
         + "if (kv[2] != \"\" && index(txt, kv[2]) == 1) { pin = kv[1]; break } } } "
         + "lim = h - \(bottomChromeRows); if (lim < 2) lim = h; "
@@ -545,7 +555,7 @@ enum AgentSessionHistory {
         + "if (index(line, pfx) != 1) continue; "
         + "txt = norm(substr(line, length(pfx) + 1)); "
         + "if (tgt != \"\" && index(txt, tgt) == 1) { real = r; break } } "
-        + "printf \"pin=%d real=%d h=%d\\n\", pin, real, h }"
+        + "printf \"pin=%d fam=%d real=%d h=%d\\n\", pin, fam, real, h }"
 
     /// One server-side exec that walks Claude's pager to the target message
     /// and leaves its real `❯` row in the top half of the screen — the
@@ -570,33 +580,51 @@ enum AgentSessionHistory {
     /// and signal cancellation restore in constant time with Ctrl+End
     /// (Claude's scroll-bottom binding; never Esc — Esc can interrupt a
     /// turn that started mid-find).
+    ///
+    /// Identical prompts ("commit", "continue") share a needle, so the
+    /// walk counts the target family from the bottom: climbing upward, each
+    /// twin's row enters the viewport from the top exactly once, and the
+    /// (newerTwinCount + 1)-th first-appearance is the requested one.
+    /// Counting only happens on upward motion, family pins always read as
+    /// the target's turn, and every upward batch shrinks to 2 half-pages
+    /// (less than one viewport) so no twin row can slip between captures.
     static func jumpFindCommand(
         sessionID: String,
         needles: [JumpNeedle],
         targetIndex: Int,
-        targetNeedles: [String]
+        targetNeedles: [String],
+        newerTwinCount: Int = 0
     ) -> String {
         // Longest needle first so nested prefixes ("fix the" / "fix the
-        // build") resolve to the more specific message; 1-based indexes keep
-        // 0 free as the unknown sentinel.
+        // build") resolve to the more specific message, with the ordinal as
+        // a deterministic tie-break; 1-based indexes keep 0 free as the
+        // unknown sentinel.
         let ordered = needles
-            .sorted { $0.text.utf8.count > $1.text.utf8.count }
+            .sorted {
+                $0.text.utf8.count != $1.text.utf8.count
+                    ? $0.text.utf8.count > $1.text.utf8.count
+                    : $0.index < $1.index
+            }
             .map { "\($0.index + 1)\t\($0.text)" }
         let listArguments = ordered.isEmpty
             ? "''"
             : ordered.map(\.shellQuoted).joined(separator: " ")
         let primary = targetNeedles.first ?? "MULTIPLEX_HISTORY_NEEDLE_MISSING"
         let fallback = targetNeedles.dropFirst().first ?? ""
+        let twins = max(0, newerTwinCount)
+        let bodyBatch = twins > 0 ? twinSafeBatch : oracleBodyBatch
+        let farBatch = twins > 0 ? twinSafeBatch : oracleFarBatch
         return TmuxProbe.pathPrefix
             + "sid=\(sessionID.shellQuoted); "
             + "ndl=$(printf '%s\\n' \(listArguments)); "
             + "n1=\(primary.shellQuoted); n2=\(fallback.shellQuoted); "
-            + "t=\(targetIndex + 1); "
+            + "t=\(targetIndex + 1); k=\(twins); "
             + "prog='\(classifierProgram)'; "
             + "capture() { tmux capture-pane -p -t \"$sid\" 2>/dev/null; }; "
             + "classify() { vals=$(printf '%s\\n' \"$cur\" | "
             + "MPXNDL=\"$ndl\" MPXPFX='❯' MPXTGT=\"$tgt\" awk \"$prog\"); "
-            + "pin=-1; real=0; h=0; eval \"$vals\"; }; "
+            + "pin=-1; fam=0; real=0; h=0; eval \"$vals\"; "
+            + "if [ \"$fam\" = 1 ]; then pin=$t; fi; }; "
             + "settle() { base=\"$1\"; moved=0; polls=0; last=\"$base\"; cur=\"$base\"; "
             + "while [ $polls -lt \(pageSettlePollCap) ]; do "
             + "sleep 0.05; cur=$(capture); [ \"$cur\" != \"$base\" ] && moved=1; "
@@ -609,6 +637,7 @@ enum AgentSessionHistory {
             + "settle \"$cur\"; }; "
             + "restore() { tmux send-keys -t \"$sid\" C-End 2>/dev/null; sleep 0.08; }; "
             + "found=0; top=0; keep=0; sent=0; osc=0; fbused=0; dir=u; "
+            + "seen=0; lastr=0; "
             + "tgt=\"$n1\"; "
             + "trap 'keep=1; restore; exit 1' HUP INT TERM; "
             + "trap 'if [ \"$keep\" != 1 ]; then restore; fi' EXIT; "
@@ -623,17 +652,28 @@ enum AgentSessionHistory {
             + "stepk 1 PPage || true; "
             + "while [ $sent -lt \(jumpSendBudget) ]; do "
             + "classify; "
-            + "printf 'MPXJ_T %s %s %s\\n' \"$sent\" \"$pin\" \"$real\"; "
+            + "printf 'MPXJ_T %s %s %s %s\\n' \"$sent\" \"$pin\" \"$real\" \"$seen\"; "
             + "[ \"$h\" -ge 12 ] 2>/dev/null || break; "
             + "if [ \"$real\" -gt 0 ]; then "
+            // Rows only drift DOWN while climbing, so a topmost match that
+            // appeared from nothing or jumped upward is a twin seen for the
+            // first time.
+            + "if [ \"$dir\" = u ]; then "
+            + "if [ \"$lastr\" = 0 ] || [ \"$real\" -lt \"$lastr\" ]; then "
+            + "seen=$((seen+1)); fi; lastr=$real; fi; "
+            + "if [ \"$seen\" -gt \"$k\" ]; then "
             + "if [ \"$real\" -le $((h / 2)) ]; then found=1; break; fi; "
             + "dir=d; stepk 1 NPage || break; "
             + "[ \"$moved\" = 0 ] && break; continue; fi; "
+            // A newer twin: climb through it.
+            + "dir=u; stepk \(bodyBatch) PPage || break; "
+            + "[ \"$moved\" = 0 ] && { top=1; break; }; continue; fi; "
+            + "lastr=0; "
             + "if [ \"$pin\" = \"$t\" ]; then "
-            + "dir=u; stepk \(oracleBodyBatch) PPage || break; "
+            + "dir=u; stepk \(bodyBatch) PPage || break; "
             + "[ \"$moved\" = 0 ] && { top=1; break; }; continue; fi; "
             + "if [ \"$pin\" -gt \"$t\" ] 2>/dev/null; then "
-            + "dir=u; stepk \(oracleFarBatch) PPage || break; "
+            + "dir=u; stepk \(farBatch) PPage || break; "
             + "[ \"$moved\" = 0 ] && { top=1; break; }; continue; fi; "
             + "if [ \"$pin\" -gt 0 ] 2>/dev/null; then "
             // A known turn OLDER than the target owns the top row: we are
@@ -641,12 +681,12 @@ enum AgentSessionHistory {
             + "if [ \"$dir\" = u ]; then osc=$((osc+1)); fi; "
             + "if [ $osc -ge 2 ]; then "
             + "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then "
-            + "tgt=\"$n2\"; fbused=1; osc=0; else break; fi; fi; "
+            + "tgt=\"$n2\"; fbused=1; osc=0; seen=0; lastr=0; else break; fi; fi; "
             + "dir=d; stepk 1 NPage || break; "
             + "[ \"$moved\" = 0 ] && break; continue; fi; "
             // Unknown ❯ turn (wrapper/meta or older than the list) or the
             // banner region: keep the current direction.
-            + "if [ \"$dir\" = u ]; then stepk \(oracleBodyBatch) PPage || break; "
+            + "if [ \"$dir\" = u ]; then stepk \(bodyBatch) PPage || break; "
             + "[ \"$moved\" = 0 ] && { top=1; break; }; "
             + "else stepk 1 NPage || break; [ \"$moved\" = 0 ] && break; fi; "
             + "done; "
