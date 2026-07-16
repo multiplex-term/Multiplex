@@ -239,10 +239,13 @@ enum AgentSessionHistory {
               let data = trimmed.data(using: .utf8),
               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return .ignored }
-        // Older Claude versions / auto-compaction write a summary entry;
-        // 2.1.211's manual /compact instead records the typed command as a
-        // plain user line. Both reset the rendered transcript.
-        if object["isCompactSummary"] as? Bool == true { return .compactBoundary }
+        // Compact summaries are never prompts, but they are NOT a boundary:
+        // they come from auto-compaction and continued-out-of-context
+        // sessions, which do not wipe the rendered transcript (hiding JUMP
+        // there was a real false negative). Only the *typed* /compact —
+        // verified to reset the view on 2.1.211 — marks one below; an
+        // old-version manual compact degrades to an honest miss pill.
+        if object["isCompactSummary"] as? Bool == true { return .ignored }
         guard let text = claudeCodeText(from: object), isDisplayablePrompt(text)
         else { return .ignored }
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)

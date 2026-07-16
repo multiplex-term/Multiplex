@@ -564,11 +564,17 @@ views.
   identical prompts land on the nearest twin. Slash commands are actions,
   not prompts: the file records them BOTH as bare "/cmd" user lines and as
   `<command-…>` wrappers (either tag order), and all are filtered from the
-  list. **`/compact` (typed form on 2.1.211, `isCompactSummary` entries
-  from auto-compact/older versions) and `/clear` reset the rendered
-  transcript** — prompts before the boundary keep peek but carry
+  list. **Only the typed `/compact` line is a transcript-reset boundary**
+  (verified on 2.1.211: the view drops to the fresh banner; an empty-session
+  failure writes nothing; `/clear` starts a whole new session file, so its
+  rule is dormant-defensive) — prompts before it keep peek but carry
   `reachable=false`, which withholds JUMP; don't "fix" that by searching
-  harder, the pager genuinely cannot reach them. Only `.finding` blocks a
+  harder, the pager genuinely cannot reach them. `isCompactSummary` entries
+  are deliberately NOT boundaries: they come from auto-compaction and
+  continued-out-of-context sessions, which keep the rendered transcript —
+  treating them as resets hid working JUMP buttons (user-reported). The
+  asymmetry rules the tie: a wrongly hidden button is unexplainable, a
+  wrongly shown one ends in the honest miss pill. Only `.finding` blocks a
   new jump: a lingering JUMPED state is superseded directly (the
   normalized start makes chaining safe). While `.finding`, the terminal's
   input pump is locked and a veil says so; `.shell` tabs list history

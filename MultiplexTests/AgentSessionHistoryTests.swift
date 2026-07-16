@@ -42,10 +42,12 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertNotNil(result.messages[0].timestamp)
     }
 
-    func testCompactBoundaryMarksOlderPromptsUnreachable() {
+    func testCompactSummaryIsFilteredButIsNotABoundary() {
         // The compact summary is itself a type:user entry (no isMeta): it
-        // must not appear as a prompt, and everything before it is gone
-        // from the rendered transcript — peek-only.
+        // must not appear as a prompt. It is NOT a boundary either — it
+        // comes from auto-compaction / continued sessions, which keep the
+        // rendered transcript, so hiding JUMP before it was a false
+        // negative (user-reported).
         let body = """
         {"type":"user","message":{"role":"user","content":"Old prompt one"}}
         {"type":"user","message":{"role":"user","content":"Old prompt two"}}
@@ -56,13 +58,13 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertEqual(result?.messages.map(\.text), [
             "Old prompt one", "Old prompt two", "Fresh prompt",
         ])
-        XCTAssertEqual(result?.messages.map(\.reachable), [false, false, true])
+        XCTAssertEqual(result?.messages.map(\.reachable), [true, true, true])
 
-        // The oracle index only carries turns that can still render.
+        // Every listed turn stays in the oracle index.
         let entries = AgentSessionHistory.needleEntries(
             for: result?.messages ?? [], paneColumns: 100
         )
-        XCTAssertEqual(entries.map(\.index), [2])
+        XCTAssertEqual(entries.map(\.index), [0, 1, 2])
     }
 
     func testTypedCompactCommandIsAlsoABoundary() {
@@ -97,7 +99,7 @@ final class AgentSessionHistoryTests: XCTestCase {
         var lines = (0..<8).map {
             "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"early \($0)\"}}"
         }
-        lines.append("{\"type\":\"user\",\"isCompactSummary\":true,\"message\":{\"role\":\"user\",\"content\":\"summary\"}}")
+        lines.append("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"/compact\"}}")
         lines += (0..<60).map {
             "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"late \($0)\"}}"
         }
