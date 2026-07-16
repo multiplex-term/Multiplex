@@ -258,9 +258,10 @@ views.
     rejects the undeclared import). Also freezes the SSH transport supply chain.
   - `SwiftTerm` — 1.14.0 (rev `849e8a4`), patched four times (all marked
     `Multiplex patch`):
-    `keyboardType` is settable (upstream is get-only), letting terminals
-    default to `.asciiCapable` (English) instead of the user's IME; pans scroll the *remote* instead of
-    reporting click-drags — wheel button
+    `keyboardType` is settable (upstream is get-only), and Multiplex keeps it
+    at `.default` so the system preserves the user's selected language and
+    multistage IME instead of forcing ASCII input; pans scroll the *remote*
+    instead of reporting click-drags — wheel button
     events when the client requested mouse tracking (tmux `mouse on` scrolls
     its own scrollback), DECCKM-aware arrows in the alternate screen with
     mouse off (`performRemoteScroll`; the scroll view's own pan is disabled
