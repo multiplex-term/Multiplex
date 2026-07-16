@@ -1,10 +1,10 @@
 import Foundation
 
-/// One user prompt extracted from a CLI agent's own session file. The agents
-/// keep JSONL transcripts on the host they run on (`~/.claude/projects/…`,
-/// `~/.codex/sessions/…`, `~/.pi/agent/sessions/…`); Multiplex reads a
+/// One user prompt extracted from Claude Code's own session file. Claude
+/// keeps a JSONL transcript per conversation on the host it runs on
+/// (`~/.claude/projects/<munged-cwd>/<sessionId>.jsonl`); Multiplex reads a
 /// bounded tail over the SSH control plane and shows the real prompts —
-/// including the full text of messages the TUIs render truncated.
+/// including the full text of messages the TUI renders truncated.
 struct AgentUserMessage: Identifiable, Hashable {
     /// Position in the parsed candidate list (file order). Stable within one
     /// load only — files are append-only, so a reload may shift ordinals.
@@ -22,14 +22,15 @@ struct AgentUserMessage: Identifiable, Hashable {
 }
 
 /// Builds and parses the remote commands behind the HISTORY surface: locate
-/// the active session file for a pane's agent + cwd, tail its user messages,
-/// and (Claude Code) drive the TUI's own PgUp pager to scroll an old message
-/// back on screen. Pure functions, exercised directly by unit tests — the
-/// same discipline as `TmuxProbe`.
+/// the pane's exact Claude Code session file, tail its user messages, and
+/// drive Claude's own pager to scroll an old message back on screen. Pure
+/// functions, exercised directly by unit tests — the same discipline as
+/// `TmuxProbe`. Claude Code only: Codex/Pi support was withdrawn 2026-07-16
+/// to concentrate on making this exact (see the plan doc).
 ///
-/// Formats verified 2026-07-16 against real files on the dev Mac (Claude
-/// Code 2.1.211, Codex rollouts, Pi session v3); the experiment record lives
-/// in local-plan/agent-message-history.md. Every stage fails soft: a missing
+/// Formats and pager behavior verified 2026-07-16 against real Claude Code
+/// 2.1.211 under tmux 3.6a; the experiment record lives in
+/// local-plan/agent-message-history.md. Every stage fails soft: a missing
 /// file, an unparsable line, or a search miss degrades to "unavailable" or
 /// "not found", never an error state.
 enum AgentSessionHistory {
@@ -39,14 +40,15 @@ enum AgentSessionHistory {
     static let tailByteBudget = 262_144
     /// Newest prompts kept after parsing.
     static let maxMessages = 50
-    /// Initial backward scan gives up after this many half-page PgUp steps.
-    static let pageCap = 40
-    /// Claude pins the current user prompt at row 1 throughout its assistant
-    /// response. Once found, seek through that response in small batches until
-    /// the real turn boundary (or transcript top), with a separate generous
-    /// cap for very long tool-heavy turns.
-    static let pinnedSeekPageCap = 400
-    static let pinnedSeekBatch = 4
+    /// Total pager keystrokes one find may send. The header oracle makes
+    /// every step directed, so this is a runaway stop, not a search radius.
+    static let jumpSendBudget = 400
+    /// Steps per settle while traversing turns known to be newer than the
+    /// target (each PgUp moves half the transcript region).
+    static let oracleFarBatch = 6
+    /// Steps per settle while inside the target turn's own response; the
+    /// landing rules recover an overshoot in a step or two.
+    static let oracleBodyBatch = 4
     /// Needles longer than this never help — the target line must fit a
     /// pane row anyway.
     static let needleMaximum = 60
@@ -55,8 +57,12 @@ enum AgentSessionHistory {
     static let needleFallbackMaximum = 24
     /// A page redraw is considered settled after two equal captures. At the
     /// transcript boundary, wait up to this many 50 ms polls before deciding
-    /// PgUp had no effect; a fixed sleep falsely stopped on busy hosts.
+    /// paging had no effect; a fixed sleep falsely stopped on busy hosts.
     static let pageSettlePollCap = 20
+    /// Rows excluded from the bottom of every capture before matching: the
+    /// composer (its `❯` would false-match a drafted prompt), separators,
+    /// and the status strip are fixed chrome, not transcript.
+    static let bottomChromeRows = 6
 
     // MARK: - Locating and reading the session file
 
@@ -67,8 +73,8 @@ enum AgentSessionHistory {
         var agentSessionID: String?
     }
 
-    /// Resolve the active pane cwd and, for Claude Code, its exact session id
-    /// in one exec. Claude publishes `~/.claude/sessions/<pid>.json`; walking
+    /// Resolve the active pane cwd and Claude Code's exact session id in one
+    /// exec. Claude publishes `~/.claude/sessions/<pid>.json`; walking
     /// descendants of `#{pane_pid}` ties that registry entry to this pane,
     /// avoiding the common failure where another Claude process in the same
     /// cwd has the newest transcript. Older versions / hosts without the
@@ -76,15 +82,13 @@ enum AgentSessionHistory {
     ///
     /// `list-panes -F`, never `display-message` (tmux 3.6a renders pane
     /// formats empty for outside clients).
-    static func paneContextCommand(sessionName: String, agent: AgentKind) -> String {
+    static func paneContextCommand(sessionName: String) -> String {
         let target = "=\(sessionName)".shellQuoted
-        var command = TmuxProbe.pathPrefix
+        return TmuxProbe.pathPrefix
             + "tmux list-panes -t \(target)"
             + " -F '#{?pane_active,MULTIPLEX_HIST_CWD #{pane_current_path},}'"
             + " 2>/dev/null | grep -m1 '^MULTIPLEX_HIST_CWD '; "
-        guard agent == .claudeCode else { return command + "true" }
-
-        command += "root=$(tmux list-panes -t \(target)"
+            + "root=$(tmux list-panes -t \(target)"
             + " -F '#{?pane_active,#{pane_pid},}' 2>/dev/null | grep -m1 .); "
             + "if [ -n \"$root\" ]; then "
             + "sid=$(ps -eo pid=,ppid= 2>/dev/null | "
@@ -100,7 +104,6 @@ enum AgentSessionHistory {
             + "if [ -n \"$value\" ]; then printf '%s\\n' \"$value\"; break; fi; done); "
             + "[ -n \"$sid\" ] && printf 'MULTIPLEX_HIST_AGENT_SESSION %s\\n' \"$sid\"; "
             + "fi; true"
-        return command
     }
 
     static func parsePaneContext(_ output: String) -> PaneContext? {
@@ -130,57 +133,32 @@ enum AgentSessionHistory {
         return uuid.uuidString.lowercased()
     }
 
-    /// One exec that locates the newest session file for `agent` in `cwd`
-    /// and prints a filtered tail of it behind sentinels:
+    /// One exec that locates the pane's session file and prints a filtered
+    /// tail of it behind sentinels:
     ///
     ///     MULTIPLEX_HIST_FILE <path>
     ///     MULTIPLEX_HIST_BEGIN
     ///     <candidate JSONL lines>
     ///     MULTIPLEX_HIST_END
     ///
-    /// Claude Code prefers the exact session id resolved from this pane's
-    /// process registry; newest-mtime remains its fail-soft fallback and the
-    /// deliberate rule for Pi (the behavior of `pi -c`). Codex first filters
-    /// rollout metadata by cwd, then takes newest. Candidate lines only start
-    /// with `{` — a JSONL line can never equal a sentinel, so arbitrary prompt
-    /// text can't break the framing.
-    static func readCommand(
-        agent: AgentKind,
-        cwd: String,
-        preferredSessionID: String? = nil
-    ) -> String {
-        let locate: String
-        let filter: String
-        switch agent {
-        case .claudeCode:
-            // Project dir = munged cwd. Prefer the exact pane-process session
-            // from `~/.claude/sessions/<pid>.json`; if that registry is absent
-            // or stale, preserve the fail-soft newest-mtime behavior.
-            let sessionID = validatedClaudeSessionID(preferredSessionID) ?? ""
-            locate = "d=\"$HOME/.claude/projects/\"\(claudeProjectDirectoryComponent(forCwd: cwd).shellQuoted); "
-                + "f=; sid=\(sessionID.shellQuoted); "
-                + "if [ -n \"$sid\" ] && [ -f \"$d/$sid.jsonl\" ]; then f=\"$d/$sid.jsonl\"; fi; "
-                + "[ -n \"$f\" ] || f=$(ls -t \"$d\"/*.jsonl 2>/dev/null | head -1); "
-            filter = "grep -a '\"type\":\"user\"' \"$f\" 2>/dev/null"
-                + " | grep -av '\"tool_use_id\"'"
-        case .codex:
-            // Rollouts are date-bucketed with no cwd in the path; the
-            // session_meta head line carries it. Scan the newest 20.
-            locate = "f=$(ls -t \"$HOME\"/.codex/sessions/*/*/*/rollout-*.jsonl 2>/dev/null"
-                + " | head -20 | while IFS= read -r c; do"
-                + " head -c 8192 \"$c\" 2>/dev/null | grep -Fq -- \(codexCwdNeedle(forCwd: cwd).shellQuoted)"
-                + " && { printf '%s\\n' \"$c\"; break; }; done); "
-            filter = "grep -a '\"user_message\"' \"$f\" 2>/dev/null"
-        case .pi:
-            locate = "d=\"$HOME/.pi/agent/sessions/\"\(piProjectDirectoryComponent(forCwd: cwd).shellQuoted); "
-                + "f=$(ls -t \"$d\"/*.jsonl 2>/dev/null | head -1); "
-            filter = "grep -a '\"role\":\"user\"' \"$f\" 2>/dev/null"
-        }
-        return locate
+    /// The exact session id resolved from this pane's process registry wins;
+    /// newest-mtime remains the fail-soft fallback for hosts/versions without
+    /// the registry (it is what `claude --continue` resumes). The grep chain
+    /// drops assistant/progress lines and the (huge) tool_result user lines
+    /// server-side. Candidate lines only start with `{` — a JSONL line can
+    /// never equal a sentinel, so arbitrary prompt text can't break framing.
+    static func readCommand(cwd: String, preferredSessionID: String? = nil) -> String {
+        let sessionID = validatedClaudeSessionID(preferredSessionID) ?? ""
+        return "d=\"$HOME/.claude/projects/\"\(claudeProjectDirectoryComponent(forCwd: cwd).shellQuoted); "
+            + "f=; sid=\(sessionID.shellQuoted); "
+            + "if [ -n \"$sid\" ] && [ -f \"$d/$sid.jsonl\" ]; then f=\"$d/$sid.jsonl\"; fi; "
+            + "[ -n \"$f\" ] || f=$(ls -t \"$d\"/*.jsonl 2>/dev/null | head -1); "
             + "if [ -n \"$f\" ]; then "
             + "printf 'MULTIPLEX_HIST_FILE %s\\n' \"$f\"; "
             + "echo MULTIPLEX_HIST_BEGIN; "
-            + filter + " | tail -c \(tailByteBudget); "
+            + "grep -a '\"type\":\"user\"' \"$f\" 2>/dev/null"
+            + " | grep -av '\"tool_use_id\"'"
+            + " | tail -c \(tailByteBudget); "
             + "echo; echo MULTIPLEX_HIST_END; "
             + "else echo MULTIPLEX_HIST_NOFILE; fi; true"
     }
@@ -192,7 +170,7 @@ enum AgentSessionHistory {
 
     /// nil = the command produced no sentinel at all (transport/short read);
     /// a `ReadResult` with no messages = the file was found but held none.
-    static func parseReadOutput(_ output: String, agent: AgentKind) -> ReadResult? {
+    static func parseReadOutput(_ output: String) -> ReadResult? {
         if output.contains("MULTIPLEX_HIST_NOFILE") {
             return ReadResult(filePath: nil, messages: [])
         }
@@ -211,7 +189,7 @@ enum AgentSessionHistory {
             }
         }
         guard filePath != nil else { return nil }
-        let parsed = candidates.compactMap { message(fromLine: $0, agent: agent) }
+        let parsed = candidates.compactMap(message(fromLine:))
         let kept = parsed.suffix(maxMessages)
         return ReadResult(
             filePath: filePath,
@@ -226,20 +204,14 @@ enum AgentSessionHistory {
     /// One candidate JSONL line → a user prompt, or nil for everything else
     /// (tool results, meta entries, system wrappers, the partial first line
     /// of a byte-bounded tail).
-    static func message(fromLine line: Substring, agent: AgentKind) -> AgentUserMessage? {
+    static func message(fromLine line: Substring) -> AgentUserMessage? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("{"),
               let data = trimmed.data(using: .utf8),
               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return nil }
-
-        let text: String?
-        switch agent {
-        case .claudeCode: text = claudeCodeText(from: object)
-        case .codex: text = codexText(from: object)
-        case .pi: text = piText(from: object)
-        }
-        guard let text, isDisplayablePrompt(text) else { return nil }
+        guard let text = claudeCodeText(from: object), isDisplayablePrompt(text)
+        else { return nil }
         return AgentUserMessage(
             ordinal: 0,
             text: text,
@@ -255,8 +227,6 @@ enum AgentSessionHistory {
         "<command-name>",
         "<local-command-stdout>",
         "<system-reminder>",
-        "<user_instructions>",
-        "<environment_context>",
     ]
 
     private static func isDisplayablePrompt(_ text: String) -> Bool {
@@ -287,32 +257,6 @@ enum AgentSessionHistory {
         return texts.isEmpty ? nil : texts.joined(separator: "\n")
     }
 
-    /// Codex's `event_msg`/`user_message` entries are exactly the submitted
-    /// prompts (context wrappers ride separate developer items).
-    private static func codexText(from object: [String: Any]) -> String? {
-        guard object["type"] as? String == "event_msg",
-              let payload = object["payload"] as? [String: Any],
-              payload["type"] as? String == "user_message"
-        else { return nil }
-        return payload["message"] as? String
-    }
-
-    /// Pi session v3: `type:"message"` entries with role user / assistant /
-    /// toolResult — the role split is clean. Entries form a branch tree
-    /// (id/parentId); file order is append order, so prompts from abandoned
-    /// branches may appear (accepted v1 — they were still typed by the user).
-    private static func piText(from object: [String: Any]) -> String? {
-        guard object["type"] as? String == "message",
-              let message = object["message"] as? [String: Any],
-              message["role"] as? String == "user",
-              let blocks = message["content"] as? [[String: Any]]
-        else { return nil }
-        let texts = blocks.compactMap { block -> String? in
-            block["type"] as? String == "text" ? block["text"] as? String : nil
-        }
-        return texts.isEmpty ? nil : texts.joined(separator: "\n")
-    }
-
     private static let fractionalTimestampParser: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -325,31 +269,13 @@ enum AgentSessionHistory {
         fractionalTimestampParser.date(from: string) ?? timestampParser.date(from: string)
     }
 
-    // MARK: - Project directory munging
-
     /// Claude Code: every non-alphanumeric byte of the cwd becomes `-`
     /// (verified: `/Users/jhen/workspace/llama.rn` → `…-llama-rn`).
     static func claudeProjectDirectoryComponent(forCwd cwd: String) -> String {
         String(cwd.map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "-" })
     }
 
-    /// Pi: `/` → `-` with a `-` prefix and `--` suffix (verified against
-    /// real dirs: `/Users/jhen/workspace2/Multiplex` →
-    /// `--Users-jhen-workspace2-Multiplex--`; dots survive).
-    static func piProjectDirectoryComponent(forCwd cwd: String) -> String {
-        "-" + cwd.replacingOccurrences(of: "/", with: "-") + "--"
-    }
-
-    /// The fixed string grepped against a rollout's head to match its
-    /// session_meta cwd. JSON-escaped the way serde writes it.
-    static func codexCwdNeedle(forCwd cwd: String) -> String {
-        let escaped = cwd
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"cwd\":\"\(escaped)\""
-    }
-
-    // MARK: - Jump (Claude Code pages its transcript with PgUp)
+    // MARK: - Jump prologue
 
     /// Everything the jump needs before touching the pane, in one exec:
     /// tmux's own session id (pane-target commands reject `=name` on 3.6a),
@@ -413,6 +339,28 @@ enum AgentSessionHistory {
         )
     }
 
+    // MARK: - Needles
+
+    /// One entry of the header oracle's index: the ordinal of a loaded
+    /// message and the normalized prefix its rendered `❯` row starts with.
+    struct JumpNeedle: Equatable {
+        var index: Int
+        var text: String
+    }
+
+    /// The oracle's full index: a needle per loaded message that has one.
+    /// Messages whose rendering can't be matched (too short, pure-paste)
+    /// simply read as unknown turns during navigation.
+    static func needleEntries(
+        for messages: [AgentUserMessage], paneColumns: Int
+    ) -> [JumpNeedle] {
+        messages.compactMap { message in
+            needle(for: message, paneColumns: paneColumns).map {
+                JumpNeedle(index: message.ordinal, text: $0)
+            }
+        }
+    }
+
     /// Search strings for one prompt. The primary is a first-line prefix cut
     /// to the pane; a 24-column fallback handles right-edge truncation and
     /// small rendering differences. Whitespace is normalized because the TUI
@@ -421,7 +369,7 @@ enum AgentSessionHistory {
         guard let primary = needle(for: message, paneColumns: paneColumns) else { return [] }
         var values = [primary]
         let fallback = terminalPrefix(primary, maxColumns: needleFallbackMaximum)
-        if fallback != primary { values.append(fallback) }
+        if fallback != primary, fallback.count >= 4 { values.append(fallback) }
         return values
     }
 
@@ -450,7 +398,7 @@ enum AgentSessionHistory {
 
     /// Collapse whitespace runs and discard C0 controls so JSONL prompt text
     /// and one rendered `❯` row compare independently of spacing details.
-    private static func normalizedSearchText(_ text: String) -> String {
+    static func normalizedSearchText(_ text: String) -> String {
         var result = ""
         var pendingSpace = false
         for character in text {
@@ -483,114 +431,153 @@ enum AgentSessionHistory {
         }
     }
 
-    enum CaptureMatch: Equatable {
-        case none
-        /// The actual prompt row is visible below row 1: the turn boundary is
-        /// already on screen.
-        case visiblePrompt
-        /// Claude's sticky row-1 prompt header. This only identifies the turn;
-        /// finding must continue toward that turn's beginning.
-        case pinnedPrompt
-    }
+    // MARK: - Jump find (header-oracle navigation)
 
-    /// Match only Claude's rendered user-turn rows (`❯ …`). The same prompt
-    /// text commonly appears in assistant prose/tool output, while a row-1
-    /// user row is sticky for the whole response and is therefore not yet a
-    /// final landing point.
-    static func captureMatch(_ lines: [String], needles: [String]) -> CaptureMatch {
-        let normalizedNeedles = needles
-            .map(normalizedSearchText)
-            .filter { !$0.isEmpty }
-        guard !normalizedNeedles.isEmpty else { return .none }
-        for (index, line) in lines.enumerated() {
-            guard let prompt = claudePromptText(from: line),
-                  normalizedNeedles.contains(where: { prompt.contains($0) })
-            else { continue }
-            return index == 0 ? .pinnedPrompt : .visiblePrompt
-        }
-        return .none
-    }
-
-    private static func claudePromptText(from line: String) -> String? {
-        let trimmed = line.drop(while: { character in
-            character.unicodeScalars.allSatisfy {
-                CharacterSet.whitespaces.contains($0)
-            }
-        })
-        guard trimmed.first == "❯" else { return nil }
-        return normalizedSearchText(String(trimmed.dropFirst()))
-    }
-
-    /// The whole find runs server-side in ONE exec, independent of network
-    /// RTT. It first pages backward until the target's structural `❯` row is
-    /// visible. A match below row 1 is the real prompt. A row-1 match is
-    /// Claude's sticky turn header, so a second phase keeps paging through the
-    /// assistant response in small batches; after crossing into the previous
-    /// turn it refines forward until the target returns. Transcript top is
-    /// also a valid boundary for the oldest turn.
+    /// The per-capture classifier, shared by every step of the find script.
+    /// Claude's pager pins the header of the turn that OWNS THE TOP ROW at
+    /// row 1 (verified: scrolling inside a response shows that turn's `❯`
+    /// prompt pinned; one PgUp past its beginning flips the pin to the
+    /// previous turn while the real header becomes an ordinary row below).
+    /// The awk program reports, per settled capture:
     ///
-    /// Misses and signal cancellation restore in constant time with Ctrl+End,
-    /// which Claude maps to scroll-bottom without interrupting a running turn.
-    static func jumpFindCommand(sessionID: String, needles: [String]) -> String {
-        let usable = needles.filter { !$0.isEmpty }
-        let primary = usable.first ?? "MULTIPLEX_HISTORY_NEEDLE_MISSING"
-        let fallback = usable.dropFirst().first ?? ""
+    ///   pin  — 1-based needle index of the row-1 header, 0 for a `❯` row
+    ///          matching no known message (wrapper/meta turns, turns older
+    ///          than the loaded list), -1 when row 1 is not a `❯` row (the
+    ///          banner region above the first turn).
+    ///   real — first row 2..(h-chrome) whose `❯` text starts with the
+    ///          target needle: the actual prompt row, on screen.
+    ///   h    — capture height, for the landing threshold.
+    ///
+    /// Matching is prefix-only over normalized text and never looks at
+    /// assistant prose; the bottom chrome rows are excluded so a drafted
+    /// composer line can't false-match.
+    private static let classifierProgram =
+        "function norm(s) { gsub(/[\\t\\r]/, \" \", s); gsub(\"\\302\\240\", \" \", s); "
+        + "gsub(/  +/, \" \", s); sub(/^ +/, \"\", s); sub(/ +$/, \"\", s); return s } "
+        + "BEGIN { m = split(ENVIRON[\"MPXNDL\"], L, \"\\n\"); "
+        + "pfx = ENVIRON[\"MPXPFX\"]; tgt = ENVIRON[\"MPXTGT\"] } "
+        + "{ rows[NR] = $0 } "
+        + "END { h = NR; pin = -1; real = 0; "
+        + "line = rows[1]; sub(/^ +/, \"\", line); "
+        + "if (index(line, pfx) == 1) { "
+        + "txt = norm(substr(line, length(pfx) + 1)); pin = 0; "
+        + "for (i = 1; i <= m; i++) { split(L[i], kv, \"\\t\"); "
+        + "if (kv[2] != \"\" && index(txt, kv[2]) == 1) { pin = kv[1]; break } } } "
+        + "lim = h - \(bottomChromeRows); if (lim < 2) lim = h; "
+        + "for (r = 2; r <= lim; r++) { line = rows[r]; sub(/^ +/, \"\", line); "
+        + "if (index(line, pfx) != 1) continue; "
+        + "txt = norm(substr(line, length(pfx) + 1)); "
+        + "if (tgt != \"\" && index(txt, tgt) == 1) { real = r; break } } "
+        + "printf \"pin=%d real=%d h=%d\\n\", pin, real, h }"
+
+    /// One server-side exec that walks Claude's pager to the target message
+    /// and leaves its real `❯` row in the top half of the screen — the
+    /// header oracle replaces the old blind needle hunt:
+    ///
+    /// - `real` in the top half → landed (that IS the message row).
+    /// - `real` lower → one PgDn per classify converges (half-page steps
+    ///   can't skip the window).
+    /// - pin == target → inside the target's response: page up in small
+    ///   batches; the crossing produces `real` near the top by construction.
+    /// - pin newer than target → directed far scan upward, no absolute page
+    ///   cap: the send budget is a runaway stop, not a search radius.
+    /// - pin older than target → overshot (or approaching from above): page
+    ///   down singles; `real` enters from the bottom and the landing rule
+    ///   finishes.
+    /// - unknown/no pin (wrapper turns, the banner region) → keep the
+    ///   current direction one batch at a time.
+    ///
+    /// Two upward crossings past the target without ever seeing its row
+    /// mean the primary needle doesn't match this rendering — retry once
+    /// with the shorter fallback, then give up honestly. Misses, stalls,
+    /// and signal cancellation restore in constant time with Ctrl+End
+    /// (Claude's scroll-bottom binding; never Esc — Esc can interrupt a
+    /// turn that started mid-find).
+    static func jumpFindCommand(
+        sessionID: String,
+        needles: [JumpNeedle],
+        targetIndex: Int,
+        targetNeedles: [String]
+    ) -> String {
+        // Longest needle first so nested prefixes ("fix the" / "fix the
+        // build") resolve to the more specific message; 1-based indexes keep
+        // 0 free as the unknown sentinel.
+        let ordered = needles
+            .sorted { $0.text.utf8.count > $1.text.utf8.count }
+            .map { "\($0.index + 1)\t\($0.text)" }
+        let listArguments = ordered.isEmpty
+            ? "''"
+            : ordered.map(\.shellQuoted).joined(separator: " ")
+        let primary = targetNeedles.first ?? "MULTIPLEX_HISTORY_NEEDLE_MISSING"
+        let fallback = targetNeedles.dropFirst().first ?? ""
         return TmuxProbe.pathPrefix
-            + "sid=\(sessionID.shellQuoted); n1=\(primary.shellQuoted); n2=\(fallback.shellQuoted); "
+            + "sid=\(sessionID.shellQuoted); "
+            + "ndl=$(printf '%s\\n' \(listArguments)); "
+            + "n1=\(primary.shellQuoted); n2=\(fallback.shellQuoted); "
+            + "t=\(targetIndex + 1); "
+            + "prog='\(classifierProgram)'; "
             + "capture() { tmux capture-pane -p -t \"$sid\" 2>/dev/null; }; "
-            // match=1: actual prompt below row 1; match=2: sticky row-1 header.
-            + "classify() { match=0; "
-            + "first=$(printf '%s\\n' \"$1\" | "
-            + "sed -n '1{s/^[[:space:]]*❯[[:space:]]*//p;}' | tr '\\t\\r' '  '"
-            + " | sed 's/[[:space:]][[:space:]]*/ /g'); "
-            + "if printf '%s\\n' \"$first\" | grep -Fq -- \"$needle\"; then match=2; return; fi; "
-            + "rest=$(printf '%s\\n' \"$1\" | "
-            + "sed -n '2,$s/^[[:space:]]*❯[[:space:]]*//p' | tr '\\t\\r' '  '"
-            + " | sed 's/[[:space:]][[:space:]]*/ /g'); "
-            + "if printf '%s\\n' \"$rest\" | grep -Fq -- \"$needle\"; then match=1; fi; }; "
-            + "settle() { base=\"$1\"; changed=0; polls=0; last=\"$base\"; cur=\"$base\"; "
+            + "classify() { vals=$(printf '%s\\n' \"$cur\" | "
+            + "MPXNDL=\"$ndl\" MPXPFX='❯' MPXTGT=\"$tgt\" awk \"$prog\"); "
+            + "pin=-1; real=0; h=0; eval \"$vals\"; }; "
+            + "settle() { base=\"$1\"; moved=0; polls=0; last=\"$base\"; cur=\"$base\"; "
             + "while [ $polls -lt \(pageSettlePollCap) ]; do "
-            + "sleep 0.05; cur=$(capture); [ \"$cur\" != \"$base\" ] && changed=1; "
-            + "if [ \"$changed\" = 1 ] && [ \"$cur\" = \"$last\" ]; then break; fi; "
+            + "sleep 0.05; cur=$(capture); [ \"$cur\" != \"$base\" ] && moved=1; "
+            + "if [ \"$moved\" = 1 ] && [ \"$cur\" = \"$last\" ]; then break; fi; "
             + "last=\"$cur\"; polls=$((polls+1)); done; }; "
+            + "stepk() { count=$1; key=$2; s=0; "
+            + "while [ $s -lt $count ]; do "
+            + "tmux send-keys -t \"$sid\" \"$key\" 2>/dev/null || return 1; "
+            + "s=$((s+1)); sent=$((sent+1)); sleep 0.03; done; "
+            + "settle \"$cur\"; }; "
             + "restore() { tmux send-keys -t \"$sid\" C-End 2>/dev/null; sleep 0.08; }; "
-            + "seek_start() { sought=0; "
-            + "while [ $sought -lt \(pinnedSeekPageCap) ]; do "
-            + "base=\"$cur\"; sent=0; "
-            + "while [ $sent -lt \(pinnedSeekBatch) ] && [ $sought -lt \(pinnedSeekPageCap) ]; do "
-            + "tmux send-keys -t \"$sid\" PPage 2>/dev/null || return; "
-            + "sent=$((sent+1)); sought=$((sought+1)); i=$((i+1)); sleep 0.03; done; "
-            + "settle \"$base\"; "
-            + "if [ \"$cur\" = \"$base\" ]; then top=1; found=1; return; fi; "
-            + "classify \"$cur\"; "
-            + "if [ \"$match\" = 1 ]; then found=1; return; fi; "
-            + "if [ \"$match\" = 2 ]; then continue; fi; "
-            + "back=0; while [ $back -lt $sent ]; do "
-            + "base=\"$cur\"; tmux send-keys -t \"$sid\" NPage 2>/dev/null || return; "
-            + "settle \"$base\"; i=$((i-1)); back=$((back+1)); classify \"$cur\"; "
-            + "if [ \"$match\" != 0 ]; then found=1; return; fi; done; return; done; }; "
-            + "search() { found=0; top=0; i=0; cur=$(capture); classify \"$cur\"; "
-            + "if [ \"$match\" = 1 ]; then found=1; return; fi; "
-            + "if [ \"$match\" = 2 ]; then seek_start; return; fi; "
-            + "while [ $i -lt \(pageCap) ]; do "
-            + "base=\"$cur\"; tmux send-keys -t \"$sid\" PPage 2>/dev/null || break; "
-            + "settle \"$base\"; i=$((i+1)); "
-            + "if [ \"$cur\" = \"$base\" ]; then top=1; break; fi; "
-            + "classify \"$cur\"; "
-            + "if [ \"$match\" = 1 ]; then found=1; return; fi; "
-            + "if [ \"$match\" = 2 ]; then seek_start; return; fi; done; }; "
-            + "found=0; top=0; keep=0; i=0; "
+            + "found=0; top=0; keep=0; sent=0; osc=0; fbused=0; dir=u; "
+            + "tgt=\"$n1\"; "
             + "trap 'keep=1; restore; exit 1' HUP INT TERM; "
             + "trap 'if [ \"$keep\" != 1 ]; then restore; fi' EXIT; "
-            + "needle=\"$n1\"; search; "
-            // Only relax the needle after a complete primary miss.
-            + "if [ \"$found\" = 0 ] && [ -n \"$n2\" ]; then "
-            + "restore; needle=\"$n2\"; search; fi; "
+            // Normalize the start: the user may have scrolled the pager
+            // anywhere by hand, and from an unknown position the oracle's
+            // first direction would be a guess (a top start stalled it).
+            // From live, one PgUp always enters the pager with row-1 pin
+            // semantics in force — the LIVE view's row 1 is ordinary
+            // transcript and must not be classified.
+            + "restore; sleep 0.1; "
+            + "cur=$(capture); "
+            + "stepk 1 PPage || true; "
+            + "while [ $sent -lt \(jumpSendBudget) ]; do "
+            + "classify; "
+            + "printf 'MPXJ_T %s %s %s\\n' \"$sent\" \"$pin\" \"$real\"; "
+            + "[ \"$h\" -ge 12 ] 2>/dev/null || break; "
+            + "if [ \"$real\" -gt 0 ]; then "
+            + "if [ \"$real\" -le $((h / 2)) ]; then found=1; break; fi; "
+            + "dir=d; stepk 1 NPage || break; "
+            + "[ \"$moved\" = 0 ] && break; continue; fi; "
+            + "if [ \"$pin\" = \"$t\" ]; then "
+            + "dir=u; stepk \(oracleBodyBatch) PPage || break; "
+            + "[ \"$moved\" = 0 ] && { top=1; break; }; continue; fi; "
+            + "if [ \"$pin\" -gt \"$t\" ] 2>/dev/null; then "
+            + "dir=u; stepk \(oracleFarBatch) PPage || break; "
+            + "[ \"$moved\" = 0 ] && { top=1; break; }; continue; fi; "
+            + "if [ \"$pin\" -gt 0 ] 2>/dev/null; then "
+            // A known turn OLDER than the target owns the top row: we are
+            // above the message (an overshoot, or a needle mismatch).
+            + "if [ \"$dir\" = u ]; then osc=$((osc+1)); fi; "
+            + "if [ $osc -ge 2 ]; then "
+            + "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then "
+            + "tgt=\"$n2\"; fbused=1; osc=0; else break; fi; fi; "
+            + "dir=d; stepk 1 NPage || break; "
+            + "[ \"$moved\" = 0 ] && break; continue; fi; "
+            // Unknown ❯ turn (wrapper/meta or older than the list) or the
+            // banner region: keep the current direction.
+            + "if [ \"$dir\" = u ]; then stepk \(oracleBodyBatch) PPage || break; "
+            + "[ \"$moved\" = 0 ] && { top=1; break; }; "
+            + "else stepk 1 NPage || break; [ \"$moved\" = 0 ] && break; fi; "
+            + "done; "
             + "if [ \"$found\" = 1 ]; then "
-            + "keep=1; trap - HUP INT TERM EXIT; printf 'MPXJ_FOUND %s\\n' \"$i\"; else "
+            + "keep=1; trap - HUP INT TERM EXIT; printf 'MPXJ_FOUND %s\\n' \"$sent\"; else "
             + "keep=1; restore; trap - HUP INT TERM EXIT; "
-            + "if [ \"$top\" = 1 ]; then printf 'MPXJ_TOP %s\\n' \"$i\"; "
-            + "else printf 'MPXJ_EXHAUSTED %s\\n' \"$i\"; fi; fi; true"
+            + "if [ \"$top\" = 1 ]; then printf 'MPXJ_TOP %s\\n' \"$sent\"; "
+            + "else printf 'MPXJ_EXHAUSTED %s\\n' \"$sent\"; fi; fi; true"
     }
 
     enum JumpFindResult: Equatable {
@@ -614,8 +601,8 @@ enum AgentSessionHistory {
     }
 
     /// BACK TO LIVE: Claude maps Ctrl+End to scroll-bottom. It is constant
-    /// time even after a very long pinned turn, and unlike Esc cannot interrupt
-    /// a turn that started after finding began.
+    /// time even after a very long seek, and unlike Esc cannot interrupt a
+    /// turn that started after finding began.
     static func jumpReturnCommand(sessionID: String, pages _: Int) -> String {
         TmuxProbe.pathPrefix
             + "tmux send-keys -t \(sessionID.shellQuoted) C-End 2>/dev/null; true"

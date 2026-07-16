@@ -615,9 +615,10 @@ final class TerminalSessionController {
 
     /// The HISTORY panel opened: read the active session file's user
     /// prompts. Reloaded on every open — the file is append-only and the
-    /// bounded tail read is cheap.
+    /// bounded tail read is cheap. Claude Code only: the session-file
+    /// surface concentrates on the one agent whose pager jump is exact.
     func openAgentHistory(for agent: AgentKind) {
-        guard status == .live else { return }
+        guard status == .live, agent == .claudeCode else { return }
         historyLoadTask?.cancel()
         agentHistory = .loading
         historyLoadTask = Task { [weak self] in
@@ -641,8 +642,7 @@ final class TerminalSessionController {
                     if let sessionName = route.sessionName {
                         let output = try await connection.exec(
                             AgentSessionHistory.paneContextCommand(
-                                sessionName: sessionName,
-                                agent: agent
+                                sessionName: sessionName
                             )
                         )
                         let context = AgentSessionHistory.parsePaneContext(output)
@@ -655,12 +655,11 @@ final class TerminalSessionController {
                     guard let cwd else { return nil }
                     let output = try await connection.exec(
                         AgentSessionHistory.readCommand(
-                            agent: agent,
                             cwd: cwd,
                             preferredSessionID: preferredSessionID
                         )
                     )
-                    return AgentSessionHistory.parseReadOutput(output, agent: agent)
+                    return AgentSessionHistory.parseReadOutput(output)
                 }
             guard !Task.isCancelled, agentHistory != nil else { return }
             guard let result else {
@@ -690,24 +689,34 @@ final class TerminalSessionController {
     /// Scroll the live Claude Code transcript back to `message`: verify the
     /// agent is idle (paging a running turn fights streaming repaints, and
     /// the restore path must never need Esc), then run the one-exec remote
-    /// find loop — see `AgentSessionHistory.jumpFindCommand`.
+    /// header-oracle walk — see `AgentSessionHistory.jumpFindCommand`. The
+    /// full loaded message list rides along: every pinned turn header the
+    /// pager shows is matched against it, so each step is directed.
     func startHistoryJump(to message: AgentUserMessage) {
         guard status == .live,
               let sessionName = route.sessionName,
               historyJump == nil,
               !tmuxCopyModeUIActive,
-              case .loaded(let agent, _, true) = agentHistory,
+              case .loaded(let agent, let messages, true) = agentHistory,
               agent == .claudeCode
         else { return }
         let preview = String(message.firstLine.prefix(24))
         historyJump = .finding(preview: preview)
         historyJumpTask = Task { [weak self] in
-            await self?.runHistoryJump(message: message, sessionName: sessionName, preview: preview)
+            await self?.runHistoryJump(
+                message: message,
+                allMessages: messages,
+                sessionName: sessionName,
+                preview: preview
+            )
         }
     }
 
     private func runHistoryJump(
-        message: AgentUserMessage, sessionName: String, preview: String
+        message: AgentUserMessage,
+        allMessages: [AgentUserMessage],
+        sessionName: String,
+        preview: String
     ) async {
         let outcome: HistoryJumpOutcome
         do {
@@ -724,24 +733,20 @@ final class TerminalSessionController {
                 case .needsYou: return .failed("ANSWER THE AGENT FIRST")
                 case .idle: break
                 }
-                let needles = AgentSessionHistory.needles(
+                let targetNeedles = AgentSessionHistory.needles(
                     for: message, paneColumns: prologue.paneWidth
                 )
-                guard !needles.isEmpty else {
+                guard !targetNeedles.isEmpty else {
                     return .failed("MESSAGE TOO SHORT TO FIND")
-                }
-                // A row-1 match is Claude's sticky header for the current
-                // turn, not the message boundary. Let the remote finder seek
-                // through that assistant response; only a lower prompt row is
-                // already a valid landing point.
-                if AgentSessionHistory.captureMatch(
-                    prologue.capture, needles: needles
-                ) == .visiblePrompt {
-                    return .found(sessionID: prologue.sessionID, pages: 0)
                 }
                 let findOutput = try await connection.exec(
                     AgentSessionHistory.jumpFindCommand(
-                        sessionID: prologue.sessionID, needles: needles
+                        sessionID: prologue.sessionID,
+                        needles: AgentSessionHistory.needleEntries(
+                            for: allMessages, paneColumns: prologue.paneWidth
+                        ),
+                        targetIndex: message.ordinal,
+                        targetNeedles: targetNeedles
                     )
                 )
                 switch AgentSessionHistory.parseJumpFind(findOutput) {

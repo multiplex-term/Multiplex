@@ -114,6 +114,7 @@ struct AgentHelperStrip: View {
             for: .multiplexDebugAgentHistory
         )) { _ in
             guard isFocusOwner(),
+                  agent == .claudeCode,
                   let historyController,
                   historyController.canOfferAgentHistory,
                   !historyLocked
@@ -200,12 +201,15 @@ struct AgentHelperStrip: View {
         }
     }
 
-    /// The HISTORY chip: session-file prompts for the pane's agent. Free
-    /// tier routes to the paywall; hidden entirely when the tab has no way
-    /// to read session files.
+    /// The HISTORY chip: session-file prompts for the pane's Claude Code
+    /// conversation (the one agent whose pager jump is exact — Codex/Pi
+    /// support was withdrawn to keep this surface precise). Free tier routes
+    /// to the paywall; hidden entirely when the tab has no way to read
+    /// session files.
     @ViewBuilder
     private var historyButton: some View {
-        if let historyController, historyController.canOfferAgentHistory {
+        if agent == .claudeCode,
+           let historyController, historyController.canOfferAgentHistory {
             let button = Button {
                 if historyLocked {
                     openPaywall()

@@ -523,40 +523,48 @@ views.
   from its measured rendered height and cap only true overflow; never restore a
   command-count multiplier. Multiline rows do not have one stable height, so
   estimates leave a blank trench above the footer or clip edited content.
-- **HISTORY reads the agent's own session file; jump drives the TUI's own
-  pager** (`AgentSessionHistory`, pure + fixture-tested; Pro via
-  `canBrowseAgentHistory`). The control path resolves the pane cwd
-  (`list-panes -F`, same 3.6a discipline as drops). For Claude Code it also
-  walks descendants of `#{pane_pid}` and reads Claude's live
+- **HISTORY reads Claude Code's own session file; jump walks Claude's pager
+  with the header oracle** (`AgentSessionHistory`, pure + fixture-tested;
+  Pro via `canBrowseAgentHistory`). **Claude Code only** — Codex/Pi history
+  was deliberately withdrawn 2026-07-16; do not re-add a lesser variant
+  without a mechanism as exact as this one. The control path resolves the
+  pane cwd (`list-panes -F`, same 3.6a discipline as drops), walks
+  descendants of `#{pane_pid}`, and reads Claude's live
   `~/.claude/sessions/<pid>.json` registry, selecting that exact
   `~/.claude/projects/<munged-cwd>/<sessionId>.jsonl`; **do not regress to
   newest-mtime-only** — multiple Claude panes in one cwd are common, and the
   wrong file makes every JUMP miss. Missing/older registries fail soft to
-  newest mtime. Codex scans `~/.codex/sessions/*/*/*/rollout-*`, filtering
-  the head `"cwd":"…"`; Pi uses the newest file under
-  `~/.pi/agent/sessions/<-cwd with /→- and a trailing -->` (all verified
-  against real files 2026-07-16). Reads are sentinel-framed with server-side
-  grep pre-filters (Claude files reach tens of MB and its `type:"user"`
-  lines are mostly tool results; `<task-notification>`-style wrapper turns
-  are filtered app-side). **Claude Code ≥2.x owns the alternate screen under
-  tmux — its transcript never enters tmux scrollback**, so copy-mode search
-  can't find it; jump is instead ONE server-side exec (RTT-independent).
-  Matching is structural: only Claude's `❯` user rows count, never assistant
-  echoes/tool output. **A matching row 1 is not the message** — Claude pins
-  that turn header throughout its assistant response (observed for 40+ pages).
-  The finder therefore scans backward to the target turn, then seeks its real
-  beginning in four-PageUp batches (400-half-page safety cap); after crossing
-  into the prior turn it refines forward until the target returns. Captures
-  are polled until stable. Misses, cancellation, and BACK TO LIVE use Claude's
-  Ctrl+End scroll-bottom binding in constant time, **never Esc** — Esc can
-  interrupt a running turn. Long prompts render as ONE `…`-truncated row at
-  pane width, so search uses a ≤60-column normalized first-line prefix,
-  retrying a 24-column fallback only after a full primary miss (wide glyphs
-  cost two columns).
-  Pure-paste messages can match nothing and remain effectively peek-only.
-  While `.finding`, the terminal's input pump is locked and a veil says so;
-  `.shell` tabs list history through the probe's cwd stage (`readlink /proc`,
-  `lsof` fallback) but never jump. Plan + verified experiment record:
+  newest mtime. Reads are sentinel-framed with server-side grep pre-filters
+  (Claude files reach tens of MB and its `type:"user"` lines are mostly
+  tool results; `<task-notification>`-style wrapper turns are filtered
+  app-side). **Claude Code ≥2.x owns the alternate screen under tmux — its
+  transcript never enters tmux scrollback**, so copy-mode search can't find
+  it; jump is ONE server-side exec (RTT-independent). The pager facts the
+  walk is built on (verified 2.1.211): PgUp/PgDn move half the transcript
+  region; **row 1 of a scrolled view is the sticky `❯` header of the turn
+  that owns the top row** (banner region → no `❯`), and it coexists with
+  real `❯` rows below; Ctrl+End is scroll-bottom, Ctrl+Home scroll-top; no
+  line-granular scroll exists. The find therefore ships the WHOLE loaded
+  message list as an index (longest-needle-first, 1-based; an awk classifier
+  reports `pin` = which known turn owns row 1, `real` = the target's actual
+  `❯` row, bottom chrome excluded so a drafted composer can't false-match):
+  normalize to live, then every step is directed — pin newer than target →
+  batched PgUp, pin == target → smaller batches through its response, pin
+  older → single PgDn approach from above, unknown pins ride the current
+  direction. Landing is deterministic: accept only a real row in the TOP
+  half; a lower sighting takes one PgDn (half-page steps cannot skip the
+  window). Two upward crossings past the target without its row = needle
+  mismatch → one retry with the 24-column fallback, then an honest miss.
+  The 400-send budget is a runaway stop, not a search radius — there is no
+  blind page cap anymore. Misses, cancellation traps, and BACK TO LIVE use
+  Ctrl+End in constant time, **never Esc** — Esc can interrupt a running
+  turn. Long prompts render as ONE `…`-truncated row at pane width, so
+  needles are ≤60-column normalized first-line prefixes (wide glyphs cost
+  two columns); pure-paste messages can match nothing and remain peek-only;
+  identical prompts land on the nearest twin. While `.finding`, the
+  terminal's input pump is locked and a veil says so; `.shell` tabs list
+  history through the probe's cwd stage (`readlink /proc`, `lsof` fallback)
+  but never jump. Plan + verified experiment record:
   `local-plan/agent-message-history.md`.
 - **File attach/drop = SFTP upload + typed path, never Enter**: compatible
   SSH-backed tmux tabs carry one free FILE menu in the UMD/classic iPad toolbar
