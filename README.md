@@ -76,8 +76,9 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
   scene, so per-window first responders leave input stuck on the first
   session. Tapping a terminal claims focus app-wide (resigning the previous
   one and activating that window's scene); the chrome's keyboard button
-  re-summons a dismissed keyboard; a shell that (re)connects claims focus.
-  Keystrokes flow through a single ordered AsyncStream per shell.
+  re-summons a dismissed keyboard. The system keyboard preserves the user's
+  selected language and multistage IMEs; a shell that (re)connects claims
+  focus. Keystrokes flow through a single ordered AsyncStream per shell.
 - **Terminal themes** — Settings (chip on the wall) picks the terminal color
   scheme: seven built-ins (Tally — the default, Multiplex amber, Gruvbox
   Dark, Dracula, Nord, Solarized Dark/Light) plus user-created themes with a
@@ -114,7 +115,7 @@ with any POSIX-ish login shell, and channel close = clean detach.
 
 | Library | Version | Why |
 | --- | --- | --- |
-| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | 1.13.0, vendored | The only mature native-Swift terminal emulator view; declares visionOS support; MIT. Vendored at `Vendor/SwiftTerm` (rev `8e7a1e1`) with Multiplex input patches for the ASCII keyboard default, primary-button taps, remote scrolling, copy-mode selection, and iOS-app-on-Mac hardware keys. |
+| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | 1.14.0, vendored | The only mature native-Swift terminal emulator view; declares visionOS support; MIT. Vendored at `Vendor/SwiftTerm` (rev `849e8a4`) with upstream primary-button taps plus Multiplex input patches for multilingual system-keyboard selection, remote scrolling, copy-mode selection, and iOS-app-on-Mac hardware keys. |
 | [Citadel](https://github.com/orlandos-nl/Citadel) | 0.12.0 (exact) | Async/await SSH on SwiftNIO: PTY shell + resize, exec, and OpenSSH key parsing (ed25519/RSA, encrypted keys included). |
 
 **Supply-chain note.** Citadel is deliberately pinned to **0.12.0**: 0.12.1

@@ -7,9 +7,10 @@ options:
     visionOS: "1.0"
 
 packages:
-  # Vendored 1.13.0 (rev 8e7a1e1, MIT) with one patch: keyboardType is
-  # settable so the terminal can default to an ASCII-capable (English)
-  # keyboard instead of the user's IME.
+  # Vendored 1.14.0 (rev 849e8a4, MIT). Multiplex keeps keyboardType settable
+  # and `.default` for multilingual/IME input, routes pans to remote scrolling
+  # and copy mode, and preserves iOS-app-on-Mac Escape and hardware Ctrl chords.
+  # Primary-button tap reporting is upstream as of this release.
   SwiftTerm:
     path: Vendor/SwiftTerm
   # Pinned to 0.12.0 on purpose: 0.12.1 moved its swift-nio-ssh dependency to

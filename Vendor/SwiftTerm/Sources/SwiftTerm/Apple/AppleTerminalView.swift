@@ -83,9 +83,55 @@ struct ViewLineInfo {
     var boxDrawings: [BoxDrawingRenderItem]
 }
 
+/// How to place a single glyph within its `columnWidth`-cell slot.
+///
+/// Full-width (CJK) and other substituted glyphs would otherwise be pinned to
+/// the left edge of their slot, which dumps the slack between the glyph's
+/// advance and the slot width onto the right of every cell — the phantom gap
+/// reported for CJK text. ``GlyphSlotFit`` centers the glyph's advance box in
+/// the slot so the slack is split evenly instead, matching Terminal.app and the
+/// centering Ghostty applies to wide glyphs (its glyph constraint with
+/// `align: .center`). As a safety net it also constrains a glyph whose ink
+/// overflows its slot — too wide for the columns, or too tall for the cell —
+/// scaling it down to fit and re-centering it vertically. That fit-to-cell guard
+/// is in the spirit of Ghostty's `size` constraint; it is not Ghostty's
+/// cap-height CJK down-scaling (#8709), which corrects an up-scaling we never do.
+/// `dx`/`dy` are point offsets applied to the glyph origin; `scale` is a uniform
+/// downscale (`<= 1`).
+struct GlyphSlotFit {
+    var dx: CGFloat = 0
+    var dy: CGFloat = 0
+    var scale: CGFloat = 1
+
+    static let identity = GlyphSlotFit()
+
+    var isIdentity: Bool { dx == 0 && dy == 0 && scale == 1 }
+}
+
 extension TerminalView {
     typealias CellDimension = CGSize
-    
+
+#if os(macOS)
+    /// Controls whether font smoothing (sub-pixel rendering) is enabled during glyph drawing.
+    /// Set to `false` to get thinner strokes on Retina displays, matching iTerm2's "Thin strokes" setting.
+    /// Defaults to `true` (standard macOS font smoothing).
+    @objc open var fontSmoothing: Bool {
+        get { _fontSmoothing }
+        set { _fontSmoothing = newValue }
+    }
+#endif
+
+    /// Multiplier for vertical line spacing. 1.0 = default (ascent + descent + leading).
+    /// Set to 1.1 for 110% vertical spacing (matches iTerm2's vertical spacing setting).
+    /// Triggers a font reset and terminal resize when changed.
+    @objc open var lineSpacing: CGFloat {
+        get { _lineSpacing }
+        set {
+            _lineSpacing = newValue
+            resetFont()
+        }
+    }
+
     func resetCaches ()
     {
         self.attributes = [:]
@@ -99,9 +145,11 @@ extension TerminalView {
     {
         resetCaches()
         self.cellDimension = computeFontDimensions ()
-        let newCols = Int(frame.width / cellDimension.width)
-        let newRows = Int(frame.height / cellDimension.height)
-        resize(cols: newCols, rows: newRows)
+        if (frame.width > 0) && (frame.height > 0) {
+            let newCols = Int(frame.width / cellDimension.width)
+            let newRows = Int(frame.height / cellDimension.height)
+            resize(cols: newCols, rows: newRows)
+        }
         updateCaretView()
         
         #if os(macOS)
@@ -129,13 +177,16 @@ extension TerminalView {
         // Calculation assume that all glyphs in the font have the same advancement.
         // Get the ascent + descent + leading from the font, already scaled for the font's size
         self.cellDimension = computeFontDimensions ()
-        
-        let terminalOptions = TerminalOptions(cols: Int(width / cellDimension.width),
-                                              rows: Int(height / cellDimension.height))
-        
+
+        let zeroSizedView = width == 0 && height == 0
+        let terminalOptions = zeroSizedView
+            ? (terminal?.options ?? .default)
+            : TerminalOptions(cols: Int(width / cellDimension.width),
+                              rows: Int(height / cellDimension.height))
+
         if terminal == nil {
             terminal = Terminal(delegate: self, options: terminalOptions)
-        } else {
+        } else if !zeroSizedView {
             terminal.options = terminalOptions
             terminal.setup(isReset: false)
         }
@@ -172,6 +223,9 @@ extension TerminalView {
     /// Returns true if this changed the number of columns/rows, false otherwise
     @discardableResult
     func processSizeChange (newSize: CGSize) -> Bool {
+        if newSize.width == 0 && newSize.height == 0 {
+            return false
+        }
         let newRows = Int (newSize.height / cellDimension.height)
         let newCols = Int (getEffectiveWidth (size: newSize) / cellDimension.width)
         
@@ -197,7 +251,7 @@ extension TerminalView {
         let lineAscent = CTFontGetAscent (fontSet.normal)
         let lineDescent = CTFontGetDescent (fontSet.normal)
         let lineLeading = CTFontGetLeading (fontSet.normal)
-        let cellHeight = ceil(lineAscent + lineDescent + lineLeading)
+        let cellHeight = ceil((lineAscent + lineDescent + lineLeading) * _lineSpacing)
         #if os(macOS)
         // The following is a more robust way of getting the largest ascii character width, but comes with a performance hit.
         // See: https://github.com/migueldeicaza/SwiftTerm/issues/286
@@ -222,7 +276,54 @@ extension TerminalView {
         let snappedHeight = ceil(cellHeight * scale) / scale
         return CellDimension(width: max(1, snappedWidth), height: max(min(snappedHeight, 8192), 1))
     }
-    
+
+    /// Computes how to center `glyph` within its `columnWidth`-cell slot (and
+    /// scale it down if its ink overflows). Returns ``GlyphSlotFit/identity`` for
+    /// ordinary single-cell glyphs, so Latin text in a monospace font is rendered
+    /// exactly as before and the hot path stays untouched. Shared by the
+    /// CoreGraphics and Metal glyph renderers so they stay pixel-consistent.
+    func glyphSlotFit (font: CTFont, glyph: CGGlyph, columnWidth: Int) -> GlyphSlotFit
+    {
+        // Only wide cells need adjusting: a single-width glyph in a monospace
+        // font already fills its cell, so we skip the metric lookups entirely.
+        guard columnWidth >= 2, cellDimension != nil else { return .identity }
+
+        let cellWidth = cellDimension.width
+        let cellHeight = cellDimension.height
+        let slotWidth = CGFloat(columnWidth) * cellWidth
+
+        var g = glyph
+        var advance = CGSize.zero
+        CTFontGetAdvancesForGlyphs(font, .horizontal, &g, &advance, 1)
+        guard advance.width > 0 else { return .identity }
+
+        var ink = CGRect.zero
+        CTFontGetBoundingRectsForGlyphs(font, .horizontal, &g, &ink, 1)
+
+        // Scale down only when the ink would spill outside its slot (rare; this
+        // protects oversized substitute glyphs). Never enlarge.
+        var scale: CGFloat = 1
+        if ink.width > slotWidth || ink.height > cellHeight, ink.width > 0, ink.height > 0 {
+            scale = max(0.1, min(min(slotWidth / ink.width, cellHeight / ink.height), 1))
+        }
+
+        // Center the (scaled) advance box horizontally in the slot. Centering by
+        // advance rather than ink keeps glyphs that are intentionally off-center
+        // within their em square — e.g. the CJK comma `、` — in their place.
+        let dx = (slotWidth - advance.width * scale) / 2
+
+        // Preserve the natural Latin baseline unless the glyph was scaled, in
+        // which case center its ink vertically so it doesn't sit too low/high.
+        var dy: CGFloat = 0
+        if scale < 1, ink.height > 0 {
+            let baselineFromBottom = ceil(CTFontGetDescent(fontSet.normal) + CTFontGetLeading(fontSet.normal))
+            let inkCenterFromBaseline = (ink.origin.y + ink.height / 2) * scale
+            dy = (cellHeight / 2 - baselineFromBottom) - inkCenterFromBaseline
+        }
+
+        return GlyphSlotFit(dx: dx, dy: dy, scale: scale)
+    }
+
     func mapColor (color: Attribute.Color, isFg: Bool, isBold: Bool, useBrightColors: Bool = true) -> TTColor
     {
         switch color {
@@ -326,8 +427,11 @@ extension TerminalView {
 
     public func synchronizedOutputChanged (source: Terminal, active: Bool)
     {
-        updateScroller()
-        queuePendingDisplay()
+        if !active {
+            updateScroller()
+            queuePendingDisplay()
+            terminalDelegate?.scrolled(source: self, position: scrollPosition)
+        }
     }
 
     public func setBackgroundColor(source: Terminal, color: Color) {
@@ -696,6 +800,11 @@ extension TerminalView {
             } else {
                 // Common path: just accumulate into the batch
                 pendingText.append(character)
+                if UnicodeUtil.prefersTextPresentation(character) {
+                    // Steer font fallback away from Apple Color Emoji for
+                    // default-text-presentation symbols (see prefersTextPresentation).
+                    pendingText.append("\u{FE0E}")
+                }
                 previousPlaceholder = nil
                 previousPlaceholderAttribute = nil
             }
@@ -1174,6 +1283,16 @@ extension TerminalView {
         }
         var placeholderImageCache: [UInt32: TTImage] = [:]
 
+        #if os(macOS)
+        // Clear the invalidated region before painting. We fill only cells that carry
+        // an explicit background; default-background cells rely on transparent backing-
+        // store pixels showing the layer's background color. AppKit clears the backing
+        // store only on a full-view redraw, so a partial repaint (a restricted DECSTBM
+        // scroll region, line insert/delete) otherwise keeps stale glyphs/backgrounds.
+        // Clear to transparent — not fill — so a translucent background is preserved.
+        context.clear(dirtyRect)
+        #endif
+
         for row in firstRow...lastRow {
             if row < 0 {
                 continue
@@ -1184,7 +1303,7 @@ extension TerminalView {
             let renderMode = displayBuffer.lines [row].renderMode
             let lineOffset = calcLineOffset(forRow: row)
             let lineOrigin = CGPoint(x: 0, y: frame.height - lineOffset)
-            
+
             switch renderMode {
             case .single:
                 break
@@ -1319,13 +1438,28 @@ extension TerminalView {
                             #endif
 
                             if endColumn >= terminal.cols {
-                                rect.size.width = frame.width - rect.origin.x
+                                if backgroundColor == nativeBackgroundColor {
+                                    rect.size.width = frame.width - rect.origin.x
+                                } else {
+                                    let marginX = rect.origin.x + rect.size.width
+                                    if marginX < frame.width {
+                                        let marginRect = CGRect(x: marginX, y: rect.origin.y, width: frame.width - marginX, height: rect.size.height)
+                                        #if os(macOS)
+                                        nativeBackgroundColor.setFill()
+                                        marginRect.fill()
+                                        #else
+                                        context.setFillColor(nativeBackgroundColor.cgColor)
+                                        context.fill(marginRect)
+                                        #endif
+                                    }
+                                }
                             }
 
                             #if os(macOS)
                             backgroundColor.setFill()
                             rect.fill()
                             #else
+                            context.setFillColor(backgroundColor.cgColor)
                             context.fill(rect)
                             #endif
                         }
@@ -1361,8 +1495,8 @@ extension TerminalView {
             context.setShouldAntialias(true)
             context.setAllowsAntialiasing(true)
             #if os(macOS)
-            context.setShouldSmoothFonts(true)
-            context.setAllowsFontSmoothing(true)
+            context.setShouldSmoothFonts(fontSmoothing)
+            context.setAllowsFontSmoothing(fontSmoothing)
             #endif
 
             // Glyph drawing loop — reuses cached CTLines
@@ -1394,20 +1528,50 @@ extension TerminalView {
                             y: lineOrigin.y + yOffset + ctPosition.y)
                     }
 
-                    nativeForegroundColor.set()
+                    nativeForegroundColor.setFill()
 
                     if runAttributes.keys.contains(.foregroundColor) {
                         let color = runAttributes[.foregroundColor] as! TTColor
-                        let cgColor = color.cgColor
-                        if let colorSpace = cgColor.colorSpace {
-                            context.setFillColorSpace(colorSpace)
-                        }
-                        context.setFillColor(cgColor)
+                        color.setFill()
                     }
 
-                    CTFontDrawGlyphs(runFont, runGlyphs, &positions, positions.count, context)
+                    // Center full-width (CJK) and substituted glyphs within their
+                    // multi-cell slot instead of pinning them to the cell's left
+                    // edge. `positions` stays grid-aligned for the decorations
+                    // below; only `glyphPositions` is shifted/scaled.
+                    let ctRunFont = runFont as CTFont
+                    var glyphPositions = positions
+                    var scaledFits: [GlyphSlotFit]? = nil
+                    if prepared.segment.columnWidth >= 2 {
+                        var computed = [GlyphSlotFit](repeating: .identity, count: runGlyphsCount)
+                        var anyScaled = false
+                        for i in 0..<runGlyphsCount {
+                            let fit = glyphSlotFit(font: ctRunFont, glyph: runGlyphs[i], columnWidth: prepared.segment.columnWidth)
+                            computed[i] = fit
+                            glyphPositions[i].x += fit.dx
+                            glyphPositions[i].y += fit.dy
+                            if fit.scale != 1 { anyScaled = true }
+                        }
+                        if anyScaled { scaledFits = computed }
+                    }
 
-                    // Draw other attributes
+                    if let scaledFits {
+                        // Rare path: at least one glyph overflowed its slot and is
+                        // drawn individually at a reduced point size.
+                        for i in 0..<runGlyphsCount {
+                            let s = scaledFits[i].scale
+                            let drawFont: CTFont = s == 1
+                                ? ctRunFont
+                                : CTFontCreateCopyWithAttributes(ctRunFont, CTFontGetSize(ctRunFont) * s, nil, nil)
+                            var g = runGlyphs[i]
+                            var p = glyphPositions[i]
+                            CTFontDrawGlyphs(drawFont, &g, &p, 1, context)
+                        }
+                    } else {
+                        CTFontDrawGlyphs(runFont, runGlyphs, &glyphPositions, glyphPositions.count, context)
+                    }
+
+                    // Draw other attributes (decorations stay grid-aligned)
                     drawRunAttributes(runAttributes, glyphPositions: positions, in: context)
 
                     processedGlyphs += runGlyphsCount
@@ -1568,6 +1732,9 @@ extension TerminalView {
     func updateDisplay (notifyAccessibility: Bool)
     {
         defer { pendingDisplay = false }
+        if terminal.synchronizedOutputActive {
+            return
+        }
         updateCursorPosition()
         guard let (rowStart, rowEnd) = terminal.getUpdateRange () else {
             if notifyUpdateChanges {
@@ -1575,6 +1742,22 @@ extension TerminalView {
                 let y = buffer.yDisp+buffer.y
                 terminalDelegate?.rangeChanged (source: self, startY: y, endY: y)
             }
+            // Pure cursor moves (e.g. CSI C / CSI D from word-jumps) don't
+            // mark any row dirty, so getUpdateRange() returns nil. With Metal
+            // the cursor is drawn by the renderer reading buffer.x/y at draw
+            // time, and MTKView is paused — without an explicit redraw the
+            // cursor stays at its old screen position until something else
+            // dirties a row. Trigger a redraw if the cursor moved.
+            #if canImport(MetalKit)
+            if metalView != nil {
+                let buffer = terminal.displayBuffer
+                let cursor = (x: buffer.x, y: buffer.yBase + buffer.y, hidden: terminal.cursorHidden)
+                if lastRenderedCursor == nil || lastRenderedCursor! != cursor {
+                    lastRenderedCursor = cursor
+                    requestMetalDisplay()
+                }
+            }
+            #endif
             return
         }
         if notifyUpdateChanges {
@@ -1582,7 +1765,7 @@ extension TerminalView {
         }
 
         terminal.clearUpdateRange ()
-                
+
         #if os(macOS)
         let baseLine = frame.height
         var region = CGRect (x: 0,
@@ -1596,6 +1779,14 @@ extension TerminalView {
             let oh = region.height
             let oy = region.origin.y
             region = CGRect (x: 0, y: 0, width: frame.width, height: oh + oy)
+        } else {
+            // Region ends mid-screen (a restricted DECSTBM region): extend the
+            // invalidation down by one cell so the sub-cell remainder just below the
+            // band's bottom row (descenders / tall unicode) is cleared too. Previously
+            // only rowEnd == rows-1 got this, leaving a one-row ghost below the region.
+            let extra = cellDimension.height
+            let newY = max (0, region.origin.y - extra)
+            region = CGRect (x: 0, y: newY, width: frame.width, height: region.maxY - newY)
         }
 #if canImport(MetalKit)
         if metalView != nil {
@@ -1624,6 +1815,7 @@ extension TerminalView {
                     metalDirtyRange = nil
                 }
             }
+            lastRenderedCursor = (x: buffer.x, y: buffer.yBase + buffer.y, hidden: terminal.cursorHidden)
             requestMetalDisplay()
         } else {
             setNeedsDisplay(region)
@@ -1637,6 +1829,8 @@ extension TerminalView {
         #if canImport(MetalKit)
         if metalView != nil {
             metalDirtyRange = metalVisibleRange()
+            let buffer = terminal.displayBuffer
+            lastRenderedCursor = (x: buffer.x, y: buffer.yBase + buffer.y, hidden: terminal.cursorHidden)
             requestMetalDisplay()
         } else {
             setNeedsDisplay(bounds)
@@ -1650,6 +1844,9 @@ extension TerminalView {
         
         if (notifyAccessibility) {
             accessibility.invalidate ()
+            #if os(iOS)
+            UIAccessibility.post(notification: .layoutChanged, argument: nil)
+            #endif
             #if os(macOS)
             NSAccessibility.post (element: self, notification: .valueChanged)
             NSAccessibility.post (element: self, notification: .selectedTextChanged)
@@ -1681,8 +1878,13 @@ extension TerminalView {
         let offset = (cellDimension.height * (CGFloat(buffer.y-(buffer.yDisp-buffer.yBase)+1)))
         let lineOrigin = CGPoint(x: 0, y: frame.height - offset)
         #endif
+        let charUnderCursor = buffer.lines [vy][buffer.x]
+        // Span the caret across the full character so a block cursor covers a
+        // full-width (CJK) glyph instead of only its left half.
+        let cursorColumnWidth = max(1, Int(charUnderCursor.width))
         caretView.frame.origin = CGPoint(x: lineOrigin.x + (cellDimension.width * doublePosition * CGFloat(buffer.x)), y: lineOrigin.y)
-        caretView.setText (ch: buffer.lines [vy][buffer.x])
+        caretView.frame.size.width = cellDimension.width * doublePosition * CGFloat(cursorColumnWidth)
+        caretView.setText (ch: charUnderCursor)
     }
     
     // Does not use a default argument and merge, because it is called back
@@ -1702,6 +1904,9 @@ extension TerminalView {
     // It is also cheap, so should be called when new data has been posted or received.
     func queuePendingDisplay ()
     {
+        if terminal.synchronizedOutputActive {
+            return
+        }
         // throttle
         if !pendingDisplay {
             let fps60 = 16670000
@@ -1711,6 +1916,7 @@ extension TerminalView {
             DispatchQueue.main.asyncAfter(
                 deadline: DispatchTime (uptimeNanoseconds: DispatchTime.now().uptimeNanoseconds + UInt64 (fpsDelay)),
                 execute: updateDisplay)
+        } else {
         }
     }
 
@@ -1823,11 +2029,10 @@ extension TerminalView {
     
     public func scroll (toPosition: Double)
     {
-        userScrolling = true
         let displayBuffer = terminal.displayBuffer
         let oldPosition = displayBuffer.yDisp
         
-        let maxScrollback = displayBuffer.lines.count - displayBuffer.rows
+        let maxScrollback = max(0, displayBuffer.lines.count - displayBuffer.rows)
         var newScrollPosition = Int (Double (maxScrollback) * toPosition)
         
         if newScrollPosition < 0 {
@@ -1839,25 +2044,48 @@ extension TerminalView {
 
         if newScrollPosition != oldPosition {
             scrollTo(row: newScrollPosition)
+        } else {
+            updateUserScrollingState(for: newScrollPosition, in: displayBuffer)
         }
-        userScrolling = false
+    }
+
+    private func updateUserScrollingState(for row: Int, in displayBuffer: Buffer) {
+        let maxScrollback = max(0, displayBuffer.lines.count - displayBuffer.rows)
+        let isUserScrolling = row < maxScrollback
+        userScrolling = isUserScrolling
+        terminal.userScrolling = isUserScrolling
     }
     
     public func scrollTo (row: Int, notifyAccessibility: Bool = true)
     {
         let displayBuffer = terminal.displayBuffer
-        if row != displayBuffer.yDisp {
-            terminal.setViewYDisp (row)
-            
+        let maxScrollback = max(0, displayBuffer.lines.count - displayBuffer.rows)
+        let targetRow = max(0, min(row, maxScrollback))
+#if os(iOS) || os(visionOS)
+        resetManualScrollOffsetWithinRow()
+#endif
+        updateUserScrollingState(for: targetRow, in: displayBuffer)
+
+        if targetRow != displayBuffer.yDisp {
+            terminal.setViewYDisp (targetRow)
+
             // tell the terminal we want to refresh all the rows
             terminal.refresh (startRow: 0, endRow: terminal.rows)
-            
+
             // do the display update
             updateDisplay (notifyAccessibility: notifyAccessibility)
             //selectionView.notifyScrolled(source: terminal)
             terminalDelegate?.scrolled (source: self, position: scrollPosition)
             updateScroller()
             setNeedsDisplay(frame)
+        } else {
+#if os(iOS) || os(visionOS)
+            // The row did not change, but we just cleared any sub-row manual
+            // scroll offset above; resync contentOffset so a later output-driven
+            // updateScroller does not snap the view up by that stale fractional
+            // amount.
+            updateScroller()
+#endif
         }
     }
     
@@ -1909,9 +2137,57 @@ extension TerminalView {
     func feedFinish ()
     {
         suspendDisplayUpdates ()
+        if shouldDisplayImmediatelyAfterUserInput() {
+            displayImmediately()
+            return
+        }
         queuePendingDisplay()
     }
-    
+
+    private func shouldDisplayImmediatelyAfterUserInput() -> Bool {
+        guard !terminal.synchronizedOutputActive else { return false }
+        let last = loadLastUserInputUptimeNs()
+        guard last > 0 else { return false }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now >= last else { return false }
+        return now - last <= interactiveInputDisplayWindowNs
+    }
+
+    /// Records that the user just produced input, opening the immediate-display
+    /// window. `lastUserInputUptimeNs` is written here on the main thread but
+    /// read from the (possibly background) feed thread in feedFinish(), so both
+    /// accesses go through userInputLock to avoid a data race / torn read.
+    func recordUserInput() {
+        let now = DispatchTime.now().uptimeNanoseconds
+        userInputLock.lock()
+        lastUserInputUptimeNs = now
+        userInputLock.unlock()
+    }
+
+    private func loadLastUserInputUptimeNs() -> UInt64 {
+        userInputLock.lock()
+        defer { userInputLock.unlock() }
+        return lastUserInputUptimeNs
+    }
+
+    private func displayImmediately() {
+        guard !Thread.isMainThread else {
+            updateDisplay()
+            return
+        }
+        // Coalesce with the throttled path: if a redraw is already scheduled
+        // (either here or via queuePendingDisplay), don't post another. This
+        // bypasses the 16.67ms frame-rate timer so echo feels responsive, while
+        // still collapsing a burst of feed chunks into a single main-thread
+        // redraw instead of flooding the main queue with one updateDisplay per
+        // chunk. updateDisplay() clears pendingDisplay, reopening the gate.
+        guard !pendingDisplay else { return }
+        pendingDisplay = true
+        DispatchQueue.main.async { [weak self] in
+            self?.updateDisplay()
+        }
+    }
+
     /// Sends data to the terminal emulator for interpretation, this can be invoked from a background thread
     public func feed (byteArray: ArraySlice<UInt8>)
     {
@@ -1957,6 +2233,7 @@ extension TerminalView {
      */
     public func send(data: ArraySlice<UInt8>)
     {
+        recordUserInput()
         ensureCaretIsVisible ()
         #if os(iOS) || os(visionOS)
         if TerminalView.textInputDebugEnabled {
@@ -2265,7 +2542,7 @@ extension TerminalView {
     public func selectNone () {
         selection.selectNone()
     }
-    
+
 }
 
 #if canImport(UIKit) && DEBUG

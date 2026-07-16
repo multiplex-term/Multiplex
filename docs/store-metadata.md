@@ -74,8 +74,9 @@ submission.
 
 Current product split:
 
-- Free: two hosts, full SSH spatial windows/tabs/merge with primary-button
-  touch/pointer input for mouse-aware TUIs, all-pane agent detection and wall
+- Free: two hosts, full SSH spatial windows/tabs/merge with multilingual
+  system-keyboard/IME input and primary-button touch/pointer input for
+  mouse-aware TUIs, all-pane agent detection and wall
   telemetry with foreground-aware helpers in tmux panes and plain SSH
   shells (including direct-shell NEEDS YOU chrome), built-in terminal themes,
   free file attachment on SSH-backed tmux tabs from Files/Photos (plus camera

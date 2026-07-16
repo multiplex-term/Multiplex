@@ -48,7 +48,9 @@ struct SwiftTermView: UIViewRepresentable {
                 font: .monospacedSystemFont(ofSize: fontSize, weight: .regular)
             )
             view.changeScrollback(5000)
-            view.keyboardType = .asciiCapable
+            // Use the standard keyboard so the user's selected language and
+            // multistage IMEs remain available instead of forcing ASCII input.
+            view.keyboardType = .default
             #if os(visionOS)
             // SwiftTerm still builds its stock accessory here even though
             // the floating visionOS keyboard never shows one — and that
