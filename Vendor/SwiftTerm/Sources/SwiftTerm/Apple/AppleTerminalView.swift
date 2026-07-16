@@ -164,6 +164,11 @@ extension TerminalView {
         guard let caretView else { return }
         caretView.frame.size = CGSize(width: cellDimension.width, height: cellDimension.height)
         caretView.updateCursorStyle()
+        #if os(iOS) || os(visionOS)
+        // Multiplex patch: font/cell-size changes must resize and re-anchor the
+        // UIKit marked-text preview while composition remains active.
+        updateMarkedTextOverlay()
+        #endif
     }
     
     /// The frame used by the caretView
@@ -1857,6 +1862,11 @@ extension TerminalView {
     func updateCursorPosition()
     {
         guard let caretView else { return }
+        #if os(iOS) || os(visionOS)
+        // Multiplex patch: re-anchor the local IME preview after every caret
+        // update, including early exits when the cursor leaves the viewport.
+        defer { updateMarkedTextOverlay() }
+        #endif
         //let lineOrigin = CGPoint(x: 0, y: frame.height - (cellDimension.height * (CGFloat(terminal.buffer.y - terminal.buffer.yDisp + 1))))
         //caretView.frame.origin = CGPoint(x: lineOrigin.x + (cellDimension.width * CGFloat(terminal.buffer.x)), y: lineOrigin.y)
         let buffer = terminal.displayBuffer

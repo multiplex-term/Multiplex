@@ -224,6 +224,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     var caretView: CaretView?
     var _lineSpacing: CGFloat = 1.0
     var terminal: Terminal!
+    // Multiplex patch: keep IME composition local in a floating label until
+    // UIKit commits it; provisional marked text must never enter the PTY.
+    var markedTextOverlay: UILabel?
     private var progressBarView: TerminalProgressBarView?
     private var progressReportTimer: Timer?
     private var lastProgressValue: UInt8?
@@ -337,6 +340,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         setupLinkReportingInteractions()
         setupAccessoryView ()
         didFinishSetup = true
+    }
+
+    // Multiplex patch: a detached terminal has lost its input session
+    // (transport/view teardown or tab reparenting), so discard its local composition.
+    open override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window == nil, _markedTextRange != nil || markedTextOverlay != nil else { return }
+        resetInputBuffer()
     }
 
 #if canImport(MetalKit)
@@ -552,6 +563,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     @objc func resetCmd(_ sender: Any?) {
         terminal.cmdReset()
+        // Multiplex patch: terminal reset also resets UIKit's transient IME state
+        // so no marked-text preview survives a rebuilt terminal view.
+        resetInputBuffer()
         selection.selectNone()
         disableSelectionPanGesture()
         queuePendingDisplay()
@@ -1928,6 +1942,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         let rangeStartIndex = rangeToReplace.startPosition.offset
         textInputStorage.replaceSubrange(rangeToReplace.fullRange(in: textInputStorage), with: textToInsert)
         _markedTextRange = nil
+        // Multiplex patch: all insertText routes converge here; remove the local
+        // IME preview before the committed text is sent to the remote terminal.
+        updateMarkedTextOverlay()
         let insertedOffset = textInputStorage.textInputValidUTF16Offset(
             rangeStartIndex + textToInsert.textInputUTF16Count,
             rounding: .forward)
@@ -2482,6 +2499,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
         
         _markedTextRange = nil
+        // Multiplex patch: deleting a marked range ends composition, so do not
+        // leave its purely local preview floating over the terminal.
+        updateMarkedTextOverlay()
         _selectedTextRange = TextRange(from: rangeStartPosition, to: rangeStartPosition)
 
         endTextInputEdit()

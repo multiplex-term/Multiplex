@@ -226,6 +226,9 @@ extension TerminalView: UITextInput {
             return _markedTextRange
         }
         set {
+            // Multiplex patch: keep the local IME preview in lockstep even if
+            // UIKit updates the marked range property directly.
+            defer { updateMarkedTextOverlay() }
             guard let newValue else {
                 _markedTextRange = nil
                 uitiLog("markedTextRange -> nil")
@@ -253,7 +256,9 @@ extension TerminalView: UITextInput {
 
         beginTextInputEdit()
 
-        if let newText = markedText {
+        // Multiplex patch: match the Mac preview semantics by treating empty
+        // marked text as the end of composition instead of retaining an empty range.
+        if let newText = markedText, !newText.isEmpty {
             textInputStorage.replaceSubrange(rangeToReplace.fullRange(in: textInputStorage), with: newText)
             // Figure out the new selection range
             let rangeStartIndex = rangeStartPosition.offset
@@ -276,6 +281,63 @@ extension TerminalView: UITextInput {
         }
 
         endTextInputEdit()
+        // Multiplex patch: redraw every incremental IME hypothesis locally;
+        // setMarkedText deliberately does not send provisional bytes remotely.
+        updateMarkedTextOverlay()
+    }
+
+    // Multiplex patch: port SwiftTerm's Mac marked-text preview to UIKit so
+    // multistage IME input remains visible without entering the terminal stream.
+    func updateMarkedTextOverlay() {
+        guard let markedRange = _markedTextRange,
+              !markedRange.isEmpty,
+              let markedText = text(in: markedRange),
+              !markedText.isEmpty,
+              let caretView,
+              caretView.superview === self else {
+            markedTextOverlay?.removeFromSuperview()
+            markedTextOverlay = nil
+            return
+        }
+
+        let overlay: UILabel
+        if let existing = markedTextOverlay {
+            overlay = existing
+        } else {
+            overlay = UILabel(frame: .zero)
+            overlay.numberOfLines = 1
+            overlay.lineBreakMode = .byClipping
+            overlay.isUserInteractionEnabled = false
+            overlay.layer.cornerRadius = 3
+            overlay.layer.masksToBounds = true
+            addSubview(overlay)
+            markedTextOverlay = overlay
+        }
+
+        overlay.backgroundColor = nativeBackgroundColor.withAlphaComponent(0.9)
+        overlay.attributedText = NSAttributedString(
+            string: markedText,
+            attributes: [
+                .font: font,
+                .foregroundColor: nativeForegroundColor,
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+            ])
+        overlay.sizeToFit()
+
+        let visibleBounds = bounds
+        overlay.frame.size.width = min(overlay.frame.width, max(0, visibleBounds.width))
+
+        let caretRect = caretView.frame
+        let maximumX = max(visibleBounds.minX, visibleBounds.maxX - overlay.frame.width)
+        var origin = caretRect.origin
+        origin.x = min(max(origin.x, visibleBounds.minX), maximumX)
+
+        let cellHeight = max(cellDimension.height, caretRect.height)
+        if caretRect.maxY >= visibleBounds.maxY - cellHeight {
+            origin.y = max(visibleBounds.minY, caretRect.minY - cellHeight)
+        }
+        overlay.frame.origin = origin
+        bringSubviewToFront(overlay)
     }
 
     func resetInputBuffer (_ loc: String = #function)
@@ -286,6 +348,9 @@ extension TerminalView: UITextInput {
         textInputStorage = ""
         _selectedTextRange = TextRange (from: TextPosition(offset: 0), to: TextPosition(offset: 0))
         _markedTextRange = nil
+        // Multiplex patch: resetting UIKit's input buffer must also remove the
+        // local composition preview used by IMEs and dictation hypotheses.
+        updateMarkedTextOverlay()
         endTextInputEdit()
     }
     
@@ -306,6 +371,9 @@ extension TerminalView: UITextInput {
             _markedTextRange = nil
             endTextInputEdit()
         }        
+        // Multiplex patch: unmarking with no committed text is still an exit
+        // from composition; the insertText branch clears this in its common commit path.
+        updateMarkedTextOverlay()
     }
     
     public var beginningOfDocument: UITextPosition {
@@ -358,16 +426,22 @@ extension TerminalView: UITextInput {
     }
             
     public func firstRect(for range: UITextRange) -> CGRect {
-        return bounds
+        // Multiplex patch: candidate UI should follow the visible marked range;
+        // fall back to the real terminal caret cell when no preview is active.
+        return markedTextOverlay?.frame ?? caretView?.frame ?? .zero
     }
     
     public func caretRect(for position: UITextPosition) -> CGRect {
-        return bounds
+        // Multiplex patch: UITextInput positions are transient buffer offsets,
+        // but their honest on-screen insertion point is SwiftTerm's caret cell.
+        return caretView?.frame ?? .zero
     }
     
     public func selectionRects(for range: UITextRange) -> [UITextSelectionRect] {
         guard let r = range as? TextRange else { return [] }
-        return [TextSelectionRect(rect: bounds, range: r, string: textInputStorage)]
+        // Multiplex patch: keep selection geometry near the cursor instead of
+        // advertising the entire terminal view to UIKit's candidate placement.
+        return [TextSelectionRect(rect: firstRect(for: r), range: r, string: textInputStorage)]
     }
     
     // These can be exercised by the hold-spacebar
