@@ -141,7 +141,7 @@ final class HostSyncTests: XCTestCase {
         XCTAssertTrue(resolution.toPush.isEmpty)
     }
 
-    func testCommandSetupDoesNotChangeProbeConnectionConfiguration() {
+    func testProbeAndFeedIdentityIgnoreCommandSetupButChangeWithHostConfig() {
         let original = host("devbox")
         var commandsEdited = original
         commandsEdited.agentCommandConfiguration.replace(
@@ -154,11 +154,19 @@ final class HostSyncTests: XCTestCase {
         XCTAssertTrue(
             original.hasSameConnectionModelConfiguration(as: commandsEdited)
         )
+        XCTAssertEqual(
+            FleetFeedID(hosts: [original], active: true),
+            FleetFeedID(hosts: [commandsEdited], active: true)
+        )
 
         var addressEdited = commandsEdited
         addressEdited.hostname = "new.example.com"
         XCTAssertFalse(
             original.hasSameConnectionModelConfiguration(as: addressEdited)
+        )
+        XCTAssertNotEqual(
+            FleetFeedID(hosts: [original], active: true),
+            FleetFeedID(hosts: [addressEdited], active: true)
         )
     }
 

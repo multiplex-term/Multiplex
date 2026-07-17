@@ -69,16 +69,17 @@ extension Host {
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
     }
 
-    /// Command-setup edits must not tear down the probe connection. Compare
-    /// every other current/future Host field while ignoring only the synced
-    /// helper payload and its last-writer timestamp.
+    /// Hashable identity for the connection model and the wall feed that
+    /// drives it. Command-setup edits must not tear down the probe connection;
+    /// every other current/future Host field remains part of the identity.
+    var connectionModelConfiguration: Host {
+        var configuration = self
+        configuration.agentCommandConfiguration = AgentCommandConfiguration()
+        configuration.updatedAt = .distantPast
+        return configuration
+    }
+
     func hasSameConnectionModelConfiguration(as other: Host) -> Bool {
-        var lhs = self
-        var rhs = other
-        lhs.agentCommandConfiguration = AgentCommandConfiguration()
-        rhs.agentCommandConfiguration = AgentCommandConfiguration()
-        lhs.updatedAt = .distantPast
-        rhs.updatedAt = .distantPast
-        return lhs == rhs
+        connectionModelConfiguration == other.connectionModelConfiguration
     }
 }

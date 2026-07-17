@@ -85,6 +85,20 @@ enum FleetTileGridSizing {
     }
 }
 
+/// Identity of the long-lived wall feed. It uses the same normalized host
+/// configuration as `ConnectionHub`: whenever the hub replaces a stale model,
+/// this changes too, cancelling the old feed and starting one for the new
+/// model. Helper-command-only edits intentionally keep the existing feed.
+struct FleetFeedID: Hashable {
+    private let hostConfigurations: [Host]
+    private let active: Bool
+
+    init(hosts: [Host], active: Bool) {
+        hostConfigurations = hosts.map(\.connectionModelConfiguration)
+        self.active = active
+    }
+}
+
 /// Narrow Observation boundary for one host. Capture-pane text and attention
 /// changes now invalidate only that host section; the parent wall observes
 /// the lightweight fleet/session summaries used for global layout.
@@ -167,19 +181,11 @@ struct FleetWall: View {
     /// Wall cadence: one concurrent probe round-trip per host per tick.
     private static let feedInterval: Duration = .seconds(5)
 
-    /// Feed-loop identity: restarts on fleet changes AND on scene
-    /// activation, so a deck coming to the foreground ticks immediately
-    /// instead of finishing whatever sleep it was suspended in.
-    private struct FeedID: Hashable {
-        let hosts: [UUID]
-        let active: Bool
-    }
-
     var body: some View {
         platformWall
         .background(Theme.chassis.ignoresSafeArea())
         .task(
-            id: FeedID(hosts: store.hosts.map(\.id), active: scenePhase == .active)
+            id: FleetFeedID(hosts: store.hosts, active: scenePhase == .active)
         ) { await runFeed() }
         .sheet(item: $namingHost) { host in
             NewSessionSheet(
