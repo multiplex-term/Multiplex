@@ -227,7 +227,11 @@ struct SwiftTermView: UIViewRepresentable {
             })
         }
         view.backgroundColor = UIColor(theme.background)
-        view.keyboardAppearance = theme.isDark ? .dark : .light
+        // The keyboard belongs to the chassis, not the terminal surface:
+        // `.default` follows the window's appearance (the Settings choice via
+        // `overrideUserInterfaceStyle`), so a light terminal theme under dark
+        // chrome keeps a dark keyboard — and vice versa (user-reported).
+        view.keyboardAppearance = .default
         coordinator.appliedTheme = theme
     }
 

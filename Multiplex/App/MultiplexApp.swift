@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct MultiplexApp: App {
@@ -125,7 +126,7 @@ struct MultiplexApp: App {
             .environment(entitlements)
             .environment(attention)
             .environment(localNetworkAccess)
-            .modifier(PlatformChrome())
+            .modifier(PlatformChrome(themes: themes))
     }
 }
 
@@ -162,17 +163,23 @@ struct DeckWindowSizingBoundary: ViewModifier {
     }
 }
 
-/// iPad sits on chassis (dark UI, neutral signal accent — color is spent on
+/// iPad sits on chassis (opaque UI, neutral signal accent — color is spent on
 /// state, not actions); visionOS keeps native glass for sheets and system
-/// controls.
+/// controls. The appearance choice (`ThemeStore.appearance`) resolves here:
+/// `.system` follows the device — chassis tokens are trait-dynamic, so the
+/// whole scene flips live — while LIGHT/DARK pin the scheme. visionOS under
+/// `.system` keeps its native appearance exactly as before.
 private struct PlatformChrome: ViewModifier {
+    var themes: ThemeStore
+
     @ViewBuilder
     func body(content: Content) -> some View {
         #if os(visionOS)
         content
+            .background(AppearanceApplicator(appearance: themes.appearance))
         #else
         let base = content
-            .preferredColorScheme(.dark)
+            .background(AppearanceApplicator(appearance: themes.appearance))
             .tint(Theme.signal)
         if ProcessInfo.processInfo.isiOSAppOnMac {
             // The Mac paints the iPad canvas at 77%. Fixed-size chassis type
@@ -185,5 +192,52 @@ private struct PlatformChrome: ViewModifier {
             base
         }
         #endif
+    }
+}
+
+/// Applies the appearance to the scene's `UIWindow` via
+/// `overrideUserInterfaceStyle` — deliberately NOT `preferredColorScheme`.
+/// SwiftUI's preference stops at presentation boundaries: with it, an open
+/// Settings sheet (its own presentation) kept the old traits, so the
+/// trait-dynamic chassis tokens inside it never flipped when the user tapped
+/// LIGHT/DARK (user-reported). The window is the one authority that every
+/// presentation in the scene inherits — sheets, popovers, alerts, and the
+/// keyboard — and each scene root carries one of these, so every window of
+/// every scene follows the same choice, live.
+private struct AppearanceApplicator: UIViewRepresentable {
+    var appearance: AppAppearance
+
+    func makeUIView(context: Context) -> Applicator {
+        Applicator()
+    }
+
+    func updateUIView(_ view: Applicator, context: Context) {
+        view.style = UIUserInterfaceStyle(appearance.colorSchemeOverride)
+    }
+
+    final class Applicator: UIView {
+        var style: UIUserInterfaceStyle = .unspecified {
+            didSet { apply() }
+        }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            isHidden = true
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("unused") }
+
+        // The window is only reachable once attached; a scene restored in
+        // the background attaches late, so apply on every move.
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            apply()
+        }
+
+        private func apply() {
+            window?.overrideUserInterfaceStyle = style
+        }
     }
 }

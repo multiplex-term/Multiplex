@@ -78,7 +78,10 @@ Current product split:
   system-keyboard/IME input and primary-button touch/pointer input for
   mouse-aware TUIs, all-pane agent detection and wall
   telemetry with foreground-aware helpers in tmux panes and plain SSH
-  shells (including direct-shell NEEDS YOU chrome), built-in terminal themes,
+  shells (including direct-shell NEEDS YOU chrome), a System/Light/Dark
+  appearance setting (SYSTEM follows the device; the whole chassis, launch
+  screen, and keyboard flip together) with built-in terminal themes and a
+  separate theme selection per appearance (light adds Tally Frost/Paper/Ivory),
   free file attachment on SSH-backed tmux tabs from Files/Photos (plus camera
   on iPad) and drag-and-drop through the same SSH upload path, a most-used tmux
   shortcut dropdown on both platforms (including touch-native copy-mode

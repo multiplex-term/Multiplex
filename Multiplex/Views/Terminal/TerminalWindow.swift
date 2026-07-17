@@ -1030,6 +1030,9 @@ struct TerminalWindowRoot: View {
 /// terminal keeps its state and PTY size.
 private struct TerminalPane: View {
     @Environment(ThemeStore.self) private var themes
+    /// Terminal themes are selected per chassis appearance; flipping the
+    /// scheme re-resolves here and `SwiftTermView` re-skins in place.
+    @Environment(\.colorScheme) private var colorScheme
 
     let controller: TerminalSessionController?
     let hostExists: Bool
@@ -1044,11 +1047,12 @@ private struct TerminalPane: View {
     @State private var dropTargeted = false
 
     var body: some View {
+        let theme = themes.selected(for: colorScheme)
         ZStack {
             // The gutter around the terminal matches its background, so the
             // window reads as one surface in whatever theme is active.
             #if os(visionOS)
-            Color(themes.selected.background).ignoresSafeArea()
+            Color(theme.background).ignoresSafeArea()
             #else
             // UIKit keeps rail controls inside the rounded-corner safe
             // boundary. Paint that protected tail as part of the rail, then
@@ -1057,13 +1061,13 @@ private struct TerminalPane: View {
             // after a float/window move, so this paint layer ignores both
             // container and keyboard regions. It has no controls or layout.
             Theme.bezel.ignoresSafeArea()
-            Color(themes.selected.background)
+            Color(theme.background)
             #endif
             if let controller {
                 SwiftTermView(
                     controller: controller,
                     fontSize: fontSize,
-                    theme: themes.selected,
+                    theme: theme,
                     bottomChromeHeight: bottomChromeHeight,
                     contentSafeArea: contentSafeArea,
                     railOwnsBottomSafeArea: railOwnsBottomSafeArea,

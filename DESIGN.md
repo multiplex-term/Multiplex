@@ -44,6 +44,46 @@ attention.
 the lamp always reads `LIVE`/`ENDED`/`LINK`, and errors never use tally red —
 they use words and caution amber.
 
+### Daylight — the light appearance
+
+Every rule above survives with the studio lights on; one inverts. Dark: screens
+are the darkest thing, sunk inside lighter chassis. Light: **screens read as
+paper — brighter than the chassis that frames them** — and the visible line
+(`bezelHi`) flips from the brightest chassis value to the darkest. Raised
+surfaces stay raised in both. State colors deepen so their captions keep the
+dark chassis's contrast (tally holds ~4.5:1 in both worlds); they are shared
+across any light chassis hue, because color is state, never decoration.
+
+The light chassis is **Frost** — cool platinum (hue ≈ 216°), chosen 2026-07-17
+from a three-way hue bake-off (Paper `#E9EAEC` neutral and Ivory `#ECE8DF`
+warm are the recorded alternates; swapping is one token block in `Theme.swift`
+plus the `AppBackground` asset). All values are WCAG-checked against the same
+hierarchy the dark chassis ships.
+
+| Token      | Dark      | Light (Frost) | Light contrast on chassis |
+| ---------- | --------- | ------------- | ------------------------- |
+| `chassis`  | `#17181A` | `#E4E8EE`     | —                         |
+| `bezel`    | `#26282B` | `#F0F3F7`     | raised                    |
+| `bezelHi`  | `#33363A` | `#CDD3DC`     | the visible line          |
+| `screen`   | `#0A0B0C` | `#F9FBFD`     | brightest surface         |
+| `tally`    | `#E5484D` | `#C13439`     | 4.5:1                     |
+| `caution`  | `#E0A33E` | `#966618`     | 3.8:1                     |
+| `ok`       | `#7FBF9A` | `#3E7C58`     | 4.0:1                     |
+| `signal`   | `#F2F3F4` | `#191E25`     | 13.6:1                    |
+| `signal2`  | `#9BA1A6` | `#515C69`     | 5.5:1                     |
+| `signal3`  | `#5C6166` | `#87919E`     | 2.6:1                     |
+| `miniText` | `#C8D2D6` | `#3A434E`     | 9.7:1 on `screen`         |
+
+The appearance is a Settings choice — SYSTEM (follows the device; the default),
+LIGHT, DARK — applied per window, so the wall, terminal chrome, forms, and
+keyboard flip together. Terminal surfaces stay user preference: each appearance
+keeps its own theme slot, dark defaulting to Tally and light to **Tally
+Frost**; **Tally Paper** (neutral, tally-red cursor) and **Tally Ivory** (warm,
+amber cursor quoting the retired Multiplex identity) ship alongside as the
+rest of the light trio. The keyboard follows the chassis appearance, never the
+terminal theme — a light theme in a dark studio is a lit monitor, not a lit
+room.
+
 ## Type
 
 Three voices:

@@ -101,8 +101,15 @@ struct TerminalTheme: Codable, Hashable, Identifiable {
 
 extension TerminalTheme {
     static let builtIns: [TerminalTheme] = [
-        .tally, .multiplex, .gruvboxDark, .dracula, .nord, .solarizedDark, .solarizedLight,
+        .tally, .tallyFrost, .tallyPaper, .tallyIvory,
+        .multiplex, .gruvboxDark, .dracula, .nord, .solarizedDark, .solarizedLight,
     ]
+
+    /// The house default for each appearance: `tally` when the chrome is
+    /// dark, `tallyFrost` when it is light — the light chassis is the Frost
+    /// design, and its terminal theme pairs with it
+    /// (see `ThemeStore.selected(for:)`).
+    static let lightDefault = TerminalTheme.tallyFrost
 
     static func builtIn(id: String) -> TerminalTheme? {
         builtIns.first { $0.id == id }
@@ -133,6 +140,53 @@ extension TerminalTheme {
         ansi: palette([
             0x17181A, 0xE5484D, 0x7FBF9A, 0xE0A33E, 0x7AA5C4, 0xB88FB0, 0x8FBFC4, 0xC9CDD1,
             0x5C6166, 0xF27074, 0x98D4B2, 0xEDBB66, 0x98BFDC, 0xCFA7C7, 0xABD6DA, 0xF2F3F4,
+        ])
+    )
+
+    // The Tally light family — one palette per hue temperature, designed
+    // together with the light chassis (DESIGN.md "Daylight" section). All
+    // ANSI 1–6 hold ≥ 4.2:1 and bright-black ≥ 4.3:1 on their background;
+    // 7/15 stay conventionally light ("white" on a light theme reads faint
+    // by design, mirroring ANSI 0 on the dark themes).
+
+    /// Neutral — the light house default. Paper screen, ink text, and the
+    /// same tally-red cursor as the dark house theme.
+    static let tallyPaper = TerminalTheme(
+        id: "tally-paper",
+        name: "Tally Paper",
+        background: ThemeColor(0xFBFBFC),
+        foreground: ThemeColor(0x1D2023),
+        cursor: ThemeColor(0xE5484D),
+        ansi: palette([
+            0x17181A, 0xC63439, 0x256E4A, 0x96690F, 0x2E6D9E, 0x8E5287, 0x1E7883, 0xB9BEC3,
+            0x5C6670, 0xE5484D, 0x2F8A5D, 0xB8820F, 0x3D83BC, 0xA96AA0, 0x268E9B, 0xFFFFFF,
+        ])
+    )
+
+    /// Warm — cream ground, olive-shifted green, and an amber cursor that
+    /// quotes the retired Multiplex amber-on-ink identity.
+    static let tallyIvory = TerminalTheme(
+        id: "tally-ivory",
+        name: "Tally Ivory",
+        background: ThemeColor(0xFBF7ED),
+        foreground: ThemeColor(0x22201A),
+        cursor: ThemeColor(0xC2610E),
+        ansi: palette([
+            0x1D1912, 0xB4372A, 0x5C7118, 0x91660A, 0x38689A, 0x9A4F72, 0x2A7A6C, 0xC4BCA9,
+            0x6B6354, 0xD64830, 0x6E8A1F, 0xB57F0C, 0x4A7FB5, 0xB56489, 0x359182, 0xFDFBF4,
+        ])
+    )
+
+    /// Cool — frost-white ground, spruce green, azure cursor.
+    static let tallyFrost = TerminalTheme(
+        id: "tally-frost",
+        name: "Tally Frost",
+        background: ThemeColor(0xF7F9FC),
+        foreground: ThemeColor(0x161B22),
+        cursor: ThemeColor(0x2B6CB0),
+        ansi: palette([
+            0x14181E, 0xBC3A52, 0x1E7A5B, 0x8A6D15, 0x2B6CB0, 0x7757A8, 0x167F92, 0xB6BEC9,
+            0x5D6874, 0xDC4863, 0x279772, 0xA8850F, 0x3D82D2, 0x9070C4, 0x1E97AD, 0xFFFFFF,
         ])
     )
 

@@ -159,6 +159,12 @@ Keyboard**. In DEBUG builds,
 presses the focused terminal's "Show keyboard" button headlessly
 (`….debug.dismiss` is its counterpart — resigns the focused terminal so a
 screenshot run can hide the system keyboard),
+`… -p app.multiplexterm.multiplex.debug.appearance` cycles the global
+appearance SYSTEM → LIGHT → DARK through the exact `ThemeStore.appearance`
+property the Settings choice bar sets (persisted; flips every window's
+`overrideUserInterfaceStyle` live, open sheets included — the headless way to
+capture light/dark chrome, and pair it with `xcrun simctl ui <UDID> appearance
+light|dark` to prove SYSTEM's device following), and
 `… -p app.multiplexterm.multiplex.debug.agentchip` taps the focused terminal's
 first slash chip in the agent helper strip (inject → pump → PTY → tmux), and
 `… -p app.multiplexterm.multiplex.debug.newtab` runs the focused window's
@@ -734,7 +740,18 @@ automation or the App Store Connect UI is required.
   (`#17181A`), screens darker than their frames (`#0A0B0C`), tally red
   (`#E5484D`) spent ONLY on live state and always captioned. Use tokens, don't
   hardcode colors; **color is state, never decoration** (actions are neutral
-  chips). Components live in `Chassis.swift`: `ChassisLabel` (compressed caps
+  chips). **Every token is appearance-dynamic** (`Color(light:dark:)`, trait
+  resolved): dark is the graphite above, light is the Frost chassis
+  (`#E4E8EE`, screens *brighter* than their frames — DESIGN.md "Daylight";
+  Paper/Ivory alternates recorded there). `chassis` stays an asset color so
+  the launch screen hands off in either polarity. The user's appearance
+  choice (`ThemeStore.appearance`: SYSTEM/LIGHT/DARK, Settings) is applied by
+  `PlatformChrome` through each scene window's `overrideUserInterfaceStyle` —
+  **never `preferredColorScheme`, which stops at presentation boundaries**:
+  with it, an open Settings sheet kept stale traits and the tokens inside
+  never flipped (user-reported). Window traits also drive the keyboard and
+  UIKit-hosted popovers, so there is exactly one authority.
+  Components live in `Chassis.swift`: `ChassisLabel` (compressed caps
   — rails, tile names, UMD titles), `ChassisChip`/`ChassisBadge` (square
   actions), `TallyLamp` (captioned state lamp), `ChassisSwitch` (compact square
   slide toggle, caption trailing), and `TallyFormBoolField` (full-width 48 pt
@@ -761,10 +778,19 @@ automation or the App Store Connect UI is required.
   rounded platter).
 - **Terminal surface colors are user preference, not identity**: they come
   from the selected `TerminalTheme` (wall SETTINGS chip), never `Theme`
-  tokens. Default is `TerminalTheme.tally`; chrome keeps the chassis whatever
-  the theme. Open terminals re-skin live — `SwiftTermView.updateUIView`
-  re-applies when the theme value changes. tmux's own status line is left to
-  the user's config on purpose (no `status-style` injection).
+  tokens. **Each appearance keeps its own selection** —
+  `ThemeStore.selected(for: colorScheme)`; the dark slot keeps the legacy
+  UserDefaults key (existing installs keep their theme) and defaults to
+  `TerminalTheme.tally`, the light slot defaults to `.tallyFrost` (the light
+  house trio `tallyFrost`/`tallyPaper`/`tallyIvory` is contrast-tested in
+  `TerminalThemeTests`). Settings rows edit the slot of the appearance on
+  screen; chrome keeps the chassis whatever the theme. Open terminals re-skin
+  live — `SwiftTermView.updateUIView` re-applies when the theme value
+  changes, and a scheme flip re-resolves the slot through `TerminalPane`'s
+  `colorScheme`. `keyboardAppearance` stays `.default` — the keyboard belongs
+  to the chassis appearance, not the terminal theme (a light theme under dark
+  chrome keeps a dark keyboard; user-reported). tmux's own status line is
+  left to the user's config on purpose (no `status-style` injection).
 - Secrets never touch disk in plaintext — always `KeychainStore`, keyed by host
   UUID.
 - Platform splits use `#if os(visionOS)`; the iPad UI sits on chassis with a

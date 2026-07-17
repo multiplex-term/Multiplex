@@ -7,6 +7,9 @@ struct SettingsView: View {
     @Environment(EntitlementStore.self) private var entitlements
     @Environment(AttentionCenter.self) private var attention
     @Environment(\.dismiss) private var dismiss
+    /// The resolved chassis appearance — theme rows select into this
+    /// appearance's slot, so the sheet always edits what's on screen.
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Non-nil while the editor is pushed; a theme unknown to the store is
     /// a new one and is added (and selected) on save.
@@ -17,6 +20,7 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
+                    appearanceSection
                     currentThemeSection
                     builtInThemesSection
                     customThemesSection
@@ -58,16 +62,39 @@ struct SettingsView: View {
         #endif
     }
 
+    /// SYSTEM follows the device; LIGHT/DARK pin the chassis. The choice is
+    /// free and device-local, like the terminal theme selection.
+    private var appearanceSection: some View {
+        TallyFormSection(
+            "Appearance",
+            detail: "System follows the device. The deck, terminal chrome, and forms switch together; each appearance keeps its own terminal theme below."
+        ) {
+            TallyFormRow {
+                TallyChoiceBar(
+                    [
+                        ("SYSTEM", AppAppearance.system),
+                        ("LIGHT", AppAppearance.light),
+                        ("DARK", AppAppearance.dark),
+                    ],
+                    selection: Binding(
+                        get: { themes.appearance },
+                        set: { themes.appearance = $0 }
+                    )
+                )
+            }
+        }
+    }
+
     private var currentThemeSection: some View {
         TallyFormSection(
             "Current theme",
-            detail: "Selections apply to every terminal immediately. The deck and window chrome always keep the Tally chassis."
+            detail: "Selections apply to every terminal immediately and belong to the \(colorScheme == .light ? "light" : "dark") appearance now on screen."
         ) {
             TallyFormRow {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 3) {
-                            ChassisLabel(themes.selected.name, size: 12)
+                            ChassisLabel(themes.selected(for: colorScheme).name, size: 12)
                             Text("TERMINAL SURFACE")
                                 .font(.mono(8, weight: .medium))
                                 .kerning(1)
@@ -77,7 +104,7 @@ struct SettingsView: View {
                         ChassisBadge("ACTIVE", prominent: true)
                     }
 
-                    ThemePreview(theme: themes.selected)
+                    ThemePreview(theme: themes.selected(for: colorScheme))
                 }
             }
         }
@@ -89,8 +116,8 @@ struct SettingsView: View {
             detail: "Choose a terminal palette. Press and hold a theme to duplicate it as a custom starting point."
         ) {
             ForEach(TerminalTheme.builtIns) { theme in
-                ThemeRow(theme: theme, isSelected: themes.selectedID == theme.id) {
-                    themes.select(theme)
+                ThemeRow(theme: theme, isSelected: themes.selectedID(for: colorScheme) == theme.id) {
+                    themes.select(theme, for: colorScheme)
                 }
                 .contextMenu {
                     Button("Duplicate") { duplicate(theme) }
@@ -114,8 +141,8 @@ struct SettingsView: View {
                 ForEach(themes.customThemes) { theme in
                     ThemeRow(
                         theme: theme,
-                        isSelected: themes.selectedID == theme.id,
-                        select: { themes.select(theme) },
+                        isSelected: themes.selectedID(for: colorScheme) == theme.id,
+                        select: { themes.select(theme, for: colorScheme) },
                         edit: { requestThemeEditor(theme) },
                         duplicate: { duplicate(theme) },
                         delete: { themes.remove(theme) }
@@ -126,7 +153,7 @@ struct SettingsView: View {
             TallyFormRow {
                 HStack(spacing: 12) {
                     ChassisChip("NEW THEME", systemImage: "plus") {
-                        requestThemeEditor(themes.selected.asCustom(named: "New Theme"))
+                        requestThemeEditor(themes.selected(for: colorScheme).asCustom(named: "New Theme"))
                     }
                     Spacer()
                     if !entitlements.canMutateCustomThemes {
@@ -267,7 +294,7 @@ struct SettingsView: View {
     private func save(_ theme: TerminalTheme) {
         if themes.theme(id: theme.id) == nil {
             themes.add(theme)
-            themes.select(theme)
+            themes.select(theme, for: colorScheme)
         } else {
             themes.update(theme)
         }
@@ -277,7 +304,7 @@ struct SettingsView: View {
     private func presentThemeEditorForVerificationIfRequested() {
         guard ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_SETTINGS"] == "theme"
         else { return }
-        editingTheme = themes.selected.asCustom(named: "Tally Custom")
+        editingTheme = themes.selected(for: colorScheme).asCustom(named: "Tally Custom")
     }
     #endif
 }

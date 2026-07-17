@@ -1298,7 +1298,7 @@ struct HatchedScreen: View {
                 path.addLine(to: CGPoint(x: x + size.height, y: 0))
                 x += 14
             }
-            context.stroke(path, with: .color(Color(hex: 0x101114)), lineWidth: 5)
+            context.stroke(path, with: .color(Theme.screenHatch), lineWidth: 5)
         }
         .background(Theme.screen)
     }

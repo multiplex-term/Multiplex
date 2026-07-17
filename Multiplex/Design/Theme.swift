@@ -4,39 +4,53 @@ import UIKit
 /// Multiplex design tokens — the TALLY identity (see DESIGN.md).
 /// A broadcast monitor wall: graphite chassis, screens darker than the
 /// chassis that frames them, and color spent on state, never decoration.
+///
+/// Every token carries a dark and a light rendition and resolves through the
+/// trait collection, so the whole chassis follows the appearance chosen in
+/// Settings (`ThemeStore.appearance` → `PlatformChrome`). The light chassis is
+/// the "Frost" design — cool platinum, screens *brighter* than the frames
+/// that hold them (the identity's inversion flips with the studio lights; the
+/// Paper/Ivory alternates are recorded in DESIGN.md). State colors deepen in
+/// light so the lamp captions keep the dark chassis's contrast ratio.
 enum Theme {
     // MARK: Chassis (ground)
-    /// Window ground — warm graphite, deliberately not blue-black.
-    /// Shared with the system launch screen so startup hands off without a
-    /// white flash before SwiftUI paints the deck.
+    /// Window ground — warm graphite in the dark, silver in the light,
+    /// deliberately never blue-black. Lives in the asset catalog because the
+    /// system launch screen shares it, so startup hands off without an
+    /// opposite-polarity flash before SwiftUI paints the deck.
     static let chassis = Color("AppBackground")
     /// Raised surfaces: tiles, rails, the UMD bar.
-    static let bezel = Color(hex: 0x26282B)
-    /// Borders, dividers, inactive bezel segments.
-    static let bezelHi = Color(hex: 0x33363A)
-    /// The darkest thing on screen: miniature + terminal grounds. Screens
-    /// sit *inside* lighter chassis — that inversion is the identity.
-    static let screen = Color(hex: 0x0A0B0C)
+    static let bezel = Color(light: 0xF0F3F7, dark: 0x26282B)
+    /// Borders, dividers, inactive bezel segments — the visible line. It is
+    /// the brightest chassis value in the dark and the darkest in the light;
+    /// either way it is the edge that draws the hardware.
+    static let bezelHi = Color(light: 0xCDD3DC, dark: 0x33363A)
+    /// Miniature + input-well grounds. Dark: the darkest thing on screen —
+    /// screens sit *inside* lighter chassis. Light: the brightest — a lit
+    /// frost screen inside a platinum frame. The inversion is the identity.
+    static let screen = Color(light: 0xF9FBFD, dark: 0x0A0B0C)
+    /// The no-signal hatch stroke on `screen` (barely raised off it).
+    static let screenHatch = Color(light: 0xEDF0F4, dark: 0x101114)
 
     // MARK: Signal (state only — a color here always means something)
     /// Live/attached lamp — broadcast "on air". Always captioned (LIVE),
     /// never used for errors, never used as an accent.
-    static let tally = Color(hex: 0xE5484D)
+    static let tally = Color(light: 0xC13439, dark: 0xE5484D)
     /// Bell/activity ticks, connecting states. Small doses.
-    static let caution = Color(hex: 0xE0A33E)
+    static let caution = Color(light: 0x966618, dark: 0xE0A33E)
     /// Connected dot on host rails.
-    static let ok = Color(hex: 0x7FBF9A)
+    static let ok = Color(light: 0x3E7C58, dark: 0x7FBF9A)
 
     // MARK: Text on chassis
-    static let signal = Color(hex: 0xF2F3F4)
-    static let signal2 = Color(hex: 0x9BA1A6)
-    static let signal3 = Color(hex: 0x5C6166)
+    static let signal = Color(light: 0x191E25, dark: 0xF2F3F4)
+    static let signal2 = Color(light: 0x515C69, dark: 0x9BA1A6)
+    static let signal3 = Color(light: 0x87919E, dark: 0x5C6166)
     /// Warm neutral reserved for user-authored command copy. It distinguishes
     /// custom chips from the stock set without borrowing a semantic state
     /// color (tally/caution/ok) or making them read as more important.
-    static let customCommand = Color(hex: 0xB9AA98)
+    static let customCommand = Color(light: 0x75654C, dark: 0xB9AA98)
     /// Dimmed mono text inside miniature screens.
-    static let miniText = Color(hex: 0xC8D2D6)
+    static let miniText = Color(light: 0x3A434E, dark: 0xC8D2D6)
 
     // MARK: Type scale
     /// iOS-on-Mac ("Designed for iPad") paints the iPad point grid at 77%
@@ -96,6 +110,26 @@ extension Color {
             red: Double((hex >> 16) & 0xFF) / 255,
             green: Double((hex >> 8) & 0xFF) / 255,
             blue: Double(hex & 0xFF) / 255
+        )
+    }
+
+    /// An appearance-following chassis token: resolves per trait collection,
+    /// so UIKit-hosted chrome (popover backgrounds, the terminal gutter)
+    /// adapts alongside SwiftUI when the color scheme changes.
+    init(light: UInt32, dark: UInt32) {
+        self.init(uiColor: UIColor { traits in
+            UIColor(hex: traits.userInterfaceStyle == .dark ? dark : light)
+        })
+    }
+}
+
+extension UIColor {
+    convenience init(hex: UInt32) {
+        self.init(
+            red: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: 1
         )
     }
 }
