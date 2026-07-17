@@ -370,8 +370,8 @@ private struct KeyBarRow: View {
                 arrowKey("arrow.down.to.line", .pageDown, "Page down", metric: metric)
             }
             arrowKey("arrow.left", .left, "Arrow left", metric: metric)
-            arrowKey("arrow.down", .down, "Arrow down", metric: metric)
             arrowKey("arrow.up", .up, "Arrow up", metric: metric)
+            arrowKey("arrow.down", .down, "Arrow down", metric: metric)
             arrowKey("arrow.right", .right, "Arrow right", metric: metric)
             Key(
                 action: { press(.dismiss) },
