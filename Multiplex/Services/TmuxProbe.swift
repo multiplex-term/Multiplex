@@ -378,7 +378,8 @@ enum TmuxProbe {
     /// - `launch`: typed into the fresh shell via send-keys (literal text,
     ///   then Enter) — never the session's command argv, so the agent
     ///   exiting leaves a shell, and the login shell's own PATH resolves it
-    ///   exactly as if the user typed it.
+    ///   exactly as if the user typed it. Agent launches may include the New
+    ///   Session sheet's safely quoted, one-shot initial prompt.
     ///
     /// The create prints `#{session_id} #{session_name}` (id fixed-width
     /// first, variable-length name last — the probe's own format

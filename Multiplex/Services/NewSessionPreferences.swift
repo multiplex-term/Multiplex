@@ -1,8 +1,9 @@
 import Foundation
 
-/// Device-local defaults for the deck's New Session prompt. The opt-in is
+/// Device-local defaults for the deck's New Session sheet. The opt-in is
 /// separate from the selected agent so remembering "Shell only" is distinct
-/// from not remembering a launch choice at all.
+/// from not remembering a launch choice at all. The one-shot initial prompt
+/// is deliberately never persisted.
 struct NewSessionPreferences {
     private static let remembersLastLaunchKey = "newSession.remembersLastLaunch"
     private static let lastAgentKey = "newSession.lastAgent"

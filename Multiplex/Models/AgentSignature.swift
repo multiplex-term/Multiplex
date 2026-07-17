@@ -35,6 +35,42 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         }
     }
 
+    /// The command typed into a fresh shell, optionally carrying the user's
+    /// first prompt as one safely quoted positional argument. Shell quoting
+    /// keeps prompt text inert; multiline prompts use printable `printf`
+    /// escapes so control bytes never reach the shell's line editor before
+    /// the final Enter.
+    func launchCommand(initialPrompt rawPrompt: String) -> String {
+        let prompt = Self.normalizedInitialPrompt(rawPrompt)
+        guard !prompt.isEmpty else { return launchCommand }
+        return "\(launchCommand) \(Self.shellArgument(for: prompt))"
+    }
+
+    private static func normalizedInitialPrompt(_ prompt: String) -> String {
+        let normalizedLineEndings = prompt
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") {
+            result, scalar in
+            let allowedControl = scalar.value == 0x09 || scalar.value == 0x0A
+            if allowedControl || !CharacterSet.controlCharacters.contains(scalar) {
+                result.append(Character(scalar))
+            }
+        }
+        return safeText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func shellArgument(for prompt: String) -> String {
+        guard prompt.contains("\n") || prompt.contains("\t") else {
+            return prompt.shellQuoted
+        }
+        let escaped = prompt
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\t", with: "\\t")
+        return "\"$(printf '%b' \(escaped.shellQuoted))\""
+    }
+
     /// Whether the agent exposes title/dialog transitions that the attention
     /// classifier has been verified against. Pi's identifying title remains
     /// static while work runs, so detection and helpers stay available while

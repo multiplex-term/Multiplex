@@ -382,6 +382,23 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertTrue(command.hasSuffix("; true"))
     }
 
+    func testNewSessionCommandTypesPromptLaunchLiterally() {
+        let launch = AgentKind.claudeCode.launchCommand(
+            initialPrompt: "Review John's $(touch /tmp/pwned)"
+        )
+        let command = TmuxProbe.newSessionCommand(
+            name: "claude", sourceSessionName: nil, launch: launch
+        )
+
+        // The generated CLI line is one literal send-keys argument. Its
+        // prompt stays quoted for the fresh pane's login shell rather than
+        // becoming syntax in this control-connection exec.
+        XCTAssertTrue(command.contains(
+            "tmux send-keys -t \"${i%% *}\" -l -- \(launch.shellQuoted)"
+        ))
+        XCTAssertTrue(command.contains("tmux send-keys -t \"${i%% *}\" Enter"))
+    }
+
     func testNewSessionCommandWithoutSourceOrLaunch() {
         let command = TmuxProbe.newSessionCommand(
             name: "main", sourceSessionName: nil, launch: nil)

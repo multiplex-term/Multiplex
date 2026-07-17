@@ -80,8 +80,9 @@ Current product split:
   telemetry with foreground-aware helpers in tmux panes and plain SSH
   shells (including direct-shell NEEDS YOU chrome), a System/Light/Dark
   appearance setting (SYSTEM follows the device; the whole chassis, launch
-  screen, and keyboard flip together) with built-in terminal themes and a
-  separate theme selection per appearance (light adds Tally Frost/Paper/Ivory),
+  screen, and keyboard flip together), New Session launches for Claude Code,
+  Codex, or Pi with an optional one-shot first prompt, built-in terminal themes
+  and a separate theme selection per appearance (light adds Tally Frost/Paper/Ivory),
   free file attachment on SSH-backed tmux tabs from Files/Photos (plus camera
   on iPad) and drag-and-drop through the same SSH upload path, a most-used tmux
   shortcut dropdown on both platforms (including touch-native copy-mode

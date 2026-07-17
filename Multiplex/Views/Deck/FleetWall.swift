@@ -185,8 +185,14 @@ struct FleetWall: View {
             NewSessionSheet(
                 host: host,
                 existingNames: hub.model(for: host).tmux.sessions.map(\.name),
-                create: { name, agent, directory in
-                    createSession(on: host, named: name, launching: agent, startingIn: directory)
+                create: { name, agent, initialPrompt, directory in
+                    createSession(
+                        on: host,
+                        named: name,
+                        launching: agent,
+                        initialPrompt: initialPrompt,
+                        startingIn: directory
+                    )
                 }
             )
         }
@@ -1027,7 +1033,7 @@ struct FleetWall: View {
     /// the problem.
     private func createSession(
         on host: Host, named rawName: String, launching agent: AgentKind?,
-        startingIn directory: String?
+        initialPrompt: String, startingIn directory: String?
     ) {
         let name = TmuxProbe.sanitizedSessionName(rawName)
         let model = hub.model(for: host)
@@ -1036,7 +1042,7 @@ struct FleetWall: View {
                 base: name,
                 inDirectoryOf: nil,
                 startingIn: directory,
-                typing: agent?.launchCommand
+                typing: agent?.launchCommand(initialPrompt: initialPrompt)
             ) else { return }
             open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: created)))
         }
@@ -1088,13 +1094,14 @@ private struct SessionDropTarget: Equatable {
 /// long press are explicit choices now. The name prefills the first free
 /// conventional name for the selection (main / claude / codex / pi, then
 /// -2, -3…) so Create is one tap; picking an agent re-prefills it unless
-/// the user already typed their own. An opt-in remembers the submitted
-/// launch choice for the next prompt. Hosts with working directories also
-/// get a "Starts in" picker, defaulting to the first (the host's own default).
+/// the user already typed their own. Each agent can receive a one-shot first
+/// prompt as its CLI argument. An opt-in remembers only the submitted launch
+/// choice for the next sheet. Hosts with working directories also get a
+/// "Starts in" picker, defaulting to the first (the host's own default).
 private struct NewSessionSheet: View {
     let host: Host
     let existingNames: [String]
-    let create: (String, AgentKind?, String?) -> Void
+    let create: (String, AgentKind?, String, String?) -> Void
 
     private let preferences: NewSessionPreferences
 
@@ -1102,13 +1109,14 @@ private struct NewSessionSheet: View {
 
     @State private var name: String
     @State private var agent: AgentKind?
+    @State private var initialPrompt: String
     @State private var directory: String?
     @State private var remembersLastLaunch: Bool
 
     init(
         host: Host,
         existingNames: [String],
-        create: @escaping (String, AgentKind?, String?) -> Void,
+        create: @escaping (String, AgentKind?, String, String?) -> Void,
         preferences: NewSessionPreferences = NewSessionPreferences()
     ) {
         self.host = host
@@ -1119,6 +1127,7 @@ private struct NewSessionSheet: View {
         let remembersLastLaunch = preferences.remembersLastLaunch
         let agent = preferences.rememberedAgent
         _agent = State(initialValue: agent)
+        _initialPrompt = State(initialValue: "")
         _directory = State(initialValue: host.workingDirs.first)
         _remembersLastLaunch = State(initialValue: remembersLastLaunch)
         _name = State(initialValue: TmuxProbe.uniqueSessionName(
@@ -1160,6 +1169,20 @@ private struct NewSessionSheet: View {
                         TallyFormRow {
                             TallyChoiceBar(launchChoices, selection: $agent)
                                 .accessibilityLabel("What to launch")
+                        }
+                        if let agent {
+                            TallyFormField("Initial prompt (optional)") {
+                                TextField(
+                                    "What should \(agent.displayName) do?",
+                                    text: $initialPrompt,
+                                    axis: .vertical
+                                )
+                                .lineLimit(2...5)
+                                .textInputAutocapitalization(.sentences)
+                                .accessibilityLabel(
+                                    "Optional initial prompt for \(agent.displayName)"
+                                )
+                            }
                         }
                         TallyFormRow {
                             HStack(spacing: 12) {
@@ -1235,7 +1258,7 @@ private struct NewSessionSheet: View {
                             remembersLastLaunch: remembersLastLaunch,
                             agent: agent
                         )
-                        create(name, agent, directory)
+                        create(name, agent, initialPrompt, directory)
                         dismiss()
                     }
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -1274,9 +1297,9 @@ private struct NewSessionSheet: View {
 
     private var launchDetail: String {
         guard let agent else {
-            return "Creates the tmux session, then attaches to its login shell."
+            return "Creates the tmux session, then attaches to its login shell. REMEMBER saves only this launch choice."
         }
-        return "Creates the tmux session, types “\(agent.launchCommand)” into its fresh shell, then attaches."
+        return "Starts \(agent.displayName) in the fresh shell. The optional prompt becomes its first message; REMEMBER saves only the launch choice."
     }
 
     private var directoryDetail: String {
@@ -1668,7 +1691,7 @@ private enum FleetWallPreviewData {
     NewSessionSheet(
         host: FleetWallPreviewData.host,
         existingNames: ["main", "scratch"],
-        create: { _, _, _ in },
+        create: { _, _, _, _ in },
         preferences: NewSessionPreferences(
             defaults: UserDefaults(
                 suiteName: "app.multiplexterm.multiplex.preview.new-session"

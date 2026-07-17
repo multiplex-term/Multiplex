@@ -6,6 +6,54 @@ import XCTest
 /// rust-v0.144.x, Pi v0.80.7, tmux 3.6a — 2026-07-10/15). When an agent
 /// changes its signature, this file is where the new truth lands.
 final class AgentSignatureTests: XCTestCase {
+    // MARK: new-session launch commands
+
+    func testLaunchCommandAddsInitialPromptForEveryAgent() {
+        let prompt = "Review the SSH path"
+
+        XCTAssertEqual(
+            AgentKind.claudeCode.launchCommand(initialPrompt: prompt),
+            "claude 'Review the SSH path'"
+        )
+        XCTAssertEqual(
+            AgentKind.codex.launchCommand(initialPrompt: prompt),
+            "codex 'Review the SSH path'"
+        )
+        XCTAssertEqual(
+            AgentKind.pi.launchCommand(initialPrompt: prompt),
+            "pi 'Review the SSH path'"
+        )
+    }
+
+    func testLaunchCommandKeepsPromptInOneShellArgument() {
+        let prompt = "Don't run $(touch /tmp/pwned); `id`"
+
+        XCTAssertEqual(
+            AgentKind.claudeCode.launchCommand(initialPrompt: prompt),
+            "claude 'Don'\\''t run $(touch /tmp/pwned); `id`'"
+        )
+    }
+
+    func testLaunchCommandPreservesMultilinePromptWithoutTypingControlBytes() {
+        let prompt = "First line\r\nSecond\tcolumn\\n literal"
+
+        XCTAssertEqual(
+            AgentKind.pi.launchCommand(initialPrompt: prompt),
+            #"pi "$(printf '%b' 'First line\nSecond\tcolumn\\n literal')""#
+        )
+    }
+
+    func testLaunchCommandIgnoresBlankPromptAndStripsTerminalControls() {
+        XCTAssertEqual(
+            AgentKind.codex.launchCommand(initialPrompt: " \r\n\t "),
+            "codex"
+        )
+        XCTAssertEqual(
+            AgentKind.codex.launchCommand(initialPrompt: "Fix\u{0003} this"),
+            "codex 'Fix this'"
+        )
+    }
+
     // MARK: classify — comm + title first pass
 
     func testClassifyByCommand() {

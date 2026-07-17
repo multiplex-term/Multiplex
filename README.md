@@ -29,8 +29,10 @@ that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
   caution tick. Split panes are counted in the spine, and agent telemetry
   covers Claude Code / Codex / Pi in every pane, not just the foreground split.
   Tapping a tile **Attaches** the session in its own window
-  (`tmux attach-session`). **New Session** runs `tmux new-session -A`.
-  **Shell** opens a plain login shell, no tmux.
+  (`tmux attach-session`). **New Session** creates a tmux session in Home or
+  a configured working directory and can immediately start Claude Code,
+  Codex, or Pi with an optional first prompt. **Shell** opens a plain login
+  shell, no tmux.
 - **Terminal windows & tabs** — each terminal is its own SwiftUI scene
   (`WindowGroup(for: TerminalWindowRoute.self)` + `openWindow`): independent
   placement on visionOS, real multiple scenes on iPadOS (Stage Manager /
