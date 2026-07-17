@@ -258,14 +258,19 @@ struct UMDBar: View {
         Rectangle().fill(Theme.bezelHi).frame(width: 1, height: 18)
     }
 
-    /// The window's lamp: LIVE (tally, captioned), LINK while the shell
-    /// connects, ENDED when the channel closed. A mosh tab that's live but
-    /// out of contact reads NO LINK — the session is intact and self-heals,
+    /// The cluster starts with a persistent MOSH transport plate when in use;
+    /// SSH is deliberately unmarked. Its lamp reads LIVE, LINK while
+    /// connecting, and ENDED when the channel closed. A mosh tab that's live
+    /// but out of contact reads NO LINK — the session is intact and self-heals,
     /// so it's caution, not a fault. A direct shell has no wall tile, so its
     /// app-owned UMD also carries the same captioned NEEDS YOU state that a
     /// tmux session would show on the wall.
     private var statusCluster: some View {
         HStack(spacing: 8) {
+            if controller?.host.useMosh == true {
+                ChassisBadge("MOSH")
+                    .accessibilityLabel("Connects over mosh")
+            }
             connectionStatus
             if case .needsYou = controller?.directShellAttention {
                 TallyLamp(caption: "NEEDS YOU", color: Theme.caution)
@@ -283,7 +288,7 @@ struct UMDBar: View {
                 TallyLamp()
             }
         case .connecting:
-            TallyLamp(caption: controller?.host.useMosh == true ? "MOSH" : "LINK", color: Theme.caution)
+            TallyLamp(caption: "LINK", color: Theme.caution)
         case .ended:
             TallyLamp(caption: "ENDED", color: Theme.signal3)
         case nil:

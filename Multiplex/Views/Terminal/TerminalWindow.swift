@@ -790,6 +790,11 @@ struct TerminalWindowRoot: View {
 
     @ViewBuilder
     private func primaryToolbarActions(trailingPadding: CGFloat) -> some View {
+        if activeController?.host.useMosh == true {
+            ChassisBadge("MOSH")
+                .fixedSize()
+                .accessibilityLabel("Connects over mosh")
+        }
         if case .needsYou = activeController?.directShellAttention {
             // A classic iPad plain shell has no wall tile or bottom UMD; keep
             // the same captioned state in its toolbar instead.

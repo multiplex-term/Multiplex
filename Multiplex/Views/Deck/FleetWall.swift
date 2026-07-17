@@ -569,6 +569,10 @@ struct FleetWall: View {
                             .font(.mono(9.5))
                             .foregroundStyle(Theme.signal2)
                             .lineLimit(1)
+                        if host.useMosh {
+                            ChassisBadge("MOSH")
+                                .accessibilityLabel("Connects over mosh")
+                        }
                         Spacer(minLength: 4)
                         shellChip(host, connected: connected)
                     }
@@ -582,6 +586,10 @@ struct FleetWall: View {
                             .font(.mono(11))
                             .foregroundStyle(Theme.signal2)
                             .lineLimit(2)
+                        if host.useMosh {
+                            ChassisBadge("MOSH")
+                                .accessibilityLabel("Connects over mosh")
+                        }
                         Spacer()
                         railStatus(model)
                         // The SHELL chip is the row's tallest element —

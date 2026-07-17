@@ -394,6 +394,9 @@ struct TallyLamp: View {
                 .font(.mono(9, weight: .bold))
                 .kerning(1.2)
                 .foregroundStyle(color)
+                // The caption is the lamp's meaning — it must win layout
+                // compression, or a crowded row shows an uncaptioned red dot.
+                .fixedSize()
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(caption.lowercased())
