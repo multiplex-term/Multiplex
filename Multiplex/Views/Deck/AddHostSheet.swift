@@ -121,7 +121,7 @@ struct AddHostSheet: View {
             TallyFormRow {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Sign in with")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.ui(10, weight: .semibold))
                         .foregroundStyle(Theme.signal2)
                     TallyChoiceBar(
                         Host.AuthMethod.allCases.map { ($0.label, $0) },
@@ -191,7 +191,7 @@ struct AddHostSheet: View {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             TallyLamp(caption: "INVALID", color: Theme.caution)
                             Text("Use one port or a range from 1 to 65535.")
-                                .font(.system(size: 10))
+                                .font(.ui(10))
                                 .foregroundStyle(Theme.signal2)
                         }
                     }
@@ -233,14 +233,14 @@ struct AddHostSheet: View {
                         HStack(spacing: 10) {
                             TallyLamp(caption: "CONNECTED", color: Theme.ok)
                             Text(headline)
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.ui(11, weight: .medium))
                                 .foregroundStyle(Theme.signal)
                         }
                         ForEach(warnings, id: \.self) { warning in
                             HStack(alignment: .top, spacing: 10) {
                                 TallyLamp(caption: "CHECK", color: Theme.caution)
                                 Text(warning)
-                                    .font(.system(size: 10))
+                                    .font(.ui(10))
                                     .foregroundStyle(Theme.signal2)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -252,7 +252,7 @@ struct AddHostSheet: View {
                     HStack(alignment: .top, spacing: 10) {
                         TallyLamp(caption: "NO SIGNAL", color: Theme.caution)
                         Text(message)
-                            .font(.system(size: 11))
+                            .font(.ui(11))
                             .foregroundStyle(Theme.signal)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -354,7 +354,7 @@ struct AddHostSheet: View {
             TallyFormRow {
                 VStack(alignment: .leading, spacing: 7) {
                     Text("Add directory")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.ui(10, weight: .semibold))
                         .foregroundStyle(Theme.signal2)
                     HStack(spacing: 8) {
                         TextField("~/projects/app", text: $newWorkingDir)
@@ -417,7 +417,7 @@ struct AddHostSheet: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.ui(9, weight: .semibold))
                 .foregroundStyle(disabled ? Theme.signal3 : Theme.signal2)
                 .frame(width: 25, height: 25)
                 .background(Theme.chassis)
@@ -593,7 +593,7 @@ private struct RevealableSecureField: View {
                 revealed.toggle()
             } label: {
                 Image(systemName: revealed ? "eye.slash" : "eye")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.ui(10, weight: .semibold))
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)

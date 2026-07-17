@@ -379,7 +379,7 @@ private struct KeyBarRow: View {
                 accessibilityText: "Hide keyboard"
             ) {
                 Image(systemName: "keyboard.chevron.compact.down")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.ui(13, weight: .semibold))
             }
             if showsTmux {
                 // Keep the tmux dropdown at the rail's trailing edge until
@@ -424,7 +424,7 @@ private struct KeyBarRow: View {
             repeats: true,
             accessibilityText: accessibility
         ) {
-            Image(systemName: icon).font(.system(size: 12, weight: .semibold))
+            Image(systemName: icon).font(.ui(12, weight: .semibold))
         }
     }
 

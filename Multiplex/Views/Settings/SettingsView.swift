@@ -106,7 +106,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         ChassisLabel("No custom themes", size: 10, color: Theme.signal3)
                         Text("Start from the active palette, then tune its surface and ANSI colors.")
-                            .font(.system(size: 10))
+                            .font(.ui(10))
                             .foregroundStyle(Theme.signal2)
                     }
                 }

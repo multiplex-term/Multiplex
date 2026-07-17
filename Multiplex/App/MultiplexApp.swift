@@ -166,13 +166,24 @@ struct DeckWindowSizingBoundary: ViewModifier {
 /// state, not actions); visionOS keeps native glass for sheets and system
 /// controls.
 private struct PlatformChrome: ViewModifier {
+    @ViewBuilder
     func body(content: Content) -> some View {
         #if os(visionOS)
         content
         #else
-        content
+        let base = content
             .preferredColorScheme(.dark)
             .tint(Theme.signal)
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            // The Mac paints the iPad canvas at 77%. Fixed-size chassis type
+            // compensates through Theme.typeScale; semantic text styles
+            // (.footnote, .subheadline …) keep Dynamic Type on iPad and get
+            // the equivalent boost here instead. Fixed-size fonts ignore
+            // Dynamic Type, so the two mechanisms never compound.
+            base.dynamicTypeSize(.xxLarge)
+        } else {
+            base
+        }
         #endif
     }
 }

@@ -71,7 +71,7 @@ struct DropTargetVeil: View {
             Theme.chassis.opacity(0.35)
             VStack(spacing: 8) {
                 Image(systemName: "arrow.down.doc")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.ui(22, weight: .semibold))
                     .foregroundStyle(Theme.signal)
                 ChassisLabel("Drop to upload", size: 11, color: Theme.signal2)
             }

@@ -148,7 +148,7 @@ struct ThemeEditorView: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(label)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.ui(11, weight: .medium))
                         .foregroundStyle(Theme.signal)
                     Text(color.hexString)
                         .font(.mono(9, weight: .medium))

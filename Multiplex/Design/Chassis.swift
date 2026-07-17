@@ -18,9 +18,12 @@ struct ChassisLabel: View {
     }
 
     var body: some View {
+        // Font and kerning scale together so tracking stays proportional
+        // when Theme.typeScale compensates iOS-on-Mac's 77% canvas.
+        let scaled = size * Theme.typeScale
         Text(text.uppercased())
-            .font(.system(size: size, weight: .bold).width(.compressed))
-            .kerning(size * 0.09)
+            .font(.system(size: scaled, weight: .bold).width(.compressed))
+            .kerning(scaled * 0.09)
             .foregroundStyle(color)
             .lineLimit(1)
     }
@@ -74,11 +77,12 @@ struct ChassisBadge: View {
         HStack(spacing: 5) {
             if let systemImage {
                 Image(systemName: systemImage)
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.ui(9, weight: .semibold))
                     // SF Symbols have different intrinsic ascents (paperclip
                     // is taller than plus). A fixed slot keeps every chassis
-                    // badge on the same control height.
-                    .frame(width: 10, height: 10)
+                    // badge on the same control height; it tracks the type
+                    // scale so the icon never outgrows its slot.
+                    .frame(width: 10 * Theme.typeScale, height: 10 * Theme.typeScale)
             }
             if !label.isEmpty {
                 Text(label)
@@ -210,7 +214,7 @@ struct TallyFormSection<Content: View>: View {
 
             if let detail {
                 Text(detail)
-                    .font(.system(size: 10))
+                    .font(.ui(10))
                     .foregroundStyle(Theme.signal2)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 2)
@@ -268,7 +272,7 @@ struct TallyFormBoolField: View {
         Button { isOn.toggle() } label: {
             HStack(spacing: 10) {
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.ui(12, weight: .semibold))
                     .foregroundStyle(Theme.signal)
                     .lineLimit(1)
                     .layoutPriority(1)
@@ -318,7 +322,7 @@ struct TallyFormField<Field: View>: View {
         TallyFormRow {
             VStack(alignment: .leading, spacing: 7) {
                 Text(label)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.ui(10, weight: .semibold))
                     .foregroundStyle(Theme.signal2)
                 field
                     .font(.mono(12))
@@ -388,7 +392,9 @@ struct TallyLamp: View {
         HStack(spacing: 5) {
             Circle()
                 .fill(color)
-                .frame(width: 7, height: 7)
+                // The dot tracks the type scale with its caption so the
+                // lamp keeps its proportions on iOS-on-Mac.
+                .frame(width: 7 * Theme.typeScale, height: 7 * Theme.typeScale)
                 .shadow(color: color.opacity(0.7), radius: 4)
             Text(caption)
                 .font(.mono(9, weight: .bold))

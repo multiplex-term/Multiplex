@@ -69,7 +69,7 @@ struct TmuxShortcutPanel: View {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(shortcut.title.uppercased())
-                        .font(.system(size: 10, weight: .bold).width(.compressed))
+                        .font(.ui(10, weight: .bold).width(.compressed))
                         .kerning(0.8)
                         .foregroundStyle(Theme.signal)
                     Text(isArmed ? "press again to close" : shortcut.command)

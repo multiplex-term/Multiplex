@@ -736,6 +736,17 @@ automation or the App Store Connect UI is required.
   Monospace (`Font.mono`) stays
   the identity/data voice (addresses, telemetry, screen content); body copy
   stays SF Pro.
+- **Fixed-size chrome type always goes through `Font.mono` / `Font.ui`,
+  never raw `.system(size:)`**: iOS-on-Mac ("Designed for iPad") paints the
+  iPad point grid at 77% with no opt-out, so both type roles multiply by
+  `Theme.typeScale` (1.3 there, 1.0 everywhere else — iPad/visionOS render
+  byte-identically). `ChassisLabel` scales its size+kerning together, and
+  type-locked accents (badge icon slot, lamp dot) ride the same scale while
+  control geometry (padding, key sizes, switch tracks) deliberately stays
+  authored. Semantic text styles (`.footnote`…) keep Dynamic Type and get
+  the equivalent Mac boost once at the scene root (`PlatformChrome`'s
+  `dynamicTypeSize(.xxLarge)`); fixed-size fonts ignore Dynamic Type, so
+  the two mechanisms never compound.
 - **visionOS hover**: use `chassisHover(_:)` on every custom Button/Menu —
   and it must sit on the Button itself, NOT its label (the system resolves
   the hover shape where the effect attaches; a label-level

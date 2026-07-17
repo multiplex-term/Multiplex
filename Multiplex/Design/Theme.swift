@@ -37,6 +37,18 @@ enum Theme {
     static let customCommand = Color(hex: 0xB9AA98)
     /// Dimmed mono text inside miniature screens.
     static let miniText = Color(hex: 0xC8D2D6)
+
+    // MARK: Type scale
+    /// iOS-on-Mac ("Designed for iPad") paints the iPad point grid at 77%
+    /// with no opt-out for non-game apps, so chassis type authored at
+    /// 8–12 pt lands under 10 physical points there. Every fixed-size type
+    /// role (`Font.mono`, `Font.ui`, `ChassisLabel`) multiplies by this
+    /// scale to restore physical parity on the Mac; iPad and visionOS stay
+    /// 1:1. Only type and type-locked accents (badge icon slot, lamp dot)
+    /// scale — control chrome (padding, key sizes, switch tracks) keeps its
+    /// authored geometry. Semantic text styles (`.footnote` …) keep Dynamic
+    /// Type instead and are boosted once at the scene root (`PlatformChrome`).
+    static let typeScale: CGFloat = ProcessInfo.processInfo.isiOSAppOnMac ? 1.3 : 1.0
 }
 
 // Terminal surface colors are the user's choice, not identity — they live in
@@ -92,9 +104,18 @@ extension Color {
 
 extension Font {
     /// Identity voice: host names, session names, addresses, counts,
-    /// telemetry, and everything inside a screen.
+    /// telemetry, and everything inside a screen. Sizes are authored in
+    /// iPad points; `Theme.typeScale` restores physical size on iOS-on-Mac.
     static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+        .system(size: size * Theme.typeScale, weight: weight, design: .monospaced)
+    }
+
+    /// Body/label voice for chassis chrome authored at a fixed point size —
+    /// SF Pro riding the same platform type scale as `mono`. Use this instead
+    /// of `.system(size:)` anywhere in app chrome; semantic text styles
+    /// (`.footnote` …) stay as they are and scale via the scene root.
+    static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .system(size: size * Theme.typeScale, weight: weight)
     }
 }
 

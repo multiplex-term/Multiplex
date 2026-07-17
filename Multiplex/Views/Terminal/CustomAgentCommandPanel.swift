@@ -124,7 +124,7 @@ struct CustomAgentCommandPanel: View {
             .padding(.leading, 1)
 
             Text("Place each built-in in Bar or More. Custom content may span many lines; turn Submit off to leave it ready to edit.")
-                .font(.system(size: 11))
+                .font(.ui(11))
                 .foregroundStyle(Theme.signal2)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -195,7 +195,7 @@ struct CustomAgentCommandPanel: View {
         Button(action: toggleBuiltInCommands) {
             HStack(spacing: 10) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.ui(9, weight: .bold))
                     .foregroundStyle(Theme.signal2)
                     .rotationEffect(.degrees(isBuiltInExpanded ? 90 : 0))
                     .frame(width: 12)
@@ -423,7 +423,7 @@ struct CustomAgentCommandPanel: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.ui(9, weight: .semibold))
                 .foregroundStyle(disabled ? Theme.signal3 : Theme.signal2)
                 .frame(width: 25, height: 23)
                 .background(Theme.chassis)

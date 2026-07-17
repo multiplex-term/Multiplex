@@ -1181,7 +1181,7 @@ private struct NewSessionSheet: View {
                             TallyFormRow {
                                 HStack(spacing: 12) {
                                     Text("Starts in")
-                                        .font(.system(size: 10, weight: .semibold))
+                                        .font(.ui(10, weight: .semibold))
                                         .foregroundStyle(Theme.signal2)
                                     Spacer()
                                     Text("HOME")
@@ -1203,7 +1203,7 @@ private struct NewSessionSheet: View {
                                             .lineLimit(1)
                                         Spacer()
                                         Image(systemName: "chevron.down")
-                                            .font(.system(size: 9, weight: .semibold))
+                                            .font(.ui(9, weight: .semibold))
                                             .foregroundStyle(Theme.signal2)
                                     }
                                     .contentShape(Rectangle())
