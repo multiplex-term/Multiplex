@@ -40,10 +40,10 @@ enum TmuxProbe {
     /// active-pane capture for the live miniatures. A second capture exec
     /// used to follow the probe; folding it in halves the per-tick channel
     /// opens, login-shell spawns, and round-trips.
-    static var probeCommand: String {
+    static let probeCommand: String = {
         let sessionFormat = "S #{session_id} #{session_attached} #{session_created} #{session_name}"
         let windowFormat = "W #{session_id} #{window_index} #{window_active} #{window_bell_flag} #{window_activity_flag} #{window_name}"
-        let paneFormat = paneFormat(tag: "P")
+        let paneLineFormat = paneFormat(tag: "P")
         return pathPrefix
             + "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
             + "tmux list-sessions -F '\(sessionFormat)' 2>/dev/null "
@@ -51,7 +51,7 @@ enum TmuxProbe {
             // Keep the pane listing in one shell variable: it is printed for
             // the parser and reused to derive every pane-process root,
             // avoiding a second list-panes call in the process stage.
-            + "&& panes=$(tmux list-panes -a -F '\(paneFormat)' 2>/dev/null) "
+            + "&& panes=$(tmux list-panes -a -F '\(paneLineFormat)' 2>/dev/null) "
             + "&& printf '%s\\n' \"$panes\" "
             + "&& { echo MULTIPLEX_PS; \(psPaneSubtreeCommand); } "
             + "|| true; "
@@ -60,6 +60,28 @@ enum TmuxProbe {
             + "echo \"MPXS $s\"; "
             + "tmux capture-pane -p -t \"$s\" -S -\(captureDepth) 2>/dev/null; "
             + "done; echo MPXE"
+    }()
+
+    /// Everything derived from one probe response. Keeping this pure bundle
+    /// together lets callers move the process-tree walk, capture trimming,
+    /// and miniature clipping off the UI actor in one hop.
+    struct ParsedProbe {
+        var state: TmuxState
+        var tails: [String: [String]]
+        var miniatures: [String: [String]]
+    }
+
+    static func parseProbe(_ output: String) -> ParsedProbe {
+        let state = parse(output)
+        guard case .sessions(let sessions) = state else {
+            return ParsedProbe(state: state, tails: [:], miniatures: [:])
+        }
+        let tails = parseTails(output, sessions: sessions)
+        return ParsedProbe(
+            state: state,
+            tails: tails,
+            miniatures: tails.mapValues(miniatureTail)
+        )
     }
 
     /// One host-wide process snapshot, clipped to every tmux pane subtree
@@ -92,8 +114,6 @@ enum TmuxProbe {
 
     /// Parse combined probe output into a `TmuxState`.
     static func parse(_ output: String) -> TmuxState {
-        if output.contains("MULTIPLEX_NO_TMUX") { return .tmuxMissing }
-
         struct SessionInfo {
             var name: String
             var clients: Int
@@ -106,10 +126,13 @@ enum TmuxProbe {
         var psRows: [PSRow] = []
         var inPSSection = false
 
-        for line in output.split(separator: "\n") {
-            // Everything after the tails sentinel is raw pane content —
-            // arbitrary bytes that must never be read as S/W/P/ps lines.
-            if line == "MULTIPLEX_TAILS" { break }
+        // String.split is eager. Slice before the capture section first so a
+        // large wall repaint is not tokenized once as probe records and then
+        // again as terminal lines.
+        let records = tailsMarker(in: output).map { output[..<$0.lowerBound] }
+            ?? output[...]
+        for line in records.split(separator: "\n") {
+            if line == "MULTIPLEX_NO_TMUX" { return .tmuxMissing }
             if line == "MULTIPLEX_PS" {
                 inPSSection = true
                 continue
@@ -449,7 +472,6 @@ enum TmuxProbe {
             names[session.tmuxID] = session.name
         }
         var result: [String: [String]] = [:]
-        var inTails = false
         var currentName: String?
         var lines: [String] = []
         func flush() {
@@ -457,12 +479,11 @@ enum TmuxProbe {
             currentName = nil
             lines = []
         }
-        for raw in output.split(separator: "\n", omittingEmptySubsequences: false) {
+        let marker = tailsMarker(in: output)
+        guard let marker else { return [:] }
+        for raw in output[marker.upperBound...]
+            .split(separator: "\n", omittingEmptySubsequences: false) {
             let line = String(raw)
-            if !inTails {
-                if line == "MULTIPLEX_TAILS" { inTails = true }
-                continue
-            }
             if line.hasPrefix("MPXS ") {
                 flush()
                 currentName = names[String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)]
@@ -497,5 +518,10 @@ enum TmuxProbe {
         var s = Substring(line)
         while let last = s.last, last == " " || last == "\t" { s = s.dropLast() }
         return String(s)
+    }
+
+    private static func tailsMarker(in output: String) -> Range<String.Index>? {
+        output.range(of: "\nMULTIPLEX_TAILS\n")
+            ?? output.range(of: "MULTIPLEX_TAILS\n", options: .anchored)
     }
 }

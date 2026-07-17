@@ -68,6 +68,20 @@ final class MoshFragmentTests: XCTestCase {
         XCTAssertNil(assembly.add(first[2]))
     }
 
+    func testSingleFragmentFastPathAbandonsPartialAssembly() {
+        var fragmenter = MoshFragmenter()
+        var assembly = MoshFragmentAssembly()
+
+        let partial = fragmenter.fragments(
+            of: Data(repeating: 1, count: 90), budget: 40
+        )
+        let complete = fragmenter.fragments(of: Data("next".utf8), budget: 40)
+        XCTAssertNil(assembly.add(partial[0]))
+        XCTAssertEqual(assembly.add(complete[0]), Data("next".utf8))
+        XCTAssertNil(assembly.add(partial[1]))
+        XCTAssertNil(assembly.add(partial[2]))
+    }
+
     func testFragmentIDsAdvancePerInstruction() {
         var fragmenter = MoshFragmenter()
         let a = fragmenter.fragments(of: Data("a".utf8), budget: 100)

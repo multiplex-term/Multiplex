@@ -28,6 +28,18 @@ struct Block128: Equatable {
         return out
     }
 
+    /// Append without materializing the temporary 16-byte array returned by
+    /// `bytes`. OCB emits one block after another, so this removes two tiny
+    /// heap candidates per full block on the packet hot path.
+    func appendBytes(to out: inout [UInt8]) {
+        for i in 0 ..< 8 {
+            out.append(UInt8(truncatingIfNeeded: hi >> (56 - 8 * i)))
+        }
+        for i in 0 ..< 8 {
+            out.append(UInt8(truncatingIfNeeded: lo >> (56 - 8 * i)))
+        }
+    }
+
     static func ^ (a: Block128, b: Block128) -> Block128 {
         var out = Block128()
         out.hi = a.hi ^ b.hi
@@ -106,11 +118,20 @@ final class MoshAEAD {
         out.reserveCapacity(plain.count + 16)
 
         let fullBlocks = plain.count / 16
+        var fullInputs: [Block128] = []
+        var fullOffsets: [Block128] = []
+        fullInputs.reserveCapacity(fullBlocks)
+        fullOffsets.reserveCapacity(fullBlocks)
         for i in 1 ... max(fullBlocks, 1) where fullBlocks > 0 {
             offset ^= l[i.trailingZeroBitCount]
             let p = Block128(plain[(i - 1) * 16 ..< i * 16])
-            out += (encrypt(p ^ offset) ^ offset).bytes
+            fullInputs.append(p ^ offset)
+            fullOffsets.append(offset)
             checksum ^= p
+        }
+        let encrypted = Self.transform(encryptor, fullInputs)
+        for index in encrypted.indices {
+            (encrypted[index] ^ fullOffsets[index]).appendBytes(to: &out)
         }
 
         let remainder = plain.count % 16
@@ -129,7 +150,7 @@ final class MoshAEAD {
 
         var tag = encrypt(checksum ^ offset ^ lDollar)
         tag ^= hash(associatedData)
-        out += tag.bytes
+        tag.appendBytes(to: &out)
         return Data(out)
     }
 
@@ -146,11 +167,20 @@ final class MoshAEAD {
         plain.reserveCapacity(cipher.count)
 
         let fullBlocks = cipher.count / 16
+        var fullInputs: [Block128] = []
+        var fullOffsets: [Block128] = []
+        fullInputs.reserveCapacity(fullBlocks)
+        fullOffsets.reserveCapacity(fullBlocks)
         for i in 1 ... max(fullBlocks, 1) where fullBlocks > 0 {
             offset ^= l[i.trailingZeroBitCount]
             let c = Block128(cipher[(i - 1) * 16 ..< i * 16])
-            let p = decrypt(c ^ offset) ^ offset
-            plain += p.bytes
+            fullInputs.append(c ^ offset)
+            fullOffsets.append(offset)
+        }
+        let decrypted = Self.transform(decryptor, fullInputs)
+        for index in decrypted.indices {
+            let p = decrypted[index] ^ fullOffsets[index]
+            p.appendBytes(to: &plain)
             checksum ^= p
         }
 
@@ -170,9 +200,9 @@ final class MoshAEAD {
 
         var expected = encrypt(checksum ^ offset ^ lDollar)
         expected ^= hash(associatedData)
-        var diff: UInt8 = 0
-        for (a, b) in zip(expected.bytes, tag) { diff |= a ^ b }
-        guard diff == 0 else { return nil }
+        let received = Block128(tag)
+        guard (expected.hi ^ received.hi) | (expected.lo ^ received.lo) == 0
+        else { return nil }
         return Data(plain)
     }
 
@@ -184,9 +214,14 @@ final class MoshAEAD {
         var offset = Block128.zero
 
         let fullBlocks = a.count / 16
+        var fullInputs: [Block128] = []
+        fullInputs.reserveCapacity(fullBlocks)
         for i in 1 ... max(fullBlocks, 1) where fullBlocks > 0 {
             offset ^= l[i.trailingZeroBitCount]
-            sum ^= encrypt(Block128(a[(i - 1) * 16 ..< i * 16]) ^ offset)
+            fullInputs.append(Block128(a[(i - 1) * 16 ..< i * 16]) ^ offset)
+        }
+        for encrypted in Self.transform(encryptor, fullInputs) {
+            sum ^= encrypted
         }
 
         let remainder = a.count % 16
@@ -237,12 +272,43 @@ final class MoshAEAD {
     private func decrypt(_ block: Block128) -> Block128 { Self.transform(decryptor, block) }
 
     private static func transform(_ cryptor: CCCryptorRef, _ block: Block128) -> Block128 {
-        var input = block.bytes
-        var output = [UInt8](repeating: 0, count: 16)
+        transform(cryptor, [block])[0]
+    }
+
+    /// ECB has no chaining dependency, so all full OCB blocks can cross the
+    /// CommonCrypto boundary in one update. A near-MTU packet used to make
+    /// roughly 75 `CCCryptorUpdate` calls (and allocate input/output arrays for
+    /// each); it now makes one for the full-block body plus the scalar pad/tag
+    /// operations required by OCB3.
+    private static func transform(
+        _ cryptor: CCCryptorRef,
+        _ blocks: [Block128]
+    ) -> [Block128] {
+        guard !blocks.isEmpty else { return [] }
+        var input: [UInt8] = []
+        input.reserveCapacity(blocks.count * 16)
+        for block in blocks { block.appendBytes(to: &input) }
+        var output = [UInt8](repeating: 0, count: input.count)
         var moved = 0
-        let status = CCCryptorUpdate(cryptor, &input, 16, &output, 16, &moved)
-        precondition(status == kCCSuccess && moved == 16, "AES-ECB block transform failed")
-        return Block128(output[...])
+        let outputCapacity = output.count
+        let status = CCCryptorUpdate(
+            cryptor,
+            &input,
+            input.count,
+            &output,
+            outputCapacity,
+            &moved
+        )
+        precondition(
+            status == kCCSuccess && moved == outputCapacity,
+            "AES-ECB block transform failed"
+        )
+        var result: [Block128] = []
+        result.reserveCapacity(blocks.count)
+        for offset in stride(from: 0, to: output.count, by: 16) {
+            result.append(Block128(output[offset ..< offset + 16]))
+        }
+        return result
     }
 }
 

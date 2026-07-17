@@ -56,6 +56,40 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     public static var textInputDebugEnabled: Bool = ProcessInfo.processInfo.environment["SWIFTTERM_TEXT_INPUT_DEBUG"] == "1"
     internal static var textInputLogCounter: Int = 0
 
+    // Multiplex patch: inactive tabs must keep parsing bytes so their buffer
+    // and scrollback remain current, but they do not need UIKit invalidations,
+    // cursor placement, or accessibility notifications while fully obscured.
+    // The lock matters because feed() is allowed on a background thread.
+    private let renderUpdatesLock = NSLock()
+    private var _renderUpdatesEnabled = true
+    public var renderUpdatesEnabled: Bool {
+        get {
+            renderUpdatesLock.lock()
+            defer { renderUpdatesLock.unlock() }
+            return _renderUpdatesEnabled
+        }
+        set {
+            renderUpdatesLock.lock()
+            let shouldRefresh = newValue && !_renderUpdatesEnabled
+            _renderUpdatesEnabled = newValue
+            renderUpdatesLock.unlock()
+            guard shouldRefresh else { return }
+            let refresh = { [weak self] in
+                guard let self else { return }
+                self.terminal.refresh(
+                    startRow: 0,
+                    endRow: max(0, self.terminal.rows - 1)
+                )
+                self.queuePendingDisplay()
+            }
+            if Thread.isMainThread {
+                refresh()
+            } else {
+                DispatchQueue.main.async(execute: refresh)
+            }
+        }
+    }
+
     struct FontSet {
         public let normal: UIFont
         let bold: UIFont

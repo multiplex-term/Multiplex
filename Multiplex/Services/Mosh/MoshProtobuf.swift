@@ -40,15 +40,16 @@ enum MoshProto {
     struct Reader {
         enum Failure: Error { case truncated, unsupportedWireType }
 
-        private let bytes: [UInt8]
-        private var index = 0
+        private let bytes: Data
+        private var index: Data.Index
 
         init(_ data: Data) {
-            bytes = [UInt8](data)
+            bytes = data
+            index = data.startIndex
         }
 
         mutating func next() throws -> (field: Int, value: Value)? {
-            guard index < bytes.count else { return nil }
+            guard index < bytes.endIndex else { return nil }
             let tag = try varint()
             let field = Int(tag >> 3)
             switch tag & 7 {
@@ -59,9 +60,11 @@ enum MoshProto {
                 return try next()
             case 2:
                 let length = Int(try varint())
-                guard length <= bytes.count - index else { throw Failure.truncated }
-                let value = Data(bytes[index ..< index + length])
-                index += length
+                guard length <= bytes.distance(from: index, to: bytes.endIndex)
+                else { throw Failure.truncated }
+                let end = bytes.index(index, offsetBy: length)
+                let value = bytes[index ..< end]
+                index = end
                 return (field, .bytes(value))
             case 5: // fixed32 — likewise skip
                 try skip(4)
@@ -75,9 +78,9 @@ enum MoshProto {
             var result: UInt64 = 0
             var shift: UInt64 = 0
             while true {
-                guard index < bytes.count, shift < 64 else { throw Failure.truncated }
+                guard index < bytes.endIndex, shift < 64 else { throw Failure.truncated }
                 let byte = bytes[index]
-                index += 1
+                index = bytes.index(after: index)
                 result |= UInt64(byte & 0x7F) << shift
                 if byte & 0x80 == 0 { return result }
                 shift += 7
@@ -85,8 +88,9 @@ enum MoshProto {
         }
 
         private mutating func skip(_ count: Int) throws {
-            guard count <= bytes.count - index else { throw Failure.truncated }
-            index += count
+            guard count <= bytes.distance(from: index, to: bytes.endIndex)
+            else { throw Failure.truncated }
+            index = bytes.index(index, offsetBy: count)
         }
     }
 }

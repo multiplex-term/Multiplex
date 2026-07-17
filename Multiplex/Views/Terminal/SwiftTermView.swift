@@ -67,6 +67,7 @@ struct SwiftTermView: UIViewRepresentable {
             view.inputAccessoryView = nil
             #endif
         }
+        view.renderUpdatesEnabled = isActive
         apply(theme, to: view, coordinator: context.coordinator)
         if view.font.pointSize != fontSize {
             view.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
@@ -180,6 +181,9 @@ struct SwiftTermView: UIViewRepresentable {
         // (about to be torn down) representable gets one last update.
         guard let view = context.coordinator.terminalView,
               view.isDescendant(of: container) else { return }
+        if view.renderUpdatesEnabled != isActive {
+            view.renderUpdatesEnabled = isActive
+        }
         let fontChanged = view.font.pointSize != fontSize
         if fontChanged {
             view.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)

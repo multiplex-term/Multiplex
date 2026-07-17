@@ -70,6 +70,22 @@ final class MoshTransportTests: XCTestCase {
         )
     }
 
+    func testUnsentInputsAndResizesCoalesce() throws {
+        var (engine, server) = try makePair()
+
+        engine.resize(cols: 100, rows: 30)
+        engine.resize(cols: 90, rows: 25)
+        engine.input(Data("a".utf8))
+        engine.input(Data("bc".utf8))
+
+        let instructions = server.receive(engine.tick(now: 1000).datagrams, now: 1005)
+        let instruction = try XCTUnwrap(instructions.first)
+        XCTAssertEqual(
+            MoshUserMessage.decode(instruction.diff),
+            [.resize(cols: 90, rows: 25), .keys(Data("abc".utf8))]
+        )
+    }
+
     func testUnackedInputRetransmitsUntilAcked() throws {
         var (engine, server) = try makePair()
         _ = engine.tick(now: 1000) // initial resize goes out (and is lost)
@@ -222,6 +238,29 @@ final class MoshTransportTests: XCTestCase {
             now = next
         }
         XCTAssertGreaterThanOrEqual(heartbeats, 2)
+    }
+
+    func testRequestedHeartbeatIsImmediate() throws {
+        var (engine, server) = try makePair()
+        _ = server.receive(engine.tick(now: 1000).datagrams, now: 1000)
+        for datagram in server.send(old: 0, new: 1, ack: 1, now: 1010) {
+            _ = engine.receive(datagram, now: 1015)
+        }
+
+        // First discharge the delayed acknowledgement caused by receiving
+        // the server state, leaving only the normal idle heartbeat pending.
+        _ = engine.tick(now: 1015)
+        _ = server.receive(engine.tick(now: 1115).datagrams, now: 1115)
+        let (quiet, deadline) = engine.tick(now: 1200)
+        XCTAssertTrue(quiet.isEmpty)
+        XCTAssertGreaterThan(deadline, 1200)
+
+        engine.requestHeartbeat(now: 1200)
+        let immediate = server.receive(engine.tick(now: 1200).datagrams, now: 1200)
+        XCTAssertFalse(immediate.isEmpty)
+        XCTAssertTrue(immediate.allSatisfy {
+            MoshUserMessage.decode($0.diff)?.isEmpty ?? false
+        })
     }
 
     func testClientShutdownHandshake() throws {

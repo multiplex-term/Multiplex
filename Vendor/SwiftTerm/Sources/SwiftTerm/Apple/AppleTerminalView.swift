@@ -1737,6 +1737,9 @@ extension TerminalView {
     func updateDisplay (notifyAccessibility: Bool)
     {
         defer { pendingDisplay = false }
+        #if os(iOS) || os(visionOS)
+        guard renderUpdatesEnabled else { return }
+        #endif
         if terminal.synchronizedOutputActive {
             return
         }
@@ -1914,6 +1917,9 @@ extension TerminalView {
     // It is also cheap, so should be called when new data has been posted or received.
     func queuePendingDisplay ()
     {
+        #if os(iOS) || os(visionOS)
+        guard renderUpdatesEnabled else { return }
+        #endif
         if terminal.synchronizedOutputActive {
             return
         }
@@ -1932,6 +1938,9 @@ extension TerminalView {
 
 #if canImport(MetalKit)
     func requestMetalDisplay() {
+        #if os(iOS) || os(visionOS)
+        guard renderUpdatesEnabled else { return }
+        #endif
         guard let metalView = metalView else {
             return
         }
@@ -1939,6 +1948,9 @@ extension TerminalView {
     }
 
     func queueMetalDisplay() {
+        #if os(iOS) || os(visionOS)
+        guard renderUpdatesEnabled else { return }
+        #endif
         guard metalView != nil else {
             return
         }
@@ -2181,6 +2193,9 @@ extension TerminalView {
     }
 
     private func displayImmediately() {
+        #if os(iOS) || os(visionOS)
+        guard renderUpdatesEnabled else { return }
+        #endif
         guard !Thread.isMainThread else {
             updateDisplay()
             return

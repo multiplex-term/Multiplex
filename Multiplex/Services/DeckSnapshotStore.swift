@@ -11,6 +11,13 @@ final class DeckSnapshotStore {
     private var snapshots: [UUID: DeckSnapshot] = [:]
     private let fileURL: URL
     private var saveTask: Task<Void, Never>?
+    /// JSON encoding plus atomic replacement can stall for several frames on
+    /// a busy fleet snapshot. A serial utility queue keeps writes ordered
+    /// without spending the deck's main actor budget.
+    private let writerQueue = DispatchQueue(
+        label: "app.multiplexterm.deck-snapshots",
+        qos: .utility
+    )
 
     init(fileURL: URL? = nil) {
         if let fileURL {
@@ -47,10 +54,15 @@ final class DeckSnapshotStore {
     /// Write pending changes now — the debounce timer may never fire when
     /// the app is being suspended.
     func flush() {
-        guard saveTask != nil else { return }
-        saveTask?.cancel()
-        saveTask = nil
-        save()
+        if saveTask != nil {
+            saveTask?.cancel()
+            saveTask = nil
+            save(synchronously: true)
+        } else {
+            // A debounced save may already be queued. Cross the serial queue
+            // before suspension so that write reaches stable storage too.
+            writerQueue.sync {}
+        }
     }
 
     private func scheduleSave() {
@@ -72,9 +84,20 @@ final class DeckSnapshotStore {
         })
     }
 
-    private func save() {
-        let raw = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.key.uuidString, $0.value) })
-        guard let data = try? JSONEncoder().encode(raw) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+    private func save(synchronously: Bool = false) {
+        let snapshot = snapshots
+        let fileURL = fileURL
+        let work = {
+            let raw = Dictionary(uniqueKeysWithValues: snapshot.map {
+                ($0.key.uuidString, $0.value)
+            })
+            guard let data = try? JSONEncoder().encode(raw) else { return }
+            try? data.write(to: fileURL, options: .atomic)
+        }
+        if synchronously {
+            writerQueue.sync(execute: work)
+        } else {
+            writerQueue.async(execute: work)
+        }
     }
 }

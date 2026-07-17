@@ -27,17 +27,24 @@ enum MoshZlib {
     }
 
     static func decompress(_ compressed: Data, maxSize: Int = maxDecompressedSize) throws -> Data {
-        let bytes = [UInt8](compressed)
+        let start = compressed.startIndex
         // Header: deflate method, header checksum multiple of 31, no preset
         // dictionary (mosh never sets one).
-        guard bytes.count >= 6,
-              bytes[0] & 0x0F == 8,
-              (Int(bytes[0]) << 8 | Int(bytes[1])) % 31 == 0,
-              bytes[1] & 0x20 == 0
+        guard compressed.count >= 6 else { throw Failure.corrupt }
+        let flagsIndex = compressed.index(after: start)
+        let method = compressed[start]
+        let flags = compressed[flagsIndex]
+        guard method & 0x0F == 8,
+              (Int(method) << 8 | Int(flags)) % 31 == 0,
+              flags & 0x20 == 0
         else { throw Failure.corrupt }
 
-        let raw = Data(bytes[2 ..< bytes.count - 4])
-        let expected = bytes[(bytes.count - 4)...].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+        let trailerStart = compressed.index(compressed.endIndex, offsetBy: -4)
+        let rawStart = compressed.index(start, offsetBy: 2)
+        let raw = compressed[rawStart ..< trailerStart]
+        let expected = compressed[trailerStart...].reduce(UInt32(0)) {
+            $0 << 8 | UInt32($1)
+        }
 
         let plain = try inflate(raw, maxSize: maxSize)
         guard adler32(plain) == expected else { throw Failure.checksumMismatch }
@@ -73,18 +80,19 @@ enum MoshZlib {
     private static func storedDeflate(_ plain: Data) -> Data {
         var out = Data()
         var offset = 0
-        let bytes = [UInt8](plain)
         repeat {
-            let chunk = min(65535, bytes.count - offset)
-            let final: UInt8 = offset + chunk >= bytes.count ? 1 : 0
+            let chunk = min(65535, plain.count - offset)
+            let final: UInt8 = offset + chunk >= plain.count ? 1 : 0
             out.append(final) // BTYPE=00 stored, BFINAL in bit 0
             out.append(UInt8(chunk & 0xFF))
             out.append(UInt8(chunk >> 8))
             out.append(UInt8(~chunk & 0xFF))
             out.append(UInt8((~chunk >> 8) & 0xFF))
-            out.append(contentsOf: bytes[offset ..< offset + chunk])
+            let start = plain.index(plain.startIndex, offsetBy: offset)
+            let end = plain.index(start, offsetBy: chunk)
+            out.append(contentsOf: plain[start ..< end])
             offset += chunk
-        } while offset < bytes.count
+        } while offset < plain.count
         return out
     }
 

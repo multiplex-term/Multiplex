@@ -74,7 +74,11 @@ final class HostConnectionModel {
     let host: Host
     private(set) var phase: Phase = .idle
     private(set) var tmux: TmuxState = .unknown
-    private(set) var lastRefreshed: Date?
+    private var lastRefreshed: Date?
+    /// Observation-friendly summaries: views that only need liveness or a
+    /// badge count should not subscribe to the full pane/process tree.
+    private(set) var hasLiveProbe = false
+    private(set) var sessionCount = 0
     /// Session name → last visible lines of its active pane; the deck
     /// wall's live miniatures, refreshed by every probe (the probe's single
     /// exec carries the capture tails).
@@ -98,6 +102,7 @@ final class HostConnectionModel {
 
     private var connection: SSHConnection?
     private var refreshTask: Task<Void, Never>?
+    private var refreshGeneration = 0
     private var activePaneProbeInFlight = false
     private struct ActiveAgentCacheEntry {
         var fingerprint: TmuxPaneFingerprint
@@ -130,14 +135,19 @@ final class HostConnectionModel {
         guard case .unknown = tmux else { return }
         tmux = .sessions(snapshot.sessions)
         miniatures = snapshot.miniatures
+        sessionCount = snapshot.sessions.count
     }
 
     /// Connect if needed, then re-probe tmux sessions.
     func refresh() {
         guard refreshTask == nil else { return }
-        refreshTask = Task {
-            defer { refreshTask = nil }
-            await performRefresh()
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
+        refreshTask = Task { [weak self] in
+            guard let self else { return }
+            await self.performRefresh(generation: generation, mayRetry: true)
+            guard self.refreshGeneration == generation else { return }
+            self.refreshTask = nil
         }
     }
 
@@ -259,14 +269,16 @@ final class HostConnectionModel {
         )
     }
 
-    private func performRefresh() async {
+    private func performRefresh(generation: Int, mayRetry: Bool) async {
+        guard refreshGeneration == generation, !Task.isCancelled else { return }
         // Whether this pass reuses an already-established link — if that
         // link fails mid-probe (Wi-Fi blip, server restart, socket severed
         // during suspension), one immediate reconnect beats surfacing
         // UNREACHABLE and waiting out a full feed interval.
         let reusedLink = connection != nil && phase == .connected
         do {
-            let connection = try await ensureConnection()
+            let connection = try await ensureConnection(refreshGeneration: generation)
+            guard refreshGeneration == generation, !Task.isCancelled else { return }
             // Only surface .probing before the first result — every later
             // state (sessions, no server, unreachable) is a settled answer.
             // The deck wall re-probes every few seconds, and flipping a
@@ -276,13 +288,22 @@ final class HostConnectionModel {
             let execStart = ContinuousClock.now
             let output = try await deadlined { try await connection.exec(TmuxProbe.probeCommand) }
             let execEnd = ContinuousClock.now
-            tmux = TmuxProbe.parse(output)
-            switch tmux {
+            guard refreshGeneration == generation, !Task.isCancelled else { return }
+            let parsed = await Task.detached(priority: .userInitiated) {
+                TmuxProbe.parseProbe(output)
+            }.value
+            let parseEnd = ContinuousClock.now
+            guard refreshGeneration == generation, !Task.isCancelled else { return }
+
+            if tmux != parsed.state { tmux = parsed.state }
+            if attentionTails != parsed.tails { attentionTails = parsed.tails }
+            if miniatures != parsed.miniatures { miniatures = parsed.miniatures }
+            if !hasLiveProbe { hasLiveProbe = true }
+            let nextSessionCount = parsed.state.sessions.count
+            if sessionCount != nextSessionCount { sessionCount = nextSessionCount }
+            switch parsed.state {
             case .sessions(let sessions):
                 seedActiveAgentCache(from: sessions)
-                let tails = TmuxProbe.parseTails(output, sessions: sessions)
-                attentionTails = tails
-                miniatures = tails.mapValues(TmuxProbe.miniatureTail)
                 onSnapshot?(DeckSnapshot(sessions: sessions, miniatures: miniatures))
             case .noServer, .tmuxMissing:
                 // A settled "nothing there" clears the cache — ghost tiles
@@ -294,13 +315,14 @@ final class HostConnectionModel {
             Self.timing.debug("""
                 \(self.host.name, privacy: .public) probe: exec \
                 \(Self.ms(execStart, execEnd), privacy: .public)ms, parse \
-                \(Self.ms(execEnd, .now), privacy: .public)ms, \
+                \(Self.ms(execEnd, parseEnd), privacy: .public)ms, \
                 \(output.utf8.count, privacy: .public)B
                 """)
             lastRefreshed = Date()
             evaluateAttention()
         } catch {
-            if reusedLink {
+            guard refreshGeneration == generation, !Task.isCancelled else { return }
+            if reusedLink, mayRetry {
                 // Retry silently: the rail keeps reading CONNECTED while a
                 // fresh link is attempted (ensureConnection never downgrades
                 // a non-idle phase), and only a failed retry surfaces.
@@ -308,7 +330,10 @@ final class HostConnectionModel {
                     Task { await connection.close() }
                 }
                 connection = nil
-                await performRefresh() // second pass has no link to reuse
+                await performRefresh(
+                    generation: generation,
+                    mayRetry: false
+                )
             } else {
                 markFailed(error)
             }
@@ -332,8 +357,11 @@ final class HostConnectionModel {
 
     private func markFailed(_ error: Error) {
         let message = friendlyMessage(for: error)
-        phase = .failed(message)
-        tmux = .failed(message)
+        let failedPhase = Phase.failed(message)
+        let failedTmux = TmuxState.failed(message)
+        if phase != failedPhase { phase = failedPhase }
+        if tmux != failedTmux { tmux = failedTmux }
+        if sessionCount != 0 { sessionCount = 0 }
         if let connection {
             // A link that timed out is usually black-holed; tearing it down
             // also unblocks any exec still hung on it. Never await this on
@@ -344,7 +372,7 @@ final class HostConnectionModel {
         evaluateAttention()
     }
 
-    private func ensureConnection() async throws -> SSHConnection {
+    private func ensureConnection(refreshGeneration expectedGeneration: Int? = nil) async throws -> SSHConnection {
         if let connection, phase == .connected {
             // A link whose last successful round-trip is several feed
             // intervals old was almost certainly severed while the app was
@@ -366,13 +394,23 @@ final class HostConnectionModel {
         // a retry actually lands.
         if phase == .idle { phase = .connecting }
         let secretsStart = ContinuousClock.now
-        let fresh = SSHConnection(host: host, secrets: .load(for: host))
+        let secrets = await HostSecrets.loadOffMain(for: host)
+        if let expectedGeneration,
+           (expectedGeneration != refreshGeneration || Task.isCancelled) {
+            throw CancellationError()
+        }
+        let fresh = SSHConnection(host: host, secrets: secrets)
         let connectStart = ContinuousClock.now
         do {
             try await deadlined(seconds: Self.connectDeadline) { try await fresh.connect() }
         } catch {
             Task { await fresh.close() }
             throw error
+        }
+        if let expectedGeneration,
+           (expectedGeneration != refreshGeneration || Task.isCancelled) {
+            await fresh.close()
+            throw CancellationError()
         }
         Self.timing.debug("""
             \(self.host.name, privacy: .public) connect: secrets \
@@ -404,25 +442,18 @@ final class HostConnectionModel {
         seconds: Double = HostConnectionModel.execDeadline,
         _ operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
-        let resumed = OSAllocatedUnfairLock(initialState: false)
         return try await withCheckedThrowingContinuation { continuation in
-            @Sendable func finish(_ result: Result<T, Error>) {
-                let first = resumed.withLock { done -> Bool in
-                    if done { return false }
-                    done = true
-                    return true
-                }
-                if first { continuation.resume(with: result) }
-            }
+            let gate = DeadlineGate(continuation)
             let work = Task {
-                do { finish(.success(try await operation())) }
-                catch { finish(.failure(error)) }
+                do { gate.finish(.success(try await operation()), winner: .work) }
+                catch { gate.finish(.failure(error), winner: .work) }
             }
-            Task {
-                try? await Task.sleep(for: .seconds(seconds))
-                finish(.failure(ProbeTimeoutError()))
-                work.cancel()
+            let timer = Task {
+                do { try await Task.sleep(for: .seconds(seconds)) }
+                catch { return }
+                gate.finish(.failure(ProbeTimeoutError()), winner: .timer)
             }
+            gate.install(work: work, timer: timer)
         }
     }
 
@@ -431,7 +462,7 @@ final class HostConnectionModel {
     /// probe pass — title and tail inputs arrive together.
     private func evaluateAttention() {
         guard case .sessions(let sessions) = tmux else {
-            attention = [:]
+            if !attention.isEmpty { attention = [:] }
             attentionTracker.reset()
             return
         }
@@ -469,7 +500,7 @@ final class HostConnectionModel {
             }
         }
         attentionTracker.prune(keeping: Set(sessions.map(\.name)))
-        attention = next
+        if attention != next { attention = next }
     }
 
     /// Create a detached tmux session over the control connection and
@@ -539,7 +570,9 @@ final class HostConnectionModel {
     private func kill(_ session: TmuxSession, over connection: SSHConnection) async {
         _ = try? await deadlined { try await connection.exec(TmuxProbe.killCommand(for: session)) }
         if case .sessions(let list) = tmux {
-            tmux = .sessions(list.filter { $0.id != session.id })
+            let remaining = list.filter { $0.id != session.id }
+            tmux = .sessions(remaining)
+            sessionCount = remaining.count
         }
         miniatures[session.name] = nil
         attentionTails[session.name] = nil
@@ -551,6 +584,7 @@ final class HostConnectionModel {
     }
 
     func disconnect() async {
+        refreshGeneration &+= 1
         refreshTask?.cancel()
         refreshTask = nil
         if let connection {
@@ -559,6 +593,8 @@ final class HostConnectionModel {
         connection = nil
         phase = .idle
         tmux = .unknown
+        hasLiveProbe = false
+        sessionCount = 0
         miniatures = [:]
         attentionTails = [:]
         attention = [:]
@@ -579,3 +615,51 @@ final class HostConnectionModel {
 /// A control-connection round-trip outlived its deadline — the link is
 /// treated as dead (see `HostConnectionModel.deadlined`).
 private struct ProbeTimeoutError: Error {}
+
+/// Resolves a deadline race once and cancels its losing task. In particular,
+/// a successful five-second wall probe no longer leaves a ten-second timer
+/// task alive behind it on every host and every tick.
+private final class DeadlineGate<Value>: @unchecked Sendable {
+    enum Winner: Equatable { case work, timer }
+
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Error>?
+    private var work: Task<Void, Never>?
+    private var timer: Task<Void, Never>?
+    private var finished = false
+
+    init(_ continuation: CheckedContinuation<Value, Error>) {
+        self.continuation = continuation
+    }
+
+    func install(work: Task<Void, Never>, timer: Task<Void, Never>) {
+        lock.lock()
+        if finished {
+            lock.unlock()
+            work.cancel()
+            timer.cancel()
+            return
+        }
+        self.work = work
+        self.timer = timer
+        lock.unlock()
+    }
+
+    func finish(_ result: Result<Value, Error>, winner: Winner) {
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            return
+        }
+        finished = true
+        let continuation = continuation
+        self.continuation = nil
+        let loser = winner == .work ? timer : work
+        work = nil
+        timer = nil
+        lock.unlock()
+
+        loser?.cancel()
+        continuation?.resume(with: result)
+    }
+}

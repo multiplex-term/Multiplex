@@ -59,7 +59,10 @@ struct MoshTransportEngine {
 
     /// Suffix of user events not yet known to be received; `eventOffset`
     /// is how many acknowledged events were dropped from the front.
-    private var events: [MoshUserEvent] = []
+    /// A slice makes dropping acknowledged prefixes O(1). Under packet loss a
+    /// client can accumulate thousands of small key events; repeatedly calling
+    /// `Array.removeFirst` shifted that whole suffix on every acknowledgement.
+    private var events: ArraySlice<MoshUserEvent> = []
     private var eventOffset = 0
     private var totalEvents: Int { eventOffset + events.count }
 
@@ -107,12 +110,40 @@ struct MoshTransportEngine {
 
     mutating func input(_ data: Data) {
         guard !shutdownInProgress, !data.isEmpty else { return }
+        // Input arriving inside the send-mindelay window has not appeared in a
+        // numbered state yet. Fold it into that unsent event now instead of
+        // retaining one allocation per UIKit key callback and rediscovering the
+        // same coalescing on every retransmit encode.
+        if totalEvents > sentStates.last!.eventCount,
+           let lastIndex = events.indices.last,
+           case .keys(var pending) = events[lastIndex] {
+            pending.append(data)
+            events[lastIndex] = .keys(pending)
+            return
+        }
         events.append(.keys(data))
     }
 
     mutating func resize(cols: Int, rows: Int) {
         guard !shutdownInProgress else { return }
+        // Window drags can emit several sizes inside one transport frame. Only
+        // the newest unsent size matters; a size already present in a numbered
+        // state is immutable because retransmission diffs refer to that state.
+        if totalEvents > sentStates.last!.eventCount,
+           let lastIndex = events.indices.last,
+           case .resize = events[lastIndex] {
+            events[lastIndex] = .resize(cols: cols, rows: rows)
+            return
+        }
         events.append(.resize(cols: cols, rows: rows))
+    }
+
+    /// A fresh UDP socket needs a packet immediately so the server learns the
+    /// new source port. Merely waking `tick` is insufficient while the normal
+    /// three-second acknowledgement deadline is still in the future.
+    mutating func requestHeartbeat(now: UInt64) {
+        guard !shutdownInProgress else { return }
+        nextAckTime = min(nextAckTime, now)
     }
 
     mutating func startShutdown(now: UInt64) {
@@ -178,6 +209,16 @@ struct MoshTransportEngine {
         if confirmed > eventOffset {
             events.removeFirst(confirmed - eventOffset)
             eventOffset = confirmed
+            // ArraySlice intentionally retains its original storage. Release a
+            // long acknowledged prefix occasionally so a roaming session does
+            // not pin old key payloads forever; the rare compaction amortizes
+            // the O(n) copy over at least 1,024 removals.
+            if events.isEmpty {
+                events = []
+            } else if events.startIndex >= 1_024,
+                      events.startIndex > events.count {
+                events = ArraySlice(Array(events))
+            }
         }
     }
 
@@ -212,6 +253,7 @@ struct MoshTransportEngine {
         // every packet carry all unacknowledged input.
         var baseNum = assumedReceiverNum
         var baseCount = sentStates.first(where: { $0.num == baseNum })?.eventCount ?? sentStates[0].eventCount
+        var diff: Data
         if baseNum != sentStates[0].num {
             let cumulative = encodeDiff(fromEventCount: sentStates[0].eventCount)
             let proposed = encodeDiff(fromEventCount: baseCount)
@@ -219,9 +261,13 @@ struct MoshTransportEngine {
                 || (cumulative.count < 1000 && cumulative.count - proposed.count < 100) {
                 baseNum = sentStates[0].num
                 baseCount = sentStates[0].eventCount
+                diff = cumulative
+            } else {
+                diff = proposed
             }
+        } else {
+            diff = encodeDiff(fromEventCount: baseCount)
         }
-        let diff = encodeDiff(fromEventCount: baseCount)
 
         var datagrams: [Data] = []
         if diff.isEmpty {
@@ -287,7 +333,7 @@ struct MoshTransportEngine {
 
     private func encodeDiff(fromEventCount count: Int) -> Data {
         guard count < totalEvents else { return Data() }
-        return MoshUserMessage.encode(events[(count - eventOffset)...])
+        return MoshUserMessage.encode(events.dropFirst(count - eventOffset))
     }
 
     private static func chaff() -> Data {

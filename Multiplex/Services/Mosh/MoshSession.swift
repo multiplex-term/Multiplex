@@ -39,6 +39,7 @@ actor MoshSession: TerminalTransport {
 
     private var connection: NWConnection?
     private var pumpTask: Task<Void, Never>?
+    private var receiveTask: Task<Void, Never>?
     private var wakeup: CheckedContinuation<Void, Never>?
     private var wakeupTimer: Task<Void, Never>?
     private var wakeupGeneration = 0
@@ -55,9 +56,32 @@ actor MoshSession: TerminalTransport {
     private var socketGeneration = 0
     private var socketState: NWConnection.State = .setup
     private var wakeupPending = false
+    /// Reused across port hops. Creating a fresh dispatch queue for every
+    /// replacement socket leaves avoidable queue objects and callback contexts
+    /// behind during roaming; each session still owns its own serial lane.
+    private let socketQueue = DispatchQueue(label: "mosh.udp")
+    private struct SocketEvent: @unchecked Sendable {
+        var data: Data?
+        var error: NWError?
+        var generation: Int
+    }
+    /// Network.framework callbacks push into this queue synchronously; one
+    /// actor task decrypts them in order. The former callback path created a
+    /// new unstructured Task for every UDP datagram.
+    private let socketEvents: AsyncStream<SocketEvent>
+    private let socketEventsContinuation: AsyncStream<SocketEvent>.Continuation
 
     init(target: MoshBootstrap.Target, cols: Int, rows: Int) throws {
         self.target = target
+        // UDP is explicitly loss-tolerant and the transport re-bases missed
+        // states. Bound pathological producer bursts instead of recreating
+        // the old unbounded pile of per-datagram tasks in another form.
+        let events = AsyncStream.makeStream(
+            of: SocketEvent.self,
+            bufferingPolicy: .bufferingNewest(256)
+        )
+        socketEvents = events.stream
+        socketEventsContinuation = events.continuation
         engine = try MoshTransportEngine(
             key: target.key,
             cols: cols,
@@ -85,6 +109,7 @@ actor MoshSession: TerminalTransport {
         self.onClose = onClose
         self.onContact = onContact
 
+        receiveTask = Task { await receiveLoop() }
         startSocket()
         pumpTask = Task { await pump() }
 
@@ -93,7 +118,7 @@ actor MoshSession: TerminalTransport {
         guard !everContacted else { return }
         let timeout = Task {
             try? await Task.sleep(for: Self.firstContactTimeout)
-            await self.failFirstContact()
+            self.failFirstContact()
         }
         defer { timeout.cancel() }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -136,6 +161,7 @@ actor MoshSession: TerminalTransport {
         default:
             break
         }
+        engine.requestHeartbeat(now: Self.now())
         kick()
     }
 
@@ -162,8 +188,12 @@ actor MoshSession: TerminalTransport {
             guard better, let self else { return }
             Task { await self.pathImproved(generation: generation) }
         }
-        nwConnection.start(queue: DispatchQueue(label: "mosh.udp"))
-        armReceive(nwConnection, generation: generation)
+        nwConnection.start(queue: socketQueue)
+        Self.armReceive(
+            nwConnection,
+            generation: generation,
+            continuation: socketEventsContinuation
+        )
     }
 
     private func socketStateChanged(_ state: NWConnection.State, generation: Int) {
@@ -186,28 +216,49 @@ actor MoshSession: TerminalTransport {
 
     private func recreateSocket() {
         connection?.cancel()
+        // Make the next pump pass emit on the fresh source port immediately;
+        // waking it alone can otherwise leave the normal 3 s ACK deadline in
+        // place and make foreground/path recovery feel stalled.
+        engine.requestHeartbeat(now: Self.now())
         startSocket()
         kick()
     }
 
-    private func armReceive(_ nwConnection: NWConnection, generation: Int) {
-        nwConnection.receiveMessage { [weak self] data, _, _, error in
-            guard let self else { return }
-            Task {
-                if let data, !data.isEmpty {
-                    await self.handleDatagram(data)
-                }
-                await self.rearmOrRecover(nwConnection, generation: generation, error: error)
-            }
+    private nonisolated static func armReceive(
+        _ nwConnection: NWConnection,
+        generation: Int,
+        continuation: AsyncStream<SocketEvent>.Continuation
+    ) {
+        nwConnection.receiveMessage { data, _, _, error in
+            continuation.yield(SocketEvent(
+                data: data,
+                error: error,
+                generation: generation
+            ))
+            guard error == nil else { return }
+            armReceive(
+                nwConnection,
+                generation: generation,
+                continuation: continuation
+            )
         }
     }
 
-    private func rearmOrRecover(_ nwConnection: NWConnection, generation: Int, error: NWError?) {
-        guard !closed, generation == socketGeneration else { return }
-        if error != nil {
-            recreateSocket()
-        } else {
-            armReceive(nwConnection, generation: generation)
+    private func receiveLoop() async {
+        var batchCount = 0
+        for await event in socketEvents {
+            guard !closed else { return }
+            if let data = event.data, !data.isEmpty {
+                handleDatagram(data)
+            }
+            if event.error != nil, event.generation == socketGeneration {
+                recreateSocket()
+            }
+            batchCount += 1
+            if batchCount == 16 {
+                batchCount = 0
+                await Task.yield()
+            }
         }
     }
 
@@ -244,9 +295,14 @@ actor MoshSession: TerminalTransport {
     }
 
     private func send(_ datagrams: [Data]) {
-        guard let connection else { return }
-        for datagram in datagrams {
-            connection.send(content: datagram, completion: .contentProcessed { _ in })
+        guard let connection, !datagrams.isEmpty else { return }
+        // Mosh transport states are replay-safe. `idempotent` avoids allocating
+        // a completion closure whose error was deliberately ignored, and one
+        // Network.framework batch lets fragmented repaints share flush work.
+        connection.batch {
+            for datagram in datagrams {
+                connection.send(content: datagram, completion: .idempotent)
+            }
         }
     }
 
@@ -311,7 +367,7 @@ actor MoshSession: TerminalTransport {
             wakeup = continuation
             wakeupTimer = Task {
                 try? await Task.sleep(for: .milliseconds(delay))
-                await self.timerFired(generation)
+                self.timerFired(generation)
             }
         }
         wakeupPending = false
@@ -346,6 +402,9 @@ actor MoshSession: TerminalTransport {
         firstContact = nil
         pumpTask?.cancel()
         pumpTask = nil
+        receiveTask?.cancel()
+        receiveTask = nil
+        socketEventsContinuation.finish()
         fireWakeup()
         connection?.cancel()
         connection = nil
