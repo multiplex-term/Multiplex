@@ -358,16 +358,17 @@ views.
   width: the stack is narrower than the shell, so its frame must align
   `.topLeading` or SwiftUI centers the lot (that shifted the deck inward and
   ran the terminal off-screen in landscape).
-- **iPhone's right-swipe back gesture must arbitrate above SwiftTerm**:
-  `ShellBackSwipeRecognizer` installs one directional `UIPanGestureRecognizer`
-  on the shell window, so a swipe can begin anywhere in the UIKit terminal
-  surface. Its dynamic failure priority gives horizontal movement first refusal;
-  vertical intent fails immediately back to SwiftTerm, preserving remote
-  tmux/copy-mode scrolling. An active local text selection takes priority too:
-  the recognizer rejects its terminal touch before tracking and re-checks at
-  begin, so a rightward selection-handle drag can never navigate to the deck.
-  A SwiftUI gesture on the shell does not reliably receive drags begun inside
-  `TerminalView`.
+- **iPhone's left-edge right-swipe must arbitrate above SwiftTerm**:
+  `ShellBackSwipeRecognizer` installs one `UIScreenEdgePanGestureRecognizer`
+  on the shell window. UIKit's native left-edge activation keeps horizontal
+  drags elsewhere — including the agent-helper command scroller — with their
+  owning surface. At the edge, dynamic failure priority gives horizontal
+  movement first refusal; vertical intent fails immediately back to SwiftTerm,
+  preserving remote tmux/copy-mode scrolling. An active local text selection
+  takes priority too: the recognizer rejects its terminal touch before tracking
+  and re-checks at begin, so a rightward selection-handle drag can never
+  navigate to the deck. A SwiftUI gesture on the shell does not reliably
+  receive drags begun inside `TerminalView`.
 - **The iPad key rail is app-owned chrome, never an `inputAccessoryView`**:
   `TerminalKeyBar` is a TALLY rail (ESC / latching CTRL / TAB, the shell
   symbols `~ | / -`, DECCKM-aware autorepeat arrows, dismiss) installed as a

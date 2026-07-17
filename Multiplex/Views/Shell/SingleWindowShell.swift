@@ -51,7 +51,7 @@ struct SingleWindowShell: View {
     /// the terminal should start moving before UIKit does that cold work.
     @State private var terminalFocusReady = true
     @State private var deckRailVisible = true
-    /// Interactive position for the iPhone's right-swipe back gesture. The
+    /// Interactive position for the iPhone's left-edge back gesture. The
     /// deck stays mounted beneath the terminal, so the swipe can reveal the
     /// real live wall without rebuilding either surface.
     @State private var compactBackSwipeOffset: CGFloat = 0
@@ -424,11 +424,11 @@ struct SingleWindowShell: View {
 }
 
 #if os(iOS)
-/// Installs a directional pan on the shell window so a right swipe can begin
-/// anywhere in the terminal, including SwiftTerm's UIKit surface. The shell
-/// pan gets first refusal only for horizontal movement; it fails immediately
-/// for vertical intent and for an active terminal text selection, handing the
-/// touch stream back to SwiftTerm.
+/// Installs a left-edge pan on the shell window so a right swipe can reveal
+/// the deck without stealing horizontal drags elsewhere (including the agent
+/// helper strip). At the edge, the shell pan gets first refusal only for
+/// horizontal movement; it fails immediately for vertical intent and for an
+/// active terminal text selection, handing the touch stream back to SwiftTerm.
 private struct ShellBackSwipeRecognizer: UIViewRepresentable {
     var isEnabled: Bool
     var onChanged: (CGFloat) -> Void
@@ -485,11 +485,12 @@ private struct ShellBackSwipeRecognizer: UIViewRepresentable {
         private var onEnded: (CGFloat, CGFloat) -> Void
         private var onCancelled: () -> Void
 
-        private lazy var recognizer: UIPanGestureRecognizer = {
-            let recognizer = UIPanGestureRecognizer(
+        private lazy var recognizer: UIScreenEdgePanGestureRecognizer = {
+            let recognizer = UIScreenEdgePanGestureRecognizer(
                 target: self,
                 action: #selector(handleGesture(_:))
             )
+            recognizer.edges = .left
             recognizer.minimumNumberOfTouches = 1
             recognizer.maximumNumberOfTouches = 1
             recognizer.cancelsTouchesInView = true
@@ -575,10 +576,11 @@ private struct ShellBackSwipeRecognizer: UIViewRepresentable {
             return nil
         }
 
-        /// Let the horizontal shell navigation settle direction before a
-        /// descendant terminal pan recognizes. If intent is vertical,
-        /// `gestureRecognizerShouldBegin` fails and SwiftTerm receives the
-        /// same accumulated touch stream rather than competing with it.
+        /// Let navigation settle direction before a descendant pan recognizes
+        /// only when the touch began in UIKit's native left-edge activation
+        /// region. Everywhere else this recognizer never enters the race. If
+        /// edge intent is vertical, `gestureRecognizerShouldBegin` fails and
+        /// SwiftTerm receives the same accumulated stream.
         func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer

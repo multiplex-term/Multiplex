@@ -46,7 +46,7 @@ enum SingleWindowShellLayout {
     }
 }
 
-/// Pure completion policy for the iPhone shell's right-swipe navigation.
+/// Pure completion policy for the iPhone shell's left-edge back swipe.
 /// Translation is in points and velocity is in points per second.
 enum SingleWindowShellBackSwipe {
     private static let completionFraction: CGFloat = 0.5
