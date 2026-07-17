@@ -1,5 +1,6 @@
 import SwiftUI
 #if os(iOS)
+import SwiftTerm
 import UIKit
 #endif
 
@@ -426,7 +427,8 @@ struct SingleWindowShell: View {
 /// Installs a directional pan on the shell window so a right swipe can begin
 /// anywhere in the terminal, including SwiftTerm's UIKit surface. The shell
 /// pan gets first refusal only for horizontal movement; it fails immediately
-/// for vertical intent and hands ordinary terminal scrolling back to SwiftTerm.
+/// for vertical intent and for an active terminal text selection, handing the
+/// touch stream back to SwiftTerm.
 private struct ShellBackSwipeRecognizer: UIViewRepresentable {
     var isEnabled: Bool
     var onChanged: (CGFloat) -> Void
@@ -474,6 +476,10 @@ private struct ShellBackSwipeRecognizer: UIViewRepresentable {
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         private weak var attachedWindow: UIWindow?
+        /// Terminal beneath this pan's initial touch. Keeping the origin (not
+        /// the finger's later location) makes a selection-handle drag remain
+        /// terminal-owned even if it crosses the view's edge.
+        private weak var initialTouchTerminal: TerminalView?
         private var isEnabled: Bool
         private var onChanged: (CGFloat) -> Void
         private var onEnded: (CGFloat, CGFloat) -> Void
@@ -531,6 +537,19 @@ private struct ShellBackSwipeRecognizer: UIViewRepresentable {
         func detach() {
             attachedWindow?.removeGestureRecognizer(recognizer)
             attachedWindow = nil
+            initialTouchTerminal = nil
+        }
+
+        /// Exclude an already-active local selection before the window pan
+        /// starts tracking. Otherwise its horizontal handle drag wins the
+        /// shell's direction race and cancels SwiftTerm's selection pan.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldReceive touch: UITouch
+        ) -> Bool {
+            guard gestureRecognizer === recognizer, isEnabled else { return false }
+            initialTouchTerminal = terminalView(containing: touch.view)
+            return initialTouchTerminal?.hasActiveSelection != true
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -538,7 +557,22 @@ private struct ShellBackSwipeRecognizer: UIViewRepresentable {
                   let pan = gestureRecognizer as? UIPanGestureRecognizer
             else { return false }
             let velocity = pan.velocity(in: pan.view)
-            return velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
+            // Re-check live in case selection became active after touch-down
+            // but before the pan crossed UIKit's recognition threshold.
+            return SingleWindowShellBackSwipe.shouldBegin(
+                horizontalVelocity: velocity.x,
+                verticalVelocity: velocity.y,
+                hasActiveTextSelection: initialTouchTerminal?.hasActiveSelection == true
+            )
+        }
+
+        private func terminalView(containing view: UIView?) -> TerminalView? {
+            var candidate = view
+            while let current = candidate {
+                if let terminal = current as? TerminalView { return terminal }
+                candidate = current.superview
+            }
+            return nil
         }
 
         /// Let the horizontal shell navigation settle direction before a
@@ -560,8 +594,10 @@ private struct ShellBackSwipeRecognizer: UIViewRepresentable {
                 onChanged(translation)
             case .ended:
                 onEnded(translation, recognizer.velocity(in: recognizer.view).x)
+                initialTouchTerminal = nil
             case .cancelled, .failed:
                 onCancelled()
+                initialTouchTerminal = nil
             default:
                 break
             }

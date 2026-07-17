@@ -93,6 +93,29 @@ final class SingleWindowShellPolicyTests: XCTestCase {
         XCTAssertEqual(SingleWindowShellLayout.deckRailWidth, 316)
     }
 
+    func testBackSwipeBeginsOnlyForUnselectedRightwardHorizontalIntent() {
+        XCTAssertTrue(SingleWindowShellBackSwipe.shouldBegin(
+            horizontalVelocity: 300,
+            verticalVelocity: 100,
+            hasActiveTextSelection: false
+        ))
+        XCTAssertFalse(SingleWindowShellBackSwipe.shouldBegin(
+            horizontalVelocity: -300,
+            verticalVelocity: 100,
+            hasActiveTextSelection: false
+        ))
+        XCTAssertFalse(SingleWindowShellBackSwipe.shouldBegin(
+            horizontalVelocity: 100,
+            verticalVelocity: 300,
+            hasActiveTextSelection: false
+        ))
+        XCTAssertFalse(SingleWindowShellBackSwipe.shouldBegin(
+            horizontalVelocity: 300,
+            verticalVelocity: 100,
+            hasActiveTextSelection: true
+        ))
+    }
+
     func testBackSwipeTranslationStaysWithinTheStage() {
         XCTAssertEqual(
             SingleWindowShellBackSwipe.constrainedTranslation(-20, width: 390),

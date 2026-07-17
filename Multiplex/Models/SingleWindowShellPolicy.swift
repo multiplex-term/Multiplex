@@ -54,6 +54,18 @@ enum SingleWindowShellBackSwipe {
     private static let minimumFlickDistance: CGFloat = 16
     private static let decisiveReverseVelocity: CGFloat = -100
 
+    /// Local text-selection drags always stay with the terminal. Otherwise,
+    /// only unambiguously rightward horizontal intent starts navigation.
+    static func shouldBegin(
+        horizontalVelocity: CGFloat,
+        verticalVelocity: CGFloat,
+        hasActiveTextSelection: Bool
+    ) -> Bool {
+        guard !hasActiveTextSelection else { return false }
+        return horizontalVelocity > 0
+            && abs(horizontalVelocity) > abs(verticalVelocity)
+    }
+
     static func constrainedTranslation(_ translation: CGFloat, width: CGFloat) -> CGFloat {
         guard width > 0 else { return 0 }
         return min(max(translation, 0), width)
