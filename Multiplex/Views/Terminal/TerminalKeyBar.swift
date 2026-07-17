@@ -304,13 +304,13 @@ private struct KeyBarRow: View {
             row(symbols: [], withPageKeys: false, showsTmux: showsTmuxShortcuts)
                 .padding(.horizontal, 8)
             if showsTmuxShortcuts {
-            row(
-                symbols: [],
-                withPageKeys: false,
-                showsTmux: true,
-                metric: .compactWithTmux
-            )
-            .padding(.horizontal, 1)
+                row(
+                    symbols: [],
+                    withPageKeys: false,
+                    showsTmux: true,
+                    metric: .compactWithTmux
+                )
+                .padding(.horizontal, 8)
             }
             row(
                 symbols: [],
@@ -355,6 +355,7 @@ private struct KeyBarRow: View {
                     Key(
                         action: { press(.text(symbol)) },
                         width: metric.keyWidth,
+                        faceHorizontalInset: metric.faceHorizontalInset,
                         accessibilityText: symbol
                     ) {
                         Text(symbol).font(.mono(15))
@@ -376,6 +377,7 @@ private struct KeyBarRow: View {
             Key(
                 action: { press(.dismiss) },
                 width: metric.keyWidth,
+                faceHorizontalInset: metric.faceHorizontalInset,
                 accessibilityText: "Hide keyboard"
             ) {
                 Image(systemName: "keyboard.chevron.compact.down")
@@ -387,6 +389,7 @@ private struct KeyBarRow: View {
                 Key(
                     action: { press(.showTmuxShortcuts) },
                     width: metric.keyWidth,
+                    faceHorizontalInset: metric.faceHorizontalInset,
                     accessibilityText: "Show tmux shortcuts"
                 ) {
                     Text("TMUX").font(.mono(9, weight: .semibold)).kerning(0.7)
@@ -405,6 +408,7 @@ private struct KeyBarRow: View {
         Key(
             action: { press(key) },
             width: metric.keyWidth,
+            faceHorizontalInset: metric.faceHorizontalInset,
             latched: latched,
             accessibilityText: accessibility
         ) {
@@ -421,6 +425,7 @@ private struct KeyBarRow: View {
         Key(
             action: { press(key) },
             width: metric.keyWidth,
+            faceHorizontalInset: metric.faceHorizontalInset,
             repeats: true,
             accessibilityText: accessibility
         ) {
@@ -432,12 +437,18 @@ private struct KeyBarRow: View {
         let keyWidth: CGFloat
         let spacing: CGFloat
         let groupGap: CGFloat
+        var faceHorizontalInset: CGFloat = 0
 
         static let regular = KeyMetric(keyWidth: 46, spacing: 6, groupGap: 12)
+        // Preserve 40-point hit regions while narrowing only their visible
+        // faces. The tighter transparent gaps buy the 390-point phone tier a
+        // real 8-point edge inset without dropping TMUX or crowding a face
+        // directly against the screen edge.
         static let compactWithTmux = KeyMetric(
             keyWidth: 40,
-            spacing: 3,
-            groupGap: 1
+            spacing: 1,
+            groupGap: 1,
+            faceHorizontalInset: 1
         )
         static let compact = KeyMetric(keyWidth: 40, spacing: 4, groupGap: 4)
     }
@@ -448,6 +459,7 @@ private struct KeyBarRow: View {
 private struct Key<Label: View>: View {
     var action: () -> Void
     var width: CGFloat = 46
+    var faceHorizontalInset: CGFloat = 0
     var repeats = false
     var latched = false
     var accessibilityText: String
@@ -456,10 +468,15 @@ private struct Key<Label: View>: View {
     var body: some View {
         Button(action: action) {
             label()
-                .frame(width: width, height: 34)
-                .contentShape(Rectangle())
+                .frame(
+                    width: width - (faceHorizontalInset * 2),
+                    height: 34
+                )
         }
-        .buttonStyle(KeyFace(latched: latched))
+        .buttonStyle(KeyFace(
+            latched: latched,
+            horizontalHitPadding: faceHorizontalInset
+        ))
         .buttonRepeatBehavior(repeats ? .enabled : .disabled)
         .chassisHover(2)
         .accessibilityLabel(accessibilityText)
@@ -469,6 +486,7 @@ private struct Key<Label: View>: View {
 
 private struct KeyFace: ButtonStyle {
     var latched: Bool
+    var horizontalHitPadding: CGFloat
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -477,6 +495,8 @@ private struct KeyFace: ButtonStyle {
                 : configuration.isPressed ? Theme.bezelHi : Theme.chassis)
             .overlay(Rectangle().strokeBorder(
                 latched ? Theme.signal2 : Theme.bezelHi, lineWidth: 1))
+            .padding(.horizontal, horizontalHitPadding)
+            .contentShape(Rectangle())
     }
 }
 
