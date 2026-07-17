@@ -57,16 +57,19 @@ enum AgentSessionHistory {
     /// up quadruples the step count, but a walk longer than this is a
     /// runaway whatever the geometry.
     static let jumpSendBudgetMax = 1600
-    /// Steps per settle while traversing turns known to be newer than the
-    /// target (each PgUp moves half the transcript region).
+    /// Steps per settle while row 1's turn is provably at least TWO turns
+    /// newer than the target (each PgUp moves half the transcript region).
+    /// Only there is a big leap safe: the next header to cross belongs to
+    /// a known non-target turn, whose pin reports the crossing.
     static let oracleFarBatch = 6
-    /// Steps per settle while inside the target turn's own response; the
-    /// landing rules recover an overshoot in a step or two.
-    static let oracleBodyBatch = 4
-    /// Upward batch when the target's needle is shared by other prompts:
-    /// two half-pages stay under one viewport of rows, so a twin's row can
-    /// never pass through unseen between captures — the from-the-bottom
-    /// count stays exact.
+    /// Upward batch anywhere the NEXT header to cross could be the
+    /// target's row — inside the target's own response, in the turn just
+    /// newer than it (the target's whole turn can be shorter than one
+    /// leap), under an unknown pin, and while counting twins: two
+    /// half-pages stay within one viewport of rows, so the row cannot
+    /// pass through unseen between captures. A faster batch here skipped
+    /// a 20-row message whose upstream neighbor was the recovery's only
+    /// known pin (user-reported "fix FAIL … scrolled to top").
     static let twinSafeBatch = 2
     /// Needles longer than this never help — the target line must fit a
     /// pane row anyway.
@@ -368,15 +371,23 @@ enum AgentSessionHistory {
 
     /// Everything the jump needs before touching the pane, in one exec:
     /// tmux's own session id (pane-target commands reject `=name` on 3.6a),
-    /// the active pane's width + title, and the current screen. The app
-    /// classifies idle from title+capture — paging a running turn fights
-    /// streaming repaints, and Esc would interrupt it.
+    /// the active pane's width + title, the current screen, and how many
+    /// DISTINCT client sizes are attached. The app classifies idle from
+    /// title+capture — paging a running turn fights streaming repaints,
+    /// and Esc would interrupt it. The client-size count names the one
+    /// failure the walk cannot beat: `window-size latest` flips the window
+    /// whenever a differently-sized second client acts, Claude reflows and
+    /// resets its pager, and the walk's coordinates die mid-run
+    /// (user-reported against a session with an 89×36 Mac terminal and the
+    /// 52×44 app attached at once).
     static func jumpPrologueCommand(sessionName: String) -> String {
         TmuxProbe.pathPrefix
             + "sid=$(tmux list-panes -t \("=\(sessionName)".shellQuoted)"
             + " -F '#{session_id}' 2>/dev/null | head -1); "
             + "if [ -n \"$sid\" ]; then "
             + "printf 'MPXJ_SID %s\\n' \"$sid\"; "
+            + "printf 'MPXJ_SIZES %s\\n' \"$(tmux list-clients -t \"$sid\""
+            + " -F '#{client_width}x#{client_height}' 2>/dev/null | sort -u | grep -c .)\"; "
             + "tmux list-panes -t \"$sid\""
             + " -F '#{?pane_active,MPXJ_META #{pane_width} #{pane_title},}' 2>/dev/null"
             + " | grep -m1 MPXJ_META; "
@@ -391,6 +402,9 @@ enum AgentSessionHistory {
         var paneWidth: Int
         var paneTitle: String
         var capture: [String]
+        /// Distinct attached-client sizes (0 when unknown). More than one
+        /// means another client can resize this session under the walk.
+        var clientSizeCount: Int = 0
     }
 
     static func parseJumpPrologue(_ output: String) -> JumpPrologue? {
@@ -399,11 +413,17 @@ enum AgentSessionHistory {
         var width = 0
         var title = ""
         var capture: [String] = []
+        var sizeCount = 0
         var inCapture = false
         for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
             if line.hasPrefix("MPXJ_SID ") {
                 sessionID = line.dropFirst("MPXJ_SID ".count)
                     .trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("MPXJ_SIZES ") {
+                sizeCount = Int(
+                    line.dropFirst("MPXJ_SIZES ".count)
+                        .trimmingCharacters(in: .whitespaces)
+                ) ?? 0
             } else if line.hasPrefix("MPXJ_META ") {
                 // Fixed width field first, variable-length title last —
                 // the probe's own format discipline.
@@ -424,7 +444,8 @@ enum AgentSessionHistory {
             sessionID: sessionID,
             paneWidth: width,
             paneTitle: title,
-            capture: capture
+            capture: capture,
+            clientSizeCount: sizeCount
         )
     }
 
@@ -612,15 +633,21 @@ enum AgentSessionHistory {
     /// - `real` in the top half → landed (that IS the message row).
     /// - `real` lower → one PgDn per classify converges (half-page steps
     ///   can't skip the window).
-    /// - pin == target → inside the target's response: page up in small
-    ///   batches; the crossing produces `real` near the top by construction.
-    /// - pin newer than target → directed far scan upward, no absolute page
-    ///   cap: the send budget is a runaway stop, not a search radius.
+    /// - pin == target → inside the target's response: climb within one
+    ///   viewport per capture, so the crossing MUST surface `real`.
+    /// - pin ≥ two turns newer → far scan in big leaps (the next header to
+    ///   cross is a known non-target turn), no absolute page cap: the send
+    ///   budget is a runaway stop, not a search radius. Exactly one turn
+    ///   newer → viewport-safe steps; the target's whole turn can be
+    ///   shorter than a leap, and a skipped row is only recoverable when a
+    ///   KNOWN older pin sits above it (wrapper turns and pre-window
+    ///   prompts pin as unknown — user-reported "fix FAIL" skip).
     /// - pin older than target → overshot (or approaching from above): page
     ///   down singles; `real` enters from the bottom and the landing rule
     ///   finishes.
     /// - unknown/no pin (wrapper turns, the banner region) → keep the
-    ///   current direction one batch at a time.
+    ///   current direction, viewport-safe upward (unknown says nothing
+    ///   about distance).
     ///
     /// Two upward crossings past the target without ever seeing its row
     /// mean the primary needle doesn't match this rendering — retry once
@@ -680,11 +707,11 @@ enum AgentSessionHistory {
         let fallback = targetNeedles.dropFirst().first ?? ""
         let twins = max(0, newerTwinCount)
         let fallbackTwins = max(twins, fallbackTwinCount ?? twins)
-        // Twin-safe batches whenever EITHER needle has a family — the
-        // fallback can swap in mid-walk, and its viewport guarantee must
-        // already hold.
+        // Twin-safe batches everywhere when EITHER needle has a family —
+        // the fallback can swap in mid-walk, and its viewport guarantee
+        // must already hold. Even for unique targets, only the far scan
+        // (row 1 provably ≥ 2 turns newer) may leap.
         let anyTwins = max(twins, fallbackTwins) > 0
-        let bodyBatch = anyTwins ? twinSafeBatch : oracleBodyBatch
         let farBatch = anyTwins ? twinSafeBatch : oracleFarBatch
         return TmuxProbe.pathPrefix
             + "sid=\(sessionID.shellQuoted); "
@@ -715,24 +742,27 @@ enum AgentSessionHistory {
             + "stab() { cur=$(capture); p=0; while [ $p -lt \(pageSettlePollCap) ]; do "
             + "sleep 0.05; nxt=$(capture); [ \"$nxt\" = \"$cur\" ] && break; "
             + "cur=\"$nxt\"; p=$((p+1)); done; }; "
-            + "found=0; top=0; short=0; keep=0; sent=0; osc=0; fbused=0; dir=u; "
-            + "seen=0; lastr=0; "
+            + "found=0; near=0; top=0; short=0; keep=0; sent=0; osc=0; fbused=0; dir=u; "
+            + "seen=0; lastr=0; h0=0; rsz=0; sawt=0; sawreal=0; nb=0; "
             + "tgt=\"$n1\"; "
             + "trap 'keep=1; restore; exit 1' HUP INT TERM; "
             + "trap 'if [ \"$keep\" != 1 ]; then restore; fi' EXIT; "
-            // Swap in the fallback needle and restart the walk from live —
-            // the only position where the upward twin-count semantics are
-            // known-valid. The fallback family can be wider, so its own
-            // twin count comes along.
-            + "swapfb() { tgt=\"$n2\"; k=$k2; fbused=1; osc=0; seen=0; lastr=0; dir=u; "
-            + "restore; stab; }; "
+            // Restart the walk from live — the only position where the
+            // upward twin-count semantics are known-valid.
+            + "rebase() { osc=0; seen=0; lastr=0; dir=u; restore; stab; }; "
+            // Swap in the fallback needle. The fallback family can be
+            // wider, so its own twin count comes along.
+            + "swapfb() { tgt=\"$n2\"; k=$k2; fbused=1; rebase; }; "
             // One upward batch. Hitting scroll-top before the fallback has
             // had its turn is a needle-mismatch signal, not a miss: an
             // unmatched OLDEST message can never produce the older-pin
-            // crossings the other fallback trigger needs.
+            // crossings the other fallback trigger needs. Scroll-top after
+            // BOTH needles, when the target's turn was pinned but its row
+            // never rendered, enters the nearby descent instead.
             + "climb() { stepk \"$1\" PPage || return 1; "
             + "if [ \"$moved\" = 0 ]; then "
             + "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then swapfb; stepk 1 PPage || return 1; "
+            + "elif [ $sawt = 1 ] && [ $sawreal = 0 ] && [ $nb = 0 ]; then nb=1; dir=d; "
             + "else top=1; return 1; fi; fi; }; "
             // Normalize the start: the user may have scrolled the pager
             // anywhere by hand, and from an unknown position the oracle's
@@ -746,7 +776,18 @@ enum AgentSessionHistory {
             + "classify; "
             + "printf 'MPXJ_T %s %s %s %s\\n' \"$sent\" \"$pin\" \"$real\" \"$seen\"; "
             + "[ \"$h\" -ge 12 ] 2>/dev/null || { short=1; break; }; "
+            // A capture-height change mid-walk = another attached client
+            // resized the window (`window-size latest`): Claude reflowed
+            // and reset its pager, so the position — and possibly the
+            // needles, which are baked for the prologue width — is void.
+            // Restart once for a transient flip; a second flip is a
+            // standing size fight the walk cannot win.
+            + "if [ \"$h0\" = 0 ]; then h0=$h; fi; "
+            + "if [ \"$h\" != \"$h0\" ]; then "
+            + "if [ \"$rsz\" = 0 ]; then rsz=1; h0=$h; rebase; "
+            + "stepk 1 PPage || break; continue; else break; fi; fi; "
             + "if [ \"$real\" -gt 0 ]; then "
+            + "sawreal=1; "
             // Rows only drift DOWN while climbing, so a topmost match that
             // appeared from nothing or jumped upward is a twin seen for the
             // first time.
@@ -763,42 +804,85 @@ enum AgentSessionHistory {
             + "dir=d; stepk 1 NPage || break; "
             + "[ \"$moved\" = 0 ] && break; continue; fi; "
             // A newer twin: climb through it.
-            + "dir=u; climb \(bodyBatch) || break; continue; fi; "
+            + "dir=u; climb \(twinSafeBatch) || break; continue; fi; "
             + "lastr=0; "
             + "if [ \"$pin\" = \"$t\" ]; then "
-            + "dir=u; climb \(bodyBatch) || break; continue; fi; "
+            + "sawt=1; "
+            // Nearby descent: the first view owned by the target's turn
+            // coming DOWN from above is the turn's top — its sticky IS the
+            // message's flattened row. The exact row never rendered (a
+            // rebuilt transcript omits long multiline prompt bodies), so
+            // this is the closest true landing that exists.
+            + "if [ \"$nb\" = 1 ]; then near=1; break; fi; "
+            + "dir=u; climb \(twinSafeBatch) || break; continue; fi; "
+            + "if [ \"$nb\" = 1 ]; then "
+            // Descend in singles toward the turn; overshooting to a NEWER
+            // pin steps back up one.
             + "if [ \"$pin\" -gt \"$t\" ] 2>/dev/null; then "
+            + "dir=u; stepk 1 PPage || break; else "
+            + "dir=d; stepk 1 NPage || break; fi; "
+            + "[ \"$moved\" = 0 ] && break; continue; fi; "
+            + "if [ \"$pin\" -gt \"$t\" ] 2>/dev/null; then "
+            // Row 1's turn is newer than the target. Two or more turns
+            // away, the next header to cross is a known non-target turn —
+            // leap. Just one turn away, the NEXT crossing is the target's
+            // own row and the target's whole turn can be shorter than a
+            // leap: stay within one viewport per capture.
+            + "if [ \"$pin\" -gt $((t + 1)) ]; then "
             + "dir=u; climb \(farBatch) || break; continue; fi; "
+            + "dir=u; climb \(twinSafeBatch) || break; continue; fi; "
             + "if [ \"$pin\" -gt 0 ] 2>/dev/null; then "
             // A known turn OLDER than the target owns the top row: we are
             // above the message (an overshoot, or a needle mismatch).
             + "if [ \"$dir\" = u ]; then osc=$((osc+1)); fi; "
             + "if [ $osc -ge 2 ]; then "
             + "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then "
-            + "swapfb; stepk 1 PPage || break; continue; else break; fi; fi; "
+            + "swapfb; stepk 1 PPage || break; continue; "
+            // Both needles crossed the pinned target turn without its row
+            // ever rendering: land nearby instead of lying "not found".
+            + "elif [ $sawt = 1 ] && [ $sawreal = 0 ] && [ $nb = 0 ]; then "
+            + "nb=1; dir=d; continue; else break; fi; fi; "
             + "dir=d; stepk 1 NPage || break; "
             + "[ \"$moved\" = 0 ] && break; continue; fi; "
             // Unknown ❯ turn (wrapper/meta or older than the list) or the
-            // banner region: keep the current direction.
-            + "if [ \"$dir\" = u ]; then climb \(bodyBatch) || break; "
+            // banner region: keep the current direction. Unknown says
+            // nothing about distance, so upward stays viewport-safe — a
+            // wrapper turn can sit directly below the target.
+            + "if [ \"$dir\" = u ]; then climb \(twinSafeBatch) || break; "
             + "else stepk 1 NPage || break; [ \"$moved\" = 0 ] && break; fi; "
             + "done; "
             + "if [ \"$found\" = 1 ]; then "
-            + "keep=1; trap - HUP INT TERM EXIT; printf 'MPXJ_FOUND %s\\n' \"$sent\"; else "
+            + "keep=1; trap - HUP INT TERM EXIT; printf 'MPXJ_FOUND %s\\n' \"$sent\"; "
+            + "elif [ \"$near\" = 1 ]; then "
+            + "keep=1; trap - HUP INT TERM EXIT; printf 'MPXJ_NEAR %s\\n' \"$sent\"; else "
             + "keep=1; restore; trap - HUP INT TERM EXIT; "
-            + "if [ \"$short\" = 1 ]; then printf 'MPXJ_SHORT %s\\n' \"$sent\"; "
+            // Any failure after a detected flip reports the flip: the
+            // needles were built for the prologue geometry, so a post-flip
+            // TOP/EXHAUSTED is not evidence the message is gone.
+            + "if [ \"$rsz\" = 1 ]; then printf 'MPXJ_RESIZED %s\\n' \"$sent\"; "
+            + "elif [ \"$short\" = 1 ]; then printf 'MPXJ_SHORT %s\\n' \"$sent\"; "
             + "elif [ \"$top\" = 1 ]; then printf 'MPXJ_TOP %s\\n' \"$sent\"; "
             + "else printf 'MPXJ_EXHAUSTED %s\\n' \"$sent\"; fi; fi; true"
     }
 
     enum JumpFindResult: Equatable {
         case found(pages: Int)
+        /// Landed at the target turn's top — its sticky header IS the
+        /// message's flattened row — because the exact row never rendered:
+        /// a REBUILT transcript (resume, or the reflow after any resize)
+        /// omits a long multiline prompt's body entirely; only live-drawn
+        /// rows from the original submission ever show it.
+        case near(pages: Int)
         case top(pages: Int)
         case exhausted(pages: Int)
         /// The pane is too short for the header oracle (docked keyboard on
         /// a phone in landscape) — an actionable state, not a missing
         /// message.
         case short(pages: Int)
+        /// The window was resized mid-walk (another attached client under
+        /// `window-size latest`): the pager reset and the needles' geometry
+        /// is void, so the miss says nothing about the message.
+        case resized(pages: Int)
     }
 
     static func parseJumpFind(_ output: String) -> JumpFindResult? {
@@ -807,9 +891,11 @@ enum AgentSessionHistory {
             guard fields.count == 2, let pages = Int(fields[1]) else { continue }
             switch fields[0] {
             case "MPXJ_FOUND": return .found(pages: pages)
+            case "MPXJ_NEAR": return .near(pages: pages)
             case "MPXJ_TOP": return .top(pages: pages)
             case "MPXJ_EXHAUSTED": return .exhausted(pages: pages)
             case "MPXJ_SHORT": return .short(pages: pages)
+            case "MPXJ_RESIZED": return .resized(pages: pages)
             default: continue
             }
         }

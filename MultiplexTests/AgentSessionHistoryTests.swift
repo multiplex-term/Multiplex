@@ -372,6 +372,7 @@ final class AgentSessionHistoryTests: XCTestCase {
     func testJumpPrologueParses() {
         let output = """
         MPXJ_SID $4
+        MPXJ_SIZES 2
         MPXJ_META 120 ✳ Claude Code
         MPXJ_CAP
         line one
@@ -383,6 +384,13 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertEqual(prologue?.paneWidth, 120)
         XCTAssertEqual(prologue?.paneTitle, "✳ Claude Code")
         XCTAssertEqual(prologue?.capture, ["line one", "❯ old prompt"])
+        XCTAssertEqual(prologue?.clientSizeCount, 2)
+
+        // Older or partial output without the size marker stays valid.
+        let bare = AgentSessionHistory.parseJumpPrologue(
+            "MPXJ_SID $4\nMPXJ_META 80 t\nMPXJ_CAP\nrow\nMPXJ_CAPEND"
+        )
+        XCTAssertEqual(bare?.clientSizeCount, 0)
     }
 
     func testJumpPrologueNoSession() {
@@ -421,21 +429,44 @@ final class AgentSessionHistoryTests: XCTestCase {
         // Navigation branches: landing threshold, inside-body batch, far
         // scan, overshoot descent, fallback swap after two crossings.
         XCTAssertTrue(command.contains("-le $((h / 2))"))
-        XCTAssertTrue(command.contains("climb \(AgentSessionHistory.oracleBodyBatch) ||"))
+        // The far leap is gated on row 1 being ≥ 2 turns newer than the
+        // target; anywhere the next crossing could be the target's own row
+        // the climb stays within one viewport per capture (a 4-page batch
+        // skipped a whole 20-row message between captures).
+        XCTAssertTrue(command.contains("if [ \"$pin\" -gt $((t + 1)) ]; then"))
+        XCTAssertTrue(command.contains("climb \(AgentSessionHistory.twinSafeBatch) ||"))
         XCTAssertTrue(command.contains("climb \(AgentSessionHistory.oracleFarBatch) ||"))
         XCTAssertTrue(command.contains("[ \"$pin\" -gt \"$t\" ]"))
         // The fallback swap restarts from live with its own twin count, and
         // hitting scroll-top before the swap takes the same retry (an
         // unmatched oldest message never produces older-pin crossings).
         XCTAssertTrue(command.contains(
-            "swapfb() { tgt=\"$n2\"; k=$k2; fbused=1; osc=0; seen=0; lastr=0; dir=u; "
-                + "restore; stab; }"
+            "rebase() { osc=0; seen=0; lastr=0; dir=u; restore; stab; }"
         ))
+        XCTAssertTrue(command.contains("swapfb() { tgt=\"$n2\"; k=$k2; fbused=1; rebase; }"))
+        // A mid-walk capture-height change means another attached client
+        // resized the window: restart once, then report the flip rather
+        // than a fake miss.
+        XCTAssertTrue(command.contains("if [ \"$h\" != \"$h0\" ]; then"))
+        XCTAssertTrue(command.contains("if [ \"$rsz\" = 0 ]; then rsz=1; h0=$h; rebase;"))
+        XCTAssertTrue(command.contains("MPXJ_RESIZED"))
+        // When both needles crossed the pinned target turn but its row
+        // never rendered (rebuilt transcripts omit long multiline prompt
+        // bodies), the walk descends to the turn's top and reports NEAR
+        // instead of a fake miss.
+        XCTAssertTrue(command.contains("sawt=1;"))
+        XCTAssertTrue(command.contains("sawreal=1;"))
+        XCTAssertTrue(command.contains(
+            "elif [ $sawt = 1 ] && [ $sawreal = 0 ] && [ $nb = 0 ]; then nb=1; dir=d; continue;"
+        ))
+        XCTAssertTrue(command.contains("if [ \"$nb\" = 1 ]; then near=1; break; fi;"))
+        XCTAssertTrue(command.contains("MPXJ_NEAR"))
         // A unique target lands on any sighting; only twins gate on the
         // upward count.
         XCTAssertTrue(command.contains("if [ \"$k\" = 0 ] || [ \"$seen\" -gt \"$k\" ]; then"))
         XCTAssertTrue(command.contains(
             "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then swapfb; stepk 1 PPage || return 1; "
+                + "elif [ $sawt = 1 ] && [ $sawreal = 0 ] && [ $nb = 0 ]; then nb=1; dir=d; "
                 + "else top=1; return 1; fi"
         ))
         // A too-short pane is reported as its own state, not a missing
@@ -583,6 +614,14 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertEqual(
             AgentSessionHistory.parseJumpFind("MPXJ_T 1 -1 0 0\nMPXJ_SHORT 1"),
             .short(pages: 1)
+        )
+        XCTAssertEqual(
+            AgentSessionHistory.parseJumpFind("MPXJ_T 9 4 0 0\nMPXJ_RESIZED 12"),
+            .resized(pages: 12)
+        )
+        XCTAssertEqual(
+            AgentSessionHistory.parseJumpFind("MPXJ_T 60 7 0 0\nMPXJ_NEAR 64"),
+            .near(pages: 64)
         )
         XCTAssertNil(AgentSessionHistory.parseJumpFind("nothing"))
     }

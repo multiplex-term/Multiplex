@@ -580,20 +580,41 @@ views.
   message list as an index (longest-needle-first, 1-based; an awk classifier
   reports `pin` = which known turn owns row 1, `real` = the target's actual
   `❯` row, bottom chrome excluded so a drafted composer can't false-match):
-  normalize to live, then every step is directed — pin newer than target →
-  batched PgUp, pin == target → smaller batches through its response, pin
-  older → single PgDn approach from above, unknown pins ride the current
-  direction. Landing is deterministic: accept only a real row in the TOP
-  half; a lower sighting takes one PgDn (half-page steps cannot skip the
-  window) — and a UNIQUE target lands on any sighting, descent included:
-  batched climbs can cross the header between captures, and the recovery
-  descent sights the row while the upward twin count isn't running (a k=0
-  walk once re-climbed a 90-page turn twice over exactly this). Two upward
-  crossings past the target without its row = needle mismatch → one retry
-  with the 24-column fallback; hitting scroll-top with the fallback unused
-  takes the same retry (an unmatched OLDEST message never produces those
-  crossings — the original iPhone blind spot). Both retries restart from
-  live, so upward twin counting stays valid. The send budget is a runaway
+  normalize to live, then every step is directed — pin ≥ TWO turns newer
+  than target → 6-page leaps (the next header to cross is a known
+  non-target turn), pin exactly one turn newer, pin == target, or unknown
+  → viewport-safe 2-page steps (the target's whole turn can be shorter
+  than a leap, and a skipped row is only recoverable when a KNOWN older
+  pin sits above it — wrapper turns and pre-window prompts pin unknown),
+  pin older → single PgDn approach from above. Landing is deterministic:
+  accept only a real row in the TOP half; a lower sighting takes one PgDn
+  (half-page steps cannot skip the window) — and a UNIQUE target lands on
+  any sighting, descent included: a crossing can still slip a capture, and
+  the recovery descent sights the row while the upward twin count isn't
+  running (a k=0 walk once re-climbed a 90-page turn twice over exactly
+  this). Two upward crossings past the target without its row = needle
+  mismatch → one retry with the 24-column fallback; hitting scroll-top
+  with the fallback unused takes the same retry (an unmatched OLDEST
+  message never produces those crossings — the original iPhone blind
+  spot). Both retries restart from live, so upward twin counting stays
+  valid. **A rebuilt transcript (resume, or the reflow after ANY resize)
+  can omit a long multiline prompt's body entirely — only live-drawn rows
+  from the original submission ever showed it, and only its sticky header
+  survives** (verified: a 17-line prompt renders zero rows at every width
+  after rebuild, while its 6-line sibling survives). When both needles
+  cross the pinned target turn without its row ever rendering, the walk
+  descends to the first view the target's turn owns and reports
+  MPXJ_NEAR — the sticky at row 1 IS the message's flattened text, and
+  the app treats it as the jump destination rather than lying "not
+  found". **A mid-walk capture-height change means another attached
+  client resized the window** (`window-size latest` follows the most
+  recently active client; an 89×36 Mac terminal plus the 52×44 app
+  attached at once reproduced the user's failures): the walk restarts
+  once, then reports MPXJ_RESIZED — needles are baked for the prologue
+  geometry, so a post-flip miss says nothing about the message. The
+  prologue also counts distinct attached-client sizes, and failures on a
+  multi-size session surface as "ANOTHER CLIENT RESIZES THIS SESSION"
+  instead of a generic miss. The send budget is a runaway
   stop, not a search radius — base 400 (calibrated ~100×30) scaled by
   `jumpSendBudget(paneWidth:paneHeight:)` up to 1600: a 44-column pane
   rewraps the same transcript into ~2.3× the rows (a real iPhone jump took

@@ -937,13 +937,30 @@ final class TerminalSessionController {
                     )
                 )
                 switch AgentSessionHistory.parseJumpFind(findOutput) {
-                case .found(let pages):
+                case .found(let pages), .near(let pages):
+                    // .near landed at the turn's top: the sticky header IS
+                    // the message's flattened row (a rebuilt transcript
+                    // omits long multiline prompt bodies). From the user's
+                    // seat that is the jump destination.
                     return .found(sessionID: prologue.sessionID, pages: pages)
                 case .top, .exhausted:
-                    // The remote script already restored the live view.
-                    return .failed("NOT IN THE VISIBLE TRANSCRIPT")
+                    // The remote script already restored the live view. A
+                    // second differently-sized client can invalidate the
+                    // walk without a mid-walk flip (it reflows the render
+                    // the needles were built against), so name it.
+                    return .failed(
+                        prologue.clientSizeCount > 1
+                            ? "ANOTHER CLIENT RESIZES THIS SESSION"
+                            : "NOT IN THE VISIBLE TRANSCRIPT"
+                    )
                 case .short:
                     return .failed("TERMINAL TOO SHORT TO JUMP")
+                case .resized:
+                    return .failed(
+                        prologue.clientSizeCount > 1
+                            ? "ANOTHER CLIENT RESIZES THIS SESSION"
+                            : "RESIZED MID-JUMP — TRY AGAIN"
+                    )
                 case nil:
                     return .failed("SEARCH FAILED")
                 }
