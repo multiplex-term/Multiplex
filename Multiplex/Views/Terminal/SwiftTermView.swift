@@ -144,6 +144,19 @@ struct SwiftTermView: UIViewRepresentable {
             equalTo: container.trailingAnchor,
             constant: -(Self.terminalInsets.right + contentSafeArea.trailing)
         )
+        // A docked keyboard lifts the rail by the measured overlap, and the
+        // strip it vacates otherwise shows the terminal theme — under a light
+        // theme the translucent system keyboard samples that near-white and
+        // reads washed-out on dark chrome (user-reported). Continue the
+        // rail's chassis down to the container edge instead, so the keyboard
+        // always sits over appearance-correct hardware; its top rides the
+        // rail's bottom anchor, so it is exactly the keyboard-covered band
+        // and collapses to nothing when no keyboard docks.
+        let keyboardBackfill = UIView()
+        keyboardBackfill.backgroundColor = UIColor(Theme.bezel)
+        keyboardBackfill.isUserInteractionEnabled = false
+        container.insertSubview(keyboardBackfill, belowSubview: keyBar)
+        keyboardBackfill.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             terminalTop,
             terminalLeading,
@@ -153,6 +166,10 @@ struct SwiftTermView: UIViewRepresentable {
             keyBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             keyBar.heightAnchor.constraint(equalToConstant: TerminalKeyBar.barHeight),
             keyBarBottom,
+            keyboardBackfill.topAnchor.constraint(equalTo: keyBar.bottomAnchor),
+            keyboardBackfill.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            keyboardBackfill.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            keyboardBackfill.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
         context.coordinator.installKeyboardAvoidance(
             container: container,

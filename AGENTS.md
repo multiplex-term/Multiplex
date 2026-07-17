@@ -653,6 +653,12 @@ views.
   **zero-height** end frame; that geometry is deliberately a no-op because the
   app-owned rail already occupies real layout space. Never infer rail geometry
   from keyboard notifications or restore direct accessory measurement.
+  The container also backfills the strip a docked keyboard covers (rail
+  bottom → container bottom) with `Theme.bezel`: iOS 26's translucent
+  keyboard samples what's behind it, and without the backfill a light
+  terminal theme under dark chrome read as a washed-white keyboard
+  (user-reported). Don't let the terminal theme surface extend under a
+  docked keyboard.
   The helper strip rides inside the opt-out too, but is not sacrificed to
   it: the same handler publishes how far the docked keyboard/rail rises
   above the window's bottom safe-area edge
