@@ -346,6 +346,13 @@ views.
   width: the stack is narrower than the shell, so its frame must align
   `.topLeading` or SwiftUI centers the lot (that shifted the deck inward and
   ran the terminal off-screen in landscape).
+- **iPhone's right-swipe back gesture must arbitrate above SwiftTerm**:
+  `ShellBackSwipeRecognizer` installs one directional `UIPanGestureRecognizer`
+  on the shell window, so a swipe can begin anywhere in the UIKit terminal
+  surface. Its dynamic failure priority gives horizontal movement first refusal;
+  `gestureRecognizerShouldBegin` immediately fails vertical intent back to
+  SwiftTerm, preserving remote tmux/copy-mode scrolling. A SwiftUI gesture on
+  the shell does not reliably receive drags begun inside `TerminalView`.
 - **The iPad key rail is app-owned chrome, never an `inputAccessoryView`**:
   `TerminalKeyBar` is a TALLY rail (ESC / latching CTRL / TAB, the shell
   symbols `~ | / -`, DECCKM-aware autorepeat arrows, dismiss) installed as a

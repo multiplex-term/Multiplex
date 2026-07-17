@@ -45,3 +45,36 @@ enum SingleWindowShellLayout {
         width >= expandedThreshold
     }
 }
+
+/// Pure completion policy for the iPhone shell's right-swipe navigation.
+/// Translation is in points and velocity is in points per second.
+enum SingleWindowShellBackSwipe {
+    private static let completionFraction: CGFloat = 0.5
+    private static let projectionDuration: CGFloat = 0.2
+    private static let minimumFlickDistance: CGFloat = 16
+    private static let decisiveReverseVelocity: CGFloat = -100
+
+    static func constrainedTranslation(_ translation: CGFloat, width: CGFloat) -> CGFloat {
+        guard width > 0 else { return 0 }
+        return min(max(translation, 0), width)
+    }
+
+    /// A deliberate half-width drag always completes. A shorter flick can
+    /// complete when its forward velocity projects beyond the same midpoint;
+    /// a clear reversal always cancels so the interface follows intent.
+    static func shouldReturnToDeck(
+        translation: CGFloat,
+        velocity: CGFloat,
+        width: CGFloat
+    ) -> Bool {
+        guard width > 0 else { return false }
+        let distance = constrainedTranslation(translation, width: width)
+        guard distance >= minimumFlickDistance,
+              velocity > decisiveReverseVelocity
+        else { return false }
+
+        if distance >= width * completionFraction { return true }
+        let projectedDistance = distance + max(velocity, 0) * projectionDuration
+        return projectedDistance >= width * completionFraction
+    }
+}

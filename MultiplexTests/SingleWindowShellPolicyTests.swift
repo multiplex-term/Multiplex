@@ -92,4 +92,54 @@ final class SingleWindowShellPolicyTests: XCTestCase {
         XCTAssertTrue(SingleWindowShellLayout.isExpanded(width: 1_024))
         XCTAssertEqual(SingleWindowShellLayout.deckRailWidth, 316)
     }
+
+    func testBackSwipeTranslationStaysWithinTheStage() {
+        XCTAssertEqual(
+            SingleWindowShellBackSwipe.constrainedTranslation(-20, width: 390),
+            0
+        )
+        XCTAssertEqual(
+            SingleWindowShellBackSwipe.constrainedTranslation(120, width: 390),
+            120
+        )
+        XCTAssertEqual(
+            SingleWindowShellBackSwipe.constrainedTranslation(500, width: 390),
+            390
+        )
+        XCTAssertEqual(
+            SingleWindowShellBackSwipe.constrainedTranslation(120, width: 0),
+            0
+        )
+    }
+
+    func testBackSwipeCompletesFromDistanceOrProjectedForwardVelocity() {
+        XCTAssertTrue(SingleWindowShellBackSwipe.shouldReturnToDeck(
+            translation: 200,
+            velocity: 0,
+            width: 390
+        ))
+        XCTAssertTrue(SingleWindowShellBackSwipe.shouldReturnToDeck(
+            translation: 80,
+            velocity: 600,
+            width: 390
+        ))
+    }
+
+    func testBackSwipeCancelsWhenShortStationaryOrReversing() {
+        XCTAssertFalse(SingleWindowShellBackSwipe.shouldReturnToDeck(
+            translation: 80,
+            velocity: 0,
+            width: 390
+        ))
+        XCTAssertFalse(SingleWindowShellBackSwipe.shouldReturnToDeck(
+            translation: 250,
+            velocity: -300,
+            width: 390
+        ))
+        XCTAssertFalse(SingleWindowShellBackSwipe.shouldReturnToDeck(
+            translation: 200,
+            velocity: 1_000,
+            width: 0
+        ))
+    }
 }
