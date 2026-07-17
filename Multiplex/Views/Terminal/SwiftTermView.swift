@@ -28,10 +28,10 @@ struct SwiftTermView: UIViewRepresentable {
     var showsTmuxShortcuts = true
 
     private static let focusTapName = "multiplex.focus-tap"
-    // Keep breathing room around the terminal chassis, but let tmux's status
+    // Keep a compact gutter around the terminal grid, but let tmux's status
     // line meet the helper/key rail directly—any bottom inset reads as an
     // accidental black seam between the two surfaces.
-    private static let terminalInsets = UIEdgeInsets(top: 8, left: 10, bottom: 0, right: 10)
+    private static let terminalInsets = UIEdgeInsets(top: 4, left: 6, bottom: 0, right: 6)
 
     func makeUIView(context: Context) -> UIView {
         let view: TerminalView
