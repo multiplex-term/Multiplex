@@ -52,6 +52,7 @@ struct MoshTransportEngine {
     private var packets: MoshPacketLayer
     private var fragmenter = MoshFragmenter()
     private var assembly = MoshFragmentAssembly()
+    private let zlib = MoshZlib.Context()
     /// Datagram payload budget: path MTU minus the 28 packet-layer bytes.
     private let budget: Int
 
@@ -162,7 +163,7 @@ struct MoshTransportEngine {
         }
 
         guard let compressed = assembly.add(opened.payload),
-              let serialized = try? MoshZlib.decompress(compressed),
+              let serialized = try? zlib.decompress(compressed),
               let instruction = MoshInstruction(parsing: serialized),
               instruction.protocolVersionField == MoshInstruction.protocolVersion
         else { return [] }
@@ -325,7 +326,7 @@ struct MoshTransportEngine {
         nextSendTime = nil
         pendingDataAck = false
 
-        let compressed = MoshZlib.compress(instruction.encoded())
+        let compressed = zlib.compress(instruction.encoded())
         return fragmenter.fragments(of: compressed, budget: budget).map {
             packets.seal($0, now: now)
         }

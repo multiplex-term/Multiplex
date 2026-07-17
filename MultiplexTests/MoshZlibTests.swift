@@ -37,6 +37,20 @@ final class MoshZlibTests: XCTestCase {
         }
     }
 
+    func testReusableContextMatchesStaticAPI() throws {
+        let context = MoshZlib.Context()
+        let cases: [Data] = [
+            Data(),
+            Data("hello mosh".utf8),
+            Data(repeating: 0x61, count: 100_000),
+        ]
+        for plain in cases {
+            let compressed = context.compress(plain)
+            XCTAssertEqual(compressed, MoshZlib.compress(plain))
+            XCTAssertEqual(try context.decompress(compressed), plain)
+        }
+    }
+
     func testAdler32() {
         XCTAssertEqual(MoshZlib.adler32(Data()), 1)
         XCTAssertEqual(MoshZlib.adler32(Data("hello mosh".utf8)), 0x1584_03EC)

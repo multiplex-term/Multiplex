@@ -13,20 +13,80 @@ enum MoshZlib {
         case tooLarge
     }
 
+    /// Per-transport Compression workspaces. Apple's one-shot buffer APIs
+    /// allocate these internally when passed `nil`; keeping one context on each
+    /// transport engine avoids that malloc/free pair on every datagram without
+    /// sharing mutable codec storage between sessions.
+    final class Context {
+        private var encodeScratch: UnsafeMutableRawPointer?
+        private var decodeScratch: UnsafeMutableRawPointer?
+
+        deinit {
+            encodeScratch?.deallocate()
+            decodeScratch?.deallocate()
+        }
+
+        func compress(_ plain: Data) -> Data {
+            MoshZlib.compress(plain, scratch: encodeScratchBuffer())
+        }
+
+        func decompress(
+            _ compressed: Data,
+            maxSize: Int = MoshZlib.maxDecompressedSize
+        ) throws -> Data {
+            try MoshZlib.decompress(
+                compressed,
+                maxSize: maxSize,
+                scratch: decodeScratchBuffer()
+            )
+        }
+
+        private func encodeScratchBuffer() -> UnsafeMutableRawPointer {
+            if let encodeScratch { return encodeScratch }
+            let size = compression_encode_scratch_buffer_size(COMPRESSION_ZLIB)
+            let buffer = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 16)
+            encodeScratch = buffer
+            return buffer
+        }
+
+        private func decodeScratchBuffer() -> UnsafeMutableRawPointer {
+            if let decodeScratch { return decodeScratch }
+            let size = compression_decode_scratch_buffer_size(COMPRESSION_ZLIB)
+            let buffer = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 16)
+            decodeScratch = buffer
+            return buffer
+        }
+    }
+
     /// Decompressed instructions are screen diffs; a full repaint of a huge
     /// terminal is tens of KB. Anything past this bound is hostile input.
     /// 4 MiB mirrors mosh's own Compressor::BUFFER_SIZE DoS limit.
     static let maxDecompressedSize = 2048 * 2048
 
     static func compress(_ plain: Data) -> Data {
+        compress(plain, scratch: nil)
+    }
+
+    private static func compress(
+        _ plain: Data,
+        scratch: UnsafeMutableRawPointer?
+    ) -> Data {
         var out = Data([0x78, 0x9C]) // deflate, 32K window, default level
-        out.append(deflate(plain))
+        out.append(deflate(plain, scratch: scratch))
         var adler = adler32(plain).bigEndian
         withUnsafeBytes(of: &adler) { out.append(contentsOf: $0) }
         return out
     }
 
     static func decompress(_ compressed: Data, maxSize: Int = maxDecompressedSize) throws -> Data {
+        try decompress(compressed, maxSize: maxSize, scratch: nil)
+    }
+
+    private static func decompress(
+        _ compressed: Data,
+        maxSize: Int,
+        scratch: UnsafeMutableRawPointer?
+    ) throws -> Data {
         let start = compressed.startIndex
         // Header: deflate method, header checksum multiple of 31, no preset
         // dictionary (mosh never sets one).
@@ -46,14 +106,17 @@ enum MoshZlib {
             $0 << 8 | UInt32($1)
         }
 
-        let plain = try inflate(raw, maxSize: maxSize)
+        let plain = try inflate(raw, maxSize: maxSize, scratch: scratch)
         guard adler32(plain) == expected else { throw Failure.checksumMismatch }
         return plain
     }
 
     // MARK: - Raw DEFLATE via Compression
 
-    private static func deflate(_ plain: Data) -> Data {
+    private static func deflate(
+        _ plain: Data,
+        scratch: UnsafeMutableRawPointer?
+    ) -> Data {
         // An empty deflate stream is one fixed-Huffman final block.
         guard !plain.isEmpty else { return Data([0x03, 0x00]) }
         let capacity = plain.count + plain.count / 2 + 64
@@ -63,7 +126,7 @@ enum MoshZlib {
                 compression_encode_buffer(
                     dst.bindMemory(to: UInt8.self).baseAddress!, capacity,
                     src.bindMemory(to: UInt8.self).baseAddress!, plain.count,
-                    nil, COMPRESSION_ZLIB
+                    scratch, COMPRESSION_ZLIB
                 )
             }
         }
@@ -96,25 +159,31 @@ enum MoshZlib {
         return out
     }
 
-    private static func inflate(_ raw: Data, maxSize: Int) throws -> Data {
+    private static func inflate(
+        _ raw: Data,
+        maxSize: Int,
+        scratch: UnsafeMutableRawPointer?
+    ) throws -> Data {
         guard !raw.isEmpty else { throw Failure.corrupt }
-        // Typical packets inflate to a few KB; grow on demand rather than
-        // zero-filling the worst-case bound for every datagram. A filled
-        // buffer is indistinguishable from truncation, so retry one size up
-        // until a spare byte survives.
-        var capacity = max(4096, raw.count * 8)
+        // Terminal repaints contain long repeated runs and routinely exceed an
+        // 8x ratio. A 16 KiB / 32x first pass covers those common diffs without
+        // approaching the 4 MiB hostile-input bound. A filled buffer is
+        // indistinguishable from truncation, so retry until a spare byte
+        // survives.
+        var capacity = max(16_384, raw.count * 32)
         while true {
             capacity = min(capacity, maxSize + 1)
-            var out = Data(count: capacity)
-            let written = out.withUnsafeMutableBytes { dst in
-                raw.withUnsafeBytes { src in
+            let out = [UInt8](unsafeUninitializedCapacity: capacity) { dst, initializedCount in
+                let written = raw.withUnsafeBytes { src in
                     compression_decode_buffer(
-                        dst.bindMemory(to: UInt8.self).baseAddress!, capacity,
+                        dst.baseAddress!, capacity,
                         src.bindMemory(to: UInt8.self).baseAddress!, raw.count,
-                        nil, COMPRESSION_ZLIB
+                        scratch, COMPRESSION_ZLIB
                     )
                 }
+                initializedCount = written
             }
+            let written = out.count
             if written == capacity {
                 guard capacity < maxSize + 1 else { throw Failure.tooLarge }
                 capacity *= 4
@@ -122,28 +191,34 @@ enum MoshZlib {
             }
             // written == 0 is either an empty stream or a decode error; the
             // adler32 check in decompress() is what tells them apart.
-            out.removeSubrange(written...)
-            return out
+            return Data(out)
         }
     }
 
     // MARK: - adler32 (RFC 1950)
 
     static func adler32(_ data: Data) -> UInt32 {
+        let modulus: UInt32 = 65521
+        let nmax = 5552
         var a: UInt32 = 1
         var b: UInt32 = 0
-        var pending = 0
-        for byte in data {
-            a &+= UInt32(byte)
-            b &+= a
-            pending += 1
-            // Largest run before 32-bit overflow with worst-case bytes.
-            if pending == 5552 {
-                a %= 65521
-                b %= 65521
-                pending = 0
+
+        data.withUnsafeBytes { raw in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            var index = 0
+            while index < bytes.count {
+                // NMAX is the largest run before 32-bit overflow with
+                // worst-case bytes; defer both modulos until the batch ends.
+                let end = min(index + nmax, bytes.count)
+                while index < end {
+                    a &+= UInt32(bytes[index])
+                    b &+= a
+                    index += 1
+                }
+                a %= modulus
+                b %= modulus
             }
         }
-        return (b % 65521) << 16 | (a % 65521)
+        return b << 16 | a
     }
 }

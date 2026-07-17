@@ -21,6 +21,15 @@ struct Block128: Equatable {
         self.lo = lo
     }
 
+    init(_ bytes: UnsafeRawBufferPointer, at offset: Int) {
+        precondition(offset >= 0 && offset + 16 <= bytes.count)
+        var hi: UInt64 = 0, lo: UInt64 = 0
+        for i in 0 ..< 8 { hi = hi << 8 | UInt64(bytes[offset + i]) }
+        for i in 8 ..< 16 { lo = lo << 8 | UInt64(bytes[offset + i]) }
+        self.hi = hi
+        self.lo = lo
+    }
+
     var bytes: [UInt8] {
         var out = [UInt8](repeating: 0, count: 16)
         for i in 0 ..< 8 { out[i] = UInt8(truncatingIfNeeded: hi >> (56 - 8 * i)) }
@@ -38,6 +47,36 @@ struct Block128: Equatable {
         for i in 0 ..< 8 {
             out.append(UInt8(truncatingIfNeeded: lo >> (56 - 8 * i)))
         }
+    }
+
+    func byte(at index: Int) -> UInt8 {
+        precondition((0 ..< 16).contains(index))
+        if index < 8 {
+            return UInt8(truncatingIfNeeded: hi >> (56 - 8 * index))
+        }
+        return UInt8(truncatingIfNeeded: lo >> (56 - 8 * (index - 8)))
+    }
+
+    mutating func setByte(_ byte: UInt8, at index: Int) {
+        precondition((0 ..< 16).contains(index))
+        let laneIndex = index < 8 ? index : index - 8
+        let shift = UInt64(56 - 8 * laneIndex)
+        let mask = UInt64(0xFF) << shift
+        if index < 8 {
+            hi = (hi & ~mask) | UInt64(byte) << shift
+        } else {
+            lo = (lo & ~mask) | UInt64(byte) << shift
+        }
+    }
+
+    func write(to buffer: UnsafeMutableRawBufferPointer, at offset: Int) {
+        precondition(offset >= 0 && offset + 16 <= buffer.count)
+        for i in 0 ..< 16 { buffer[offset + i] = byte(at: i) }
+    }
+
+    func xor(into buffer: UnsafeMutableRawBufferPointer, at offset: Int) {
+        precondition(offset >= 0 && offset + 16 <= buffer.count)
+        for i in 0 ..< 16 { buffer[offset + i] ^= byte(at: i) }
     }
 
     static func ^ (a: Block128, b: Block128) -> Block128 {
@@ -111,99 +150,149 @@ final class MoshAEAD {
     /// data; the parameter exists so RFC 7253's composite test vector can
     /// exercise the full algorithm.
     func seal(_ plaintext: Data, nonce: [UInt8], associatedData: Data = Data()) -> Data {
-        let plain = [UInt8](plaintext)
-        var offset = initialOffset(nonce: nonce)
-        var checksum = Block128.zero
-        var out = [UInt8]()
-        out.reserveCapacity(plain.count + 16)
+        let initial = initialOffset(nonce: nonce)
+        return plaintext.withUnsafeBytes { source in
+            let fullBlocks = plaintext.count / 16
+            let fullBytes = fullBlocks * 16
+            let remainder = plaintext.count - fullBytes
+            let input = transformedInput(
+                source,
+                fullBlocks: fullBlocks,
+                initialOffset: initial
+            )
 
-        let fullBlocks = plain.count / 16
-        var fullInputs: [Block128] = []
-        var fullOffsets: [Block128] = []
-        fullInputs.reserveCapacity(fullBlocks)
-        fullOffsets.reserveCapacity(fullBlocks)
-        for i in 1 ... max(fullBlocks, 1) where fullBlocks > 0 {
-            offset ^= l[i.trailingZeroBitCount]
-            let p = Block128(plain[(i - 1) * 16 ..< i * 16])
-            fullInputs.append(p ^ offset)
-            fullOffsets.append(offset)
-            checksum ^= p
-        }
-        let encrypted = Self.transform(encryptor, fullInputs)
-        for index in encrypted.indices {
-            (encrypted[index] ^ fullOffsets[index]).appendBytes(to: &out)
-        }
+            return Self.uninitializedData(count: plaintext.count + 16) { output in
+                if fullBytes > 0 {
+                    input.withUnsafeBytes {
+                        Self.transform(encryptor, input: $0, output: output)
+                    }
+                }
 
-        let remainder = plain.count % 16
-        if remainder > 0 {
-            offset ^= lStar
-            let pad = encrypt(offset).bytes
-            var padded = [UInt8](repeating: 0, count: 16)
-            for i in 0 ..< remainder {
-                let byte = plain[fullBlocks * 16 + i]
-                out.append(byte ^ pad[i])
-                padded[i] = byte
+                // Offset_i is deterministic, so walking it again is cheaper
+                // than retaining a payload-sized block/offset representation.
+                // Unmask the AES output in place and checksum the matching
+                // plaintext block during the same pass.
+                var offset = initial
+                var checksum = Block128.zero
+                for blockIndex in 0 ..< fullBlocks {
+                    let blockNumber = blockIndex + 1
+                    let byteOffset = blockIndex * 16
+                    offset ^= l[blockNumber.trailingZeroBitCount]
+                    offset.xor(into: output, at: byteOffset)
+                    checksum ^= Block128(source, at: byteOffset)
+                }
+
+                if remainder > 0 {
+                    offset ^= lStar
+                    let pad = encrypt(offset)
+                    var padded = Block128.zero
+                    for i in 0 ..< remainder {
+                        let byte = source[fullBytes + i]
+                        output[fullBytes + i] = byte ^ pad.byte(at: i)
+                        padded.setByte(byte, at: i)
+                    }
+                    padded.setByte(0x80, at: remainder)
+                    checksum ^= padded
+                }
+
+                var tag = encrypt(checksum ^ offset ^ lDollar)
+                tag ^= hash(associatedData)
+                tag.write(to: output, at: plaintext.count)
             }
-            padded[remainder] = 0x80
-            checksum ^= Block128(padded[...])
         }
-
-        var tag = encrypt(checksum ^ offset ^ lDollar)
-        tag ^= hash(associatedData)
-        tag.appendBytes(to: &out)
-        return Data(out)
     }
 
     /// Open: returns the plaintext, or nil when authentication fails.
     func open(_ box: Data, nonce: [UInt8], associatedData: Data = Data()) -> Data? {
         guard box.count >= 16 else { return nil }
-        let bytes = [UInt8](box)
-        let cipher = bytes[..<(bytes.count - 16)]
-        let tag = bytes[(bytes.count - 16)...]
+        let cipherCount = box.count - 16
+        let initial = initialOffset(nonce: nonce)
+        let (plain, expected, received) = box.withUnsafeBytes { source in
+            let fullBlocks = cipherCount / 16
+            let fullBytes = fullBlocks * 16
+            let remainder = cipherCount - fullBytes
+            let input = transformedInput(
+                source,
+                fullBlocks: fullBlocks,
+                initialOffset: initial
+            )
 
-        var offset = initialOffset(nonce: nonce)
-        var checksum = Block128.zero
-        var plain = [UInt8]()
-        plain.reserveCapacity(cipher.count)
+            var offset = initial
+            var checksum = Block128.zero
+            let plain = Self.uninitializedData(count: cipherCount) { output in
+                if fullBytes > 0 {
+                    input.withUnsafeBytes {
+                        Self.transform(decryptor, input: $0, output: output)
+                    }
+                }
 
-        let fullBlocks = cipher.count / 16
-        var fullInputs: [Block128] = []
-        var fullOffsets: [Block128] = []
-        fullInputs.reserveCapacity(fullBlocks)
-        fullOffsets.reserveCapacity(fullBlocks)
-        for i in 1 ... max(fullBlocks, 1) where fullBlocks > 0 {
-            offset ^= l[i.trailingZeroBitCount]
-            let c = Block128(cipher[(i - 1) * 16 ..< i * 16])
-            fullInputs.append(c ^ offset)
-            fullOffsets.append(offset)
-        }
-        let decrypted = Self.transform(decryptor, fullInputs)
-        for index in decrypted.indices {
-            let p = decrypted[index] ^ fullOffsets[index]
-            p.appendBytes(to: &plain)
-            checksum ^= p
-        }
+                // Decryption produces AES^-1(C_i xor Offset_i). Remove the
+                // same deterministic offset in place and fold each recovered
+                // plaintext block into the checksum immediately.
+                for blockIndex in 0 ..< fullBlocks {
+                    let blockNumber = blockIndex + 1
+                    let byteOffset = blockIndex * 16
+                    offset ^= l[blockNumber.trailingZeroBitCount]
+                    offset.xor(into: output, at: byteOffset)
+                    checksum ^= Block128(UnsafeRawBufferPointer(output), at: byteOffset)
+                }
 
-        let remainder = cipher.count % 16
-        if remainder > 0 {
-            offset ^= lStar
-            let pad = encrypt(offset).bytes
-            var padded = [UInt8](repeating: 0, count: 16)
-            for i in 0 ..< remainder {
-                let byte = cipher[cipher.startIndex + fullBlocks * 16 + i] ^ pad[i]
-                plain.append(byte)
-                padded[i] = byte
+                if remainder > 0 {
+                    offset ^= lStar
+                    let pad = encrypt(offset)
+                    var padded = Block128.zero
+                    for i in 0 ..< remainder {
+                        let byte = source[fullBytes + i] ^ pad.byte(at: i)
+                        output[fullBytes + i] = byte
+                        padded.setByte(byte, at: i)
+                    }
+                    padded.setByte(0x80, at: remainder)
+                    checksum ^= padded
+                }
             }
-            padded[remainder] = 0x80
-            checksum ^= Block128(padded[...])
-        }
 
-        var expected = encrypt(checksum ^ offset ^ lDollar)
-        expected ^= hash(associatedData)
-        let received = Block128(tag)
+            var expected = encrypt(checksum ^ offset ^ lDollar)
+            expected ^= hash(associatedData)
+            return (plain, expected, Block128(source, at: cipherCount))
+        }
         guard (expected.hi ^ received.hi) | (expected.lo ^ received.lo) == 0
         else { return nil }
-        return Data(plain)
+        return plain
+    }
+
+    /// Build the AES input body directly from contiguous source bytes. This is
+    /// the only payload-sized buffer besides the final output.
+    private func transformedInput(
+        _ source: UnsafeRawBufferPointer,
+        fullBlocks: Int,
+        initialOffset: Block128
+    ) -> Data {
+        Self.uninitializedData(count: fullBlocks * 16) { input in
+            var offset = initialOffset
+            for blockIndex in 0 ..< fullBlocks {
+                let blockNumber = blockIndex + 1
+                let byteOffset = blockIndex * 16
+                offset ^= l[blockNumber.trailingZeroBitCount]
+                (Block128(source, at: byteOffset) ^ offset).write(to: input, at: byteOffset)
+            }
+        }
+    }
+
+    /// Foundation's `Data(count:)` zero-fills. Allocate raw storage, initialize
+    /// every byte in the body, then transfer ownership to Data without another
+    /// payload copy.
+    private static func uninitializedData(
+        count: Int,
+        initialize: (UnsafeMutableRawBufferPointer) -> Void
+    ) -> Data {
+        guard count > 0 else { return Data() }
+        let storage = UnsafeMutableRawPointer.allocate(byteCount: count, alignment: 16)
+        initialize(UnsafeMutableRawBufferPointer(start: storage, count: count))
+        return Data(
+            bytesNoCopy: storage,
+            count: count,
+            deallocator: .custom { pointer, _ in pointer.deallocate() }
+        )
     }
 
     /// HASH(K, A) — the associated-data accumulator (RFC 7253 §4.1).
@@ -275,11 +364,29 @@ final class MoshAEAD {
         transform(cryptor, [block])[0]
     }
 
-    /// ECB has no chaining dependency, so all full OCB blocks can cross the
-    /// CommonCrypto boundary in one update. A near-MTU packet used to make
-    /// roughly 75 `CCCryptorUpdate` calls (and allocate input/output arrays for
-    /// each); it now makes one for the full-block body plus the scalar pad/tag
-    /// operations required by OCB3.
+    /// Transform a contiguous full-block body in one CommonCrypto update.
+    private static func transform(
+        _ cryptor: CCCryptorRef,
+        input: UnsafeRawBufferPointer,
+        output: UnsafeMutableRawBufferPointer
+    ) {
+        guard !input.isEmpty else { return }
+        var moved = 0
+        let status = CCCryptorUpdate(
+            cryptor,
+            input.baseAddress,
+            input.count,
+            output.baseAddress,
+            output.count,
+            &moved
+        )
+        precondition(
+            status == kCCSuccess && moved == input.count,
+            "AES-ECB block transform failed"
+        )
+    }
+
+    /// Fixed-size adapter for scalar AES operations and associated-data HASH.
     private static func transform(
         _ cryptor: CCCryptorRef,
         _ blocks: [Block128]
