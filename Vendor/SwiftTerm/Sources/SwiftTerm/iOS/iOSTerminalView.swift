@@ -1019,7 +1019,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// Multiplex patch: scrolls the remote by `ticks` cells — positive means
     /// the finger moved down, i.e. reveal earlier content. Sends wheel
     /// button events when the client requested mouse tracking, otherwise
-    /// DECCKM-aware cursor keys while the alternate buffer is active.
+    /// DECCKM-aware cursor keys while the alternate buffer is active. Cursor
+    /// key bursts are batched into one send per pan tick.
     public func performRemoteScroll (ticks: Int, at point: CGPoint? = nil) {
         guard let terminal else { return }
         let count = min (abs (ticks), 40)
@@ -1034,9 +1035,22 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                                    pixelX: hit.pixels.col, pixelY: hit.pixels.row)
             }
         } else if forceRemoteCursorScroll || terminal.isCurrentBufferAlternate {
-            for _ in 0..<count {
-                ticks > 0 ? sendKeyUp() : sendKeyDown()
+            let sequence: [UInt8]
+            if ticks > 0 {
+                sequence = terminal.applicationCursor
+                    ? EscapeSequences.moveUpApp
+                    : EscapeSequences.moveUpNormal
+            } else {
+                sequence = terminal.applicationCursor
+                    ? EscapeSequences.moveDownApp
+                    : EscapeSequences.moveDownNormal
             }
+            var burst: [UInt8] = []
+            burst.reserveCapacity(sequence.count * count)
+            for _ in 0..<count {
+                burst.append(contentsOf: sequence)
+            }
+            send(burst)
         }
     }
    

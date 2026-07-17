@@ -94,10 +94,11 @@ enum AgentSignature {
     /// Keep this deliberately narrow: Claude identifies itself in its OSC
     /// title, Codex has a versioned screen masthead and a unique approval
     /// title, and a spinner may only preserve an already-known kind. Pi's OSC
-    /// title is omitted because Pi leaves it stale after exit.
+    /// title is omitted because Pi leaves it stale after exit. Visible lines
+    /// stay lazy so an explicit title signature never translates the screen.
     static func classifyTerminal(
         title: String,
-        visibleLines: [String],
+        visibleLines: @autoclosure () -> [String],
         isAlternateScreen: Bool,
         previous: AgentKind?
     ) -> AgentKind? {
@@ -108,7 +109,7 @@ enum AgentSignature {
             return .codex
         }
 
-        let codexMasthead = visibleLines.contains { line in
+        let codexMasthead = visibleLines().contains { line in
             line.contains("OpenAI Codex") && line.contains("(v")
         }
         if codexMasthead { return .codex }

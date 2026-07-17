@@ -135,6 +135,7 @@ final class TerminalSessionController {
     private var lastDirectShellProbe: Date?
     private var directShellMonitorGeneration = 0
     private var terminalAgentHint: AgentKind?
+    private var lastTerminalTitleProcessedForAgentHint: String?
     private var directShellAttentionAgent: AgentKind?
     private var directShellAttentionTracker = AttentionTracker()
     private(set) var dropState: DropState?
@@ -409,11 +410,12 @@ final class TerminalSessionController {
     func terminalTitleChanged(_ title: String) {
         remoteTitle = title
         guard route.sessionName == nil else { return }
-        let screen = terminalScreenSnapshot()
+        guard title != lastTerminalTitleProcessedForAgentHint else { return }
+        lastTerminalTitleProcessedForAgentHint = title
         if let hint = AgentSignature.classifyTerminal(
             title: title,
-            visibleLines: screen.lines,
-            isAlternateScreen: screen.isAlternate,
+            visibleLines: terminalScreenSnapshot().lines,
+            isAlternateScreen: terminalView?.getTerminal().isCurrentBufferAlternate ?? false,
             previous: directShellAgent ?? terminalAgentHint
         ) {
             terminalAgentHint = hint
@@ -569,6 +571,7 @@ final class TerminalSessionController {
         directShellProbeGenerationInFlight = nil
         lastDirectShellProbe = nil
         terminalAgentHint = nil
+        lastTerminalTitleProcessedForAgentHint = nil
         directShellAgent = nil
         directShellAttention = nil
         directShellWorkingDirectory = nil

@@ -253,15 +253,21 @@ final class AgentSignatureTests: XCTestCase {
     }
 
     func testDirectTerminalFallbackUsesOnlyVerifiedSignatures() {
+        var evaluatedVisibleLines = false
+        func titleFastPathVisibleLines() -> [String] {
+            evaluatedVisibleLines = true
+            return []
+        }
         XCTAssertEqual(
             AgentSignature.classifyTerminal(
                 title: "✳ Claude Code",
-                visibleLines: [],
+                visibleLines: titleFastPathVisibleLines(),
                 isAlternateScreen: false,
                 previous: nil
             ),
             .claudeCode
         )
+        XCTAssertFalse(evaluatedVisibleLines)
         XCTAssertEqual(
             AgentSignature.classifyTerminal(
                 title: "Multiplex",
