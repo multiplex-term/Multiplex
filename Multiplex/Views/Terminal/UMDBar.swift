@@ -188,30 +188,16 @@ struct UMDBar: View {
     }
 
     private var overflowMenu: some View {
-        Menu {
-            Section("Text Size") {
-                Button("Smaller Text", action: fontDown)
-                Button("Larger Text", action: fontUp)
-            }
-            Menu("New Tab") {
-                Button("New Session") { newSession(nil) }
-                ForEach(AgentKind.allCases, id: \.self) { agent in
-                    Button(agent.displayName) { newSession(agent) }
-                }
-            }
-            FileAttachMenu(controller: controller, labelStyle: .submenu)
-            Divider()
-            Button("Detach", action: detach)
-            if let closeSession {
-                Button("Close Session", role: .destructive, action: closeSession)
-            }
-        } label: {
-            ChassisBadge("", systemImage: "ellipsis")
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .chassisHover(2)
-        .accessibilityLabel("Terminal actions")
+        TerminalOverflowMenu(
+            controller: controller,
+            mergeSources: mergeSources,
+            fontDown: fontDown,
+            fontUp: fontUp,
+            newSession: newSession,
+            merge: merge,
+            detach: detach,
+            closeSession: closeSession
+        )
     }
 
     @ViewBuilder
@@ -294,6 +280,66 @@ struct UMDBar: View {
         case nil:
             EmptyView()
         }
+    }
+}
+
+/// Shared compact action menu for the iPhone shell and narrow classic iPad
+/// windows. Keeping one menu definition prevents either compact surface from
+/// silently losing actions as the regular terminal chrome evolves.
+struct TerminalOverflowMenu: View {
+    var controller: TerminalSessionController?
+    var mergeSources: [TerminalWorkspace.WindowEntry]
+    var fontDown: () -> Void
+    var fontUp: () -> Void
+    var newSession: (AgentKind?) -> Void
+    var merge: (UUID) -> Void
+    var detach: () -> Void
+    var closeSession: (() -> Void)?
+
+    var body: some View {
+        Menu {
+            Section("Text Size") {
+                Button("Smaller Text", action: fontDown)
+                Button("Larger Text", action: fontUp)
+            }
+            Menu("New Tab") {
+                Button("New Session") { newSession(nil) }
+                ForEach(AgentKind.allCases, id: \.self) { agent in
+                    Button(agent.displayName) { newSession(agent) }
+                }
+            }
+            FileAttachMenu(controller: controller, labelStyle: .submenu)
+            if !mergeSources.isEmpty {
+                Menu("Merge Window") {
+                    ForEach(mergeSources) { entry in
+                        Button {
+                            merge(entry.id)
+                        } label: {
+                            Label(entry.label, systemImage: "macwindow")
+                        }
+                    }
+                    if mergeSources.count > 1 {
+                        Divider()
+                        Button {
+                            for entry in mergeSources { merge(entry.id) }
+                        } label: {
+                            Label("Merge All Windows", systemImage: "rectangle.stack")
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button("Detach", action: detach)
+            if let closeSession {
+                Button("Close Session", role: .destructive, action: closeSession)
+            }
+        } label: {
+            ChassisBadge("", systemImage: "ellipsis")
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .chassisHover(2)
+        .accessibilityLabel("Terminal actions")
     }
 }
 

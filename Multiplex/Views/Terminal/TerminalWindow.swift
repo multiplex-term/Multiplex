@@ -39,6 +39,9 @@ struct TerminalWindowRoot: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
+    #if !os(visionOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
 
     @Binding var route: TerminalWindowRoute
     var shell: ShellConfiguration?
@@ -802,16 +805,41 @@ struct TerminalWindowRoot: View {
                 .fixedSize()
                 .accessibilityLabel("Agent needs you")
         }
-        newTabMenu
-        FileAttachMenu(controller: activeController)
-            .fixedSize()
-        keyboardButton
-        fontButtons
-        if !mergeSources.isEmpty {
-            mergeMenu
+        if horizontalSizeClass == .compact {
+            // UIKit's automatic toolbar overflow keeps only the trailing
+            // DETACH menu when custom chassis controls no longer fit. Own the
+            // compact overflow just like the iPhone shell so every displaced
+            // action remains reachable in a narrow Stage Manager window.
+            keyboardButton
+            terminalOverflowMenu
+                .padding(.trailing, trailingPadding)
+        } else {
+            newTabMenu
+            FileAttachMenu(controller: activeController)
+                .fixedSize()
+            keyboardButton
+            fontButtons
+            if !mergeSources.isEmpty {
+                mergeMenu
+            }
+            detachMenu
+                .padding(.trailing, trailingPadding)
         }
-        detachMenu
-            .padding(.trailing, trailingPadding)
+    }
+
+    private var terminalOverflowMenu: some View {
+        TerminalOverflowMenu(
+            controller: activeController,
+            mergeSources: mergeSources,
+            fontDown: { fontSize = max(9, fontSize - 1) },
+            fontUp: { fontSize = min(32, fontSize + 1) },
+            newSession: { openNewTab(launching: $0) },
+            merge: { merge($0) },
+            detach: { detachActiveTab() },
+            closeSession: activeTabHasSession
+                ? { confirmingCloseActiveSession = true } : nil
+        )
+        .fixedSize()
     }
 
     /// Dropdown: detach (tmux keeps the session) or the destructive
