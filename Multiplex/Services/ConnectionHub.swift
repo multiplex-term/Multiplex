@@ -74,7 +74,7 @@ final class HostConnectionModel {
     let host: Host
     private(set) var phase: Phase = .idle
     private(set) var tmux: TmuxState = .unknown
-    private var lastRefreshed: Date?
+    @ObservationIgnored private var lastRefreshed: Date?
     /// Observation-friendly summaries: views that only need liveness or a
     /// badge count should not subscribe to the full pane/process tree.
     private(set) var hasLiveProbe = false
@@ -100,10 +100,18 @@ final class HostConnectionModel {
     private static let timing = Logger(
         subsystem: "app.multiplexterm.multiplex", category: "wall")
 
-    private var connection: SSHConnection?
-    private var refreshTask: Task<Void, Never>?
-    private var refreshGeneration = 0
-    private var activePaneProbeInFlight = false
+    @ObservationIgnored private var connection: SSHConnection?
+    @ObservationIgnored private var connectRetryBackoff = ConnectRetryBackoff()
+    /// Synchronizable Keychain reads are cached across fresh-link retries.
+    /// Re-entered credentials can take at most 60 seconds to land, while
+    /// editing the host config replaces this model. This extends plaintext
+    /// residency between attempts, but a live SSHConnection already retains
+    /// the same secrets for its lifetime, so the security posture is unchanged.
+    @ObservationIgnored private var cachedSecrets: HostSecrets?
+    @ObservationIgnored private var cachedSecretsLoadedAt: Date?
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshGeneration = 0
+    @ObservationIgnored private var activePaneProbeInFlight = false
     private struct ActiveAgentCacheEntry {
         var fingerprint: TmuxPaneFingerprint
         var agent: AgentKind?
@@ -112,11 +120,11 @@ final class HostConnectionModel {
     /// Pane id → process fallback. Direct comm/title matches never need this;
     /// wrappers and negative results expire so a long-lived foreground
     /// process can still change descendants without changing pane identity.
-    private var activeAgentCache: [String: ActiveAgentCacheEntry] = [:]
-    private var attentionTracker = AttentionTracker()
+    @ObservationIgnored private var activeAgentCache: [String: ActiveAgentCacheEntry] = [:]
+    @ObservationIgnored private var attentionTracker = AttentionTracker()
     /// Deeper, unclipped capture tails (the miniatures' source parse) —
     /// what the question detector reads.
-    private var attentionTails: [String: [String]] = [:]
+    @ObservationIgnored private var attentionTails: [String: [String]] = [:]
 
     init(host: Host) {
         self.host = host
@@ -271,6 +279,9 @@ final class HostConnectionModel {
 
     private func performRefresh(generation: Int, mayRetry: Bool) async {
         guard refreshGeneration == generation, !Task.isCancelled else { return }
+        guard connection != nil || connectRetryBackoff.shouldAttempt(now: Date()) else {
+            return
+        }
         // Whether this pass reuses an already-established link — if that
         // link fails mid-probe (Wi-Fi blip, server restart, socket severed
         // during suspension), one immediate reconnect beats surfacing
@@ -335,7 +346,7 @@ final class HostConnectionModel {
                     mayRetry: false
                 )
             } else {
-                markFailed(error)
+                markFailed(error, registerConnectFailure: !reusedLink)
             }
         }
     }
@@ -355,7 +366,10 @@ final class HostConnectionModel {
         Int((to - from) / .milliseconds(1))
     }
 
-    private func markFailed(_ error: Error) {
+    private func markFailed(_ error: Error, registerConnectFailure: Bool) {
+        if registerConnectFailure {
+            connectRetryBackoff.registerFailure(now: Date())
+        }
         let message = friendlyMessage(for: error)
         let failedPhase = Phase.failed(message)
         let failedTmux = TmuxState.failed(message)
@@ -394,7 +408,22 @@ final class HostConnectionModel {
         // a retry actually lands.
         if phase == .idle { phase = .connecting }
         let secretsStart = ContinuousClock.now
-        let secrets = await HostSecrets.loadOffMain(for: host)
+        let now = Date()
+        let secrets: HostSecrets
+        if let cachedSecrets,
+           let cachedSecretsLoadedAt,
+           now.timeIntervalSince(cachedSecretsLoadedAt) < Self.secretsCacheTTL {
+            secrets = cachedSecrets
+        } else {
+            let loaded = await HostSecrets.loadOffMain(for: host)
+            if let expectedGeneration,
+               (expectedGeneration != refreshGeneration || Task.isCancelled) {
+                throw CancellationError()
+            }
+            cachedSecrets = loaded
+            cachedSecretsLoadedAt = Date()
+            secrets = loaded
+        }
         if let expectedGeneration,
            (expectedGeneration != refreshGeneration || Task.isCancelled) {
             throw CancellationError()
@@ -419,12 +448,14 @@ final class HostConnectionModel {
             """)
         connection = fresh
         phase = .connected
+        connectRetryBackoff.reset()
         return fresh
     }
 
     /// Deadline for establishing the control connection (TCP + SSH handshake
     /// + auth); longer than an exec round-trip on an already-live link.
     private static let connectDeadline: Double = 15
+    private static let secretsCacheTTL: TimeInterval = 60
     /// Age of the last successful round-trip beyond which an "established"
     /// link is presumed severed by suspension (several wall ticks — while
     /// the deck is frontmost, every tick refreshes it).
@@ -516,6 +547,8 @@ final class HostConnectionModel {
         base: String, inDirectoryOf sourceSession: String?,
         startingIn directory: String? = nil, typing launch: String?
     ) async -> String? {
+        resetConnectRetryBackoff()
+        let reusedLink = connection != nil && phase == .connected
         do {
             let connection = try await ensureConnection()
             let command = TmuxProbe.newSessionCommand(
@@ -532,7 +565,7 @@ final class HostConnectionModel {
             refresh()
             return name
         } catch {
-            markFailed(error)
+            markFailed(error, registerConnectFailure: !reusedLink)
             return nil
         }
     }
@@ -543,6 +576,7 @@ final class HostConnectionModel {
     /// like the probe helpers — if the control link dropped, do nothing and
     /// let the next probe cycle surface the failure.
     func killSession(_ session: TmuxSession) async {
+        resetConnectRetryBackoff()
         guard phase == .connected, let connection else { return }
         await kill(session, over: connection)
     }
@@ -554,6 +588,8 @@ final class HostConnectionModel {
     /// session's tmux id when it has one; otherwise `killCommand` falls back
     /// to an `=name` exact match.
     func killSession(named name: String) async {
+        resetConnectRetryBackoff()
+        let reusedLink = connection != nil && phase == .connected
         do {
             let connection = try await ensureConnection()
             var session = TmuxSession(name: name, windows: [], created: .distantPast)
@@ -563,8 +599,13 @@ final class HostConnectionModel {
             }
             await kill(session, over: connection)
         } catch {
-            markFailed(error)
+            markFailed(error, registerConnectFailure: !reusedLink)
         }
+    }
+
+    /// User actions and a newly-active wall get one immediate fresh attempt.
+    func resetConnectRetryBackoff() {
+        connectRetryBackoff.reset()
     }
 
     private func kill(_ session: TmuxSession, over connection: SSHConnection) async {

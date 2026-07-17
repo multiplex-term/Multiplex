@@ -384,6 +384,7 @@ struct FleetWall: View {
     /// ten-second deadline without stretching healthy hosts from five to
     /// fifteen seconds between live captures.
     private func runFeed(for model: HostConnectionModel) async {
+        await model.resetConnectRetryBackoff()
         while !Task.isCancelled {
             guard UIApplication.shared.applicationState == .active else {
                 // Not active YET: a cold launch runs the first tick before
@@ -787,6 +788,7 @@ struct FleetWall: View {
             newSessionTile(host)
             ForEach(store.orderedSessions(sessions, for: host.id)) { session in
                 sessionTile(host, model: model, session: session)
+                    .equatable()
             }
             .reorderable()
         }
@@ -823,6 +825,7 @@ struct FleetWall: View {
             ForEach(store.orderedSessions(sessions, for: host.id)) { session in
                 let target = SessionDropTarget(hostID: host.id, sessionName: session.name)
                 sessionTile(host, model: model, session: session)
+                    .equatable()
                     .draggable(sessionDragPayload(hostID: host.id, sessionName: session.name))
                     .overlay {
                         Rectangle()
@@ -1330,7 +1333,7 @@ private struct DotPulse: ViewModifier {
     }
 }
 
-private struct SessionTile: View {
+private struct SessionTile: View, Equatable {
     let session: TmuxSession
     let lines: [String]
     /// Agent state from the latest probe/capture pass for the active pane.
@@ -1352,11 +1355,33 @@ private struct SessionTile: View {
     let attachNewWindow: () -> Void
     let delete: () -> Void
 
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        // Every data field read by the tile participates. `attach`,
+        // `attachNewWindow`, and `delete` are the only exclusions: equal data
+        // means their captured host/session inputs are equivalent, while the
+        // closures themselves receive a fresh identity on every parent pass.
+        lhs.session == rhs.session
+            && lhs.lines == rhs.lines
+            && lhs.attention == rhs.attention
+            && lhs.hasLiveAgentState == rhs.hasLiveAgentState
+            && lhs.hasOpenTab == rhs.hasOpenTab
+            && lhs.compact == rhs.compact
+            && lhs.selected == rhs.selected
+            && lhs.duplicateAttachTitle == rhs.duplicateAttachTitle
+            && lhs.openTabAccessibilityText == rhs.openTabAccessibilityText
+    }
+
     var body: some View {
+        let isAgentRunning = agentRunning
+        let agentNeedsInput = agentNeedsYou
+
         Button(action: attach) {
             VStack(spacing: 0) {
                 screen
-                umd
+                umd(
+                    agentRunning: isAgentRunning,
+                    agentNeedsYou: agentNeedsInput
+                )
                 if !compact { segmentStrip }
             }
             .padding(compact ? 4 : 5)
@@ -1377,7 +1402,10 @@ private struct SessionTile: View {
             Button(duplicateAttachTitle, action: attachNewWindow)
             Button("Delete Session…", role: .destructive, action: delete)
         }
-        .accessibilityLabel(accessibilitySummary)
+        .accessibilityLabel(accessibilitySummary(
+            agentRunning: isAgentRunning,
+            agentNeedsYou: agentNeedsInput
+        ))
         .accessibilityHint("Long press and drag to reorder within this host")
     }
 
@@ -1408,7 +1436,7 @@ private struct SessionTile: View {
         .background(Theme.screen)
     }
 
-    private var umd: some View {
+    private func umd(agentRunning: Bool, agentNeedsYou: Bool) -> some View {
         HStack(spacing: 9) {
             ChassisLabel(session.name, size: compact ? 10 : 12)
             // The badge is taller than the lamp, so swapping them resizes
@@ -1429,7 +1457,7 @@ private struct SessionTile: View {
             }
             Spacer(minLength: 6)
             if !compact {
-                Text(telemetry)
+                Text(telemetry(agentRunning: agentRunning))
                     .font(.mono(9.5))
                     .foregroundStyle(Theme.signal2)
                     .lineLimit(1)
@@ -1441,7 +1469,7 @@ private struct SessionTile: View {
         .padding(.bottom, 5)
     }
 
-    private var telemetry: String {
+    private func telemetry(agentRunning: Bool) -> String {
         let hasSplitPanes = session.paneCount > session.windowCount
         var parts = [hasSplitPanes ? "\(session.windowCount)W" : "\(session.windowCount) WIN"]
         if hasSplitPanes {
@@ -1550,7 +1578,10 @@ private struct SessionTile: View {
         return "\(session.windowCount) windows, \(session.paneCount) panes. \(active)"
     }
 
-    private var accessibilitySummary: String {
+    private func accessibilitySummary(
+        agentRunning: Bool,
+        agentNeedsYou: Bool
+    ) -> String {
         var parts = [session.name, session.isAttached ? "live" : "not attached"]
         if agentNeedsYou { parts.append("agent needs your input") }
         if agentRunning { parts.append("agent running") }

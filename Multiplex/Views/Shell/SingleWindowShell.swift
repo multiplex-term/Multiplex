@@ -3,6 +3,34 @@ import SwiftUI
 import UIKit
 #endif
 
+/// Holds the expensive deck subtree behind value-only identity. The shell's
+/// swipe offset and visibility modifiers remain outside this boundary.
+private struct ShellDeckPane: View, Equatable {
+    let terminalOpener: TerminalRouteOpener
+    let wallPresentation: FleetWall.Presentation
+    let selectedTerminal: TerminalRoute?
+    let shellSafeArea: EdgeInsets
+
+    var body: some View {
+        DeckWindow(
+            terminalOpener: terminalOpener,
+            wallPresentation: wallPresentation,
+            selectedTerminal: selectedTerminal,
+            shellSafeArea: shellSafeArea
+        )
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        // All three value inputs read by the deck participate.
+        // `terminalOpener` is the sole exclusion: this private boundary is
+        // always built for the same shell destination/action, whose closure
+        // identity alone changes when the shell body evaluates.
+        lhs.wallPresentation == rhs.wallPresentation
+            && lhs.selectedTerminal == rhs.selectedTerminal
+            && lhs.shellSafeArea == rhs.shellSafeArea
+    }
+}
+
 /// Multiplex's real one-scene shell for iPhone and full-screen iPad. The deck
 /// and terminal stage remain mounted together: compact navigation slides the
 /// live terminal over the deck, while expanded layout exposes the same deck
@@ -206,7 +234,7 @@ struct SingleWindowShell: View {
         expanded: Bool,
         safeArea: EdgeInsets
     ) -> some View {
-        DeckWindow(
+        ShellDeckPane(
             terminalOpener: TerminalRouteOpener(
                 destination: .shell,
                 action: openTerminalRoute
@@ -215,6 +243,7 @@ struct SingleWindowShell: View {
             selectedTerminal: terminalRoute.activeTab,
             shellSafeArea: safeArea
         )
+        .equatable()
     }
 
     @ViewBuilder
