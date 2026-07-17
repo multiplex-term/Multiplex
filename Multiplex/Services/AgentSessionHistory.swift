@@ -47,7 +47,16 @@ enum AgentSessionHistory {
     static let maxMessages = 50
     /// Total pager keystrokes one find may send. The header oracle makes
     /// every step directed, so this is a runaway stop, not a search radius.
+    /// Calibrated on a ~100×30 desktop pane; `jumpSendBudget(paneWidth:
+    /// paneHeight:)` scales it up for narrow/short panes, where the same
+    /// transcript rewraps into several times the rows and each half-page
+    /// step covers fewer of them (an iPhone jump EXHAUSTED at 400 on
+    /// content a desktop pane crossed in 76).
     static let jumpSendBudget = 400
+    /// Ceiling for the scaled budget — a phone-sized pane with the keyboard
+    /// up quadruples the step count, but a walk longer than this is a
+    /// runaway whatever the geometry.
+    static let jumpSendBudgetMax = 1600
     /// Steps per settle while traversing turns known to be newer than the
     /// target (each PgUp moves half the transcript region).
     static let oracleFarBatch = 6
@@ -443,27 +452,52 @@ enum AgentSessionHistory {
         }
     }
 
-    /// Search strings for one prompt. The primary is a first-line prefix cut
-    /// to the pane; a 24-column fallback handles right-edge truncation and
-    /// small rendering differences. Whitespace is normalized because the TUI
-    /// can reflow it differently from JSONL. nil/empty = too short to match.
+    /// Search strings for one prompt. The primary is a wrap-safe first-line
+    /// prefix cut to the pane; a 24-column fallback handles residual
+    /// rendering drift (column-accounting differences, version changes).
+    /// Whitespace is normalized because the TUI can reflow it differently
+    /// from JSONL. nil/empty = too short to match.
     static func needles(for message: AgentUserMessage, paneColumns: Int) -> [String] {
         guard let primary = needle(for: message, paneColumns: paneColumns) else { return [] }
         var values = [primary]
-        let fallback = terminalPrefix(primary, maxColumns: needleFallbackMaximum)
+        let fallback = wrapSafePrefix(primary, maxColumns: needleFallbackMaximum)
         if fallback != primary, fallback.count >= 4 { values.append(fallback) }
         return values
     }
 
     static func needle(for message: AgentUserMessage, paneColumns: Int) -> String? {
         let line = normalizedSearchText(message.firstLine)
-        // The rendered row spends columns on the `❯ ` prefix and the `…`
-        // truncation mark; stay well inside it.
-        let columnBudget = min(paneColumns - 4, needleMaximum)
+        // Only the sticky header flattens the prompt into one `…`-truncated
+        // row (its text budget is width − 4); a REAL transcript row renders
+        // the body word-wrapped, so its first row ends at the last word
+        // boundary before the width. The needle must be a prefix of BOTH:
+        // budget in two extra columns of safety, then retreat to a word
+        // boundary in `wrapSafePrefix`.
+        let columnBudget = min(paneColumns - 6, needleMaximum)
         guard columnBudget >= 4 else { return nil }
-        let needle = terminalPrefix(line, maxColumns: columnBudget)
+        let needle = wrapSafePrefix(line, maxColumns: columnBudget)
         guard needle.count >= 4 else { return nil }
         return needle
+    }
+
+    /// A prefix that cannot run past the first rendered row of a wrapped
+    /// prompt: hard-cut to the column budget, then retreat to the last word
+    /// boundary — Claude wraps prose at spaces, and a mid-word cut extends
+    /// past the row's wrap point exactly when the pane is narrow (the
+    /// iPhone failure). A line that fits whole keeps itself; a cut that
+    /// already lands on a word boundary, or a leading token spanning the
+    /// entire budget (paths, CJK runs — Claude hard-splits those on the
+    /// row too), keeps the hard cut. Retreating is always match-safe: a
+    /// shorter prefix of the same flow; lost specificity is absorbed by
+    /// the from-the-bottom twin count.
+    static func wrapSafePrefix(_ text: String, maxColumns: Int) -> String {
+        let hard = terminalPrefix(text, maxColumns: maxColumns)
+        guard hard != text, hard.count < text.count else { return hard }
+        let continuation = text[text.index(text.startIndex, offsetBy: hard.count)...]
+        if continuation.first == " " { return hard }
+        guard let boundary = hard.lastIndex(of: " ") else { return hard }
+        let cut = String(hard[..<boundary]).trimmingCharacters(in: .whitespaces)
+        return cut.count >= 4 ? cut : hard
     }
 
     private static func terminalPrefix(_ text: String, maxColumns: Int) -> String {
@@ -557,6 +591,20 @@ enum AgentSessionHistory {
         + "if (tgt != \"\" && index(txt, tgt) == 1) { real = r; break } } "
         + "printf \"pin=%d fam=%d real=%d h=%d\\n\", pin, fam, real, h }"
 
+    /// Scale the send budget to the pane: the 400 base was calibrated on a
+    /// ~100-column, ~30-row desktop pane (transcript region ≈ 24 rows). At
+    /// 44 columns the same transcript rewraps into ~2.3× the rows, and with
+    /// a docked keyboard the half-page step shrinks too — an unscaled stop
+    /// turned real iPhone jumps into false "not found"s.
+    static func jumpSendBudget(paneWidth: Int, paneHeight: Int) -> Int {
+        var budget = jumpSendBudget
+        let width = max(paneWidth, 20)
+        if width < 100 { budget = budget * 100 / width }
+        let region = max(paneHeight - bottomChromeRows, 8)
+        if region < 24 { budget = budget * 24 / region }
+        return min(max(budget, jumpSendBudget), jumpSendBudgetMax)
+    }
+
     /// One server-side exec that walks Claude's pager to the target message
     /// and leaves its real `❯` row in the top half of the screen — the
     /// header oracle replaces the old blind needle hunt:
@@ -576,10 +624,17 @@ enum AgentSessionHistory {
     ///
     /// Two upward crossings past the target without ever seeing its row
     /// mean the primary needle doesn't match this rendering — retry once
-    /// with the shorter fallback, then give up honestly. Misses, stalls,
-    /// and signal cancellation restore in constant time with Ctrl+End
-    /// (Claude's scroll-bottom binding; never Esc — Esc can interrupt a
-    /// turn that started mid-find).
+    /// with the shorter fallback, then give up honestly. Reaching
+    /// scroll-top with the fallback still unused takes the same retry (an
+    /// unmatched oldest message never produces the older-pin crossings the
+    /// first trigger needs — the original iPhone blind spot). Both retries
+    /// RESTART from live, so the upward twin-counting semantics stay valid
+    /// under the swapped needle. Misses, stalls, and signal cancellation
+    /// restore in constant time with Ctrl+End (Claude's scroll-bottom
+    /// binding; never Esc — Esc can interrupt a turn that started
+    /// mid-find). A pane too short for the oracle (< 12 rows — a docked
+    /// phone keyboard in landscape) reports MPXJ_SHORT instead of
+    /// pretending the message is gone.
     ///
     /// Identical prompts ("commit", "continue") share a needle, so the
     /// walk counts the target family from the bottom: climbing upward, each
@@ -588,37 +643,54 @@ enum AgentSessionHistory {
     /// Counting only happens on upward motion, family pins always read as
     /// the target's turn, and every upward batch shrinks to 2 half-pages
     /// (less than one viewport) so no twin row can slip between captures.
+    /// The shorter fallback needle can widen the family, so the swap
+    /// installs its own `fallbackTwinCount`.
     static func jumpFindCommand(
         sessionID: String,
         needles: [JumpNeedle],
         targetIndex: Int,
         targetNeedles: [String],
-        newerTwinCount: Int = 0
+        newerTwinCount: Int = 0,
+        fallbackTwinCount: Int? = nil,
+        sendBudget: Int = jumpSendBudget
     ) -> String {
         // Longest needle first so nested prefixes ("fix the" / "fix the
         // build") resolve to the more specific message, with the ordinal as
         // a deterministic tie-break; 1-based indexes keep 0 free as the
-        // unknown sentinel.
+        // unknown sentinel. Twin needles share their text, so a sticky
+        // header matching one cannot say WHICH twin's turn owns the top
+        // row — reporting the oldest twin's ordinal made the driver
+        // "descend from an overshoot" while it was actually below the
+        // target (live view, newest twin pinned). Twins embed as 0:
+        // direction-neutral, while the target's own family still rides
+        // the fam flag.
+        var textCounts: [String: Int] = [:]
+        for needle in needles { textCounts[needle.text, default: 0] += 1 }
         let ordered = needles
             .sorted {
                 $0.text.utf8.count != $1.text.utf8.count
                     ? $0.text.utf8.count > $1.text.utf8.count
                     : $0.index < $1.index
             }
-            .map { "\($0.index + 1)\t\($0.text)" }
+            .map { "\(textCounts[$0.text, default: 0] > 1 ? 0 : $0.index + 1)\t\($0.text)" }
         let listArguments = ordered.isEmpty
             ? "''"
             : ordered.map(\.shellQuoted).joined(separator: " ")
         let primary = targetNeedles.first ?? "MULTIPLEX_HISTORY_NEEDLE_MISSING"
         let fallback = targetNeedles.dropFirst().first ?? ""
         let twins = max(0, newerTwinCount)
-        let bodyBatch = twins > 0 ? twinSafeBatch : oracleBodyBatch
-        let farBatch = twins > 0 ? twinSafeBatch : oracleFarBatch
+        let fallbackTwins = max(twins, fallbackTwinCount ?? twins)
+        // Twin-safe batches whenever EITHER needle has a family — the
+        // fallback can swap in mid-walk, and its viewport guarantee must
+        // already hold.
+        let anyTwins = max(twins, fallbackTwins) > 0
+        let bodyBatch = anyTwins ? twinSafeBatch : oracleBodyBatch
+        let farBatch = anyTwins ? twinSafeBatch : oracleFarBatch
         return TmuxProbe.pathPrefix
             + "sid=\(sessionID.shellQuoted); "
             + "ndl=$(printf '%s\\n' \(listArguments)); "
             + "n1=\(primary.shellQuoted); n2=\(fallback.shellQuoted); "
-            + "t=\(targetIndex + 1); k=\(twins); "
+            + "t=\(targetIndex + 1); k=\(twins); k2=\(fallbackTwins); "
             + "prog='\(classifierProgram)'; "
             + "capture() { tmux capture-pane -p -t \"$sid\" 2>/dev/null; }; "
             + "classify() { vals=$(printf '%s\\n' \"$cur\" | "
@@ -636,24 +708,44 @@ enum AgentSessionHistory {
             + "s=$((s+1)); sent=$((sent+1)); sleep 0.03; done; "
             + "settle \"$cur\"; }; "
             + "restore() { tmux send-keys -t \"$sid\" C-End 2>/dev/null; sleep 0.08; }; "
-            + "found=0; top=0; keep=0; sent=0; osc=0; fbused=0; dir=u; "
+            // Wait out an in-flight redraw from an UNKNOWN base — a C-End
+            // from a deep scroll can repaint for longer than a fixed sleep,
+            // and a stale capture would anchor the next settle against the
+            // pre-restore screen.
+            + "stab() { cur=$(capture); p=0; while [ $p -lt \(pageSettlePollCap) ]; do "
+            + "sleep 0.05; nxt=$(capture); [ \"$nxt\" = \"$cur\" ] && break; "
+            + "cur=\"$nxt\"; p=$((p+1)); done; }; "
+            + "found=0; top=0; short=0; keep=0; sent=0; osc=0; fbused=0; dir=u; "
             + "seen=0; lastr=0; "
             + "tgt=\"$n1\"; "
             + "trap 'keep=1; restore; exit 1' HUP INT TERM; "
             + "trap 'if [ \"$keep\" != 1 ]; then restore; fi' EXIT; "
+            // Swap in the fallback needle and restart the walk from live —
+            // the only position where the upward twin-count semantics are
+            // known-valid. The fallback family can be wider, so its own
+            // twin count comes along.
+            + "swapfb() { tgt=\"$n2\"; k=$k2; fbused=1; osc=0; seen=0; lastr=0; dir=u; "
+            + "restore; stab; }; "
+            // One upward batch. Hitting scroll-top before the fallback has
+            // had its turn is a needle-mismatch signal, not a miss: an
+            // unmatched OLDEST message can never produce the older-pin
+            // crossings the other fallback trigger needs.
+            + "climb() { stepk \"$1\" PPage || return 1; "
+            + "if [ \"$moved\" = 0 ]; then "
+            + "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then swapfb; stepk 1 PPage || return 1; "
+            + "else top=1; return 1; fi; fi; }; "
             // Normalize the start: the user may have scrolled the pager
             // anywhere by hand, and from an unknown position the oracle's
             // first direction would be a guess (a top start stalled it).
             // From live, one PgUp always enters the pager with row-1 pin
             // semantics in force — the LIVE view's row 1 is ordinary
             // transcript and must not be classified.
-            + "restore; sleep 0.1; "
-            + "cur=$(capture); "
+            + "restore; stab; "
             + "stepk 1 PPage || true; "
-            + "while [ $sent -lt \(jumpSendBudget) ]; do "
+            + "while [ $sent -lt \(sendBudget) ]; do "
             + "classify; "
             + "printf 'MPXJ_T %s %s %s %s\\n' \"$sent\" \"$pin\" \"$real\" \"$seen\"; "
-            + "[ \"$h\" -ge 12 ] 2>/dev/null || break; "
+            + "[ \"$h\" -ge 12 ] 2>/dev/null || { short=1; break; }; "
             + "if [ \"$real\" -gt 0 ]; then "
             // Rows only drift DOWN while climbing, so a topmost match that
             // appeared from nothing or jumped upward is a twin seen for the
@@ -661,39 +753,41 @@ enum AgentSessionHistory {
             + "if [ \"$dir\" = u ]; then "
             + "if [ \"$lastr\" = 0 ] || [ \"$real\" -lt \"$lastr\" ]; then "
             + "seen=$((seen+1)); fi; lastr=$real; fi; "
-            + "if [ \"$seen\" -gt \"$k\" ]; then "
+            // A unique target lands on ANY sighting — a batched climb can
+            // cross the header between captures, and the recovery descent
+            // then sights the row while dir=d, where the upward count
+            // never runs (a k=0 walk once re-climbed a 90-page turn twice
+            // over exactly this). Only twins need the count discipline.
+            + "if [ \"$k\" = 0 ] || [ \"$seen\" -gt \"$k\" ]; then "
             + "if [ \"$real\" -le $((h / 2)) ]; then found=1; break; fi; "
             + "dir=d; stepk 1 NPage || break; "
             + "[ \"$moved\" = 0 ] && break; continue; fi; "
             // A newer twin: climb through it.
-            + "dir=u; stepk \(bodyBatch) PPage || break; "
-            + "[ \"$moved\" = 0 ] && { top=1; break; }; continue; fi; "
+            + "dir=u; climb \(bodyBatch) || break; continue; fi; "
             + "lastr=0; "
             + "if [ \"$pin\" = \"$t\" ]; then "
-            + "dir=u; stepk \(bodyBatch) PPage || break; "
-            + "[ \"$moved\" = 0 ] && { top=1; break; }; continue; fi; "
+            + "dir=u; climb \(bodyBatch) || break; continue; fi; "
             + "if [ \"$pin\" -gt \"$t\" ] 2>/dev/null; then "
-            + "dir=u; stepk \(farBatch) PPage || break; "
-            + "[ \"$moved\" = 0 ] && { top=1; break; }; continue; fi; "
+            + "dir=u; climb \(farBatch) || break; continue; fi; "
             + "if [ \"$pin\" -gt 0 ] 2>/dev/null; then "
             // A known turn OLDER than the target owns the top row: we are
             // above the message (an overshoot, or a needle mismatch).
             + "if [ \"$dir\" = u ]; then osc=$((osc+1)); fi; "
             + "if [ $osc -ge 2 ]; then "
             + "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then "
-            + "tgt=\"$n2\"; fbused=1; osc=0; seen=0; lastr=0; else break; fi; fi; "
+            + "swapfb; stepk 1 PPage || break; continue; else break; fi; fi; "
             + "dir=d; stepk 1 NPage || break; "
             + "[ \"$moved\" = 0 ] && break; continue; fi; "
             // Unknown ❯ turn (wrapper/meta or older than the list) or the
             // banner region: keep the current direction.
-            + "if [ \"$dir\" = u ]; then stepk \(bodyBatch) PPage || break; "
-            + "[ \"$moved\" = 0 ] && { top=1; break; }; "
+            + "if [ \"$dir\" = u ]; then climb \(bodyBatch) || break; "
             + "else stepk 1 NPage || break; [ \"$moved\" = 0 ] && break; fi; "
             + "done; "
             + "if [ \"$found\" = 1 ]; then "
             + "keep=1; trap - HUP INT TERM EXIT; printf 'MPXJ_FOUND %s\\n' \"$sent\"; else "
             + "keep=1; restore; trap - HUP INT TERM EXIT; "
-            + "if [ \"$top\" = 1 ]; then printf 'MPXJ_TOP %s\\n' \"$sent\"; "
+            + "if [ \"$short\" = 1 ]; then printf 'MPXJ_SHORT %s\\n' \"$sent\"; "
+            + "elif [ \"$top\" = 1 ]; then printf 'MPXJ_TOP %s\\n' \"$sent\"; "
             + "else printf 'MPXJ_EXHAUSTED %s\\n' \"$sent\"; fi; fi; true"
     }
 
@@ -701,6 +795,10 @@ enum AgentSessionHistory {
         case found(pages: Int)
         case top(pages: Int)
         case exhausted(pages: Int)
+        /// The pane is too short for the header oracle (docked keyboard on
+        /// a phone in landscape) — an actionable state, not a missing
+        /// message.
+        case short(pages: Int)
     }
 
     static func parseJumpFind(_ output: String) -> JumpFindResult? {
@@ -711,6 +809,7 @@ enum AgentSessionHistory {
             case "MPXJ_FOUND": return .found(pages: pages)
             case "MPXJ_TOP": return .top(pages: pages)
             case "MPXJ_EXHAUSTED": return .exhausted(pages: pages)
+            case "MPXJ_SHORT": return .short(pages: pages)
             default: continue
             }
         }

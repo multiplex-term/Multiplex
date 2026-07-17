@@ -252,6 +252,8 @@ final class AgentSessionHistoryTests: XCTestCase {
     }
 
     func testNeedleCapsAtPaneWidthAndMaximum() {
+        // A single unbroken token keeps the hard cut — Claude hard-splits
+        // it on the row too.
         let long = String(repeating: "a", count: 200)
         XCTAssertEqual(
             AgentSessionHistory.needle(for: message(long), paneColumns: 100)?.count,
@@ -259,7 +261,58 @@ final class AgentSessionHistoryTests: XCTestCase {
         )
         XCTAssertEqual(
             AgentSessionHistory.needle(for: message(long), paneColumns: 40)?.count,
-            36
+            34
+        )
+    }
+
+    func testNeedleRetreatsToWordBoundaryAtNarrowPanes() {
+        // 44-column iPhone pane, budget 38. The real transcript row wraps
+        // "@desktop-…-desktop Implement…" after the 36-column token, so a
+        // mid-word needle ("…-desktop Im") could never prefix-match it —
+        // the verified iPhone failure.
+        let line = "@desktop-apps/bricks-project-desktop Implement new BottomArea"
+        XCTAssertEqual(
+            AgentSessionHistory.needle(for: message(line), paneColumns: 44),
+            "@desktop-apps/bricks-project-desktop"
+        )
+        let prose = "top bar: right area toggle button always position on right"
+        XCTAssertEqual(
+            AgentSessionHistory.needle(for: message(prose), paneColumns: 44),
+            "top bar: right area toggle button"
+        )
+        // Wide panes still cap at the 60-column maximum, boundary-aligned.
+        XCTAssertEqual(
+            AgentSessionHistory.needle(for: message(line), paneColumns: 100),
+            "@desktop-apps/bricks-project-desktop Implement new"
+        )
+        // A first line that fits its budget whole is untouched.
+        XCTAssertEqual(
+            AgentSessionHistory.needle(for: message(prose), paneColumns: 100),
+            prose
+        )
+    }
+
+    func testWrapSafePrefixKeepsBoundaryAlignedCuts() {
+        // The budget edge falls right before a space: the hard cut IS the
+        // word boundary, nothing to retreat.
+        XCTAssertEqual(
+            AgentSessionHistory.wrapSafePrefix("alpha beta gamma", maxColumns: 10),
+            "alpha beta"
+        )
+        // Mid-word cut retreats to the last space.
+        XCTAssertEqual(
+            AgentSessionHistory.wrapSafePrefix("alpha beta gamma", maxColumns: 12),
+            "alpha beta"
+        )
+        // A retreat below four characters keeps the hard cut instead.
+        XCTAssertEqual(
+            AgentSessionHistory.wrapSafePrefix("ok Megatoken", maxColumns: 8),
+            "ok Megat"
+        )
+        // Fitting whole never cuts.
+        XCTAssertEqual(
+            AgentSessionHistory.wrapSafePrefix("fits whole", maxColumns: 40),
+            "fits whole"
         )
     }
 
@@ -278,8 +331,10 @@ final class AgentSessionHistoryTests: XCTestCase {
             for: message(String(repeating: "abcdefghij ", count: 10)),
             paneColumns: 100
         )
-        XCTAssertEqual(values.count, 2)
-        XCTAssertEqual(values[0].count, AgentSessionHistory.needleMaximum)
+        XCTAssertEqual(values, [
+            "abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij",
+            "abcdefghij abcdefghij",
+        ])
         XCTAssertLessThanOrEqual(values[1].count, AgentSessionHistory.needleFallbackMaximum)
         XCTAssertTrue(values[0].hasPrefix(values[1]))
     }
@@ -287,8 +342,9 @@ final class AgentSessionHistoryTests: XCTestCase {
     func testNeedleCountsWideCharactersDouble() {
         let wide = String(repeating: "個", count: 50)
         let needle = AgentSessionHistory.needle(for: message(wide), paneColumns: 44)
-        // 40-column budget → 20 double-width characters.
-        XCTAssertEqual(needle?.count, 20)
+        // 38-column budget → 19 double-width characters; an unbroken CJK
+        // run keeps the hard cut (the row hard-splits it too).
+        XCTAssertEqual(needle?.count, 19)
     }
 
     func testNeedleRefusesTinyMessages() {
@@ -365,17 +421,34 @@ final class AgentSessionHistoryTests: XCTestCase {
         // Navigation branches: landing threshold, inside-body batch, far
         // scan, overshoot descent, fallback swap after two crossings.
         XCTAssertTrue(command.contains("-le $((h / 2))"))
-        XCTAssertTrue(command.contains("stepk \(AgentSessionHistory.oracleBodyBatch) PPage"))
-        XCTAssertTrue(command.contains("stepk \(AgentSessionHistory.oracleFarBatch) PPage"))
+        XCTAssertTrue(command.contains("climb \(AgentSessionHistory.oracleBodyBatch) ||"))
+        XCTAssertTrue(command.contains("climb \(AgentSessionHistory.oracleFarBatch) ||"))
         XCTAssertTrue(command.contains("[ \"$pin\" -gt \"$t\" ]"))
-        XCTAssertTrue(command.contains("tgt=\"$n2\"; fbused=1"))
+        // The fallback swap restarts from live with its own twin count, and
+        // hitting scroll-top before the swap takes the same retry (an
+        // unmatched oldest message never produces older-pin crossings).
+        XCTAssertTrue(command.contains(
+            "swapfb() { tgt=\"$n2\"; k=$k2; fbused=1; osc=0; seen=0; lastr=0; dir=u; "
+                + "restore; stab; }"
+        ))
+        // A unique target lands on any sighting; only twins gate on the
+        // upward count.
+        XCTAssertTrue(command.contains("if [ \"$k\" = 0 ] || [ \"$seen\" -gt \"$k\" ]; then"))
+        XCTAssertTrue(command.contains(
+            "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then swapfb; stepk 1 PPage || return 1; "
+                + "else top=1; return 1; fi"
+        ))
+        // A too-short pane is reported as its own state, not a missing
+        // message.
+        XCTAssertTrue(command.contains("{ short=1; break; }"))
+        XCTAssertTrue(command.contains("MPXJ_SHORT"))
         XCTAssertTrue(command.contains("-lt \(AgentSessionHistory.jumpSendBudget)"))
         XCTAssertTrue(command.contains("-lt \(AgentSessionHistory.pageSettlePollCap)"))
         XCTAssertTrue(command.contains("trap 'keep=1; restore; exit 1' HUP INT TERM"))
         XCTAssertTrue(command.contains("C-End"))
         // A hand-scrolled pager start is unknowable; the walk normalizes to
         // live before its first PgUp.
-        let normalizeRange = command.range(of: "restore; sleep 0.1; ")
+        let normalizeRange = command.range(of: "restore; stab; ")
         let loopRange = command.range(of: "while [ $sent -lt ")
         XCTAssertNotNil(normalizeRange)
         XCTAssertNotNil(loopRange)
@@ -408,14 +481,17 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertTrue(command.contains("if [ \"$fam\" = 1 ]; then pin=$t; fi"))
         // …and every upward batch stays under one viewport so no twin row
         // can slip through between captures.
-        XCTAssertTrue(command.contains("stepk \(AgentSessionHistory.twinSafeBatch) PPage"))
-        XCTAssertFalse(command.contains("stepk \(AgentSessionHistory.oracleFarBatch) PPage"))
-        // Equal-length duplicate needles embed in deterministic ordinal
-        // order.
-        XCTAssertTrue(
-            command.range(of: "'2\tcommit'")!.lowerBound
-                < command.range(of: "'5\tcommit'")!.lowerBound
-        )
+        XCTAssertTrue(command.contains("climb \(AgentSessionHistory.twinSafeBatch) ||"))
+        XCTAssertFalse(command.contains("climb \(AgentSessionHistory.oracleFarBatch) ||"))
+        // Twin needles embed as the 0 sentinel: a sticky header matching
+        // one cannot say WHICH twin owns the turn, and an ordinal would
+        // steer the walk (the oldest twin's index read as "overshot →
+        // descend" straight from the live view). The unique needle keeps
+        // its ordinal.
+        XCTAssertFalse(command.contains("'2\tcommit'"))
+        XCTAssertFalse(command.contains("'5\tcommit'"))
+        XCTAssertEqual(command.components(separatedBy: "'0\tcommit'").count - 1, 2)
+        XCTAssertTrue(command.contains("'4\ttop bar: right area toggle'"))
 
         // A unique target keeps the fast batches.
         let unique = AgentSessionHistory.jumpFindCommand(
@@ -424,8 +500,60 @@ final class AgentSessionHistoryTests: XCTestCase {
             targetIndex: 0,
             targetNeedles: ["only prompt"]
         )
-        XCTAssertTrue(unique.contains("k=0;"))
-        XCTAssertTrue(unique.contains("stepk \(AgentSessionHistory.oracleFarBatch) PPage"))
+        XCTAssertTrue(unique.contains("k=0; k2=0;"))
+        XCTAssertTrue(unique.contains("climb \(AgentSessionHistory.oracleFarBatch) ||"))
+
+        // A target unique under the primary needle but conflated under the
+        // shorter fallback must already pace for twins: the fallback can
+        // swap in mid-walk, and its viewport guarantee has to hold from
+        // the first batch.
+        let fallbackFamily = AgentSessionHistory.jumpFindCommand(
+            sessionID: "$0",
+            needles: [
+                .init(index: 0, text: "deploy the staging environment now"),
+                .init(index: 2, text: "deploy the staging environment again"),
+            ],
+            targetIndex: 0,
+            targetNeedles: ["deploy the staging environment now", "deploy the staging"],
+            newerTwinCount: 0,
+            fallbackTwinCount: 1
+        )
+        XCTAssertTrue(fallbackFamily.contains("k=0; k2=1;"))
+        XCTAssertTrue(fallbackFamily.contains("climb \(AgentSessionHistory.twinSafeBatch) ||"))
+        XCTAssertFalse(fallbackFamily.contains("climb \(AgentSessionHistory.oracleFarBatch) ||"))
+    }
+
+    func testJumpSendBudgetScalesWithPaneGeometry() {
+        // The desktop calibration point keeps the base.
+        XCTAssertEqual(
+            AgentSessionHistory.jumpSendBudget(paneWidth: 100, paneHeight: 30),
+            AgentSessionHistory.jumpSendBudget
+        )
+        // An iPhone-portrait pane rewraps the transcript into ~2.3× the
+        // rows.
+        XCTAssertEqual(
+            AgentSessionHistory.jumpSendBudget(paneWidth: 44, paneHeight: 41),
+            909
+        )
+        // Narrow AND short (docked keyboard) hits the ceiling.
+        XCTAssertEqual(
+            AgentSessionHistory.jumpSendBudget(paneWidth: 44, paneHeight: 18),
+            AgentSessionHistory.jumpSendBudgetMax
+        )
+        // Wider than the calibration never shrinks below the base.
+        XCTAssertEqual(
+            AgentSessionHistory.jumpSendBudget(paneWidth: 180, paneHeight: 60),
+            AgentSessionHistory.jumpSendBudget
+        )
+        // The scaled budget is what the built command runs with.
+        let command = AgentSessionHistory.jumpFindCommand(
+            sessionID: "$0",
+            needles: [.init(index: 0, text: "only prompt")],
+            targetIndex: 0,
+            targetNeedles: ["only prompt"],
+            sendBudget: 909
+        )
+        XCTAssertTrue(command.contains("while [ $sent -lt 909 ]"))
     }
 
     func testJumpFindCommandSurvivesEmptyOracle() {
@@ -451,6 +579,10 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertEqual(
             AgentSessionHistory.parseJumpFind("MPXJ_EXHAUSTED 40"),
             .exhausted(pages: 40)
+        )
+        XCTAssertEqual(
+            AgentSessionHistory.parseJumpFind("MPXJ_T 1 -1 0 0\nMPXJ_SHORT 1"),
+            .short(pages: 1)
         )
         XCTAssertNil(AgentSessionHistory.parseJumpFind("nothing"))
     }

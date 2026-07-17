@@ -904,17 +904,36 @@ final class TerminalSessionController {
                 )
                 // Identical prompts ("commit") share one needle: tell the
                 // walk how many NEWER twins to climb past so it lands on
-                // the requested one, not the nearest.
+                // the requested one, not the nearest. Prefix matching, not
+                // equality — the walk's row sightings are prefix matches,
+                // so a newer "commit everything" row would count as a
+                // sighting of target "commit" and must be climbed through
+                // too. The shorter fallback needle can conflate MORE
+                // prompts, so it carries its own count for the mid-walk
+                // swap.
                 let newerTwins = entries.filter {
-                    $0.index > message.ordinal && $0.text == targetPrimary
+                    $0.index > message.ordinal && $0.text.hasPrefix(targetPrimary)
                 }.count
+                let fallbackTwins = targetNeedles.dropFirst().first.map { fb in
+                    entries.filter {
+                        $0.index > message.ordinal && $0.text.hasPrefix(fb)
+                    }.count
+                }
                 let findOutput = try await connection.exec(
                     AgentSessionHistory.jumpFindCommand(
                         sessionID: prologue.sessionID,
                         needles: entries,
                         targetIndex: message.ordinal,
                         targetNeedles: targetNeedles,
-                        newerTwinCount: newerTwins
+                        newerTwinCount: newerTwins,
+                        fallbackTwinCount: fallbackTwins,
+                        // Narrow/short panes rewrap the transcript into far
+                        // more rows; the runaway stop scales with the pane
+                        // the prologue just measured.
+                        sendBudget: AgentSessionHistory.jumpSendBudget(
+                            paneWidth: prologue.paneWidth,
+                            paneHeight: prologue.capture.count
+                        )
                     )
                 )
                 switch AgentSessionHistory.parseJumpFind(findOutput) {
@@ -923,6 +942,8 @@ final class TerminalSessionController {
                 case .top, .exhausted:
                     // The remote script already restored the live view.
                     return .failed("NOT IN THE VISIBLE TRANSCRIPT")
+                case .short:
+                    return .failed("TERMINAL TOO SHORT TO JUMP")
                 case nil:
                     return .failed("SEARCH FAILED")
                 }

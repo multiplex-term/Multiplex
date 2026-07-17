@@ -585,20 +585,45 @@ views.
   older → single PgDn approach from above, unknown pins ride the current
   direction. Landing is deterministic: accept only a real row in the TOP
   half; a lower sighting takes one PgDn (half-page steps cannot skip the
-  window). Two upward crossings past the target without its row = needle
-  mismatch → one retry with the 24-column fallback, then an honest miss.
-  The 400-send budget is a runaway stop, not a search radius — there is no
-  blind page cap anymore. Misses, cancellation traps, and BACK TO LIVE use
-  Ctrl+End in constant time, **never Esc** — Esc can interrupt a running
-  turn. Long prompts render as ONE `…`-truncated row at pane width, so
-  needles are ≤60-column normalized first-line prefixes (wide glyphs cost
-  two columns); pure-paste messages can match nothing and remain peek-only.
-  **Identical prompts ("commit") are counted from the bottom**: family pins
-  always read as the target's turn, each twin's row is counted once at its
-  first appearance while climbing, and the (newer-twin-count + 1)-th
-  sighting is the requested one — with every upward batch capped under one
-  viewport (`twinSafeBatch`) so a twin row can never slip between captures;
-  counting only happens on upward motion. Slash commands are actions,
+  window) — and a UNIQUE target lands on any sighting, descent included:
+  batched climbs can cross the header between captures, and the recovery
+  descent sights the row while the upward twin count isn't running (a k=0
+  walk once re-climbed a 90-page turn twice over exactly this). Two upward
+  crossings past the target without its row = needle mismatch → one retry
+  with the 24-column fallback; hitting scroll-top with the fallback unused
+  takes the same retry (an unmatched OLDEST message never produces those
+  crossings — the original iPhone blind spot). Both retries restart from
+  live, so upward twin counting stays valid. The send budget is a runaway
+  stop, not a search radius — base 400 (calibrated ~100×30) scaled by
+  `jumpSendBudget(paneWidth:paneHeight:)` up to 1600: a 44-column pane
+  rewraps the same transcript into ~2.3× the rows (a real iPhone jump took
+  335 sends where desktop took 61), and a docked keyboard shrinks each
+  half-page step. Under 12 rows the walk reports `MPXJ_SHORT` → "TERMINAL
+  TOO SHORT TO JUMP", not a fake miss. Misses, cancellation traps, and
+  BACK TO LIVE use Ctrl+End in constant time, **never Esc** — Esc can
+  interrupt a running turn; every restore-then-capture polls to stability
+  (`stab`), because a deep C-End repaint outlives any fixed sleep.
+  **Only the STICKY header flattens a prompt into one `…`-truncated row
+  (text budget = width − 4); a REAL transcript row renders the full body
+  word-wrapped** — desktop panes masked this because first lines under
+  ~96 columns never wrap. Needles are therefore wrap-safe: normalized
+  first-line prefixes cut to min(width − 6, 60) columns and then retreated
+  to a word boundary (`wrapSafePrefix`; wide glyphs cost two columns; an
+  unbroken leading token keeps the hard cut — Claude hard-splits those on
+  the row too); pure-paste messages can match nothing and remain
+  peek-only. **Identical prompts ("commit") are counted from the bottom**:
+  family pins always read as the target's turn, each twin's row is counted
+  once at its first appearance while climbing, and the
+  (newer-twin-count + 1)-th sighting is the requested one — with every
+  upward batch capped under one viewport (`twinSafeBatch`) so a twin row
+  can never slip between captures; counting only happens on upward motion.
+  Twin needles embed in the oracle index as the 0 sentinel — a sticky
+  matching a shared needle cannot say WHICH twin owns the turn, and the
+  oldest twin's ordinal once read as "overshot → descend" straight from
+  the live view. Twin counts match by PREFIX (a newer "commit everything"
+  row sights as target "commit" and must be climbed through), and the
+  24-column fallback carries its own, possibly wider, count for the
+  mid-walk swap. Slash commands are actions,
   not prompts: the file records them BOTH as bare "/cmd" user lines and as
   `<command-…>` wrappers (either tag order), and all are filtered from the
   list. **Only the typed `/compact` line is a transcript-reset boundary**
