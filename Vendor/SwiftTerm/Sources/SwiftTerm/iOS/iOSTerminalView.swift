@@ -780,15 +780,45 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         gestureRecognizer.modifierFlags.contains(.shift) && !terminal.mouseShiftCapture
     }
 
+    /// Multiplex patch: a visible local selection is app-side UI painted over
+    /// the remote screen, so any tap while one is active dismisses it and is
+    /// consumed — before link opening and before mouse reporting. Previously
+    /// the dismissal only lived in singleTap's mouse-off branch: with mouse
+    /// tracking on (tmux `mouse on`, CLI agents, vim) the tap was forwarded
+    /// to the remote as a click and the highlight could never be cancelled by
+    /// touch — and pans kept extending the selection, since an active
+    /// selection owns the drag. Returns true when a selection was dismissed.
+    @discardableResult
+    func dismissActiveLocalSelection () -> Bool {
+        guard selection.active else { return false }
+        selection.selectNone()
+        disableSelectionPanGesture()
+        if UIMenuController.shared.isMenuVisible {
+            UIMenuController.shared.hideMenu()
+        }
+        queuePendingDisplay()
+        return true
+    }
+
     @objc func singleTap (_ gestureRecognizer: UITapGestureRecognizer)
     {
-        if isFirstResponder {
-            guard gestureRecognizer.view != nil else { return }
+        guard gestureRecognizer.view != nil else { return }
 
-            if gestureRecognizer.state != .ended {
-                return
+        if gestureRecognizer.state != .ended {
+            return
+        }
+
+        // Multiplex patch: the cancel tap also works while the terminal is
+        // not first responder (keyboard dismissed) — it dismisses and
+        // refocuses in one tap instead of needing a second one.
+        if dismissActiveLocalSelection() {
+            if !isFirstResponder {
+                let _ = becomeFirstResponder()
             }
+            return
+        }
 
+        if isFirstResponder {
             let tapHit = calculateTapHit(gesture: gestureRecognizer).grid
             if let result = linkForClick(at: tapHit, hasCommandModifier: commandActive) {
                 terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
@@ -802,10 +832,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                     sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
                 }
             } else {
-                if selection.active {
-                    selection.selectNone()
-                    disableSelectionPanGesture()
-                }
                 if UIMenuController.shared.isMenuVisible {
                     UIMenuController.shared.hideMenu()
                 } else {
@@ -833,8 +859,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
 
         if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode.sendButtonPress() {
+            // Multiplex patch: a fast re-tap on an active selection lands
+            // here (singleTap requires this recognizer to fail) — it must
+            // dismiss the selection, never reach the remote.
+            if dismissActiveLocalSelection() {
+                return
+            }
             sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
-            
+
             if terminal.mouseMode.sendButtonRelease() {
                 sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
             }
@@ -858,6 +890,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
 
         if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode.sendButtonPress() {
+            // Multiplex patch: same dismissal rule as singleTap/doubleTap.
+            if dismissActiveLocalSelection() {
+                return
+            }
             sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
 
             if terminal.mouseMode.sendButtonRelease() {

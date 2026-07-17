@@ -269,7 +269,7 @@ views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5), patched
     to declare the `NIO` product it imports (Xcode 27's module resolution
     rejects the undeclared import). Also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.14.0 (rev `849e8a4`), patched four times (all marked
+  - `SwiftTerm` — 1.14.0 (rev `849e8a4`), patched five times (all marked
     `Multiplex patch`):
     `keyboardType` is settable (upstream is get-only), and Multiplex keeps it
     at `.default` so the system preserves the user's selected language and
@@ -279,7 +279,13 @@ views.
     its own scrollback), DECCKM-aware arrows in the alternate screen with
     mouse off (`performRemoteScroll`; the scroll view's own pan is disabled
     while remote scroll applies, so plain-shell tabs keep native local
-    scrollback); and on iOS-app-on-Mac ("Designed for iPad") hardware
+    scrollback); a tap while a local text selection is active always
+    dismisses it and is consumed (`dismissActiveLocalSelection`, checked
+    before link opening and mouse reporting, and mirrored into the double/
+    triple-tap mouse branches a fast re-tap lands in) — upstream only cleared
+    the selection in the mouse-off single-tap path, so with mouse tracking on
+    the tap went to the remote as a click and the highlight was uncancellable
+    by touch; and on iOS-app-on-Mac ("Designed for iPad") hardware
     Escape is claimed by a priority no-op `UIKeyCommand` on iOS-app-on-Mac,
     preventing the Mac text system's default `cancelOperation:` from resigning
     terminal/window focus while SwiftTerm's normal `pressesBegan` path sends
