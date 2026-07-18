@@ -857,9 +857,9 @@ automation or the App Store Connect UI is required.
 
 ## Conventions
 
-- Bundle id `app.multiplexterm.multiplex`; Release device families remain iPad
-  + Vision Pro, while Debug also includes iPhone for shell verification. Min
-  visionOS 1.0 / iOS 17.
+- Bundle id `app.multiplexterm.multiplex`; device families are iPhone + iPad
+  + Vision Pro in every configuration (one universal iOS binary — iPhone
+  always runs the single-window shell). Min visionOS 1.0 / iOS 17.
 - Design tokens live in `Theme.swift` — the TALLY identity: graphite chassis
   (`#17181A`), screens darker than their frames (`#0A0B0C`), tally red
   (`#E5484D`) spent ONLY on live state and always captioned. Use tokens, don't

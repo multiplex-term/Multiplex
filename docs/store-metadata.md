@@ -14,9 +14,9 @@ behavior, or App Review flow changes.
 | Apple ID | `6790074057` |
 | SKU | `multiplex` |
 | Bundle ID | `app.multiplexterm.multiplex` |
-| Platforms | iPadOS and visionOS in one app record |
+| Platforms | iOS (iPhone + iPad) and visionOS in one app record — the iPhone joined the universal iOS binary 2026-07-18 (single-window shell) and ships with the next binary |
 | Current version | 1.0 |
-| Minimum OS | iPadOS 17.0; visionOS 1.0 |
+| Minimum OS | iOS 17.0; visionOS 1.0 |
 | Target release model | Free download with one non-consumable Pro unlock; confirm the base-app price manually |
 | Primary category | Developer Tools |
 | Secondary category | Utilities |
@@ -173,8 +173,12 @@ After regeneration:
 Public product screenshots follow
 [`docs/appstore/screenshots-plan.md`](appstore/screenshots-plan.md) and live in
 `fastlane/screenshots/en-US/`; do not mix the two screenshot sets.
-As of 2026-07-13 the public gallery set has not been generated or uploaded—the
-directory contains only its placeholder.
+The plan was re-worked 2026-07-18 for three device classes — Vision Pro
+3840×2160, iPad 13″ 2752×2064, and the new iPhone 6.9″ 1320×2868 portrait
+set — and for the features added since 2026-07-11 (widgets/App Shortcuts,
+agent HISTORY, file attach, the light appearance). As of 2026-07-18 the
+public gallery set has not been generated or uploaded—the directory contains
+only its placeholder.
 
 ## Fastlane and manual boundaries
 
@@ -188,7 +192,7 @@ can still be permission-gated or require App Store Connect UI work.
 | --- | --- |
 | App listing metadata and review notes | `bundle exec fastlane store_metadata` |
 | Public App Store screenshots | `bundle exec fastlane store_screenshots` |
-| iPadOS + visionOS TestFlight binaries | `bundle exec fastlane beta` |
+| iOS (iPhone + iPad) + visionOS TestFlight binaries | `bundle exec fastlane beta` |
 | IAP metadata and IAP review screenshot | Already configured; manual ASC or custom Spaceship/API for future changes |
 | App Privacy questionnaire | App Store Connect UI |
 | Age Rating questionnaire | App Store Connect UI |

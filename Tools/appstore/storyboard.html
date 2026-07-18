@@ -36,14 +36,20 @@
     box-shadow: 0 calc(var(--u) * .5) calc(var(--u) * 2.4) rgba(0,0,0,.55);
   }
 
-  /* iPad: chassis mat, inset screen, UMD docked under the inset */
-  .frame.ipad { display: flex; flex-direction: column; padding: calc(var(--u) * 1.8); gap: 0; }
-  .frame.ipad .inset {
-    position: relative; flex: 1; overflow: hidden;
+  /* iPad + iPhone: chassis mat, inset screen, UMD docked beneath.
+     The inset keeps the raw capture's exact aspect (--rawAR) so a real
+     capture is uniformly downscaled, never cropped — cover-fitting a
+     2752×2064 raw into the mat would shave ~90 px off the deck header
+     and the key rail. The mat absorbs the difference as chassis. */
+  .frame.ipad, .frame.iphone { display: flex; flex-direction: column; gap: 0; }
+  .frame.ipad   { padding: calc(var(--u) * 1.8); }
+  .frame.iphone { padding: calc(var(--u) * 1.2); }
+  .frame .inset {
+    position: relative; flex: 1; min-height: 0; overflow: hidden;
+    aspect-ratio: var(--rawAR); align-self: center; max-width: 100%;
     background: var(--screen); border: calc(var(--u) * .06) solid var(--bezelHi);
   }
-  .frame.ipad .inset img.raw { position: absolute; inset: 0; }
-  .frame.ipad .umd { width: 100%; }
+  .frame .inset img.raw { position: absolute; inset: 0; }
 
   /* the UMD bar — the app's under-monitor display carrying the caption */
   .umd {
@@ -51,6 +57,7 @@
     background: var(--bezel);
     border: calc(var(--u) * .06) solid var(--bezelHi);
     padding: calc(var(--u) * 1.1) calc(var(--u) * 1.6);
+    width: 100%;
   }
   .umd .headline {
     flex: 1; font-family: var(--caps); font-weight: 800; font-stretch: condensed;
@@ -72,6 +79,20 @@
   .lamp.needs { color: var(--caution); } .lamp.needs .dot { background: var(--caution); box-shadow: 0 0 calc(var(--u)*.9) var(--caution); }
   .lamp.plain { color: var(--signal2); } .lamp.plain .dot { background: var(--signal3); }
 
+  /* iPhone portrait: the row UMD can't fit a headline + telemetry side by
+     side at 1320 px, so the UMD stacks — headline row, then telemetry +
+     lamp on a second row. --u is w/50 there (not w/100) so the bar keeps
+     the same visual weight against a portrait frame. */
+  .frame.iphone .umd {
+    flex-direction: column; align-items: stretch; gap: calc(var(--u) * .5);
+    padding: calc(var(--u) * .9) calc(var(--u) * 1.1);
+  }
+  .frame.iphone .umd .headline { font-size: calc(var(--u) * 1.45); }
+  .frame.iphone .umd .subrow {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: calc(var(--u) * 1);
+  }
+
   /* missing capture → AWAITING CAPTURE (the app's own empty-state voice) */
   .frame .awaiting {
     position: absolute; inset: calc(var(--u) * 1.8);
@@ -79,12 +100,15 @@
     gap: calc(var(--u) * 1.2); text-align: center;
     border: calc(var(--u) * .06) dashed var(--bezelHi); background: var(--screen);
   }
-  .frame.ipad .awaiting { position: absolute; inset: 0; }
+  .frame .inset .awaiting { position: absolute; inset: 0; }
   .frame.missing img.raw { display: none; }
   .frame.missing .awaiting { display: flex; }
   .awaiting .mark { font-family: var(--mono); font-size: calc(var(--u) * 1.3); letter-spacing: .18em; color: var(--signal3); }
   .awaiting .file { font-family: var(--mono); font-size: calc(var(--u) * 1.0); color: var(--signal2); }
   .awaiting .stage { max-width: 72%; font-size: calc(var(--u) * 1.05); line-height: 1.5; color: var(--signal2); }
+  .frame.iphone .awaiting .stage { font-size: calc(var(--u) * .8); }
+  .frame.iphone .awaiting .file  { font-size: calc(var(--u) * .75); }
+  .frame.iphone .awaiting .mark  { font-size: calc(var(--u) * .95); }
 
   /* ---------- gallery chrome (not part of the render) ---------- */
   .gallery { max-width: 1040px; margin: 0 auto; padding: 48px 24px 96px; }
@@ -104,52 +128,123 @@
 <body>
 <script>
 // ============================================================================
-// Frame definitions — keep ids in sync with Tools/appstore/compose.sh.
-// Raw captures: Tools/appstore/raw/<id>.png  (see docs/appstore/screenshots-plan.md)
+// Frame definitions — keep ids + per-platform ORDER in sync with
+// Tools/appstore/compose.sh. Raw captures: Tools/appstore/raw/<platform>-<id>.png
+// (see docs/appstore/screenshots-plan.md).
+//
+// Shot copy rules: numbers must be true of the pixels; "PRO" appears in the
+// telemetry only when the surface shown is actually Pro-gated (history, mosh,
+// custom themes). The agent chip strip is free (10 taps/day), so it carries
+// no PRO mark.
 // ============================================================================
 const LAMP = { live: ["live", "LIVE"], needs: ["needs", "NEEDS YOU"], plain: ["plain", ""] };
 
-const SHOTS = [
-  { key: "wall",    headline: "Every tmux session, live on the wall",  telemetry: "2 HOSTS · 6 SESSIONS", lamp: "live",
-    stage: "Deck frontmost, 2 host rails, ~6 tiles with staged miniature content (editor, build ✓ lines, logs). One tile LIVE, the agent tile showing its glyph. Nothing behind the app." },
-  { key: "windows", headline: "A spatial window per session",          telemetry: "3 WINDOWS", lamp: "live", ipadHeadline: "Real scenes, Stage Manager ready",
-    stage: "visionOS: three terminals placed around the room at different depths, deck small at left. iPad: two scenes side-by-side in Stage Manager." },
-  { key: "agents",  headline: "Know when your agent needs you",        telemetry: "✳ CLAUDE CODE", lamp: "needs",
-    stage: "Wall with the agent tile in NEEDS YOU (run real claude, let it ask a question). Notification banner visible if you can catch it — that's the money pixel." },
-  { key: "strip",   headline: "One-tap agent commands",                telemetry: "/CLEAR · /COMPACT · STOP · PRO", lamp: "plain",
-    stage: "Attached session running real Claude Code, Pro chip strip visible at window bottom, keyboard hidden." },
-  { key: "mosh",    headline: "mosh built in — roam, sleep, resume",   telemetry: "UDP · RTT 18 MS", lamp: "live",
-    stage: "Host edit sheet with MOSH toggle on, an attached live session behind it." },
-  { key: "tabs",    headline: "Merge windows — shells stay live",      telemetry: "3 TABS · 1 WINDOW", lamp: "live",
-    stage: "One terminal window holding three tabs (source-label strip visible, one tally dot lit). Stage right after a Merge." },
-  { key: "themes",  headline: "Seven themes, plus your own",           telemetry: "GRUVBOX DARK", lamp: "plain",
-    stage: "Settings theme picker open over a Gruvbox-skinned terminal — shows the surface re-skinning while chrome stays chassis." },
-  { key: "shortcuts", headline: "tmux controls, right where you type", telemetry: "12 SHORTCUTS · ⌃B", lamp: "plain",
-    stage: "Attached live terminal with the custom TMUX dropdown open. visionOS: trigger in the UMD immediately right of + TAB. iPad: trigger at the trailing edge of the bottom key rail." },
-];
+// One definition per shot; `per` holds platform-specific overrides for
+// headline / telemetry / stage. Which platforms use a shot — and in what
+// store order — lives in ORDER below.
+const SHOTS = {
+  wall: {
+    headline: "Every tmux session, live on the wall", telemetry: "2 HOSTS · 6 SESSIONS", lamp: "live",
+    stage: "Deck frontmost, 2 host rails, ~6 tiles with staged miniature content (editor, build ✓ lines, logs). One tile LIVE, the agent tile showing its glyph. Nothing behind the app.",
+    per: { iphone: { stage: "The single-window shell's deck in portrait: both host rails in frame, staged miniatures, one attached tile's tally dot lit. Status bar overridden to 9:41." } },
+  },
+  windows: {
+    headline: "A spatial window per session", telemetry: "3 WINDOWS", lamp: "live",
+    stage: "visionOS: three terminals placed around the room at different depths, deck small at left.",
+    per: { ipad: { headline: "Real scenes, Stage Manager ready", stage: "Two Multiplex scenes side-by-side in Stage Manager (drag a second window out via a tab's context menu → New Window)." } },
+  },
+  agents: {
+    headline: "Know when your agent needs you", telemetry: "✳ CLAUDE CODE", lamp: "needs",
+    stage: "Wall with the agent tile in NEEDS YOU (run real claude, let it ask a question). Notification banner visible if you can catch it — that's the money pixel.",
+    per: { iphone: { stage: "Shell deck with the agent tile in NEEDS YOU and the notification banner landing over it — the away-from-the-desk pitch. Needs the one-time notification grant." } },
+  },
+  strip: {
+    headline: "One-tap agent commands — plus your own", telemetry: "/CLEAR · /COMPACT · STOP", lamp: "plain",
+    stage: "Attached session running real Claude Code, chip strip visible, keyboard hidden. Include one custom chip from Command Setup (e.g. a SHIP IT… command) so “plus your own” is true in the pixels.",
+  },
+  history: {
+    headline: "Jump back to any prompt", telemetry: "CLAUDE CODE · PRO", lamp: "plain",
+    stage: "Claude Code session with ≥5 real prompts submitted, HISTORY panel open (debug.msghistory notification) — full prompt text where the TUI truncates, JUMP visible on an older row.",
+  },
+  drop: {
+    headline: "Attach files straight into the session", telemetry: "CAMERA · PHOTOS · FILES", lamp: "plain",
+    stage: "Live Claude Code session with the FILE menu open (Camera / Photos / Files); ideally a just-delivered drop's typed path visible in the composer.",
+    per: { visionos: { telemetry: "PHOTOS · FILES · DRAG & DROP", stage: "Live Claude Code session with the FILE menu open (Photos / Files — no camera on visionOS); ideally a just-delivered drop's typed path visible in the composer." } },
+  },
+  widgets: {
+    headline: "The wall, on your Home Screen", telemetry: "WIDGETS · APP SHORTCUTS", lamp: "plain",
+    stage: "Home Screen on a plain dark wallpaper: Fleet Wall (large) + Host Monitor (medium, SHELL/AGENT keys visible). Run the app against the staged fleet first so the App Group snapshot fills; SEEN stamps visible. Widgets claim no liveness — the plain lamp is deliberate.",
+    per: {
+      visionos: { headline: "The wall, pinned in your space", stage: "visionOS 26 widget pinned near a wall of the environment, app closed. Experimental: if the sim can't stage widget placement, ship visionOS without this frame." },
+      iphone: { stage: "iPhone Home Screen, plain dark wallpaper: Host Monitor (medium, SHELL/AGENT keys) above Fleet Wall (medium). App run first so the snapshot fills; SEEN stamps visible." },
+    },
+  },
+  mosh: {
+    headline: "mosh built in — roam, sleep, resume", telemetry: "UDP · PRO", lamp: "live",
+    stage: "Host edit sheet with the MOSH toggle on, an attached live session behind it (or relaunch seeded from store-seed-mosh.json).",
+  },
+  tabs: {
+    headline: "Merge windows — shells stay live", telemetry: "3 TABS · 1 WINDOW", lamp: "live",
+    stage: "One terminal window holding three tabs (source-label strip visible, one tally dot lit). Stage right after a Merge.",
+  },
+  themes: {
+    headline: "Light or dark — ten themes, plus your own", telemetry: "TALLY FROST · LIGHT", lamp: "plain",
+    stage: "Appearance LIGHT (debug.appearance notification): Frost chassis, Settings theme rows over a Tally Frost terminal — the light identity is the differentiator.",
+    per: { visionos: { telemetry: "GRUVBOX DARK", stage: "Settings theme picker open over a Gruvbox-skinned terminal — surface re-skins live while chrome stays chassis (visionOS glass reads best dark)." } },
+  },
+  keys: {
+    headline: "A full terminal, phone-sized", telemetry: "ESC · CTRL · TAB · ARROWS · TMUX", lamp: "live",
+    stage: "iPhone only: attached tmux session, docked keyboard raised (debug.summon), TALLY key rail above it — ESC / latching CTRL / TAB, shell symbols, arrows, TMUX trigger all in frame.",
+  },
+};
+
+// Store order per device class (= file order after compose.sh).
+// visionOS/iPad run the shared 10-shot narrative; iPhone swaps `windows`
+// and `tabs` (no multi-window story in the one-window shell) for `keys`.
+const ORDER = {
+  visionos: ["wall", "windows", "agents", "strip", "history", "drop", "widgets", "mosh", "tabs", "themes"],
+  ipad:     ["wall", "windows", "agents", "strip", "history", "drop", "widgets", "mosh", "tabs", "themes"],
+  iphone:   ["wall", "keys", "agents", "strip", "history", "drop", "widgets", "mosh", "themes"],
+};
 
 const PLATFORMS = [
   { id: "visionos", w: 3840, h: 2160, label: "Apple Vision Pro" },
   { id: "ipad",     w: 2752, h: 2064, label: "iPad 13″ (landscape)" },
+  { id: "iphone",   w: 1320, h: 2868, label: "iPhone 6.9″ (portrait)" },
 ];
 
-function frameEl(shot, platform) {
+function resolve(shotKey, platformId) {
+  const base = SHOTS[shotKey];
+  const over = (base.per && base.per[platformId]) || {};
+  return { key: shotKey, ...base, ...over };
+}
+
+function frameEl(shotKey, platform) {
+  const shot = resolve(shotKey, platform.id);
   const f = document.createElement("div");
   f.className = `frame ${platform.id}`;
   f.style.width = platform.w + "px";
   f.style.height = platform.h + "px";
-  // --u: one UMD unit, proportional to frame width so both sizes stay in tune
-  f.style.setProperty("--u", (platform.w / 100) + "px");
+  // --u: one UMD unit. Landscape frames scale it from width (w/100); the
+  // portrait iPhone frame needs a larger unit (w/50) or the UMD vanishes
+  // against the tall image.
+  f.style.setProperty("--u", (platform.id === "iphone" ? platform.w / 50 : platform.w / 100) + "px");
+  // --rawAR: the capture's aspect, so matted insets never crop it.
+  f.style.setProperty("--rawAR", `${platform.w} / ${platform.h}`);
 
   const [lampClass, lampText] = LAMP[shot.lamp];
-  const headline = (platform.id === "ipad" && shot.ipadHeadline) ? shot.ipadHeadline : shot.headline;
   const raw = `raw/${platform.id}-${shot.key}.png`;
-  const umd = `
-    <div class="umd">
-      <div class="headline">${headline}</div>
-      <div class="telemetry">${shot.telemetry}</div>
-      ${lampText ? `<div class="lamp ${lampClass}"><span class="dot"></span>${lampText}</div>` : ""}
-    </div>`;
+  const lampHTML = lampText ? `<div class="lamp ${lampClass}"><span class="dot"></span>${lampText}</div>` : "";
+  const umd = platform.id === "iphone"
+    ? `<div class="umd">
+        <div class="headline">${shot.headline}</div>
+        <div class="subrow"><div class="telemetry">${shot.telemetry}</div>${lampHTML}</div>
+      </div>`
+    : `<div class="umd">
+        <div class="headline">${shot.headline}</div>
+        <div class="telemetry">${shot.telemetry}</div>
+        ${lampHTML}
+      </div>`;
   const awaiting = `
     <div class="awaiting">
       <div class="mark">AWAITING CAPTURE</div>
@@ -167,14 +262,14 @@ function frameEl(shot, platform) {
 }
 
 const params = new URLSearchParams(location.search);
-const want = params.get("frame"); // e.g. "visionos-wall" → exact-size render for compose.sh
+const want = params.get("frame"); // e.g. "iphone-wall" → exact-size render for compose.sh
 
 if (want) {
   const [pid, ...rest] = want.split("-");
-  const shot = SHOTS.find(s => s.key === rest.join("-"));
+  const key = rest.join("-");
   const platform = PLATFORMS.find(p => p.id === pid);
-  if (shot && platform) {
-    document.body.appendChild(frameEl(shot, platform));
+  if (platform && SHOTS[key] && ORDER[pid].includes(key)) {
+    document.body.appendChild(frameEl(key, platform));
   } else {
     document.body.textContent = `Unknown frame: ${want}`;
   }
@@ -185,21 +280,23 @@ if (want) {
     <h1>Multiplex — App Store screenshot compositor</h1>
     <p class="lede">Each store image is one monitor of the TALLY wall: the raw capture is
     the screen, and the app's own UMD bar carries the caption — compressed-caps headline,
-    mono telemetry, captioned tally lamp. Frames without a capture yet show their staging
-    notes in place of the screen.</p>
+    mono telemetry, captioned tally lamp. Three device classes: Vision Pro 3840×2160,
+    iPad 13″ 2752×2064, iPhone 6.9″ 1320×2868 portrait. Frames without a capture yet
+    show their staging notes in place of the screen.</p>
     <div class="how">1 &nbsp;Capture raws per docs/appstore/screenshots-plan.md → Tools/appstore/raw/&lt;platform&gt;-&lt;id&gt;.png<br>
 2 &nbsp;./compose.sh &nbsp;→ exact-size PNGs in out/, copied into fastlane/screenshots/en-US/<br>
-3 &nbsp;bundle exec fastlane store_screenshots</div>`;
+3 &nbsp;bundle exec fastlane store_screenshots &nbsp;(deliver infers the device class from pixel size)</div>`;
   const displayW = 960;
   for (const platform of PLATFORMS) {
-    SHOTS.forEach((shot, i) => {
+    ORDER[platform.id].forEach((key, i) => {
+      const shot = resolve(key, platform.id);
       const entry = document.createElement("div");
       entry.className = "entry";
       const scale = displayW / platform.w;
       entry.innerHTML = `
         <div class="meta">
           <span class="idx">${String(i + 1).padStart(2, "0")}</span>
-          <span class="name">${platform.id}-${shot.key}</span>
+          <span class="name">${platform.id}-${key}</span>
           <span class="dims">${platform.label} · ${platform.w}×${platform.h}</span>
         </div>`;
       const box = document.createElement("div");
@@ -209,7 +306,7 @@ if (want) {
       const inner = document.createElement("div");
       inner.className = "inner";
       inner.style.transform = `scale(${scale})`;
-      inner.appendChild(frameEl(shot, platform));
+      inner.appendChild(frameEl(key, platform));
       box.appendChild(inner);
       entry.appendChild(box);
       const note = document.createElement("p");

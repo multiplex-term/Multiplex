@@ -4,8 +4,18 @@ The design system, captions, and exact-size compositing live in
 **`Tools/appstore/storyboard.html`** (open it in a browser — gallery mode
 shows every frame with its staging notes; `compose.sh` renders the finals).
 This doc is the *capture* side: what to stage, how to shoot it, what to
-avoid. Final store sizes: **Vision Pro 3840×2160**, **iPad 13″ 2752×2064**
-(landscape — a terminal app is browsed and used in landscape).
+avoid. Final store sizes, one set per device class:
+
+| Class | Size | Capture device |
+| --- | --- | --- |
+| Apple Vision Pro | 3840×2160 | Vision Pro sim, full framebuffer |
+| iPad 13″ | 2752×2064 landscape | iPad Pro 13″ sim, native 1:1 |
+| iPhone 6.9″ | 1320×2868 **portrait** | iPhone 17 Pro Max sim, native 1:1 |
+
+iPad browses a terminal app in landscape; the iPhone shell is a portrait,
+one-window app — shoot it the way it's held. `deliver` infers the device
+class from pixel size, so all three sets live together in
+`fastlane/screenshots/en-US/` and upload through the one lane.
 
 ## The frame idea (why these don't look like anyone else's)
 
@@ -15,59 +25,107 @@ under-monitor display idiom) carries the marketing copy — compressed-caps
 headline on the left, captioned tally lamp + mono telemetry on the right,
 restating the feature as broadcast telemetry (`2 HOSTS · 6 SESSIONS ● LIVE`).
 No gradients, no floating device mockups, no emoji. On visionOS the UMD
-floats as a slab in the lower third of the environment capture; on iPad the
-capture sits inset in a chassis mat with the UMD beneath it — screens darker
-than the chassis that frames them, same inversion as the app.
+floats as a slab in the lower third of the environment capture; on iPad and
+iPhone the capture sits inset in a chassis mat with the UMD beneath it —
+screens darker than the chassis that frames them, same inversion as the app.
+The iPhone's portrait UMD stacks (headline row, telemetry + lamp row) so the
+bar keeps its weight at 1320 px. Matted insets keep the raw's exact aspect —
+uniform downscale, never a crop.
 
-## Shot list (order = store order; first three do the selling)
+## Shot list — visionOS + iPad (order = store order; first three sell)
 
 | # | id | Stage | Headline (UMD left) | Telemetry (UMD right) |
 | --- | --- | --- | --- | --- |
-| 1 | `wall` | Deck, 2 hosts, ~6 live tiles, one LIVE lamp, one NEEDS YOU tick | EVERY TMUX SESSION, LIVE ON THE WALL | `2 HOSTS · 6 SESSIONS` ● LIVE |
-| 2 | `windows` | 3 terminals placed around the room (visionOS) / Stage Manager scenes (iPad) | A SPATIAL WINDOW PER SESSION *(iPad: REAL SCENES, STAGE MANAGER READY)* | `3 WINDOWS` ● LIVE |
-| 3 | `agents` | Wall with agent glyph + NEEDS YOU badge; notification banner visible | KNOW WHEN YOUR AGENT NEEDS YOU | `✳ CLAUDE CODE` ● NEEDS YOU |
-| 4 | `strip` | Terminal running Claude Code, Pro chip strip visible | ONE-TAP AGENT COMMANDS | `/CLEAR · /COMPACT · STOP` · PRO |
-| 5 | `mosh` | Host sheet with MOSH toggle on + attached session behind | MOSH BUILT IN — ROAM, SLEEP, RESUME | `UDP · RTT 18 MS` ● LIVE |
-| 6 | `tabs` | One window, 3 tabs in the source-label strip | MERGE WINDOWS — SHELLS STAY LIVE | `3 TABS · 1 WINDOW` ● LIVE |
-| 7 | `themes` | Settings theme picker + a Gruvbox-skinned terminal behind | SEVEN THEMES, PLUS YOUR OWN | `GRUVBOX DARK` · THEME |
-| 8 | `shortcuts` | Attached terminal with the custom TMUX dropdown open | TMUX CONTROLS, RIGHT WHERE YOU TYPE | `12 SHORTCUTS · ⌃B` |
+| 1 | `wall` | Deck, 2 hosts, ~6 live tiles, one LIVE lamp, agent glyph | EVERY TMUX SESSION, LIVE ON THE WALL | `2 HOSTS · 6 SESSIONS` ● LIVE |
+| 2 | `windows` | 3 terminals around the room (visionOS) / Stage Manager scenes (iPad) | A SPATIAL WINDOW PER SESSION *(iPad: REAL SCENES, STAGE MANAGER READY)* | `3 WINDOWS` ● LIVE |
+| 3 | `agents` | Wall with agent glyph + NEEDS YOU; notification banner in frame | KNOW WHEN YOUR AGENT NEEDS YOU | `✳ CLAUDE CODE` ● NEEDS YOU |
+| 4 | `strip` | Real Claude Code, chip strip + one custom chip visible | ONE-TAP AGENT COMMANDS — PLUS YOUR OWN | `/CLEAR · /COMPACT · STOP` |
+| 5 | `history` | HISTORY panel open over a Claude session with ≥5 prompts | JUMP BACK TO ANY PROMPT | `CLAUDE CODE · PRO` |
+| 6 | `drop` | FILE menu open over a live agent session | ATTACH FILES STRAIGHT INTO THE SESSION | iPad `CAMERA · PHOTOS · FILES` / visionOS `PHOTOS · FILES · DRAG & DROP` |
+| 7 | `widgets` | Home Screen widgets (iPad) / widget pinned in the room (visionOS 26) | THE WALL, ON YOUR HOME SCREEN *(visionOS: PINNED IN YOUR SPACE)* | `WIDGETS · APP SHORTCUTS` |
+| 8 | `mosh` | Host sheet with MOSH toggle on + attached session behind | MOSH BUILT IN — ROAM, SLEEP, RESUME | `UDP · PRO` ● LIVE |
+| 9 | `tabs` | One window, 3 tabs in the source-label strip | MERGE WINDOWS — SHELLS STAY LIVE | `3 TABS · 1 WINDOW` ● LIVE |
+| 10 | `themes` | iPad: LIGHT appearance, Frost chassis + Tally Frost / visionOS: Gruvbox dark | LIGHT OR DARK — TEN THEMES, PLUS YOUR OWN | `TALLY FROST · LIGHT` / `GRUVBOX DARK` |
 
-Same narrative on both platforms (capture both per shot). 8 ≤ 10 ✓.
+Exactly 10 = the ASC cap. The 2026-07-18 re-plan (widgets/Shortcuts, agent
+history, file attach, the light appearance, iPhone) added `history`, `drop`,
+`widgets` and retired the standalone `shortcuts` frame (TMUX dropdown) — the
+agent surfaces outrank it for this audience. If `widgets` proves unstageable
+on the visionOS sim, ship visionOS with 9 or revive `shortcuts` from git
+history as its 10th.
 
-## Staging rules (what made the current dev captures unusable)
+## Shot list — iPhone (portrait, 9 shots)
+
+Same ids ⇒ same narrative, minus the multi-window shots (`windows`, `tabs` —
+the phone is deliberately a one-window shell) and plus the key-rail shot:
+
+| # | id | iPhone-specific staging |
+| --- | --- | --- |
+| 1 | `wall` | The shell's deck in portrait, both host rails in frame |
+| 2 | `keys` | Attached session, **docked keyboard raised**, TALLY key rail above it — ESC / CTRL / TAB / arrows / TMUX. Headline A FULL TERMINAL, PHONE-SIZED · `ESC · CTRL · TAB · ARROWS · TMUX` ● LIVE |
+| 3 | `agents` | NEEDS YOU tile + notification banner over the shell deck — the away-from-the-desk pitch |
+| 4 | `strip` | Chip strip above the key rail, keyboard hidden |
+| 5 | `history` | HISTORY panel (jump works on narrow panes) |
+| 6 | `drop` | FILE menu with **Camera** / Photos / Files |
+| 7 | `widgets` | Home Screen: Host Monitor (medium, SHELL/AGENT keys) + Fleet Wall (medium) |
+| 8 | `mosh` | Host sheet MOSH toggle — the cellular/roaming story is strongest here |
+| 9 | `themes` | LIGHT appearance: Frost chassis, Settings theme rows |
+
+## Staging rules (what made the earlier dev captures unusable)
 
 - **Simulator locale en_US** — kills the Japanese keyboard-hint bar seen in
   `docs/visionos-multiwindow.png`.
+- **Status bar override** on iPhone/iPad before any capture:
+  `xcrun simctl status_bar <UDID> override --time 9:41 --batteryState charged
+  --batteryLevel 100 --cellularMode active --cellularBars 4 --operatorName ""`
+  (visionOS has no status bar).
 - **Nothing behind the app** on visionOS — the Files window ghosting through
   glass in `docs/visionos-deck.png` reads as clutter. One consistent
   environment for the whole set (the day living room reads best).
 - **No dev tells**: host must not read `jhen@127.0.0.1:2222`. Alias the
   harness: add `127.0.0.1 atlas.internal` to the Mac's `/etc/hosts` (the sim
-  uses the Mac's resolver) and add the host in-app as `atlas.internal`,
-  port 2222, user `demo`. Session names: `main`, `build`, `logs`, `agent` —
-  never `test`/`test2`. A second rail (`forge.internal`) can point at any
-  real box you have; a one-host wall is fine too (fix shot 1's telemetry to
-  match reality — the numbers must be true of the pixels).
-- **Software keyboard hidden** unless the shot is about typing.
+  uses the Mac's resolver) and seed via `stage-sessions.sh`'s
+  `store-seed.json` (`demo@atlas.internal:2222`). Session names: `main`,
+  `build`, `logs`, `agent` — never `test`/`test2`. A second rail
+  (`forge.internal`) can point at any real box — the Mac's own sshd with its
+  own tmux server works — or fix shot 1's telemetry to a one-host truth
+  (the numbers must be true of the pixels). Two hosts also *is* the free
+  tier, which keeps the hero shot honest about the free download.
+- **Software keyboard hidden** unless the shot is about typing (`keys` and
+  nothing else; `debug.summon`/`debug.dismiss` drive it headlessly).
 - **Miniature content is the texture of the whole wall** — stage it:
   - `main`: nvim/an editor + 2 more tmux windows so the spine shows segments
   - `build`: loop printing plausible compile lines with ✓ marks
   - `logs`: `tail -f` of a generated access log (timestamps, 200s)
   - `agent`: **real `claude` running in the harness pane** (real glyph, real
     strip, real NEEDS YOU when it asks — better than the fake for pictures)
-- Drive content from the Mac: `tmux -L … send-keys`, and
+- **Widget shots need a warm snapshot**: run the app against the staged
+  fleet first (the App Group `widget-state.json` publishes off the live
+  probe), then add widgets on a **plain dark wallpaper** Home Screen. SEEN
+  stamps in frame are honest and deliberate — widgets never claim liveness.
+- **Light-appearance shots** flip via the `debug.appearance` notification
+  (SYSTEM → LIGHT → DARK, persisted); flip back after the `themes` capture.
+- **Pro surfaces** (`history`, `mosh`, custom themes) are live by default in
+  DEBUG builds (`isPro` defaults true); the telemetry marks them `PRO`
+  honestly. The chip strip is free (10 taps/day) and carries no PRO mark.
+- Drive content from the Mac: `tmux send-keys`, and
   `MULTIPLEX_AUTO_ATTACH=main,build` to open windows without hand-fiddling.
 
 ## Capture
 
-- **visionOS**: `xcrun simctl io <UDID> screenshot wall.png` captures the
-  full framebuffer including the environment (matches the existing docs
-  shots). Save to `Tools/appstore/raw/visionos-<id>.png`.
-- **iPad**: iPad Pro 13″ sim, landscape →
-  `raw/ipad-<id>.png` (native 2752×2064 — used 1:1).
+- **visionOS**: `xcrun simctl io <UDID> screenshot` captures the full
+  framebuffer including the environment. Save to
+  `Tools/appstore/raw/visionos-<id>.png`.
+- **iPad**: iPad Pro 13″ sim, landscape → `raw/ipad-<id>.png` (native
+  2752×2064, used 1:1).
+- **iPhone**: iPhone 17 Pro Max sim, portrait → `raw/iphone-<id>.png`
+  (native 1320×2868, used 1:1). The shell is automatic on iPhone — no
+  `MULTIPLEX_FORCE_SHELL` needed. Wait ≥12 s after a fresh boot before the
+  first capture (iOS 27 first-frame delay).
 - Then `Tools/appstore/compose.sh` → exact-size frames in
   `Tools/appstore/out/`, auto-copied into `fastlane/screenshots/en-US/`,
-  `bundle exec fastlane store_screenshots` to upload.
+  `bundle exec fastlane store_screenshots` to upload (device class is
+  inferred from pixel size).
 
 ## App Preview video (phase 2 — ship screenshots first)
 
@@ -85,4 +143,6 @@ muted (posters autoplay silently). Storyboard (visionOS, ~24 s):
 
 Record with `simctl io recordVideo` (or device capture), edit to
 3840×2160 H.264 ≤ 500 MB, upload manually in ASC (deliver can't).
-iPad preview: same script minus spatial placement, 1600×1200.
+iPad preview: same script minus spatial placement, 1600×1200. iPhone
+preview (886×1920 portrait): wall → attach → key rail typing → NEEDS YOU
+banner → widget tap → back on the wall.

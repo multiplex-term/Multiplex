@@ -7,18 +7,29 @@
 #   2. ./compose.sh            # everything with a raw capture present
 #   3. bundle exec fastlane store_screenshots
 #
+# deliver infers the device class from pixel size: 3840×2160 → Vision Pro,
+# 2752×2064 → iPad 13″, 1320×2868 → iPhone 6.9″.
+#
 # Frames whose raw capture is missing are still rendered (as AWAITING CAPTURE
 # boards) but are NOT copied into fastlane/screenshots.
 
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Keep ids + order in sync with SHOTS in storyboard.html.
-SHOTS=(wall windows agents strip mosh tabs themes shortcuts)
-size_for() { # macOS bash 3.2 has no associative arrays
+# Keep ids + order in sync with SHOTS/ORDER in storyboard.html.
+# iPhone swaps windows/tabs (no multi-window story in the one-window shell)
+# for the key-rail shot.
+shots_for() { # macOS bash 3.2 has no associative arrays
+  case "$1" in
+    visionos|ipad) echo "wall windows agents strip history drop widgets mosh tabs themes" ;;
+    iphone)        echo "wall keys agents strip history drop widgets mosh themes" ;;
+  esac
+}
+size_for() {
   case "$1" in
     visionos) echo "3840,2160" ;;
     ipad)     echo "2752,2064" ;;
+    iphone)   echo "1320,2868" ;;
   esac
 }
 
@@ -33,12 +44,12 @@ done
 mkdir -p out raw
 DEST="../../fastlane/screenshots/en-US"
 
-i=0
-for shot in "${SHOTS[@]}"; do
-  i=$((i + 1))
-  for platform in visionos ipad; do
+for platform in visionos ipad iphone; do
+  size="$(size_for "$platform")"
+  i=0
+  for shot in $(shots_for "$platform"); do
+    i=$((i + 1))
     frame="${platform}-${shot}"
-    size="$(size_for "$platform")"
     "$CHROME" --headless=new --disable-gpu --hide-scrollbars \
       --force-device-scale-factor=1 --window-size="$size" \
       --virtual-time-budget=5000 \
