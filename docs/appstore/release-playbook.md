@@ -60,7 +60,7 @@ PLEASE TRY
 
 KNOWN
 • <current sharp edges>
-Feedback: screenshot in TestFlight, or jhen@bricks.tools
+Feedback: screenshot in TestFlight, or iainst0409@gmail.com
 ```
 
 Builds expire after 90 days — ship something monthly or testers go dark.

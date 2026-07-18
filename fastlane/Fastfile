@@ -75,7 +75,7 @@ end
 # docs/appstore/release-playbook.md for the demo-host runbook.
 def beta_review_info
   {
-    contact_email:      ENV.fetch("REVIEW_CONTACT_EMAIL", "jhen@bricks.tools"),
+    contact_email:      ENV.fetch("REVIEW_CONTACT_EMAIL", "iainst0409@gmail.com"),
     contact_first_name: ENV.fetch("REVIEW_CONTACT_FIRST", "Jhen-Jie"),
     contact_last_name:  ENV.fetch("REVIEW_CONTACT_LAST", "Hong"),
     contact_phone:      ENV.fetch("REVIEW_CONTACT_PHONE"),
