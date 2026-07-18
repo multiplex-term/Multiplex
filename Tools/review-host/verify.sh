@@ -3,9 +3,9 @@
 # App Store / TestFlight-external submission. Interactive: you type the demo
 # password, which also proves the exact auth path reviewers will use.
 #
-#   ./verify.sh [host]        # default: demo.multiplexterm.dev
+#   ./verify.sh [host]        # default: demo-for-review.multiplexterm.dev
 set -u
-HOST="${1:-demo.multiplexterm.dev}"
+HOST="${1:-demo-for-review.multiplexterm.dev}"
 
 echo "— DNS"
 dig +short A "$HOST" | sed 's/^/  /'

@@ -11,14 +11,16 @@
 FROM ubuntu:24.04
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        openssh-server tmux mosh vim htop procps tini \
+        openssh-server tmux mosh vim htop procps tini locales-all \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     # mosh-server refuses to start without a UTF-8 locale; login sessions
     # read this via pam_env. Stop honoring client-sent LANG/LC_* (Ubuntu's
-    # default AcceptEnv) — the image only ships C.UTF-8, and a client
-    # forwarding en_US.UTF-8 would get setlocale warnings and could break
-    # mosh-server's UTF-8 check.
+    # default AcceptEnv) — a client forwarding an uninstalled locale gets
+    # setlocale warnings. AcceptEnv does NOT cover mosh: the mosh client
+    # forwards its locale via `mosh-server -l LC_ALL=…`, and with that locale
+    # missing the detached server dies silently after MOSH CONNECT (every
+    # mosh session then fails) — hence locales-all above.
     && echo 'LANG=C.UTF-8' >> /etc/environment \
     && sed -i 's/^AcceptEnv/#AcceptEnv/' /etc/ssh/sshd_config \
     # `review` is the only login account (sshd AllowUsers pins that). No

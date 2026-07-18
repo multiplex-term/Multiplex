@@ -17,7 +17,11 @@ hostname: multiplex-review
 locale: C.UTF-8                    # mosh-server refuses non-UTF-8 locales
 package_update: true
 package_upgrade: true
-packages: [tmux, mosh, vim, htop, fail2ban, ufw]
+# locales-all: a mosh client forwards its own locale via `mosh-server -l
+# LC_ALL=…` (bypassing sshd's AcceptEnv entirely); if that locale is missing
+# server-side, the detached mosh-server dies silently after MOSH CONNECT and
+# every mosh session fails. Found live on the GCP host, 2026-07-18.
+packages: [tmux, mosh, vim, htop, fail2ban, ufw, locales-all]
 
 ssh_pwauth: false                  # global off; Match block opens it for `review` only
 

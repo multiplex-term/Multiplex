@@ -1,4 +1,4 @@
-# Reviewer demo host — demo.multiplexterm.dev
+# Reviewer demo host — demo-for-review.multiplexterm.dev
 
 The App Review demo server as code. Policy/why in
 `docs/appstore/release-playbook.md`; reviewer-facing walkthrough in
@@ -39,8 +39,8 @@ identity, which matters once the app ships TOFU pinning).
    demo password in `.env` (`cp .env.sample .env`; same value as
    `fastlane/.env` and ASC's demo-account field).
 3. `docker compose up -d --build`
-4. DNS: `A demo.multiplexterm.dev → <VM IP>` (TTL 300). Different name →
-   update `notes.txt`.
+4. DNS: `A demo-for-review.multiplexterm.dev → <VM IP>` (TTL 300; the zone
+   lives in Vercel DNS). Different name → update `notes.txt`.
 5. **Egress lockdown** — on the *host*, not in the container (ufw's
    outgoing policy does not govern Docker's FORWARD path). The running
    container needs **zero** outbound; replies ride conntrack. Run in this
@@ -67,6 +67,24 @@ SHA-512 hash), paste as user-data at VM creation, DNS, `./verify.sh`.
 Includes ufw egress rules and unattended-upgrades since there's no
 rebuild cycle. ⚠ The demo scripts exist twice: `scripts/` (canonical,
 used by Docker) and embedded in `cloud-init.yaml` — keep them in sync.
+
+## GCP deployment (current, 2026-07)
+
+The live host is a GCP e2-micro (`multiplex-demo-host`, `us-west1-b` — the
+free-tier region) running the option-B shape, deployed and redeployed by
+`./gcp-deploy.sh` (idempotent; run before every submission and monthly, the
+same cadence as the Docker rebuild):
+
+```sh
+./gcp-deploy.sh                    # security updates + re-assert everything
+./gcp-deploy.sh --rotate-password  # new password into fastlane/.env → ASC too
+./gcp-deploy.sh --start            # boot the stopped VM first
+```
+
+Stop→start changes the ephemeral IP — update the Vercel A record (the script
+detects the mismatch and prints the target). The VM's one sshd serves both
+gcloud admin (keys) and `review` (password via a Match-User drop-in), so the
+script never touches global sshd auth. Redeploys keep the host keys.
 
 ## Verified (local Docker run, 2026-07-12)
 

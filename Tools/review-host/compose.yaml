@@ -1,4 +1,4 @@
-# Reviewer demo host — demo.multiplexterm.dev
+# Reviewer demo host — demo-for-review.multiplexterm.dev
 #
 #   DEMO_SSH_PASSWORD=… docker compose up -d --build
 #   (or copy .env.sample to .env — git-ignored — and `docker compose up -d`)
