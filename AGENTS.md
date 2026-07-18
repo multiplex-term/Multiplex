@@ -617,7 +617,23 @@ views.
   region; **row 1 of a scrolled view is the sticky `❯` header of the turn
   that owns the top row** (banner region → no `❯`), and it coexists with
   real `❯` rows below; Ctrl+End is scroll-bottom, Ctrl+Home scroll-top; no
-  line-granular scroll exists. The find therefore ships the WHOLE loaded
+  line-granular scroll exists. **The sticky is click-to-jump (verified
+  2.1.214): an SGR press+release at row 1 scrolls straight to that turn's
+  start — and ONLY the sticky reacts; real `❯` rows, plain content, and
+  the banner ignore clicks.** When the prologue sees the pane's mouse
+  reporting on with SGR (`#{mouse_any_flag}`/`#{mouse_sgr_flag}` — the
+  click is bytes on stdin, unsafe otherwise), a unique-target walk clicks
+  every sticky it climbs past instead of batch-scrolling: ~2 sends per
+  turn regardless of response length (the documented pathologies were all
+  length-driven — a 3-turn probe fell 19→7 sends, deep real-transcript
+  jumps collapse further). The target's own sticky-click lands the turn
+  top and one PgUp drops its real row to 1 + region/2 — always inside the
+  top-half landing rule; if no row appears there, the body never renders
+  (rebuilt transcript) and the walk shortcuts to the NEAR descent. A
+  click that moves nothing disarms clicking for the walk (older Claude)
+  and the scroll walk continues; twin targets never click — a warp breaks
+  the row-continuity the from-the-bottom count rides on. The find
+  therefore ships the WHOLE loaded
   message list as an index (longest-needle-first, 1-based; an awk classifier
   reports `pin` = which known turn owns row 1, `real` = the target's actual
   `❯` row, bottom chrome excluded so a drafted composer can't false-match):

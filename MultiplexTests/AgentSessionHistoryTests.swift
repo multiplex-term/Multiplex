@@ -373,7 +373,7 @@ final class AgentSessionHistoryTests: XCTestCase {
         let output = """
         MPXJ_SID $4
         MPXJ_SIZES 2
-        MPXJ_META 120 ✳ Claude Code
+        MPXJ_META 120 1 1 ✳ Claude Code
         MPXJ_CAP
         line one
         ❯ old prompt
@@ -385,10 +385,27 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertEqual(prologue?.paneTitle, "✳ Claude Code")
         XCTAssertEqual(prologue?.capture, ["line one", "❯ old prompt"])
         XCTAssertEqual(prologue?.clientSizeCount, 2)
+        XCTAssertEqual(prologue?.supportsHeaderClicks, true)
+
+        // Clicks need mouse reporting AND the SGR encoding the click bytes
+        // use.
+        let noSGR = AgentSessionHistory.parseJumpPrologue(
+            "MPXJ_SID $4\nMPXJ_META 80 1 0 t\nMPXJ_CAP\nrow\nMPXJ_CAPEND"
+        )
+        XCTAssertEqual(noSGR?.supportsHeaderClicks, false)
+        XCTAssertEqual(noSGR?.paneTitle, "t")
+
+        // Old tmux renders unknown format variables empty — positions
+        // survive, clicks read as unsupported, the title stays intact.
+        let oldTmux = AgentSessionHistory.parseJumpPrologue(
+            "MPXJ_SID $4\nMPXJ_META 80   ✳ Claude Code\nMPXJ_CAP\nrow\nMPXJ_CAPEND"
+        )
+        XCTAssertEqual(oldTmux?.supportsHeaderClicks, false)
+        XCTAssertEqual(oldTmux?.paneTitle, "✳ Claude Code")
 
         // Older or partial output without the size marker stays valid.
         let bare = AgentSessionHistory.parseJumpPrologue(
-            "MPXJ_SID $4\nMPXJ_META 80 t\nMPXJ_CAP\nrow\nMPXJ_CAPEND"
+            "MPXJ_SID $4\nMPXJ_META 80 1 1 t\nMPXJ_CAP\nrow\nMPXJ_CAPEND"
         )
         XCTAssertEqual(bare?.clientSizeCount, 0)
     }
@@ -406,7 +423,8 @@ final class AgentSessionHistoryTests: XCTestCase {
                 .init(index: 2, text: "Charlie"),
             ],
             targetIndex: 1,
-            targetNeedles: ["it's the Bravo turn", "it's the Bravo"]
+            targetNeedles: ["it's the Bravo turn", "it's the Bravo"],
+            headerClicks: true
         )
         XCTAssertTrue(command.contains("sid='$4'"))
         // The oracle index rides along: 1-based ordinals, longest needle
@@ -441,7 +459,7 @@ final class AgentSessionHistoryTests: XCTestCase {
         // hitting scroll-top before the swap takes the same retry (an
         // unmatched oldest message never produces older-pin crossings).
         XCTAssertTrue(command.contains(
-            "rebase() { osc=0; seen=0; lastr=0; dir=u; restore; stab; }"
+            "rebase() { osc=0; seen=0; lastr=0; ckt=0; dir=u; restore; stab; }"
         ))
         XCTAssertTrue(command.contains("swapfb() { tgt=\"$n2\"; k=$k2; fbused=1; rebase; }"))
         // A mid-walk capture-height change means another attached client
@@ -469,6 +487,32 @@ final class AgentSessionHistoryTests: XCTestCase {
                 + "elif [ $sawt = 1 ] && [ $sawreal = 0 ] && [ $nb = 0 ]; then nb=1; dir=d; "
                 + "else top=1; return 1; fi"
         ))
+        // Header clicks (unique target, mouse on): the SGR press+release
+        // targets row 1 column 2 — the sticky — and every upward branch
+        // click-skips instead of batch-scrolling; a no-move click disarms.
+        XCTAssertTrue(command.contains("ck=1; ckt=0;"))
+        XCTAssertTrue(command.contains(
+            "mseq=$(printf '\\033[<0;2;1M\\033[<0;2;1m')"
+        ))
+        XCTAssertTrue(command.contains("send-keys -t \"$sid\" -l \"$mseq\""))
+        XCTAssertTrue(command.contains(
+            "cskip() { dir=u; hclick || return 1; "
+                + "if [ \"$moved\" = 1 ]; then climb 1 || return 1; else ck=0; fi; }"
+        ))
+        // The target's own sticky sets the verify flag; the verify pass
+        // shortcuts an unrendered row to the NEAR descent and disarms when
+        // the click failed to land the turn top.
+        XCTAssertTrue(command.contains("if [ \"$ck\" = 1 ]; then ckt=1; cskip || break;"))
+        XCTAssertTrue(command.contains("if [ \"$ckt\" = 1 ]; then ckt=0;"))
+        XCTAssertTrue(command.contains(
+            "if [ \"$pin\" = \"$t\" ]; then ck=0; else nb=1; dir=d; continue; fi"
+        ))
+        // Unknown stickies click only over a real ❯ row (pin 0), never the
+        // bannered -1.
+        XCTAssertTrue(command.contains(
+            "if [ \"$ck\" = 1 ] && [ \"$pin\" = 0 ]; then cskip || break; continue; fi"
+        ))
+
         // A too-short pane is reported as its own state, not a missing
         // message.
         XCTAssertTrue(command.contains("{ short=1; break; }"))
@@ -502,10 +546,15 @@ final class AgentSessionHistoryTests: XCTestCase {
             ],
             targetIndex: 1,
             targetNeedles: ["commit"],
-            newerTwinCount: 1
+            newerTwinCount: 1,
+            headerClicks: true
         )
         // The walk knows one newer twin must scroll past first…
         XCTAssertTrue(command.contains("t=2; k=1;"))
+        // …and header clicks stay disarmed even with mouse support: a
+        // click warps the viewport, and the from-the-bottom twin count
+        // needs rows to drift continuously through it.
+        XCTAssertTrue(command.contains("ck=0; ckt=0;"))
         XCTAssertTrue(command.contains("[ \"$seen\" -gt \"$k\" ]"))
         // …family pins read as the target's own turn…
         XCTAssertTrue(command.contains("fam=%d"))
@@ -524,7 +573,8 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertEqual(command.components(separatedBy: "'0\tcommit'").count - 1, 2)
         XCTAssertTrue(command.contains("'4\ttop bar: right area toggle'"))
 
-        // A unique target keeps the fast batches.
+        // A unique target keeps the fast batches; without the prologue's
+        // mouse capability the clicks stay disarmed by default.
         let unique = AgentSessionHistory.jumpFindCommand(
             sessionID: "$0",
             needles: [.init(index: 0, text: "only prompt")],
@@ -533,6 +583,7 @@ final class AgentSessionHistoryTests: XCTestCase {
         )
         XCTAssertTrue(unique.contains("k=0; k2=0;"))
         XCTAssertTrue(unique.contains("climb \(AgentSessionHistory.oracleFarBatch) ||"))
+        XCTAssertTrue(unique.contains("ck=0; ckt=0;"))
 
         // A target unique under the primary needle but conflated under the
         // shorter fallback must already pace for twins: the fallback can
@@ -547,11 +598,14 @@ final class AgentSessionHistoryTests: XCTestCase {
             targetIndex: 0,
             targetNeedles: ["deploy the staging environment now", "deploy the staging"],
             newerTwinCount: 0,
-            fallbackTwinCount: 1
+            fallbackTwinCount: 1,
+            headerClicks: true
         )
         XCTAssertTrue(fallbackFamily.contains("k=0; k2=1;"))
         XCTAssertTrue(fallbackFamily.contains("climb \(AgentSessionHistory.twinSafeBatch) ||"))
         XCTAssertFalse(fallbackFamily.contains("climb \(AgentSessionHistory.oracleFarBatch) ||"))
+        // The fallback family counts too: its needle can swap in mid-walk.
+        XCTAssertTrue(fallbackFamily.contains("ck=0; ckt=0;"))
     }
 
     func testJumpSendBudgetScalesWithPaneGeometry() {
@@ -622,6 +676,11 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertEqual(
             AgentSessionHistory.parseJumpFind("MPXJ_T 60 7 0 0\nMPXJ_NEAR 64"),
             .near(pages: 64)
+        )
+        // Click trace lines ride along without confusing the outcome.
+        XCTAssertEqual(
+            AgentSessionHistory.parseJumpFind("MPXJ_C 3 1\nMPXJ_T 4 2 13 0\nMPXJ_FOUND 5"),
+            .found(pages: 5)
         )
         XCTAssertNil(AgentSessionHistory.parseJumpFind("nothing"))
     }

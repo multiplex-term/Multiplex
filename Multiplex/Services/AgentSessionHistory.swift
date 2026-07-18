@@ -380,6 +380,12 @@ enum AgentSessionHistory {
     /// resets its pager, and the walk's coordinates die mid-run
     /// (user-reported against a session with an 89×36 Mac terminal and the
     /// 52×44 app attached at once).
+    ///
+    /// The mouse flags gate the walk's header clicks: a click is an SGR
+    /// byte sequence written to the pane's stdin, safe only while Claude
+    /// has mouse reporting on (otherwise the bytes would land in the
+    /// composer as text). Unknown format variables render empty on old
+    /// tmux, which parses as "no clicks" — fail-soft.
     static func jumpPrologueCommand(sessionName: String) -> String {
         TmuxProbe.pathPrefix
             + "sid=$(tmux list-panes -t \("=\(sessionName)".shellQuoted)"
@@ -389,7 +395,8 @@ enum AgentSessionHistory {
             + "printf 'MPXJ_SIZES %s\\n' \"$(tmux list-clients -t \"$sid\""
             + " -F '#{client_width}x#{client_height}' 2>/dev/null | sort -u | grep -c .)\"; "
             + "tmux list-panes -t \"$sid\""
-            + " -F '#{?pane_active,MPXJ_META #{pane_width} #{pane_title},}' 2>/dev/null"
+            + " -F '#{?pane_active,MPXJ_META #{pane_width} #{mouse_any_flag}"
+            + " #{mouse_sgr_flag} #{pane_title},}' 2>/dev/null"
             + " | grep -m1 MPXJ_META; "
             + "echo MPXJ_CAP; "
             + "tmux capture-pane -p -t \"$sid\" 2>/dev/null; "
@@ -405,6 +412,10 @@ enum AgentSessionHistory {
         /// Distinct attached-client sizes (0 when unknown). More than one
         /// means another client can resize this session under the walk.
         var clientSizeCount: Int = 0
+        /// The pane has mouse reporting on with SGR encoding, so the walk
+        /// may click Claude's sticky turn header (verified 2.1.214: a click
+        /// on the row-1 sticky scrolls straight to that turn's start).
+        var supportsHeaderClicks: Bool = false
     }
 
     static func parseJumpPrologue(_ output: String) -> JumpPrologue? {
@@ -414,6 +425,7 @@ enum AgentSessionHistory {
         var title = ""
         var capture: [String] = []
         var sizeCount = 0
+        var headerClicks = false
         var inCapture = false
         for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
             if line.hasPrefix("MPXJ_SID ") {
@@ -425,12 +437,16 @@ enum AgentSessionHistory {
                         .trimmingCharacters(in: .whitespaces)
                 ) ?? 0
             } else if line.hasPrefix("MPXJ_META ") {
-                // Fixed width field first, variable-length title last —
-                // the probe's own format discipline.
+                // Fixed-width fields first, variable-length title last —
+                // the probe's own format discipline. Old tmux renders the
+                // mouse flags empty (positions preserved), which reads as
+                // "no clicks".
                 let fields = line.dropFirst("MPXJ_META ".count)
                     .split(separator: " ", omittingEmptySubsequences: false)
                 width = fields.first.flatMap { Int($0) } ?? 0
-                title = fields.dropFirst().joined(separator: " ")
+                headerClicks = fields.count >= 3
+                    && Int(fields[1]) == 1 && Int(fields[2]) == 1
+                title = fields.dropFirst(3).joined(separator: " ")
             } else if line == "MPXJ_CAP" {
                 inCapture = true
             } else if line == "MPXJ_CAPEND" {
@@ -445,7 +461,8 @@ enum AgentSessionHistory {
             paneWidth: width,
             paneTitle: title,
             capture: capture,
-            clientSizeCount: sizeCount
+            clientSizeCount: sizeCount,
+            supportsHeaderClicks: headerClicks
         )
     }
 
@@ -672,6 +689,27 @@ enum AgentSessionHistory {
     /// (less than one viewport) so no twin row can slip between captures.
     /// The shorter fallback needle can widen the family, so the swap
     /// installs its own `fallbackTwinCount`.
+    ///
+    /// `headerClicks` arms the sticky header's click-to-jump (verified
+    /// 2.1.214: ONLY the row-1 sticky is clickable — a click there scrolls
+    /// straight to that turn's start; real `❯` rows, plain content, and the
+    /// banner are no-ops). While climbing, any `❯` sticky is clicked
+    /// instead of batch-scrolled: one send skips the rest of that turn
+    /// however long its response is (the walk's cost stops depending on
+    /// response length — the documented pathologies were all length-driven).
+    /// On the target's own sticky the click lands the turn top, and the one
+    /// PgUp that follows drops the header to 1 + region/2 — always inside
+    /// the top-half landing window, so the ordinary acceptance fires. If no
+    /// row appears after that PgUp, the row never renders (rebuilt
+    /// transcripts omit long multiline bodies) and the walk shortcuts to
+    /// the existing NEAR descent. A click that moves nothing disarms
+    /// clicking for the rest of the walk and the scroll walk continues
+    /// (older Claude without click support, or a coincidental turn-top
+    /// start). Clicks stay off for twin targets: the from-the-bottom count
+    /// needs rows to drift continuously through the viewport, and a warp
+    /// can surface an older twin above the jumped turn's header while that
+    /// header sits at row 1 — invisible to `real`, an undercount that
+    /// would land on the wrong twin.
     static func jumpFindCommand(
         sessionID: String,
         needles: [JumpNeedle],
@@ -679,7 +717,8 @@ enum AgentSessionHistory {
         targetNeedles: [String],
         newerTwinCount: Int = 0,
         fallbackTwinCount: Int? = nil,
-        sendBudget: Int = jumpSendBudget
+        sendBudget: Int = jumpSendBudget,
+        headerClicks: Bool = false
     ) -> String {
         // Longest needle first so nested prefixes ("fix the" / "fix the
         // build") resolve to the more specific message, with the ordinal as
@@ -713,6 +752,9 @@ enum AgentSessionHistory {
         // (row 1 provably ≥ 2 turns newer) may leap.
         let anyTwins = max(twins, fallbackTwins) > 0
         let farBatch = anyTwins ? twinSafeBatch : oracleFarBatch
+        // Header clicks warp the viewport, which is exactly what the twin
+        // count cannot survive — unique targets only.
+        let clicks = headerClicks && !anyTwins
         return TmuxProbe.pathPrefix
             + "sid=\(sessionID.shellQuoted); "
             + "ndl=$(printf '%s\\n' \(listArguments)); "
@@ -744,12 +786,19 @@ enum AgentSessionHistory {
             + "cur=\"$nxt\"; p=$((p+1)); done; }; "
             + "found=0; near=0; top=0; short=0; keep=0; sent=0; osc=0; fbused=0; dir=u; "
             + "seen=0; lastr=0; h0=0; rsz=0; sawt=0; sawreal=0; nb=0; "
+            + "ck=\(clicks ? 1 : 0); ckt=0; "
+            // SGR press+release on row 1 column 2 — Claude's sticky turn
+            // header. Only injected while ck=1 (pane mouse reporting on,
+            // unique target) and only over a `❯` sticky the classifier
+            // just saw.
+            + "mseq=$(printf '\\033[<0;2;1M\\033[<0;2;1m'); "
             + "tgt=\"$n1\"; "
             + "trap 'keep=1; restore; exit 1' HUP INT TERM; "
             + "trap 'if [ \"$keep\" != 1 ]; then restore; fi' EXIT; "
             // Restart the walk from live — the only position where the
-            // upward twin-count semantics are known-valid.
-            + "rebase() { osc=0; seen=0; lastr=0; dir=u; restore; stab; }; "
+            // upward twin-count semantics are known-valid. A pending
+            // click-verify flag dies with the old position.
+            + "rebase() { osc=0; seen=0; lastr=0; ckt=0; dir=u; restore; stab; }; "
             // Swap in the fallback needle. The fallback family can be
             // wider, so its own twin count comes along.
             + "swapfb() { tgt=\"$n2\"; k=$k2; fbused=1; rebase; }; "
@@ -764,6 +813,17 @@ enum AgentSessionHistory {
             + "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then swapfb; stepk 1 PPage || return 1; "
             + "elif [ $sawt = 1 ] && [ $sawreal = 0 ] && [ $nb = 0 ]; then nb=1; dir=d; "
             + "else top=1; return 1; fi; fi; }; "
+            // Click the sticky at row 1: one send jumps to that turn's
+            // start, then one PgUp crosses its header so the next classify
+            // sees it as a real row (or reports the crossing to the
+            // oracle). A click that moved nothing disarms clicking — this
+            // Claude doesn't jump, or the view already sat at the turn's
+            // top — and the scroll walk resumes without it.
+            + "hclick() { tmux send-keys -t \"$sid\" -l \"$mseq\" 2>/dev/null || return 1; "
+            + "sent=$((sent+1)); settle \"$cur\"; "
+            + "printf 'MPXJ_C %s %s\\n' \"$sent\" \"$moved\"; }; "
+            + "cskip() { dir=u; hclick || return 1; "
+            + "if [ \"$moved\" = 1 ]; then climb 1 || return 1; else ck=0; fi; }; "
             // Normalize the start: the user may have scrolled the pager
             // anywhere by hand, and from an unknown position the oracle's
             // first direction would be a guess (a top start stalled it).
@@ -786,6 +846,18 @@ enum AgentSessionHistory {
             + "if [ \"$h\" != \"$h0\" ]; then "
             + "if [ \"$rsz\" = 0 ]; then rsz=1; h0=$h; rebase; "
             + "stepk 1 PPage || break; continue; else break; fi; fi; "
+            // Verify the capture after a target-header click + PgUp. The
+            // row should now be real (~1 + region/2, inside the landing
+            // window) and the ordinary branches finish. No row while the
+            // pin moved on = the row never renders (rebuilt transcript) —
+            // go straight to the NEAR descent instead of burning the
+            // crossing/fallback machinery. Still pinned to the target with
+            // no row = the click didn't land the turn top — disarm and let
+            // the scroll walk continue.
+            + "if [ \"$ckt\" = 1 ]; then ckt=0; "
+            + "if [ \"$real\" = 0 ]; then "
+            + "if [ \"$pin\" = \"$t\" ]; then ck=0; "
+            + "else nb=1; dir=d; continue; fi; fi; fi; "
             + "if [ \"$real\" -gt 0 ]; then "
             + "sawreal=1; "
             // Rows only drift DOWN while climbing, so a topmost match that
@@ -814,6 +886,11 @@ enum AgentSessionHistory {
             // rebuilt transcript omits long multiline prompt bodies), so
             // this is the closest true landing that exists.
             + "if [ \"$nb\" = 1 ]; then near=1; break; fi; "
+            // The target's own sticky: click it. The jump lands the turn
+            // top and cskip's PgUp surfaces the header as a real row in
+            // the landing window — 2 sends instead of climbing the whole
+            // response. ckt marks the next classify as the verify pass.
+            + "if [ \"$ck\" = 1 ]; then ckt=1; cskip || break; continue; fi; "
             + "dir=u; climb \(twinSafeBatch) || break; continue; fi; "
             + "if [ \"$nb\" = 1 ]; then "
             // Descend in singles toward the turn; overshooting to a NEWER
@@ -823,11 +900,15 @@ enum AgentSessionHistory {
             + "dir=d; stepk 1 NPage || break; fi; "
             + "[ \"$moved\" = 0 ] && break; continue; fi; "
             + "if [ \"$pin\" -gt \"$t\" ] 2>/dev/null; then "
-            // Row 1's turn is newer than the target. Two or more turns
-            // away, the next header to cross is a known non-target turn —
-            // leap. Just one turn away, the NEXT crossing is the target's
-            // own row and the target's whole turn can be shorter than a
-            // leap: stay within one viewport per capture.
+            // Row 1's turn is newer than the target. With clicks armed,
+            // skip its whole remaining response in one send — between here
+            // and its start every row belongs to this turn, so nothing can
+            // pass unseen. Otherwise: two or more turns away, the next
+            // header to cross is a known non-target turn — leap. Just one
+            // turn away, the NEXT crossing is the target's own row and the
+            // target's whole turn can be shorter than a leap: stay within
+            // one viewport per capture.
+            + "if [ \"$ck\" = 1 ]; then cskip || break; continue; fi; "
             + "if [ \"$pin\" -gt $((t + 1)) ]; then "
             + "dir=u; climb \(farBatch) || break; continue; fi; "
             + "dir=u; climb \(twinSafeBatch) || break; continue; fi; "
@@ -845,10 +926,16 @@ enum AgentSessionHistory {
             + "dir=d; stepk 1 NPage || break; "
             + "[ \"$moved\" = 0 ] && break; continue; fi; "
             // Unknown ❯ turn (wrapper/meta or older than the list) or the
-            // banner region: keep the current direction. Unknown says
-            // nothing about distance, so upward stays viewport-safe — a
-            // wrapper turn can sit directly below the target.
-            + "if [ \"$dir\" = u ]; then climb \(twinSafeBatch) || break; "
+            // banner region: keep the current direction. A clickable
+            // unknown sticky (pin 0, not the bannered -1) is still a turn
+            // header — clicking skips its response like any other, the
+            // biggest win of all here since unknown turns otherwise crawl
+            // viewport-safe. Unknown says nothing about distance, so a
+            // scroll upward stays viewport-safe — a wrapper turn can sit
+            // directly below the target.
+            + "if [ \"$dir\" = u ]; then "
+            + "if [ \"$ck\" = 1 ] && [ \"$pin\" = 0 ]; then cskip || break; continue; fi; "
+            + "climb \(twinSafeBatch) || break; "
             + "else stepk 1 NPage || break; [ \"$moved\" = 0 ] && break; fi; "
             + "done; "
             + "if [ \"$found\" = 1 ]; then "

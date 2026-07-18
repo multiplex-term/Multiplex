@@ -940,7 +940,11 @@ final class TerminalSessionController {
                         sendBudget: AgentSessionHistory.jumpSendBudget(
                             paneWidth: prologue.paneWidth,
                             paneHeight: prologue.capture.count
-                        )
+                        ),
+                        // Claude's sticky header is click-to-jump when the
+                        // pane has SGR mouse reporting on — the walk skips
+                        // whole responses instead of scrolling them.
+                        headerClicks: prologue.supportsHeaderClicks
                     )
                 )
                 switch AgentSessionHistory.parseJumpFind(findOutput) {
