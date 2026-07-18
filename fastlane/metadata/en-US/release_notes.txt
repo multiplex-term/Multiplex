@@ -10,4 +10,6 @@ Multiplex 1.0 — first release.
 • Start Claude Code, Codex, or Pi in a new tmux session with an optional first prompt; detection across split panes and plain SSH shells, foreground-aware helpers, synced per-host chip placement and custom commands, Claude Code/Codex Pro alerts, and Claude Code prompt history with jump-back-to-message (Pro)
 • mosh built in (Pro): sessions survive sleep, roaming, and IP changes
 • File attachments from Photos or Files, camera capture on iPad, and terminal drag-and-drop
+• Home Screen widgets — a per-host monitor and a fleet wall with last-known session frames; tap to attach a shell or launch an agent (iPadOS 17, visionOS 26)
+• Shortcuts & Siri: "Open Shell" and "Open Agent" (with an optional first prompt) for any host, plus a multiplex:// URL scheme for automation
 • Light & dark appearance that follows your device, a terminal theme per appearance, built-in themes, Pro custom themes, iCloud Keychain host sync

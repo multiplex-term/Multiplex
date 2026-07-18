@@ -286,6 +286,9 @@ final class HostStore {
         if let useMosh = seed.useMosh { host.useMosh = useMosh }
         if let path = seed.moshServerPath { host.moshServerPath = path }
         if let ports = seed.moshPorts { host.moshPorts = ports }
+        // Optional so existing seeds leave the host's dirs alone; used by
+        // headless checks of the Starts-in pickers.
+        if let dirs = seed.workingDirs { host.workingDirs = dirs }
         if let key = seed.privateKey { KeychainStore.set(key, for: host.id, kind: .privateKey) }
         if let password = seed.password { KeychainStore.set(password, for: host.id, kind: .password) }
         if hosts.contains(where: { $0.id == host.id }) {
@@ -307,6 +310,7 @@ final class HostStore {
         var useMosh: Bool?
         var moshServerPath: String?
         var moshPorts: String?
+        var workingDirs: [String]?
     }
     #endif
 }

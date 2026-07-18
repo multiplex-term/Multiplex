@@ -461,7 +461,14 @@ final class TerminalSessionController {
         directShellMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                await self.refreshDirectShellAgent(ifStaleFor: 4)
+                // Same active-state gate as the wall feed and the terminal
+                // window's probes: iOS suspension is what normally parks
+                // this loop, but if anything keeps the process alive in the
+                // background (an extension, a brief transition), a hidden
+                // app must not keep issuing SSH exec probes.
+                if UIApplication.shared.applicationState == .active {
+                    await self.refreshDirectShellAgent(ifStaleFor: 4)
+                }
                 try? await Task.sleep(for: Self.directShellProbeInterval)
             }
         }

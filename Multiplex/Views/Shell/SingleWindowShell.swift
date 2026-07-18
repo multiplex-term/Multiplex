@@ -229,6 +229,14 @@ struct SingleWindowShell: View {
                 releaseTerminalFocus()
             }
         }
+        // The shell's external-action executor. Anchored here — never on the
+        // nested deck pane, which the expanded layout can clip to zero width
+        // while its rail is hidden — so the failure alert and the widget-ASK
+        // prompt sheet always present over whichever stage is frontmost.
+        .modifier(ExternalActionHost(terminalOpener: TerminalRouteOpener(
+            destination: .shell,
+            action: openTerminalRoute
+        )))
     }
 
     private func deck(

@@ -1,15 +1,17 @@
+import AppIntents
 import SwiftUI
 import UIKit
 
 @main
 struct MultiplexApp: App {
-    @State private var store = HostStore()
+    @State private var store: HostStore
     @State private var hub: ConnectionHub
     @State private var themes = ThemeStore()
     @State private var workspace: TerminalWorkspace
     @State private var entitlements: EntitlementStore
     @State private var attention: AttentionCenter
     @State private var localNetworkAccess = LocalNetworkAccessMonitor()
+    private var externalActions: ExternalActionRouter { .shared }
 
     init() {
         // Attention wiring: every probe's events funnel through one center,
@@ -20,10 +22,21 @@ struct MultiplexApp: App {
         let workspace = TerminalWorkspace(attention: attention)
         attention.workspace = workspace
         attention.entitlements = entitlements
+        let store = HostStore()
+        _store = State(initialValue: store)
         _entitlements = State(initialValue: entitlements)
         _attention = State(initialValue: attention)
         _workspace = State(initialValue: workspace)
         _hub = State(initialValue: ConnectionHub(attention: attention))
+        // App Intents run in this process: the router must be resolvable
+        // before any perform() (a cold intent launch performs right after
+        // App init), and the Shortcuts host picker reads the live store.
+        AppDependencyManager.shared.add(dependency: ExternalActionRouter.shared)
+        HostEntityProvider.live = {
+            store.hosts.map {
+                HostEntity(id: $0.id, name: $0.name, address: $0.address)
+            }
+        }
     }
 
     var body: some Scene {
@@ -126,7 +139,34 @@ struct MultiplexApp: App {
             .environment(entitlements)
             .environment(attention)
             .environment(localNetworkAccess)
+            .environment(externalActions)
+            .modifier(ExternalActionReceiver(router: externalActions))
             .modifier(PlatformChrome(themes: themes))
+    }
+}
+
+/// Every scene root can receive a `multiplex://` URL and feed the shared
+/// router; the mounted deck executes. When pending work arrives while no
+/// deck is mounted (a terminal-only visionOS/iPad arrangement), raise the
+/// one deck scene — the data-driven `WindowGroup` reuses it, never mints a
+/// second. The iPhone shell is single-scene and always mounts the deck, so
+/// the raise is correctly unavailable there.
+private struct ExternalActionReceiver: ViewModifier {
+    var router: ExternalActionRouter
+
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
+
+    func body(content: Content) -> some View {
+        content
+            .onOpenURL { url in
+                guard let action = ExternalActionURL.action(from: url) else { return }
+                router.submit(action)
+            }
+            .onChange(of: router.pendingSignal) {
+                guard !router.hasContext, supportsMultipleWindows else { return }
+                openWindow(id: "deck", value: DeckWindowRoute.main)
+            }
     }
 }
 
@@ -138,10 +178,14 @@ private struct MultiWindowDeckRoot: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        DeckWindow(terminalOpener: TerminalRouteOpener(
+        let opener = TerminalRouteOpener(
             destination: .window,
             action: { openWindow(id: "terminal", value: $0) }
-        ))
+        )
+        DeckWindow(terminalOpener: opener)
+            // Classic mode's external-action executor: same opener as the
+            // wall, with the failure/prompt UI anchored at this scene root.
+            .modifier(ExternalActionHost(terminalOpener: opener))
     }
 }
 

@@ -241,6 +241,46 @@ SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
                      device-local daily agent-helper meter; an injected
                      ProStoreClient keeps the shipping Apple boundary real
                      while making every app-owned commerce state testable
+  ExternalActionRouter  one queue for widget deep links (multiplex:// via
+                     onOpenURL on every scene root), App Shortcuts, and
+                     automation; the mounted DeckWindow attaches a Context
+                     (stores + its mode-correct TerminalRouteOpener) and
+                     ExternalActionPerformer runs the status-guarded flows:
+                     refreshAndWait → phase==.connected → focusTab/attach
+                     most-recent (or exact ?session=) / createSession with
+                     agent launchCommand(initialPrompt:). Failures alert on
+                     the deck; the widget's ASK mode presents
+                     AgentPromptSheet, which resubmits. A scene without a
+                     mounted deck raises the one deck scene to drain.
+  SharedStateStore   secret-free App Group projection (widget-state.json,
+                     group.app.multiplexterm.multiplex) for the widget
+                     process: hosts + last-known sessions/miniature tails +
+                     per-host probedAt. ConnectionHub publishes it (2s
+                     debounce, content-hash-gated WidgetCenter reloads;
+                     background flush always reloads once); DeckWindow
+                     republishes on host-list changes. HostEntity's query
+                     reads the live HostStore in-app and this file in the
+                     widget. Consistency locked by SharedStateTests.
+  MultiplexWidgets   WidgetKit extension target (iPadOS 17+/visionOS 26+,
+                     compiles ONLY Multiplex/Shared): HostWidget (small =
+                     Monitor tile, medium = hybrid screen+spine with
+                     SHELL/AGENT key Links) and FleetWidget (medium rows,
+                     large session-tile grid). Widgets never connect, show
+                     no tally red / NEEDS YOU (liveness is unverifiable),
+                     carry a relative SEEN stamp, and use timeline policy
+                     .never — the app pushes reloads. WidgetTheme follows
+                     the system appearance on iOS but PINS dark graphite on
+                     visionOS: the visionOS widget environment reports a
+                     light interface style, and trait-following rendered
+                     Frost's dark text over dark glass (user-reported).
+                     Views draw through the environment-resolved
+                     WidgetPalette (TallyThemed), NOT WidgetTheme directly:
+                     when the user picks a widget Color Theme (visionOS 26
+                     picker / iOS tinting), the system renders ACCENTED and
+                     luminance-remaps custom colors — the paired customs
+                     (mini text on screen) collapsed to invisible
+                     (user-reported). Accented draws white-with-opacity
+                     only, the channel the remap preserves.
   TerminalWorkspace  tab controllers keyed by tab id + window directory —
                      merge/split move tabs across windows, shells stay live
   TerminalSessionController   one per tab; owns the input pump + TerminalView
@@ -758,6 +798,28 @@ views.
   locally-persisted mirrored-IDs set distinguishes "new local host → publish"
   from "peer deleted it → drop". Keychain sync has no change notification —
   deck and restored terminal roots re-merge on scenePhase `.active`.
+- **Widgets/Shortcuts add no background execution and must stay that way**:
+  no `UIBackgroundModes`; intents are `openAppWhenRun` (foreground); widget
+  timelines are `.never` with app-pushed, content-hash-gated reloads, so the
+  widget process does no periodic work and never opens sockets. Probe loops
+  gate network work on `applicationState == .active` (including the plain-
+  shell monitor) and otherwise rely on iOS suspension. The Shortcuts host
+  picker and widget config read `SharedStateStore`; intents/widget links and
+  `ExternalActionURL` formats are kept in lockstep by `SharedStateTests`
+  (the widget target compiles only `Multiplex/Shared`, never the app model
+  chain — don't import Host/Tmux/Agent types there). XcodeGen quirk: the
+  widget target's per-destination deployment floors live in explicit
+  `IPHONEOS_DEPLOYMENT_TARGET`/`XROS_DEPLOYMENT_TARGET` settings because
+  target-level `deploymentTarget` is ignored for multi-destination targets.
+  E2E without widgets: `xcrun simctl openurl <UDID>
+  "multiplex://open?host=devbox&action=shell"` (or `action=agent&prompt=…`)
+  drives the exact widget-tap path; the App Group file lands under
+  `$(xcrun simctl get_app_container <UDID> app.multiplexterm.multiplex
+  groups)`. iOS 26 shows an "Open in Multiplex?" confirmation for the FIRST
+  simctl-originated open on a fresh install (approve it once in Device Hub;
+  subsequent opens run headlessly), and the failure alert deliberately
+  presents from the mode root (`ExternalActionHost`) — never move it onto
+  the deck pane, which the expanded shell clips to zero width.
 - **App icon is a hand-authored Icon Composer package** (`AppIcon.icon` at
   the repo root; spec + bake-off record in `DESIGN.md`). icon.json lists
   groups frontmost-first. Validate/render headlessly with `xcrun actool

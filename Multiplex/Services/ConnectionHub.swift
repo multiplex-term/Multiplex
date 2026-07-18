@@ -13,6 +13,18 @@ final class ConnectionHub {
     /// Last-known wall state per host — prefills fresh models so a cold
     /// launch paints tiles instantly while connections rebuild.
     private let snapshots = DeckSnapshotStore()
+    /// App Group snapshot for the widget process, republished after settled
+    /// probes and host-list changes.
+    @ObservationIgnored private let widgetState = WidgetStatePublisher()
+    /// The host list from the deck's last `publishWidgetState(hosts:)` —
+    /// probe-driven republishes reuse it between host-list changes.
+    @ObservationIgnored private var widgetHosts: [Host] = []
+    /// Per-host recency carried across launches so a cold app start doesn't
+    /// reset every widget's SEEN stamp to "never".
+    @ObservationIgnored private lazy var widgetProbeDates: [UUID: Date] = Dictionary(
+        uniqueKeysWithValues: (SharedStateStore.load()?.hosts ?? [])
+            .compactMap { host in host.probedAt.map { (host.id, $0) } }
+    )
 
     init(attention: AttentionCenter? = nil) {
         self.attention = attention
@@ -35,8 +47,9 @@ final class ConnectionHub {
         model.onAttentionAlert = { [attention] alert in
             attention?.handle(alert)
         }
-        model.onSnapshot = { [snapshots] snapshot in
+        model.onSnapshot = { [weak self, snapshots] snapshot in
             snapshots.update(snapshot, for: host.id)
+            self?.scheduleWidgetStatePublish()
         }
         if let snapshot = snapshots.snapshot(for: host.id) {
             model.restore(from: snapshot)
@@ -47,15 +60,59 @@ final class ConnectionHub {
 
     func dropModel(for hostID: UUID) {
         snapshots.remove(for: hostID)
+        widgetProbeDates.removeValue(forKey: hostID)
         if let model = models.removeValue(forKey: hostID) {
             Task { await model.disconnect() }
         }
     }
 
     /// Persist any pending snapshot changes — called when the deck leaves
-    /// the foreground, because suspension freezes the debounce timer.
+    /// the foreground, because suspension freezes the debounce timers. The
+    /// widget snapshot always reloads timelines here: this is the moment the
+    /// Home Screen becomes visible, so it must show the final state.
     func flushSnapshots() {
         snapshots.flush()
+        widgetState.flush(reloadAlways: true)
+    }
+
+    // MARK: Widget snapshot
+
+    /// The deck calls this on appear and whenever the host list changes;
+    /// settled probes republish through `onSnapshot` with the same list.
+    func publishWidgetState(hosts: [Host]) {
+        widgetHosts = hosts
+        scheduleWidgetStatePublish()
+    }
+
+    private func scheduleWidgetStatePublish() {
+        guard !widgetHosts.isEmpty else {
+            // An empty fleet is still a truth worth publishing (all hosts
+            // removed) — but only once a deck has reported at all.
+            widgetState.schedule(WidgetFleetState(hosts: [], generatedAt: Date()))
+            return
+        }
+        let states = widgetHosts.map { host -> WidgetHostState in
+            let model = models[host.id]
+            // Live probe state when the model has one; otherwise the same
+            // last-known snapshot the deck's tiles restore from.
+            let snapshot: DeckSnapshot?
+            if let model, model.hasLiveProbe {
+                snapshot = DeckSnapshot(
+                    sessions: model.tmux.sessions,
+                    miniatures: model.miniatures
+                )
+                widgetProbeDates[host.id] = Date()
+            } else {
+                snapshot = snapshots.snapshot(for: host.id)
+            }
+            return WidgetStateBuilder.hostState(
+                host: host,
+                sessions: snapshot?.sessions ?? [],
+                miniatures: snapshot?.miniatures ?? [:],
+                probedAt: widgetProbeDates[host.id]
+            )
+        }
+        widgetState.schedule(WidgetFleetState(hosts: states, generatedAt: Date()))
     }
 }
 

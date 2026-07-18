@@ -189,6 +189,10 @@ struct DeckWindow: View {
         // involve securityd/iCloud, so cloud reconciliation begins only once
         // the deck exists instead of blocking App initialization.
         .task { await store.refreshFromCloud() }
+        // Keep the widget process's App Group snapshot in step with the host
+        // list (adds, removes, renames — and the first appearance); settled
+        // probes republish it through the hub's snapshot hook.
+        .task(id: store.hosts) { hub.publishWidgetState(hosts: store.hosts) }
         .task(
             id: LocalNetworkCheckID(
                 hosts: store.hosts,
