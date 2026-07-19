@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Multiplex, the SSH tmux terminal for Vision Pro, iPad, and iPhone</title>
+<meta name="description" content="A spatial SSH terminal for remote tmux. Every session is a live monitor on a wall; attaching opens it in its own window. For Apple Vision Pro, iPad, and iPhone.">
+<meta property="og:title" content="Multiplex, the SSH tmux terminal">
+<meta property="og:description" content="Every tmux session as a live monitor on a wall. Attach opens it in its own window.">
+<meta property="og:image" content="https://multiplexterm.dev/assets/visionos-deck.jpg">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'%3E%3Crect width='1024' height='1024' rx='212' fill='%2317181A'/%3E%3Cg fill='%23F2F3F4'%3E%3Crect x='96' y='654' width='832' height='68'/%3E%3Crect x='262' y='284' width='68' height='438'/%3E%3Crect x='694' y='284' width='68' height='438'/%3E%3C/g%3E%3Cpolyline points='296,304 512,600 728,304' fill='none' stroke='%23F2F3F4' stroke-width='68'/%3E%3Ccircle cx='512' cy='600' r='40' fill='%23E5484D'/%3E%3C/svg%3E">
+<style>
+  /* ── TALLY print sheet: Frost paper, graphite ink, tally red as state ── */
+  :root{
+    --paper:#F6F8FB;
+    --paper2:#EDF0F5;
+    --ink:#191E25;
+    --ink2:#515C69;
+    --ink3:#87919E;
+    --hair:#CDD3DC;
+    --tally:#C13439;
+    --caution:#966618;
+    --ok:#3E7C58;
+    /* the figure (the product) keeps its own dark chassis */
+    --chassis:#17181A;--bezel:#26282B;--bezel-hi:#33363A;--screen:#0A0B0C;
+    --signal:#F2F3F4;--signal2:#9BA1A6;--signal3:#5C6166;--mini:#C8D2D6;--tallyD:#E5484D;
+    --sans:system-ui,-apple-system,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    --w:1120px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--paper);color:var(--ink);
+    font-family:var(--sans);font-size:16.5px;line-height:1.62;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    overflow-x:clip;
+  }
+  /* wide mono content (the figure tile) must never widen the page */
+  .mast-grid>*,.fig>*,.legend>div>*,.ledger>div>*,.rates>*{min-width:0}
+  ::selection{background:rgba(193,52,57,.22)}
+  a{color:inherit}
+  img{max-width:100%;height:auto;display:block}
+  .wrap{max-width:var(--w);margin:0 auto;padding:0 28px}
+  .lbl{font-weight:700;font-stretch:condensed;text-transform:uppercase;letter-spacing:.09em}
+  .mono{font-family:var(--mono)}
+
+  /* ── masthead ───────────────────────────────────────────────────────── */
+  .mast{padding:64px 0 0}
+  .mast-grid{display:grid;grid-template-columns:minmax(0,1fr) 264px;gap:56px;align-items:end}
+  .title{
+    font-weight:800;font-stretch:condensed;letter-spacing:-.02em;
+    font-size:clamp(3.4rem,10.5vw,8.2rem);line-height:.92;text-transform:uppercase;
+  }
+  .mast-sub{margin-top:26px;display:grid;gap:6px}
+  .mast-sub .a{font-family:var(--mono);font-size:13px;color:var(--ink2)}
+  .mast-sub .b{font-weight:700;font-stretch:condensed;text-transform:uppercase;letter-spacing:.09em;font-size:13px;color:var(--ink)}
+  .plate{
+    border:3px solid var(--ink);background:var(--paper2);
+    display:grid;place-items:center;aspect-ratio:1;padding:36px;
+  }
+  .plate svg{width:100%;height:auto;color:var(--ink)}
+  .mast-cta{margin-top:14px;display:grid;justify-items:stretch}
+  .rule{border:none;border-top:3px solid var(--ink);margin:44px 0 0}
+
+  .asb{
+    display:inline-flex;align-items:center;justify-content:center;gap:11px;text-decoration:none;
+    background:#000;border-radius:11px;padding:10px 18px 11px 14px;
+  }
+  .asb:hover{opacity:.86}
+  .asb:active{transform:translateY(1px)}
+  .asb svg{width:26px;height:26px;fill:#fff;flex:none}
+  .asb-txt{display:flex;flex-direction:column;line-height:1.16;color:#fff}
+  .asb-txt small{font-size:10.5px;font-weight:400}
+  .asb-txt b{font-size:20px;font-weight:600;letter-spacing:-.01em}
+
+  /* lede */
+  .lede{padding:40px 0 0;max-width:64ch}
+  .lede p{font-size:clamp(1.25rem,2.2vw,1.55rem);line-height:1.4;font-weight:500;letter-spacing:-.005em}
+  .lede strong{color:var(--tally);font-weight:650}
+
+  /* ── section headers, print style ───────────────────────────────────── */
+  section{padding:72px 0 0}
+  .shead{display:flex;align-items:baseline;gap:20px;border-top:3px solid var(--ink);padding-top:14px;margin-bottom:36px}
+  .shead h2{font-weight:800;font-stretch:condensed;text-transform:uppercase;letter-spacing:.02em;font-size:clamp(1.5rem,2.6vw,2.1rem);line-height:1}
+  .shead .note{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink3);text-align:right}
+
+  /* ── figure 1: reading the wall ─────────────────────────────────────── */
+  .fig{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:52px;align-items:center}
+  .tile{
+    background:var(--bezel);border:1px solid var(--bezel-hi);
+    box-shadow:0 26px 60px -28px rgba(25,30,37,.45);
+    max-width:500px;
+  }
+  .tile-screen{
+    background:var(--screen);margin:8px;height:168px;overflow:hidden;
+    padding:14px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.65;
+    color:var(--mini);white-space:pre;
+  }
+  .tile-screen .dim{color:var(--signal3)}
+  .umd{display:flex;align-items:center;gap:10px;padding:9px 13px 8px}
+  .umd .name{font-weight:700;font-stretch:condensed;text-transform:uppercase;letter-spacing:.09em;font-size:12px;color:var(--signal)}
+  .lamp{display:flex;align-items:center;gap:6px;font-weight:700;font-stretch:condensed;letter-spacing:.09em;font-size:10px;color:var(--tallyD);text-transform:uppercase}
+  .lamp i{width:8px;height:8px;border-radius:50%;background:var(--tallyD);box-shadow:0 0 9px rgba(229,72,77,.8)}
+  .umd .tel{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--signal3)}
+  .spine{display:flex;gap:2px;padding:0 8px 8px}
+  .spine span{flex:1;text-align:center;font-family:var(--mono);font-size:9px;color:var(--signal3);padding:4px 0;border-top:2px solid var(--bezel-hi)}
+  .spine .on{color:var(--signal);border-top-color:var(--signal)}
+  .spine .tick{color:#E0A33E;border-top-color:#E0A33E}
+
+  .legend{display:grid}
+  .legend > div{display:grid;grid-template-columns:130px 1fr;gap:22px;padding:17px 0;border-top:1px solid var(--hair)}
+  .legend > div:first-child{border-top:none;padding-top:0}
+  .legend .k{font-weight:700;font-stretch:condensed;text-transform:uppercase;letter-spacing:.09em;font-size:12.5px;padding-top:2px}
+  .legend .k.red{color:var(--tally)}
+  .legend .k.amb{color:var(--caution)}
+  .legend p{color:var(--ink2);font-size:15px;line-height:1.55}
+  .legend b{color:var(--ink);font-weight:600}
+
+  /* ── capabilities ledger ────────────────────────────────────────────── */
+  .ledger > div{display:grid;grid-template-columns:190px 1fr;gap:36px;padding:24px 0;border-top:1px solid var(--hair)}
+  .ledger > div:first-child{border-top:none;padding-top:0}
+  .ledger .g{font-weight:800;font-stretch:condensed;text-transform:uppercase;letter-spacing:.06em;font-size:15px;padding-top:2px}
+  .ledger p{color:var(--ink2);font-size:15.5px;max-width:70ch}
+  .ledger b{color:var(--ink);font-weight:600}
+  .ledger .pro{font-family:var(--mono);font-size:10.5px;color:var(--ink3);border:1px solid var(--hair);padding:1px 6px;margin-left:4px;white-space:nowrap}
+
+  /* ── plate photo ────────────────────────────────────────────────────── */
+  .photo{border:1px solid var(--ink)}
+  .photo img{width:100%}
+  .cap{font-family:var(--mono);font-size:12px;color:var(--ink3);padding-top:10px}
+
+  /* ── rate card ──────────────────────────────────────────────────────── */
+  .rates{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:44px}
+  .rate .rh{display:flex;align-items:baseline;gap:16px;border-top:3px solid var(--ink);padding-top:12px;margin-bottom:18px}
+  .rate .rh .lbl{font-size:16px}
+  .rate .rh .p{margin-left:auto;font-family:var(--mono);font-size:14px;color:var(--ink2)}
+  .rate .rh .p b{font-size:22px;color:var(--ink);font-weight:500}
+  .rate ul{list-style:none;display:grid}
+  .rate li{padding:10px 0;border-top:1px solid var(--hair);color:var(--ink2);font-size:15.5px}
+  .rate li:first-child{border-top:none}
+  .rate li b{color:var(--ink);font-weight:600}
+  .rate .asb{margin-top:24px}
+  .rates-note{grid-column:1/-1;color:var(--ink3);font-size:13.5px;max-width:76ch}
+  .rates-note code{font-family:var(--mono);font-size:12px}
+
+  /* ── colophon ───────────────────────────────────────────────────────── */
+  .colophon{margin-top:88px;border-top:3px solid var(--ink);padding:22px 0 64px}
+  .colo{display:flex;gap:28px;align-items:center;flex-wrap:wrap;color:var(--ink3);font-size:13.5px}
+  .colo .brand{display:flex;align-items:center;gap:10px}
+  .colo svg{width:20px;height:20px;color:var(--ink)}
+  .colo a{color:var(--ink2);text-decoration:none}
+  .colo a:hover{color:var(--ink)}
+  .colo .spacer{flex:1}
+
+  @media (max-width:920px){
+    .mast{padding-top:44px}
+    .mast-grid{grid-template-columns:1fr;gap:36px}
+    .plate{max-width:240px}
+    .fig{grid-template-columns:1fr;gap:40px}
+    .rates{grid-template-columns:1fr;gap:52px}
+    section{padding:56px 0 0}
+  }
+  @media (max-width:600px){
+    .ledger > div,.legend > div{grid-template-columns:1fr;gap:6px;padding:18px 0}
+    .shead .note{display:none}
+  }
+</style>
+</head>
+<body>
+
+<main>
+  <!-- ══ MASTHEAD ═══════════════════════════════════════════════════════ -->
+  <div class="mast">
+    <div class="wrap">
+      <div class="mast-grid">
+        <div>
+          <h1 class="title">Multiplex</h1>
+          <div class="mast-sub">
+            <span class="b">A monitor wall for remote tmux</span>
+            <span class="a">FOR APPLE VISION PRO, IPAD &amp; IPHONE &nbsp;/&nbsp; SSH + MOSH &nbsp;/&nbsp; NO SERVERS OF OURS</span>
+          </div>
+        </div>
+        <div>
+          <div class="plate" role="img" aria-label="The Multiplex Carrier mark: one signal trace drawing an M, with a red tally node at the live joint">
+            <svg viewBox="0 214 1024 578" aria-hidden="true">
+              <g fill="currentColor">
+                <rect x="0" y="654" width="1024" height="68"/>
+                <rect x="262" y="284" width="68" height="438"/>
+                <rect x="694" y="284" width="68" height="438"/>
+              </g>
+              <polyline points="296,304 512,600 728,304" fill="none" stroke="currentColor" stroke-width="68" stroke-linecap="butt" stroke-linejoin="miter"/>
+              <circle cx="512" cy="600" r="40" fill="#C13439"/>
+            </svg>
+          </div>
+          <div class="mast-cta">
+            <a class="asb" href="https://apps.apple.com/app/id6790074057">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.031 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg>
+              <span class="asb-txt"><small>Download on the</small><b>App Store</b></span>
+            </a>
+          </div>
+        </div>
+      </div>
+      <hr class="rule">
+      <div class="lede">
+        <p>Your hosts probe over SSH and every tmux session hangs as a live monitor: its actual last lines, a spine segment per window, and a <strong>red tally while you are attached</strong>. Tap one and it opens in its own window.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ FIGURE: READING THE WALL ═══════════════════════════════════════ -->
+  <section>
+    <div class="wrap">
+      <div class="shead">
+        <h2>Reading the wall</h2>
+        <span class="note">ONE TILE = ONE TMUX SESSION</span>
+      </div>
+      <div class="fig">
+        <div class="tile" role="img" aria-label="One deck tile: a dark screen with the session's last lines, an UMD row reading MAIN with a red LIVE lamp and telemetry, and a segmented window spine below">
+          <div class="tile-screen"><span class="dim">15:54:25 api GET /v1/sessions 200 16ms
+15:54:27 api GET /v1/sessions 200 94ms
+15:54:29 api GET /v1/sessions 200 10ms</span>
+&#8594; deploying build 2669
+<span class="dim">&#10003; staged &middot; waiting on approval</span></div>
+          <div class="umd">
+            <span class="name">Main</span>
+            <span class="lamp"><i></i>Live</span>
+            <span class="tel">3 WIN &middot; 1 CLIENT &middot; 19m</span>
+          </div>
+          <div class="spine"><span>0 EDITOR</span><span class="on">1 SERVER</span><span class="tick">2 LOGS</span></div>
+        </div>
+        <div class="legend">
+          <div>
+            <span class="k">Screen</span>
+            <p>The session's <b>actual last lines</b>, streamed about every five seconds while the wall is in front of you. Not an icon. Not a name in a list.</p>
+          </div>
+          <div>
+            <span class="k red">Tally</span>
+            <p>The broadcast "on air" lamp. <b>Lit and captioned LIVE while you are attached</b>; detached sessions carry a neutral ATTACH badge instead.</p>
+          </div>
+          <div>
+            <span class="k">Spine</span>
+            <p><b>One segment per tmux window</b>, the active one lit, split panes counted. A whole session's shape, readable across the room.</p>
+          </div>
+          <div>
+            <span class="k amb">Ticks</span>
+            <p>Bell or activity in a window flags its segment in caution amber. Agents report here too: the wall shows <b>CLAUDE, CODEX, or PI</b> in a tile's telemetry.</p>
+          </div>
+          <div>
+            <span class="k">No signal</span>
+            <p>An unreachable host is a hatched NO SIGNAL tile with a RECONNECT badge. <b>Failure is part of the composition</b>, never a blank page.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ CAPABILITIES ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="wrap">
+      <div class="shead">
+        <h2>Capabilities</h2>
+        <span class="note">VISIONOS 1.0 &nbsp;/&nbsp; IOS 17</span>
+      </div>
+      <div class="ledger">
+        <div>
+          <span class="g">Windows</span>
+          <p>Attach opens each session in <b>its own window</b>: spatial placement on Vision Pro, real scenes in Stage Manager and Split View on iPad. Merge windows into tabs and split them back out; the connection, buffer, and scrollback move with the tab.</p>
+        </div>
+        <div>
+          <span class="g">Agents</span>
+          <p><b>Claude Code, Codex, and Pi</b> detected in every pane, on the wall and in the terminal. Command chips follow the foreground agent; custom commands sync per host. Alerts on finished turns, questions, and permission prompts<span class="pro">PRO</span>, plus Claude Code prompt history with jump-back-to-message<span class="pro">PRO</span>.</p>
+        </div>
+        <div>
+          <span class="g">Transport</span>
+          <p>SSH with password or OpenSSH ed25519 and RSA keys, secrets in the Keychain. <b>A native mosh client</b><span class="pro">PRO</span> keeps sessions alive through sleep, roaming, and IP changes; no companion app on the host side beyond mosh-server.</p>
+        </div>
+        <div>
+          <span class="g">Files</span>
+          <p>Drag a file onto the terminal, or attach from Files, Photos, or the iPad camera. Multiplex uploads it over the tab's own connection into the pane's working directory and <b>types the remote path without submitting it</b>.</p>
+        </div>
+        <div>
+          <span class="g">Terminal</span>
+          <p>Full <b>xterm-256color</b> with touch and pointer clicks for mouse-aware TUIs. Multilingual system keyboards and IMEs, hardware keyboards, live PTY resize, a tmux shortcut menu, and touch-native copy mode. Ten built-in themes, one selection per appearance; a custom theme editor with Pro.</p>
+        </div>
+        <div>
+          <span class="g">Automation</span>
+          <p>Home Screen widgets show last-known session frames with an honest SEEN stamp. Siri and Shortcuts open a shell or <b>launch an agent with a first prompt</b>; a multiplex:// scheme drives your own automations.</p>
+        </div>
+        <div>
+          <span class="g">Privacy</span>
+          <p><b>No account, no analytics, no servers of ours.</b> Hosts, secrets, and command setups sync device to device through end-to-end encrypted iCloud Keychain. Bytes travel from your device to your host, and nowhere else.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ PLATE ══════════════════════════════════════════════════════════ -->
+  <section>
+    <div class="wrap">
+      <div class="photo">
+        <img src="assets/visionos-deck.jpg" width="2400" height="1350" alt="The Multiplex deck on Apple Vision Pro: a dark monitor wall of live tmux session tiles floating in a living room" loading="lazy">
+      </div>
+      <p class="cap">The deck on Apple Vision Pro. Host devbox, eight sessions, two attached.</p>
+    </div>
+  </section>
+
+  <!-- ══ RATE CARD ══════════════════════════════════════════════════════ -->
+  <section>
+    <div class="wrap">
+      <div class="shead">
+        <h2>Rate card</h2>
+        <span class="note">ONE PURCHASE &nbsp;/&nbsp; NO SUBSCRIPTION</span>
+      </div>
+      <div class="rates">
+        <div class="rate">
+          <div class="rh"><span class="lbl">Free</span><span class="p"><b>$0</b></span></div>
+          <ul>
+            <li><b>Two hosts</b>, the full spatial experience</li>
+            <li>Live wall, windows, tabs, merge and split</li>
+            <li>Agent detection everywhere, ten command-chip taps a day</li>
+            <li>File drops, widgets, Shortcuts, Keychain sync</li>
+            <li>Built-in themes, light and dark appearance</li>
+          </ul>
+        </div>
+        <div class="rate">
+          <div class="rh"><span class="lbl">Multiplex Pro</span><span class="p"><b>$19.99</b> once</span></div>
+          <ul>
+            <li><b>Unlimited hosts</b></li>
+            <li>mosh: sessions survive sleep, roaming, IP changes</li>
+            <li>Unmetered agent chips, alerts when a session needs you</li>
+            <li>Claude Code prompt history with jump-back-to-message</li>
+            <li>Custom theme editor, on all your devices</li>
+          </ul>
+          <a class="asb" href="https://apps.apple.com/app/id6790074057">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.031 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg>
+            <span class="asb-txt"><small>Download on the</small><b>App Store</b></span>
+          </a>
+        </div>
+        <p class="rates-note">You need a host you can reach over SSH. The live wall and persistent sessions need <code>tmux&nbsp;1.8+</code>; plain SSH shells work without tmux; mosh needs <code>mosh-server</code> on the host. Works with any POSIX login shell.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ COLOPHON ═══════════════════════════════════════════════════════ -->
+  <div class="wrap colophon">
+    <div class="colo">
+      <span class="brand">
+        <svg viewBox="0 0 1024 1024" aria-hidden="true">
+          <g fill="currentColor">
+            <rect x="0" y="654" width="1024" height="68"/>
+            <rect x="262" y="284" width="68" height="438"/>
+            <rect x="694" y="284" width="68" height="438"/>
+          </g>
+          <polyline points="296,304 512,600 728,304" fill="none" stroke="currentColor" stroke-width="68" stroke-linecap="butt" stroke-linejoin="miter"/>
+          <circle cx="512" cy="600" r="40" fill="#C13439"/>
+        </svg>
+        <span class="lbl" style="font-size:13px">Multiplex</span>
+      </span>
+      <span>&copy; 2026 Multiplex</span>
+      <span class="spacer"></span>
+      <a href="https://multiplexterm.dev/privacy">Privacy</a>
+      <a href="https://apps.apple.com/app/id6790074057">App Store</a>
+    </div>
+  </div>
+</main>
+
+</body>
+</html>
