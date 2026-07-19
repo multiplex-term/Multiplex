@@ -7,7 +7,12 @@ shows every session live — its actual last lines, window spine, and a tally
 lamp when it's attached — before you ever attach.
 
 *Design rationale and tokens: [DESIGN.md](DESIGN.md). The identity bake-off
-that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md).*
+that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md). The
+product site — the App Store listing's marketing URL and privacy policy — is
+maintained in [multiplex-home](https://github.com/jhen0409/multiplex-home)
+and served at [preview.multiplexterm.dev](https://preview.multiplexterm.dev)
+until release (final home: multiplexterm.dev); its own design bake-off is
+recorded in [docs/landing/](docs/landing/).*
 
 ![The deck: a live monitor wall of tmux sessions](docs/visionos-deck.png)
 

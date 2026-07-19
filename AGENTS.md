@@ -871,6 +871,17 @@ Record App Store Connect state only after a dated remote readback. Standard
 `deliver` lanes do not manage IAP metadata/review images; custom Spaceship/API
 automation or the App Store Connect UI is required.
 
+The **landing site** (the listing's marketing URL + the privacy policy) is
+part of the same claim surface but lives in its own repo, **multiplex-home**
+(`github.com/jhen0409/multiplex-home` — Astro on Cloudflare Workers; deploys
+are manual `npm run deploy`, decoupled from git). It serves
+`preview.multiplexterm.dev` today; the apex `multiplexterm.dev` is reserved
+for the release cutover (a one-line route change in its `wrangler.json`).
+Landing changes go through PRs, never straight to a default branch. When
+features, pricing, platforms, or privacy behavior change, update that site in
+the same change as the metadata above. The design bake-off record and the
+unchosen candidates stay here under `docs/landing/`.
+
 ## Conventions
 
 - Bundle id `app.multiplexterm.multiplex`; device families are iPhone + iPad
