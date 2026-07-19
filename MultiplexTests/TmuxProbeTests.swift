@@ -399,6 +399,29 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertTrue(command.contains("tmux send-keys -t \"${i%% *}\" Enter"))
     }
 
+    func testNewSessionCommandTypesSetupScriptBeforeLaunch() {
+        let command = TmuxProbe.newSessionCommand(
+            name: "claude", sourceSessionName: nil,
+            script: "source .venv/bin/activate\nexport A=1", launch: "claude")
+        // The script types first — same shell, so what it exports/activates
+        // is live for the launch line — and typing is sequential, never
+        // gated on the script's exit status. Interior newlines ride inside
+        // the one literal send-keys argument.
+        XCTAssertTrue(command.contains(
+            "tmux send-keys -t \"${i%% *}\" -l -- 'source .venv/bin/activate\nexport A=1'; "
+                + "tmux send-keys -t \"${i%% *}\" Enter; "
+                + "tmux send-keys -t \"${i%% *}\" -l -- 'claude'"))
+    }
+
+    func testNewSessionCommandTypesSetupScriptForPlainShellSessions() {
+        let command = TmuxProbe.newSessionCommand(
+            name: "main", sourceSessionName: nil, script: "nvm use 20", launch: nil)
+        XCTAssertTrue(command.contains(
+            "tmux send-keys -t \"${i%% *}\" -l -- 'nvm use 20'; "
+                + "tmux send-keys -t \"${i%% *}\" Enter"))
+        XCTAssertTrue(command.contains("MULTIPLEX_NEW"))
+    }
+
     func testNewSessionCommandWithoutSourceOrLaunch() {
         let command = TmuxProbe.newSessionCommand(
             name: "main", sourceSessionName: nil, launch: nil)

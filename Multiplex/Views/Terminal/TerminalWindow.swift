@@ -443,7 +443,9 @@ struct TerminalWindowRoot: View {
     /// same host, same directory as its pane (an agent variant also types
     /// its launch command into the new shell) — and attach it as a new tab
     /// of this window. The session exists before the tab appears, so the
-    /// attach can't race it.
+    /// attach can't race it. The host's remembered setup script rides along
+    /// while the New Session sheet's REMEMBER opt-in is on — the quick path
+    /// inherits the choice made there, the way it inherits the pane's cwd.
     private func openNewTab(launching agent: AgentKind?) {
         guard !creatingTab,
               let activeTab,
@@ -453,11 +455,13 @@ struct TerminalWindowRoot: View {
         // A plain shell tab has no pane to inherit a directory from —
         // the new session starts in $HOME, named after the host's habit.
         let source = activeTab.sessionName
+        let script = NewSessionPreferences().rememberedScript(for: host)
         Task {
             defer { creatingTab = false }
             guard let name = await hub.model(for: host).createSession(
                 base: agent?.launchCommand ?? source ?? "main",
                 inDirectoryOf: source,
+                running: script?.normalizedBody,
                 typing: agent?.launchCommand
             ) else {
                 newTabFailedHost = host.name

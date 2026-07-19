@@ -33,6 +33,11 @@ struct Host: Identifiable, Codable, Hashable {
     /// the first is the default; the rest are choices in the New Session
     /// prompt. Empty means $HOME.
     var workingDirs: [String] = []
+    /// Named setup scripts, in the user's order (order is presentation only
+    /// — a script runs only when chosen, never because it exists). The
+    /// selected one is typed into a freshly created session's shell before
+    /// the optional agent launch line.
+    var sessionScripts: [SessionScript] = []
     /// Agent-helper commands and built-in Bar/More placement for this host.
     /// This is part of the mirrored host record so the setup follows the host
     /// to the user's other devices through iCloud Keychain.
@@ -62,6 +67,9 @@ extension Host {
         moshServerPath = try container.decodeIfPresent(String.self, forKey: .moshServerPath)
         moshPorts = try container.decodeIfPresent(String.self, forKey: .moshPorts)
         workingDirs = try container.decodeIfPresent([String].self, forKey: .workingDirs) ?? []
+        sessionScripts = SessionScript.normalized(
+            try container.decodeIfPresent([SessionScript].self, forKey: .sessionScripts) ?? []
+        )
         agentCommandConfiguration = try container.decodeIfPresent(
             AgentCommandConfiguration.self,
             forKey: .agentCommandConfiguration
@@ -70,11 +78,13 @@ extension Host {
     }
 
     /// Hashable identity for the connection model and the wall feed that
-    /// drives it. Command-setup edits must not tear down the probe connection;
-    /// every other current/future Host field remains part of the identity.
+    /// drives it. Command-setup and setup-script edits must not tear down the
+    /// probe connection; every other current/future Host field remains part
+    /// of the identity.
     var connectionModelConfiguration: Host {
         var configuration = self
         configuration.agentCommandConfiguration = AgentCommandConfiguration()
+        configuration.sessionScripts = []
         configuration.updatedAt = .distantPast
         return configuration
     }

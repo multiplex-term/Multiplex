@@ -375,6 +375,12 @@ enum TmuxProbe {
     /// - `startDirectory`: an explicit start directory (a host working dir
     ///   picked in the New Session prompt); consulted only when there is no
     ///   source session, and skipped for $HOME when missing on the host.
+    /// - `script`: the host's chosen setup script, typed into the fresh
+    ///   shell exactly like `launch` but before it — same shell, so what it
+    ///   exports/activates is live for the launch line. Sequential, never
+    ///   gated: a failing script leaves its error visible above a launch
+    ///   that still runs. (Known limit, documented not solved: a script
+    ///   that reads stdin consumes the launch line as its input.)
     /// - `launch`: typed into the fresh shell via send-keys (literal text,
     ///   then Enter) — never the session's command argv, so the agent
     ///   exiting leaves a shell, and the login shell's own PATH resolves it
@@ -391,7 +397,8 @@ enum TmuxProbe {
     /// failed create must read as "no sentinel", not a torn-down control
     /// connection.
     static func newSessionCommand(
-        name: String, sourceSessionName: String?, startDirectory: String? = nil, launch: String?
+        name: String, sourceSessionName: String?, startDirectory: String? = nil,
+        script: String? = nil, launch: String?
     ) -> String {
         var command = pathPrefix + TmuxSessionLaunch.persistentRunnerDefinition
         if let source = sourceSessionName {
@@ -408,8 +415,8 @@ enum TmuxProbe {
         command += "i=$(\(create) -s \(name.shellQuoted) 2>/dev/null)"
             + " || i=$(\(create) 2>/dev/null); "
         var onSuccess = ""
-        if let launch {
-            onSuccess += "tmux send-keys -t \"${i%% *}\" -l -- \(launch.shellQuoted); "
+        for typed in [script, launch].compactMap({ $0 }) {
+            onSuccess += "tmux send-keys -t \"${i%% *}\" -l -- \(typed.shellQuoted); "
                 + "tmux send-keys -t \"${i%% *}\" Enter; "
         }
         onSuccess += "printf 'MULTIPLEX_NEW %s\\n' \"${i#* }\""

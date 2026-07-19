@@ -289,6 +289,11 @@ final class HostStore {
         // Optional so existing seeds leave the host's dirs alone; used by
         // headless checks of the Starts-in pickers.
         if let dirs = seed.workingDirs { host.workingDirs = dirs }
+        // Same deal for setup scripts — headless checks of the script paths
+        // seed one with a known id so the remembered choice can target it.
+        if let scripts = seed.sessionScripts {
+            host.sessionScripts = SessionScript.normalized(scripts)
+        }
         if let key = seed.privateKey { KeychainStore.set(key, for: host.id, kind: .privateKey) }
         if let password = seed.password { KeychainStore.set(password, for: host.id, kind: .password) }
         if hosts.contains(where: { $0.id == host.id }) {
@@ -311,6 +316,7 @@ final class HostStore {
         var moshServerPath: String?
         var moshPorts: String?
         var workingDirs: [String]?
+        var sessionScripts: [SessionScript]?
     }
     #endif
 }

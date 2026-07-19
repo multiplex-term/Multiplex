@@ -59,6 +59,8 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 
 - `MULTIPLEX_SEED_HOST=<path to seed.json>` — imports a ready `devbox` host
   (idempotent; stable UUID across relaunches so restored scenes stay valid).
+  Optional `workingDirs` / `sessionScripts` keys feed headless checks of the
+  New Session pickers and the setup-script creation paths.
 - `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per comma entry via
   the same route the Attach button uses; `+` inside an entry groups sessions
   as tabs of one window (`main+scratch,deploy`). Fires **once per process**.
@@ -471,6 +473,31 @@ views.
   runner falls back to ordinary tmux on macOS/BSD or when the systemd user
   manager is unavailable (a headless Linux host with logind cleanup then needs
   user lingering enabled or `KillUserProcesses=no`).
+- **Session setup scripts are chosen, then typed — never implicit**
+  (`SessionScript`, `Host.sessionScripts`; editor in Host Settings below the
+  working dirs): a newly *created* session types the selected script into the
+  fresh shell through the same send-keys-then-Enter discipline as the agent
+  launch, BEFORE the launch line — same shell, so its exports/activations are
+  live for the launch. Sequential, never `&&`-gated: a failing script leaves
+  its error visible above a launch that still runs (and a script that reads
+  stdin eats the launch line as input — documented footgun, unsolvable
+  app-side). Shell-only sessions get the script too; attach never types
+  anything, and the legacy PTY-side `.create` route stays untouched (nothing
+  rides on `TerminalRoute`). The New Session sheet's single REMEMBER opt-in
+  covers the per-host script choice (`NewSessionPreferences`, device-local
+  host-UUID → script-id map; deleted ids fail soft to NONE), and while it is
+  on, the pickerless creation paths — + TAB and the widget/Shortcuts router —
+  inherit the remembered script the way + TAB inherits the pane cwd. List
+  order is presentation only: a script never runs merely because it exists or
+  sits first, and the sheet picker is the Starts-in Menu grammar, not a
+  choice bar (user lists are unbounded). Script ids are load-bearing (the
+  remember map points at them), so the editor preserves them across edits;
+  bodies get the custom-command sanitize (controls stripped, interior
+  newlines/tabs kept). Scripts ride the synced Host record (`updatedAt`
+  bumps), are zeroed out of `connectionModelConfiguration` so edits don't
+  drop the probe link, never enter the widget projection, and are free-tier
+  host plumbing, not an agent-helper surface. The dev seed may carry a
+  `sessionScripts` array for headless checks of these paths.
 - **mosh is a second `TerminalTransport`, not a fork of the SSH path**
   (`Services/Mosh/`, `Host.useMosh`). SSH stays the control plane — deck
   probing, capture-pane, file-drop SFTP, and the mosh bootstrap itself all
