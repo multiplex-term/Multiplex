@@ -191,13 +191,14 @@ struct FleetWall: View {
             NewSessionSheet(
                 host: host,
                 existingNames: hub.model(for: host).tmux.sessions.map(\.name),
-                create: { name, agent, initialPrompt, directory in
+                create: { name, agent, initialPrompt, directory, script in
                     createSession(
                         on: host,
                         named: name,
                         launching: agent,
                         initialPrompt: initialPrompt,
-                        startingIn: directory
+                        startingIn: directory,
+                        running: script
                     )
                 }
             )
@@ -1039,7 +1040,8 @@ struct FleetWall: View {
     /// the problem.
     private func createSession(
         on host: Host, named rawName: String, launching agent: AgentKind?,
-        initialPrompt: String, startingIn directory: String?
+        initialPrompt: String, startingIn directory: String?,
+        running script: SessionScript?
     ) {
         let name = TmuxProbe.sanitizedSessionName(rawName)
         let model = hub.model(for: host)
@@ -1048,6 +1050,7 @@ struct FleetWall: View {
                 base: name,
                 inDirectoryOf: nil,
                 startingIn: directory,
+                running: script?.normalizedBody,
                 typing: agent?.launchCommand(initialPrompt: initialPrompt)
             ) else { return }
             open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: created)))
@@ -1102,12 +1105,14 @@ private struct SessionDropTarget: Equatable {
 /// -2, -3…) so Create is one tap; picking an agent re-prefills it unless
 /// the user already typed their own. Each agent can receive a one-shot first
 /// prompt as its CLI argument. An opt-in remembers only the submitted launch
-/// choice for the next sheet. Hosts with working directories also get a
-/// "Starts in" picker, defaulting to the first (the host's own default).
+/// and setup-script choices for the next sheet. Hosts with working
+/// directories also get a "Starts in" picker, defaulting to the first (the
+/// host's own default); hosts with setup scripts get a "Runs first" picker,
+/// defaulting to NONE unless one is remembered.
 private struct NewSessionSheet: View {
     let host: Host
     let existingNames: [String]
-    let create: (String, AgentKind?, String, String?) -> Void
+    let create: (String, AgentKind?, String, String?, SessionScript?) -> Void
 
     private let preferences: NewSessionPreferences
 
@@ -1117,12 +1122,13 @@ private struct NewSessionSheet: View {
     @State private var agent: AgentKind?
     @State private var initialPrompt: String
     @State private var directory: String?
+    @State private var script: SessionScript?
     @State private var remembersLastLaunch: Bool
 
     init(
         host: Host,
         existingNames: [String],
-        create: @escaping (String, AgentKind?, String, String?) -> Void,
+        create: @escaping (String, AgentKind?, String, String?, SessionScript?) -> Void,
         preferences: NewSessionPreferences = NewSessionPreferences()
     ) {
         self.host = host
@@ -1135,6 +1141,7 @@ private struct NewSessionSheet: View {
         _agent = State(initialValue: agent)
         _initialPrompt = State(initialValue: "")
         _directory = State(initialValue: host.workingDirs.first)
+        _script = State(initialValue: preferences.rememberedScript(for: host))
         _remembersLastLaunch = State(initialValue: remembersLastLaunch)
         _name = State(initialValue: TmuxProbe.uniqueSessionName(
             base: agent?.launchCommand ?? "main", existing: existingNames))
@@ -1208,6 +1215,33 @@ private struct NewSessionSheet: View {
                         }
                     }
 
+                    if !host.sessionScripts.isEmpty {
+                        TallyFormSection("Setup script", detail: scriptDetail) {
+                            TallyFormField("Runs first") {
+                                Menu {
+                                    ForEach(host.sessionScripts) { candidate in
+                                        Button(candidate.displayName) { script = candidate }
+                                    }
+                                    Divider()
+                                    Button("None") { script = nil }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Text(script?.displayName ?? "None")
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Image(systemName: "chevron.down")
+                                            .font(.ui(9, weight: .semibold))
+                                            .foregroundStyle(Theme.signal2)
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .chassisHover(2)
+                                .accessibilityLabel("Setup script")
+                            }
+                        }
+                    }
+
                     TallyFormSection("Directory", detail: directoryDetail) {
                         if host.workingDirs.isEmpty {
                             TallyFormRow {
@@ -1262,9 +1296,11 @@ private struct NewSessionSheet: View {
                     Button("Create & Attach") {
                         preferences.save(
                             remembersLastLaunch: remembersLastLaunch,
-                            agent: agent
+                            agent: agent,
+                            script: script,
+                            hostID: host.id
                         )
-                        create(name, agent, initialPrompt, directory)
+                        create(name, agent, initialPrompt, directory, script)
                         dismiss()
                     }
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -1302,10 +1338,20 @@ private struct NewSessionSheet: View {
     }
 
     private var launchDetail: String {
+        let remembers = host.sessionScripts.isEmpty
+            ? "REMEMBER saves only the launch choice."
+            : "REMEMBER saves the launch and setup-script choices."
         guard let agent else {
-            return "Creates the tmux session, then attaches to its login shell. REMEMBER saves only this launch choice."
+            return "Creates the tmux session, then attaches to its login shell. \(remembers)"
         }
-        return "Starts \(agent.displayName) in the fresh shell. The optional prompt becomes its first message; REMEMBER saves only the launch choice."
+        return "Starts \(agent.displayName) in the fresh shell. The optional prompt becomes its first message; \(remembers)"
+    }
+
+    private var scriptDetail: String {
+        guard let script else {
+            return "Nothing extra runs. A setup script is typed into the fresh shell before the launch."
+        }
+        return "Types \(script.displayName) into the fresh shell first, so the launch inherits what it sets up."
     }
 
     private var directoryDetail: String {
@@ -1697,7 +1743,7 @@ private enum FleetWallPreviewData {
     NewSessionSheet(
         host: FleetWallPreviewData.host,
         existingNames: ["main", "scratch"],
-        create: { _, _, _, _ in },
+        create: { _, _, _, _, _ in },
         preferences: NewSessionPreferences(
             defaults: UserDefaults(
                 suiteName: "app.multiplexterm.multiplex.preview.new-session"

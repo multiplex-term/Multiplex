@@ -21,6 +21,7 @@ struct AddHostSheet: View {
     @State private var moshPorts = ""
     @State private var workingDirs: [WorkingDir] = []
     @State private var newWorkingDir = ""
+    @State private var scripts: [ScriptRow] = []
     @State private var testState: TestState = .idle
     @State private var showingPaywall = false
 
@@ -31,6 +32,31 @@ struct AddHostSheet: View {
     private struct WorkingDir: Identifiable, Equatable {
         let id = UUID()
         var path: String
+    }
+
+    /// Same row discipline for setup scripts, except the identity is the
+    /// script's own persisted id: the remembered-selection memory points at
+    /// it, so editing a script must never remint it.
+    private struct ScriptRow: Identifiable, Equatable {
+        let id: UUID
+        var name: String
+        var body: String
+
+        init(_ script: SessionScript) {
+            id = script.id
+            name = script.name
+            body = script.body
+        }
+
+        init() {
+            id = UUID()
+            name = ""
+            body = ""
+        }
+
+        var script: SessionScript {
+            SessionScript(id: id, name: name, body: body)
+        }
     }
 
     private enum TestState: Equatable {
@@ -48,6 +74,7 @@ struct AddHostSheet: View {
                     credentialsSection
                     testSection
                     workingDirsSection
+                    scriptsSection
                     transportSection
                 }
                 .frame(maxWidth: 680)
@@ -436,6 +463,100 @@ struct AddHostSheet: View {
         newWorkingDir = ""
     }
 
+    // MARK: Session setup scripts
+
+    private var scriptsSection: some View {
+        TallyFormSection("Session setup scripts", detail: scriptsDetail) {
+            ForEach(scripts) { row in
+                TallyFormRow {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            TextField("Name", text: scriptBinding(for: row, \.name))
+                                .font(.ui(11, weight: .medium))
+                                .foregroundStyle(Theme.signal)
+                                .textFieldStyle(.plain)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 8)
+                                .background(Theme.screen)
+                                .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+
+                            let index = scripts.firstIndex(where: { $0.id == row.id }) ?? 0
+                            workingDirButton(
+                                "arrow.up",
+                                label: "Move script up",
+                                disabled: index == 0
+                            ) { moveScript(id: row.id, offset: -1) }
+                            workingDirButton(
+                                "arrow.down",
+                                label: "Move script down",
+                                disabled: index >= scripts.count - 1
+                            ) { moveScript(id: row.id, offset: 1) }
+                            workingDirButton("trash", label: "Delete script") {
+                                scripts.removeAll { $0.id == row.id }
+                            }
+                        }
+
+                        TextField(
+                            "source ~/.venv/bin/activate",
+                            text: scriptBinding(for: row, \.body),
+                            axis: .vertical
+                        )
+                        .lineLimit(2...6)
+                        .font(.mono(11))
+                        .foregroundStyle(Theme.signal)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 8)
+                        .background(Theme.screen)
+                        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .accessibilityLabel("Script commands")
+                    }
+                }
+            }
+
+            TallyFormRow {
+                ChassisChip("ADD SCRIPT", systemImage: "plus") {
+                    scripts.append(ScriptRow())
+                }
+            }
+        }
+    }
+
+    private var scriptsDetail: String {
+        scripts.isEmpty
+            ? "New Session can type a chosen script into the fresh shell before anything launches. Add one to make it available."
+            : "New Session offers these by name; the chosen one is typed into the fresh shell before the launch command."
+    }
+
+    /// Same late-write discipline as the working-dir rows: resolve through
+    /// the row id, never a captured array index.
+    private func scriptBinding(
+        for snapshot: ScriptRow, _ keyPath: WritableKeyPath<ScriptRow, String>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                (scripts.first(where: { $0.id == snapshot.id }) ?? snapshot)[keyPath: keyPath]
+            },
+            set: { value in
+                guard let index = scripts.firstIndex(where: { $0.id == snapshot.id }) else {
+                    return
+                }
+                scripts[index][keyPath: keyPath] = value
+            }
+        )
+    }
+
+    private func moveScript(id: UUID, offset: Int) {
+        guard let source = scripts.firstIndex(where: { $0.id == id }) else { return }
+        let destination = source + offset
+        guard scripts.indices.contains(destination) else { return }
+        scripts.swapAt(source, destination)
+    }
+
     /// What gets saved: rows trimmed, emptied rows dropped, duplicates
     /// (possible now that rows are editable) collapsed to the first, and a
     /// directory typed but not yet added folded in — losing text sitting
@@ -512,6 +633,7 @@ struct AddHostSheet: View {
         moshServerPath = host.moshServerPath ?? ""
         moshPorts = host.moshPorts ?? ""
         workingDirs = host.workingDirs.map { WorkingDir(path: $0) }
+        scripts = host.sessionScripts.map(ScriptRow.init)
         password = KeychainStore.get(for: host.id, kind: .password) ?? ""
         privateKey = KeychainStore.get(for: host.id, kind: .privateKey) ?? ""
         passphrase = KeychainStore.get(for: host.id, kind: .keyPassphrase) ?? ""
@@ -538,6 +660,9 @@ struct AddHostSheet: View {
         let ports = moshPorts.trimmingCharacters(in: .whitespaces)
         host.moshPorts = ports.isEmpty ? nil : ports
         host.workingDirs = resolvedWorkingDirs
+        // Rows with nothing to type drop out; ids survive edits so the
+        // remembered-selection memory keeps pointing at the same script.
+        host.sessionScripts = SessionScript.normalized(scripts.map(\.script))
         return host
     }
 

@@ -139,10 +139,14 @@ enum ExternalActionPerformer {
             if context.workspace.focusTab(hostID: host.id, sessionName: target) { return }
             open(sessionName: target, on: host, context: context)
         } else {
+            // Headless creation inherits the New Session sheet's remembered
+            // setup script (nil unless its REMEMBER opt-in is on) — a widget
+            // tap must not produce a lesser session than the sheet would.
             guard let created = await model.createSession(
                 base: "main",
                 inDirectoryOf: nil,
                 startingIn: host.workingDirs.first,
+                running: NewSessionPreferences().rememberedScript(for: host)?.normalizedBody,
                 typing: nil
             ) else {
                 presentCreateFailure(for: model, host: host, context: context)
@@ -159,10 +163,12 @@ enum ExternalActionPerformer {
         guard let model = await connectedModel(for: host, context: context) else { return }
         // nil = the host's default working dir; the sheet's explicit Home
         // choice arrives as "~", which the quoting layer expands to $HOME.
+        // The remembered setup script rides like the shell path above.
         guard let created = await model.createSession(
             base: agent.launchCommand,
             inDirectoryOf: nil,
             startingIn: directory ?? host.workingDirs.first,
+            running: NewSessionPreferences().rememberedScript(for: host)?.normalizedBody,
             typing: agent.launchCommand(initialPrompt: prompt ?? "")
         ) else {
             presentCreateFailure(for: model, host: host, context: context)

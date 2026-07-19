@@ -594,15 +594,16 @@ final class HostConnectionModel {
     /// Create a detached tmux session over the control connection and
     /// return its final name — in `sourceSession`'s active-pane cwd ($HOME
     /// when nil or unresolvable), or in an explicit `directory` (a host
-    /// working dir) when there is no source, optionally with `launch` typed
-    /// into its fresh shell. The wanted name derives from `base` against the
-    /// latest probe; the server settles races (see
-    /// `TmuxProbe.newSessionCommand`). Unlike the fail-soft probe helpers
-    /// this connects on demand — it's a user-initiated action — and returns
-    /// nil on failure.
+    /// working dir) when there is no source, optionally with `script` (a
+    /// host setup script) then `launch` typed into its fresh shell. The
+    /// wanted name derives from `base` against the latest probe; the server
+    /// settles races (see `TmuxProbe.newSessionCommand`). Unlike the
+    /// fail-soft probe helpers this connects on demand — it's a
+    /// user-initiated action — and returns nil on failure.
     func createSession(
         base: String, inDirectoryOf sourceSession: String?,
-        startingIn directory: String? = nil, typing launch: String?
+        startingIn directory: String? = nil, running script: String? = nil,
+        typing launch: String?
     ) async -> String? {
         resetConnectRetryBackoff()
         let reusedLink = connection != nil && phase == .connected
@@ -613,6 +614,7 @@ final class HostConnectionModel {
                     base: base, existing: tmux.sessions.map(\.name)),
                 sourceSessionName: sourceSession,
                 startDirectory: directory,
+                script: script,
                 launch: launch
             )
             let name = TmuxProbe.parseNewSession(
