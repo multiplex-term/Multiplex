@@ -847,7 +847,12 @@ views.
   widget process does no periodic work and never opens sockets. Probe loops
   gate network work on `applicationState == .active` (including the plain-
   shell monitor) and otherwise rely on iOS suspension. The Shortcuts host
-  picker and widget config read `SharedStateStore`; intents/widget links and
+  picker and widget config read `SharedStateStore`; Open Agent's dependent
+  working-directory picker re-resolves the selected host against the app's
+  live `HostStore`, so it can list that host's ordered `workingDirs` plus
+  Home without publishing paths into widget state. It remains a String
+  parameter so Shortcut variables still work; unset means the live host
+  default and `"~"` means Home. Intents/widget links and
   `ExternalActionURL` formats are kept in lockstep by `SharedStateTests`
   (the widget target compiles only `Multiplex/Shared`, never the app model
   chain — don't import Host/Tmux/Agent types there). XcodeGen quirk: the

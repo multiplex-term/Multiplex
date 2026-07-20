@@ -2,7 +2,9 @@ import AppIntents
 import Foundation
 
 /// The host as Shortcuts and widget configuration see it: id + labels, no
-/// secrets. Both processes share this type and query.
+/// secrets. The app-side query also carries configured working directories
+/// so dependent Shortcut parameters can offer them; the widget fallback does
+/// not need or publish those paths. Both processes share this type and query.
 struct HostEntity: AppEntity, Identifiable, Hashable {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Multiplex Host"
     static let defaultQuery = HostEntityQuery()
@@ -10,6 +12,7 @@ struct HostEntity: AppEntity, Identifiable, Hashable {
     var id: UUID
     var name: String
     var address: String
+    var workingDirs: [String] = []
 
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(title: "\(name)", subtitle: "\(address)")

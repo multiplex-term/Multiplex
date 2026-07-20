@@ -2,7 +2,8 @@ import XCTest
 @testable import Multiplex
 
 /// Locks the widget-facing shared surface to the app's models: the two URL
-/// builders, the agent raw values/labels, and the snapshot codec — the
+/// builders, Shortcut working-directory choices, agent raw values/labels,
+/// and the snapshot codec — the
 /// widget target compiles none of the app model chain, so these tests are
 /// the only thing keeping the two sides in step.
 final class SharedStateTests: XCTestCase {
@@ -53,6 +54,25 @@ final class SharedStateTests: XCTestCase {
                 )
             }
         }
+    }
+
+    // MARK: Shortcut working directories
+
+    func testWorkingDirectoryOptionsKeepHostOrderAndAddHomeOnce() {
+        XCTAssertEqual(
+            ShortcutWorkingDirectoryOptions.values(configured: [
+                "  ~/workspace/Multiplex  ",
+                "/srv/build dir",
+                "~/workspace/Multiplex",
+                "~",
+                "   ",
+            ]),
+            ["~/workspace/Multiplex", "/srv/build dir", "~"]
+        )
+        XCTAssertEqual(
+            ShortcutWorkingDirectoryOptions.values(configured: []),
+            ["~"]
+        )
     }
 
     // MARK: AgentChoice ↔ AgentKind

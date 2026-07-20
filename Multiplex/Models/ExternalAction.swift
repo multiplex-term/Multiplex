@@ -46,7 +46,8 @@ enum ExternalAction: Hashable {
 }
 
 /// `multiplex://open?host=<uuid|name>&action=shell|agent[&agent=<kind>]
-/// [&prompt=<text>][&ask=1]` — built by widgets, parsed by `onOpenURL`.
+/// [&prompt=<text>][&ask=1][&dir=<path>]` — built by widgets, parsed by
+/// `onOpenURL`.
 enum ExternalActionURL {
     static let scheme = "multiplex"
     static let authority = "open"

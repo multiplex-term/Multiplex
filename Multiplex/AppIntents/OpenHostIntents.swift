@@ -32,19 +32,27 @@ struct OpenHostShellIntent: AppIntent {
 struct OpenHostAgentIntent: AppIntent {
     static let title: LocalizedStringResource = "Open Agent"
     static let description = IntentDescription(
-        "Starts a CLI agent in a fresh tmux session on the host — optionally already working on a first prompt.",
+        "Starts a CLI agent in a fresh tmux session, with an optional working directory and first prompt.",
         categoryName: "Terminal"
     )
     static let openAppWhenRun = true
 
     @Parameter(title: "Host") var host: HostEntity
     @Parameter(title: "Agent", default: .claudeCode) var agent: AgentChoice
+    /// Options follow the selected host's configured paths. An unset value
+    /// uses its first configured directory (or Home when it has none).
+    @Parameter(
+        title: "Working Directory",
+        description: "Where the new session starts. Leave empty for the host default.",
+        optionsProvider: AgentWorkingDirectoryOptionsProvider()
+    ) var directory: String?
     /// Optional so Shortcuts users can leave it off or set "Ask Each Time";
     /// sent as the agent's shell-quoted launch argument.
     @Parameter(title: "First Prompt") var prompt: String?
 
     static var parameterSummary: some ParameterSummary {
         Summary("Start \(\.$agent) on \(\.$host)") {
+            \.$directory
             \.$prompt
         }
     }
@@ -55,14 +63,51 @@ struct OpenHostAgentIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         let kind = AgentKind(rawValue: agent.rawValue) ?? .claudeCode
         let text = prompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let path = directory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         router.submit(.openAgent(
             host: .id(host.id),
             agent: kind,
             prompt: text.isEmpty ? nil : text,
             askForPrompt: false,
-            directory: nil
+            directory: path.isEmpty ? nil : path
         ))
         return .result()
+    }
+}
+
+/// A host-dependent String picker keeps Shortcut setup aligned with the same
+/// ordered working-directory list used by New Session. The value remains a
+/// String so Shortcuts can also supply variables; only the suggested choices
+/// are constrained.
+struct AgentWorkingDirectoryOptionsProvider: DynamicOptionsProvider {
+    @IntentParameterDependency<OpenHostAgentIntent>(\.$host)
+    private var intent
+
+    func results() async throws -> IntentItemCollection<String> {
+        let hosts = await HostEntityProvider.all()
+        let configured = hosts.first { $0.id == intent?.host.id }?.workingDirs ?? []
+        let values = ShortcutWorkingDirectoryOptions.values(configured: configured)
+        var items: [IntentItem<String>] = values.dropLast().map { IntentItem($0) }
+        items.append(IntentItem("~", title: "Home"))
+        return IntentItemCollection(
+            promptLabel: "Choose a working directory",
+            sections: [IntentItemSection(items: items)]
+        )
+    }
+}
+
+/// Pure ordering/normalization behind the dynamic provider.
+enum ShortcutWorkingDirectoryOptions {
+    static func values(configured: [String]) -> [String] {
+        var seen = Set<String>()
+        var values: [String] = []
+        for raw in configured {
+            let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !path.isEmpty, path != "~", seen.insert(path).inserted else { continue }
+            values.append(path)
+        }
+        values.append("~")
+        return values
     }
 }
 

@@ -34,7 +34,12 @@ struct MultiplexApp: App {
         AppDependencyManager.shared.add(dependency: ExternalActionRouter.shared)
         HostEntityProvider.live = {
             store.hosts.map {
-                HostEntity(id: $0.id, name: $0.name, address: $0.address)
+                HostEntity(
+                    id: $0.id,
+                    name: $0.name,
+                    address: $0.address,
+                    workingDirs: $0.workingDirs
+                )
             }
         }
     }

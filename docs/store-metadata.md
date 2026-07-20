@@ -47,8 +47,8 @@ Free surfaces added 2026-07-18 (unreleased; ships with the next binary):
 | Widget extension | `MultiplexWidgets` (`app.multiplexterm.multiplex.widgets`), embedded in the app; iPadOS 17.0+, visionOS 26.0+ (WidgetKit does not exist on earlier visionOS — the app itself stays 1.0) |
 | Widgets | "Host Monitor" (small/medium, configurable: host, small-tap action, agent, ask-for-prompt) and "Fleet Wall" (medium/large, host order follows the deck) |
 | Widget data | Last-known sessions/miniatures from an App Group snapshot (`group.app.multiplexterm.multiplex`, `widget-state.json`, secret-free). Widgets never open connections and show no liveness claims — a relative SEEN stamp only |
-| App Shortcuts | "Open Shell" (attach most recent tmux session or create) and "Open Agent" (Claude Code/Codex/Pi, optional first prompt) — run in-app with a connection status guard; failures surface as an in-app alert |
-| URL scheme | `multiplex://open?host=<uuid|name>&action=shell\|agent[&session=…][&agent=…][&prompt=…][&ask=1]` — widget taps and user automation |
+| App Shortcuts | "Open Shell" (attach most recent tmux session or create) and "Open Agent" (Claude Code/Codex/Pi, host-configured working-directory picker, optional first prompt) — run in-app with a connection status guard; failures surface as an in-app alert |
+| URL scheme | `multiplex://open?host=<uuid|name>&action=shell\|agent[&session=…][&agent=…][&prompt=…][&ask=1][&dir=…]` — widget taps and user automation |
 | Privacy impact | None: the App Group snapshot stays on-device, contains no credentials, and adds no new data collection |
 
 The App Group entitlement must exist on the App ID for device/TestFlight
@@ -105,7 +105,9 @@ Current product split:
   shortcut dropdown on both platforms (including touch-native copy-mode
   selection and explicit exit), Home Screen widgets (per-host monitor +
   fleet wall; iPadOS 17+, visionOS 26+) and App Shortcuts ("Open Shell" /
-  "Open Agent" with an optional first prompt) with the `multiplex://` deep-link
+  "Open Agent" with a host-configured working-directory picker and optional
+  first prompt) with the
+  `multiplex://` deep-link
   scheme behind them, iCloud Keychain host/secret/command-setup sync,
   per-host/per-agent
   built-in command placement between Bar and More, custom commands (ordered,
