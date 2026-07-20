@@ -67,6 +67,7 @@ final class HostStore {
     func remove(_ host: Host) {
         hosts.removeAll { $0.id == host.id }
         KeychainStore.delete(for: host.id)
+        SSHKeyPassphraseSession.forget(for: host.id)
         KeychainStore.deleteHostRecord(for: host.id)
         mirroredIDs.remove(host.id)
         persistMirroredIDs()

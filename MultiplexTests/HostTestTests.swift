@@ -60,6 +60,121 @@ final class HostTestTests: XCTestCase {
             "Paste a private key first.")
     }
 
+    func testEncryptedKeyFailuresAskForThePassphrase() {
+        XCTAssertEqual(
+            HostTest.failureMessage(
+                for: SSHConnectionError.keyPassphraseRequired,
+                host: host(auth: .privateKey)
+            ),
+            "This private key is encrypted. Enter its passphrase above."
+        )
+        XCTAssertEqual(
+            HostTest.failureMessage(
+                for: SSHConnectionError.incorrectKeyPassphrase,
+                host: host(auth: .privateKey)
+            ),
+            "That passphrase didn't unlock the private key. Try again."
+        )
+        XCTAssertEqual(
+            SSHConnectionError.keyPassphraseRequired.keyPassphraseReason,
+            .required
+        )
+        XCTAssertEqual(
+            SSHConnectionError.incorrectKeyPassphrase.keyPassphraseReason,
+            .incorrect
+        )
+    }
+
+    // MARK: OpenSSH envelope
+
+    func testOpenSSHEnvelopeDetectsEncryptedAndPlainKeys() {
+        XCTAssertEqual(
+            OpenSSHPrivateKeyEnvelope.encryption(in: keyEnvelope(cipher: "aes256-ctr")),
+            .encrypted
+        )
+        XCTAssertEqual(
+            OpenSSHPrivateKeyEnvelope.encryption(in: keyEnvelope(cipher: "none")),
+            .unencrypted
+        )
+        XCTAssertNil(OpenSSHPrivateKeyEnvelope.encryption(in: "not a private key"))
+    }
+
+    func testAuthenticationBuilderUnlocksAnEncryptedED25519Key() {
+        let encryptedKey = """
+        -----BEGIN OPENSSH PRIVATE KEY-----
+        b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABBQRAFCo9
+        /vv0icX60s6O6UAAAAEAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIBrez0rdYqROdkIA
+        qvSrLoYFO1KVEidE4wclxivVKMbmAAAAoA9dkA6h2tAtANBP9RzyKvgrw5JKVJLVHfvZRQ
+        8d3ttvy7WOs15y8lL/SdHiCyRukkKOPRd02zqx5g6WSmXZ0dKho/aMMO+58cIxsbCmMePT
+        HaJvuQjIx6DIEoQyq83rQeVngk5rgvgou2jgHy/35C1AHtUysH4DIcltmrU3rvMF8i2GL4
+        Od3cZL5cIOQVsmAZS6t3oL+GVeVOMFCqGFxjc=
+        -----END OPENSSH PRIVATE KEY-----
+        """
+        let keyHost = host(auth: .privateKey)
+
+        XCTAssertThrowsError(try SSHConnection.makeAuthenticationMethod(
+            host: keyHost,
+            secrets: HostSecrets(password: nil, privateKey: encryptedKey, passphrase: nil)
+        )) { error in
+            guard case SSHConnectionError.keyPassphraseRequired = error else {
+                return XCTFail("Expected passphrase-required, got \(error)")
+            }
+        }
+        XCTAssertThrowsError(try SSHConnection.makeAuthenticationMethod(
+            host: keyHost,
+            secrets: HostSecrets(
+                password: nil,
+                privateKey: encryptedKey,
+                passphrase: "wrong"
+            )
+        )) { error in
+            guard case SSHConnectionError.incorrectKeyPassphrase = error else {
+                return XCTFail("Expected incorrect-passphrase, got \(error)")
+            }
+        }
+        XCTAssertNoThrow(try SSHConnection.makeAuthenticationMethod(
+            host: keyHost,
+            secrets: HostSecrets(
+                password: nil,
+                privateKey: encryptedKey,
+                passphrase: "example"
+            )
+        ))
+    }
+
+    func testProcessOnlyPassphraseOverridesAStaleKeychainValue() {
+        let hostID = UUID()
+        defer { SSHKeyPassphraseSession.forget(for: hostID) }
+        let before = SSHKeyPassphraseSession.snapshot(for: hostID)
+
+        SSHKeyPassphraseSession.accept("new answer", for: hostID, saveToICloud: false)
+
+        let after = SSHKeyPassphraseSession.snapshot(for: hostID)
+        XCTAssertGreaterThan(after.revision, before.revision)
+        XCTAssertEqual(after.value, .value("new answer"))
+        XCTAssertEqual(
+            HostSecrets(password: nil, privateKey: nil, passphrase: "stale")
+                .applyingSessionPassphrase(for: hostID)
+                .passphrase,
+            "new answer"
+        )
+    }
+
+    private func keyEnvelope(cipher: String) -> String {
+        var data = Data("openssh-key-v1\0".utf8)
+        let length = UInt32(cipher.utf8.count)
+        data.append(UInt8((length >> 24) & 0xff))
+        data.append(UInt8((length >> 16) & 0xff))
+        data.append(UInt8((length >> 8) & 0xff))
+        data.append(UInt8(length & 0xff))
+        data.append(contentsOf: cipher.utf8)
+        return """
+        -----BEGIN OPENSSH PRIVATE KEY-----
+        \(data.base64EncodedString())
+        -----END OPENSSH PRIVATE KEY-----
+        """
+    }
+
     func testAuthenticationFailureBlamesCredentialsNotTransport() {
         // Citadel: SSHClientError.allAuthenticationOptionsFailed / the
         // NIOSSH userAuthenticationFailure event both describe with

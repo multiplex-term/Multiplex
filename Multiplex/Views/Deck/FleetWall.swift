@@ -156,6 +156,9 @@ struct FleetWall: View {
     @State private var deleteTarget: DeleteTarget?
     @State private var removingHost: Host?
     @State private var unreachableNotice: UnreachableNotice?
+    /// Background probes surface that credentials are needed but never present
+    /// the prompt themselves. Only an explicit press on that host opts in.
+    @State private var keyPassphraseHostID: UUID?
     @State private var legacyDropTarget: SessionDropTarget?
     @State private var tileGridColumnCount: Int?
 
@@ -236,6 +239,11 @@ struct FleetWall: View {
                 dismissButton: .cancel(Text("OK"))
             )
         }
+        .sshKeyPassphrasePrompt(
+            challenge: presentedKeyPassphraseChallenge,
+            onSubmit: acceptKeyPassphrase,
+            onCancel: { _ in keyPassphraseHostID = nil }
+        )
     }
 
     @ViewBuilder
@@ -679,15 +687,31 @@ struct FleetWall: View {
                 // slot. The pulse carries the "in flight" signal instead.
                 railLabel("LINKING", dot: Theme.signal2, pulsing: true)
             case .failed(let reason):
-                Button {
-                    unreachableNotice = UnreachableNotice(host: model.host, reason: reason)
-                } label: {
-                    railLabel("UNREACHABLE", dot: Theme.signal3, text: Theme.signal3)
+                if model.keyPassphraseChallenge != nil {
+                    Button {
+                        _ = requestKeyPassphraseIfNeeded(model)
+                    } label: {
+                        railLabel(
+                            "NEEDS PASSPHRASE",
+                            dot: Theme.caution,
+                            text: Theme.caution
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .chassisHover(2)
+                    .accessibilityLabel("\(model.host.name) needs its SSH key passphrase")
+                    .accessibilityHint("Opens the SSH key passphrase prompt")
+                } else {
+                    Button {
+                        unreachableNotice = UnreachableNotice(host: model.host, reason: reason)
+                    } label: {
+                        railLabel("UNREACHABLE", dot: Theme.signal3, text: Theme.signal3)
+                    }
+                    .buttonStyle(.plain)
+                    .chassisHover(2)
+                    .accessibilityLabel("\(model.host.name) unreachable")
+                    .accessibilityHint("Shows why the host could not be reached")
                 }
-                .buttonStyle(.plain)
-                .chassisHover(2)
-                .accessibilityLabel("\(model.host.name) unreachable")
-                .accessibilityHint("Shows why the host could not be reached")
             case .idle:
                 Text("STANDBY").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal3)
             }
@@ -962,13 +986,21 @@ struct FleetWall: View {
     }
 
     private func noSignalTile(_ host: Host, model: HostConnectionModel) -> some View {
-        Button {
-            model.refresh()
+        let needsPassphrase = model.keyPassphraseChallenge != nil
+
+        return Button {
+            if !requestKeyPassphraseIfNeeded(model) {
+                model.refresh()
+            }
         } label: {
             VStack(spacing: 0) {
                 ZStack {
                     HatchedScreen()
-                    ChassisLabel("No Signal", size: 13, color: Theme.signal3)
+                    ChassisLabel(
+                        needsPassphrase ? "Passphrase Required" : "No Signal",
+                        size: 13,
+                        color: needsPassphrase ? Theme.caution : Theme.signal3
+                    )
                 }
                 .frame(
                     maxWidth: .infinity,
@@ -977,7 +1009,7 @@ struct FleetWall: View {
                 HStack {
                     ChassisLabel(host.name, size: 12, color: Theme.signal3)
                     Spacer()
-                    ChassisBadge("RECONNECT")
+                    ChassisBadge(needsPassphrase ? "UNLOCK" : "RECONNECT")
                 }
                 .padding(.horizontal, 7)
                 .padding(.vertical, 8)
@@ -989,7 +1021,43 @@ struct FleetWall: View {
         }
         .buttonStyle(.plain)
         .chassisHover(4)
-        .accessibilityLabel("\(host.name) unreachable. Reconnect")
+        .accessibilityLabel(
+            needsPassphrase
+                ? "\(host.name) needs its SSH key passphrase. Unlock"
+                : "\(host.name) unreachable. Reconnect"
+        )
+    }
+
+    private var presentedKeyPassphraseChallenge: SSHKeyPassphraseChallenge? {
+        guard let keyPassphraseHostID,
+              let host = store.host(id: keyPassphraseHostID)
+        else { return nil }
+        return hub.model(for: host).keyPassphraseChallenge
+    }
+
+    /// True means this failure was a credential challenge and the generic
+    /// reconnect/unreachable action has been handled here.
+    private func requestKeyPassphraseIfNeeded(_ model: HostConnectionModel) -> Bool {
+        guard model.keyPassphraseChallenge != nil else { return false }
+        if model.requestKeyPassphrase() != nil {
+            keyPassphraseHostID = model.host.id
+        }
+        return true
+    }
+
+    private func acceptKeyPassphrase(
+        _ challenge: SSHKeyPassphraseChallenge,
+        passphrase: String,
+        saveToICloud: Bool
+    ) {
+        SSHKeyPassphraseSession.accept(
+            passphrase,
+            for: challenge.hostID,
+            saveToICloud: saveToICloud
+        )
+        hub.resumeConnectionsWaitingForKeyPassphrase(hostID: challenge.hostID)
+        workspace.resumeConnectionsWaitingForKeyPassphrase(hostID: challenge.hostID)
+        keyPassphraseHostID = nil
     }
 
     private var acquiringTile: some View {

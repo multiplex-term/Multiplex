@@ -76,6 +76,10 @@ enum HostTest {
                 return host.authMethod == .password
                     ? "Enter a password first."
                     : "Paste a private key first."
+            case .keyPassphraseRequired:
+                return "This private key is encrypted. Enter its passphrase above."
+            case .incorrectKeyPassphrase:
+                return "That passphrase didn't unlock the private key. Try again."
             case .unsupportedKey:
                 return "The private key couldn't be read. Paste an OpenSSH ed25519 or RSA key, including its BEGIN/END lines."
             case .connectFailed(let detail):

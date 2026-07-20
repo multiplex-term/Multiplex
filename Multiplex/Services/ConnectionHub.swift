@@ -66,6 +66,13 @@ final class ConnectionHub {
         }
     }
 
+    /// One passphrase answer can unblock the wall probe and every terminal
+    /// tab for this host. Persistence is handled once by the prompt; the hub
+    /// only refreshes models that were specifically waiting for it.
+    func resumeConnectionsWaitingForKeyPassphrase(hostID: UUID) {
+        models[hostID]?.resumeAfterKeyPassphraseUpdate()
+    }
+
     /// Persist any pending snapshot changes — called when the deck leaves
     /// the foreground, because suspension freezes the debounce timers. The
     /// widget snapshot always reloads timelines here: this is the moment the
@@ -131,6 +138,10 @@ final class HostConnectionModel {
     let host: Host
     private(set) var phase: Phase = .idle
     private(set) var tmux: TmuxState = .unknown
+    /// Set when the private key is encrypted and its absent/stale passphrase
+    /// could not unlock it. Background wall polling never presents UI by
+    /// itself; FleetWall asks only after the user presses the failed host.
+    private(set) var keyPassphraseChallenge: SSHKeyPassphraseChallenge?
     @ObservationIgnored private var lastRefreshed: Date?
     /// Observation-friendly summaries: views that only need liveness or a
     /// badge count should not subscribe to the full pane/process tree.
@@ -160,10 +171,11 @@ final class HostConnectionModel {
     @ObservationIgnored private var connection: SSHConnection?
     @ObservationIgnored private var connectRetryBackoff = ConnectRetryBackoff()
     /// Synchronizable Keychain reads are cached across fresh-link retries.
-    /// Re-entered credentials can take at most 60 seconds to land, while
-    /// editing the host config replaces this model. This extends plaintext
-    /// residency between attempts, but a live SSHConnection already retains
-    /// the same secrets for its lifetime, so the security posture is unchanged.
+    /// Other re-entered credentials can take at most 60 seconds to land, while
+    /// the connection-time passphrase cache overlays this immediately. This
+    /// extends plaintext residency between attempts, but a live SSHConnection
+    /// already retains the same secrets for its lifetime, so the security
+    /// posture is unchanged.
     @ObservationIgnored private var cachedSecrets: HostSecrets?
     @ObservationIgnored private var cachedSecretsLoadedAt: Date?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
@@ -336,6 +348,14 @@ final class HostConnectionModel {
 
     private func performRefresh(generation: Int, mayRetry: Bool) async {
         guard refreshGeneration == generation, !Task.isCancelled else { return }
+        if let challenge = keyPassphraseChallenge {
+            let revision = SSHKeyPassphraseSession.snapshot(for: host.id).revision
+            // Another window (or Host Settings) supplied a newer answer.
+            // Otherwise leave the settled failure alone: a five-second wall
+            // feed must never keep asking for the same passphrase.
+            guard revision > challenge.attemptedRevision else { return }
+            keyPassphraseChallenge = nil
+        }
         guard connection != nil || connectRetryBackoff.shouldAttempt(now: Date()) else {
             return
         }
@@ -424,8 +444,17 @@ final class HostConnectionModel {
     }
 
     private func markFailed(_ error: Error, registerConnectFailure: Bool) {
-        if registerConnectFailure {
+        let passphraseReason = (error as? SSHConnectionError)?.keyPassphraseReason
+        if registerConnectFailure, passphraseReason == nil {
             connectRetryBackoff.registerFailure(now: Date())
+        }
+        if let passphraseReason {
+            keyPassphraseChallenge = SSHKeyPassphraseChallenge(
+                host: host,
+                reason: passphraseReason
+            )
+        } else {
+            keyPassphraseChallenge = nil
         }
         let message = friendlyMessage(for: error)
         let failedPhase = Phase.failed(message)
@@ -470,7 +499,8 @@ final class HostConnectionModel {
         if let cachedSecrets,
            let cachedSecretsLoadedAt,
            now.timeIntervalSince(cachedSecretsLoadedAt) < Self.secretsCacheTTL {
-            secrets = cachedSecrets
+            secrets = cachedSecrets.applyingSessionPassphrase(for: host.id)
+            self.cachedSecrets = secrets
         } else {
             let loaded = await HostSecrets.loadOffMain(for: host)
             if let expectedGeneration,
@@ -667,6 +697,33 @@ final class HostConnectionModel {
         connectRetryBackoff.reset()
     }
 
+    /// The failed rail/tile was pressed. Reissue the same challenge so a
+    /// cancelled alert can be opened again. If another surface has supplied
+    /// a newer process-only answer meanwhile, resume without asking twice.
+    @discardableResult
+    func requestKeyPassphrase() -> SSHKeyPassphraseChallenge? {
+        guard let challenge = keyPassphraseChallenge else { return nil }
+        let revision = SSHKeyPassphraseSession.snapshot(for: host.id).revision
+        if revision > challenge.attemptedRevision {
+            resumeAfterKeyPassphraseUpdate()
+            return nil
+        }
+        let reissued = challenge.reissued()
+        keyPassphraseChallenge = reissued
+        return reissued
+    }
+
+    func resumeAfterKeyPassphraseUpdate() {
+        guard keyPassphraseChallenge != nil else { return }
+        keyPassphraseChallenge = nil
+        if let cachedSecrets {
+            self.cachedSecrets = cachedSecrets.applyingSessionPassphrase(for: host.id)
+            cachedSecretsLoadedAt = Date()
+        }
+        connectRetryBackoff.reset()
+        refresh()
+    }
+
     private func kill(_ session: TmuxSession, over connection: SSHConnection) async {
         _ = try? await deadlined { try await connection.exec(TmuxProbe.killCommand(for: session)) }
         if case .sessions(let list) = tmux {
@@ -693,6 +750,7 @@ final class HostConnectionModel {
         connection = nil
         phase = .idle
         tmux = .unknown
+        keyPassphraseChallenge = nil
         hasLiveProbe = false
         sessionCount = 0
         miniatures = [:]

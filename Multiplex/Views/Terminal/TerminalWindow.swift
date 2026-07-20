@@ -88,6 +88,18 @@ struct TerminalWindowRoot: View {
     private var activeController: TerminalSessionController? {
         activeTab.flatMap { workspace.controller(for: $0.id) }
     }
+    /// Tabs connect concurrently. Surface the active tab's encrypted-key
+    /// challenge first, then any background tab's; accepting one answer
+    /// resumes every waiting tab for that host.
+    private var keyPassphraseChallenge: SSHKeyPassphraseChallenge? {
+        let activeFirst = activeTab.map { [$0] } ?? []
+        for tab in activeFirst + route.tabs.filter({ $0.id != activeTab?.id }) {
+            if let challenge = workspace.controller(for: tab.id)?.keyPassphraseChallenge {
+                return challenge
+            }
+        }
+        return nil
+    }
     private var terminalFocusAllowed: Bool {
         shell?.terminalFocusAllowed ?? true
     }
@@ -224,6 +236,10 @@ struct TerminalWindowRoot: View {
             } message: {
                 Text("Kills “\(activeTab?.sessionName ?? "")” on \(activeTab.flatMap { store.host(id: $0.hostID) }?.name ?? "the host") and everything running in it, then closes the tab.")
             }
+            .sshKeyPassphrasePrompt(
+                challenge: keyPassphraseChallenge,
+                onSubmit: acceptKeyPassphrase
+            )
             .onDisappear {
                 // Scene is gone (close button / dismiss): tabs still here are
                 // really closing. A merged-away window is already empty, so
@@ -249,6 +265,20 @@ struct TerminalWindowRoot: View {
                 controller.finishHistoryJump()
             }
             #endif
+    }
+
+    private func acceptKeyPassphrase(
+        _ challenge: SSHKeyPassphraseChallenge,
+        passphrase: String,
+        saveToICloud: Bool
+    ) {
+        SSHKeyPassphraseSession.accept(
+            passphrase,
+            for: challenge.hostID,
+            saveToICloud: saveToICloud
+        )
+        hub.resumeConnectionsWaitingForKeyPassphrase(hostID: challenge.hostID)
+        workspace.resumeConnectionsWaitingForKeyPassphrase(hostID: challenge.hostID)
     }
 
     /// Keep this host's full wall state fresh while a terminal window is

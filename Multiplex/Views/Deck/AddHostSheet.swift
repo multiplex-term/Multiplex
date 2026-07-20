@@ -185,7 +185,7 @@ struct AddHostSheet: View {
         case .password:
             "Stored in iCloud Keychain, never in the host record."
         case .privateKey:
-            "Paste an OpenSSH private key. The key and optional passphrase are stored in iCloud Keychain, never in files."
+            "The OpenSSH key is stored in iCloud Keychain. Leave its passphrase blank to enter it when connecting, or save the passphrase there too."
         }
     }
 
@@ -675,7 +675,13 @@ struct AddHostSheet: View {
         case .privateKey:
             KeychainStore.set(privateKey, for: host.id, kind: .privateKey)
             if !passphrase.isEmpty {
-                KeychainStore.set(passphrase, for: host.id, kind: .keyPassphrase)
+                SSHKeyPassphraseSession.accept(
+                    passphrase,
+                    for: host.id,
+                    saveToICloud: true
+                )
+            } else {
+                SSHKeyPassphraseSession.clear(for: host.id)
             }
         }
 

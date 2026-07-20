@@ -149,6 +149,14 @@ enum MoshBootstrap {
             do {
                 try await ssh.connect()
             } catch {
+                // Every resolved address uses the same private key. Missing or
+                // incorrect passphrases are actionable UI challenges, not an
+                // address-specific bootstrap failure; preserve the typed
+                // error instead of flattening it into MoshBootstrapError.
+                if (error as? SSHConnectionError)?.keyPassphraseReason != nil {
+                    await ssh.close()
+                    throw error
+                }
                 let detail = (error as? SSHConnectionError).map { _ in String(describing: error) }
                     ?? error.localizedDescription
                 lastError = .sshFailed(detail)

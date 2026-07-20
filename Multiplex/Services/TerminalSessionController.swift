@@ -30,6 +30,10 @@ final class TerminalSessionController {
 
     private(set) var status: Status = .connecting
     private(set) var remoteTitle: String = ""
+    /// A user-opened terminal may ask immediately for an encrypted key's
+    /// missing/corrected passphrase. Cancelling leaves the challenge here so
+    /// RECONNECT can re-present it without retrying the same bad secret.
+    private(set) var keyPassphraseChallenge: SSHKeyPassphraseChallenge?
 
     /// Plain-shell agent state comes from that tab's own PTY rather than the
     /// tmux fleet probe. It drives the same helper strip and attention UI as
@@ -311,6 +315,7 @@ final class TerminalSessionController {
             guard transportGeneration == generation,
                   self.connection === connection
             else { return }
+            captureKeyPassphraseChallenge(from: error)
             let message = (error as? SSHConnectionError)?.userMessage(host: host)
                 ?? "Couldn't reach \(host.name). \(error.localizedDescription)"
             status = .ended(message)
@@ -384,6 +389,7 @@ final class TerminalSessionController {
             guard transportGeneration == generation,
                   moshSession === session
             else { return }
+            captureKeyPassphraseChallenge(from: error)
             let message = (error as? MoshBootstrapError)?.userMessage(host: host)
                 ?? (error as? MoshSession.Failure)?.userMessage(host: host)
                 ?? (error as? SSHConnectionError)?.userMessage(host: host)
@@ -736,6 +742,7 @@ final class TerminalSessionController {
             try await control.connect()
             _ = try await control.exec(command)
         } catch {
+            captureKeyPassphraseChallenge(from: error)
             // The attached terminal remains the source of truth: a failed
             // control action leaves it intact instead of ending the tab.
         }
@@ -752,7 +759,13 @@ final class TerminalSessionController {
         if let connection { return try await body(connection) }
         let secrets = await HostSecrets.loadOffMain(for: host)
         let control = SSHConnection(host: host, secrets: secrets)
-        try await control.connect()
+        do {
+            try await control.connect()
+        } catch {
+            captureKeyPassphraseChallenge(from: error)
+            await control.close()
+            throw error
+        }
         do {
             let value = try await body(control)
             await control.close()
@@ -1230,6 +1243,7 @@ final class TerminalSessionController {
         setTmuxCopyModeUIActive(false)
         resetHistoryState()
         status = .ended(nil)
+        keyPassphraseChallenge = nil
         contactLost = false
         let transport = self.transport
         self.transport = nil
@@ -1240,10 +1254,38 @@ final class TerminalSessionController {
 
     func reconnect() {
         guard case .ended = status else { return }
+        if let challenge = keyPassphraseChallenge {
+            let revision = SSHKeyPassphraseSession.snapshot(for: host.id).revision
+            if revision <= challenge.attemptedRevision {
+                keyPassphraseChallenge = challenge.reissued()
+                return
+            }
+            keyPassphraseChallenge = nil
+        }
         setTmuxCopyModeUIActive(false)
         resetHistoryState()
         status = .connecting
         beginTransportRun()
+    }
+
+    /// Called app-wide after one prompt accepts an answer. Tabs that were
+    /// waiting resume their original attach route; live tabs merely clear a
+    /// challenge raised by an optional SSH control action.
+    func resumeAfterKeyPassphraseUpdate() {
+        guard keyPassphraseChallenge != nil else { return }
+        keyPassphraseChallenge = nil
+        guard case .ended = status else { return }
+        setTmuxCopyModeUIActive(false)
+        resetHistoryState()
+        status = .connecting
+        beginTransportRun()
+    }
+
+    private func captureKeyPassphraseChallenge(from error: Error) {
+        guard let reason = (error as? SSHConnectionError)?.keyPassphraseReason else {
+            return
+        }
+        keyPassphraseChallenge = SSHKeyPassphraseChallenge(host: host, reason: reason)
     }
 }
 

@@ -46,6 +46,12 @@ final class TerminalWorkspace {
         controllers.removeValue(forKey: tabID)?.detach()
     }
 
+    func resumeConnectionsWaitingForKeyPassphrase(hostID: UUID) {
+        for controller in controllers.values where controller.host.id == hostID {
+            controller.resumeAfterKeyPassphraseUpdate()
+        }
+    }
+
     // MARK: Window directory (merge sources)
 
     struct WindowEntry: Identifiable {

@@ -37,6 +37,10 @@ enum KeychainStore {
             .flatMap { String(data: $0, encoding: .utf8) }
     }
 
+    static func delete(for hostID: UUID, kind: Kind) {
+        deleteItem(service: secretService, account: account(hostID, kind))
+    }
+
     static func delete(for hostID: UUID) {
         for kind in [Kind.password, .privateKey, .keyPassphrase] {
             deleteItem(service: secretService, account: account(hostID, kind))
