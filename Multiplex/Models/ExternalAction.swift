@@ -16,6 +16,42 @@ enum ExternalHostRef: Hashable {
     }
 }
 
+/// Which host setup script an external agent launch runs before the agent.
+/// The default preserves the New Session sheet's remembered choice; `none`
+/// is a deliberate override, and ids survive script renames. A deleted id
+/// fails soft to no script rather than falling back to a different command.
+enum ExternalSetupScriptSelection: Hashable {
+    case remembered
+    case none
+    case id(UUID)
+
+    static let rememberedToken = "default"
+    static let noneToken = "none"
+
+    init?(token rawValue: String) {
+        let token = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch token.lowercased() {
+        case "", Self.rememberedToken, "remembered":
+            self = .remembered
+        case Self.noneToken:
+            self = .none
+        default:
+            guard let id = UUID(uuidString: token) else { return nil }
+            self = .id(id)
+        }
+    }
+
+    /// Canonical URL/Shortcut token. Remembered is represented by omission
+    /// in URLs so existing widget links keep the same behavior.
+    var token: String? {
+        switch self {
+        case .remembered: nil
+        case .none: Self.noneToken
+        case .id(let id): id.uuidString
+        }
+    }
+}
+
 /// An externally requested app action — the payload behind the `multiplex://`
 /// URL scheme (widget taps, automation) and the App Intents. The queue and
 /// execution live in `ExternalActionRouter`; this file stays pure so the URL
@@ -29,25 +65,27 @@ enum ExternalAction: Hashable {
     /// Mint a detached tmux session launching the agent — optionally with a
     /// first prompt as its shell-quoted launch argument — then attach it.
     /// `askForPrompt` presents the in-app prompt sheet first (the widget's
-    /// ASK mode); the sheet resubmits with the entered prompt and its
-    /// working-directory choice. `directory` semantics: nil = the host's
+    /// ASK mode); the sheet resubmits with the entered prompt, directory,
+    /// and setup-script choice. `directory` semantics: nil = the host's
     /// default (first working dir), `"~"` = explicitly home (the quoting
     /// layer expands it to `$HOME`), anything else = that path.
     case openAgent(
         host: ExternalHostRef, agent: AgentKind, prompt: String?,
-        askForPrompt: Bool, directory: String?)
+        askForPrompt: Bool, directory: String?,
+        setupScript: ExternalSetupScriptSelection)
 
     var hostRef: ExternalHostRef {
         switch self {
         case .openShell(let host, _): host
-        case .openAgent(let host, _, _, _, _): host
+        case .openAgent(let host, _, _, _, _, _): host
         }
     }
 }
 
 /// `multiplex://open?host=<uuid|name>&action=shell|agent[&agent=<kind>]
-/// [&prompt=<text>][&ask=1][&dir=<path>]` — built by widgets, parsed by
-/// `onOpenURL`.
+/// [&prompt=<text>][&ask=1][&dir=<path>][&script=<uuid|none>]` — built by
+/// widgets, parsed by `onOpenURL`. Omitting `script` uses the remembered New
+/// Session choice.
 enum ExternalActionURL {
     static let scheme = "multiplex"
     static let authority = "open"
@@ -63,7 +101,10 @@ enum ExternalActionURL {
             if let sessionName, !sessionName.isEmpty {
                 items.append(URLQueryItem(name: "session", value: sessionName))
             }
-        case .openAgent(_, let agent, let prompt, let askForPrompt, let directory):
+        case .openAgent(
+            _, let agent, let prompt, let askForPrompt, let directory,
+            let setupScript
+        ):
             items.append(URLQueryItem(name: "action", value: "agent"))
             items.append(URLQueryItem(name: "agent", value: agent.rawValue))
             if let prompt, !prompt.isEmpty {
@@ -74,6 +115,9 @@ enum ExternalActionURL {
             }
             if let directory, !directory.isEmpty {
                 items.append(URLQueryItem(name: "dir", value: directory))
+            }
+            if let token = setupScript.token {
+                items.append(URLQueryItem(name: "script", value: token))
             }
         }
         components.queryItems = items
@@ -104,9 +148,18 @@ enum ExternalActionURL {
             let ask = ["1", "true", "yes"]
                 .contains(value("ask")?.lowercased() ?? "")
             let directory = value("dir").flatMap { $0.isEmpty ? nil : $0 }
+            let setupScript: ExternalSetupScriptSelection
+            if let token = value("script") {
+                guard let parsed = ExternalSetupScriptSelection(token: token)
+                else { return nil }
+                setupScript = parsed
+            } else {
+                setupScript = .remembered
+            }
             return .openAgent(
                 host: hostRef, agent: agent, prompt: prompt,
-                askForPrompt: ask, directory: directory)
+                askForPrompt: ask, directory: directory,
+                setupScript: setupScript)
         default:
             return nil
         }
@@ -138,6 +191,25 @@ enum ExternalActionPlan {
             (lhs.created, lhs.name) < (rhs.created, rhs.name)
         }?.name
     }
+
+    /// Resolve only against the chosen host's current scripts. A stale
+    /// explicit id means no script; it must never silently run the remembered
+    /// script or another script that later reused the same display name.
+    static func setupScript(
+        for selection: ExternalSetupScriptSelection,
+        available: [SessionScript],
+        remembered: SessionScript?
+    ) -> SessionScript? {
+        switch selection {
+        case .remembered:
+            guard let remembered else { return nil }
+            return available.first { $0.id == remembered.id }
+        case .none:
+            return nil
+        case .id(let id):
+            return available.first { $0.id == id }
+        }
+    }
 }
 
 /// The in-app "ask for the first prompt" sheet's payload (widget ASK mode).
@@ -148,6 +220,7 @@ struct AgentPromptRequest: Identifiable {
     var host: Host
     var agent: AgentKind
     var directory: String?
+    var setupScript: ExternalSetupScriptSelection
 }
 
 /// What the deck's failure alert shows when an external action can't run.

@@ -3,7 +3,8 @@ import SwiftUI
 /// The widget's ASK mode: an agent-open arrived asking for its first prompt,
 /// so collect it here — plus the starting directory, mirroring the New
 /// Session sheet's picker — and resubmit the same action with `askForPrompt`
-/// off. Launching with an empty field opens the agent bare — the prompt is
+/// off while preserving its setup-script choice. Launching with an empty
+/// field opens the agent bare — the prompt is
 /// always optional, matching the New Session sheet.
 struct AgentPromptSheet: View {
     let request: AgentPromptRequest
@@ -136,7 +137,8 @@ struct AgentPromptSheet: View {
             agent: request.agent,
             prompt: text.isEmpty ? nil : text,
             askForPrompt: false,
-            directory: directory
+            directory: directory,
+            setupScript: request.setupScript
         ))
         dismiss()
     }

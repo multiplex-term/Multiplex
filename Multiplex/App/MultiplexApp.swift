@@ -38,7 +38,13 @@ struct MultiplexApp: App {
                     id: $0.id,
                     name: $0.name,
                     address: $0.address,
-                    workingDirs: $0.workingDirs
+                    workingDirs: $0.workingDirs,
+                    sessionScripts: $0.sessionScripts.map {
+                        ShortcutSessionScript(
+                            id: $0.id,
+                            displayName: $0.displayName
+                        )
+                    }
                 )
             }
         }

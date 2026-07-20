@@ -35,8 +35,10 @@ recorded in [docs/landing/](docs/landing/).*
   covers Claude Code / Codex / Pi in every pane, not just the foreground split.
   Tapping a tile **Attaches** the session in its own window
   (`tmux attach-session`). **New Session** creates a tmux session in Home or
-  a configured working directory and can immediately start Claude Code,
-  Codex, or Pi with an optional first prompt. **Shell** opens a plain login
+  a configured working directory and can run one host-configured setup script
+  in its fresh shell before starting Claude Code, Codex, or Pi with an
+  optional first prompt. The Open Agent Shortcut offers the same directory,
+  setup-script, and prompt choices. **Shell** opens a plain login
   shell, no tmux.
 - **Terminal windows & tabs** — each terminal is its own SwiftUI scene
   (`WindowGroup(for: TerminalWindowRoute.self)` + `openWindow`): independent
@@ -99,7 +101,7 @@ recorded in [docs/landing/](docs/landing/).*
 SwiftUI (Deck window + N Terminal windows, each an ordered set of tabs)
    │
    ├── HostStore            hosts.json local cache; secrets + host records
-   │                        (including command setups) sync via iCloud Keychain
+   │                        (command setups + session scripts) sync via iCloud Keychain
    ├── AgentCommandConfiguration  pure per-host/agent helper layouts + commands
    ├── ThemeStore           terminal color schemes: built-ins + custom
    │                        (themes.json), selection in UserDefaults

@@ -1,10 +1,20 @@
 import AppIntents
 import Foundation
 
+/// One host-scoped setup-script choice exposed to the Shortcuts process.
+/// Only stable identity + display name cross this boundary; the script body
+/// stays in the app's synced Host model and is resolved immediately before
+/// session creation.
+struct ShortcutSessionScript: Identifiable, Hashable, Sendable {
+    var id: UUID
+    var displayName: String
+}
+
 /// The host as Shortcuts and widget configuration see it: id + labels, no
 /// secrets. The app-side query also carries configured working directories
-/// so dependent Shortcut parameters can offer them; the widget fallback does
-/// not need or publish those paths. Both processes share this type and query.
+/// and setup-script labels so dependent Shortcut parameters can offer them;
+/// the widget fallback does not need or publish either. Both processes share
+/// this type and query.
 struct HostEntity: AppEntity, Identifiable, Hashable {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Multiplex Host"
     static let defaultQuery = HostEntityQuery()
@@ -13,6 +23,7 @@ struct HostEntity: AppEntity, Identifiable, Hashable {
     var name: String
     var address: String
     var workingDirs: [String] = []
+    var sessionScripts: [ShortcutSessionScript] = []
 
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(title: "\(name)", subtitle: "\(address)")

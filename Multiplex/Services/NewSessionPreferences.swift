@@ -7,8 +7,9 @@ import Foundation
 ///
 /// The same single opt-in also covers the setup-script choice — per host,
 /// because script ids are host-scoped. While it is on, the remembered script
-/// is what the pickerless creation paths (+ TAB, widget/Shortcuts) type
-/// into their fresh sessions; off means every path types nothing.
+/// is what pickerless creation paths (+ TAB, widgets) and Open Agent's
+/// Shortcut default type into fresh sessions; off means those paths type
+/// nothing unless the Shortcut explicitly selects a script.
 struct NewSessionPreferences {
     private static let remembersLastLaunchKey = "newSession.remembersLastLaunch"
     private static let lastAgentKey = "newSession.lastAgent"

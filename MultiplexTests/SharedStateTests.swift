@@ -2,8 +2,8 @@ import XCTest
 @testable import Multiplex
 
 /// Locks the widget-facing shared surface to the app's models: the two URL
-/// builders, Shortcut working-directory choices, agent raw values/labels,
-/// and the snapshot codec — the
+/// builders, Shortcut working-directory/setup-script choices, agent raw
+/// values/labels, and the snapshot codec — the
 /// widget target compiles none of the app model chain, so these tests are
 /// the only thing keeping the two sides in step.
 final class SharedStateTests: XCTestCase {
@@ -50,7 +50,8 @@ final class SharedStateTests: XCTestCase {
                         hostID: id, agentRaw: agent.rawValue, askForPrompt: ask)),
                     .openAgent(
                         host: .id(id), agent: agent, prompt: nil,
-                        askForPrompt: ask, directory: nil)
+                        askForPrompt: ask, directory: nil,
+                        setupScript: .remembered)
                 )
             }
         }
@@ -72,6 +73,49 @@ final class SharedStateTests: XCTestCase {
         XCTAssertEqual(
             ShortcutWorkingDirectoryOptions.values(configured: []),
             ["~"]
+        )
+    }
+
+    // MARK: Shortcut setup scripts
+
+    func testSetupScriptOptionsKeepHostOrderAndStableIDs() {
+        let first = ShortcutSessionScript(id: UUID(), displayName: "venv")
+        let second = ShortcutSessionScript(id: UUID(), displayName: "  nvm  ")
+
+        XCTAssertEqual(
+            ShortcutSetupScriptOptions.choices(configured: [first, second, first]),
+            [
+                .init(value: "default", title: "New Session Default"),
+                .init(value: "none", title: "None"),
+                .init(value: first.id.uuidString, title: "venv"),
+                .init(value: second.id.uuidString, title: "nvm"),
+            ]
+        )
+    }
+
+    func testSetupScriptOptionTokensAreValidated() {
+        let id = UUID()
+        XCTAssertEqual(
+            ShortcutSetupScriptOptions.selection(for: nil),
+            .remembered
+        )
+        XCTAssertEqual(
+            ShortcutSetupScriptOptions.selection(for: "default"),
+            .remembered
+        )
+        XCTAssertEqual(
+            ShortcutSetupScriptOptions.selection(for: "none"),
+            .none
+        )
+        XCTAssertEqual(
+            ShortcutSetupScriptOptions.selection(for: id.uuidString),
+            .id(id)
+        )
+        // Shortcut variables remain accepted, but arbitrary shell text can
+        // never become a setup script body.
+        XCTAssertEqual(
+            ShortcutSetupScriptOptions.selection(for: "echo unsafe"),
+            .none
         )
     }
 

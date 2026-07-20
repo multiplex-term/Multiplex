@@ -27,7 +27,8 @@ final class ExternalActionTests: XCTestCase {
             agent: .codex,
             prompt: "fix the build\nthen run tests & say \"done\" 100%",
             askForPrompt: true,
-            directory: nil
+            directory: nil,
+            setupScript: .remembered
         )
         let url = ExternalActionURL.url(for: action)
         XCTAssertEqual(ExternalActionURL.action(from: url), action)
@@ -36,7 +37,8 @@ final class ExternalActionTests: XCTestCase {
     func testAgentURLWithoutPromptRoundTrips() {
         let action = ExternalAction.openAgent(
             host: .id(UUID()), agent: .pi, prompt: nil,
-            askForPrompt: false, directory: nil)
+            askForPrompt: false, directory: nil,
+            setupScript: .remembered)
         XCTAssertEqual(
             ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
             action
@@ -47,7 +49,25 @@ final class ExternalActionTests: XCTestCase {
         for directory in ["~/workspace/Multiplex", "~", "/srv/build dir"] {
             let action = ExternalAction.openAgent(
                 host: .id(UUID()), agent: .claudeCode, prompt: "go",
-                askForPrompt: true, directory: directory)
+                askForPrompt: true, directory: directory,
+                setupScript: .remembered)
+            XCTAssertEqual(
+                ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
+                action
+            )
+        }
+    }
+
+    func testAgentURLRoundTripsEverySetupScriptSelection() {
+        let scriptID = UUID()
+        for selection: ExternalSetupScriptSelection in [
+            .remembered, .none, .id(scriptID),
+        ] {
+            let action = ExternalAction.openAgent(
+                host: .id(UUID()), agent: .codex, prompt: nil,
+                askForPrompt: false, directory: nil,
+                setupScript: selection
+            )
             XCTAssertEqual(
                 ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
                 action
@@ -79,13 +99,14 @@ final class ExternalActionTests: XCTestCase {
             ExternalActionURL.action(from: url),
             .openAgent(
                 host: .named("devbox"), agent: .claudeCode, prompt: nil,
-                askForPrompt: false, directory: nil)
+                askForPrompt: false, directory: nil,
+                setupScript: .remembered)
         )
     }
 
     func testAgentDefaultsToClaudeCode() {
         let url = URL(string: "multiplex://open?host=devbox&action=agent")!
-        guard case .openAgent(_, let agent, _, _, _)? = ExternalActionURL.action(from: url) else {
+        guard case .openAgent(_, let agent, _, _, _, _)? = ExternalActionURL.action(from: url) else {
             return XCTFail("expected openAgent")
         }
         XCTAssertEqual(agent, .claudeCode)
@@ -100,6 +121,8 @@ final class ExternalActionTests: XCTestCase {
             from: URL(string: "multiplex://open?host=devbox&action=explode")!))
         XCTAssertNil(ExternalActionURL.action(
             from: URL(string: "multiplex://elsewhere?host=devbox")!))
+        XCTAssertNil(ExternalActionURL.action(
+            from: URL(string: "multiplex://open?host=devbox&action=agent&script=echo%20oops")!))
     }
 
     // MARK: Session pick
@@ -124,5 +147,43 @@ final class ExternalActionTests: XCTestCase {
 
     func testMostRecentSessionEmptyIsNil() {
         XCTAssertNil(ExternalActionPlan.mostRecentSessionName(in: []))
+    }
+
+    // MARK: Setup script selection
+
+    func testSetupScriptSelectionResolvesRememberedExplicitAndNone() {
+        let remembered = SessionScript(name: "remembered", body: "source old")
+        let explicit = SessionScript(name: "explicit", body: "source new")
+        let available = [remembered, explicit]
+
+        XCTAssertEqual(
+            ExternalActionPlan.setupScript(
+                for: .remembered,
+                available: available,
+                remembered: remembered
+            ),
+            remembered
+        )
+        XCTAssertEqual(
+            ExternalActionPlan.setupScript(
+                for: .id(explicit.id),
+                available: available,
+                remembered: remembered
+            ),
+            explicit
+        )
+        XCTAssertNil(ExternalActionPlan.setupScript(
+            for: .none,
+            available: available,
+            remembered: remembered
+        ))
+    }
+
+    func testDeletedExplicitSetupScriptFailsSoftToNone() {
+        XCTAssertNil(ExternalActionPlan.setupScript(
+            for: .id(UUID()),
+            available: [],
+            remembered: SessionScript(name: "remembered", body: "source old")
+        ))
     }
 }

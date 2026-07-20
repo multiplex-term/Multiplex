@@ -101,15 +101,27 @@ enum ExternalActionPerformer {
         switch action {
         case .openShell(_, let sessionName):
             await openShell(on: host, requestedSession: sessionName, context: context)
-        case .openAgent(_, let agent, let prompt, let askForPrompt, let directory):
+        case .openAgent(
+            _, let agent, let prompt, let askForPrompt, let directory,
+            let setupScript
+        ):
             if askForPrompt {
                 context.presentAgentPrompt(AgentPromptRequest(
-                    host: host, agent: agent, directory: directory))
+                    host: host,
+                    agent: agent,
+                    directory: directory,
+                    setupScript: setupScript
+                ))
                 return
             }
             await openAgent(
-                agent, prompt: prompt, directory: directory,
-                on: host, context: context)
+                agent,
+                prompt: prompt,
+                directory: directory,
+                setupScript: setupScript,
+                on: host,
+                context: context
+            )
         }
     }
 
@@ -157,18 +169,28 @@ enum ExternalActionPerformer {
     }
 
     private static func openAgent(
-        _ agent: AgentKind, prompt: String?, directory: String?, on host: Host,
+        _ agent: AgentKind,
+        prompt: String?,
+        directory: String?,
+        setupScript: ExternalSetupScriptSelection,
+        on host: Host,
         context: ExternalActionRouter.Context
     ) async {
         guard let model = await connectedModel(for: host, context: context) else { return }
         // nil = the host's default working dir; the sheet's explicit Home
         // choice arrives as "~", which the quoting layer expands to $HOME.
-        // The remembered setup script rides like the shell path above.
+        // The Shortcut picker can select a stable script id, explicitly opt
+        // out, or preserve the remembered New Session choice.
+        let script = ExternalActionPlan.setupScript(
+            for: setupScript,
+            available: host.sessionScripts,
+            remembered: NewSessionPreferences().rememberedScript(for: host)
+        )
         guard let created = await model.createSession(
             base: agent.launchCommand,
             inDirectoryOf: nil,
             startingIn: directory ?? host.workingDirs.first,
-            running: NewSessionPreferences().rememberedScript(for: host)?.normalizedBody,
+            running: script?.normalizedBody,
             typing: agent.launchCommand(initialPrompt: prompt ?? "")
         ) else {
             presentCreateFailure(for: model, host: host, context: context)

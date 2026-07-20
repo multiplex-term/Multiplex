@@ -252,8 +252,9 @@ SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
                      ExternalActionPerformer runs the status-guarded flows:
                      refreshAndWait → phase==.connected → focusTab/attach
                      most-recent (or exact ?session=) / createSession with
-                     agent launchCommand(initialPrompt:). Failures alert on
-                     the deck; the widget's ASK mode presents
+                     the resolved setup-script choice followed by agent
+                     launchCommand(initialPrompt:). Failures alert on the
+                     deck; the widget's ASK mode presents
                      AgentPromptSheet, which resubmits. A scene without a
                      mounted deck raises the one deck scene to drain.
   SharedStateStore   secret-free App Group projection (widget-state.json,
@@ -488,11 +489,15 @@ views.
   rides on `TerminalRoute`). The New Session sheet's single REMEMBER opt-in
   covers the per-host script choice (`NewSessionPreferences`, device-local
   host-UUID → script-id map; deleted ids fail soft to NONE), and while it is
-  on, the pickerless creation paths — + TAB and the widget/Shortcuts router —
-  inherit the remembered script the way + TAB inherits the pane cwd. List
-  order is presentation only: a script never runs merely because it exists or
-  sits first, and the sheet picker is the Starts-in Menu grammar, not a
-  choice bar (user lists are unbounded). Script ids are load-bearing (the
+  on, the pickerless creation paths — + TAB and the widget router — inherit
+  the remembered script the way + TAB inherits the pane cwd. Open Agent's
+  Shortcut adds a host-dependent setup-script picker: NEW SESSION DEFAULT
+  preserves that remembered behavior, NONE explicitly overrides it, and a
+  selected stable UUID resolves against the live host immediately before
+  creation (a deleted id fails soft to NONE). List order is presentation only:
+  a script never runs merely because it exists or sits first, and the sheet
+  picker is the Starts-in Menu grammar, not a choice bar (user lists are
+  unbounded). Script ids are load-bearing (the
   remember map points at them), so the editor preserves them across edits;
   bodies get the custom-command sanitize (controls stripped, interior
   newlines/tabs kept). Scripts ride the synced Host record (`updatedAt`
@@ -850,11 +855,14 @@ views.
   gate network work on `applicationState == .active` (including the plain-
   shell monitor) and otherwise rely on iOS suspension. The Shortcuts host
   picker and widget config read `SharedStateStore`; Open Agent's dependent
-  working-directory picker re-resolves the selected host against the app's
-  live `HostStore`, so it can list that host's ordered `workingDirs` plus
-  Home without publishing paths into widget state. It remains a String
-  parameter so Shortcut variables still work; unset means the live host
-  default and `"~"` means Home. Intents/widget links and
+  working-directory and setup-script pickers re-resolve the selected host
+  against the app's live `HostStore`, so they can list ordered `workingDirs`
+  plus Home and script names+stable ids without publishing paths, names, or
+  bodies into widget state. The directory remains a String so Shortcut
+  variables still work; unset means the live host default and `"~"` means
+  Home. The setup-script String is validated as DEFAULT/NONE/a UUID — unset
+  preserves the remembered New Session choice, and arbitrary text never
+  reaches the remote shell. Intents/widget links and
   `ExternalActionURL` formats are kept in lockstep by `SharedStateTests`
   (the widget target compiles only `Multiplex/Shared`, never the app model
   chain — don't import Host/Tmux/Agent types there). XcodeGen quirk: the
