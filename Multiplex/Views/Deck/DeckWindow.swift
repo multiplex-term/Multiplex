@@ -145,6 +145,7 @@ struct DeckWindow: View {
     @State private var addingHost = false
     @State private var editingHost: Host?
     @State private var showingSettings = false
+    @State private var showingFAQ = false
     @State private var showingPaywall = false
     @State private var showingLocalNetworkAlert = false
 
@@ -161,7 +162,8 @@ struct DeckWindow: View {
             shellSafeArea: shellSafeArea,
             addHost: requestAddHost,
             editHost: { editingHost = $0 },
-            openSettings: { showingSettings = true }
+            openSettings: { showingSettings = true },
+            openFAQ: { showingFAQ = true }
         )
         // Explicitly bridge Observation environments across the scene sheet
         // boundary. iOS 27 can otherwise present this sheet from the shell's
@@ -177,6 +179,7 @@ struct DeckWindow: View {
                 .environment(entitlements)
         }
         .sheet(isPresented: $showingSettings) { SettingsView() }
+        .sheet(isPresented: $showingFAQ) { FAQView() }
         .sheet(isPresented: $showingPaywall) { ProPaywallView() }
         .alert("Local Network Access Is Off", isPresented: $showingLocalNetworkAlert) {
             Button("Open Settings") { openAppSettings() }
@@ -225,6 +228,7 @@ struct DeckWindow: View {
         #if DEBUG
         .task { presentPaywallForReviewCaptureIfRequested() }
         .task { presentSettingsForVerificationIfRequested() }
+        .task { presentFAQForVerificationIfRequested() }
         .task { await presentHostSettingsForVerificationIfRequested() }
         .task {
             await DeckScene.autoAttachIfRequested(
@@ -264,6 +268,14 @@ struct DeckWindow: View {
         guard let request = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_SETTINGS"],
               ["1", "theme"].contains(request) else { return }
         showingSettings = true
+    }
+
+    /// Launch with `MULTIPLEX_AUTO_FAQ=1` to open the deck's FAQ sheet for
+    /// deterministic layout capture.
+    private func presentFAQForVerificationIfRequested() {
+        guard ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_FAQ"] == "1"
+        else { return }
+        showingFAQ = true
     }
 
     /// Headless regression hook for the Observation environment crossing the

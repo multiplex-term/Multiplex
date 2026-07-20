@@ -151,6 +151,7 @@ struct FleetWall: View {
     var addHost: () -> Void
     var editHost: (Host) -> Void
     var openSettings: () -> Void
+    var openFAQ: () -> Void
 
     @State private var namingHost: Host?
     @State private var deleteTarget: DeleteTarget?
@@ -446,6 +447,9 @@ struct FleetWall: View {
             ChassisChip("HOST", systemImage: "plus", action: addHost)
                 .fixedSize()
                 .accessibilityLabel("Add host")
+            ChassisChip("FAQ", systemImage: "questionmark", action: openFAQ)
+                .fixedSize()
+                .accessibilityLabel("Frequently asked questions")
             ChassisChip("SETTINGS", systemImage: "gearshape", action: openSettings)
                 .fixedSize()
                 // The system's compact trailing margin looks crowded against
@@ -469,6 +473,8 @@ struct FleetWall: View {
                     .minimumScaleFactor(0.75)
                 ChassisChip("", systemImage: "plus", action: addHost)
                     .accessibilityLabel("Add host")
+                ChassisChip("", systemImage: "questionmark", action: openFAQ)
+                    .accessibilityLabel("Frequently asked questions")
                 ChassisChip("", systemImage: "gearshape", action: openSettings)
                     .accessibilityLabel("Settings")
             }
@@ -488,6 +494,8 @@ struct FleetWall: View {
                     .font(.mono(11))
                     .foregroundStyle(Theme.signal2)
                 ChassisChip("HOST", systemImage: "plus", action: addHost)
+                ChassisChip("FAQ", systemImage: "questionmark", action: openFAQ)
+                    .accessibilityLabel("Frequently asked questions")
                 ChassisChip("SETTINGS", systemImage: "gearshape", action: openSettings)
             }
             .padding(.bottom, 16)
@@ -512,6 +520,13 @@ struct FleetWall: View {
             ChassisChip(iconOnly ? "" : "HOST", systemImage: "plus", action: addHost)
                 .fixedSize()
                 .accessibilityLabel("Add host")
+            ChassisChip(
+                iconOnly ? "" : "FAQ",
+                systemImage: "questionmark",
+                action: openFAQ
+            )
+            .fixedSize()
+            .accessibilityLabel("Frequently asked questions")
             ChassisChip(
                 iconOnly ? "" : "SETTINGS",
                 systemImage: "gearshape",
