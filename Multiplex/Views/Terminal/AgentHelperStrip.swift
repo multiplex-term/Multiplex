@@ -181,6 +181,7 @@ struct AgentHelperStrip: View {
                 .id(customCommandEditorID)
                 .presentationCompactAdaptation(.popover)
                 .customCommandPresentationSizing()
+                .followsAppAppearance()
             }
             #else
             moreMenu
@@ -239,6 +240,7 @@ struct AgentHelperStrip: View {
                         dismiss: { showingHistory = false }
                     )
                     .presentationCompactAdaptation(.popover)
+                    .followsAppAppearance()
                 }
             #else
             button

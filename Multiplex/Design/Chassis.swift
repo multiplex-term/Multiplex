@@ -421,6 +421,69 @@ extension View {
             .contentShape(.hoverEffect, RoundedRectangle(cornerRadius: cornerRadius))
             .hoverEffect(.highlight)
     }
+
+    /// Opaque chassis ground for a form dialog's scroll content, navigation
+    /// bar included — Settings, the host and session forms, FAQ, the theme
+    /// editor, the paywall. One shared surface on every platform: the tokens
+    /// inside these forms are trait-dynamic, so the ground must flip with
+    /// the appearance choice too. visionOS sheets used to keep native glass
+    /// here, which left a pinned LIGHT appearance reading as a washed gray
+    /// platter — light wells floating on room-tinted glass with no light
+    /// chassis anywhere (user-reported). The appearance follow-through rides
+    /// along because a visionOS sheet's own window misses the scene override
+    /// in place when it presents (see `AppearanceApplicator`).
+    func chassisSheetGround() -> some View {
+        self
+            .background(Theme.chassis.ignoresSafeArea())
+            .toolbarBackground(Theme.chassis, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .followsAppAppearance()
+    }
+}
+
+/// The visionOS sheet bar ignores window traits: its system title and plain
+/// button labels render vibrant white whatever the chassis polarity, which
+/// washes out over a light ground. Per-item content IS honored, so chassis
+/// sheets restate their bar in ink explicitly — a `ChassisSheetTitle`
+/// replacing the system title on visionOS (iPad keeps the system inline
+/// title), and `ChassisBarButton`s whose labels carry the trait-resolved
+/// signal tokens on every platform.
+struct ChassisSheetTitle: ToolbarContent {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some ToolbarContent {
+        #if os(visionOS)
+        ToolbarItem(placement: .principal) {
+            ChassisLabel(title, size: 12)
+        }
+        #endif
+    }
+}
+
+/// System bar-button shell (pill, placement, disabled hit behavior) with the
+/// label ink drawn from chassis tokens; `isEnabled` keeps the disabled
+/// affordance the explicit color would otherwise defeat.
+struct ChassisBarButton: View {
+    let title: String
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    init(_ title: String, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .foregroundStyle(isEnabled ? Theme.signal : Theme.signal3)
+        }
+    }
 }
 
 #if DEBUG

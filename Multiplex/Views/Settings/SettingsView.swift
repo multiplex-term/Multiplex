@@ -31,13 +31,14 @@ struct SettingsView: View {
                 .padding(18)
                 .frame(maxWidth: .infinity)
             }
-            .background(sheetGround.ignoresSafeArea())
+            .chassisSheetGround()
             .sheet(isPresented: $showingPaywall) { ProPaywallView() }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ChassisSheetTitle("Settings")
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    ChassisBarButton("Done") { dismiss() }
                 }
             }
             .navigationDestination(item: $editingTheme) { theme in
@@ -46,20 +47,7 @@ struct SettingsView: View {
             #if DEBUG
             .task { presentThemeEditorForVerificationIfRequested() }
             #endif
-            #if !os(visionOS)
-            .toolbarBackground(Theme.chassis, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            #endif
         }
-    }
-
-    @ViewBuilder
-    private var sheetGround: some View {
-        #if os(visionOS)
-        Color.clear
-        #else
-        Theme.chassis
-        #endif
     }
 
     /// SYSTEM follows the device; LIGHT/DARK pin the chassis. The choice is

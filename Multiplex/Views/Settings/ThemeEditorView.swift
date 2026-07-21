@@ -58,32 +58,20 @@ struct ThemeEditorView: View {
                 .padding(18)
                 .frame(maxWidth: .infinity)
             }
-            .background(sheetGround.ignoresSafeArea())
+            .chassisSheetGround()
         }
         .navigationTitle(draft.name.isEmpty ? "Theme" : draft.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ChassisSheetTitle(draft.name.isEmpty ? "Theme" : draft.name)
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save") {
+                ChassisBarButton("Save") {
                     onSave(draft)
                     dismiss()
                 }
                 .disabled(draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        #if !os(visionOS)
-        .toolbarBackground(Theme.chassis, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        #endif
-    }
-
-    @ViewBuilder
-    private var sheetGround: some View {
-        #if os(visionOS)
-        Color.clear
-        #else
-        Theme.chassis
-        #endif
     }
 
     /// Lives outside the ScrollView so only the controls scroll. The draft still

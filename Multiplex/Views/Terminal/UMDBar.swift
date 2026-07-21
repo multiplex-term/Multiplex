@@ -230,6 +230,7 @@ struct UMDBar: View {
             }
             .presentationCompactAdaptation(.popover)
             .tmuxShortcutPresentationSizing()
+            .followsAppAppearance()
         }
     }
 

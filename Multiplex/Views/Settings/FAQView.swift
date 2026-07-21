@@ -18,28 +18,16 @@ struct FAQView: View {
                 .padding(18)
                 .frame(maxWidth: .infinity)
             }
-            .background(sheetGround.ignoresSafeArea())
+            .chassisSheetGround()
             .navigationTitle("FAQ")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ChassisSheetTitle("FAQ")
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    ChassisBarButton("Done") { dismiss() }
                 }
             }
-            #if !os(visionOS)
-            .toolbarBackground(Theme.chassis, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            #endif
         }
-    }
-
-    @ViewBuilder
-    private var sheetGround: some View {
-        #if os(visionOS)
-        Color.clear
-        #else
-        Theme.chassis
-        #endif
     }
 }
 

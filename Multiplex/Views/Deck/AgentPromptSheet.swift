@@ -68,6 +68,7 @@ struct AgentPromptSheet: View {
                                 } label: {
                                     HStack(spacing: 10) {
                                         Text(directoryLabel)
+                                            .foregroundStyle(Theme.signal)
                                             .lineLimit(1)
                                         Spacer()
                                         Image(systemName: "chevron.down")
@@ -87,32 +88,20 @@ struct AgentPromptSheet: View {
                 .padding(18)
                 .frame(maxWidth: .infinity)
             }
-            .background(sheetGround.ignoresSafeArea())
+            .chassisSheetGround()
             .navigationTitle("\(request.agent.displayName) on \(request.host.name)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ChassisSheetTitle("\(request.agent.displayName) on \(request.host.name)")
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    ChassisBarButton("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Launch", action: launch)
+                    ChassisBarButton("Launch", action: launch)
                 }
             }
-            #if !os(visionOS)
-            .toolbarBackground(Theme.chassis, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            #endif
         }
         .task { promptFocused = true }
-    }
-
-    @ViewBuilder
-    private var sheetGround: some View {
-        #if os(visionOS)
-        Color.clear
-        #else
-        Theme.chassis
-        #endif
     }
 
     private var directoryLabel: String {

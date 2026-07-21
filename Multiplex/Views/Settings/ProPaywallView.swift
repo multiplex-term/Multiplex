@@ -40,25 +40,32 @@ struct ProPaywallView: View {
                 .frame(maxWidth: 620, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
+            .chassisSheetGround()
             .navigationTitle("Pro")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ChassisSheetTitle("Pro")
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    ChassisBarButton("Done") { dismiss() }
                 }
             }
             .task { await entitlements.loadStorefront() }
         }
     }
 
+    // Prose colors are chassis tokens, never semantic styles: visionOS
+    // renders `.primary`/`.secondary` as vibrant glass white regardless of
+    // the window's light/dark traits, which washed the copy out over the
+    // light chassis ground.
     private var hero: some View {
         VStack(alignment: .leading, spacing: 8) {
             ChassisLabel("Multiplex Pro", size: 18)
             Text("Buy once. Use it on iPad and Vision Pro.")
                 .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.signal)
             Text("The free tier stays useful: two hosts, spatial SSH terminals, live agent detection, built-in themes and \(EntitlementStore.dailySlashChipLimit) built-in or custom agent-command taps each day.")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.signal2)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -68,12 +75,14 @@ struct ProPaywallView: View {
             if entitlements.isPro {
                 HStack(spacing: 10) {
                     Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Theme.signal)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Multiplex Pro is unlocked")
                             .font(.headline)
+                            .foregroundStyle(Theme.signal)
                         Text("This purchase is available on your devices with the same Apple ID.")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.signal2)
                     }
                 }
                 .accessibilityElement(children: .combine)
@@ -90,11 +99,12 @@ struct ProPaywallView: View {
                         }
                         Text(purchaseLabel)
                             .font(.body.weight(.semibold))
+                            .foregroundStyle(Theme.signal)
                         Spacer(minLength: 12)
                         Text("ONE-TIME")
                             .font(.mono(9, weight: .semibold))
                             .kerning(1)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.signal2)
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
@@ -114,18 +124,21 @@ struct ProPaywallView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Button(
-                entitlements.commerceState == .restoring
-                    ? "Restoring Purchases…"
-                    : "Restore Purchases"
-            ) {
+            Button {
                 Task { _ = await entitlements.restorePurchases() }
+            } label: {
+                Text(
+                    entitlements.commerceState == .restoring
+                        ? "Restoring Purchases…"
+                        : "Restore Purchases"
+                )
+                .foregroundStyle(Theme.signal2)
             }
             .disabled(entitlements.restoreIsUnavailable)
 
             Text("Payment is charged to your Apple ID. No subscription.")
                 .font(.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Theme.signal3)
         }
         .padding(.top, 4)
     }
@@ -179,7 +192,7 @@ struct ProPaywallView: View {
                 ChassisLabel(title, size: 11)
                 Text(detail)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.signal2)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

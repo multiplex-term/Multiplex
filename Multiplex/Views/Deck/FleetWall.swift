@@ -1333,6 +1333,7 @@ private struct NewSessionSheet: View {
                                 } label: {
                                     HStack(spacing: 10) {
                                         Text(script?.displayName ?? "None")
+                                            .foregroundStyle(Theme.signal)
                                             .lineLimit(1)
                                         Spacer()
                                         Image(systemName: "chevron.down")
@@ -1372,6 +1373,7 @@ private struct NewSessionSheet: View {
                                 } label: {
                                     HStack(spacing: 10) {
                                         Text(directory ?? "Home")
+                                            .foregroundStyle(Theme.signal)
                                             .lineLimit(1)
                                         Spacer()
                                         Image(systemName: "chevron.down")
@@ -1393,15 +1395,16 @@ private struct NewSessionSheet: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { focusedField = nil }
-            .background(sheetGround.ignoresSafeArea())
+            .chassisSheetGround()
             .navigationTitle("New Session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ChassisSheetTitle("New Session")
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    ChassisBarButton("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create & Attach") {
+                    ChassisBarButton("Create & Attach") {
                         preferences.save(
                             remembersLastLaunch: remembersLastLaunch,
                             agent: agent,
@@ -1414,24 +1417,11 @@ private struct NewSessionSheet: View {
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
-            #if !os(visionOS)
-            .toolbarBackground(Theme.chassis, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            #endif
         }
         .onChange(of: agent) { previous, selected in
             let untouched = name == prefill(for: previous)
             if untouched { name = prefill(for: selected) }
         }
-    }
-
-    @ViewBuilder
-    private var sheetGround: some View {
-        #if os(visionOS)
-        Color.clear
-        #else
-        Theme.chassis
-        #endif
     }
 
     private var launchChoices: [(String, AgentKind?)] {

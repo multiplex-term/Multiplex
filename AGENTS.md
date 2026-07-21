@@ -971,7 +971,14 @@ unchosen candidates stay here under `docs/landing/`.
   **never `preferredColorScheme`, which stops at presentation boundaries**:
   with it, an open Settings sheet kept stale traits and the tokens inside
   never flipped (user-reported). Window traits also drive the keyboard and
-  UIKit-hosted popovers, so there is exactly one authority.
+  UIKit-hosted popovers. One nuance: **a visionOS sheet/popover hosts in its
+  own window, which follows a live override change but misses the override
+  already in place when it presents** — a fresh launch with LIGHT pinned
+  opened Settings dark (user-reported). Presented chassis surfaces therefore
+  carry `followsAppAppearance()` (bundled into `chassisSheetGround()`;
+  applicator in `Design/AppearanceApplicator.swift`), which re-applies the
+  same choice to whatever window hosts them — a no-op where presentations
+  share the scene window.
   Components live in `Chassis.swift`: `ChassisLabel` (compressed caps
   — rails, tile names, UMD titles), `ChassisChip`/`ChassisBadge` (square
   actions), `TallyLamp` (captioned state lamp), `ChassisSwitch` (compact square
@@ -1015,7 +1022,12 @@ unchosen candidates stay here under `docs/landing/`.
 - Secrets never touch disk in plaintext — always `KeychainStore`, keyed by host
   UUID.
 - Platform splits use `#if os(visionOS)`; the iPad UI sits on chassis with a
-  neutral `signal` tint, visionOS keeps native glass for sheets. The wall and
+  neutral `signal` tint, visionOS keeps native glass for system controls
+  (menus, alerts, popover shells). Form sheets — Settings, host/session
+  forms, FAQ, theme editor, paywall — sit on opaque chassis on every
+  platform via `chassisSheetGround()` (ground + nav-bar background
+  together): their tokens are trait-dynamic, and a glass ground swallowed
+  the pinned LIGHT appearance on visionOS (user-reported). The wall and
   terminal chrome are opaque chassis on both platforms by design.
 
 ## Known limits (v1)

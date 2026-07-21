@@ -81,37 +81,25 @@ struct AddHostSheet: View {
                 .padding(18)
                 .frame(maxWidth: .infinity)
             }
-            .background(sheetGround.ignoresSafeArea())
+            .chassisSheetGround()
             .navigationTitle(editing == nil ? "Add Host" : "Host Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ChassisSheetTitle(editing == nil ? "Add Host" : "Host Settings")
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    ChassisBarButton("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save)
+                    ChassisBarButton("Save", action: save)
                         .disabled(!isValid)
                 }
             }
-            #if !os(visionOS)
-            .toolbarBackground(Theme.chassis, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            #endif
         }
         .onAppear(perform: populate)
         .sheet(isPresented: $showingPaywall) { ProPaywallView() }
         // Any edit that could change the outcome retires the shown result —
         // a stale PASSED next to a new address would vouch for the wrong host.
         .onChange(of: testFingerprint) { testState = .idle }
-    }
-
-    @ViewBuilder
-    private var sheetGround: some View {
-        #if os(visionOS)
-        Color.clear
-        #else
-        Theme.chassis
-        #endif
     }
 
     // MARK: Form sections
