@@ -134,6 +134,7 @@ struct FleetWall: View {
 
     @Environment(HostStore.self) private var store
     @Environment(ConnectionHub.self) private var hub
+    @Environment(NetworkChangeMonitor.self) private var networkChanges
     @Environment(TerminalWorkspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -693,47 +694,61 @@ struct FleetWall: View {
     @ViewBuilder
     private func railStatus(_ model: HostConnectionModel) -> some View {
         Group {
-            switch model.phase {
-            case .connected:
-                railLabel("CONNECTED", dot: Theme.ok)
-            case .connecting:
-                // Same dot anatomy as every other phase — a ProgressView is
-                // intrinsically taller and its spinner draws outside the
-                // slot. The pulse carries the "in flight" signal instead.
-                railLabel("LINKING", dot: Theme.signal2, pulsing: true)
-            case .failed(let reason):
-                if model.keyPassphraseChallenge != nil {
-                    Button {
-                        _ = requestKeyPassphraseIfNeeded(model)
-                    } label: {
-                        railLabel(
-                            "NEEDS PASSPHRASE",
-                            dot: Theme.caution,
-                            text: Theme.caution
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .chassisHover(2)
-                    .accessibilityLabel("\(model.host.name) needs its SSH key passphrase")
-                    .accessibilityHint("Opens the SSH key passphrase prompt")
-                } else {
-                    Button {
-                        unreachableNotice = UnreachableNotice(host: model.host, reason: reason)
-                    } label: {
-                        railLabel("UNREACHABLE", dot: Theme.signal3, text: Theme.signal3)
-                    }
-                    .buttonStyle(.plain)
-                    .chassisHover(2)
-                    .accessibilityLabel("\(model.host.name) unreachable")
-                    .accessibilityHint("Shows why the host could not be reached")
-                }
-            case .idle:
-                Text("STANDBY").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal3)
+            // Device-side condition beats every per-host phase: with no
+            // usable route, a lingering CONNECTED is stale (the socket just
+            // hasn't timed out yet) and UNREACHABLE blames the host for the
+            // device's state.
+            if networkChanges.isOffline {
+                railLabel("OFFLINE", dot: Theme.signal3, text: Theme.signal3)
+                    .accessibilityLabel("This device has no network connection")
+            } else {
+                phaseRailStatus(model)
             }
         }
         // Every phase shares one fixed-height slot so no phase change can
         // move the rail.
         .frame(height: 12)
+    }
+
+    @ViewBuilder
+    private func phaseRailStatus(_ model: HostConnectionModel) -> some View {
+        switch model.phase {
+        case .connected:
+            railLabel("CONNECTED", dot: Theme.ok)
+        case .connecting:
+            // Same dot anatomy as every other phase — a ProgressView is
+            // intrinsically taller and its spinner draws outside the
+            // slot. The pulse carries the "in flight" signal instead.
+            railLabel("LINKING", dot: Theme.signal2, pulsing: true)
+        case .failed(let reason):
+            if model.keyPassphraseChallenge != nil {
+                Button {
+                    _ = requestKeyPassphraseIfNeeded(model)
+                } label: {
+                    railLabel(
+                        "NEEDS PASSPHRASE",
+                        dot: Theme.caution,
+                        text: Theme.caution
+                    )
+                }
+                .buttonStyle(.plain)
+                .chassisHover(2)
+                .accessibilityLabel("\(model.host.name) needs its SSH key passphrase")
+                .accessibilityHint("Opens the SSH key passphrase prompt")
+            } else {
+                Button {
+                    unreachableNotice = UnreachableNotice(host: model.host, reason: reason)
+                } label: {
+                    railLabel("UNREACHABLE", dot: Theme.signal3, text: Theme.signal3)
+                }
+                .buttonStyle(.plain)
+                .chassisHover(2)
+                .accessibilityLabel("\(model.host.name) unreachable")
+                .accessibilityHint("Shows why the host could not be reached")
+            }
+        case .idle:
+            Text("STANDBY").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal3)
+        }
     }
 
     private func railLabel(

@@ -14,10 +14,20 @@ final class NetworkChangeMonitor {
     /// Advances once per settled, meaningful path change while watching.
     /// The deck observes this edge and rebuilds its control connections.
     private(set) var reconnectRevision = 0
+    /// The device itself has no usable route (Wi-Fi off, airplane mode) —
+    /// distinct from a host being unreachable. The rail shows OFFLINE over
+    /// every per-host phase while this holds: a stale CONNECTED would
+    /// otherwise survive until a probe burns its exec deadline, and the
+    /// failure it settles into blames the host for a device-side condition.
+    /// Debounced by the same settle delay as reconnects, so an interface
+    /// handoff that passes through unsatisfied never flashes it. Clearing
+    /// is immediate — a usable route is instant truth.
+    private(set) var isOffline = false
 
     @ObservationIgnored private var detector = NetworkChangeDetector()
     @ObservationIgnored private var monitor: NWPathMonitor?
     @ObservationIgnored private var settleTask: Task<Void, Never>?
+    @ObservationIgnored private var offlineTask: Task<Void, Never>?
     @ObservationIgnored private let queue = DispatchQueue(
         label: "app.multiplexterm.multiplex.network-change",
         qos: .utility
@@ -55,11 +65,28 @@ final class NetworkChangeMonitor {
         monitor = nil
         settleTask?.cancel()
         settleTask = nil
+        offlineTask?.cancel()
+        offlineTask = nil
     }
 
     private func register(_ snapshot: NetworkPathSnapshot) {
         // A cancelled monitor's queue can still deliver a late update.
         guard monitor != nil else { return }
+        if snapshot.isSatisfied {
+            offlineTask?.cancel()
+            offlineTask = nil
+            if isOffline { isOffline = false }
+        } else if !isOffline, offlineTask == nil {
+            // First unsatisfied update starts the clock; repeats while it
+            // runs must not push the deadline out.
+            offlineTask = Task { [weak self] in
+                do { try await Task.sleep(for: Self.settleDelay) }
+                catch { return }
+                guard let self, self.monitor != nil else { return }
+                self.offlineTask = nil
+                self.isOffline = true
+            }
+        }
         guard detector.register(snapshot) else { return }
         settleTask?.cancel()
         settleTask = Task { [weak self] in
