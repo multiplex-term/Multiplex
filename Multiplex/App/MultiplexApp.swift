@@ -53,18 +53,17 @@ struct MultiplexApp: App {
 
     var body: some Scene {
         #if os(visionOS)
-        // Snug fit for a two-tile wall row: 26pt wall padding either side +
-        // two tiles at the grid's 360pt preferred width + the 14pt gutter.
-        // Wider windows keep that tile size until another full tile fits (a
-        // third needs 1160), so growing never compresses the existing row.
-        // 330 is the shortest visionOS will actually grant at this width
-        // (shorter requests render ~330 anyway — system aspect floor); it
-        // shows the header, host rail, and one full tile row, and more rows scroll.
+        // A three-tile wall row: 26pt wall padding either side + three tiles
+        // at the grid's 360pt preferred width + two 14pt gutters = 1160.
+        // Wider windows keep that tile size until another full tile fits, so
+        // growing never compresses the existing row. 524 shows the header,
+        // host rail, and two full tile rows (330 one-row height + a 180pt
+        // tile + the 14pt gutter); more rows scroll.
         deckScene
             // Keep the system's resize range tied to the stable scene
             // boundary below, never to FleetWall's changing grid ideal size.
             .windowResizability(.contentMinSize)
-            .defaultSize(debugSize("MULTIPLEX_DECK_SIZE") ?? CGSize(width: 786, height: 330))
+            .defaultSize(debugSize("MULTIPLEX_DECK_SIZE") ?? CGSize(width: 1160, height: 524))
         terminalScene
             .windowStyle(.plain)
             .defaultSize(debugSize("MULTIPLEX_TERM_SIZE") ?? CGSize(width: 1120, height: 700))
