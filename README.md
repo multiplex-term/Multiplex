@@ -16,7 +16,7 @@ recorded in [docs/landing/](docs/landing/).*
 
 ![The deck: a live monitor wall of tmux sessions](docs/visionos-deck.png)
 
-![A session attached in its own spatial window, UMD chrome below](docs/visionos-multiwindow.png)
+![Sessions attached in their own spatial windows around the room, UMD chrome below each](docs/visionos-multiwindow.png)
 
 ## What it does
 
