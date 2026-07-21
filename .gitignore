@@ -28,3 +28,4 @@ Tools/review-host/.env
 # App Store screenshot compositor — raw captures in, composed frames out
 Tools/appstore/raw/
 Tools/appstore/out/
+fastlane/metadata/review_information/phone_number.txt
