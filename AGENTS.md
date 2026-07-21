@@ -466,6 +466,18 @@ views.
 - **tmux attach needs a PTY**: the shell opens with ECHO off and
   `exec tmux attach-session …` is injected as the first stdin line (silent
   handoff, works with any POSIX login shell). Detach = close the channel.
+  The injected bytes sit in the PTY queue while rc files run, and oh-my-zsh's
+  update check steals them — old versions `read -k 1` a key (the `e` of
+  `exec` answered the prompt, the shell ran the broken remainder), current
+  versions drain all buffered stdin before blocking on `[Y/n]` (the whole
+  line vanished). `ShellHandoff` (pure, unit-tested) defends both ways: the
+  payload prefixes a sacrificial `:` line (a single-key reader eats the
+  one-byte no-op as its "skip" answer, a line reader eats a no-op line), and
+  `UpdatePromptWatch` spots the blocked prompt in early output so the
+  controller re-types the payload once — its `:` answers the prompt, and the
+  watch retires at tmux's alternate-screen takeover or a 32 KB cap. Both
+  prompt wordings ship in the needle list; keep them phrase-exact so MOTD
+  mentions of oh-my-zsh can't trigger a spurious re-type.
 - **A first tmux server must outlive the SSH login scope on systemd Linux**:
   hosts with `KillUserProcesses=yes` reap a normally daemonized tmux server
   when the terminal SSH session closes. New sessions are therefore created

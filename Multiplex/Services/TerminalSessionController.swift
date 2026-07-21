@@ -118,6 +118,10 @@ final class TerminalSessionController {
     /// Data→Array copy for every network chunk. Parsing remains on the main
     /// actor because SwiftTerm's view/delegate/display machinery is UIKit.
     private var outputCoalescer: TerminalOutputCoalescer?
+    /// SSH handoff tabs only: watches early PTY output for the oh-my-zsh
+    /// update prompt, whose stdin drain swallows the injected attach line.
+    /// nil once resolved (prompt handled, attach seen, or window elapsed).
+    private var handoffWatch: ShellHandoff.UpdatePromptWatch?
     private var lastCols = 80
     private var lastRows = 24
     private var started = false
@@ -283,6 +287,12 @@ final class TerminalSessionController {
                 return
             }
             let openedSize = TerminalSize(cols: lastCols, rows: lastRows)
+            // Armed before the PTY opens so the first output chunk is already
+            // scanned; an rc-time oh-my-zsh update prompt swallows the
+            // injected handoff line and needs a re-type (ShellHandoff).
+            handoffWatch = route.remoteCommand == nil
+                ? nil
+                : ShellHandoff.UpdatePromptWatch()
             try await connection.openShell(
                 command: route.remoteCommand,
                 cols: openedSize.cols,
@@ -322,6 +332,7 @@ final class TerminalSessionController {
             self.connection = nil
             transport = nil
             outputCoalescer = nil
+            handoffWatch = nil
         }
     }
 
@@ -402,11 +413,40 @@ final class TerminalSessionController {
     }
 
     private func feed(_ bytes: [UInt8]) {
+        scanForSwallowedHandoff(bytes)
         guard let terminalView else {
             pendingOutput.append(contentsOf: bytes)
             return
         }
         terminalView.feed(byteArray: bytes[...])
+    }
+
+    /// Modern oh-my-zsh drains all buffered stdin before blocking on its
+    /// update prompt, eating the injected tmux handoff line whole. When the
+    /// prompt surfaces in early output, re-type the payload: its sacrificial
+    /// `:` answers the prompt ("skip") and the command then attaches. At most
+    /// once per transport run; the watch also retires itself when tmux's
+    /// alternate-screen takeover proves the handoff landed.
+    private func scanForSwallowedHandoff(_ bytes: [UInt8]) {
+        guard handoffWatch != nil, let command = route.remoteCommand else { return }
+        switch handoffWatch!.consume(bytes) {
+        case .watching:
+            return
+        case .done:
+            handoffWatch = nil
+        case .promptDetected:
+            handoffWatch = nil
+            let payload = Data(ShellHandoff.payload(for: command).utf8)
+            // The ordered input pump keeps the re-type serialized with any
+            // keystrokes; before the pump exists (output can arrive while
+            // runSSH is still between openShell and startTransportPumps),
+            // write straight to the transport — the user can't type yet.
+            if let inputContinuation {
+                inputContinuation.yield(payload)
+            } else if let transport {
+                Task { try? await transport.write(payload) }
+            }
+        }
     }
 
     /// OSC title updates are also the no-exec fallback signal for direct mosh
@@ -446,6 +486,7 @@ final class TerminalSessionController {
         stopDirectShellMonitoring()
         setTmuxCopyModeUIActive(false)
         resetHistoryState()
+        handoffWatch = nil
         status = .ended(reason)
         contactLost = false
         let endedTransport = transport

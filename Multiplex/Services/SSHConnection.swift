@@ -518,7 +518,10 @@ actor SSHConnection {
                     try await client.withPTY(request) { inbound, outbound in
                         await self.storeWriter(outbound)
                         if let command {
-                            try await outbound.write(ByteBuffer(string: command + "\n"))
+                            // ShellHandoff prefixes a sacrificial no-op line so an
+                            // rc-time stdin reader (oh-my-zsh's update prompt) eats
+                            // that instead of the command.
+                            try await outbound.write(ByteBuffer(string: ShellHandoff.payload(for: command)))
                         }
                         gate.open()
                         for try await chunk in inbound {
