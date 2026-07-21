@@ -855,6 +855,7 @@ final class TerminalSessionController {
                 try await withControlConnection { [route] connection in
                     let cwd: String?
                     let preferredSessionID: String?
+                    let configDir: String?
                     if let sessionName = route.sessionName {
                         let output = try await connection.exec(
                             AgentSessionHistory.paneContextCommand(
@@ -864,15 +865,18 @@ final class TerminalSessionController {
                         let context = AgentSessionHistory.parsePaneContext(output)
                         cwd = context?.cwd
                         preferredSessionID = context?.agentSessionID
+                        configDir = context?.configDir
                     } else {
                         cwd = shellCwd
                         preferredSessionID = nil
+                        configDir = nil
                     }
                     guard let cwd else { return nil }
                     let output = try await connection.exec(
                         AgentSessionHistory.readCommand(
                             cwd: cwd,
-                            preferredSessionID: preferredSessionID
+                            preferredSessionID: preferredSessionID,
+                            configDir: configDir
                         )
                     )
                     return AgentSessionHistory.parseReadOutput(output)

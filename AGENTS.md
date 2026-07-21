@@ -646,11 +646,22 @@ views.
   without a mechanism as exact as this one. The control path resolves the
   pane cwd (`list-panes -F`, same 3.6a discipline as drops), walks
   descendants of `#{pane_pid}`, and reads Claude's live
-  `~/.claude/sessions/<pid>.json` registry, selecting that exact
-  `~/.claude/projects/<munged-cwd>/<sessionId>.jsonl`; **do not regress to
-  newest-mtime-only** — multiple Claude panes in one cwd are common, and the
-  wrong file makes every JUMP miss. Missing/older registries fail soft to
-  newest mtime. Reads are sentinel-framed with server-side grep pre-filters
+  `<config root>/sessions/<pid>.json` registry, selecting that exact
+  `<config root>/projects/<munged-cwd>/<sessionId>.jsonl`; **do not regress
+  to newest-mtime-only** — multiple Claude panes in one cwd are common, and
+  the wrong file makes every JUMP miss. Missing/older registries fail soft
+  to newest mtime. The config root honors `CLAUDE_CONFIG_DIR`, per
+  candidate pid: process environ (Linux `/proc` — covers a var exported
+  only inside the pane, e.g. by a session setup script) → `ps -E`
+  (pre-Darwin-27 macOS only; 27 strips same-user procargs env — verified)
+  → the exec shell's own exported value → `~/.claude`; every rung is just a
+  candidate, accepted only if it actually holds the pid's registry, and the
+  winning root rides a `MULTIPLEX_HIST_CONFIG_DIR` sentinel into the
+  projects read (no cross-root rescue on a miss — `claude --continue`
+  wouldn't look in `~/.claude` either while the var is set). A macOS
+  remote can't expose a pane-only export; exporting in shell rc covers it
+  there. `.shell` tabs have no pid walk, so their reads honor the exec
+  shell's `CLAUDE_CONFIG_DIR` alone. Reads are sentinel-framed with server-side grep pre-filters
   (Claude files reach tens of MB and its `type:"user"` lines are mostly
   tool results; `<task-notification>`-style wrapper turns are filtered
   app-side), and long base64 `"data"` values are blanked BEFORE the tail

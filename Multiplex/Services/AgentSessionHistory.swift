@@ -2,9 +2,10 @@ import Foundation
 
 /// One user prompt extracted from Claude Code's own session file. Claude
 /// keeps a JSONL transcript per conversation on the host it runs on
-/// (`~/.claude/projects/<munged-cwd>/<sessionId>.jsonl`); Multiplex reads a
-/// bounded tail over the SSH control plane and shows the real prompts —
-/// including the full text of messages the TUI renders truncated.
+/// (`<config root>/projects/<munged-cwd>/<sessionId>.jsonl`, where the config
+/// root is `$CLAUDE_CONFIG_DIR` when set and `~/.claude` otherwise); Multiplex
+/// reads a bounded tail over the SSH control plane and shows the real
+/// prompts — including the full text of messages the TUI renders truncated.
 struct AgentUserMessage: Identifiable, Hashable {
     /// Position in the parsed candidate list (file order). Stable within one
     /// load only — files are append-only, so a reload may shift ordinals.
@@ -93,14 +94,32 @@ enum AgentSessionHistory {
         /// Claude Code's exact conversation id, when its per-process registry
         /// is available. nil deliberately falls back to newest-mtime.
         var agentSessionID: String?
+        /// The config root that actually held this pane's registry — Claude
+        /// honors `CLAUDE_CONFIG_DIR`, so `~/.claude` is a default, not a
+        /// fact. nil lets `readCommand` fall back to the exec shell's own
+        /// env / the default root.
+        var configDir: String? = nil
     }
 
     /// Resolve the active pane cwd and Claude Code's exact session id in one
-    /// exec. Claude publishes `~/.claude/sessions/<pid>.json`; walking
+    /// exec. Claude publishes `<config root>/sessions/<pid>.json`; walking
     /// descendants of `#{pane_pid}` ties that registry entry to this pane,
     /// avoiding the common failure where another Claude process in the same
     /// cwd has the newest transcript. Older versions / hosts without the
     /// registry simply omit the marker and retain the mtime fallback.
+    ///
+    /// The config root honors `CLAUDE_CONFIG_DIR`, tried per candidate pid
+    /// most-specific first: the *process's own* environ (Linux `/proc` —
+    /// exact even when the var was exported only inside the pane, e.g. by a
+    /// session setup script, where the exec channel's env never sees it),
+    /// then `ps -E` (pre-Darwin-27 macOS; 27 strips procargs env even for
+    /// same-user children — verified — so this rung reads empty there),
+    /// then the exec shell's exported value, then `~/.claude`. Every rung
+    /// is a *candidate*: `reg` accepts a root only if it actually holds
+    /// this pid's registry, so a garbled `ps -E` parse (its env join is
+    /// space-ambiguous) can misdirect nothing. The root that held the
+    /// registry is reported so `readCommand` reads the matching
+    /// `projects/` tree — the same process wrote both.
     ///
     /// `list-panes -F`, never `display-message` (tmux 3.6a renders pane
     /// formats empty for outside clients).
@@ -113,24 +132,35 @@ enum AgentSessionHistory {
             + "root=$(tmux list-panes -t \(target)"
             + " -F '#{?pane_active,#{pane_pid},}' 2>/dev/null | grep -m1 .); "
             + "if [ -n \"$root\" ]; then "
-            + "sid=$(ps -eo pid=,ppid= 2>/dev/null | "
+            + "reg() { c=\"$1\"; [ -n \"$c\" ] || return 1; "
+            + "f=\"$c/sessions/$p.json\"; [ -r \"$f\" ] || return 1; "
+            + "value=$(sed -n 's/.*\"sessionId\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p'"
+            + " \"$f\" | head -1); [ -n \"$value\" ]; }; "
+            + "out=$(ps -eo pid=,ppid= 2>/dev/null | "
             + "awk -v r=\"$root\" '{ parent[$1] = $2 } END { "
             + "print 0, r; for (pid in parent) { if (pid == r) continue; "
             + "p = pid; depth = 0; "
             + "while (p in parent && p != r && depth < 64) { p = parent[p]; depth++ } "
             + "if (p == r) print depth, pid } }' | sort -n | "
             + "while read -r depth p; do "
-            + "f=\"$HOME/.claude/sessions/$p.json\"; [ -r \"$f\" ] || continue; "
-            + "value=$(sed -n 's/.*\"sessionId\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p'"
-            + " \"$f\" | head -1); "
-            + "if [ -n \"$value\" ]; then printf '%s\\n' \"$value\"; break; fi; done); "
+            + "pe=; [ -r \"/proc/$p/environ\" ] && "
+            + "pe=$(tr '\\0' '\\n' < \"/proc/$p/environ\" 2>/dev/null | "
+            + "sed -n 's/^CLAUDE_CONFIG_DIR=//p' | head -1); "
+            + "[ -n \"$pe\" ] || pe=$(ps -E -o command= -p \"$p\" 2>/dev/null | "
+            + "sed -n 's/.* CLAUDE_CONFIG_DIR=\\([^ ]*\\).*/\\1/p' | head -1); "
+            + "if reg \"$pe\" || reg \"$CLAUDE_CONFIG_DIR\" || reg \"$HOME/.claude\"; then "
+            + "printf '%s\\n%s\\n' \"$value\" \"$c\"; break; fi; done); "
+            + "sid=$(printf '%s\\n' \"$out\" | sed -n 1p); "
+            + "cfg=$(printf '%s\\n' \"$out\" | sed -n 2p); "
             + "[ -n \"$sid\" ] && printf 'MULTIPLEX_HIST_AGENT_SESSION %s\\n' \"$sid\"; "
+            + "[ -n \"$cfg\" ] && printf 'MULTIPLEX_HIST_CONFIG_DIR %s\\n' \"$cfg\"; "
             + "fi; true"
     }
 
     static func parsePaneContext(_ output: String) -> PaneContext? {
         var cwd: String?
         var sessionID: String?
+        var configDir: String?
         for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
             if line.hasPrefix("MULTIPLEX_HIST_CWD ") {
                 let value = line.dropFirst("MULTIPLEX_HIST_CWD ".count)
@@ -139,12 +169,17 @@ enum AgentSessionHistory {
             } else if line.hasPrefix("MULTIPLEX_HIST_AGENT_SESSION ") {
                 sessionID = line.dropFirst("MULTIPLEX_HIST_AGENT_SESSION ".count)
                     .trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("MULTIPLEX_HIST_CONFIG_DIR ") {
+                let value = line.dropFirst("MULTIPLEX_HIST_CONFIG_DIR ".count)
+                    .trimmingCharacters(in: .whitespaces)
+                if value.hasPrefix("/") { configDir = value }
             }
         }
         guard let cwd else { return nil }
         return PaneContext(
             cwd: cwd,
-            agentSessionID: validatedClaudeSessionID(sessionID)
+            agentSessionID: validatedClaudeSessionID(sessionID),
+            configDir: configDir
         )
     }
 
@@ -169,9 +204,25 @@ enum AgentSessionHistory {
     /// drops assistant/progress lines and the (huge) tool_result user lines
     /// server-side. Candidate lines only start with `{` — a JSONL line can
     /// never equal a sentinel, so arbitrary prompt text can't break framing.
-    static func readCommand(cwd: String, preferredSessionID: String? = nil) -> String {
+    ///
+    /// `configDir` is the pane-resolved config root (the one that held the
+    /// registry); without it the exec shell's own `CLAUDE_CONFIG_DIR` — the
+    /// case a plain `.shell` tab and registry-less hosts can still cover —
+    /// then `~/.claude` apply, mirroring Claude's own resolution. No
+    /// cross-root rescue on a miss: `claude --continue` would not look in
+    /// `~/.claude` either while the var is set, and a stale wrong-session
+    /// transcript is worse than an honest NO SESSION FILE.
+    static func readCommand(
+        cwd: String, preferredSessionID: String? = nil, configDir: String? = nil
+    ) -> String {
         let sessionID = validatedClaudeSessionID(preferredSessionID) ?? ""
-        return "d=\"$HOME/.claude/projects/\"\(claudeProjectDirectoryComponent(forCwd: cwd).shellQuoted); "
+        // Relative/garbage roots are dropped, not interpolated — same
+        // posture as the session id above (quoting keeps any string inert,
+        // but a non-absolute root could only ever be wrong).
+        let resolvedRoot = configDir?.hasPrefix("/") == true ? configDir ?? "" : ""
+        return "c=\(resolvedRoot.shellQuoted); "
+            + "[ -n \"$c\" ] || c=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\"; "
+            + "d=\"$c/projects/\"\(claudeProjectDirectoryComponent(forCwd: cwd).shellQuoted); "
             + "f=; sid=\(sessionID.shellQuoted); "
             + "if [ -n \"$sid\" ] && [ -f \"$d/$sid.jsonl\" ]; then f=\"$d/$sid.jsonl\"; fi; "
             + "[ -n \"$f\" ] || f=$(ls -t \"$d\"/*.jsonl 2>/dev/null | head -1); "

@@ -175,8 +175,11 @@ final class AgentSessionHistoryTests: XCTestCase {
             cwd: "/Users/dev/app",
             preferredSessionID: sessionID
         )
-        XCTAssertTrue(command.contains("$HOME/.claude/projects/"))
-        XCTAssertTrue(command.contains("'-Users-dev-app'"))
+        // No pane-resolved root: the exec shell's own CLAUDE_CONFIG_DIR
+        // applies, then the ~/.claude default.
+        XCTAssertTrue(command.contains("c=''"))
+        XCTAssertTrue(command.contains("[ -n \"$c\" ] || c=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\""))
+        XCTAssertTrue(command.contains("d=\"$c/projects/\"'-Users-dev-app'"))
         XCTAssertTrue(command.contains("sid='\(sessionID)'"))
         XCTAssertTrue(command.contains("$d/$sid.jsonl"))
         XCTAssertTrue(command.contains("[ -n \"$f\" ] || f=$(ls -t"))
@@ -203,12 +206,42 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertFalse(invalid.contains("../../etc/passwd"))
     }
 
+    func testReadCommandUsesPaneResolvedConfigRoot() {
+        // The root that held the registry wins outright — including one
+        // with spaces, which rides shell quoting.
+        let command = AgentSessionHistory.readCommand(
+            cwd: "/Users/dev/app",
+            configDir: "/srv/claude cfg"
+        )
+        XCTAssertTrue(command.contains("c='/srv/claude cfg'"))
+        XCTAssertTrue(command.contains("d=\"$c/projects/\"'-Users-dev-app'"))
+
+        // Only absolute roots are trusted; anything else falls back to the
+        // env/default resolution rather than being interpolated.
+        let relative = AgentSessionHistory.readCommand(
+            cwd: "/Users/dev/app",
+            configDir: "../evil"
+        )
+        XCTAssertTrue(relative.contains("c=''"))
+        XCTAssertFalse(relative.contains("../evil"))
+    }
+
     func testPaneContextCommandUsesExactTargetAndClaudeProcessRegistry() {
         let command = AgentSessionHistory.paneContextCommand(sessionName: "ma in")
         XCTAssertTrue(command.contains("list-panes -t '=ma in'"))
         XCTAssertTrue(command.contains("pane_current_path"))
         XCTAssertTrue(command.contains("pane_pid"))
-        XCTAssertTrue(command.contains("$HOME/.claude/sessions/$p.json"))
+        // Registry lookup ladder: the Claude process's own environ (Linux,
+        // covers pane-only exports like a setup script's), ps -E (older
+        // macOS), the exec shell's exported CLAUDE_CONFIG_DIR, ~/.claude.
+        XCTAssertTrue(command.contains("$c/sessions/$p.json"))
+        XCTAssertTrue(command.contains("/proc/$p/environ"))
+        XCTAssertTrue(command.contains("s/^CLAUDE_CONFIG_DIR=//p"))
+        XCTAssertTrue(command.contains("ps -E -o command= -p \"$p\""))
+        XCTAssertTrue(command.contains(
+            "reg \"$pe\" || reg \"$CLAUDE_CONFIG_DIR\" || reg \"$HOME/.claude\""
+        ))
+        XCTAssertTrue(command.contains("MULTIPLEX_HIST_CONFIG_DIR"))
         XCTAssertTrue(command.contains("sessionId"))
         XCTAssertFalse(command.contains("display-message"))
     }
@@ -235,6 +268,32 @@ final class AgentSessionHistoryTests: XCTestCase {
             )
         )
         XCTAssertNil(AgentSessionHistory.parsePaneContext("no path here\n"))
+    }
+
+    func testPaneContextParsesConfigRootAbsoluteOnly() {
+        let id = "359827c7-0214-435f-b01b-0ce0dbb29b06"
+        XCTAssertEqual(
+            AgentSessionHistory.parsePaneContext(
+                "MULTIPLEX_HIST_CWD /Users/dev/app\n"
+                    + "MULTIPLEX_HIST_AGENT_SESSION \(id)\n"
+                    + "MULTIPLEX_HIST_CONFIG_DIR /srv/claude cfg\n"
+            ),
+            AgentSessionHistory.PaneContext(
+                cwd: "/Users/dev/app",
+                agentSessionID: id,
+                configDir: "/srv/claude cfg"
+            )
+        )
+        // A relative root is dropped, never handed to readCommand.
+        XCTAssertEqual(
+            AgentSessionHistory.parsePaneContext(
+                "MULTIPLEX_HIST_CWD /Users/dev/app\n"
+                    + "MULTIPLEX_HIST_CONFIG_DIR relative/dir\n"
+            ),
+            AgentSessionHistory.PaneContext(
+                cwd: "/Users/dev/app", agentSessionID: nil
+            )
+        )
     }
 
     // MARK: Needles
