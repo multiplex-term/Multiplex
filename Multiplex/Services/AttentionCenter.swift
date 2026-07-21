@@ -72,6 +72,7 @@ final class AttentionCenter {
     func handleDirectShellEvent(
         _ event: AttentionEvent,
         agent: AgentKind?,
+        dialogSummary: String? = nil,
         from controller: TerminalSessionController
     ) {
         guard isActive,
@@ -83,7 +84,8 @@ final class AttentionCenter {
             tabID: controller.route.id,
             agent: agent,
             event: event,
-            paneTitle: controller.remoteTitle
+            paneTitle: controller.remoteTitle,
+            dialogSummary: dialogSummary
         ))
     }
 
@@ -133,9 +135,11 @@ final class AttentionCenter {
         // Callers already avoid doing this work when locked, but repeating
         // the policy here prevents a future event source from bypassing Pro.
         guard isActive else { return }
+        let copy = Self.copy(for: alert)
         let content = UNMutableNotificationContent()
-        content.title = title(for: alert)
-        content.body = body(for: alert)
+        content.title = copy.title
+        if let subtitle = copy.subtitle { content.subtitle = subtitle }
+        content.body = copy.body
         content.sound = .default
         let sourceID = alert.tabID?.uuidString ?? alert.sessionName
         content.threadIdentifier = "\(alert.host.id)-\(sourceID)"
@@ -165,26 +169,40 @@ final class AttentionCenter {
         }
     }
 
-    private func title(for alert: AttentionAlert) -> String {
-        let agent = alert.agent?.displayName ?? "Session"
-        switch alert.event {
-        case .turnEnded:
-            return "\(agent) finished"
-        case .needsInput(.permission):
-            return "\(agent) wants permission"
-        case .needsInput(.question):
-            return "\(agent) has a question"
-        case .bell:
-            return alert.agent.map { "\($0.displayName) rang the bell" } ?? "Bell"
-        }
+    /// The rendered copy of one alert. The body used to open with the
+    /// identifiers ("session · host — …"), so a long session name pushed
+    /// the meaningful part past the banner/lock-screen truncation and the
+    /// notification read as machine soup (user-reported). Content now
+    /// leads: the body is what the agent asks (or the task that finished)
+    /// and the identifiers move to the subtitle line; only a contentless
+    /// alert keeps the place as its body.
+    struct NotificationCopy: Equatable {
+        var title: String
+        var subtitle: String?
+        var body: String
     }
 
-    private func body(for alert: AttentionAlert) -> String {
-        let place = "\(alert.sessionName) · \(alert.host.name)"
-        if let summary = AgentAttention.taskSummary(title: alert.paneTitle, agent: alert.agent) {
-            return "\(place) — \(summary)"
+    nonisolated static func copy(for alert: AttentionAlert) -> NotificationCopy {
+        let agent = alert.agent?.displayName ?? "Session"
+        let title: String = switch alert.event {
+        case .turnEnded:
+            "\(agent) finished"
+        case .needsInput(.permission):
+            "\(agent) wants permission"
+        case .needsInput(.question):
+            "\(agent) has a question"
+        case .bell:
+            alert.agent.map { "\($0.displayName) rang the bell" } ?? "Bell"
         }
-        return place
+        let place = "\(alert.sessionName) · \(alert.host.name)"
+        // The dialog's own copy outranks the pane-title task summary, which
+        // is flavor and can lag a prompt behind.
+        let content = alert.dialogSummary
+            ?? AgentAttention.taskSummary(title: alert.paneTitle, agent: alert.agent)
+        guard let content else {
+            return NotificationCopy(title: title, subtitle: nil, body: place)
+        }
+        return NotificationCopy(title: title, subtitle: place, body: content)
     }
 }
 

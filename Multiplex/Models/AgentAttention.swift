@@ -56,6 +56,9 @@ struct AttentionAlert {
     var agent: AgentKind?
     var event: AttentionEvent
     var paneTitle: String
+    /// What the blocking dialog asks (`AgentAttention.dialogSummary`),
+    /// when the event is needs-input and the tail yielded readable copy.
+    var dialogSummary: String? = nil
 }
 
 /// The state classifier. Everything here matches *structure*, not prose —
@@ -142,6 +145,58 @@ enum AgentAttention {
         let ordinal = rest.prefix(while: { $0.isASCII && $0.isNumber })
         guard (1...2).contains(ordinal.count) else { return false }
         return rest.dropFirst(ordinal.count).hasPrefix(".")
+    }
+
+    /// Human copy for a needs-input notification: what the dialog is
+    /// actually asking, pulled from the same tail that classified it.
+    /// Claude Code's AskUserQuestion opens with a "☐ <header>" line
+    /// followed by the wrapped question text; a permission dialog carries
+    /// the acting tool's halo line ("⏺ Bash(touch probe.txt)") above its
+    /// confirm question, and Codex prints the "$ <command>" it wants to run
+    /// below its. Structural like the classifier, and fail-soft: nil sends
+    /// the caller back to the task-summary/place copy.
+    static func dialogSummary(in tail: [String], kind: AttentionKind) -> String? {
+        let region = tail.suffix(questionCaretWindow)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        switch kind {
+        case .question:
+            guard let headerIndex = region.lastIndex(where: { $0.hasPrefix("☐") })
+            else { return nil }
+            let header = String(region[headerIndex].dropFirst())
+                .trimmingCharacters(in: .whitespaces)
+            var question: [String] = []
+            for line in region[(headerIndex + 1)...] {
+                if line.isEmpty {
+                    if question.isEmpty { continue }  // the blank under the header
+                    break                             // the blank before the options
+                }
+                if isCaretOptionRow(line) { break }
+                question.append(line)
+            }
+            let text = question.joined(separator: " ")
+            let summary = [header, text].filter { !$0.isEmpty }.joined(separator: " — ")
+            return summary.isEmpty ? nil : clipped(summary)
+        case .permission:
+            guard let markIndex = region.lastIndex(where: { line in
+                permissionMarks.contains { line.contains($0) }
+            }) else { return nil }
+            if let halo = region[..<markIndex].last(where: { $0.hasPrefix("⏺") }) {
+                let text = String(halo.dropFirst()).trimmingCharacters(in: .whitespaces)
+                if !text.isEmpty { return clipped(text) }
+            }
+            if let command = region[markIndex...].first(where: { $0.hasPrefix("$ ") }) {
+                return clipped(command)
+            }
+            return nil
+        }
+    }
+
+    /// A notification body is a glance, not a transcript.
+    private static let dialogSummaryLimit = 180
+
+    private static func clipped(_ text: String) -> String {
+        guard text.count > dialogSummaryLimit else { return text }
+        return text.prefix(dialogSummaryLimit - 1) + "…"
     }
 
     /// Notification copy from a Claude Code title: the task summary after

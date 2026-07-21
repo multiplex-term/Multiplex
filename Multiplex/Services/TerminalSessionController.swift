@@ -601,7 +601,12 @@ final class TerminalSessionController {
             hasBell: false
         )
         if let event = events.max(by: { $0.priority < $1.priority }) {
-            attention?.handleDirectShellEvent(event, agent: agent, from: self)
+            var dialogSummary: String?
+            if case .needsInput(let kind) = event {
+                dialogSummary = AgentAttention.dialogSummary(in: tail, kind: kind)
+            }
+            attention?.handleDirectShellEvent(
+                event, agent: agent, dialogSummary: dialogSummary, from: self)
         }
     }
 

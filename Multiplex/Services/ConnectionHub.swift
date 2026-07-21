@@ -622,12 +622,18 @@ final class HostConnectionModel {
             // wins (they share a notification slot, and delivery order
             // across independent posts isn't guaranteed).
             if let event = events.max(by: { $0.priority < $1.priority }) {
+                var dialogSummary: String?
+                if case .needsInput(let kind) = event {
+                    dialogSummary = AgentAttention.dialogSummary(
+                        in: attentionTails[session.name] ?? [], kind: kind)
+                }
                 onAttentionAlert?(AttentionAlert(
                     host: host,
                     sessionName: session.name,
                     agent: activeAgent,
                     event: event,
-                    paneTitle: activeTitle
+                    paneTitle: activeTitle,
+                    dialogSummary: dialogSummary
                 ))
             }
         }

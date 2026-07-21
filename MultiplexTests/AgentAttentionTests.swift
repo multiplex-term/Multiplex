@@ -274,7 +274,90 @@ final class AgentAttentionTests: XCTestCase {
             .idle)
     }
 
+    // MARK: Dialog summaries (notification body copy)
+
+    func testQuestionDialogSummaryLeadsWithHeaderAndQuestion() {
+        XCTAssertEqual(
+            AgentAttention.dialogSummary(in: askUserDialog, kind: .question),
+            "Preference — Do you prefer cats or dogs?")
+    }
+
+    func testTallQuestionDialogSummaryJoinsWrappedTextAndClips() {
+        let summary = AgentAttention.dialogSummary(in: tallAskUserDialog, kind: .question)
+        XCTAssertNotNil(summary)
+        XCTAssertTrue(summary?.hasPrefix(
+            "List scope — The spec says \"show online devices in the current workspace\"") == true)
+        // Wrapped question rows join into prose; runaway text stays a glance.
+        XCTAssertEqual(summary?.count, 180)
+        XCTAssertTrue(summary?.hasSuffix("…") == true)
+    }
+
+    func testPermissionDialogSummaryUsesToolHaloLine() {
+        XCTAssertEqual(
+            AgentAttention.dialogSummary(in: permissionDialog, kind: .permission),
+            "Bash(touch probe.txt)")
+    }
+
+    func testCodexApprovalSummaryUsesCommandLine() {
+        XCTAssertEqual(
+            AgentAttention.dialogSummary(in: codexApproval, kind: .permission),
+            "$ mkdir -p /tmp/mplx-codex-probe2")
+    }
+
+    func testDialogSummaryFailsSoftWhenStructureIsAbsent() {
+        // The trust prompt carries neither a tool halo nor a command line;
+        // an idle screen has no dialog at all. Both fall back to nil so the
+        // notification keeps its task-summary/place copy.
+        XCTAssertNil(AgentAttention.dialogSummary(in: trustPrompt, kind: .permission))
+        XCTAssertNil(AgentAttention.dialogSummary(in: [], kind: .question))
+        XCTAssertNil(AgentAttention.dialogSummary(
+            in: ["❯ 1. Cats", "Enter to select"], kind: .question))
+    }
+
     // MARK: Notification copy
+
+    func testNotificationCopyLeadsWithDialogContent() {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        let copy = AttentionCenter.copy(for: AttentionAlert(
+            host: host,
+            sessionName: "claude-ctor-devices-panel",
+            agent: .claudeCode,
+            event: .needsInput(.question),
+            paneTitle: "✳ Implement devices panel with online status",
+            dialogSummary: "List scope — The spec says…"
+        ))
+        XCTAssertEqual(copy.title, "Claude Code has a question")
+        // Identifiers move to the subtitle so a long session name cannot
+        // truncate the question out of the banner.
+        XCTAssertEqual(copy.subtitle, "claude-ctor-devices-panel · devbox")
+        XCTAssertEqual(copy.body, "List scope — The spec says…")
+    }
+
+    func testNotificationCopyFallsBackToTaskSummaryThenPlace() {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        let turnEnd = AttentionCenter.copy(for: AttentionAlert(
+            host: host,
+            sessionName: "main",
+            agent: .claudeCode,
+            event: .turnEnded,
+            paneTitle: "✳ Write haiku about terminals"
+        ))
+        XCTAssertEqual(turnEnd.title, "Claude Code finished")
+        XCTAssertEqual(turnEnd.subtitle, "main · devbox")
+        XCTAssertEqual(turnEnd.body, "Write haiku about terminals")
+        // No dialog copy and no task summary (Codex titles carry a cwd):
+        // the place stays the body rather than duplicating into both slots.
+        let bare = AttentionCenter.copy(for: AttentionAlert(
+            host: host,
+            sessionName: "wd",
+            agent: .codex,
+            event: .turnEnded,
+            paneTitle: "wd"
+        ))
+        XCTAssertEqual(bare.title, "Codex finished")
+        XCTAssertNil(bare.subtitle)
+        XCTAssertEqual(bare.body, "wd · devbox")
+    }
 
     func testTaskSummaryStripsStateGlyph() {
         XCTAssertEqual(
