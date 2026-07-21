@@ -40,7 +40,7 @@ uniform downscale, never a crop.
 | 2 | `windows` | 3 terminals around the room (visionOS) / Stage Manager scenes (iPad) | A SPATIAL WINDOW PER SESSION *(iPad: REAL SCENES, STAGE MANAGER READY)* | `3 WINDOWS` ● LIVE |
 | 3 | `agents` | Wall with agent glyph + NEEDS YOU; notification banner in frame | KNOW WHEN YOUR AGENT NEEDS YOU | `✳ CLAUDE CODE` ● NEEDS YOU |
 | 4 | `strip` | Real Claude Code, chip strip + one custom chip visible | ONE-TAP AGENT COMMANDS — PLUS YOUR OWN | `/CLEAR · /COMPACT · STOP` |
-| 5 | `history` | HISTORY panel open over a Claude session with ≥5 prompts | JUMP BACK TO ANY PROMPT | `CLAUDE CODE · PRO` |
+| 5 | `launch` | New Session sheet over the wall: Claude Code selected, prompt + setup script + dir filled | START AN AGENT SESSION IN ONE STEP | `CLAUDE CODE · CODEX · PI` |
 | 6 | `drop` | FILE menu open over a live agent session | ATTACH FILES STRAIGHT INTO THE SESSION | iPad `CAMERA · PHOTOS · FILES` / visionOS `PHOTOS · FILES · DRAG & DROP` |
 | 7 | `widgets` | Home Screen widgets (iPad) / widget pinned in the room (visionOS 26) | THE WALL, ON YOUR HOME SCREEN *(visionOS: PINNED IN YOUR SPACE)* | `WIDGETS · APP SHORTCUTS` |
 | 8 | `mosh` | Host sheet with MOSH toggle on + attached session behind | MOSH BUILT IN — ROAM, SLEEP, RESUME | `UDP · PRO` ● LIVE |
@@ -50,9 +50,13 @@ uniform downscale, never a crop.
 Exactly 10 = the ASC cap. The 2026-07-18 re-plan (widgets/Shortcuts, agent
 history, file attach, the light appearance, iPhone) added `history`, `drop`,
 `widgets` and retired the standalone `shortcuts` frame (TMUX dropdown) — the
-agent surfaces outrank it for this audience. If `widgets` proves unstageable
-on the visionOS sim, ship visionOS with 9 or revive `shortcuts` from git
-history as its 10th.
+agent surfaces outrank it for this audience. The 2026-07-21 re-plan swapped
+`history` out (the jump machinery isn't stable enough to headline yet) for
+`launch` — the New Session sheet's one-step agent start, the listing's lead
+agent claim, free-tier, and pure form UI to stage. Revive `history` from git
+history once jump is trustworthy. If `widgets` proves unstageable on the
+visionOS sim, ship visionOS with 9 or revive `shortcuts` from git history as
+its 10th.
 
 ## Shot list — iPhone (portrait, 9 shots)
 
@@ -65,7 +69,7 @@ the phone is deliberately a one-window shell) and plus the key-rail shot:
 | 2 | `keys` | Attached session, **docked keyboard raised**, TALLY key rail above it — ESC / CTRL / TAB / arrows / TMUX. Headline A FULL TERMINAL, PHONE-SIZED · `ESC · CTRL · TAB · ARROWS · TMUX` ● LIVE |
 | 3 | `agents` | NEEDS YOU tile + notification banner over the shell deck — the away-from-the-desk pitch |
 | 4 | `strip` | Chip strip above the key rail, keyboard hidden |
-| 5 | `history` | HISTORY panel (jump works on narrow panes) |
+| 5 | `launch` | New Session sheet over the shell's deck — LAUNCH bar, prompt, RUNS FIRST, STARTS IN |
 | 6 | `drop` | FILE menu with **Camera** / Photos / Files |
 | 7 | `widgets` | Home Screen: Host Monitor (medium, SHELL/AGENT keys) + Fleet Wall (medium) |
 | 8 | `mosh` | Host sheet MOSH toggle — the cellular/roaming story is strongest here |
@@ -105,9 +109,16 @@ the phone is deliberately a one-window shell) and plus the key-rail shot:
   stamps in frame are honest and deliberate — widgets never claim liveness.
 - **Light-appearance shots** flip via the `debug.appearance` notification
   (SYSTEM → LIGHT → DARK, persisted); flip back after the `themes` capture.
-- **Pro surfaces** (`history`, `mosh`, custom themes) are live by default in
-  DEBUG builds (`isPro` defaults true); the telemetry marks them `PRO`
-  honestly. The chip strip is free (10 taps/day) and carries no PRO mark.
+- **Pro surfaces** (`mosh`, custom themes) are live by default in DEBUG
+  builds (`isPro` defaults true); the telemetry marks them `PRO` honestly.
+  The chip strip is free (10 taps/day) and carries no PRO mark, and the
+  `launch` sheet is free-tier plumbing — no PRO in its caption either.
+- **The `launch` sheet needs seeded dirs + scripts**: its RUNS FIRST and
+  STARTS IN pickers only render when the host carries `sessionScripts` /
+  `workingDirs` — `stage-sessions.sh` injects plausible ones into
+  `store-seed.json`. Stage with LAUNCH on CLAUDE CODE, a believable initial
+  prompt typed, a script selected, and a repo dir chosen, so every field the
+  caption claims is filled in the pixels.
 - Drive content from the Mac: `tmux send-keys`, and
   `MULTIPLEX_AUTO_ATTACH=main,build` to open windows without hand-fiddling.
 

@@ -21,8 +21,8 @@ cd "$(dirname "$0")"
 # for the key-rail shot.
 shots_for() { # macOS bash 3.2 has no associative arrays
   case "$1" in
-    visionos|ipad) echo "wall windows agents strip history drop widgets mosh tabs themes" ;;
-    iphone)        echo "wall keys agents strip history drop widgets mosh themes" ;;
+    visionos|ipad) echo "wall windows agents strip launch drop widgets mosh tabs themes" ;;
+    iphone)        echo "wall keys agents strip launch drop widgets mosh themes" ;;
   esac
 }
 size_for() {

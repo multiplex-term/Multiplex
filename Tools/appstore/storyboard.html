@@ -133,9 +133,9 @@
 // (see docs/appstore/screenshots-plan.md).
 //
 // Shot copy rules: numbers must be true of the pixels; "PRO" appears in the
-// telemetry only when the surface shown is actually Pro-gated (history, mosh,
-// custom themes). The agent chip strip is free (10 taps/day), so it carries
-// no PRO mark.
+// telemetry only when the surface shown is actually Pro-gated (mosh, custom
+// themes). The agent chip strip is free (10 taps/day), so it carries no PRO
+// mark.
 // ============================================================================
 const LAMP = { live: ["live", "LIVE"], needs: ["needs", "NEEDS YOU"], plain: ["plain", ""] };
 
@@ -162,9 +162,10 @@ const SHOTS = {
     headline: "One-tap agent commands — plus your own", telemetry: "/CLEAR · /COMPACT · STOP", lamp: "plain",
     stage: "Attached session running real Claude Code, chip strip visible, keyboard hidden. Include one custom chip from Command Setup (e.g. a SHIP IT… command) so “plus your own” is true in the pixels.",
   },
-  history: {
-    headline: "Jump back to any prompt", telemetry: "CLAUDE CODE · PRO", lamp: "plain",
-    stage: "Claude Code session with ≥5 real prompts submitted, HISTORY panel open (debug.msghistory notification) — full prompt text where the TUI truncates, JUMP visible on an older row.",
+  launch: {
+    headline: "Start an agent session in one step", telemetry: "CLAUDE CODE · CODEX · PI", lamp: "plain",
+    stage: "New Session sheet (a rail's NEW SESSION tile) over the wall: LAUNCH bar on Claude Code, an initial prompt typed, RUNS FIRST on a setup script, STARTS IN on a repo dir. store-seed.json must carry workingDirs + sessionScripts (stage-sessions.sh injects them).",
+    per: { iphone: { stage: "Same sheet over the shell's deck in portrait: LAUNCH bar on Claude Code, initial prompt typed, RUNS FIRST + STARTS IN filled from the seeded dirs/scripts." } },
   },
   drop: {
     headline: "Attach files straight into the session", telemetry: "CAMERA · PHOTOS · FILES", lamp: "plain",
@@ -202,9 +203,9 @@ const SHOTS = {
 // visionOS/iPad run the shared 10-shot narrative; iPhone swaps `windows`
 // and `tabs` (no multi-window story in the one-window shell) for `keys`.
 const ORDER = {
-  visionos: ["wall", "windows", "agents", "strip", "history", "drop", "widgets", "mosh", "tabs", "themes"],
-  ipad:     ["wall", "windows", "agents", "strip", "history", "drop", "widgets", "mosh", "tabs", "themes"],
-  iphone:   ["wall", "keys", "agents", "strip", "history", "drop", "widgets", "mosh", "themes"],
+  visionos: ["wall", "windows", "agents", "strip", "launch", "drop", "widgets", "mosh", "tabs", "themes"],
+  ipad:     ["wall", "windows", "agents", "strip", "launch", "drop", "widgets", "mosh", "tabs", "themes"],
+  iphone:   ["wall", "keys", "agents", "strip", "launch", "drop", "widgets", "mosh", "themes"],
 };
 
 const PLATFORMS = [

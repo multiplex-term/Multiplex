@@ -179,9 +179,13 @@ Public product screenshots follow
 The plan was re-worked 2026-07-18 for three device classes — Vision Pro
 3840×2160, iPad 13″ 2752×2064, and the new iPhone 6.9″ 1320×2868 portrait
 set — and for the features added since 2026-07-11 (widgets/App Shortcuts,
-agent HISTORY, file attach, the light appearance). As of 2026-07-18 the
-public gallery set has not been generated or uploaded—the directory contains
-only its placeholder.
+agent HISTORY, file attach, the light appearance). On 2026-07-21 the
+`history` frame was pulled from the gallery plan (the jump machinery is not
+yet stable enough to headline; the listing description still describes the
+shipped feature) and replaced with `launch` — the New Session sheet's
+one-step Claude Code/Codex/Pi start with setup script and first prompt, the
+description's lead agent claim. As of 2026-07-21 the public gallery set has
+not been generated or uploaded—the directory contains only its placeholder.
 
 ## Fastlane and manual boundaries
 

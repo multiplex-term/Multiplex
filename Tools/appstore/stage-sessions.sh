@@ -36,6 +36,13 @@ import json, pathlib
 p = pathlib.Path("Tools/dev-sshd/state/seed.json")
 s = json.loads(p.read_text())
 s["name"], s["hostname"] = "atlas", "atlas.internal"
+# The `launch` shot's New Session sheet only shows its STARTS IN and
+# RUNS FIRST pickers when the host carries dirs/scripts — seed both.
+s["workingDirs"] = ["~/code/atlas", "~/code/api"]
+s["sessionScripts"] = [
+    {"name": "dev env", "body": "source .envrc"},
+    {"name": "venv", "body": ". .venv/bin/activate"},
+]
 p.with_name("store-seed.json").write_text(json.dumps(s, indent=2))
 p.with_name("store-seed-mosh.json").write_text(json.dumps(dict(s, useMosh=True), indent=2))
 print("wrote state/store-seed.json (+ store-seed-mosh.json)")
