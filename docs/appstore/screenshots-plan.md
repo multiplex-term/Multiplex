@@ -13,9 +13,10 @@ avoid. Final store sizes, one set per device class:
 | iPhone 6.9″ | 1320×2868 **portrait** | iPhone 17 Pro Max sim, native 1:1 |
 
 iPad browses a terminal app in landscape; the iPhone shell is a portrait,
-one-window app — shoot it the way it's held. `deliver` infers the device
-class from pixel size, so all three sets live together in
-`fastlane/screenshots/en-US/` and upload through the one lane.
+one-window app — shoot it the way it's held. ASC screenshot sets hang off a
+platform version, so iPhone+iPad live in `fastlane/screenshots/ios/en-US/`
+and Vision Pro in `fastlane/screenshots/visionos/en-US/`; the one lane runs
+deliver per platform, inferring device class from pixel size within each.
 
 ## The frame idea (why these don't look like anyone else's)
 
@@ -136,9 +137,10 @@ is deliberately a one-window shell); `keys` moves up to slot 2:
   `MULTIPLEX_FORCE_SHELL` needed. Wait ≥12 s after a fresh boot before the
   first capture (iOS 27 first-frame delay).
 - Then `Tools/appstore/compose.sh` → exact-size frames in
-  `Tools/appstore/out/`, auto-copied into `fastlane/screenshots/en-US/`,
-  `bundle exec fastlane store_screenshots` to upload (device class is
-  inferred from pixel size).
+  `Tools/appstore/out/`, auto-copied into
+  `fastlane/screenshots/<ios|visionos>/en-US/`,
+  `bundle exec fastlane store_screenshots` to upload (one deliver per
+  platform; device class inferred from pixel size within each).
 
 ## App Preview video (phase 2 — ship screenshots first)
 

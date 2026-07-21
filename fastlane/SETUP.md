@@ -47,9 +47,13 @@ bundle exec fastlane beta                      # both platforms → TestFlight i
 
 visionOS in fastlane rides the `xros` platform value (pilot/gym support it;
 current fastlane required — `bundle update fastlane` if pilot rejects the
-platform). Known gap: **deliver** can be behind on visionOS *screenshot*
-uploads — if `store_screenshots` refuses the 3840×2160 set, upload those in
-the ASC UI (they change rarely; metadata still uploads fine).
+platform). `store_screenshots` runs one deliver per platform — pushing the
+3840×2160 set at the ios version fails with "Display Type Not Allowed"
+(ASC screenshot sets hang off a platform version). If the `xros` deliver
+still refuses the set, upload it in the ASC UI (it changes rarely).
+Metadata/screenshot writes need the API key role **App Manager** — a
+Developer-role key uploads TestFlight builds fine but deliver fails with
+"forbidden for security reasons".
 
 ## 5. Before review
 

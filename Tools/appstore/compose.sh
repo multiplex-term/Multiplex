@@ -1,7 +1,11 @@
 #!/bin/bash
 # Compose App Store screenshots: renders each frame of storyboard.html at
 # exact store pixel size via headless Chrome, then copies the results into
-# fastlane/screenshots/en-US/ with sortable names (store order = file order).
+# fastlane/screenshots/<ios|visionos>/en-US/ with sortable names (store
+# order = file order). Two dirs because ASC screenshot sets are
+# per-platform-version: deliver must push iPhone/iPad to the ios version
+# and Vision Pro to the xros version — a Vision Pro display type on the
+# ios version is refused ("Display Type Not Allowed").
 #
 #   1. Put raw captures in Tools/appstore/raw/   (see docs/appstore/screenshots-plan.md)
 #   2. ./compose.sh            # everything with a raw capture present
@@ -42,10 +46,17 @@ done
 [[ -n "$CHROME" ]] || { echo "No Chrome/Chromium/Edge found (needed for headless render)"; exit 1; }
 
 mkdir -p out raw
-DEST="../../fastlane/screenshots/en-US"
+dest_for() { # ASC platform version the set belongs to (see header)
+  case "$1" in
+    visionos) echo "../../fastlane/screenshots/visionos/en-US" ;;
+    *)        echo "../../fastlane/screenshots/ios/en-US" ;;
+  esac
+}
 
 for platform in visionos ipad iphone; do
   size="$(size_for "$platform")"
+  dest="$(dest_for "$platform")"
+  mkdir -p "$dest"
   i=0
   for shot in $(shots_for "$platform"); do
     i=$((i + 1))
@@ -57,8 +68,8 @@ for platform in visionos ipad iphone; do
       "file://$PWD/storyboard.html?frame=${frame}" 2>/dev/null
     if [[ -f "raw/${frame}.png" ]]; then
       printf -v n '%02d' "$i"
-      cp "out/${frame}.png" "${DEST}/${platform}-${n}-${shot}.png"
-      echo "composed  ${frame} → fastlane/screenshots/en-US/${platform}-${n}-${shot}.png"
+      cp "out/${frame}.png" "${dest}/${platform}-${n}-${shot}.png"
+      echo "composed  ${frame} → ${dest#../../}/${platform}-${n}-${shot}.png"
     else
       echo "awaiting  ${frame} (no raw/${frame}.png — rendered to out/ only)"
     fi

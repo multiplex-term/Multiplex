@@ -158,12 +158,21 @@ end
 
 desc "Push fastlane/screenshots to App Store Connect (device class inferred from pixel size)."
 lane :store_screenshots do
-  deliver(
-    api_key: asc_api_key,
-    skip_binary_upload: true,
-    skip_metadata: true,
-    overwrite_screenshots: true,
-    force: true,
-    precheck_include_in_app_purchases: false,
-  )
+  api_key = asc_api_key
+  # ASC screenshot sets hang off a platform version: iPhone/iPad belong to
+  # the ios version, Vision Pro to the xros version. One mixed deliver run
+  # fails with "Display Type Not Allowed" on the visionOS files.
+  { "ios" => "./fastlane/screenshots/ios",
+    "xros" => "./fastlane/screenshots/visionos" }.each do |platform, path|
+    deliver(
+      api_key: api_key,
+      platform: platform,
+      screenshots_path: path,
+      skip_binary_upload: true,
+      skip_metadata: true,
+      overwrite_screenshots: true,
+      force: true,
+      precheck_include_in_app_purchases: false,
+    )
+  end
 end

@@ -175,7 +175,8 @@ After regeneration:
 
 Public product screenshots follow
 [`docs/appstore/screenshots-plan.md`](appstore/screenshots-plan.md) and live in
-`fastlane/screenshots/en-US/`; do not mix the two screenshot sets.
+`fastlane/screenshots/ios/en-US/` + `fastlane/screenshots/visionos/en-US/`
+(one dir per ASC platform version); do not mix the two screenshot sets.
 The plan was re-worked 2026-07-18 for three device classes — Vision Pro
 3840×2160, iPad 13″ 2752×2064, and the new iPhone 6.9″ 1320×2868 portrait
 set — and for the features added since 2026-07-11 (widgets/App Shortcuts,

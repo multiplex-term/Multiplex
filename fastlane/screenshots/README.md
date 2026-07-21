@@ -1,7 +1,10 @@
 # App Store screenshots
 
-Final, composed store images go in `en-US/` — `fastlane store_screenshots`
-uploads everything here, inferring the device class from pixel size:
+Final, composed store images go in `ios/en-US/` (iPhone + iPad) and
+`visionos/en-US/` (Vision Pro) — ASC screenshot sets hang off a platform
+version, so `fastlane store_screenshots` runs one deliver per platform
+(`ios`, then `xros`). Within a platform, deliver infers the device class
+from pixel size:
 
 | Device class | Pixels | Orientation | Count |
 | --- | --- | --- | --- |
