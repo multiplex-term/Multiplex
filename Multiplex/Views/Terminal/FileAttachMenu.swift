@@ -8,37 +8,72 @@ import UIKit
 /// Camera / Photos / Files entry point shared by terminal chrome on
 /// SSH-backed tmux tabs. All selections become `DroppedFile`s and rejoin
 /// the same SFTP + typed-path pipeline as a drag onto the terminal pane.
+enum FileAttachPicker: Equatable {
+    case camera
+    case photoLibrary
+    case files
+}
+
+/// The direct FILE chip owns a stable picker presenter. Compact layouts use
+/// `FileAttachSubmenu` instead so their *outer* overflow menu can own that
+/// presenter; state attached to nested Menu content is torn down on iPhone as
+/// soon as the selection closes.
 struct FileAttachMenu: View {
+    var controller: TerminalSessionController?
+
+    @State private var requestedPicker: FileAttachPicker?
+
+    var body: some View {
+        FileAttachControl(
+            controller: controller,
+            labelStyle: .badge,
+            request: { requestedPicker = $0 }
+        )
+        .fileAttachPickers(
+            controller: controller,
+            request: $requestedPicker
+        )
+    }
+}
+
+/// Menu-only content for compact terminal overflow. The request escapes to a
+/// presenter mounted on the outer menu, which remains alive while this nested
+/// submenu dismisses.
+struct FileAttachSubmenu: View {
+    var controller: TerminalSessionController?
+    var request: (FileAttachPicker) -> Void
+
+    var body: some View {
+        FileAttachControl(
+            controller: controller,
+            labelStyle: .submenu,
+            request: request
+        )
+    }
+}
+
+private struct FileAttachControl: View {
     enum LabelStyle {
         case badge
         case submenu
     }
 
     var controller: TerminalSessionController?
-    var labelStyle: LabelStyle = .badge
+    var labelStyle: LabelStyle
+    var request: (FileAttachPicker) -> Void
 
     #if !os(visionOS)
     private static let cameraAvailable = UIImagePickerController
         .isSourceTypeAvailable(.camera)
     #endif
 
-    @State private var showingFileImporter = false
-    @State private var showingPhotoLibrary = false
-    @State private var selectedPhotos: [PhotosPickerItem] = []
-    @State private var fileTarget: TerminalSessionController?
-    @State private var photoTarget: TerminalSessionController?
-    #if !os(visionOS)
-    @State private var showingCamera = false
-    @State private var cameraTarget: TerminalSessionController?
-    #endif
-
+    @ViewBuilder
     var body: some View {
         if canOfferFileAttach {
             Menu {
                 #if !os(visionOS)
                 Button {
-                    cameraTarget = controller
-                    showingCamera = true
+                    request(.camera)
                 } label: {
                     Label("Camera…", systemImage: "camera")
                 }
@@ -46,15 +81,13 @@ struct FileAttachMenu: View {
                 #endif
 
                 Button {
-                    photoTarget = controller
-                    showingPhotoLibrary = true
+                    request(.photoLibrary)
                 } label: {
                     Label("Photo Library…", systemImage: "photo.on.rectangle")
                 }
 
                 Button {
-                    fileTarget = controller
-                    showingFileImporter = true
+                    request(.files)
                 } label: {
                     Label("Files…", systemImage: "folder")
                 }
@@ -71,6 +104,57 @@ struct FileAttachMenu: View {
             .chassisHover(2)
             .disabled(controller?.status != .live)
             .accessibilityLabel("Send a file to this session")
+        }
+    }
+
+    private var canOfferFileAttach: Bool {
+        guard let controller else { return false }
+        return !controller.host.useMosh && controller.route.sessionName != nil
+    }
+}
+
+extension View {
+    func fileAttachPickers(
+        controller: TerminalSessionController?,
+        request: Binding<FileAttachPicker?>
+    ) -> some View {
+        modifier(FileAttachPickerModifier(
+            controller: controller,
+            request: request
+        ))
+    }
+}
+
+/// Owns every system picker on a view that survives menu dismissal. This is
+/// especially important for iPhone, where FILE is nested inside the terminal
+/// overflow menu rather than mounted as a direct UMD chip.
+private struct FileAttachPickerModifier: ViewModifier {
+    var controller: TerminalSessionController?
+    @Binding var request: FileAttachPicker?
+
+    @State private var showingFileImporter = false
+    @State private var showingPhotoLibrary = false
+    @State private var selectedPhotos: [PhotosPickerItem] = []
+    @State private var fileTarget: TerminalSessionController?
+    @State private var photoTarget: TerminalSessionController?
+    #if !os(visionOS)
+    @State private var showingCamera = false
+    @State private var cameraTarget: TerminalSessionController?
+    #endif
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: request) { _, picker in
+                guard let picker else { return }
+                request = nil
+                rememberTarget(for: picker)
+
+                // Let the Menu finish its selection transaction before asking
+                // the same SwiftUI host to present another controller.
+                DispatchQueue.main.async {
+                    present(picker)
+                }
+            }
             .fileImporter(
                 isPresented: $showingFileImporter,
                 allowedContentTypes: [.item],
@@ -110,12 +194,32 @@ struct FileAttachMenu: View {
                 .ignoresSafeArea()
             }
             #endif
+    }
+
+    private func rememberTarget(for picker: FileAttachPicker) {
+        switch picker {
+        case .camera:
+            #if !os(visionOS)
+            cameraTarget = controller
+            #endif
+        case .photoLibrary:
+            photoTarget = controller
+        case .files:
+            fileTarget = controller
         }
     }
 
-    private var canOfferFileAttach: Bool {
-        guard let controller else { return false }
-        return !controller.host.useMosh && controller.route.sessionName != nil
+    private func present(_ picker: FileAttachPicker) {
+        switch picker {
+        case .camera:
+            #if !os(visionOS)
+            showingCamera = true
+            #endif
+        case .photoLibrary:
+            showingPhotoLibrary = true
+        case .files:
+            showingFileImporter = true
+        }
     }
 
     private func receiveFiles(_ result: Result<[URL], Error>) {

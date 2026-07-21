@@ -780,8 +780,13 @@ views.
   `local-plan/agent-message-history.md`.
 - **File attach/drop = SFTP upload + typed path, never Enter**: compatible
   SSH-backed tmux tabs carry one free FILE menu in the UMD/classic iPad toolbar
-  (Camera on iPad/iPhone, Photos and Files everywhere); every picker result
-  and every pane drop becomes `[DroppedFile]` and enters
+  (Camera on iPad/iPhone, Photos and Files everywhere). On compact iPhone /
+  narrow iPad, FILE is a submenu of the terminal overflow: its picker state
+  and presentation modifiers must stay on the persistent **outer** menu, and
+  presentation waits one main-queue turn for menu dismissal. SwiftUI tears
+  down state owned by the nested submenu as its selection closes, making every
+  option appear inert. Every picker result and every pane drop becomes
+  `[DroppedFile]` and enters
   `TerminalSessionController.deliverDrop`. A file is local and the agent is
   remote, so the pane uploads it over the tab's
   own connection (Citadel multiplexes the SFTP subsystem next to the PTY;

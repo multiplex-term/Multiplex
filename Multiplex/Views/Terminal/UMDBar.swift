@@ -296,6 +296,11 @@ struct TerminalOverflowMenu: View {
     var detach: () -> Void
     var closeSession: (() -> Void)?
 
+    /// The picker presenter must belong to this outer menu, not to its nested
+    /// Send File submenu. iPhone destroys submenu presentation state while
+    /// dismissing the menu selection.
+    @State private var requestedFileAttachPicker: FileAttachPicker?
+
     var body: some View {
         Menu {
             Section("Text Size") {
@@ -308,7 +313,9 @@ struct TerminalOverflowMenu: View {
                     Button(agent.displayName) { newSession(agent) }
                 }
             }
-            FileAttachMenu(controller: controller, labelStyle: .submenu)
+            FileAttachSubmenu(controller: controller) {
+                requestedFileAttachPicker = $0
+            }
             if !mergeSources.isEmpty {
                 Menu("Merge Window") {
                     ForEach(mergeSources) { entry in
@@ -340,6 +347,10 @@ struct TerminalOverflowMenu: View {
         .buttonStyle(.plain)
         .chassisHover(2)
         .accessibilityLabel("Terminal actions")
+        .fileAttachPickers(
+            controller: controller,
+            request: $requestedFileAttachPicker
+        )
     }
 }
 
