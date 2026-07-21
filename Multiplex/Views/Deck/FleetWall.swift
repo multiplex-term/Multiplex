@@ -1222,6 +1222,12 @@ private struct NewSessionSheet: View {
     @State private var directory: String?
     @State private var script: SessionScript?
     @State private var remembersLastLaunch: Bool
+    @FocusState private var focusedField: InputField?
+
+    private enum InputField: Hashable {
+        case name
+        case initialPrompt
+    }
 
     init(
         host: Host,
@@ -1271,6 +1277,7 @@ private struct NewSessionSheet: View {
                     ) {
                         TallyFormField("Name") {
                             TextField("main", text: $name)
+                                .focused($focusedField, equals: .name)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
                         }
@@ -1289,6 +1296,7 @@ private struct NewSessionSheet: View {
                                     axis: .vertical
                                 )
                                 .lineLimit(2...5)
+                                .focused($focusedField, equals: .initialPrompt)
                                 .textInputAutocapitalization(.sentences)
                                 .accessibilityLabel(
                                     "Optional initial prompt for \(agent.displayName)"
@@ -1383,6 +1391,8 @@ private struct NewSessionSheet: View {
                 .padding(18)
                 .frame(maxWidth: .infinity)
             }
+            .contentShape(Rectangle())
+            .onTapGesture { focusedField = nil }
             .background(sheetGround.ignoresSafeArea())
             .navigationTitle("New Session")
             .navigationBarTitleDisplayMode(.inline)
