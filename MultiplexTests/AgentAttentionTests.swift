@@ -2,7 +2,8 @@ import XCTest
 @testable import Multiplex
 
 /// Pins the attention rules to the states captured from the real CLIs on
-/// 2026-07-11 (Claude Code v2.1.206, Codex rust-v0.144.1, tmux 3.6a) — the
+/// 2026-07-11 (Claude Code v2.1.206, Codex rust-v0.144.1, tmux 3.6a) and
+/// 2026-07-21 (Claude Code v2.1.216 tall AskUserQuestion) — the
 /// experiment record is local-plan/agent-attention.md. Titles and dialog
 /// blocks below are verbatim captures; when an agent's TUI shifts, this
 /// file is where the new truth lands.
@@ -113,6 +114,46 @@ final class AgentAttentionTests: XCTestCase {
         "Enter to select · ↑/↓ to navigate · Esc to cancel",
     ]
 
+    /// Claude Code AskUserQuestion with four described options, verbatim
+    /// (v2.1.216, live capture 2026-07-21, 53-column tmux pane). Wrapped
+    /// descriptions put `❯ 1.` 22 lines above the hint row — past the old
+    /// 15-line window, which classified this as `.idle`: no NEEDS YOU
+    /// badge, no notification (user-reported on iPhone, whose ~44-column
+    /// panes wrap even further).
+    private let tallAskUserDialog = [
+        "─────────────────────────────────────────────────────",
+        " ☐ List scope",
+        "",
+        "The spec says \"show online devices in the current",
+        "workspace\" — strictly online-only, or all workspace",
+        "devices with online status? (CLI convention: online =",
+        "last_alive_time within 5 min, so strictly-online",
+        "lists will visibly flap as devices flake.)",
+        "",
+        "❯ 1. All devices, online first (Recommended)",
+        "     List every workspace device sorted online-first",
+        "     with a clear ● Online / ○ Offline (Xm ago)",
+        "     status like the CLI. Offline rows are dimmed.",
+        "     More stable UI, and offline-but-expected devices",
+        "     are visible (often what you're debugging).",
+        "  2. Online only",
+        "     Strictly filter to alive-within-5-min devices.",
+        "     Cleaner list matching the literal spec, but",
+        "     devices flapping around the threshold",
+        "     appear/disappear, and you can't see a device",
+        "     that just dropped.",
+        "  3. Online + recently offline",
+        "     Show online devices plus devices seen in the",
+        "     last N hours (e.g. 24h); hide long-dead ones.",
+        "     Middle ground, but introduces an arbitrary",
+        "     cutoff to explain.",
+        "  4. Type something.",
+        "─────────────────────────────────────────────────────",
+        "  5. Chat about this",
+        "",
+        "Enter to select · ↑/↓ to navigate · Esc to cancel",
+    ]
+
     /// Codex command approval, verbatim (--ask-for-approval untrusted).
     private let codexApproval = [
         "• Running mkdir -p /tmp/mplx-codex-probe2",
@@ -144,6 +185,55 @@ final class AgentAttentionTests: XCTestCase {
         XCTAssertEqual(
             AgentAttention.classify(title: "⠂ Create probe.txt file", tail: askUserDialog),
             .needsYou(.question))
+    }
+
+    func testTallAskUserQuestionCaretBeyondHintWindow() {
+        // While the dialog is up the title has already dropped its spinner
+        // ("✳ …", observed live) — content alone must carry the state.
+        XCTAssertEqual(
+            AgentAttention.classify(
+                title: "✳ Implement devices panel with online status",
+                tail: tallAskUserDialog),
+            .needsYou(.question))
+        XCTAssertEqual(
+            AgentAttention.classify(title: "⠂ Implement devices panel", tail: tallAskUserDialog),
+            .needsYou(.question))
+    }
+
+    func testCaretOnLaterOptionKeepsQuestionState() {
+        // Arrow keys move the caret off option 1 — the dialog is still up,
+        // so the standing needs-you state must not flicker back to idle.
+        let navigated = askUserDialog.map { line in
+            switch line {
+            case "❯ 1. Cats": "  1. Cats"
+            case "  2. Dogs": "❯ 2. Dogs"
+            default: line
+            }
+        }
+        XCTAssertEqual(
+            AgentAttention.classify(title: "✳ Preference", tail: navigated),
+            .needsYou(.question))
+    }
+
+    func testCaretRowRequiresOrdinalThenDot() {
+        // A prompt echo starting with a bare number or "1st…" must not read
+        // as an option row even when hint-like prose sits at the bottom
+        // (working *on* these strings puts them in real transcripts).
+        let prose = [
+            "❯ 1st of all, check the docs",
+            "❯ 1 more thing to try",
+            "❯ 123. numbered like a spec section",
+            "the hint stem is Enter to select · reviewed above",
+        ]
+        XCTAssertEqual(AgentAttention.classify(title: "✳ Claude Code", tail: prose), .idle)
+    }
+
+    func testCaretWithoutHintStaysIdle() {
+        // An option-shaped row inside the caret window with no hint row in
+        // the trailing window is transcript history, not a live dialog.
+        let scrolled = ["❯ 1. Yes"]
+            + Array(repeating: "output line", count: AgentAttention.questionWindow)
+        XCTAssertEqual(AgentAttention.classify(title: "✳ Claude Code", tail: scrolled), .idle)
     }
 
     func testCodexApprovalContent() {

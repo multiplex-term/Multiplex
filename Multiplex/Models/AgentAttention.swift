@@ -3,7 +3,9 @@ import Foundation
 /// What an agent's pane is doing, as seen from outside — classified from
 /// the probe's `pane_title` plus the capture-pane tail. Verified against
 /// Claude Code v2.1.206 and Codex rust-v0.144.1 inside tmux 3.6a on
-/// 2026-07-11; the experiment captures live in local-plan/agent-attention.md.
+/// 2026-07-11; tall AskUserQuestion dialogs re-verified live against
+/// v2.1.216 on 2026-07-21. Experiment captures live in
+/// local-plan/agent-attention.md.
 enum PaneAgentState: Equatable {
     /// Turn in flight — Claude Code and Codex prefix their OSC title with a
     /// Braille spinner glyph (U+2800…U+28FF) while working.
@@ -62,11 +64,21 @@ struct AttentionAlert {
 /// obvious detector would have keyed on). Fail-soft like `AgentSignature`:
 /// a state we can't read is `.idle`, never an error.
 enum AgentAttention {
-    /// How many trailing capture lines the question detector may look at —
-    /// the live dialog region at the bottom of the screen. Both TUIs
-    /// collapse a resolved dialog in place (they redraw; it doesn't linger
-    /// in the tail), so a match here is a dialog that is up *now*.
+    /// How many trailing capture lines may anchor a live dialog — both TUIs
+    /// keep the dialog's hint/question row against the bottom of the screen
+    /// and collapse a resolved dialog in place (they redraw; it doesn't
+    /// linger in the tail), so a hint here is a dialog that is up *now*.
     static let questionWindow = 15
+
+    /// How far above the bottom the selection caret may sit. The hint row
+    /// stays inside `questionWindow`, but AskUserQuestion renders every
+    /// option's full description *below* the caret, so a multi-option
+    /// dialog separates `❯ N.` from its own hint row by more than 15
+    /// wrapped lines (observed live on v2.1.216: 22 lines at 53 columns —
+    /// and an iPhone pane is ~44 columns, wrapping further). Still bounded:
+    /// the dialog redraws inside the live pane, and pairing with the hint
+    /// keeps this out of scrollback-prose territory.
+    static let questionCaretWindow = 45
 
     /// Classify only agents whose outside-the-pane signals are known. Keeping
     /// this boundary here prevents a newly detected agent from accidentally
@@ -99,24 +111,37 @@ enum AgentAttention {
         return (0x2800...0x28FF).contains(first.value)
     }
 
-    /// A dialog blocked on the user renders a numbered option list plus a
-    /// confirm-hint line. Requiring both, in the trailing window only,
-    /// keeps prompt echoes ("❯ Write a haiku…") and scrollback prose from
+    /// A dialog blocked on the user renders a caret-selected numbered
+    /// option list plus a confirm-hint line. Requiring both — the hint in
+    /// the trailing window, the caret in the wider dialog region — keeps
+    /// prompt echoes ("❯ Write a haiku…") and scrollback prose from
     /// false-positiving.
     static func questionShape(in tail: [String]) -> AttentionKind? {
         let lines = tail.suffix(questionWindow)
             .map { $0.trimmingCharacters(in: .whitespaces) }
-        let hasOptionList = lines.contains { line in
-            guard line.hasPrefix("❯") || line.hasPrefix("›") else { return false }
-            return line.dropFirst().trimmingCharacters(in: .whitespaces).hasPrefix("1.")
-        }
-        guard hasOptionList,
-              lines.contains(where: { line in confirmHints.contains { line.contains($0) } })
+        guard lines.contains(where: { line in confirmHints.contains { line.contains($0) } })
         else { return nil }
+        let dialogRegion = tail.suffix(questionCaretWindow)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard dialogRegion.contains(where: isCaretOptionRow) else { return nil }
         let isPermission = lines.contains { line in
             permissionMarks.contains { line.contains($0) }
         }
         return isPermission ? .permission : .question
+    }
+
+    /// The selection caret's own row — "❯ 1. Yes" / "› 3. No". Any ordinal
+    /// matches: arrow keys move the caret off option 1 while the dialog
+    /// stays up (and any attached client's arrows move it for every
+    /// client), so keying on "1." dropped the standing needs-you state the
+    /// moment someone navigated. The ordinal-then-dot shape is what keeps
+    /// prompt echoes ("❯ 1st of all…") from reading as an option row.
+    private static func isCaretOptionRow(_ line: String) -> Bool {
+        guard line.hasPrefix("❯") || line.hasPrefix("›") else { return false }
+        let rest = line.dropFirst().trimmingCharacters(in: .whitespaces)
+        let ordinal = rest.prefix(while: { $0.isASCII && $0.isNumber })
+        guard (1...2).contains(ordinal.count) else { return false }
+        return rest.dropFirst(ordinal.count).hasPrefix(".")
     }
 
     /// Notification copy from a Claude Code title: the task summary after
