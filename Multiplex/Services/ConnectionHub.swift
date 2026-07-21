@@ -73,6 +73,15 @@ final class ConnectionHub {
         models[hostID]?.resumeAfterKeyPassphraseUpdate()
     }
 
+    /// The device's network path changed — every model's control link is
+    /// suspect at once, so rebuild them all instead of letting each host
+    /// discover its dead socket against a full exec deadline.
+    func reconnectAfterNetworkChange() {
+        for model in models.values {
+            model.reconnectAfterNetworkChange()
+        }
+    }
+
     /// Persist any pending snapshot changes — called when the deck leaves
     /// the foreground, because suspension freezes the debounce timers. The
     /// widget snapshot always reloads timelines here: this is the moment the
@@ -695,6 +704,24 @@ final class HostConnectionModel {
     /// User actions and a newly-active wall get one immediate fresh attempt.
     func resetConnectRetryBackoff() {
         connectRetryBackoff.reset()
+    }
+
+    /// The device's network path changed under a live wall (Wi-Fi ↔
+    /// cellular, VPN toggle, connectivity returning). An established control
+    /// link is bound to the old path — presume it severed instead of burning
+    /// an exec deadline discovering it, the same policy as the suspension
+    /// stale-link rebuild: sessions and miniatures stay, and the rail keeps
+    /// CONNECTED unless the rebuild fails. A host waiting out retry backoff
+    /// gets a fresh attempt now — its failures belonged to the old network.
+    func reconnectAfterNetworkChange() {
+        connectRetryBackoff.reset()
+        if let connection {
+            // Closing also unblocks a probe hung on the dead link; the
+            // in-flight refresh's silent retry then rebuilds on the new path.
+            Task { await connection.close() }
+            self.connection = nil
+        }
+        refresh()
     }
 
     /// The failed rail/tile was pressed. Reissue the same challenge so a

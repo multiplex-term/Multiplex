@@ -11,6 +11,7 @@ struct MultiplexApp: App {
     @State private var entitlements: EntitlementStore
     @State private var attention: AttentionCenter
     @State private var localNetworkAccess = LocalNetworkAccessMonitor()
+    @State private var networkChanges = NetworkChangeMonitor()
     private var externalActions: ExternalActionRouter { .shared }
 
     init() {
@@ -150,6 +151,7 @@ struct MultiplexApp: App {
             .environment(entitlements)
             .environment(attention)
             .environment(localNetworkAccess)
+            .environment(networkChanges)
             .environment(externalActions)
             .modifier(ExternalActionReceiver(router: externalActions))
             .modifier(PlatformChrome(themes: themes))

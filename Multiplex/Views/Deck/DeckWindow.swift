@@ -134,6 +134,7 @@ struct DeckWindow: View {
     @Environment(ConnectionHub.self) private var hub
     @Environment(TerminalWorkspace.self) private var workspace
     @Environment(LocalNetworkAccessMonitor.self) private var localNetworkAccess
+    @Environment(NetworkChangeMonitor.self) private var networkChanges
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
 
@@ -207,6 +208,22 @@ struct DeckWindow: View {
             } else {
                 localNetworkAccess.suspend()
             }
+        }
+        // Watch the network path while the deck is active. A settled change
+        // (Wi-Fi ↔ cellular, VPN toggle, connectivity returning — including
+        // one that happened while backgrounded) rebuilds every host's
+        // control link at once instead of letting each probe burn its exec
+        // deadline on a socket bound to the old path.
+        .task(id: scenePhase == .active) {
+            if scenePhase == .active {
+                networkChanges.begin()
+            } else {
+                networkChanges.suspend()
+            }
+        }
+        .onChange(of: networkChanges.reconnectRevision) { _, _ in
+            guard scenePhase == .active else { return }
+            hub.reconnectAfterNetworkChange()
         }
         .onChange(of: localNetworkAccess.denialRevision) { _, revision in
             guard revision > 0, scenePhase == .active else { return }
