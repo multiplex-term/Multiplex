@@ -721,6 +721,16 @@ final class HostConnectionModel {
             Task { await connection.close() }
             self.connection = nil
         }
+        // A settled UNREACHABLE would hide this deliberate fresh attempt —
+        // `ensureConnection` only surfaces LINKING from idle, an anti-flash
+        // rule aimed at the periodic retry loop. A network change is a
+        // one-shot edge, so read as LINKING while the attempt runs; it
+        // settles back to CONNECTED or UNREACHABLE on its own. A pending
+        // passphrase challenge keeps NEEDS PASSPHRASE: its refresh
+        // early-returns, and flipping would strand the rail on LINKING.
+        if keyPassphraseChallenge == nil, case .failed = phase {
+            phase = .connecting
+        }
         refresh()
     }
 
