@@ -17,11 +17,11 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # Keep ids + order in sync with SHOTS/ORDER in storyboard.html.
-# iPhone swaps windows/tabs (no multi-window story in the one-window shell)
-# for the key-rail shot.
+# iPhone drops windows (no multi-window story in the one-window shell);
+# every platform carries its own keys shot (rail / ornament cluster).
 shots_for() { # macOS bash 3.2 has no associative arrays
   case "$1" in
-    visionos|ipad) echo "wall windows agents strip launch drop widgets mosh tabs themes" ;;
+    visionos|ipad) echo "wall windows agents strip launch drop widgets mosh keys themes" ;;
     iphone)        echo "wall keys agents strip launch drop widgets mosh themes" ;;
   esac
 }

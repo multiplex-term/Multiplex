@@ -184,10 +184,6 @@ const SHOTS = {
     headline: "mosh built in — roam, sleep, resume", telemetry: "UDP · PRO", lamp: "live",
     stage: "Host edit sheet with the MOSH toggle on, an attached live session behind it (or relaunch seeded from store-seed-mosh.json).",
   },
-  tabs: {
-    headline: "Merge windows — shells stay live", telemetry: "3 TABS · 1 WINDOW", lamp: "live",
-    stage: "One terminal window holding three tabs (source-label strip visible, one tally dot lit). Stage right after a Merge.",
-  },
   themes: {
     headline: "Light or dark — ten themes, plus your own", telemetry: "TALLY FROST · LIGHT", lamp: "plain",
     stage: "Appearance LIGHT (debug.appearance notification): Frost chassis, Settings theme rows over a Tally Frost terminal — the light identity is the differentiator.",
@@ -195,16 +191,28 @@ const SHOTS = {
   },
   keys: {
     headline: "A full terminal, phone-sized", telemetry: "ESC · CTRL · TAB · ARROWS · TMUX", lamp: "live",
-    stage: "iPhone only: attached tmux session, docked keyboard raised (debug.summon), TALLY key rail above it — ESC / latching CTRL / TAB, shell symbols, arrows, TMUX trigger all in frame.",
+    stage: "iPhone: attached tmux session, docked keyboard raised (debug.summon), TALLY key rail above it — ESC / latching CTRL / TAB, shell symbols, arrows, TMUX trigger all in frame.",
+    per: {
+      ipad: {
+        headline: "Real terminal keys, above the keyboard",
+        stage: "Attached session with the docked keyboard raised (debug.summon): TALLY key rail — ESC / latching CTRL / TAB, shell symbols, arrows, TMUX — with the agent helper strip riding above it.",
+      },
+      visionos: {
+        headline: "ESC, CTRL, TAB — always in reach", telemetry: "ESC · CTRL · TAB",
+        stage: "Terminal window with the ornament key cluster beside the UMD and the floating keyboard below (debug.summon) — the cluster's latching CTRL is the story.",
+      },
+    },
   },
 };
 
 // Store order per device class (= file order after compose.sh).
-// visionOS/iPad run the shared 10-shot narrative; iPhone swaps `windows`
-// and `tabs` (no multi-window story in the one-window shell) for `keys`.
+// visionOS/iPad run the shared 10-shot narrative; iPhone drops `windows`
+// (no multi-window story in the one-window shell). Every platform carries
+// `keys` — its own key surface: rail (iPad/iPhone) or ornament cluster
+// (visionOS).
 const ORDER = {
-  visionos: ["wall", "windows", "agents", "strip", "launch", "drop", "widgets", "mosh", "tabs", "themes"],
-  ipad:     ["wall", "windows", "agents", "strip", "launch", "drop", "widgets", "mosh", "tabs", "themes"],
+  visionos: ["wall", "windows", "agents", "strip", "launch", "drop", "widgets", "mosh", "keys", "themes"],
+  ipad:     ["wall", "windows", "agents", "strip", "launch", "drop", "widgets", "mosh", "keys", "themes"],
   iphone:   ["wall", "keys", "agents", "strip", "launch", "drop", "widgets", "mosh", "themes"],
 };
 

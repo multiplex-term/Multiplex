@@ -44,7 +44,7 @@ uniform downscale, never a crop.
 | 6 | `drop` | FILE menu open over a live agent session | ATTACH FILES STRAIGHT INTO THE SESSION | iPad `CAMERA · PHOTOS · FILES` / visionOS `PHOTOS · FILES · DRAG & DROP` |
 | 7 | `widgets` | Home Screen widgets (iPad) / widget pinned in the room (visionOS 26) | THE WALL, ON YOUR HOME SCREEN *(visionOS: PINNED IN YOUR SPACE)* | `WIDGETS · APP SHORTCUTS` |
 | 8 | `mosh` | Host sheet with MOSH toggle on + attached session behind | MOSH BUILT IN — ROAM, SLEEP, RESUME | `UDP · PRO` ● LIVE |
-| 9 | `tabs` | One window, 3 tabs in the source-label strip | MERGE WINDOWS — SHELLS STAY LIVE | `3 TABS · 1 WINDOW` ● LIVE |
+| 9 | `keys` | iPad: docked keyboard raised, TALLY key rail + helper strip above it / visionOS: ornament key cluster beside the UMD, floating keyboard below | REAL TERMINAL KEYS, ABOVE THE KEYBOARD *(visionOS: ESC, CTRL, TAB — ALWAYS IN REACH)* | `ESC · CTRL · TAB · ARROWS · TMUX` / visionOS `ESC · CTRL · TAB` ● LIVE |
 | 10 | `themes` | iPad: LIGHT appearance, Frost chassis + Tally Frost / visionOS: Gruvbox dark | LIGHT OR DARK — TEN THEMES, PLUS YOUR OWN | `TALLY FROST · LIGHT` / `GRUVBOX DARK` |
 
 Exactly 10 = the ASC cap. The 2026-07-18 re-plan (widgets/Shortcuts, agent
@@ -56,12 +56,14 @@ agent surfaces outrank it for this audience. The 2026-07-21 re-plan swapped
 agent claim, free-tier, and pure form UI to stage. Revive `history` from git
 history once jump is trustworthy. If `widgets` proves unstageable on the
 visionOS sim, ship visionOS with 9 or revive `shortcuts` from git history as
-its 10th.
+its 10th. The 2026-07-21 capture pass retired `tabs` (the merge story reads
+as ordinary tab UI in a still) for `keys` on every platform — each device
+class shows its own key surface (rail / ornament cluster).
 
 ## Shot list — iPhone (portrait, 9 shots)
 
-Same ids ⇒ same narrative, minus the multi-window shots (`windows`, `tabs` —
-the phone is deliberately a one-window shell) and plus the key-rail shot:
+Same ids ⇒ same narrative, minus the multi-window `windows` shot (the phone
+is deliberately a one-window shell); `keys` moves up to slot 2:
 
 | # | id | iPhone-specific staging |
 | --- | --- | --- |
