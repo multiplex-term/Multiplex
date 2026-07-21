@@ -420,9 +420,14 @@ final class HostConnectionModel {
         } catch {
             guard refreshGeneration == generation, !Task.isCancelled else { return }
             if reusedLink, mayRetry {
-                // Retry silently: the rail keeps reading CONNECTED while a
-                // fresh link is attempted (ensureConnection never downgrades
-                // a non-idle phase), and only a failed retry surfaces.
+                // The established link failed a real round-trip — an event,
+                // not the periodic retry loop the anti-flash rule guards.
+                // Read as LINKING while the immediate fresh attempt runs
+                // (up to a whole connect deadline against a host that just
+                // left the network): a rail still claiming CONNECTED there
+                // is a lie the user watches (user-reported). Sessions and
+                // miniatures stay; the attempt settles the phase itself.
+                if phase != .connecting { phase = .connecting }
                 if let connection {
                     Task { await connection.close() }
                 }
@@ -721,14 +726,17 @@ final class HostConnectionModel {
             Task { await connection.close() }
             self.connection = nil
         }
-        // A settled UNREACHABLE would hide this deliberate fresh attempt —
-        // `ensureConnection` only surfaces LINKING from idle, an anti-flash
-        // rule aimed at the periodic retry loop. A network change is a
-        // one-shot edge, so read as LINKING while the attempt runs; it
-        // settles back to CONNECTED or UNREACHABLE on its own. A pending
-        // passphrase challenge keeps NEEDS PASSPHRASE: its refresh
-        // early-returns, and flipping would strand the rail on LINKING.
-        if keyPassphraseChallenge == nil, case .failed = phase {
+        // Read as LINKING while the attempt runs — `ensureConnection` only
+        // surfaces it from idle, an anti-flash rule aimed at the periodic
+        // retry loop, and a network change is a one-shot edge. That covers
+        // CONNECTED too: the old socket is bound to the departed path, so
+        // keeping CONNECTED up during the rebuild is a lie the user watches
+        // for the whole connect deadline when the new path can't reach the
+        // host (user-reported). The attempt settles back to CONNECTED or
+        // UNREACHABLE on its own. A pending passphrase challenge keeps
+        // NEEDS PASSPHRASE: its refresh early-returns, and flipping would
+        // strand the rail on LINKING.
+        if keyPassphraseChallenge == nil, phase != .idle, phase != .connecting {
             phase = .connecting
         }
         refresh()
