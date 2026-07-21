@@ -28,11 +28,16 @@
   .frame { position: relative; overflow: hidden; background: var(--chassis); }
   .frame img.raw { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 
-  /* visionOS: full-bleed environment capture, floating UMD slab lower third */
+  /* visionOS: full-bleed environment capture, floating UMD slab lower third.
+     The slab sizes to its caption (nowrap children overflowed a fixed 62u
+     width on the long headline+telemetry combos); min keeps short captions
+     from collapsing the slab's presence, max leaves a 3u margin per side. */
   .frame.visionos .umd {
     position: absolute; left: 50%; transform: translateX(-50%);
     bottom: calc(var(--u) * 3.2);
-    width: calc(var(--u) * 62);
+    width: max-content;
+    min-width: calc(var(--u) * 62);
+    max-width: calc(var(--u) * 94);
     box-shadow: 0 calc(var(--u) * .5) calc(var(--u) * 2.4) rgba(0,0,0,.55);
   }
 
@@ -144,8 +149,8 @@ const LAMP = { live: ["live", "LIVE"], needs: ["needs", "NEEDS YOU"], plain: ["p
 // store order — lives in ORDER below.
 const SHOTS = {
   wall: {
-    headline: "Every tmux session, live on the wall", telemetry: "2 HOSTS · 6 SESSIONS", lamp: "live",
-    stage: "Deck frontmost, 2 host rails, ~6 tiles with staged miniature content (editor, build ✓ lines, logs). One tile LIVE, the agent tile showing its glyph. Nothing behind the app.",
+    headline: "Every tmux session, live on the wall", telemetry: "2 HOSTS · 4 SESSIONS", lamp: "live",
+    stage: "Deck frontmost, 2 host rails, live tiles with real miniature content; header count must match the telemetry. One tile LIVE, the agent tile showing its glyph. Nothing behind the app.",
     per: { iphone: { stage: "The single-window shell's deck in portrait: both host rails in frame, staged miniatures, one attached tile's tally dot lit. Status bar overridden to 9:41." } },
   },
   windows: {
@@ -186,8 +191,7 @@ const SHOTS = {
   },
   themes: {
     headline: "Light or dark — ten themes, plus your own", telemetry: "TALLY FROST · LIGHT", lamp: "plain",
-    stage: "Appearance LIGHT (debug.appearance notification): Frost chassis, Settings theme rows over a Tally Frost terminal — the light identity is the differentiator.",
-    per: { visionos: { telemetry: "GRUVBOX DARK", stage: "Settings theme picker open over a Gruvbox-skinned terminal — surface re-skins live while chrome stays chassis (visionOS glass reads best dark)." } },
+    stage: "Appearance LIGHT (debug.appearance notification): Frost chassis, Settings theme rows over a Tally Frost terminal — the light identity is the differentiator (every platform, visionOS included, was captured light).",
   },
   keys: {
     headline: "A full terminal, phone-sized", telemetry: "ESC · CTRL · TAB · ARROWS · TMUX", lamp: "live",
