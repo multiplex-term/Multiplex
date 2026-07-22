@@ -537,6 +537,15 @@ struct TerminalWindowRoot: View {
                             Theme.chassis,
                             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
+                // Stacked console pinned by its LEADING row: the alignment
+                // guide puts the first row's midline on the edge anchor, so
+                // the agent bar (when detected — else the UMD) straddles the
+                // window's bottom edge exactly where the store captures show
+                // it, riding the status row, and the rest hangs below. A
+                // plain centered stack rises as it grows — three rows lifted
+                // the agent bar off the edge onto the screen content — and a
+                // below-edge anchor (.top) parked the keys and window bar in
+                // the floating keyboard's summon zone (both user-reported).
                 .ornament(attachmentAnchor: .scene(.bottom), contentAlignment: .center) {
                     VStack(spacing: 10) {
                         // An ornament has its own intrinsic width. Clamp the
@@ -553,30 +562,45 @@ struct TerminalWindowRoot: View {
                                 )
                             )
                         )
-                        HStack(spacing: 10) {
-                            // The floating visionOS keyboard has no ESC/CTRL/TAB;
-                            // the chrome carries them (same send path as typing).
-                            TerminalKeyCluster(controller: activeController)
-                            UMDBar(
-                                controller: activeController,
-                                title: umdTitle,
-                                mergeSources: mergeSources,
-                                showDeck: showDeck,
-                                summonKeyboard: { activeController?.summonKeyboard() },
-                                fontDown: { fontSize = max(9, fontSize - 1) },
-                                fontUp: { fontSize = min(32, fontSize + 1) },
-                                newSession: { openNewTab(launching: $0) },
-                                merge: { merge($0) },
-                                detach: { detachActiveTab() },
-                                closeSession: activeTabHasSession
-                                    ? { confirmingCloseActiveSession = true } : nil,
-                                showsTmuxShortcuts: activeTab?.sessionName != nil
-                            )
-                        }
+                        UMDBar(
+                            controller: activeController,
+                            title: umdTitle,
+                            mergeSources: mergeSources,
+                            showDeck: showDeck,
+                            summonKeyboard: { activeController?.summonKeyboard() },
+                            fontDown: { fontSize = max(9, fontSize - 1) },
+                            fontUp: { fontSize = min(32, fontSize + 1) },
+                            newSession: { openNewTab(launching: $0) },
+                            merge: { merge($0) },
+                            detach: { detachActiveTab() },
+                            closeSession: activeTabHasSession
+                                ? { confirmingCloseActiveSession = true } : nil,
+                            showsTmuxShortcuts: activeTab?.sessionName != nil
+                        )
+                        // The floating visionOS keyboard has no ESC/CTRL/TAB,
+                        // arrows, or RET; the chrome carries them (same send
+                        // path as typing).
+                        TerminalKeyCluster(
+                            controller: activeController,
+                            summonKeyboard: { activeController?.summonKeyboard() }
+                        )
+                    }
+                    // "Center" resolves through this guide. With an agent
+                    // detected, the strip/UMD boundary sits on the anchor:
+                    // the agent bar rides ON the status row just inside the
+                    // window edge — the store-capture geometry
+                    // (fastlane/…/visionos-09-keys.png) — and the session
+                    // rows hang below. Without one, the UMD straddles the
+                    // edge. Constants are empirical against the system's
+                    // ornament standoff; re-verify against that capture
+                    // when touching them.
+                    .alignmentGuide(VerticalAlignment.center) { _ in
+                        showsAgentHelper ? 48 : 24
                     }
                 }
         }
     }
+
     #else
     private var classicPlatformBody: some View {
         NavigationStack {
@@ -642,7 +666,14 @@ struct TerminalWindowRoot: View {
                                 configuration.availableWidth - 24
                             )
                         )
+                        // No keyboard summon here — the shell's UMD row
+                        // already carries KBD. The width clamp engages the
+                        // cluster's compact tiers in a phone-narrow shell.
                         TerminalKeyCluster(controller: activeController)
+                            .frame(maxWidth: max(
+                                1,
+                                configuration.availableWidth - 24
+                            ))
                     }
                     .padding(.bottom, 10)
                 }

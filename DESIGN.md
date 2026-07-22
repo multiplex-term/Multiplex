@@ -133,8 +133,18 @@ and `SETTINGS` chips. Host rails carry a context menu (Edit/Remove Host).
 **Terminal windows.** A chassis-framed screen: `bezelHi` hairline border,
 terminal surface edge to edge in the user's theme. Below, the **UMD**
 (under-monitor display — the label strip every broadcast monitor wears) as an
-opaque ornament on visionOS / toolbar equivalents on iPad: `DECK` chip,
-source label (`MAIN · DEVBOX`), status lamp (`LIVE`/`LINK`/`ENDED`), then
+opaque ornament on visionOS / toolbar equivalents on iPad. visionOS wraps
+the monitor in a console instead of one long row: the bottom stack hangs
+from the window's bottom edge with its leading row straddling the bezel —
+the detected agent's helper strip first (when one runs; the UMD takes the
+straddle otherwise), then the UMD title row: `DECK` chip, source label
+(`MAIN · DEVBOX`), status lamp (`LIVE`/`LINK`/`ENDED`), `A− · A+`, and
+`+ TAB · FILE · TMUX · MERGE · DETACH`, then a key row: `ESC · CTRL · TAB`,
+the DECCKM-aware autorepeat arrows, `RET`, and the keyboard summon (the
+floating visionOS keyboard has none of these — arrows + `RET` drive a CLI
+agent's option picker without summoning it). The iPad toolbar keeps the
+full chip set: `DECK`,
+source label, lamp, then
 `KBD · A− · A+ · + TAB · FILE · TMUX · MERGE · DETACH` chips. On an
 SSH-backed tmux tab, `FILE` opens Camera (iPad/iPhone), Photos, and Files
 pickers and rejoins the terminal's existing SFTP drop path; mosh and plain

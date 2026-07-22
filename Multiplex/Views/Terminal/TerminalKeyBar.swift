@@ -624,10 +624,12 @@ import SwiftTerm
 import notify
 #endif
 
-/// The visionOS terminal's key cluster — ESC, a latching CTRL, and TAB on a
-/// chassis slab beside the UMD. The floating visionOS keyboard has none of
-/// these keys and SwiftTerm plumbs no input accessory on visionOS, so the
-/// window's bottom ornament carries them instead.
+/// The visionOS terminal's key cluster — ESC, a latching CTRL, TAB, the
+/// DECCKM-aware autorepeat arrows, RET, and the keyboard summon on a chassis
+/// slab in the window's bottom ornament. The floating visionOS keyboard has
+/// none of these keys and SwiftTerm plumbs no input accessory on visionOS,
+/// so the window's chrome carries them instead; arrows + RET are how a CLI
+/// agent's option picker is driven without summoning the keyboard at all.
 ///
 /// Same guarantees as the iPad key rail: every key sends through
 /// `TerminalView.send` → the view delegate → the controller's ordered input
@@ -636,20 +638,24 @@ import notify
 /// notification to release the latch visual.
 struct TerminalKeyCluster: View {
     var controller: TerminalSessionController?
+    /// The classic window puts the keyboard summon at the cluster's trailing
+    /// edge — the slot the iPad rail gives its keyboard control. The shell
+    /// overlay passes nil; its UMD row already carries KBD.
+    var summonKeyboard: (() -> Void)? = nil
 
     @State private var ctrlLatched = false
 
     private var terminal: TerminalView? { controller?.terminalView }
 
     var body: some View {
-        HStack(spacing: 6) {
-            key("ESC", "Escape") { $0.send(EscapeSequences.cmdEsc) }
-            key("CTRL", "Control", latched: ctrlLatched) { terminal in
-                let latched = !terminal.controlModifier
-                terminal.controlModifier = latched
-                ctrlLatched = latched
-            }
-            key("TAB", "Tab") { $0.send([0x09]) }
+        // Ornaments propose unbounded width, so a classic window always gets
+        // the regular tier; the tiers exist for the (debug-forced) shell,
+        // whose pane can be phone-narrow. Faces compact before any key
+        // leaves the cluster; the floor keeps the original trio plus RET.
+        ViewThatFits(in: .horizontal) {
+            row(.regular)
+            row(.compact)
+            row(.compact, minimal: true)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -680,6 +686,60 @@ struct TerminalKeyCluster: View {
         #endif
     }
 
+    private struct Metric {
+        let keyWidth: CGFloat
+        let spacing: CGFloat
+        let groupGap: CGFloat
+
+        static let regular = Metric(keyWidth: 46, spacing: 6, groupGap: 12)
+        static let compact = Metric(keyWidth: 36, spacing: 4, groupGap: 8)
+    }
+
+    private func row(_ metric: Metric, minimal: Bool = false) -> some View {
+        HStack(spacing: metric.groupGap) {
+            HStack(spacing: metric.spacing) {
+                capsKey("ESC", "Escape", metric: metric) {
+                    $0.send(EscapeSequences.cmdEsc)
+                }
+                capsKey("CTRL", "Control", latched: ctrlLatched, metric: metric) { terminal in
+                    let latched = !terminal.controlModifier
+                    terminal.controlModifier = latched
+                    ctrlLatched = latched
+                }
+                capsKey("TAB", "Tab", metric: metric) { $0.send([0x09]) }
+            }
+            if !minimal {
+                HStack(spacing: metric.spacing) {
+                    arrowKey(
+                        "arrow.left", "Arrow left", metric: metric,
+                        app: EscapeSequences.moveLeftApp,
+                        normal: EscapeSequences.moveLeftNormal)
+                    arrowKey(
+                        "arrow.up", "Arrow up", metric: metric,
+                        app: EscapeSequences.moveUpApp,
+                        normal: EscapeSequences.moveUpNormal)
+                    arrowKey(
+                        "arrow.down", "Arrow down", metric: metric,
+                        app: EscapeSequences.moveDownApp,
+                        normal: EscapeSequences.moveDownNormal)
+                    arrowKey(
+                        "arrow.right", "Arrow right", metric: metric,
+                        app: EscapeSequences.moveRightApp,
+                        normal: EscapeSequences.moveRightNormal)
+                }
+            }
+            capsKey("RET", "Return", metric: metric) { $0.send([0x0D]) }
+            if !minimal, let summonKeyboard {
+                TerminalClusterKey(
+                    face: .icon("keyboard"),
+                    accessibility: "Show keyboard",
+                    width: metric.keyWidth,
+                    action: summonKeyboard
+                )
+            }
+        }
+    }
+
     #if DEBUG
     /// Headless proof sequence, iPad-keybar style: ESC and TAB through the
     /// cluster's own send path, then a latched CTRL consumed by a typed 'c'
@@ -696,30 +756,83 @@ struct TerminalKeyCluster: View {
     }
     #endif
 
-    /// One key: the chassis-chip face at key proportions. Latched (sticky
-    /// CTRL) inverts the face — prominence, not color, marks the held
-    /// modifier, same as the iPad rail.
-    private func key(
+    private func capsKey(
         _ label: String, _ accessibility: String, latched: Bool = false,
+        metric: Metric,
         press: @escaping (TerminalView) -> Void
     ) -> some View {
-        Button {
+        TerminalClusterKey(
+            face: .caps(label),
+            accessibility: accessibility,
+            width: metric.keyWidth,
+            latched: latched
+        ) {
             if let terminal { press(terminal) }
-        } label: {
-            Text(label)
-                .font(.mono(9, weight: .semibold))
-                .kerning(1.1)
+        }
+    }
+
+    /// Arrows honor DECCKM the same way SwiftTerm's own key handling does,
+    /// and autorepeat while held like the iPad rail's.
+    private func arrowKey(
+        _ icon: String, _ accessibility: String, metric: Metric,
+        app: [UInt8], normal: [UInt8]
+    ) -> some View {
+        TerminalClusterKey(
+            face: .icon(icon),
+            accessibility: accessibility,
+            width: metric.keyWidth,
+            repeats: true
+        ) {
+            guard let terminal else { return }
+            terminal.send(terminal.getTerminal().applicationCursor ? app : normal)
+        }
+    }
+}
+
+/// One monitor key: the chassis-chip face at key proportions. Latched
+/// (sticky CTRL) inverts the face — prominence, not color, marks the held
+/// modifier, same as the iPad rail.
+struct TerminalClusterKey: View {
+    enum Face {
+        case caps(String)
+        case icon(String)
+    }
+
+    var face: Face
+    var accessibility: String
+    var width: CGFloat = 46
+    var repeats = false
+    var latched = false
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            faceView
                 .foregroundStyle(latched ? Theme.chassis : Theme.signal2)
-                .frame(width: 46, height: 26)
+                .frame(width: width, height: 26)
                 .background(latched ? Theme.signal2 : Theme.chassis)
                 .overlay(Rectangle().strokeBorder(
                     latched ? Theme.signal2 : Theme.bezelHi, lineWidth: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .buttonRepeatBehavior(repeats ? .enabled : .disabled)
         .chassisHover(2)
         .accessibilityLabel(accessibility)
         .accessibilityAddTraits(latched ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private var faceView: some View {
+        switch face {
+        case .caps(let label):
+            Text(label)
+                .font(.mono(9, weight: .semibold))
+                .kerning(1.1)
+        case .icon(let systemName):
+            Image(systemName: systemName)
+                .font(.ui(12, weight: .semibold))
+        }
     }
 }
 
@@ -750,7 +863,7 @@ enum KeyClusterDebugHook {
 }
 
 #Preview("Terminal Key Cluster") {
-    TerminalKeyCluster(controller: nil)
+    TerminalKeyCluster(controller: nil, summonKeyboard: {})
         .padding()
 }
 #endif

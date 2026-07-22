@@ -5,7 +5,13 @@ import SwiftUI
 /// chips. Deliberately opaque — the UMD is hardware, not glass.
 struct UMDBar: View {
     enum Style {
+        /// The visionOS classic window's title row: DECK, source label,
+        /// text size, and the session controls. KBD lives on the key
+        /// cluster below, which keeps this row short enough to stack
+        /// under the monitor.
         case regular
+        /// The single-window shell's slim full-width row — it keeps DECK,
+        /// KBD, and the font chips because the shell has no other chrome.
         case shell
     }
 
@@ -53,7 +59,6 @@ struct UMDBar: View {
             ChassisLabel(title, size: 12)
             statusCluster
             divider
-            ChassisChip("KBD", action: summonKeyboard)
             ChassisChip("A−", action: fontDown)
             ChassisChip("A+", action: fontUp)
             newTabMenu

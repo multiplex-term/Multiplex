@@ -433,10 +433,24 @@ views.
   ordered pump (never a side channel); CTRL rides SwiftTerm's public
   `controlModifier`, consumed by the next typed character — the bar observes
   `.terminalViewControlModifierReset` to release the latch visual. visionOS
-  keeps no accessory (its keyboard floats and shows none); its ESC / latching
-  CTRL / TAB live in `TerminalKeyCluster`, a chassis slab beside the UMD in
-  the terminal window's bottom ornament, riding the same send path and latch
-  mechanism. ⚠ SwiftTerm still *builds* its stock accessory on visionOS, and
+  keeps no accessory (its keyboard floats and shows none);
+  `TerminalKeyCluster` — ESC / latching CTRL / TAB, the DECCKM-aware
+  autorepeat arrows, RET, and the keyboard summon — is a chassis slab
+  stacked directly below the UMD row in the terminal window's bottom
+  ornament, riding the same send path and latch mechanism. That ornament
+  is positioned by an `alignmentGuide(VerticalAlignment.center)` override
+  with state-dependent constants (48 with an agent strip, 24 without):
+  with an agent detected the strip/UMD boundary sits on the anchor, so the
+  agent bar rides ON the tmux status row just inside the window edge —
+  the store-capture geometry (fastlane/…/visionos-09-keys.png) — with the
+  UMD and key rows hanging below; without one the UMD straddles the edge.
+  Neither plain anchor works: a true centered stack rises as it grows and
+  lifted the agent bar off the edge onto the screen content, and a
+  below-edge anchor (`contentAlignment: .top`) parked the keys and the
+  window bar exactly where the floating keyboard summons (both
+  user-reported; re-verify against that capture when touching the
+  constants). DECK and the text-size chips live in the UMD title row
+  (KBD stays on the key cluster), so neither bottom row runs long. ⚠ SwiftTerm still *builds* its stock accessory on visionOS, and
   `commitTextInput` prefers that (invisible) accessory's `controlModifier`
   over the view-level one — `SwiftTermView` nils `inputAccessoryView` there
   so the cluster's latch is authoritative; don't remove that.
