@@ -36,7 +36,8 @@ The canonical localized listing copy is stored in
   [`fastlane/metadata/review_information/`](../fastlane/metadata/review_information/).
 
 Do not duplicate the complete description in this document. The files above
-are what `fastlane store_metadata` uploads.
+are what `fastlane store_metadata` uploads to both platform versions by
+default. Pass `platform:ios` or `platform:visionos` to target only one.
 
 ## Widgets, Shortcuts, and the URL scheme
 
@@ -198,7 +199,7 @@ can still be permission-gated or require App Store Connect UI work.
 
 | Work | Current route |
 | --- | --- |
-| App listing metadata and review notes | `bundle exec fastlane store_metadata` |
+| App listing metadata and review notes | `bundle exec fastlane store_metadata` (both platform versions by default; optional `platform:ios\|visionos`) |
 | Public App Store screenshots | `bundle exec fastlane store_screenshots` |
 | iOS (iPhone + iPad) + visionOS TestFlight binaries | `bundle exec fastlane beta` |
 | IAP metadata and IAP review screenshot | Already configured; manual ASC or custom Spaceship/API for future changes |

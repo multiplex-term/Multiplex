@@ -6,7 +6,8 @@
 #   bundle exec fastlane tests                 # unit tests (visionOS sim)
 #   bundle exec fastlane beta                  # archive + upload BOTH platforms to TestFlight
 #   bundle exec fastlane beta platform:visionos
-#   bundle exec fastlane store_metadata        # push fastlane/metadata → App Store Connect
+#   bundle exec fastlane store_metadata        # push metadata to BOTH platform versions
+#   bundle exec fastlane store_metadata platform:visionos
 #   bundle exec fastlane store_screenshots     # push fastlane/screenshots → App Store Connect
 #
 # The Xcode project is XcodeGen-generated: every lane regenerates it first, so
@@ -145,15 +146,21 @@ lane :beta do |options|
   end
 end
 
-desc "Push fastlane/metadata (App Info copy, review notes) to App Store Connect. Uploads no binary, no screenshots."
-lane :store_metadata do
-  deliver(
-    api_key: asc_api_key,
-    skip_binary_upload: true,
-    skip_screenshots: true,
-    force: true,                             # skip the HTML preview prompt (CI-friendly)
-    precheck_include_in_app_purchases: false, # API-key auth cannot precheck IAP
-  )
+desc "Push fastlane/metadata to App Store Connect. platform:ios|visionos or omit for both. Uploads no binary or screenshots."
+lane :store_metadata do |options|
+  platforms = options[:platform] ? [options[:platform]] : DESTINATIONS.keys
+  platforms.each { |platform| DESTINATIONS.fetch(platform) }
+  api_key = asc_api_key
+  platforms.each do |platform|
+    deliver(
+      api_key: api_key,
+      platform: DESTINATIONS.fetch(platform)[:pilot],
+      skip_binary_upload: true,
+      skip_screenshots: true,
+      force: true,                             # skip the HTML preview prompt (CI-friendly)
+      precheck_include_in_app_purchases: false, # API-key auth cannot precheck IAP
+    )
+  end
 end
 
 desc "Push fastlane/screenshots to App Store Connect (device class inferred from pixel size)."
