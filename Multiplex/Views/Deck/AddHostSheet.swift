@@ -82,6 +82,10 @@ struct AddHostSheet: View {
                 .padding(18)
                 .frame(maxWidth: .infinity)
             }
+            // A tap on the chassis outside any field drops keyboard focus.
+            // Fields, chips, and switches claim their own taps, so this only
+            // fires on inert ground and never fights a control.
+            .onTapGesture(perform: unfocusInputs)
             .chassisSheetGround()
             .navigationTitle(editing == nil ? "Add Host" : "Host Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -617,6 +621,17 @@ struct AddHostSheet: View {
             guard let value = Int(part) else { return false }
             return (1...65535).contains(value)
         }
+    }
+
+    /// Resigns whichever field currently holds the keyboard. Routed through
+    /// the responder chain so it covers the SwiftUI fields and the
+    /// UIKit-backed secret fields alike, without threading FocusState
+    /// through every row.
+    private func unfocusInputs() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil, from: nil, for: nil
+        )
     }
 
     private func populate() {
