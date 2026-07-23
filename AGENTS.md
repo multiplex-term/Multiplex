@@ -320,8 +320,9 @@ views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5), patched
     to declare the `NIO` product it imports (Xcode 27's module resolution
     rejects the undeclared import). Also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.14.0 (rev `849e8a4`), patched five times (all marked
-    `Multiplex patch`):
+  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in seven behavior groups
+    (marked `Multiplex patch`; the obscured-tab display guards share the marker
+    on their owning state):
     `keyboardType` is settable (upstream is get-only), and Multiplex keeps it
     at `.default` so the system preserves the user's selected language and
     multistage IME instead of forcing ASCII input; pans scroll the *remote*
@@ -336,7 +337,14 @@ views.
     triple-tap mouse branches a fast re-tap lands in) — upstream only cleared
     the selection in the mouse-off single-tap path, so with mouse tracking on
     the tap went to the remote as a click and the highlight was uncancellable
-    by touch; and on iOS-app-on-Mac ("Designed for iPad") hardware
+    by touch; UIKit marked text stays local in a caret-anchored overlay until
+    commit, with honest candidate-window geometry and cleanup across reset,
+    deletion, detach, and font/caret changes — this is merged with 1.15.0's
+    upstream Korean resyllabification transaction, not a replacement for it;
+    fully obscured tabs keep parsing incoming bytes and updating scrollback but
+    suppress UIKit, accessibility, and Metal invalidations until they become
+    visible, when one full refresh catches the view up; and on iOS-app-on-Mac
+    ("Designed for iPad") hardware
     Escape is claimed by a priority no-op `UIKeyCommand` on iOS-app-on-Mac,
     preventing the Mac text system's default `cancelOperation:` from resigning
     terminal/window focus while SwiftTerm's normal `pressesBegan` path sends
@@ -347,7 +355,7 @@ views.
     (`wantsPriorityOverSystemBehavior` included) ever run. The bridge sends the
     control byte (kitty-encoded when enhancement flags are on) to the
     first-responder TerminalView in the key window and never installs on real
-    iPads. Upstream 1.14.0 now encodes UIKit taps as xterm button 0
+    iPads. Upstream 1.15.0 encodes UIKit taps as xterm button 0
     (primary/left), so that former Multiplex patch was retired. Sample apps
     trimmed.
   - When bumping either, re-apply the patches and diff before trusting it.

@@ -7,9 +7,10 @@ options:
     visionOS: "1.0"
 
 packages:
-  # Vendored 1.14.0 (rev 849e8a4, MIT). Multiplex keeps keyboardType settable
+  # Vendored 1.15.0 (rev dd2fb8a, MIT). Multiplex keeps keyboardType settable
   # and `.default` for multilingual/IME input, routes pans to remote scrolling
-  # and copy mode, and preserves iOS-app-on-Mac Escape and hardware Ctrl chords.
+  # and copy mode, suppresses obscured-tab redraws, keeps UIKit composition
+  # visible, and preserves iOS-app-on-Mac Escape and hardware Ctrl chords.
   # Primary-button tap reporting is upstream as of this release.
   SwiftTerm:
     path: Vendor/SwiftTerm

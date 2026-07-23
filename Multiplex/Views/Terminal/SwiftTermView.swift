@@ -234,6 +234,10 @@ struct SwiftTermView: UIViewRepresentable {
         view.nativeForegroundColor = UIColor(theme.foreground)
         view.caretColor = UIColor(theme.cursor)
         view.selectedTextBackgroundColor = UIColor(theme.cursor).withAlphaComponent(0.3)
+        // SwiftTerm 1.15 adds an explicit selected-text foreground whose
+        // upstream default is black. Preserve the theme's former text color,
+        // especially for dark terminal surfaces.
+        view.selectedTextForegroundColor = UIColor(theme.foreground)
         if theme.isValid {
             view.installColors(theme.ansi.map { color in
                 SwiftTerm.Color(
