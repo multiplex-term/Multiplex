@@ -107,9 +107,40 @@ actor TailscaleTunnel {
         }
 
         return try await Self.performBlocking(on: ffiQueue) {
-            let stream = try Self.connect(device: device, hostname: hostname, port: port)
+            let stream = try Self.connectWithRetry(device: device, hostname: hostname, port: port)
             return TailscaleHandleRemote(stream: stream)
         }
+    }
+
+    /// tailscale-rs establishes its DERP underlay (the only data path today)
+    /// asynchronously after the netmap arrives, and the C ABI exposes no
+    /// "underlay ready" signal — only `ts_ipv4_addr`, which unblocks at the
+    /// netmap. So an early dial can fail with "no region stored in multiderp,
+    /// no underlay route" / connection reset before a DERP region's transport
+    /// registers. Retry with backoff so that transient window self-heals;
+    /// bounded so a genuinely unroutable peer still fails in reasonable time.
+    private static func connectWithRetry(
+        device: OpaquePointer,
+        hostname: String,
+        port: Int
+    ) throws -> OpaquePointer {
+        let maxAttempts = 8
+        let backoffMicroseconds: useconds_t = 900_000
+        var lastError: Error = TailscaleTunnelFailure(
+            message: "Tailscale couldn't reach \(hostname):\(port)."
+        )
+        for attempt in 1...maxAttempts {
+            do {
+                return try connect(device: device, hostname: hostname, port: port)
+            } catch {
+                lastError = error
+                logger.debug("tailnet dial attempt \(attempt)/\(maxAttempts) failed: \(error.localizedDescription, privacy: .public)")
+                if attempt < maxAttempts {
+                    usleep(backoffMicroseconds)
+                }
+            }
+        }
+        throw lastError
     }
 
     static func loadConfiguration() async -> Configuration {
