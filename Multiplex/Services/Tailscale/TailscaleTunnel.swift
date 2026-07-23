@@ -344,13 +344,34 @@ actor TailscaleTunnel {
                 throw TailscaleTunnelFailure(message: "Couldn't form tailnet address for \(name).")
             }
         }
-        guard ts_sockaddr_set_port(&addr, UInt16(port)) == 0 else {
-            throw TailscaleTunnelFailure(message: "Invalid port \(port).")
-        }
+        // ts_parse_ip fills the address with port 0, and the ffi's
+        // ts_sockaddr_set_port is a no-op (it mutates a by-value copy of the
+        // union field, upstream bug at net_types.rs:361/365). Write the port
+        // directly, host byte order (the ffi and its examples use host order:
+        // tcp_echo.c sets .sin_port = 1234 and prints it with %u).
+        try setPort(UInt16(port), on: &addr)
         guard let stream = ts_tcp_connect(device, &addr) else {
             throw TailscaleTunnelFailure(message: "Tailscale couldn't reach \(hostname):\(port).")
         }
         return stream
+    }
+
+    /// TS_AF_INET / TS_AF_INET6 (tailscale.h) — the ffi's own family values,
+    /// not the platform's AF_INET (which differs).
+    private static let tsAFInet: UInt16 = 2
+    private static let tsAFInet6: UInt16 = 23
+
+    private static func setPort(_ port: UInt16, on addr: inout ts_sockaddr) throws {
+        switch addr.sa_family {
+        case tsAFInet:
+            addr.sa_data.sockaddr_in.sin_port = port
+        case tsAFInet6:
+            addr.sa_data.sockaddr_in6.sin6_port = port
+        default:
+            throw TailscaleTunnelFailure(
+                message: "Unsupported tailnet address family \(addr.sa_family)."
+            )
+        }
     }
 
     private static func readIPs(device: OpaquePointer) -> [String] {
