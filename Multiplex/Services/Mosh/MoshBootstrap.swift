@@ -2,6 +2,7 @@ import Foundation
 
 enum MoshBootstrapError: Error {
     case dnsFailure
+    case tailscaleIncompatible
     case sshFailed(String)
     case serverFailed(String)
 
@@ -9,6 +10,8 @@ enum MoshBootstrapError: Error {
         switch self {
         case .dnsFailure:
             "Couldn't resolve \(host.hostname)."
+        case .tailscaleIncompatible:
+            "mosh can't run over the embedded Tailscale connection — turn one of them off."
         case .sshFailed(let detail):
             "Couldn't reach \(host.name) to start mosh (\(detail))."
         case .serverFailed(let detail):
@@ -138,6 +141,9 @@ enum MoshBootstrap {
     // MARK: - The bootstrap itself
 
     static func start(host: Host, secrets: HostSecrets, remoteCommand: String?) async throws -> Target {
+        guard !(host.useTailscale && host.useMosh) else {
+            throw MoshBootstrapError.tailscaleIncompatible
+        }
         let addresses = resolve(host.hostname)
         guard !addresses.isEmpty else { throw MoshBootstrapError.dnsFailure }
 

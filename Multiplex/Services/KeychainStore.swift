@@ -3,9 +3,10 @@ import Security
 
 /// Minimal Keychain wrapper. Every item is written as *synchronizable*, so
 /// iCloud Keychain carries it to the user's other devices — end-to-end
-/// encrypted, no entitlement or CloudKit container required. Two item
+/// encrypted, no entitlement or CloudKit container required. Three item
 /// families share the same primitives:
 ///   - per-host secrets (password / private key / passphrase)
+///   - the app-wide Tailscale auth key, under a fixed namespace UUID
 ///   - mirrored host records: the non-secret `Host` JSON, one item per host,
 ///     which is how the host list itself crosses devices
 ///
@@ -20,6 +21,7 @@ enum KeychainStore {
         case password
         case privateKey
         case keyPassphrase
+        case tailscaleAuthKey
     }
 
     private static func account(_ hostID: UUID, _ kind: Kind) -> String {

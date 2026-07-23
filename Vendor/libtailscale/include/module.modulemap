@@ -1,0 +1,4 @@
+module CLibTailscale {
+    header "tailscale.h"
+    export *
+}

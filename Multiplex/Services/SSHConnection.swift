@@ -2,6 +2,7 @@ import Citadel
 import Crypto
 import Foundation
 import NIOCore
+import NIOPosix
 import NIOSSH
 
 /// A passphrase entered from the connection-time prompt. Every connection to
@@ -158,6 +159,7 @@ enum SSHConnectionError: Error {
     case keyPassphraseRequired
     case incorrectKeyPassphrase
     case unsupportedKey
+    case tailscaleUnavailable
     case connectFailed(String)
     case notConnected
 
@@ -165,7 +167,9 @@ enum SSHConnectionError: Error {
         switch self {
         case .keyPassphraseRequired: .required
         case .incorrectKeyPassphrase: .incorrect
-        case .missingCredentials, .unsupportedKey, .connectFailed, .notConnected: nil
+        case .missingCredentials, .unsupportedKey, .tailscaleUnavailable,
+             .connectFailed, .notConnected:
+            nil
         }
     }
 
@@ -179,6 +183,8 @@ enum SSHConnectionError: Error {
             "The passphrase didn't unlock the private key for \(host.name). Try again."
         case .unsupportedKey:
             "The private key for \(host.name) couldn't be read. Paste an OpenSSH ed25519 or RSA key."
+        case .tailscaleUnavailable:
+            "Tailscale connections aren't available on this device (Vision Pro)."
         case .connectFailed(let detail):
             "Couldn't reach \(host.name) (\(detail))."
         case .notConnected:
@@ -270,11 +276,52 @@ actor SSHConnection {
             task = inFlight
             generation = connectGeneration
         } else {
+            #if !canImport(CLibTailscale)
+            if host.useTailscale {
+                throw SSHConnectionError.tailscaleUnavailable
+            }
+            #endif
             let method = try Self.makeAuthenticationMethod(host: host, secrets: secrets)
             connectGeneration &+= 1
             generation = connectGeneration
             task = Task {
-                try await SSHClient.connect(
+                if host.useTailscale {
+                    #if canImport(CLibTailscale)
+                    let settings = SSHClientSettings(
+                        host: host.hostname,
+                        port: host.port,
+                        authenticationMethod: { method },
+                        hostKeyValidator: .acceptAnything()
+                    )
+                    let descriptor = try await TailscaleTunnel.shared.dial(
+                        hostname: host.hostname,
+                        port: host.port
+                    )
+                    // NIO owns the descriptor from this call onward, including
+                    // channel-initialization failure paths.
+                    let channel = try await ClientBootstrap(
+                        group: MultiThreadedEventLoopGroup.singleton
+                    )
+                    .withConnectedSocket(descriptor)
+                    .get()
+                    do {
+                        // This overload waits for Citadel's authenticated
+                        // handshake and hands the same inbound handler to the
+                        // resulting session.
+                        return try await SSHClient.connect(
+                            on: channel,
+                            settings: settings
+                        )
+                    } catch {
+                        try? await channel.close()
+                        throw error
+                    }
+                    #else
+                    throw SSHConnectionError.tailscaleUnavailable
+                    #endif
+                }
+
+                return try await SSHClient.connect(
                     host: host.hostname,
                     port: host.port,
                     authenticationMethod: method,
