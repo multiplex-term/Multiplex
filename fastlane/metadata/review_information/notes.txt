@@ -15,9 +15,9 @@ CORE FLOW
 - DETACH closes the window; tmux keeps the session running, so its tile stays on the wall.
 
 AGENT FEATURES (Pro)
-- Multiplex Pro is a one-time in-app purchase; in the review environment it completes as a sandbox transaction at no charge (the strip's PRO pill or Settings opens the paywall). The free tier also includes a small daily allowance of command-chip taps, so the strip is demonstrable without purchasing.
+- Multiplex Pro is a one-time in-app purchase; during review it completes as a sandbox transaction at no charge (the strip's PRO pill or Settings opens the paywall). The free tier also includes a small daily allowance of command-chip taps, so the strip is demonstrable without purchasing.
 - The session named "agent" runs simulated CLI coding agents — stub processes that reproduce the Claude Code, Codex, and Pi terminal signatures, so detection is reproducible during review. Real installs use the same detection and helper paths.
-- Its tile carries an agent glyph. Attach, and the command strip appears at the bottom of the window; tapping a chip types that command into the session (you'll see it echoed). MORE → Customize Commands opens Command Setup for the current host: expand Built-in to give each stock command an explicit Bar/More choice. Custom rows can be reordered or deleted, content can span multiple lines, Submit decides whether a tap also sends Return, Bar controls placement, and Shared keeps that command available in Claude Code, Codex, and Pi on this host. Another host retains its own setup, and iCloud Keychain carries that setup with the host to the user's other devices.
+- Its tile carries an agent glyph. Attach, and the command strip appears at the bottom of the window; tapping a chip types that command into the session (you'll see it echoed). MORE → Customize Commands opens Command Setup for the current host: expand Built-in to give each stock command an explicit Bar/More choice. Custom rows can be reordered or deleted, content can span multiple lines, Submit decides whether a tap also sends Return, Bar controls placement, and Shared keeps that command available in Claude Code, Codex, and Pi on this host. Each host keeps its own setup, and iCloud Keychain syncs it to the user's other devices.
 - Notifications permission is requested only to alert you when Claude Code or Codex finishes or asks something while its window isn't focused (Settings → AGENT ALERTS). Optional.
 
 MOSH (Pro)
@@ -28,4 +28,4 @@ PERMISSIONS
 - Local Network: requested only when a host address is on the local network. The demo host is on the public internet, so you may never see this prompt.
 - Notifications: agent alerts, as above.
 
-The demo server is an isolated VM provisioned only for App Review: the account is unprivileged and its outbound traffic is firewalled. It stays online for the entire review period — if it is ever unreachable, contact the email in this app's review contact and it will be fixed within hours.
+The demo server is an isolated VM provisioned only for App Review: the account is unprivileged and its outbound traffic is firewalled. It stays online for the entire review period — if it is ever unreachable, contact the review email and it will be fixed within hours.
