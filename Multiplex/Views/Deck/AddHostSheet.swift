@@ -22,6 +22,11 @@ struct AddHostSheet: View {
     @State private var passphrase = ""
     @State private var useMosh = false
     @State private var useTailscale = false
+    #if canImport(CLibTailscale)
+    /// nil until the keychain read lands, so the missing-key tip never
+    /// flashes during load.
+    @State private var tailscaleAuthKeyConfigured: Bool?
+    #endif
     @State private var moshServerPath = ""
     @State private var moshPorts = ""
     @State private var workingDirs: [WorkingDir] = []
@@ -222,6 +227,22 @@ struct AddHostSheet: View {
     }
 
     private var transportSection: some View {
+        transportSectionBody
+            #if canImport(CLibTailscale)
+            // Re-reads on every toggle flip: the sheet and Settings are
+            // never open at once, so toggle-on is the freshest moment.
+            .task(id: useTailscale) {
+                guard useTailscale else { return }
+                let configuration = await TailscaleTunnel.loadConfiguration()
+                guard !Task.isCancelled else { return }
+                tailscaleAuthKeyConfigured = !configuration.authKey
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty
+            }
+            #endif
+    }
+
+    private var transportSectionBody: some View {
         TallyFormSection("Transport", detail: transportDetail) {
             #if canImport(CLibTailscale)
             TallyFormBoolField(
@@ -229,6 +250,14 @@ struct AddHostSheet: View {
                 isOn: tailscaleToggle,
                 accessibilityHint: "Routes this host's SSH connection through the embedded Tailscale node"
             )
+            if useTailscale, tailscaleAuthKeyConfigured == false {
+                TallyFormRow {
+                    Text("No Tailscale auth key is set yet — add a reusable one in Settings › Tailscale, or this host can't connect.")
+                        .font(.ui(10))
+                        .foregroundStyle(Theme.caution)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             #else
             TallyFormBoolField(
                 "Connect via Tailscale",

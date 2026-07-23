@@ -134,7 +134,7 @@ targets:
         "SWIFT_INCLUDE_PATHS[sdk=iphoneos*]": "$(SRCROOT)/Vendor/libtailscale/include"
         "SWIFT_INCLUDE_PATHS[sdk=iphonesimulator*]": "$(SRCROOT)/Vendor/libtailscale/include"
         "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]": "$(SRCROOT)/Vendor/libtailscale/lib/ios-arm64"
-        "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]": "$(SRCROOT)/Vendor/libtailscale/lib/ios-arm64-simulator"
+        "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]": "$(SRCROOT)/Vendor/libtailscale/lib/ios-simulator"
         "OTHER_LDFLAGS[sdk=iphoneos*]": "$(inherited) -ltailscale"
         "OTHER_LDFLAGS[sdk=iphonesimulator*]": "$(inherited) -ltailscale"
         # One target produces the universal iOS binary (iPhone + iPad) and the

@@ -22,8 +22,9 @@ visionOS build never links this and the feature is compiled out there
 
 - `include/tailscale.h` — the hand-written public C API from the pinned
   commit (verbatim). `include/module.modulemap` wraps it as `CLibTailscale`.
-- `lib/ios-arm64/libtailscale.a`, `lib/ios-arm64-simulator/libtailscale.a`
-  — **git-ignored** (~27 MB each). Rebuild them with:
+- `lib/ios-arm64/libtailscale.a` (device), `lib/ios-simulator/libtailscale.a`
+  (universal arm64 + x86_64 — Release simulator builds link both slices)
+  — **git-ignored** (~27-54 MB each). Rebuild them with:
 
 ```sh
 ./Tools/build-libtailscale.sh

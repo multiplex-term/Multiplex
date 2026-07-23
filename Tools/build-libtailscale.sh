@@ -23,18 +23,26 @@ if ! cmp -s "$WORK/tailscale.h" "$VENDOR/include/tailscale.h"; then
     exit 1
 fi
 
-make -C "$WORK" libtailscale_ios.a libtailscale_ios_sim_arm64.a
+# The simulator archive must be UNIVERSAL (arm64 + x86_64): a Release
+# simulator build sets ONLY_ACTIVE_ARCH=NO and links both slices.
+make -C "$WORK" libtailscale_ios.a libtailscale_ios_sim_arm64.a libtailscale_ios_sim_x86_64.a
+lipo -create -output "$WORK/libtailscale_ios_sim.a" \
+    "$WORK/libtailscale_ios_sim_x86_64.a" "$WORK/libtailscale_ios_sim_arm64.a"
 
-mkdir -p "$VENDOR/lib/ios-arm64" "$VENDOR/lib/ios-arm64-simulator"
+mkdir -p "$VENDOR/lib/ios-arm64" "$VENDOR/lib/ios-simulator"
 cp "$WORK/libtailscale_ios.a" "$VENDOR/lib/ios-arm64/libtailscale.a"
-cp "$WORK/libtailscale_ios_sim_arm64.a" "$VENDOR/lib/ios-arm64-simulator/libtailscale.a"
+cp "$WORK/libtailscale_ios_sim.a" "$VENDOR/lib/ios-simulator/libtailscale.a"
 
-for slice in ios-arm64 ios-arm64-simulator; do
+for slice in ios-arm64 ios-simulator; do
     if ! nm -gU "$VENDOR/lib/$slice/libtailscale.a" 2>/dev/null | grep -q _tailscale_dial; then
         echo "error: $slice archive is missing _tailscale_dial" >&2
         exit 1
     fi
 done
+lipo -info "$VENDOR/lib/ios-simulator/libtailscale.a" | grep -q x86_64 || {
+    echo "error: simulator archive is not universal" >&2
+    exit 1
+}
 
 echo "Installed:"
-ls -l "$VENDOR/lib/ios-arm64/libtailscale.a" "$VENDOR/lib/ios-arm64-simulator/libtailscale.a"
+ls -l "$VENDOR/lib/ios-arm64/libtailscale.a" "$VENDOR/lib/ios-simulator/libtailscale.a"
