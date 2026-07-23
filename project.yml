@@ -131,6 +131,22 @@ targets:
         PRODUCT_NAME: Multiplex
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "202607181"
+        # tailscale-rs C ABI, linked per SDK — including the xros SDKs, which
+        # is the whole point vs the Go path (Rust has an aarch64-apple-visionos
+        # target; Go does not). Archives are git-ignored; rebuild with
+        # Tools/build-tailscale-rs.sh.
+        "SWIFT_INCLUDE_PATHS[sdk=iphoneos*]": "$(SRCROOT)/Vendor/tailscale-rs/include"
+        "SWIFT_INCLUDE_PATHS[sdk=iphonesimulator*]": "$(SRCROOT)/Vendor/tailscale-rs/include"
+        "SWIFT_INCLUDE_PATHS[sdk=xros*]": "$(SRCROOT)/Vendor/tailscale-rs/include"
+        "SWIFT_INCLUDE_PATHS[sdk=xrsimulator*]": "$(SRCROOT)/Vendor/tailscale-rs/include"
+        "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]": "$(SRCROOT)/Vendor/tailscale-rs/lib/ios-arm64"
+        "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]": "$(SRCROOT)/Vendor/tailscale-rs/lib/ios-simulator"
+        "LIBRARY_SEARCH_PATHS[sdk=xros*]": "$(SRCROOT)/Vendor/tailscale-rs/lib/xros-arm64"
+        "LIBRARY_SEARCH_PATHS[sdk=xrsimulator*]": "$(SRCROOT)/Vendor/tailscale-rs/lib/xros-simulator"
+        "OTHER_LDFLAGS[sdk=iphoneos*]": "$(inherited) -ltailscalers -framework CoreFoundation -liconv"
+        "OTHER_LDFLAGS[sdk=iphonesimulator*]": "$(inherited) -ltailscalers -framework CoreFoundation -liconv"
+        "OTHER_LDFLAGS[sdk=xros*]": "$(inherited) -ltailscalers -framework CoreFoundation -liconv"
+        "OTHER_LDFLAGS[sdk=xrsimulator*]": "$(inherited) -ltailscalers -framework CoreFoundation -liconv"
         # One target produces the universal iOS binary (iPhone + iPad) and the
         # separate visionOS binary. Fastlane archives Release, so family 1 must
         # live in the base setting rather than in a Debug-only override.
