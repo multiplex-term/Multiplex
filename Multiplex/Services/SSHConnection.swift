@@ -158,6 +158,7 @@ enum SSHConnectionError: Error {
     case keyPassphraseRequired
     case incorrectKeyPassphrase
     case unsupportedKey
+    case tailscaleUnavailable
     case connectFailed(String)
     case notConnected
 
@@ -165,7 +166,9 @@ enum SSHConnectionError: Error {
         switch self {
         case .keyPassphraseRequired: .required
         case .incorrectKeyPassphrase: .incorrect
-        case .missingCredentials, .unsupportedKey, .connectFailed, .notConnected: nil
+        case .missingCredentials, .unsupportedKey, .tailscaleUnavailable,
+             .connectFailed, .notConnected:
+            nil
         }
     }
 
@@ -179,6 +182,8 @@ enum SSHConnectionError: Error {
             "The passphrase didn't unlock the private key for \(host.name). Try again."
         case .unsupportedKey:
             "The private key for \(host.name) couldn't be read. Paste an OpenSSH ed25519 or RSA key."
+        case .tailscaleUnavailable:
+            "Tailscale connections aren't available on this device (Vision Pro)."
         case .connectFailed(let detail):
             "Couldn't reach \(host.name) (\(detail))."
         case .notConnected:
@@ -270,11 +275,47 @@ actor SSHConnection {
             task = inFlight
             generation = connectGeneration
         } else {
+            #if !canImport(CLibTailscale)
+            if host.useTailscale {
+                throw SSHConnectionError.tailscaleUnavailable
+            }
+            #endif
             let method = try Self.makeAuthenticationMethod(host: host, secrets: secrets)
             connectGeneration &+= 1
             generation = connectGeneration
             task = Task {
-                try await SSHClient.connect(
+                if host.useTailscale {
+                    #if canImport(CLibTailscale)
+                    let descriptor = try await TailscaleTunnel.shared.dial(
+                        hostname: host.hostname,
+                        port: host.port
+                    )
+                    // Citadel's channel-injection overload asserts
+                    // inEventLoop in its synchronous prefix, so the dialed
+                    // fd is spliced through a one-shot localhost relay and
+                    // Citadel dials it via its ordinary bootstrap. The
+                    // relay tears itself down when either side closes, so
+                    // the client's own close() is its lifetime owner.
+                    let relay = TailscaleLoopbackRelay()
+                    let relayPort = try relay.start(spliceTo: descriptor)
+                    do {
+                        return try await SSHClient.connect(
+                            host: "127.0.0.1",
+                            port: Int(relayPort),
+                            authenticationMethod: method,
+                            hostKeyValidator: .acceptAnything(),
+                            reconnect: .never
+                        )
+                    } catch {
+                        relay.close()
+                        throw error
+                    }
+                    #else
+                    throw SSHConnectionError.tailscaleUnavailable
+                    #endif
+                }
+
+                return try await SSHClient.connect(
                     host: host.hostname,
                     port: host.port,
                     authenticationMethod: method,

@@ -14,6 +14,10 @@ xcuserdata/
 # Dev harness artifacts (generated keys, sshd runtime state)
 Tools/dev-sshd/state/
 
+# Vendored libtailscale static archives (~27 MB each) — rebuild with
+# Tools/build-libtailscale.sh; the header/modulemap stay tracked
+Vendor/libtailscale/lib/
+
 local-plan/
 
 # fastlane — generated reports and local secrets (see fastlane/SETUP.md)

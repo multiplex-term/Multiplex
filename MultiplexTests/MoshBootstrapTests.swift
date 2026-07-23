@@ -101,4 +101,37 @@ final class MoshBootstrapTests: XCTestCase {
         XCTAssertEqual(v4.datagramBudget, 1252 - 28)
         XCTAssertEqual(v6.datagramBudget, 1216 - 28)
     }
+
+    func testRejectsEmbeddedTailscaleBeforeBootstrap() async {
+        var host = Host(
+            name: "devbox",
+            hostname: "unresolvable.invalid",
+            username: "dev"
+        )
+        host.useMosh = true
+        host.useTailscale = true
+
+        do {
+            _ = try await MoshBootstrap.start(
+                host: host,
+                secrets: HostSecrets(
+                    password: nil,
+                    privateKey: nil,
+                    passphrase: nil
+                ),
+                remoteCommand: nil
+            )
+            XCTFail("Expected the mutually exclusive transports to fail")
+        } catch let error as MoshBootstrapError {
+            guard case .tailscaleIncompatible = error else {
+                return XCTFail("Expected tailscale incompatibility, got \(error)")
+            }
+            XCTAssertEqual(
+                error.userMessage(host: host),
+                "mosh can't run over the embedded Tailscale connection — turn one of them off."
+            )
+        } catch {
+            XCTFail("Expected MoshBootstrapError, got \(error)")
+        }
+    }
 }

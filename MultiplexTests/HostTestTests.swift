@@ -60,6 +60,20 @@ final class HostTestTests: XCTestCase {
             "Paste a private key first.")
     }
 
+    func testVisionOSTailscaleFailureIsSpecific() {
+        XCTAssertEqual(
+            SSHConnectionError.tailscaleUnavailable.userMessage(host: host()),
+            "Tailscale connections aren't available on this device (Vision Pro)."
+        )
+        XCTAssertEqual(
+            HostTest.failureMessage(
+                for: SSHConnectionError.tailscaleUnavailable,
+                host: host()
+            ),
+            "Tailscale connections aren't available on this device (Vision Pro)."
+        )
+    }
+
     func testEncryptedKeyFailuresAskForThePassphrase() {
         XCTAssertEqual(
             HostTest.failureMessage(
