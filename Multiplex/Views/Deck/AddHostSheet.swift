@@ -16,6 +16,9 @@ struct AddHostSheet: View {
     @State private var authMethod: Host.AuthMethod = .password
     @State private var password = ""
     @State private var privateKey = ""
+    /// Editing an existing host opens with the stored key hidden; a tap on
+    /// the field swaps in the editor. Add mode always shows the editor.
+    @State private var privateKeyConcealed = false
     @State private var passphrase = ""
     @State private var useMosh = false
     @State private var moshServerPath = ""
@@ -164,15 +167,38 @@ struct AddHostSheet: View {
                 }
             case .privateKey:
                 TallyFormField("Private key") {
-                    TextField(
-                        "BEGIN OPENSSH PRIVATE KEY",
-                        text: $privateKey,
-                        axis: .vertical
-                    )
-                    .lineLimit(4...8)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .textContentType(.init(rawValue: ""))
+                    if privateKeyConcealed {
+                        // The stored key must not paint on screen just for
+                        // opening Host Settings. Fixed-count bullets so the
+                        // mask leaks nothing, not even the key's size; the
+                        // binding still holds the key, so Save and Test work
+                        // without ever revealing it.
+                        Button {
+                            privateKeyConcealed = false
+                        } label: {
+                            HStack(spacing: 12) {
+                                Text(String(repeating: "\u{2022}", count: 8))
+                                Spacer(minLength: 12)
+                                ChassisLabel("EDIT", size: 8, color: Theme.signal2)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .chassisHover(2)
+                        .accessibilityLabel("Edit private key")
+                        .accessibilityHint("Shows the saved key")
+                    } else {
+                        TextField(
+                            "BEGIN OPENSSH PRIVATE KEY",
+                            text: $privateKey,
+                            axis: .vertical
+                        )
+                        .lineLimit(4...8)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .textContentType(.init(rawValue: ""))
+                    }
                 }
                 TallyFormField("Passphrase") {
                     RevealableSecureField("Passphrase", prompt: "Optional", text: $passphrase)
@@ -649,6 +675,7 @@ struct AddHostSheet: View {
         password = KeychainStore.get(for: host.id, kind: .password) ?? ""
         privateKey = KeychainStore.get(for: host.id, kind: .privateKey) ?? ""
         passphrase = KeychainStore.get(for: host.id, kind: .keyPassphrase) ?? ""
+        privateKeyConcealed = !privateKey.isEmpty
     }
 
     /// The form's current values as a Host record — what Save persists and
