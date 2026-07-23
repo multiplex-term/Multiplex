@@ -12,6 +12,7 @@ struct MultiplexApp: App {
     @State private var attention: AttentionCenter
     @State private var localNetworkAccess = LocalNetworkAccessMonitor()
     @State private var networkChanges = NetworkChangeMonitor()
+    @State private var appLock = AppLockStore()
     private var externalActions: ExternalActionRouter { .shared }
 
     init() {
@@ -152,7 +153,12 @@ struct MultiplexApp: App {
             .environment(localNetworkAccess)
             .environment(networkChanges)
             .environment(externalActions)
+            .environment(appLock)
             .modifier(ExternalActionReceiver(router: externalActions))
+            // The lock veil sits inside PlatformChrome so it follows the
+            // pinned appearance, and outside everything else so it covers
+            // deck and terminal content alike.
+            .modifier(AppLockGate(lock: appLock))
             .modifier(PlatformChrome(themes: themes))
     }
 }

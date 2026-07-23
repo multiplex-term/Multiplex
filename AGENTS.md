@@ -104,6 +104,13 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   agent:cc 'Select login method:' Enter` — cat echoes it) into the
   harness's fake Claude pane and the rail tip renders without a genuinely
   locked keychain.
+- `MULTIPLEX_APP_LOCK=1|held` — starts this launch behind the app-lock veil
+  regardless of the persisted setting (never persisted, like
+  `MULTIPLEX_PRO_LOCKED`). `1` keeps the real authenticator — the veil's
+  automatic attempt presents the system unlock sheet (the sim shows its
+  device-passcode prompt) — while `held` refuses every attempt so the veil
+  itself can be captured. The shipping toggle lives in Settings → App lock
+  (`AppLockStore`).
 - `MULTIPLEX_FORCE_SHELL=1|0` — DEBUG-only override for the single-window
   shell decision. `1` forces the real shell on and `0` forces classic
   multi-window mode on any device. Without an override, iPhone always uses
@@ -246,6 +253,13 @@ SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
                      builders and parsers (pure, unit-tested)
     AgentSignature   classifies a pane's CLI agent (Claude Code / Codex / Pi) from
                      probe output; command sets for the helper strip (pure)
+  AppLockStore       optional Face/Touch/Optic ID app lock (device-local
+                     UserDefaults, free): locks at launch and on
+                     didEnterBackground (never resign-active — the biometric
+                     prompt itself resigns); `AppLockGate` veils every scene
+                     root and flips `TerminalFocusArbiter.inputSuppressed`
+                     so no responder survives behind the veil; a
+                     passcode-less device fails OPEN (lockout is worse)
   EntitlementStore   the Pro gate — StoreKit 2 non-consumable ownership,
                      purchase/restore, transaction updates, and the
                      device-local daily agent-helper meter; an injected

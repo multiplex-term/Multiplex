@@ -22,6 +22,19 @@ enum TerminalFocusArbiter {
     private static var keyboardVisible = false
     private static var observersInstalled = false
 
+    /// While the app lock veil covers every scene, no terminal may hold or
+    /// acquire the app-wide input session: an overlay does not stop
+    /// hardware keystrokes from reaching a first responder, and
+    /// foregrounding restoration would otherwise re-summon one behind the
+    /// veil. Setting this releases the current owner; `claim`/`restore`
+    /// refuse while it holds. `AppLockGate` is the only writer.
+    static var inputSuppressed = false {
+        didSet {
+            guard inputSuppressed, let owner = current else { return }
+            release(owner)
+        }
+    }
+
     #if DEBUG
     private static let keyboardLogger = Logger(
         subsystem: "app.multiplexterm.multiplex",
@@ -31,6 +44,7 @@ enum TerminalFocusArbiter {
 
     /// Move keyboard focus to this terminal. No-op if it already has it.
     static func claim(_ view: TerminalView) {
+        guard !inputSuppressed else { return }
         installObserversIfNeeded()
         // Stage Manager can transiently clear `isKeyWindow` while the user
         // moves that very window. The terminal still owns the live input
@@ -111,6 +125,9 @@ enum TerminalFocusArbiter {
     /// foregrounding. In the disallowed case, resign even if UIKit restored
     /// the responder after the arbiter owner had already been cleared.
     static func restore(_ view: TerminalView, allowed: Bool) {
+        // A locked app treats every restoration as a hidden-stage refusal:
+        // resign whatever UIKit brought back rather than merely ignoring it.
+        let allowed = allowed && !inputSuppressed
         guard allowed else {
             #if DEBUG
             keyboardLogger.debug("kbd-focus-restore-refused hiddenStage=true")

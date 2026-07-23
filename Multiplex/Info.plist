@@ -35,6 +35,8 @@
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Multiplex uses the camera only when you take a photo to send to your remote SSH session.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Multiplex unlocks with Face ID when the optional App Lock setting is turned on.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Multiplex connects to SSH hosts on your local network.</string>
 	<key>UIApplicationSceneManifest</key>

@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(ThemeStore.self) private var themes
     @Environment(EntitlementStore.self) private var entitlements
     @Environment(AttentionCenter.self) private var attention
+    @Environment(AppLockStore.self) private var appLock
     @Environment(\.dismiss) private var dismiss
     /// The resolved chassis appearance — theme rows select into this
     /// appearance's slot, so the sheet always edits what's on screen.
@@ -25,6 +26,7 @@ struct SettingsView: View {
                     builtInThemesSection
                     customThemesSection
                     alertsSection
+                    appLockSection
                     proSection
                 }
                 .frame(maxWidth: 680)
@@ -196,6 +198,28 @@ struct SettingsView: View {
                     attention.alertsEnabled = enabled
                 }
             }
+        )
+    }
+
+    private var appLockSection: some View {
+        TallyFormSection(
+            "App lock",
+            detail: "Require \(AppLockStore.methodName) when Multiplex opens or returns from the background. The deck and every terminal stay covered until you authenticate; connections and the wall keep running. This device only."
+        ) {
+            TallyFormBoolField(
+                "Require \(AppLockStore.methodName)",
+                isOn: appLockBinding,
+                accessibilityHint: "Locks the app behind \(AppLockStore.methodName)"
+            )
+        }
+    }
+
+    /// Enabling authenticates first (`AppLockStore.setEnabled`), so the
+    /// switch reflects the store's decision, never the tap's optimism.
+    private var appLockBinding: Binding<Bool> {
+        Binding(
+            get: { appLock.isEnabled },
+            set: { enabled in Task { await appLock.setEnabled(enabled) } }
         )
     }
 

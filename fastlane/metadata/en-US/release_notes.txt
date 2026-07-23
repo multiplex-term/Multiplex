@@ -13,3 +13,4 @@ Multiplex 1.0 — first release.
 • Home Screen widgets — a per-host monitor and a fleet wall with last-known session frames; tap to attach a shell or launch an agent (iPadOS 17, visionOS 26)
 • Shortcuts & Siri: "Open Shell" and "Open Agent" (with working-directory and setup-script pickers plus an optional first prompt) for any host, plus a multiplex:// URL scheme for automation
 • Light & dark appearance that follows your device, a terminal theme per appearance, built-in themes, Pro custom themes, iCloud Keychain host sync
+• Optional App Lock: require Face ID, Touch ID, or Optic ID when Multiplex opens or returns from the background
