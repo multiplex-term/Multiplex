@@ -6,12 +6,13 @@ import SwiftUI
 struct UMDBar: View {
     enum Style {
         /// The visionOS classic window's title row: DECK, source label,
-        /// text size, and the session controls. KBD lives on the key
-        /// cluster below, which keeps this row short enough to stack
-        /// under the monitor.
+        /// text size, and the session controls. The keyboard toggle lives
+        /// on the key cluster below, which keeps this row short enough to
+        /// stack under the monitor.
         case regular
-        /// The single-window shell's slim full-width row — it keeps DECK,
-        /// KBD, and the font chips because the shell has no other chrome.
+        /// The single-window shell's slim full-width row — it keeps DECK
+        /// and the font chips because the shell has no other chrome; the
+        /// keyboard toggle lives on the key rail/cluster below.
         case shell
     }
 
@@ -19,7 +20,6 @@ struct UMDBar: View {
     var title: String
     var mergeSources: [TerminalWorkspace.WindowEntry]
     var showDeck: () -> Void
-    var summonKeyboard: () -> Void
     var fontDown: () -> Void
     var fontUp: () -> Void
     /// New tab: a fresh session on the active tab's host, in its pane's
@@ -146,8 +146,6 @@ struct UMDBar: View {
             statusCluster
                 .fixedSize()
             Spacer(minLength: 4)
-            ChassisChip("KBD", action: summonKeyboard)
-                .fixedSize()
             if showsDirectActions {
                 ChassisChip("A−", action: fontDown).fixedSize()
                 ChassisChip("A+", action: fontUp).fixedSize()
@@ -367,7 +365,6 @@ struct TerminalOverflowMenu: View {
         title: "agent · devbox",
         mergeSources: [],
         showDeck: {},
-        summonKeyboard: {},
         fontDown: {},
         fontUp: {},
         newSession: { _ in },
@@ -385,7 +382,6 @@ struct TerminalOverflowMenu: View {
         title: "agent",
         mergeSources: [],
         showDeck: {},
-        summonKeyboard: {},
         fontDown: {},
         fontUp: {},
         newSession: { _ in },

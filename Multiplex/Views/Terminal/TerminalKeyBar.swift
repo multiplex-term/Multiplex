@@ -130,8 +130,8 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         case .pageDown:
             click()
             terminal.send(EscapeSequences.cmdPageDown)
-        case .dismiss:
-            _ = terminal.resignFirstResponder()
+        case .keyboard:
+            TerminalFocusArbiter.toggle(terminal)
         case .showTmuxShortcuts:
             showTmuxShortcuts()
         case .tmux(let shortcut):
@@ -278,12 +278,13 @@ private enum TerminalKey {
     case text(String)
     case up, down, left, right
     case pageUp, pageDown
-    case dismiss
+    case keyboard
     case showTmuxShortcuts
     case tmux(TmuxShortcut)
 }
 
-/// The rail: modifiers left, shell symbols center, arrows + dismiss right.
+/// The rail: modifiers left, shell symbols center, arrows + keyboard toggle
+/// right.
 /// Fixed-size keys let ViewThatFits measure every tier honestly. The original
 /// iPad ladder stays first; phone tiers compact the key metric only after page
 /// keys and symbols are gone. Regular phones retain TMUX; the final 375-point
@@ -375,12 +376,12 @@ private struct KeyBarRow: View {
             arrowKey("arrow.down", .down, "Arrow down", metric: metric)
             arrowKey("arrow.right", .right, "Arrow right", metric: metric)
             Key(
-                action: { press(.dismiss) },
+                action: { press(.keyboard) },
                 width: metric.keyWidth,
                 faceHorizontalInset: metric.faceHorizontalInset,
-                accessibilityText: "Hide keyboard"
+                accessibilityText: "Show or hide keyboard"
             ) {
-                Image(systemName: "keyboard.chevron.compact.down")
+                Image(systemName: "keyboard")
                     .font(.ui(13, weight: .semibold))
             }
             if showsTmux {
@@ -625,7 +626,7 @@ import notify
 #endif
 
 /// The visionOS terminal's key cluster — ESC, a latching CTRL, TAB, the
-/// DECCKM-aware autorepeat arrows, RET, and the keyboard summon on a chassis
+/// DECCKM-aware autorepeat arrows, RET, and the keyboard toggle on a chassis
 /// slab in the window's bottom ornament. The floating visionOS keyboard has
 /// none of these keys and SwiftTerm plumbs no input accessory on visionOS,
 /// so the window's chrome carries them instead; arrows + RET are how a CLI
@@ -638,10 +639,6 @@ import notify
 /// notification to release the latch visual.
 struct TerminalKeyCluster: View {
     var controller: TerminalSessionController?
-    /// The classic window puts the keyboard summon at the cluster's trailing
-    /// edge — the slot the iPad rail gives its keyboard control. The shell
-    /// overlay passes nil; its UMD row already carries KBD.
-    var summonKeyboard: (() -> Void)? = nil
 
     @State private var ctrlLatched = false
 
@@ -651,7 +648,8 @@ struct TerminalKeyCluster: View {
         // Ornaments propose unbounded width, so a classic window always gets
         // the regular tier; the tiers exist for the (debug-forced) shell,
         // whose pane can be phone-narrow. Faces compact before any key
-        // leaves the cluster; the floor keeps the original trio plus RET.
+        // leaves the cluster; the floor keeps the original trio plus RET
+        // and the keyboard toggle — the window's only keyboard control.
         ViewThatFits(in: .horizontal) {
             row(.regular)
             row(.compact)
@@ -729,14 +727,12 @@ struct TerminalKeyCluster: View {
                 }
             }
             capsKey("RET", "Return", metric: metric) { $0.send([0x0D]) }
-            if !minimal, let summonKeyboard {
-                TerminalClusterKey(
-                    face: .icon("keyboard"),
-                    accessibility: "Show keyboard",
-                    width: metric.keyWidth,
-                    action: summonKeyboard
-                )
-            }
+            TerminalClusterKey(
+                face: .icon("keyboard"),
+                accessibility: "Show or hide keyboard",
+                width: metric.keyWidth,
+                action: { controller?.toggleKeyboard() }
+            )
         }
     }
 
@@ -863,7 +859,7 @@ enum KeyClusterDebugHook {
 }
 
 #Preview("Terminal Key Cluster") {
-    TerminalKeyCluster(controller: nil, summonKeyboard: {})
+    TerminalKeyCluster(controller: nil)
         .padding()
 }
 #endif

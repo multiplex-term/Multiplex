@@ -416,7 +416,9 @@ views.
   receive drags begun inside `TerminalView`.
 - **The iPad key rail is app-owned chrome, never an `inputAccessoryView`**:
   `TerminalKeyBar` is a TALLY rail (ESC / latching CTRL / TAB, the shell
-  symbols `~ | / -`, DECCKM-aware autorepeat arrows, dismiss) installed as a
+  symbols `~ | / -`, DECCKM-aware autorepeat arrows, and the keyboard
+  toggle — `TerminalFocusArbiter.toggle`, the app's only keyboard
+  show/hide control since the KBD chips were retired) installed as a
   normal sibling beneath `TerminalView`. A physical-iPad A/B proved that even
   assigning the custom rail to `inputAccessoryView` makes TextInputUI rehost it
   while a Stage Manager window moves, repeatedly reactivating the floating
@@ -428,14 +430,16 @@ views.
   page keys, then symbols; a 390 pt phone tier compacts keys to 40 pt while
   retaining TMUX. The final 372 pt tier drops TMUX, and the shell UMD overflow
   deliberately has no duplicate tmux entry. ESC/CTRL/TAB, all four arrows,
-  and dismiss never leave the rail.
+  and the keyboard toggle never leave the rail.
   Every key sends through `TerminalView.send` → delegate → the controller's
   ordered pump (never a side channel); CTRL rides SwiftTerm's public
   `controlModifier`, consumed by the next typed character — the bar observes
   `.terminalViewControlModifierReset` to release the latch visual. visionOS
   keeps no accessory (its keyboard floats and shows none);
   `TerminalKeyCluster` — ESC / latching CTRL / TAB, the DECCKM-aware
-  autorepeat arrows, RET, and the keyboard summon — is a chassis slab
+  autorepeat arrows, RET, and the keyboard toggle (first responder is the
+  visibility authority on visionOS, which posts no keyboard show/hide
+  notifications) — is a chassis slab
   stacked directly below the UMD row in the terminal window's bottom
   ornament, riding the same send path and latch mechanism. That ornament
   is positioned by an `alignmentGuide(VerticalAlignment.center)` override
@@ -450,7 +454,8 @@ views.
   window bar exactly where the floating keyboard summons (both
   user-reported; re-verify against that capture when touching the
   constants). DECK and the text-size chips live in the UMD title row
-  (KBD stays on the key cluster), so neither bottom row runs long. ⚠ SwiftTerm still *builds* its stock accessory on visionOS, and
+  (the keyboard toggle stays on the key cluster), so neither bottom row
+  runs long. ⚠ SwiftTerm still *builds* its stock accessory on visionOS, and
   `commitTextInput` prefers that (invisible) accessory's `controlModifier`
   over the view-level one — `SwiftTermView` nils `inputAccessoryView` there
   so the cluster's latch is authoritative; don't remove that.

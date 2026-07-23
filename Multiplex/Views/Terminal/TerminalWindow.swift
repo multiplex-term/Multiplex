@@ -567,7 +567,6 @@ struct TerminalWindowRoot: View {
                             title: umdTitle,
                             mergeSources: mergeSources,
                             showDeck: showDeck,
-                            summonKeyboard: { activeController?.summonKeyboard() },
                             fontDown: { fontSize = max(9, fontSize - 1) },
                             fontUp: { fontSize = min(32, fontSize + 1) },
                             newSession: { openNewTab(launching: $0) },
@@ -579,11 +578,8 @@ struct TerminalWindowRoot: View {
                         )
                         // The floating visionOS keyboard has no ESC/CTRL/TAB,
                         // arrows, or RET; the chrome carries them (same send
-                        // path as typing).
-                        TerminalKeyCluster(
-                            controller: activeController,
-                            summonKeyboard: { activeController?.summonKeyboard() }
-                        )
+                        // path as typing) plus the keyboard toggle.
+                        TerminalKeyCluster(controller: activeController)
                     }
                     // "Center" resolves through this guide. With an agent
                     // detected, the strip/UMD boundary sits on the anchor:
@@ -631,7 +627,6 @@ struct TerminalWindowRoot: View {
                 title: umdTitle,
                 mergeSources: [],
                 showDeck: configuration.showDeck,
-                summonKeyboard: { activeController?.summonKeyboard() },
                 fontDown: { fontSize = max(9, fontSize - 1) },
                 fontUp: { fontSize = min(32, fontSize + 1) },
                 newSession: { openNewTab(launching: $0) },
@@ -666,9 +661,8 @@ struct TerminalWindowRoot: View {
                                 configuration.availableWidth - 24
                             )
                         )
-                        // No keyboard summon here — the shell's UMD row
-                        // already carries KBD. The width clamp engages the
-                        // cluster's compact tiers in a phone-narrow shell.
+                        // The width clamp engages the cluster's compact
+                        // tiers in a phone-narrow shell.
                         TerminalKeyCluster(controller: activeController)
                             .frame(maxWidth: max(
                                 1,
@@ -875,14 +869,12 @@ struct TerminalWindowRoot: View {
             // DETACH menu when custom chassis controls no longer fit. Own the
             // compact overflow just like the iPhone shell so every displaced
             // action remains reachable in a narrow Stage Manager window.
-            keyboardButton
             terminalOverflowMenu
                 .padding(.trailing, trailingPadding)
         } else {
             newTabMenu
             FileAttachMenu(controller: activeController)
                 .fixedSize()
-            keyboardButton
             fontButtons
             if !mergeSources.isEmpty {
                 mergeMenu
@@ -955,14 +947,6 @@ struct TerminalWindowRoot: View {
         ChassisChip("DECK", systemImage: "square.grid.2x2", action: showDeck)
             .fixedSize()
             .accessibilityLabel("Show Deck")
-    }
-
-    private var keyboardButton: some View {
-        ChassisChip("KBD", systemImage: "keyboard") {
-            activeController?.summonKeyboard()
-        }
-        .fixedSize()
-        .accessibilityLabel("Show keyboard")
     }
 
     private var fontButtons: some View {

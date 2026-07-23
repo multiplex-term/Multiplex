@@ -206,19 +206,13 @@ final class TerminalSessionController {
         TerminalFocusArbiter.claim(terminalView)
     }
 
-    /// Explicit user request: bring the normal system keyboard back — even if
-    /// it was dismissed while this terminal stayed first responder, even if
-    /// SwiftTerm's accessory toggled its F-key pad in as a custom input view
-    /// (which otherwise sticks until toggled again), and even if the OS
-    /// docked only the accessory because a hardware keyboard was attached
-    /// (the arbiter rebuilds the input session, re-checking that state).
-    func summonKeyboard() {
+    /// Explicit user request on the chrome's keyboard key: hide the keyboard
+    /// when this terminal is presenting it, otherwise bring the normal system
+    /// keyboard back. The arbiter owns the visibility check and the stuck
+    /// custom-input-view / hardware-keyboard rebuild details.
+    func toggleKeyboard() {
         guard let terminalView else { return }
-        if terminalView.inputView != nil {
-            terminalView.inputView = nil
-            terminalView.reloadInputViews()
-        }
-        TerminalFocusArbiter.summon(terminalView, force: true)
+        TerminalFocusArbiter.toggle(terminalView)
     }
 
     /// Scene became active again: re-assert focus only if this terminal is

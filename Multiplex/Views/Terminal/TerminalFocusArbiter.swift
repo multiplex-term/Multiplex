@@ -139,6 +139,36 @@ enum TerminalFocusArbiter {
         claim(view)
     }
 
+    /// The chrome's keyboard key is a toggle: hide the keyboard this terminal
+    /// is presenting, otherwise bring the normal system keyboard back — even
+    /// if it was dismissed while the terminal stayed first responder, even if
+    /// SwiftTerm's accessory toggled its F-key pad in as a custom input view
+    /// (which otherwise sticks until toggled again), and even if the OS
+    /// suppressed the software keyboard because a hardware keyboard was
+    /// attached (the forced summon rebuilds the input session, re-checking
+    /// that state).
+    ///
+    /// visionOS posts no keyboard show/hide notifications for its spatially
+    /// separate keyboard, so the input session itself is the toggle's
+    /// authority there: first responder means the keyboard is up.
+    static func toggle(_ view: TerminalView) {
+        installObserversIfNeeded()
+        #if os(visionOS)
+        let presenting = current === view && view.isFirstResponder
+        #else
+        let presenting = current === view && view.isFirstResponder && keyboardVisible
+        #endif
+        if presenting {
+            _ = view.resignFirstResponder()
+            return
+        }
+        if view.inputView != nil {
+            view.inputView = nil
+            view.reloadInputViews()
+        }
+        summon(view, force: true)
+    }
+
     private static func installObserversIfNeeded() {
         guard !observersInstalled else { return }
         observersInstalled = true

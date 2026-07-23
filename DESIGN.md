@@ -140,12 +140,13 @@ the detected agent's helper strip first (when one runs; the UMD takes the
 straddle otherwise), then the UMD title row: `DECK` chip, source label
 (`MAIN · DEVBOX`), status lamp (`LIVE`/`LINK`/`ENDED`), `A− · A+`, and
 `+ TAB · FILE · TMUX · MERGE · DETACH`, then a key row: `ESC · CTRL · TAB`,
-the DECCKM-aware autorepeat arrows, `RET`, and the keyboard summon (the
+the DECCKM-aware autorepeat arrows, `RET`, and the keyboard toggle (the
 floating visionOS keyboard has none of these — arrows + `RET` drive a CLI
 agent's option picker without summoning it). The iPad toolbar keeps the
 full chip set: `DECK`,
 source label, lamp, then
-`KBD · A− · A+ · + TAB · FILE · TMUX · MERGE · DETACH` chips. On an
+`A− · A+ · + TAB · FILE · TMUX · MERGE · DETACH` chips; the keyboard
+toggle lives on the bottom key rail. On an
 SSH-backed tmux tab, `FILE` opens Camera (iPad/iPhone), Photos, and Files
 pickers and rejoins the terminal's existing SFTP drop path; mosh and plain
 shell tabs omit it. `TMUX` opens a custom square-grid TALLY dropdown
