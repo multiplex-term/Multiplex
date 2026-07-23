@@ -149,6 +149,7 @@ final class HostSyncTests: XCTestCase {
             builtInPlacements: [:],
             for: .claudeCode
         )
+        commandsEdited.newSessionTmuxConf = "mouse on\nhistory-limit 50000"
         commandsEdited.updatedAt = .now
 
         XCTAssertTrue(

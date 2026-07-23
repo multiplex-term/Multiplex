@@ -1194,6 +1194,7 @@ struct FleetWall: View {
                 base: name,
                 inDirectoryOf: nil,
                 startingIn: directory,
+                applying: host.newSessionTmuxConf,
                 running: script?.normalizedBody,
                 typing: agent?.launchCommand(initialPrompt: initialPrompt)
             ) else { return }

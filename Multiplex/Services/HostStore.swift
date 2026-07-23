@@ -295,6 +295,13 @@ final class HostStore {
         if let scripts = seed.sessionScripts {
             host.sessionScripts = SessionScript.normalized(scripts)
         }
+        // And for the new-session tmux conf — headless checks seed option
+        // lines and read them back host-side with show-options. An absent
+        // key keeps the host's current conf (the default on first import);
+        // an empty one seeds the cleared state.
+        if let conf = seed.newSessionTmuxConf {
+            host.newSessionTmuxConf = TmuxProbe.normalizedTmuxConf(conf) ?? ""
+        }
         if let key = seed.privateKey { KeychainStore.set(key, for: host.id, kind: .privateKey) }
         if let password = seed.password { KeychainStore.set(password, for: host.id, kind: .password) }
         if hosts.contains(where: { $0.id == host.id }) {
@@ -318,6 +325,7 @@ final class HostStore {
         var moshPorts: String?
         var workingDirs: [String]?
         var sessionScripts: [SessionScript]?
+        var newSessionTmuxConf: String?
     }
     #endif
 }

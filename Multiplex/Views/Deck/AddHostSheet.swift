@@ -25,6 +25,9 @@ struct AddHostSheet: View {
     @State private var moshPorts = ""
     @State private var workingDirs: [WorkingDir] = []
     @State private var newWorkingDir = ""
+    /// Add mode starts on the default so it is visible and editable before
+    /// the first save, not invisible policy.
+    @State private var newSessionTmuxConf = Host.defaultNewSessionTmuxConf
     @State private var scripts: [ScriptRow] = []
     @State private var testState: TestState = .idle
     @State private var showingPaywall = false
@@ -78,6 +81,7 @@ struct AddHostSheet: View {
                     credentialsSection
                     testSection
                     workingDirsSection
+                    tmuxConfSection
                     scriptsSection
                     transportSection
                 }
@@ -490,6 +494,28 @@ struct AddHostSheet: View {
         newWorkingDir = ""
     }
 
+    // MARK: New session tmux conf
+
+    private var tmuxConfSection: some View {
+        TallyFormSection(
+            "New session tmux conf",
+            detail: "One option per line, like a .tmux.conf (mouse on, "
+                + "history-limit 50000). Each line is applied to sessions "
+                + "created from Multiplex with tmux set-option -t that "
+                + "session — sessions made on the host are untouched, and "
+                + "attaching never applies anything. Hosts start with mouse "
+                + "on; clear the field to apply nothing. Server-scoped "
+                + "options still reach the whole tmux server."
+        ) {
+            TallyFormField("Options") {
+                TextField("cleared — nothing applied", text: $newSessionTmuxConf, axis: .vertical)
+                    .lineLimit(2...6)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+            }
+        }
+    }
+
     // MARK: Session setup scripts
 
     private var scriptsSection: some View {
@@ -671,6 +697,7 @@ struct AddHostSheet: View {
         moshServerPath = host.moshServerPath ?? ""
         moshPorts = host.moshPorts ?? ""
         workingDirs = host.workingDirs.map { WorkingDir(path: $0) }
+        newSessionTmuxConf = host.newSessionTmuxConf
         scripts = host.sessionScripts.map(ScriptRow.init)
         password = KeychainStore.get(for: host.id, kind: .password) ?? ""
         privateKey = KeychainStore.get(for: host.id, kind: .privateKey) ?? ""
@@ -699,6 +726,11 @@ struct AddHostSheet: View {
         let ports = moshPorts.trimmingCharacters(in: .whitespaces)
         host.moshPorts = ports.isEmpty ? nil : ports
         host.workingDirs = resolvedWorkingDirs
+        // Same scrub the command builder applies as its last-line defense —
+        // what's stored is what the parser will see. A cleared field
+        // persists as empty: "apply nothing" is a choice that must survive
+        // saves and sync, never bounce back to the default.
+        host.newSessionTmuxConf = TmuxProbe.normalizedTmuxConf(newSessionTmuxConf) ?? ""
         // Rows with nothing to type drop out; ids survive edits so the
         // remembered-selection memory keeps pointing at the same script.
         host.sessionScripts = SessionScript.normalized(scripts.map(\.script))

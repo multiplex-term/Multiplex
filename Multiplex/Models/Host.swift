@@ -38,6 +38,22 @@ struct Host: Identifiable, Codable, Hashable {
     /// selected one is typed into a freshly created session's shell before
     /// the optional agent launch line.
     var sessionScripts: [SessionScript] = []
+    /// tmux options for sessions created from Multiplex — conf-style text
+    /// stored in this record (never a file on the host), one option per
+    /// line (`mouse on`). Each line is applied to the freshly minted
+    /// session as an explicitly targeted `set-option -t <that session>`,
+    /// so sessions created host-side are never touched and attach never
+    /// applies anything. Hosts start with `defaultNewSessionTmuxConf`;
+    /// records written before the field existed decode to it too. Empty
+    /// means the user cleared it: apply nothing, the host's own
+    /// `~/.tmux.conf` alone keeps governing, as tmux always does.
+    var newSessionTmuxConf: String = Host.defaultNewSessionTmuxConf
+
+    /// `mouse on` is the app's premise, not a taste choice: pans scroll
+    /// tmux's own scrollback through the wheel events SwiftTerm reports,
+    /// and Claude Code history jumps take the sticky-click fast path only
+    /// while the pane reports mouse mode.
+    static let defaultNewSessionTmuxConf = "mouse on"
     /// Agent-helper commands and built-in Bar/More placement for this host.
     /// This is part of the mirrored host record so the setup follows the host
     /// to the user's other devices through iCloud Keychain.
@@ -70,6 +86,9 @@ extension Host {
         sessionScripts = SessionScript.normalized(
             try container.decodeIfPresent([SessionScript].self, forKey: .sessionScripts) ?? []
         )
+        newSessionTmuxConf = try container.decodeIfPresent(
+            String.self, forKey: .newSessionTmuxConf
+        ) ?? Host.defaultNewSessionTmuxConf
         agentCommandConfiguration = try container.decodeIfPresent(
             AgentCommandConfiguration.self,
             forKey: .agentCommandConfiguration
@@ -78,13 +97,14 @@ extension Host {
     }
 
     /// Hashable identity for the connection model and the wall feed that
-    /// drives it. Command-setup and setup-script edits must not tear down the
-    /// probe connection; every other current/future Host field remains part
-    /// of the identity.
+    /// drives it. Command-setup, setup-script, and new-session tmux conf
+    /// edits must not tear down the probe connection; every other
+    /// current/future Host field remains part of the identity.
     var connectionModelConfiguration: Host {
         var configuration = self
         configuration.agentCommandConfiguration = AgentCommandConfiguration()
         configuration.sessionScripts = []
+        configuration.newSessionTmuxConf = Host.defaultNewSessionTmuxConf
         configuration.updatedAt = .distantPast
         return configuration
     }

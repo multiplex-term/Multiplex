@@ -375,6 +375,22 @@ enum TmuxProbe {
     /// - `startDirectory`: an explicit start directory (a host working dir
     ///   picked in the New Session prompt); consulted only when there is no
     ///   source session, and skipped for $HOME when missing on the host.
+    /// - `tmuxConf`: the host's new-session tmux options (conf-style text
+    ///   from the Host record, never a file on the host), applied before
+    ///   anything is typed. Each parsed line becomes its own explicitly
+    ///   targeted client call — `tmux set-option -t <new session id> --
+    ///   <name> [<value>]` — so the scope is deterministic: session options
+    ///   land on the minted session only, window options on its current
+    ///   (first) window, while server-scoped options still reach the whole
+    ///   server, tmux semantics said in the editor copy (all verified
+    ///   against 3.6a). Injection-safe by construction: the name is
+    ///   charset-validated and the value rides as one shell-quoted argv.
+    ///   Per-line fail-soft (each call silenced individually, a bad option
+    ///   skips only itself) — and the calls live inside the success guard,
+    ///   never as a `\;` sequence on the create itself: a failing command
+    ///   there makes the shared client exit nonzero — the unnamed retry
+    ///   would mint a duplicate session — and its error text lands on
+    ///   stdout inside `$i`.
     /// - `script`: the host's chosen setup script, typed into the fresh
     ///   shell exactly like `launch` but before it — same shell, so what it
     ///   exports/activates is live for the launch line. Sequential, never
@@ -398,7 +414,7 @@ enum TmuxProbe {
     /// connection.
     static func newSessionCommand(
         name: String, sourceSessionName: String?, startDirectory: String? = nil,
-        script: String? = nil, launch: String?
+        tmuxConf: String? = nil, script: String? = nil, launch: String?
     ) -> String {
         var command = pathPrefix + TmuxSessionLaunch.persistentRunnerDefinition
         if let source = sourceSessionName {
@@ -415,6 +431,13 @@ enum TmuxProbe {
         command += "i=$(\(create) -s \(name.shellQuoted) 2>/dev/null)"
             + " || i=$(\(create) 2>/dev/null); "
         var onSuccess = ""
+        for option in tmuxConfOptions(tmuxConf) {
+            onSuccess += "tmux set-option -t \"${i%% *}\" -- \(option.name.shellQuoted)"
+            if let value = option.value {
+                onSuccess += " \(value.shellQuoted)"
+            }
+            onSuccess += " 2>/dev/null; "
+        }
         for typed in [script, launch].compactMap({ $0 }) {
             onSuccess += "tmux send-keys -t \"${i%% *}\" -l -- \(typed.shellQuoted); "
                 + "tmux send-keys -t \"${i%% *}\" Enter; "
@@ -433,6 +456,98 @@ enum TmuxProbe {
             if !name.isEmpty { return name }
         }
         return nil
+    }
+
+    /// One parsed new-session conf line, applied as
+    /// `set-option -t <session id> -- name [value]`. A nil value is a
+    /// deliberate emission: tmux toggles boolean options given no value.
+    struct TmuxConfOption: Equatable {
+        let name: String
+        let value: String?
+    }
+
+    /// The canonical bytes persisted for a host's new-session tmux conf —
+    /// the custom-command policy (normalize pasted line endings, strip
+    /// invisible terminal controls, keep interior tabs and newlines, trim
+    /// only the outside), nil when nothing usable remains.
+    static func normalizedTmuxConf(_ conf: String?) -> String? {
+        guard let conf else { return nil }
+        let normalizedLineEndings = conf
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") {
+            result, scalar in
+            let allowedControl = scalar.value == 0x09 || scalar.value == 0x0A
+            if allowedControl || !CharacterSet.controlCharacters.contains(scalar) {
+                result.append(Character(scalar))
+            }
+        }
+        let trimmed = safeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Parse conf text into targeted set-option calls, one per line —
+    /// `mouse on`, `history-limit 50000`. Forgiving of `.tmux.conf` muscle
+    /// memory: a leading `set`/`set-option`/`setw`/`set-window-option` word
+    /// and leading scope flags (`-g`, `-w`, …) are dropped, because the
+    /// scope here is fixed by the explicit `-t` target. Full-line `#`
+    /// comments and blanks are skipped. The name must be option-shaped
+    /// (letters/digits/`@-_`, starting with a letter or `@`) or the line is
+    /// skipped; the rest of the line is the value, verbatim except for one
+    /// unwrapped layer of symmetric quotes (a conf file's parser would have
+    /// stripped them too — without this, pasted `status-style "bg=red"`
+    /// stores literal quote characters into the option).
+    static func tmuxConfOptions(_ conf: String?) -> [TmuxConfOption] {
+        guard let conf = normalizedTmuxConf(conf) else { return [] }
+        var options: [TmuxConfOption] = []
+        for rawLine in conf.split(separator: "\n") {
+            var line = String(rawLine).trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
+
+            func takeToken() -> String? {
+                guard !line.isEmpty else { return nil }
+                guard let space = line.rangeOfCharacter(from: .whitespaces) else {
+                    defer { line = "" }
+                    return line
+                }
+                defer {
+                    line = String(line[space.upperBound...])
+                        .trimmingCharacters(in: .whitespaces)
+                }
+                return String(line[line.startIndex..<space.lowerBound])
+            }
+
+            var candidate = takeToken()
+            if let first = candidate,
+               ["set", "set-option", "setw", "set-window-option"].contains(first) {
+                candidate = takeToken()
+            }
+            while let flag = candidate, flag.hasPrefix("-") {
+                candidate = takeToken()
+            }
+            guard let name = candidate, isTmuxOptionName(name) else { continue }
+            let value = unwrappedTmuxConfValue(line)
+            options.append(TmuxConfOption(name: name, value: value.isEmpty ? nil : value))
+        }
+        return options
+    }
+
+    private static func isTmuxOptionName(_ name: String) -> Bool {
+        guard let first = name.first, first == "@" || first.isLetter else { return false }
+        return name.allSatisfy {
+            $0 == "@" || $0 == "-" || $0 == "_" || $0.isLetter || $0.isNumber
+        }
+    }
+
+    /// Strip one layer of fully wrapping quotes, but only when that quote
+    /// character never appears inside — `"a" or "b"` keeps its quotes.
+    private static func unwrappedTmuxConfValue(_ value: String) -> String {
+        guard value.count >= 2, let quote = value.first,
+              quote == "\"" || quote == "'",
+              value.last == quote,
+              !value.dropFirst().dropLast().contains(quote)
+        else { return value }
+        return String(value.dropFirst().dropLast())
     }
 
     /// tmux target syntax reserves `:` and `.`, and new-session rejects

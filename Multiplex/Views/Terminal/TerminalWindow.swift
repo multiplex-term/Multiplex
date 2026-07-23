@@ -525,6 +525,7 @@ struct TerminalWindowRoot: View {
             guard let name = await hub.model(for: host).createSession(
                 base: agent?.launchCommand ?? source ?? "main",
                 inDirectoryOf: source,
+                applying: host.newSessionTmuxConf,
                 running: script?.normalizedBody,
                 typing: agent?.launchCommand
             ) else {

@@ -90,4 +90,45 @@ final class SessionScriptTests: XCTestCase {
         // Adding or editing scripts must not tear down the probe connection.
         XCTAssertTrue(host.hasSameConnectionModelConfiguration(as: edited))
     }
+
+    func testHostNewSessionTmuxConfDefaultsRoundTripsAndKeepsCleared() throws {
+        // New hosts and records from before the field existed both carry
+        // the default — mouse on is the app's premise (pan-to-scroll and
+        // the history jump's click fast path ride tmux mouse mode).
+        XCTAssertEqual(
+            Host(name: "d", hostname: "d.example.com", username: "dev").newSessionTmuxConf,
+            Host.defaultNewSessionTmuxConf
+        )
+        let legacyHost = Data(
+            #"{"name": "devbox", "hostname": "devbox.example.com", "username": "dev"}"#.utf8
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(Host.self, from: legacyHost).newSessionTmuxConf,
+            Host.defaultNewSessionTmuxConf
+        )
+
+        var host = Host(name: "devbox", hostname: "devbox.example.com", username: "dev")
+        host.newSessionTmuxConf = "mouse on\nhistory-limit 50000"
+        XCTAssertEqual(
+            try JSONDecoder().decode(Host.self, from: JSONEncoder().encode(host))
+                .newSessionTmuxConf,
+            "mouse on\nhistory-limit 50000"
+        )
+
+        // Clearing is a choice, not an absence: an emptied conf must
+        // round-trip as empty, never bounce back to the default.
+        host.newSessionTmuxConf = ""
+        XCTAssertEqual(
+            try JSONDecoder().decode(Host.self, from: JSONEncoder().encode(host))
+                .newSessionTmuxConf,
+            ""
+        )
+
+        // Like scripts, a conf edit must not tear down the probe connection
+        // — the value is threaded into createSession from the live record,
+        // never read off the connection model's possibly-stale host copy.
+        var edited = host
+        edited.newSessionTmuxConf = "status off"
+        XCTAssertTrue(host.hasSameConnectionModelConfiguration(as: edited))
+    }
 }

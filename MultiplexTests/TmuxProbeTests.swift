@@ -457,6 +457,106 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertFalse(command.contains("/srv/app"))
     }
 
+    func testNewSessionCommandAppliesConfOptionsBeforeTyping() {
+        let command = TmuxProbe.newSessionCommand(
+            name: "main", sourceSessionName: nil,
+            tmuxConf: "mouse on\nstatus-style bg=colour53 fg=white",
+            script: "nvm use 20", launch: "claude")
+        // Each line is its own explicitly targeted, individually silenced
+        // client call inside the success guard — NEVER a `\;` sequence on
+        // the raced create: a failing command there exits that shared
+        // client nonzero (the unnamed retry would mint a duplicate session)
+        // and its error text pollutes `$i`.
+        XCTAssertFalse(command.contains("\\;"))
+        XCTAssertTrue(command.contains(
+            "[ -n \"$i\" ] && { tmux set-option -t \"${i%% *}\" -- 'mouse' 'on' 2>/dev/null; "))
+        // A multi-word value rides as ONE quoted argv — set-option's
+        // option/value grammar, and the injection barrier for user text.
+        XCTAssertTrue(command.contains(
+            "tmux set-option -t \"${i%% *}\" -- 'status-style' 'bg=colour53 fg=white' 2>/dev/null; "))
+        // Options first, then the typed script, then the launch — the
+        // session is configured before anything runs in its shell.
+        let confIndex = command.range(of: "set-option")!.lowerBound
+        let scriptIndex = command.range(of: "'nvm use 20'")!.lowerBound
+        let launchIndex = command.range(of: "'claude'")!.lowerBound
+        XCTAssertTrue(confIndex < scriptIndex && scriptIndex < launchIndex)
+    }
+
+    func testNewSessionCommandQuotesConfValuesAgainstInjection() {
+        let command = TmuxProbe.newSessionCommand(
+            name: "main", sourceSessionName: nil,
+            tmuxConf: "@note it's $(touch /tmp/pwned) `id`",
+            launch: nil)
+        // The value is inert data inside single quotes; the embedded quote
+        // uses the standard '\'' escape.
+        XCTAssertTrue(command.contains(
+            "tmux set-option -t \"${i%% *}\" -- '@note' 'it'\\''s $(touch /tmp/pwned) `id`' 2>/dev/null; "))
+    }
+
+    func testNewSessionCommandOmitsConfClauseWithoutOne() {
+        for conf in [nil, "", "  \n ", "\u{01}\u{02}", "# only a comment"] {
+            let command = TmuxProbe.newSessionCommand(
+                name: "main", sourceSessionName: nil, tmuxConf: conf, launch: nil)
+            XCTAssertFalse(command.contains("set-option"), "conf: \(String(describing: conf))")
+        }
+    }
+
+    func testTmuxConfOptionsParseConfStyleLines() {
+        let options = TmuxProbe.tmuxConfOptions("""
+          # touch-friendly defaults
+          mouse on
+
+          set -g history-limit 50000
+          set-option -ga status-right ' mpx'
+          setw automatic-rename off
+          set escape-time 0
+          status
+          @plain marker
+        """)
+        // Leading set/setw words and scope flags drop — the scope here is
+        // fixed by the explicit -t target. Comments and blanks skip. A
+        // valueless line stays valueless (tmux toggles booleans).
+        XCTAssertEqual(options, [
+            TmuxProbe.TmuxConfOption(name: "mouse", value: "on"),
+            TmuxProbe.TmuxConfOption(name: "history-limit", value: "50000"),
+            // Unwrapped like a conf parser would — the guarded space is the
+            // point of the quotes and survives.
+            TmuxProbe.TmuxConfOption(name: "status-right", value: " mpx"),
+            TmuxProbe.TmuxConfOption(name: "automatic-rename", value: "off"),
+            TmuxProbe.TmuxConfOption(name: "escape-time", value: "0"),
+            TmuxProbe.TmuxConfOption(name: "status", value: nil),
+            TmuxProbe.TmuxConfOption(name: "@plain", value: "marker"),
+        ])
+    }
+
+    func testTmuxConfOptionsUnwrapQuotedValuesAndRejectJunkNames() {
+        // A conf file's parser would strip the wrapping quotes; keep them
+        // only when the same quote also appears inside.
+        XCTAssertEqual(
+            TmuxProbe.tmuxConfOptions(#"status-style "bg=colour53 fg=white""#),
+            [TmuxProbe.TmuxConfOption(name: "status-style", value: "bg=colour53 fg=white")])
+        XCTAssertEqual(
+            TmuxProbe.tmuxConfOptions(#"@t "a" or "b""#),
+            [TmuxProbe.TmuxConfOption(name: "@t", value: #""a" or "b""#)])
+        // A name that isn't option-shaped is a skipped line, not a shell
+        // fragment — names are the unquoted half of the emitted call.
+        XCTAssertEqual(TmuxProbe.tmuxConfOptions("$(id) whatever"), [])
+        XCTAssertEqual(TmuxProbe.tmuxConfOptions("; rm -rf ~"), [])
+        // Controls are stripped before parsing (the tmux prefix byte
+        // especially), CRLF pastes normalize.
+        XCTAssertEqual(
+            TmuxProbe.tmuxConfOptions("mou\u{02}se on\r\nstatus off\r"),
+            [
+                TmuxProbe.TmuxConfOption(name: "mouse", value: "on"),
+                TmuxProbe.TmuxConfOption(name: "status", value: "off"),
+            ])
+        XCTAssertEqual(TmuxProbe.tmuxConfOptions(nil), [])
+        // The shipped default must parse to exactly the option it claims.
+        XCTAssertEqual(
+            TmuxProbe.tmuxConfOptions(Host.defaultNewSessionTmuxConf),
+            [TmuxProbe.TmuxConfOption(name: "mouse", value: "on")])
+    }
+
     func testParseNewSession() {
         XCTAssertEqual(TmuxProbe.parseNewSession("MULTIPLEX_NEW claude\n"), "claude")
         // Names keep their spaces; stray output around the sentinel is noise.

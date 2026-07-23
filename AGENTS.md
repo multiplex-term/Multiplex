@@ -59,8 +59,9 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 
 - `MULTIPLEX_SEED_HOST=<path to seed.json>` — imports a ready `devbox` host
   (idempotent; stable UUID across relaunches so restored scenes stay valid).
-  Optional `workingDirs` / `sessionScripts` keys feed headless checks of the
-  New Session pickers and the setup-script creation paths.
+  Optional `workingDirs` / `sessionScripts` / `newSessionTmuxConf` keys feed
+  headless checks of the New Session pickers and the setup-script and
+  tmux-conf creation paths.
 - `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per comma entry via
   the same route the Attach button uses; `+` inside an entry groups sessions
   as tabs of one window (`main+scratch,deploy`). Fires **once per process**.
@@ -568,7 +569,40 @@ views.
   drop the probe link, never enter the widget projection, and are free-tier
   host plumbing, not an agent-helper surface. The dev seed may carry a
   `sessionScripts` array for headless checks of these paths.
-- **mosh is a second `TerminalTransport`, not a fork of the SSH path**
+- **The per-host new-session tmux conf is Host-record text applied as
+  targeted `set-option -t` calls — never a host file, never `-f`, never on
+  the raced create** (`Host.newSessionTmuxConf`, Host Settings below the
+  working dirs). Hosts default to `mouse on` — the app's premise (pans
+  scroll tmux's own scrollback, history jumps take the sticky-click fast
+  path), and absent-key decodes take the default too, so legacy/peer
+  records inherit it. A cleared field persists as empty — "apply nothing"
+  survives saves and sync, the host's own `~/.tmux.conf` alone keeps
+  governing as tmux always does. One option per line (`mouse on`), parsed
+  by `TmuxProbe.tmuxConfOptions` — forgiving of `.tmux.conf` muscle memory
+  (leading `set`/`setw` words and scope flags drop; full-line `#` comments
+  and blanks skip; one layer of wrapping value quotes unwraps unless that
+  quote also appears inside) and injection-safe by construction: the name
+  must be option-shaped or the line is skipped, and the value rides as one
+  shell-quoted argv. Every control-connection creation path — New Session
+  sheet, + TAB, the widget/Shortcut router — threads the live host's conf
+  into `createSession`; attach and host-side sessions are never touched, and
+  the legacy PTY-side `.create` route stays untouched like scripts (nothing
+  rides on `TerminalRoute`). Scope facts, verified on 3.6a: `set-option -t
+  <session id>` lands session options on the minted session only; window
+  options land on that session's current (first) window and later windows
+  do NOT inherit them; server-scoped options (e.g. `escape-time`) silently
+  reach the whole server — the one leak, said in the editor copy. Each line
+  is its own individually `2>/dev/null`-silenced client call inside the
+  mint's success guard, so a bad option skips only itself. Never fold conf
+  application into the create as a `\;` sequence: a failing command there
+  exits that shared client nonzero — the unnamed retry then mints a
+  DUPLICATE session — and its error text lands on stdout inside `$i`. Never
+  start the server with `-f` either: that would rebrand every later
+  user-created session on that server. Like scripts: rides the synced Host
+  record (`updatedAt` bumps), zeroed out of `connectionModelConfiguration`
+  (so edits keep the probe link — which is also why callers pass it from
+  the live record, never the model's stale copy), free host plumbing, never
+  in the widget projection.
   (`Services/Mosh/`, `Host.useMosh`). SSH stays the control plane — deck
   probing, capture-pane, file-drop SFTP, and the mosh bootstrap itself all
   ride `SSHConnection.exec`; only the interactive byte stream moves to UDP.

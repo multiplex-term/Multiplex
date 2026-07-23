@@ -158,6 +158,7 @@ enum ExternalActionPerformer {
                 base: "main",
                 inDirectoryOf: nil,
                 startingIn: host.workingDirs.first,
+                applying: host.newSessionTmuxConf,
                 running: NewSessionPreferences().rememberedScript(for: host)?.normalizedBody,
                 typing: nil
             ) else {
@@ -190,6 +191,7 @@ enum ExternalActionPerformer {
             base: agent.launchCommand,
             inDirectoryOf: nil,
             startingIn: directory ?? host.workingDirs.first,
+            applying: host.newSessionTmuxConf,
             running: script?.normalizedBody,
             typing: agent.launchCommand(initialPrompt: prompt ?? "")
         ) else {
