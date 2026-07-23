@@ -40,9 +40,20 @@ enum ShellModeDecision {
 enum SingleWindowShellLayout {
     static let expandedThreshold: CGFloat = 620
     static let deckRailWidth: CGFloat = 316
+    /// The compact key rail retains its TMUX key at 390 points. Below this,
+    /// its essentials-only tier takes over and the shell's top bar becomes
+    /// the shortcut entry point instead.
+    static let keyBarTmuxMinimumWidth: CGFloat = 390
 
     static func isExpanded(width: CGFloat) -> Bool {
         width >= expandedThreshold
+    }
+
+    static func showsTopBarTmuxShortcut(
+        availableWidth: CGFloat,
+        supportsTmuxShortcuts: Bool
+    ) -> Bool {
+        supportsTmuxShortcuts && availableWidth < keyBarTmuxMinimumWidth
     }
 }
 

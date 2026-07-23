@@ -71,6 +71,27 @@ enum TerminalFocusArbiter {
         }
     }
 
+    /// Temporarily resign the current terminal while an app-owned overlay
+    /// needs the keyboard's screen space. Ownership stays with this terminal,
+    /// so dismissing the overlay can resume input without another window or
+    /// tab stealing focus in between.
+    @discardableResult
+    static func suspendForPresentation(_ view: TerminalView) -> Bool {
+        guard current === view, view.isFirstResponder else { return false }
+        #if DEBUG
+        keyboardLogger.debug("kbd-focus-suspend presentation=true")
+        #endif
+        _ = view.resignFirstResponder()
+        return true
+    }
+
+    /// Resume a presentation-suspended terminal only if it still owns focus.
+    /// A tab/window switch while the overlay was open must win.
+    static func resumeAfterPresentation(_ view: TerminalView) {
+        guard current === view else { return }
+        claim(view)
+    }
+
     /// Relinquish focus when an in-scene terminal stage navigates back to
     /// the deck. Only the current owner may release the app-wide input
     /// session; hidden/inactive tabs cannot disturb another terminal.

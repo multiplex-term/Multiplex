@@ -46,6 +46,10 @@ struct UMDBar: View {
     var contentSafeArea = EdgeInsets()
 
     @State private var showingTmuxShortcuts = false
+    /// A top-anchored phone popover cannot fit between the UMD and a docked
+    /// software keyboard. Remember whether this presentation temporarily
+    /// resigned the terminal so input can resume when the panel closes.
+    @State private var resumesFocusAfterTmuxShortcuts = false
 
     @ViewBuilder
     var body: some View {
@@ -162,8 +166,22 @@ struct UMDBar: View {
                 detachControl.fixedSize()
             } else {
                 overflowMenu.fixedSize()
+                // The sub-390-point phone rail drops TMUX to preserve every
+                // terminal lifeline key. Keep the shortcut as its own trailing
+                // top-bar control rather than burying it in the action menu.
+                if showsCompactTopBarTmuxShortcut {
+                    tmuxShortcutButton.fixedSize()
+                }
             }
         }
+    }
+
+    private var showsCompactTopBarTmuxShortcut: Bool {
+        guard let availableWidth else { return false }
+        return SingleWindowShellLayout.showsTopBarTmuxShortcut(
+            availableWidth: availableWidth,
+            supportsTmuxShortcuts: showsTmuxShortcuts
+        )
     }
 
     private var newTabMenu: some View {
@@ -184,7 +202,7 @@ struct UMDBar: View {
     private var tmuxShortcutButton: some View {
         tmuxPopover(
             Button {
-                showingTmuxShortcuts = true
+                showTmuxShortcuts()
             } label: {
                 ChassisBadge("TMUX", systemImage: "command")
             }
@@ -193,6 +211,23 @@ struct UMDBar: View {
             .disabled(controller?.status != .live)
             .accessibilityLabel("Show tmux shortcuts")
         )
+    }
+
+    private func showTmuxShortcuts() {
+        // In shell style this control sits at the top. Free the keyboard's
+        // region before UIKit sizes the downward-opening popover; otherwise
+        // the fixed command grid is clipped at both ends on a 375-point phone.
+        if case .shell = style {
+            resumesFocusAfterTmuxShortcuts =
+                controller?.suspendFocusForPresentation() == true
+        }
+        showingTmuxShortcuts = true
+    }
+
+    private func tmuxShortcutsDidDisappear() {
+        guard resumesFocusAfterTmuxShortcuts else { return }
+        resumesFocusAfterTmuxShortcuts = false
+        controller?.resumeFocusAfterPresentation()
     }
 
     private var overflowMenu: some View {
@@ -230,7 +265,10 @@ struct UMDBar: View {
         control.popover(
             isPresented: $showingTmuxShortcuts,
             attachmentAnchor: .rect(.bounds),
-            arrowEdge: .bottom
+            // The regular UMD hangs below a visionOS window, so its panel
+            // opens upward. The shell UMD sits at the top of the iPhone/iPad
+            // stage and must open downward into the terminal instead.
+            arrowEdge: tmuxPopoverArrowEdge
         ) {
             TmuxShortcutPanel(width: shortcutPanelWidth) { shortcut in
                 showingTmuxShortcuts = false
@@ -239,6 +277,14 @@ struct UMDBar: View {
             .presentationCompactAdaptation(.popover)
             .tmuxShortcutPresentationSizing()
             .followsAppAppearance()
+            .onDisappear(perform: tmuxShortcutsDidDisappear)
+        }
+    }
+
+    private var tmuxPopoverArrowEdge: Edge {
+        switch style {
+        case .regular: .bottom
+        case .shell: .top
         }
     }
 

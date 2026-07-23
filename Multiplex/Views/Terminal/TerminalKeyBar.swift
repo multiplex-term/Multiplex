@@ -287,8 +287,9 @@ private enum TerminalKey {
 /// right.
 /// Fixed-size keys let ViewThatFits measure every tier honestly. The original
 /// iPad ladder stays first; phone tiers compact the key metric only after page
-/// keys and symbols are gone. Regular phones retain TMUX; the final 375-point
-/// tier drops it while every terminal lifeline key remains available.
+/// keys and symbols are gone. Regular phones retain TMUX; below 390 points the
+/// essentials-only tier drops it while every terminal lifeline key remains
+/// available, and the iPhone shell moves the shortcut to its top-right bar.
 private struct KeyBarRow: View {
     var model: TerminalKeyBar.Model
     var showsTmuxShortcuts: Bool

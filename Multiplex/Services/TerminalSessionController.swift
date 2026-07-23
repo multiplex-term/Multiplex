@@ -183,6 +183,20 @@ final class TerminalSessionController {
         TerminalFocusArbiter.claim(terminalView)
     }
 
+    /// Temporarily free the keyboard's screen region for a chrome-owned
+    /// presentation while preserving this tab as the app-wide focus owner.
+    @discardableResult
+    func suspendFocusForPresentation() -> Bool {
+        guard let terminalView else { return false }
+        return TerminalFocusArbiter.suspendForPresentation(terminalView)
+    }
+
+    /// Restore input after that presentation only if this tab still owns it.
+    func resumeFocusAfterPresentation() {
+        guard let terminalView else { return }
+        TerminalFocusArbiter.resumeAfterPresentation(terminalView)
+    }
+
     /// The single-window shell navigated back to its deck. Focus ownership
     /// still goes through the app-wide arbiter even though both surfaces live
     /// in one scene.

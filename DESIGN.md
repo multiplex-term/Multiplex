@@ -150,9 +150,13 @@ toggle lives on the bottom key rail. On an
 SSH-backed tmux tab, `FILE` opens Camera (iPad/iPhone), Photos, and Files
 pickers and rejoins the terminal's existing SFTP drop path; mosh and plain
 shell tabs omit it. `TMUX` opens a custom square-grid TALLY dropdown
-listing the stock command, friendly action, and default `⌃B` binding; iPad
-carries the same dropdown immediately after the keyboard control in its bottom
-key rail. Connection overlays are chassis panels with the same lamp anatomy.
+listing the stock command, friendly action, and default `⌃B` binding; iPad and
+iPhone carry the same dropdown immediately after the keyboard control in the
+bottom key rail. Below 390 pt, the iPhone rail's essentials-only tier moves
+`TMUX` to a dedicated trailing control in the top UMD instead; opening it
+briefly yields the software keyboard's region to the downward popover, then
+restores terminal input on dismissal. Connection overlays are chassis panels
+with the same lamp anatomy.
 
 **Agent commands.** The detected agent's helper rail uses the same square
 chassis language. MORE opens an anchored TALLY editor: a collapsed Built-in

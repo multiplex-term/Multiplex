@@ -4,7 +4,7 @@ Multiplex 1.0 — first release.
 • A spatial window per session on Vision Pro; real scenes on iPad
 • Tabs, merge, and split — shells stay connected while windows move
 • Two hosts included free; Multiplex Pro unlocks unlimited hosts
-• A custom tmux shortcut menu, with touch-native copy mode, in the Vision Pro UMD and iPad key bar
+• A custom tmux shortcut menu, with touch-native copy mode, in the Vision Pro UMD and iPad/iPhone terminal chrome
 • Touch and pointer clicks for mouse-aware terminal apps
 • Multilingual system-keyboard and IME input, plus hardware keyboard support
 • Start Claude Code, Codex, or Pi in a new tmux session with an optional per-host setup script and first prompt; detection across split panes and plain SSH shells, foreground-aware helpers, synced per-host chip placement and custom commands, Claude Code/Codex Pro alerts, and Claude Code prompt history with jump-back-to-message (Pro)

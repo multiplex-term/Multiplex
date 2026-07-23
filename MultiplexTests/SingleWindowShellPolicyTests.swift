@@ -93,6 +93,21 @@ final class SingleWindowShellPolicyTests: XCTestCase {
         XCTAssertEqual(SingleWindowShellLayout.deckRailWidth, 316)
     }
 
+    func testNarrowShellMovesTmuxShortcutFromKeyRailToTopBar() {
+        XCTAssertTrue(SingleWindowShellLayout.showsTopBarTmuxShortcut(
+            availableWidth: 375,
+            supportsTmuxShortcuts: true
+        ))
+        XCTAssertFalse(SingleWindowShellLayout.showsTopBarTmuxShortcut(
+            availableWidth: 390,
+            supportsTmuxShortcuts: true
+        ))
+        XCTAssertFalse(SingleWindowShellLayout.showsTopBarTmuxShortcut(
+            availableWidth: 375,
+            supportsTmuxShortcuts: false
+        ))
+    }
+
     func testBackSwipeBeginsOnlyForUnselectedRightwardHorizontalIntent() {
         XCTAssertTrue(SingleWindowShellBackSwipe.shouldBegin(
             horizontalVelocity: 300,
