@@ -32,8 +32,8 @@ struct FAQView: View {
 }
 
 /// One FAQ entry as a Tally form section: the question is the section title,
-/// the answer is prose, and an optional command sits on its own screen well
-/// with a copy chip.
+/// the answer is prose, and each command sits on its own screen well with a
+/// copy chip (`CopyableCommandField` — shared with the deck's guide sheets).
 private struct FAQEntryCard: View {
     let entry: FAQEntry
 
@@ -45,8 +45,11 @@ private struct FAQEntryCard: View {
                         .font(.ui(11))
                         .foregroundStyle(Theme.signal)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let command = entry.command {
-                        FAQCommandField(command: command)
+                    ForEach(entry.commands) { command in
+                        CopyableCommandField(
+                            label: command.label,
+                            command: command.command
+                        )
                     }
                 }
             }
@@ -54,57 +57,30 @@ private struct FAQEntryCard: View {
     }
 }
 
-/// A copyable command on a screen surface — monospace stays the data voice.
-private struct FAQCommandField: View {
-    let command: String
-
-    @State private var copyCount = 0
-    @State private var showsCopied = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(command)
-                .font(.mono(10))
-                .foregroundStyle(Theme.signal)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-
-            Button {
-                UIPasteboard.general.string = command
-                copyCount += 1
-            } label: {
-                ChassisBadge(
-                    showsCopied ? "COPIED" : "COPY",
-                    systemImage: showsCopied ? "checkmark" : "doc.on.doc"
-                )
-            }
-            .buttonStyle(.plain)
-            .chassisHover(2)
-            .accessibilityLabel("Copy command")
-        }
-        .padding(10)
-        .background(Theme.screen)
-        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-        .task(id: copyCount) {
-            guard copyCount > 0 else { return }
-            showsCopied = true
-            try? await Task.sleep(for: .seconds(1.6))
-            if !Task.isCancelled { showsCopied = false }
-        }
-    }
-}
-
 /// Static FAQ content. Questions render as compressed-caps section titles,
-/// so keep them short enough for one line at phone-sheet width.
+/// so keep them short enough for one line at phone-sheet width. Commands
+/// shared with a deck tip surface live in `HostGuide` so they can't drift.
 private struct FAQEntry: Identifiable {
     let id: String
     let question: String
     let answer: String
-    var command: String?
+    var commands: [HostGuide.Command] = []
     var postscript: String?
 
     static let all: [FAQEntry] = [
+        FAQEntry(
+            id: "host-needs-tmux",
+            question: "A host shows no tmux on the deck",
+            answer: "The deck is built around a tmux server on each host — "
+                + "sessions, live tiles, and attach all come from it. A host "
+                + "without tmux still works as a plain shell (the SHELL chip "
+                + "on its rail), it just has no session tiles. To get the "
+                + "full deck, install tmux on the host:",
+            commands: HostGuide.tmuxInstall,
+            postscript: "The deck re-probes every few seconds and finds tmux "
+                + "as soon as it lands — Homebrew and /usr/local installs "
+                + "are already on the probe's PATH."
+        ),
         FAQEntry(
             id: "claude-code-tmux-keychain",
             question: "Claude Code shows signed out in tmux",
@@ -114,11 +90,12 @@ private struct FAQEntry: Identifiable {
                 + "signed out even though your login is intact. Unlock the "
                 + "keychain once inside the tmux session, then restart Claude "
                 + "Code:",
-            command: "security unlock-keychain ~/Library/Keychains/login.keychain-db",
+            commands: [HostGuide.keychainUnlock],
             postscript: "The command prompts for that Mac account's login "
                 + "password. The unlock holds until macOS locks the keychain "
                 + "again — after a restart, or per the keychain's own lock "
-                + "settings."
+                + "settings. When the deck detects this state it also points "
+                + "here: the host's rail reads KEYCHAIN LOCKED."
         )
     ]
 }

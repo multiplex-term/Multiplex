@@ -31,6 +31,11 @@ struct UMDBar: View {
     /// dropdown's destructive alternative. nil when there's no session to
     /// kill (plain shell tab, or the host record is gone).
     var closeSession: (() -> Void)?
+    /// Opens the KEYCHAIN LOCKED tip when this tab's session shows Claude
+    /// Code signed out behind a locked Mac keychain (`KeychainLockCheck`);
+    /// nil hides the status. The deck rail carries the host-level view —
+    /// this keeps it in sight after attach, where the user actually is.
+    var keychainTip: (() -> Void)?
     /// Plain login shells have no tmux server or bindings to expose.
     var showsTmuxShortcuts = true
     var style: Style = .regular
@@ -262,6 +267,17 @@ struct UMDBar: View {
                     .accessibilityLabel("Connects over mosh")
             }
             connectionStatus
+            if let keychainTip {
+                Button(action: keychainTip) {
+                    TallyLamp(caption: "KEYCHAIN LOCKED", color: Theme.caution)
+                }
+                .buttonStyle(.plain)
+                .chassisHover(2)
+                .accessibilityLabel(
+                    "The Mac's keychain is locked, so Claude Code shows signed out"
+                )
+                .accessibilityHint("Shows how to unlock the keychain")
+            }
             if case .needsYou = controller?.directShellAttention {
                 TallyLamp(caption: "NEEDS YOU", color: Theme.caution)
             }

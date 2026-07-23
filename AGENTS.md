@@ -98,6 +98,12 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 - `MULTIPLEX_AUTO_HOST_SETTINGS=1` — opens the first host's edit sheet to
   regression-check the Observation environment across the shell/scene sheet
   boundary (a missing HostStore is a fatal error, not a recoverable blank).
+- `MULTIPLEX_KEYCHAIN_TIP=locked|unlocked|missing` — forces the keychain
+  check's verdict for the deck's KEYCHAIN LOCKED tip. The sign-in-screen
+  gate still applies: inject a real needle (e.g. `tmux send-keys -t
+  agent:cc 'Select login method:' Enter` — cat echoes it) into the
+  harness's fake Claude pane and the rail tip renders without a genuinely
+  locked keychain.
 - `MULTIPLEX_FORCE_SHELL=1|0` — DEBUG-only override for the single-window
   shell decision. `1` forces the real shell on and `0` forces classic
   multi-window mode on any device. Without an override, iPhone always uses
@@ -658,6 +664,48 @@ views.
   from its measured rendered height and cap only true overflow; never restore a
   command-count multiplier. Multiline rows do not have one stable height, so
   estimates leave a blank trench above the footer or clip edited content.
+- **The deck's KEYCHAIN LOCKED tip mirrors Claude Code's own credential
+  read** (`KeychainLockCheck`, pure + tested): a Mac reached over SSH never
+  unlocks the login keychain — no GUI login — so Claude Code there starts
+  signed out even though the stored login is intact. Only when a probe sees
+  a Claude pane parked on a sign-in screen (phrase-exact needles in the
+  capture tail, verified against v2.1.218 — the "Select login method"
+  selector, the OAuth "Use the url below to sign in" / "Paste code here if
+  prompted" screen an SSH Mac gets parked on, the "Not logged in · Run
+  /login" composer status an already-onboarded install starts with (its
+  "API Usage Billing" header is deliberately NOT a needle — signed-in
+  Console-billing users show it too), and the "Please run /login" banner —
+  AND that pane's detected agent is Claude, so leftover login text behind a
+  shell prompt can't re-trigger) does the model run one `security` exec on
+  the probe connection. **LOCKED is decided
+  structurally, never by error text**: on macOS 27 a locked keychain's
+  `find-generic-password -w` fails *silently* over SSH (exit 128 /
+  errSecUserCanceled, empty stderr — the old "User interaction is not
+  allowed" string never appears; verified against a real sshd 2026-07-23),
+  while the attribute-only search still succeeds. So: data read OK →
+  unlocked; item findable but data unreadable → LOCKED; only the missing
+  item's "could not be found" is string-matched. Every stdout is discarded
+  host-side (`-w`'s stdout is the secret) and only `MPX_KEYCHAIN` sentinels
+  cross the wire; a `uname` gate answers NA once per connection on
+  non-Macs. Only LOCKED lights the tip; MISSING is a genuine first login
+  and stays silent, as does anything unreadable. The tip is a tappable
+  caution status opening the unlock sheet, on TWO surfaces: the deck rail
+  (host-level), and — because the deck is behind the user once they attach
+  — the terminal chrome of any tab whose session is affected (UMD status
+  cluster on visionOS/shell, toolbar lamp on classic iPad). The tip clears
+  the moment the screen moves on (no exec needed) and re-confirms at a
+  60 s TTL while the symptom persists. Every evaluation
+  logs the verdict + matched sessions (category `wall`, debug) — the field
+  answer to "why is there no tip". DEBUG-only
+  `MULTIPLEX_KEYCHAIN_TIP=locked|unlocked|missing` forces the verdict (the
+  sign-in-screen gate still applies) so the rail/sheet can be driven
+  against the harness's fake agent pane. The `security unlock-keychain`
+  advice was re-verified on macOS 27: unlock-then-read works (a scratch
+  keychain addressed by bare path won't persist unlock across processes,
+  but the registered login keychain does). Free host plumbing, not an
+  agent-helper surface. Install/unlock command copy is shared between deck
+  sheets and the FAQ through `HostGuide` (the NO TMUX tile's INSTALL GUIDE
+  dialog draws from the same source) so the surfaces can't drift.
 - **HISTORY reads Claude Code's own session file; jump walks Claude's pager
   with the header oracle** (`AgentSessionHistory`, pure + fixture-tested;
   Pro via `canBrowseAgentHistory`). **Claude Code only** — Codex/Pi history

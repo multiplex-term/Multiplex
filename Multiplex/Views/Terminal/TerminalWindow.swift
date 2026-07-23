@@ -76,6 +76,8 @@ struct TerminalWindowRoot: View {
     /// Detach long-press picked CLOSE SESSION — destructive, so it confirms
     /// (same policy as the deck's delete action).
     @State private var confirmingCloseActiveSession = false
+    /// The pressed KEYCHAIN LOCKED status, snapshotted at tap time.
+    @State private var keychainTipRequest: KeychainTipRequest?
 
     /// Full host snapshots stay at the wall's economical cadence. Only the
     /// app-wide keyboard owner gets the small focused-pane query between
@@ -130,6 +132,32 @@ struct TerminalWindowRoot: View {
     private var activeTabHasSession: Bool {
         guard let activeTab else { return false }
         return activeTab.sessionName != nil && store.host(id: activeTab.hostID) != nil
+    }
+
+    /// The active tab's KEYCHAIN LOCKED tip (see `KeychainLockCheck`): the
+    /// host-level notice from the shared probe, surfaced only when this
+    /// tab's session is one of the affected ones — the terminal the user is
+    /// actually staring at when Claude Code shows signed out. The deck rail
+    /// keeps the host-level view; this keeps it in sight after attach.
+    private var activeTabKeychainNotice: KeychainLockNotice? {
+        guard let activeTab,
+              let sessionName = activeTab.sessionName,
+              let host = store.host(id: activeTab.hostID),
+              let notice = hub.model(for: host).keychainNotice,
+              notice.sessionNames.contains(sessionName)
+        else { return nil }
+        return notice
+    }
+
+    private func presentKeychainTip() {
+        guard let activeTab,
+              let host = store.host(id: activeTab.hostID),
+              let notice = activeTabKeychainNotice
+        else { return }
+        keychainTipRequest = KeychainTipRequest(
+            host: host,
+            sessionNames: notice.sessionNames
+        )
     }
 
     /// Agent receiving this tab's keystrokes. tmux routes read the shared
@@ -214,6 +242,12 @@ struct TerminalWindowRoot: View {
                 }
             }
             .sheet(isPresented: $showingPaywall) { ProPaywallView() }
+            .sheet(item: $keychainTipRequest) { tip in
+                KeychainUnlockSheet(
+                    host: tip.host,
+                    sessionNames: tip.sessionNames
+                )
+            }
             .alert(
                 "Couldn't Create Session",
                 isPresented: Binding(
@@ -574,6 +608,8 @@ struct TerminalWindowRoot: View {
                             detach: { detachActiveTab() },
                             closeSession: activeTabHasSession
                                 ? { confirmingCloseActiveSession = true } : nil,
+                            keychainTip: activeTabKeychainNotice != nil
+                                ? { presentKeychainTip() } : nil,
                             showsTmuxShortcuts: activeTab?.sessionName != nil
                         )
                         // The floating visionOS keyboard has no ESC/CTRL/TAB,
@@ -634,6 +670,8 @@ struct TerminalWindowRoot: View {
                 detach: { detachActiveTab() },
                 closeSession: activeTabHasSession
                     ? { confirmingCloseActiveSession = true } : nil,
+                keychainTip: activeTabKeychainNotice != nil
+                    ? { presentKeychainTip() } : nil,
                 showsTmuxShortcuts: activeTab?.sessionName != nil,
                 style: .shell,
                 deckControlLabel: configuration.deckControlLabel,
@@ -863,6 +901,22 @@ struct TerminalWindowRoot: View {
             TallyLamp(caption: "NEEDS YOU", color: Theme.caution)
                 .fixedSize()
                 .accessibilityLabel("Agent needs you")
+        }
+        if activeTabKeychainNotice != nil {
+            // Classic iPad windows have no UMD either — the KEYCHAIN LOCKED
+            // status rides the toolbar, same as NEEDS YOU above.
+            Button {
+                presentKeychainTip()
+            } label: {
+                TallyLamp(caption: "KEYCHAIN LOCKED", color: Theme.caution)
+            }
+            .buttonStyle(.plain)
+            .chassisHover(2)
+            .fixedSize()
+            .accessibilityLabel(
+                "The Mac's keychain is locked, so Claude Code shows signed out"
+            )
+            .accessibilityHint("Shows how to unlock the keychain")
         }
         if horizontalSizeClass == .compact {
             // UIKit's automatic toolbar overflow keeps only the trailing

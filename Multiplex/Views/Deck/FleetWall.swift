@@ -163,6 +163,10 @@ struct FleetWall: View {
     @State private var keyPassphraseHostID: UUID?
     @State private var legacyDropTarget: SessionDropTarget?
     @State private var tileGridColumnCount: Int?
+    /// The NO TMUX tile's install-guide dialog target.
+    @State private var tmuxGuideHost: Host?
+    /// The rail's KEYCHAIN LOCKED tip, captured at press time.
+    @State private var keychainTip: KeychainTipRequest?
 
     /// Pending delete confirmation — which session on which host.
     private struct DeleteTarget {
@@ -240,6 +244,12 @@ struct FleetWall: View {
                 message: Text(notice.reason),
                 dismissButton: .cancel(Text("OK"))
             )
+        }
+        .sheet(item: $tmuxGuideHost) { host in
+            TmuxInstallSheet(host: host)
+        }
+        .sheet(item: $keychainTip) { tip in
+            KeychainUnlockSheet(host: tip.host, sessionNames: tip.sessionNames)
         }
         .sshKeyPassphrasePrompt(
             challenge: presentedKeyPassphraseChallenge,
@@ -714,7 +724,32 @@ struct FleetWall: View {
     private func phaseRailStatus(_ model: HostConnectionModel) -> some View {
         switch model.phase {
         case .connected:
-            railLabel("CONNECTED", dot: Theme.ok)
+            // The keychain tip outranks the plain CONNECTED word while it
+            // stands (the probe just succeeded, so connectedness is implied)
+            // — same "most actionable status wins the slot" rule that lets
+            // NEEDS PASSPHRASE replace UNREACHABLE detail.
+            if let notice = model.keychainNotice {
+                Button {
+                    keychainTip = KeychainTipRequest(
+                        host: model.host,
+                        sessionNames: notice.sessionNames
+                    )
+                } label: {
+                    railLabel(
+                        "KEYCHAIN LOCKED",
+                        dot: Theme.caution,
+                        text: Theme.caution
+                    )
+                }
+                .buttonStyle(.plain)
+                .chassisHover(2)
+                .accessibilityLabel(
+                    "\(model.host.name): the Mac's keychain is locked, so Claude Code shows signed out"
+                )
+                .accessibilityHint("Shows how to unlock the keychain")
+            } else {
+                railLabel("CONNECTED", dot: Theme.ok)
+            }
         case .connecting:
             // Same dot anatomy as every other phase — a ProgressView is
             // intrinsically taller and its spinner draws outside the
@@ -808,7 +843,7 @@ struct FleetWall: View {
                     alignment: gridAlignment,
                     spacing: FleetTileGridSizing.gutter
                 ) {
-                    noteTile("No tmux on host", detail: "You can still open a plain shell.")
+                    tmuxMissingTile(host)
                 },
                 state: model.tmux
             )
@@ -1105,11 +1140,22 @@ struct FleetWall: View {
         .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
     }
 
-    private func noteTile(_ title: String, detail: String) -> some View {
-        VStack(spacing: 6) {
-            ChassisLabel(title, size: 11, color: Theme.signal3)
-            Text(detail).font(.footnote).foregroundStyle(Theme.signal2)
+    /// The host is reachable but tmux — the wall's core dependency — isn't
+    /// on its PATH. Plain shells still work (the rail's SHELL chip), and
+    /// the chip opens the per-OS install guide.
+    private func tmuxMissingTile(_ host: Host) -> some View {
+        VStack(spacing: 8) {
+            ChassisLabel("No tmux on host", size: 11, color: Theme.signal3)
+            Text("You can still use a plain shell — press SHELL.")
+                .font(.footnote)
+                .foregroundStyle(Theme.signal2)
+                .multilineTextAlignment(.center)
+            ChassisChip("INSTALL GUIDE") {
+                tmuxGuideHost = host
+            }
+            .padding(.top, 2)
         }
+        .padding(10)
         .frame(
             maxWidth: .infinity,
             minHeight: presentation == .shellRail ? 92 : 138

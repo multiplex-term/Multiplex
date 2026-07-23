@@ -163,6 +163,11 @@ final class HostConnectionModel {
     /// Session name → agent state (busy / idle / needs you), re-derived on
     /// every probe and capture pass. Drives the wall's NEEDS YOU badge.
     private(set) var attention: [String: PaneAgentState] = [:]
+    /// The macOS locked-keychain tip (see `KeychainLockCheck`): set while a
+    /// Claude pane sits on its sign-in screen AND the host-side check
+    /// confirms the login keychain is locked over SSH. Free host plumbing
+    /// like the FAQ entry it mirrors, not an agent-helper surface.
+    private(set) var keychainNotice: KeychainLockNotice?
     /// Fires on attention *edges* (turn ended, dialog appeared, bell).
     /// Set once by `ConnectionHub`; policy and delivery live in
     /// `AttentionCenter`, never here.
@@ -203,6 +208,11 @@ final class HostConnectionModel {
     /// Deeper, unclipped capture tails (the miniatures' source parse) —
     /// what the question detector reads.
     @ObservationIgnored private var attentionTails: [String: [String]] = [:]
+    /// Last keychain check answer + when it landed. `.notMacOS` is
+    /// structural and never re-asked on this connection; other verdicts
+    /// refresh after `keychainVerdictTTL` while the symptom persists.
+    @ObservationIgnored private var keychainVerdict: (verdict: KeychainLockCheck.Verdict, at: Date)?
+    @ObservationIgnored private var keychainCheckInFlight = false
 
     init(host: Host) {
         self.host = host
@@ -417,6 +427,7 @@ final class HostConnectionModel {
                 """)
             lastRefreshed = Date()
             evaluateAttention()
+            await evaluateKeychainTip(connection: connection, generation: generation)
         } catch {
             guard refreshGeneration == generation, !Task.isCancelled else { return }
             if reusedLink, mayRetry {
@@ -476,6 +487,7 @@ final class HostConnectionModel {
         if phase != failedPhase { phase = failedPhase }
         if tmux != failedTmux { tmux = failedTmux }
         if sessionCount != 0 { sessionCount = 0 }
+        if keychainNotice != nil { keychainNotice = nil }
         if let connection {
             // A link that timed out is usually black-holed; tearing it down
             // also unblocks any exec still hung on it. Never await this on
@@ -640,6 +652,90 @@ final class HostConnectionModel {
         attentionTracker.prune(keeping: Set(sessions.map(\.name)))
         if attention != next { attention = next }
     }
+
+    /// Re-derive the wall's KEYCHAIN LOCKED tip after a settled probe.
+    /// Symptom first: only a Claude pane visibly parked on its sign-in
+    /// screen (needle in the capture tail, agent confirmed on that pane)
+    /// triggers the one-exec host check, so healthy hosts never run
+    /// `security` at all. The check reuses the probe connection and
+    /// transports a sentinel — the credential itself never leaves the host
+    /// (see `KeychainLockCheck.checkCommand`). Fail-soft like every probe
+    /// stage: an unreadable answer just clears the tip.
+    private func evaluateKeychainTip(connection: SSHConnection, generation: Int) async {
+        guard case .sessions(let sessions) = tmux else {
+            applyKeychainVerdict(nil, sessions: [])
+            return
+        }
+        let affected = sessions.filter { session in
+            session.activeAgent == .claudeCode
+                && KeychainLockCheck.showsClaudeLoginScreen(
+                    in: attentionTails[session.name] ?? [])
+        }.map(\.name)
+        guard !affected.isEmpty else {
+            applyKeychainVerdict(nil, sessions: [])
+            return
+        }
+        #if DEBUG
+        if let forced = Self.forcedKeychainVerdict {
+            applyKeychainVerdict(forced, sessions: affected)
+            return
+        }
+        #endif
+        if let cached = keychainVerdict,
+           cached.verdict == .notMacOS
+               || Date().timeIntervalSince(cached.at) < Self.keychainVerdictTTL {
+            applyKeychainVerdict(cached.verdict, sessions: affected)
+            return
+        }
+        guard !keychainCheckInFlight else { return }
+        keychainCheckInFlight = true
+        defer { keychainCheckInFlight = false }
+        let output = try? await deadlined {
+            try await connection.exec(KeychainLockCheck.checkCommand)
+        }
+        guard refreshGeneration == generation, !Task.isCancelled else { return }
+        let verdict = output.map(KeychainLockCheck.parse) ?? .indeterminate
+        keychainVerdict = (verdict, Date())
+        // Field-debuggable (`log stream --predicate 'category == "wall"'`):
+        // the one line that says the symptom was seen and what the host
+        // answered — the difference between "needle never matched" and
+        // "check said unlocked" when a tip doesn't appear.
+        Self.timing.debug("""
+            \(self.host.name, privacy: .public) keychain check: \
+            \(String(describing: verdict), privacy: .public) — sign-in screen in \
+            \(affected.joined(separator: ","), privacy: .public)
+            """)
+        applyKeychainVerdict(verdict, sessions: affected)
+    }
+
+    #if DEBUG
+    /// `MULTIPLEX_KEYCHAIN_TIP=locked|unlocked|missing` forces the check's
+    /// verdict — the sign-in-screen gate still applies — so the rail tip
+    /// can be driven headlessly against the harness's fake agent pane
+    /// without a genuinely locked keychain.
+    private static let forcedKeychainVerdict: KeychainLockCheck.Verdict? = {
+        switch ProcessInfo.processInfo.environment["MULTIPLEX_KEYCHAIN_TIP"] {
+        case "locked": .locked
+        case "unlocked": .unlocked
+        case "missing": .credentialsMissing
+        default: nil
+        }
+    }()
+    #endif
+
+    private func applyKeychainVerdict(
+        _ verdict: KeychainLockCheck.Verdict?, sessions: [String]
+    ) {
+        let notice = verdict == .locked
+            ? KeychainLockNotice(sessionNames: sessions) : nil
+        if keychainNotice != notice { keychainNotice = notice }
+    }
+
+    /// While the sign-in screen persists, re-confirm the lock at this
+    /// cadence (the tip clears instantly when the screen moves on — that
+    /// path needs no exec; this catches an unlock behind an unchanged
+    /// screen without re-reading the keychain every five-second tick).
+    private static let keychainVerdictTTL: TimeInterval = 60
 
     /// Create a detached tmux session over the control connection and
     /// return its final name — in `sourceSession`'s active-pane cwd ($HOME
@@ -808,6 +904,8 @@ final class HostConnectionModel {
         attentionTails = [:]
         attention = [:]
         attentionTracker.reset()
+        keychainNotice = nil
+        keychainVerdict = nil
     }
 
     private func friendlyMessage(for error: Error) -> String {
