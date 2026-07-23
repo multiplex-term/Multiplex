@@ -2,7 +2,6 @@ import Citadel
 import Crypto
 import Foundation
 import NIOCore
-import NIOPosix
 import NIOSSH
 
 /// A passphrase entered from the connection-time prompt. Every connection to
@@ -287,33 +286,28 @@ actor SSHConnection {
             task = Task {
                 if host.useTailscale {
                     #if canImport(CLibTailscale)
-                    let settings = SSHClientSettings(
-                        host: host.hostname,
-                        port: host.port,
-                        authenticationMethod: { method },
-                        hostKeyValidator: .acceptAnything()
-                    )
                     let descriptor = try await TailscaleTunnel.shared.dial(
                         hostname: host.hostname,
                         port: host.port
                     )
-                    // NIO owns the descriptor from this call onward, including
-                    // channel-initialization failure paths.
-                    let channel = try await ClientBootstrap(
-                        group: MultiThreadedEventLoopGroup.singleton
-                    )
-                    .withConnectedSocket(descriptor)
-                    .get()
+                    // Citadel's channel-injection overload asserts
+                    // inEventLoop in its synchronous prefix, so the dialed
+                    // fd is spliced through a one-shot localhost relay and
+                    // Citadel dials it via its ordinary bootstrap. The
+                    // relay tears itself down when either side closes, so
+                    // the client's own close() is its lifetime owner.
+                    let relay = TailscaleLoopbackRelay()
+                    let relayPort = try relay.start(spliceTo: descriptor)
                     do {
-                        // This overload waits for Citadel's authenticated
-                        // handshake and hands the same inbound handler to the
-                        // resulting session.
                         return try await SSHClient.connect(
-                            on: channel,
-                            settings: settings
+                            host: "127.0.0.1",
+                            port: Int(relayPort),
+                            authenticationMethod: method,
+                            hostKeyValidator: .acceptAnything(),
+                            reconnect: .never
                         )
                     } catch {
-                        try? await channel.close()
+                        relay.close()
                         throw error
                     }
                     #else

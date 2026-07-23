@@ -105,6 +105,15 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   agent:cc 'Select login method:' Enter` — cat echoes it) into the
   harness's fake Claude pane and the rail tip renders without a genuinely
   locked keychain.
+- `MULTIPLEX_SEED_TAILSCALE=1` — flips the seeded host to Connect via
+  Tailscale (mosh off), for headless checks of the tailscale connect seam.
+- `MULTIPLEX_TAILSCALE_FAKE_DIAL=1` — tailscale dials become plain TCP
+  sockets (no tsnet node), so the loopback-relay → Citadel path can be
+  proven end-to-end against the harness sshd without a tailnet.
+- `MULTIPLEX_TAILSCALE_AUTHKEY=tskey-…` — overrides the stored Tailscale
+  auth key (never persisted), for driving a real embedded-node login
+  headlessly; tsnet's own log lines land in the unified log under
+  category `tailscale` (debug level — `log stream`).
 - `MULTIPLEX_APP_LOCK=1|held` — starts this launch behind the app-lock veil
   regardless of the persisted setting (never persisted, like
   `MULTIPLEX_PRO_LOCKED`). `1` keeps the real authenticator — the veil's

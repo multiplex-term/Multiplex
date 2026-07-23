@@ -2,6 +2,7 @@
 import CLibTailscale
 import Foundation
 import UIKit
+import os
 
 struct TailscaleTunnelFailure: Error, LocalizedError, CustomStringConvertible, Sendable {
     let message: String
@@ -28,6 +29,10 @@ actor TailscaleTunnel {
     }
 
     static let shared = TailscaleTunnel()
+    private static let logger = Logger(
+        subsystem: "app.multiplexterm.multiplex",
+        category: "tailscale"
+    )
     static let authKeyNamespace = UUID(
         uuidString: "7BD81B2F-B868-4C52-A968-70A03B65CB23"
     )!
@@ -65,6 +70,17 @@ actor TailscaleTunnel {
     }
 
     func dial(hostname: String, port: Int) async throws -> CInt {
+        #if DEBUG
+        // Headless seam proof without a tailnet: the relay + Citadel path
+        // is identical from here on whether the fd came from tsnet or a
+        // plain TCP connect to the harness sshd.
+        if ProcessInfo.processInfo.environment["MULTIPLEX_TAILSCALE_FAKE_DIAL"] == "1" {
+            let address = TailscaleDialAddress.format(hostname: hostname, port: port)
+            return try await Self.performC(on: cQueue) {
+                try Self.debugPlainSocket(hostname: hostname, port: port, address: address)
+            }
+        }
+        #endif
         try await ensureRunning()
         guard let node else {
             throw TailscaleTunnelFailure(
@@ -104,7 +120,18 @@ actor TailscaleTunnel {
 
     static func loadConfiguration() async -> Configuration {
         await Task.detached(priority: .userInitiated) {
-            Configuration(
+            #if DEBUG
+            if let override = ProcessInfo.processInfo
+                .environment["MULTIPLEX_TAILSCALE_AUTHKEY"], !override.isEmpty {
+                return Configuration(
+                    authKey: override,
+                    controlURL: UserDefaults.standard.string(
+                        forKey: controlURLDefaultsKey
+                    ) ?? ""
+                )
+            }
+            #endif
+            return Configuration(
                 authKey: KeychainStore.get(
                     for: authKeyNamespace,
                     kind: .tailscaleAuthKey
@@ -334,10 +361,11 @@ actor TailscaleTunnel {
                     operation: "Tailscale persistent-node setup",
                     node: node
                 )
-                // TODO: Replace log discard with a pipe-backed Logger sink
-                // before this experiment is considered for shipping.
+                // tsnet's logs are the only field-debugging signal this
+                // node has (the auth-key/NoState failure was diagnosed
+                // from them); -1 (discard) also proved leaky on device.
                 try check(
-                    tailscale_set_logfd(node, -1),
+                    tailscale_set_logfd(node, makeLogSink()),
                     operation: "Tailscale logging setup",
                     node: node
                 )
@@ -430,6 +458,74 @@ actor TailscaleTunnel {
         if result != 0 {
             _ = errorMessage(node: node)
         }
+    }
+
+    #if DEBUG
+    /// Fake-dial escape hatch: a plain blocking TCP connect standing in
+    /// for `tailscale_dial`, so the relay + Citadel seam can be driven
+    /// end-to-end against the local harness without a tailnet.
+    private static func debugPlainSocket(
+        hostname: String,
+        port: Int,
+        address: String
+    ) throws -> CInt {
+        var hints = addrinfo(
+            ai_flags: 0,
+            ai_family: AF_UNSPEC,
+            ai_socktype: SOCK_STREAM,
+            ai_protocol: 0,
+            ai_addrlen: 0,
+            ai_canonname: nil,
+            ai_addr: nil,
+            ai_next: nil
+        )
+        var results: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(hostname, String(port), &hints, &results) == 0,
+              let first = results
+        else {
+            throw TailscaleTunnelFailure(
+                message: "Fake dial couldn't resolve \(address)."
+            )
+        }
+        defer { freeaddrinfo(results) }
+        let fd = socket(first.pointee.ai_family, first.pointee.ai_socktype, first.pointee.ai_protocol)
+        guard fd >= 0 else {
+            throw TailscaleTunnelFailure(message: "Fake dial socket failed (errno \(errno)).")
+        }
+        guard connect(fd, first.pointee.ai_addr, first.pointee.ai_addrlen) == 0 else {
+            close(fd)
+            throw TailscaleTunnelFailure(
+                message: "Fake dial to \(address) failed (errno \(errno))."
+            )
+        }
+        return fd
+    }
+    #endif
+
+    /// Write end of a pipe whose reader forwards each tsnet log line to
+    /// the unified log (category `tailscale`, debug). The reader exits on
+    /// EOF when the node closes its end; falls back to -1 (discard) if
+    /// the pipe can't be made.
+    private static func makeLogSink() -> CInt {
+        var fds: [CInt] = [-1, -1]
+        guard pipe(&fds) == 0 else { return -1 }
+        let readFD = fds[0]
+        DispatchQueue.global(qos: .utility).async {
+            guard let stream = fdopen(readFD, "r") else {
+                close(readFD)
+                return
+            }
+            var line = [CChar](repeating: 0, count: 4096)
+            while fgets(&line, Int32(line.count), stream) != nil {
+                let text = String(cString: line)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty {
+                    logger.debug("tsnet: \(text, privacy: .public)")
+                }
+            }
+            fclose(stream)
+        }
+        return fds[1]
     }
 
     private static func check(
