@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Add or edit a host. Secrets go straight to the Keychain on save.
 struct AddHostSheet: View {
@@ -87,7 +88,7 @@ struct AddHostSheet: View {
             .toolbar {
                 ChassisSheetTitle(editing == nil ? "Add Host" : "Host Settings")
                 ToolbarItem(placement: .cancellationAction) {
-                    ChassisBarButton("Cancel") { dismiss() }
+                    ChassisBarButton("Cancel") { clearSecretsAndDismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     ChassisBarButton("Save", action: save)
@@ -127,6 +128,10 @@ struct AddHostSheet: View {
                     .keyboardType(.asciiCapable)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
+                    // The empty content type neutralizes the username half of
+                    // AutoFill's login-form pairing — without it, User plus
+                    // any secret field below reads as a savable credential.
+                    .textContentType(.init(rawValue: ""))
             }
         }
     }
@@ -148,7 +153,10 @@ struct AddHostSheet: View {
             switch authMethod {
             case .password:
                 TallyFormField("Password") {
-                    RevealableSecureField("Password", text: $password)
+                    // Neutral placeholder on purpose: AutoFill's login-form
+                    // heuristics read field placeholders, and the caption row
+                    // above already names the field for humans.
+                    RevealableSecureField("Password", prompt: "Required", text: $password)
                 }
             case .privateKey:
                 TallyFormField("Private key") {
@@ -160,6 +168,7 @@ struct AddHostSheet: View {
                     .lineLimit(4...8)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
+                    .textContentType(.init(rawValue: ""))
                 }
                 TallyFormField("Passphrase") {
                     RevealableSecureField("Passphrase", prompt: "Optional", text: $passphrase)
@@ -678,13 +687,30 @@ struct AddHostSheet: View {
         } else {
             store.update(host)
         }
-        dismiss()
+        clearSecretsAndDismiss()
+    }
+
+    /// AutoFill offers "Save to Passwords" from whatever text still sits in
+    /// a secure field when the hosting view controller closes — so the sheet
+    /// must close with every secret field empty (the Keychain already holds
+    /// the secrets). Dismissal waits one runloop turn: it must not start
+    /// until SwiftUI has pushed the emptied strings into the UIKit fields,
+    /// or teardown snapshots the old text and the prompt fires anyway.
+    private func clearSecretsAndDismiss() {
+        password = ""
+        privateKey = ""
+        passphrase = ""
+        DispatchQueue.main.async { dismiss() }
     }
 }
 
-/// A secret field with an eye toggle: SecureField normally, a plain
-/// TextField while revealed. One binding backs both, so toggling never
-/// loses what was typed.
+/// A secret field with an eye toggle: bullets normally, the plain string
+/// while revealed. One binding backs both, so toggling never loses what was
+/// typed. The masking is drawn app-side (`MaskedSecretField`) instead of
+/// `isSecureTextEntry`: modern iOS hard-wires the Passwords QuickType bar
+/// and the save-to-Passwords prompt to secure entry — every content-type
+/// opt-out is ignored — and one secure field marks the whole sheet as a
+/// login form, dragging User and Private key into the same treatment.
 private struct RevealableSecureField: View {
     let title: String
     let prompt: String
@@ -700,14 +726,13 @@ private struct RevealableSecureField: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            if revealed {
-                TextField(prompt, text: $text)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.asciiCapable)
-            } else {
-                SecureField(prompt, text: $text)
-            }
+            MaskedSecretField(
+                title: title,
+                prompt: prompt,
+                text: $text,
+                revealed: revealed
+            )
+            .frame(maxWidth: .infinity)
             Button {
                 revealed.toggle()
             } label: {
@@ -720,6 +745,141 @@ private struct RevealableSecureField: View {
             .chassisHover(2)
             .accessibilityLabel(revealed ? "Hide \(title)" : "Show \(title)")
         }
+    }
+}
+
+/// UIKit-backed secret entry that never sets `isSecureTextEntry`. The field's
+/// UIKit text is only ever bullets (or the revealed plain string); the real
+/// secret lives in the SwiftUI binding, edited by mapping the change range
+/// onto it — one bullet per Character keeps UIKit's UTF-16 ranges aligned
+/// with Character indices. Copy/cut/select are refused while masked, so the
+/// bullets can't be round-tripped out through the edit menu.
+private struct MaskedSecretField: UIViewRepresentable {
+    let title: String
+    let prompt: String
+    @Binding var text: String
+    var revealed: Bool
+
+    func makeUIView(context: Context) -> SecretTextField {
+        let field = SecretTextField()
+        field.font = .monospacedSystemFont(
+            ofSize: 12 * Theme.typeScale,
+            weight: .regular
+        )
+        field.textColor = UIColor(Theme.signal)
+        field.attributedPlaceholder = NSAttributedString(
+            string: prompt,
+            attributes: [.foregroundColor: UIColor(Theme.signal3)]
+        )
+        field.autocorrectionType = .no
+        field.spellCheckingType = .no
+        field.smartQuotesType = .no
+        field.smartDashesType = .no
+        field.smartInsertDeleteType = .no
+        field.autocapitalizationType = .none
+        field.keyboardType = .asciiCapable
+        field.textContentType = UITextContentType(rawValue: "")
+        field.accessibilityLabel = title
+        field.delegate = context.coordinator
+        field.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.editingChanged),
+            for: .editingChanged
+        )
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return field
+    }
+
+    func updateUIView(_ field: SecretTextField, context: Context) {
+        context.coordinator.text = $text
+        context.coordinator.revealed = revealed
+        field.masksEditActions = !revealed
+        let desired = revealed ? text : Self.bullets(text.count)
+        // No-op while the coordinator itself just wrote this value, so the
+        // caret survives ordinary typing; external writes (populate, clears,
+        // the reveal toggle) repaint and drop the caret to the end.
+        if field.text != desired {
+            field.text = desired
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, revealed: revealed)
+    }
+
+    static func bullets(_ count: Int) -> String {
+        String(repeating: "\u{2022}", count: count)
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var text: Binding<String>
+        var revealed: Bool
+
+        init(text: Binding<String>, revealed: Bool) {
+            self.text = text
+            self.revealed = revealed
+        }
+
+        func textField(
+            _ field: UITextField,
+            shouldChangeCharactersIn range: NSRange,
+            replacementString string: String
+        ) -> Bool {
+            guard !revealed else { return true }
+            var chars = Array(text.wrappedValue)
+            let lower = min(range.location, chars.count)
+            let upper = min(range.location + range.length, chars.count)
+            chars.replaceSubrange(lower..<upper, with: Array(string))
+            text.wrappedValue = String(chars)
+            field.text = MaskedSecretField.bullets(chars.count)
+            let caret = lower + string.count
+            if let position = field.position(
+                from: field.beginningOfDocument,
+                offset: caret
+            ) {
+                field.selectedTextRange = field.textRange(
+                    from: position,
+                    to: position
+                )
+            }
+            return false
+        }
+
+        @objc func editingChanged(_ field: UITextField) {
+            guard revealed else { return }
+            text.wrappedValue = field.text ?? ""
+        }
+
+        func textFieldShouldReturn(_ field: UITextField) -> Bool {
+            field.resignFirstResponder()
+            return true
+        }
+    }
+}
+
+/// The masked half of `MaskedSecretField`: refuses selection and clipboard
+/// actions while bullets are shown, since the underlying UIKit text is not
+/// the secret but leaking even its shape through the edit menu is wrong.
+final class SecretTextField: UITextField {
+    var masksEditActions = true
+
+    override func canPerformAction(
+        _ action: Selector,
+        withSender sender: Any?
+    ) -> Bool {
+        if masksEditActions {
+            switch action {
+            case #selector(copy(_:)),
+                 #selector(cut(_:)),
+                 #selector(select(_:)),
+                 #selector(selectAll(_:)):
+                return false
+            default:
+                break
+            }
+        }
+        return super.canPerformAction(action, withSender: sender)
     }
 }
 

@@ -29,17 +29,30 @@ struct SSHKeyPassphrasePromptModifier: ViewModifier {
                 isPresented: $isPresented,
                 presenting: challenge
             ) { challenge in
+                // The empty content type is the opt-out from AutoFill's
+                // stored-Passwords link — a credential type here invites the
+                // Passwords bar and the "Save to Passwords?" sheet for an SSH
+                // secret whose persistence is this prompt's own explicit
+                // Save & Connect choice.
                 SecureField("Key passphrase", text: $passphrase)
-                    .textContentType(.password)
+                    .textContentType(.init(rawValue: ""))
+                // State empties before the callbacks run: the system's
+                // save-to-Passwords heuristic reads whatever text remains
+                // in the field as the alert tears down.
                 Button("Connect Once") {
-                    onSubmit(challenge, passphrase, false)
+                    let entered = passphrase
+                    passphrase = ""
+                    onSubmit(challenge, entered, false)
                 }
                 .disabled(passphrase.isEmpty)
                 Button("Save & Connect") {
-                    onSubmit(challenge, passphrase, true)
+                    let entered = passphrase
+                    passphrase = ""
+                    onSubmit(challenge, entered, true)
                 }
                 .disabled(passphrase.isEmpty)
                 Button("Cancel", role: .cancel) {
+                    passphrase = ""
                     onCancel(challenge)
                 }
             } message: { challenge in

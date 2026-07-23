@@ -878,6 +878,18 @@ views.
   delayed main-thread work. A real docked keyboard must span the screen; short
   shortcut frames may match a narrower window only for classification and
   never produce clearance.
+- **Host secrets never use `isSecureTextEntry`** (`MaskedSecretField` in
+  `AddHostSheet.swift`): modern iOS hard-wires the Passwords QuickType chip
+  and the save-to-Passwords prompt to secure entry — every `textContentType`
+  opt-out (`.oneTimeCode`, empty raw value) is ignored, and one secure field
+  drags the sheet's *other* fields (User, Private key) into login-form
+  treatment too (user-reported; an SSH secret must never be offered to
+  Passwords). Bullets are drawn app-side while the real string lives only in
+  the SwiftUI binding; copy/cut/select are refused while masked. The sheet
+  additionally clears all secret state before dismissal, and the key-unlock
+  alert (which can only host a system `SecureField`) empties its field in
+  every button action for the same reason. Don't regress any of these to a
+  stock `SecureField`.
 - **Cross-device sync rides iCloud Keychain, nothing else** (E2E-encrypted, no
   entitlement/CloudKit): secrets *and* a JSON host record per host are
   synchronizable keychain items (services `app.multiplexterm.multiplex` /
