@@ -107,6 +107,10 @@ struct AddHostSheet: View {
                 }
             }
         }
+        // This long form is easy to drag while scrolling. Require the
+        // explicit Cancel or Save action so a swipe cannot discard edits;
+        // both paths also clear secret bindings before the sheet tears down.
+        .interactiveDismissDisabled()
         .onAppear(perform: populate)
         .sheet(isPresented: $showingPaywall) { ProPaywallView() }
         // Any edit that could change the outcome retires the shown result —
