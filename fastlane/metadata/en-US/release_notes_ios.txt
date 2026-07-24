@@ -1,0 +1,16 @@
+Multiplex 1.0 — first release for iPhone and iPad.
+
+• The wall: every tmux session as a live monitor, before you attach
+• A real scene per session on iPad; an adaptive deck-and-terminal workspace on iPhone
+• Tabs, merge, and split — shells stay connected while tabs move
+• Two hosts included free; Multiplex Pro unlocks unlimited hosts
+• A custom tmux shortcut menu, with touch-native copy mode, in the iPad and iPhone terminal chrome
+• Touch and pointer clicks for mouse-aware terminal apps
+• Multilingual system-keyboard and IME input, hardware keyboard support, and an iPad terminal rail with ESC, CTRL, TAB, arrows, Return, and more
+• Start Claude Code, Codex, or Pi in a new tmux session with an optional per-host setup script and first prompt; detection across split panes and plain SSH shells, foreground-aware helpers, synced per-host chip placement and custom commands, Claude Code/Codex Pro alerts, and Claude Code prompt history with jump-back-to-message (Pro)
+• mosh built in (Pro): sessions survive sleep, roaming, and IP changes
+• File attachments from Photos, Files, or the camera, plus terminal drag-and-drop
+• Home Screen widgets — a per-host monitor and a fleet wall with last-known session frames; tap to attach a shell or launch an agent (iOS 17)
+• Shortcuts & Siri: “Open Shell” and “Open Agent” (with working-directory and setup-script pickers plus an optional first prompt) for any host, plus a multiplex:// URL scheme for automation
+• Light & dark appearance that follows your device, a terminal theme per appearance, built-in themes, Pro custom themes, and iCloud Keychain host sync
+• Optional App Lock: require Face ID or Touch ID when Multiplex opens or returns from the background

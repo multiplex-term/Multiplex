@@ -29,15 +29,18 @@ behavior, or App Review flow changes.
 The canonical localized listing copy is stored in
 [`fastlane/metadata/en-US/`](../fastlane/metadata/en-US/):
 
-- name, subtitle, promotional text, description, keywords, release notes;
+- name, subtitle, promotional text, description, and keywords;
+- platform-specific `release_notes_ios.txt` and
+  `release_notes_visionos.txt` in each locale;
 - support, marketing, and privacy URLs;
 - categories and copyright in [`fastlane/metadata/`](../fastlane/metadata/);
 - App Review contact/demo flow in
   [`fastlane/metadata/review_information/`](../fastlane/metadata/review_information/).
 
-Do not duplicate the complete description in this document. The files above
-are what `fastlane store_metadata` uploads to both platform versions by
-default. Pass `platform:ios` or `platform:visionos` to target only one.
+Do not duplicate the complete description in this document. The
+`store_metadata` lane uploads the shared files to both platform versions and
+injects the matching platform release notes into each `deliver` call. Pass
+`platform:ios` or `platform:visionos` to target only one.
 
 ## Widgets, Shortcuts, and the URL scheme
 

@@ -71,6 +71,19 @@ def whats_new
   File.exist?(path) ? File.read(path) : "Internal build."
 end
 
+# Deliver has one shared metadata path, so inject the one field that differs
+# between App Store platform versions instead of duplicating every locale.
+def platform_release_notes(platform)
+  pattern = File.expand_path("metadata/*/release_notes_#{platform}.txt", __dir__)
+  notes = Dir.glob(pattern).sort.each_with_object({}) do |path, localized|
+    body = File.read(path)
+    UI.user_error!("Release notes are empty: #{path}") if body.strip.empty?
+    localized[File.basename(File.dirname(path))] = body
+  end
+  UI.user_error!("No release notes found for #{platform} (expected #{pattern})") if notes.empty?
+  notes
+end
+
 # Beta App Review contact + demo host. TestFlight external review and App
 # Store review both need a reachable SSH demo host — see
 # docs/appstore/release-playbook.md for the demo-host runbook.
@@ -146,7 +159,7 @@ lane :beta do |options|
   end
 end
 
-desc "Push fastlane/metadata to App Store Connect. platform:ios|visionos or omit for both. Uploads no binary or screenshots."
+desc "Push shared metadata plus platform release notes. platform:ios|visionos or omit for both. Uploads no binary or screenshots."
 lane :store_metadata do |options|
   platforms = options[:platform] ? [options[:platform]] : DESTINATIONS.keys
   platforms.each { |platform| DESTINATIONS.fetch(platform) }
@@ -155,6 +168,7 @@ lane :store_metadata do |options|
     deliver(
       api_key: api_key,
       platform: DESTINATIONS.fetch(platform)[:pilot],
+      release_notes: platform_release_notes(platform),
       skip_binary_upload: true,
       skip_screenshots: true,
       force: true,                             # skip the HTML preview prompt (CI-friendly)

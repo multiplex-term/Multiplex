@@ -1,8 +1,9 @@
 # Release playbook — TestFlight & App Store
 
 How a commit on `main` becomes a TestFlight build and, eventually, an App
-Store release. Store copy lives in `fastlane/metadata/` (uploaded verbatim to
-both platform versions by `fastlane store_metadata`); screenshot design in
+Store release. Store copy lives in `fastlane/metadata/`; `fastlane
+store_metadata` sends shared copy to both platform versions and selects each
+locale's matching iOS or visionOS release notes. Screenshot design lives in
 `docs/appstore/screenshots-plan.md`; one-time account setup in
 `fastlane/SETUP.md`.
 
