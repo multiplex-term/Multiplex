@@ -6,9 +6,9 @@ import SwiftUI
 struct UMDBar: View {
     enum Style {
         /// The visionOS classic window's title row: DECK, source label,
-        /// text size, and the session controls. The keyboard toggle lives
-        /// on the key cluster below, which keeps this row short enough to
-        /// stack under the monitor.
+        /// text size, and the session controls. The key cluster flanks it
+        /// on the same console row (every key stays TerminalKeyCluster's;
+        /// this row never grows its own).
         case regular
         /// The single-window shell's slim full-width row — it keeps DECK
         /// and the font chips because the shell has no other chrome; the

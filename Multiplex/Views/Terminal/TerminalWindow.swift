@@ -597,36 +597,53 @@ struct TerminalWindowRoot: View {
                                 )
                             )
                         )
-                        UMDBar(
-                            controller: activeController,
-                            title: umdTitle,
-                            mergeSources: mergeSources,
-                            showDeck: showDeck,
-                            fontDown: { fontSize = max(9, fontSize - 1) },
-                            fontUp: { fontSize = min(32, fontSize + 1) },
-                            newSession: { openNewTab(launching: $0) },
-                            merge: { merge($0) },
-                            detach: { detachActiveTab() },
-                            closeSession: activeTabHasSession
-                                ? { confirmingCloseActiveSession = true } : nil,
-                            keychainTip: activeTabKeychainNotice != nil
-                                ? { presentKeychainTip() } : nil,
-                            showsTmuxShortcuts: activeTab?.sessionName != nil
-                        )
                         // The floating visionOS keyboard has no ESC/CTRL/TAB,
                         // arrows, or RET; the chrome carries them (same send
-                        // path as typing) plus the keyboard toggle.
-                        TerminalKeyCluster(controller: activeController)
+                        // path as typing) plus the keyboard toggle. The keys
+                        // flank the UMD on one console row — ESC/CTRL/TAB
+                        // left, navigation keys right. The width clamp is
+                        // what lets its ViewThatFits compact the key faces —
+                        // and it must be OrnamentWidthClamp, never
+                        // `.frame(maxWidth:)`: an ornament clips to its
+                        // REPORTED bounds, and a frame caps the report, so
+                        // the too-narrow floor tier rendered with both key
+                        // slabs and DECK sliced off at the window edges.
+                        OrnamentWidthClamp(
+                            maxWidth: max(1, geometry.size.width - 24)
+                        ) {
+                            TerminalKeyCluster(controller: activeController) {
+                                UMDBar(
+                                    controller: activeController,
+                                    title: umdTitle,
+                                    mergeSources: mergeSources,
+                                    showDeck: showDeck,
+                                    fontDown: { fontSize = max(9, fontSize - 1) },
+                                    fontUp: { fontSize = min(32, fontSize + 1) },
+                                    newSession: { openNewTab(launching: $0) },
+                                    merge: { merge($0) },
+                                    detach: { detachActiveTab() },
+                                    closeSession: activeTabHasSession
+                                        ? { confirmingCloseActiveSession = true } : nil,
+                                    keychainTip: activeTabKeychainNotice != nil
+                                        ? { presentKeychainTip() } : nil,
+                                    showsTmuxShortcuts: activeTab?.sessionName != nil
+                                )
+                            }
+                        }
                     }
                     // "Center" resolves through this guide. With an agent
-                    // detected, the strip/UMD boundary sits on the anchor:
-                    // the agent bar rides ON the status row just inside the
-                    // window edge — the store-capture geometry
-                    // (fastlane/…/visionos-09-keys.png) — and the session
-                    // rows hang below. Without one, the UMD straddles the
-                    // edge. Constants are empirical against the system's
-                    // ornament standoff; re-verify against that capture
-                    // when touching them.
+                    // detected, the strip/console-row boundary sits on the
+                    // anchor: the agent bar rides ON the status row just
+                    // inside the window edge — the store-capture geometry
+                    // (fastlane/…/visionos-09-keys.png, pre-merge rows) —
+                    // and the console row (keys flanking the UMD) hangs
+                    // below. Without one, that row straddles the edge.
+                    // Empirical against the system's ornament standoff;
+                    // re-verify visually when touching them. Content must
+                    // never hang much deeper than this row does: the system
+                    // clips ornament content far below the anchor at
+                    // compact window widths (a third stacked row rendered
+                    // as a sliver).
                     .alignmentGuide(VerticalAlignment.center) { _ in
                         showsAgentHelper ? 40 : 24
                     }
@@ -1437,6 +1454,45 @@ private struct HistoryNoticePill: View {
         .accessibilityElement(children: .combine)
     }
 }
+
+#if os(visionOS)
+/// Proposes at most `maxWidth` to its content but reports the content's
+/// ACTUAL size. An ornament clips to its reported bounds, so the ordinary
+/// `.frame(maxWidth:)` — which caps the report — sliced the console row's
+/// key slabs off at the window edges whenever the fixedSize floor tier
+/// overflowed the clamp. This keeps the clamp's tier-driving proposal
+/// (bounded even when the ornament proposes nothing) while letting the
+/// ornament grow to whatever the chosen tier really needs.
+private struct OrnamentWidthClamp: Layout {
+    var maxWidth: CGFloat
+
+    private func clamped(_ proposal: ProposedViewSize) -> ProposedViewSize {
+        ProposedViewSize(
+            width: min(proposal.width ?? maxWidth, maxWidth),
+            height: proposal.height
+        )
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        guard let content = subviews.first else { return .zero }
+        return content.sizeThatFits(clamped(proposal))
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let content = subviews.first else { return }
+        content.place(
+            at: CGPoint(x: bounds.midX, y: bounds.midY),
+            anchor: .center,
+            proposal: clamped(proposal)
+        )
+    }
+}
+#endif
 
 #if DEBUG
 #Preview("Copy mode bar") {

@@ -474,23 +474,34 @@ views.
   `TerminalKeyCluster` — ESC / latching CTRL / TAB, the DECCKM-aware
   autorepeat arrows, RET, and the keyboard toggle (first responder is the
   visibility authority on visionOS, which posts no keyboard show/hide
-  notifications) — is a chassis slab
-  stacked directly below the UMD row in the terminal window's bottom
-  ornament, riding the same send path and latch mechanism. That ornament
+  notifications) — flanks the UMD row on ONE console line in the terminal
+  window's bottom ornament (ESC/CTRL/TAB slab left, navigation-key slab
+  right, both matching the UMD's 44 pt height), riding the same send path
+  and latch mechanism; one cluster instance owns the latch state and the
+  DEBUG proof hook in both layouts. The row stays ONE line at every width:
+  ViewThatFits compacts the key faces first (tiers engage because the
+  window clamps the ornament content's width), and when even compact
+  cannot fit, a `fixedSize` floor keeps the row at its ideal width and
+  lets it overflow the window edges symmetrically — the shipped unclamped
+  UMD's own narrow-window behavior. Never re-add a keys-under-UMD
+  restack fallback and never let the UMD compress: the system CLIPS
+  ornament content hanging far below the anchor at compact window widths
+  (a restacked key row rendered as an unusable sliver), and a squeezed
+  UMD truncates its title (both simulator-verified 2026-07). The ornament
   is positioned by an `alignmentGuide(VerticalAlignment.center)` override
   with state-dependent constants (40 with an agent strip, 24 without):
-  with an agent detected the strip/UMD boundary sits on the anchor, so the
-  agent bar rides ON the tmux status row just inside the window edge —
-  the store-capture geometry (fastlane/…/visionos-09-keys.png) — with the
-  UMD and key rows hanging below; without one the UMD straddles the edge.
-  Neither plain anchor works: a true centered stack rises as it grows and
-  lifted the agent bar off the edge onto the screen content, and a
-  below-edge anchor (`contentAlignment: .top`) parked the keys and the
+  with an agent detected the strip/console-row boundary sits on the
+  anchor, so the agent bar rides ON the tmux status row just inside the
+  window edge — the store-capture geometry
+  (fastlane/…/visionos-09-keys.png, which predates the one-line merge) —
+  with the console row hanging below; without one that row straddles the
+  edge. Neither plain anchor works: a true centered stack rises as it
+  grows and lifted the agent bar off the edge onto the screen content, and
+  a below-edge anchor (`contentAlignment: .top`) parked the keys and the
   window bar exactly where the floating keyboard summons (both
-  user-reported; re-verify against that capture when touching the
-  constants). DECK and the text-size chips live in the UMD title row
-  (the keyboard toggle stays on the key cluster), so neither bottom row
-  runs long. ⚠ SwiftTerm still *builds* its stock accessory on visionOS, and
+  user-reported; re-verify visually when touching the constants). DECK and
+  the text-size chips live in the UMD title row (every key stays the
+  cluster's), so the title row never grows its own keys. ⚠ SwiftTerm still *builds* its stock accessory on visionOS, and
   `commitTextInput` prefers that (invisible) accessory's `controlModifier`
   over the view-level one — `SwiftTermView` nils `inputAccessoryView` there
   so the cluster's latch is authoritative; don't remove that.
