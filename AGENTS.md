@@ -1091,9 +1091,9 @@ The **landing site** (the listing's marketing URL + the privacy policy) is
 part of the same claim surface but lives in its own repo, **multiplex-home**
 (`github.com/jhen0409/multiplex-home` — Astro on Cloudflare Workers; deploys
 are manual `npm run deploy`, decoupled from git). It serves
-`multiplexterm.dev`; `preview.multiplexterm.dev` remains routed to the same
-Worker. Landing changes go through PRs, never straight to a default branch. When
-features, pricing, platforms, or privacy behavior change, update that site in
+`multiplexterm.dev`. Landing changes go through PRs, never straight to a default
+branch. When features, pricing, platforms, or privacy behavior change, update
+that site in
 the same change as the metadata above. The design bake-off record and the
 unchosen candidates stay here under `docs/landing/`.
 
