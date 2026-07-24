@@ -2033,6 +2033,30 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     private func commitTextInput(_ text: String, applyModifiers: Bool) {
+        // Multiplex patch: on iOS-app-on-Mac the Cocoa text system owns
+        // hardware Return — Shift+Return never reaches pressesBegan with its
+        // modifier and arrives here as a bare "\n". The physical shift state
+        // is still readable at the HID layer (same GCKeyboard source as the
+        // Ctrl-chord bridge), so rewrite the delivery synchronously — no
+        // handler race, and exactly one byte sequence per press. Kitty-aware
+        // apps get the CSI 13;2u encoding; everything else gets LF, matching
+        // the pressesBegan Shift+Return cases used on real iPads/visionOS.
+        if applyModifiers, text == "\n", _markedTextRange == nil, macPhysicalShiftHeld() {
+            resetInputBuffer()
+            if terminal.keyboardEnhancementFlags.isEmpty {
+                send([10])
+            } else {
+                _ = sendKittyEvent(KittyKeyEvent(key: .functional(.enter),
+                                                 modifiers: [.shift],
+                                                 eventType: .press,
+                                                 text: nil,
+                                                 shiftedKey: nil,
+                                                 baseLayoutKey: nil,
+                                                 composing: false))
+            }
+            queuePendingDisplay()
+            return
+        }
         let hadPendingAutoPeriodDelete = pendingAutoPeriodDeleteWasSpace
         if !isAutoPeriodReplacement(text) {
             pendingAutoPeriodDeleteWasSpace = false
@@ -2169,6 +2193,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return .delete
         case .keyboardEscape:
             return .escape
+        // Multiplex patch: classify hardware Return so the kitty branch of
+        // pressesBegan owns it before UIKit's text-input fallback drops the
+        // physical Shift modifier. With enhancement flags active, Shift+Enter
+        // encodes as CSI 13;2u (plain Return stays legacy CR per the spec);
+        // the flags-empty path has its own Shift+Return case in pressesBegan.
+        case .keyboardReturnOrEnter, .keyboardReturn:
+            return .enter
         case .keyboardTab:
             return .tab
         case .keyboardF1:
@@ -2827,6 +2858,21 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
 
+    /// Multiplex patch: synchronous HID-level read of the physical Shift keys
+    /// for the commitTextInput Shift+Return rewrite. Mac-only by construction;
+    /// Ctrl/Cmd combos keep their existing meanings.
+    private func macPhysicalShiftHeld() -> Bool {
+        guard ProcessInfo.processInfo.isiOSAppOnMac,
+              let input = GCKeyboard.coalesced?.keyboardInput else { return false }
+        guard input.button(forKeyCode: .leftShift)?.isPressed == true ||
+              input.button(forKeyCode: .rightShift)?.isPressed == true else { return false }
+        guard input.button(forKeyCode: .leftControl)?.isPressed != true,
+              input.button(forKeyCode: .rightControl)?.isPressed != true,
+              input.button(forKeyCode: .leftGUI)?.isPressed != true,
+              input.button(forKeyCode: .rightGUI)?.isPressed != true else { return false }
+        return true
+    }
+
     func sendMacControl(_ character: String) {
         if !terminal.keyboardEnhancementFlags.isEmpty,
            character.unicodeScalars.count == 1, let scalar = character.unicodeScalars.first {
@@ -3060,7 +3106,22 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 break
             case .keyboardPause, .keyboardStop, .keyboardMute, .keyboardVolumeUp, .keyboardVolumeDown:
                 break
-                
+
+            // Multiplex patch: without kitty flags there is no protocol-level
+            // Shift+Enter, and UIKit's text-input fallback (insertText "\n")
+            // drops the physical Shift modifier — so claim the press here and
+            // send LF (Ctrl+J). Every CLI agent composer treats LF as
+            // insert-newline (Claude Code, Codex, Pi — verified under tmux
+            // 3.6a, which forwards the byte untouched), while shells and
+            // full-screen apps treat it like Enter. Unmodified Return keeps
+            // the UIKit path so IME commits stay intact.
+            case .keyboardReturnOrEnter, .keyboardReturn, .keypadEnter:
+                if key.modifierFlags.contains(.shift) {
+                    data = .bytes([10])
+                } else {
+                    fallthrough
+                }
+
             default:
                 if key.modifierFlags.contains ([.alternate, .command]) && key.charactersIgnoringModifiers == "o" {
                     optionAsMetaKey.toggle()

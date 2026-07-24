@@ -335,7 +335,7 @@ views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5), patched
     to declare the `NIO` product it imports (Xcode 27's module resolution
     rejects the undeclared import). Also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in seven behavior groups
+  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in eight behavior groups
     (marked `Multiplex patch`; the obscured-tab display guards share the marker
     on their owning state):
     `keyboardType` is settable (upstream is get-only), and Multiplex keeps it
@@ -370,7 +370,22 @@ views.
     (`wantsPriorityOverSystemBehavior` included) ever run. The bridge sends the
     control byte (kitty-encoded when enhancement flags are on) to the
     first-responder TerminalView in the key window and never installs on real
-    iPads. Upstream 1.15.0 encodes UIKit taps as xterm button 0
+    iPads. Hardware Shift+Enter is a first-class newline: `pressesBegan`
+    claims Return (all three Return HID usages) before UIKit's text-input
+    fallback strips the modifier — with kitty enhancement flags active it
+    encodes `CSI 13;2u`, otherwise it sends LF (0x0A), which Claude Code,
+    Codex, and Pi composers all treat as insert-newline while stock tmux
+    3.6a forwards the byte untouched and shells/vim treat it exactly like
+    Enter (all verified 2026-07-24; unmodified Return keeps the UIKit path
+    so IME commits stay intact, and Option+Enter's ESC CR falls through
+    unchanged). On iOS-app-on-Mac the Cocoa text system strips Shift before
+    `pressesBegan` ever sees Return, so `commitTextInput` rewrites a bare
+    "\n" by synchronously polling the physical Shift keys at the same
+    `GCKeyboard` HID layer the Ctrl bridge uses — race-free (exactly one
+    sequence per press) and real-hardware only: synthetic System Events
+    keystrokes reach the UIKit pipeline but never the HID layer, so neither
+    that rewrite nor the Ctrl bridge can be driven headlessly. Upstream
+    1.15.0 encodes UIKit taps as xterm button 0
     (primary/left), so that former Multiplex patch was retired. Sample apps
     trimmed.
   - When bumping either, re-apply the patches and diff before trusting it.
