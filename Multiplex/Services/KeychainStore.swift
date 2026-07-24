@@ -20,6 +20,15 @@ enum KeychainStore {
         case password
         case privateKey
         case keyPassphrase
+        /// The app-wide Tailscale auth key (tailscale-rs backend), stored
+        /// under a fixed namespace UUID rather than a real host.
+        case tailscaleAuthKey
+        /// The app-generated tailnet node identity: 96 bytes
+        /// (node ‖ machine ‖ network-lock, 32 each). tailscale-rs takes the
+        /// key state as an input and never exports it, so the app owns and
+        /// persists it here — this is why no plaintext state directory is
+        /// needed. Under the same fixed namespace UUID as the auth key.
+        case tailscaleKeyState
     }
 
     private static func account(_ hostID: UUID, _ kind: Kind) -> String {
@@ -39,6 +48,15 @@ enum KeychainStore {
 
     static func delete(for hostID: UUID, kind: Kind) {
         deleteItem(service: secretService, account: account(hostID, kind))
+    }
+
+    /// Binary-secret accessors for the tailnet node identity (not UTF-8).
+    static func setData(_ value: Data, for hostID: UUID, kind: Kind) {
+        setItem(value, service: secretService, account: account(hostID, kind))
+    }
+
+    static func getData(for hostID: UUID, kind: Kind) -> Data? {
+        getItem(service: secretService, account: account(hostID, kind))
     }
 
     static func delete(for hostID: UUID) {

@@ -21,6 +21,12 @@ struct AddHostSheet: View {
     @State private var privateKeyConcealed = false
     @State private var passphrase = ""
     @State private var useMosh = false
+    @State private var useTailscale = false
+    #if canImport(CTailscaleRS)
+    /// nil until the keychain read lands, so the missing-key tip never
+    /// flashes during load.
+    @State private var tailscaleAuthKeyConfigured: Bool?
+    #endif
     @State private var moshServerPath = ""
     @State private var moshPorts = ""
     @State private var workingDirs: [WorkingDir] = []
@@ -225,7 +231,39 @@ struct AddHostSheet: View {
     }
 
     private var transportSection: some View {
+        transportSectionBody
+            #if canImport(CTailscaleRS)
+            // Re-reads on every toggle flip: the sheet and Settings are never
+            // open at once, so toggle-on is the freshest moment.
+            .task(id: useTailscale) {
+                guard useTailscale else { return }
+                let configuration = await TailscaleTunnel.loadConfiguration()
+                guard !Task.isCancelled else { return }
+                tailscaleAuthKeyConfigured = !configuration.authKey
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty
+            }
+            #endif
+    }
+
+    private var transportSectionBody: some View {
         TallyFormSection("Transport", detail: transportDetail) {
+            #if canImport(CTailscaleRS)
+            TallyFormBoolField(
+                "Connect via Tailscale",
+                isOn: tailscaleToggle,
+                accessibilityHint: "Routes this host's SSH connection through the embedded Tailscale node"
+            )
+            if useTailscale, tailscaleAuthKeyConfigured == false {
+                TallyFormRow {
+                    Text("No Tailscale auth key is set yet — add a reusable one in Settings › Tailscale, or this host can't connect.")
+                        .font(.ui(10))
+                        .foregroundStyle(Theme.caution)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            #endif
+
             TallyFormBoolField(
                 "Connect with mosh",
                 isOn: moshToggle,
@@ -263,10 +301,15 @@ struct AddHostSheet: View {
     }
 
     private var transportDetail: String {
+        #if canImport(CTailscaleRS)
+        if useTailscale {
+            return "Experimental · SSH runs through this device's embedded Tailscale node, relayed through Tailscale's servers. Add a reusable auth key in Settings. Mosh is unavailable on this path."
+        }
+        #endif
         if useMosh {
-            "Terminals attach over UDP and survive roaming or sleep. SSH still signs in, starts mosh-server, and probes the deck."
+            return "Terminals attach over UDP and survive roaming or sleep. SSH still signs in, starts mosh-server, and probes the deck."
         } else {
-            "SSH carries both the control connection and attached terminals."
+            return "SSH carries both the control connection and attached terminals."
         }
     }
 
@@ -324,7 +367,12 @@ struct AddHostSheet: View {
     }
 
     private var testDetail: String {
-        useMosh
+        #if canImport(CTailscaleRS)
+        if useTailscale {
+            return "Starts the embedded Tailscale node, signs in to SSH through it, then looks for tmux on the host."
+        }
+        #endif
+        return useMosh
             ? "Signs in over SSH with the settings above, then looks for tmux and mosh-server on the host."
             : "Signs in over SSH with the settings above, then looks for tmux on the host."
     }
@@ -334,7 +382,8 @@ struct AddHostSheet: View {
     private var testFingerprint: [String] {
         [hostname, port, username, authMethod.rawValue,
          password, privateKey, passphrase,
-         useMosh ? "mosh" : "ssh", moshServerPath]
+         useMosh ? "mosh" : "ssh",
+         useTailscale ? "tailscale" : "direct", moshServerPath]
     }
 
     private func runTest() {
@@ -653,6 +702,21 @@ struct AddHostSheet: View {
                     return
                 }
                 useMosh = enabled
+                if enabled {
+                    useTailscale = false
+                }
+            }
+        )
+    }
+
+    private var tailscaleToggle: Binding<Bool> {
+        Binding(
+            get: { useTailscale },
+            set: { enabled in
+                useTailscale = enabled
+                if enabled {
+                    useMosh = false
+                }
             }
         )
     }
@@ -697,7 +761,8 @@ struct AddHostSheet: View {
         port = String(host.port)
         username = host.username
         authMethod = host.authMethod
-        useMosh = host.useMosh
+        useTailscale = host.useTailscale
+        useMosh = host.useMosh && !host.useTailscale
         moshServerPath = host.moshServerPath ?? ""
         moshPorts = host.moshPorts ?? ""
         workingDirs = host.workingDirs.map { WorkingDir(path: $0) }
@@ -724,7 +789,8 @@ struct AddHostSheet: View {
         host.port = Int(port) ?? 22
         host.username = username.trimmingCharacters(in: .whitespaces)
         host.authMethod = authMethod
-        host.useMosh = useMosh
+        host.useTailscale = useTailscale
+        host.useMosh = useMosh && !useTailscale
         let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
         let ports = moshPorts.trimmingCharacters(in: .whitespaces)
@@ -789,7 +855,7 @@ struct AddHostSheet: View {
 /// and the save-to-Passwords prompt to secure entry — every content-type
 /// opt-out is ignored — and one secure field marks the whole sheet as a
 /// login form, dragging User and Private key into the same treatment.
-private struct RevealableSecureField: View {
+struct RevealableSecureField: View {
     let title: String
     let prompt: String
     @Binding var text: String

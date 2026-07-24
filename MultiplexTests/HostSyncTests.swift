@@ -101,10 +101,27 @@ final class HostSyncTests: XCTestCase {
         XCTAssertEqual(host.name, "devbox")
         XCTAssertEqual(host.updatedAt, .distantPast)
         XCTAssertFalse(host.useMosh)
+        XCTAssertFalse(host.useTailscale)
         XCTAssertNil(host.moshServerPath)
         XCTAssertNil(host.moshPorts)
         XCTAssertEqual(host.workingDirs, [])
         XCTAssertTrue(host.agentCommandConfiguration.isEmpty)
+    }
+
+    func testTailscaleFlagParticipatesInConnectionIdentity() {
+        let original = host("devbox")
+        var tailscale = original
+        tailscale.useTailscale = true
+        XCTAssertFalse(original.hasSameConnectionModelConfiguration(as: tailscale))
+    }
+
+    func testHostTailscaleFlagRoundTripsThroughRecordEncoding() throws {
+        var original = host("devbox", updatedAt: Date(timeIntervalSince1970: 1234))
+        original.useTailscale = true
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Host.self, from: data)
+        XCTAssertEqual(decoded, original)
+        XCTAssertTrue(decoded.useTailscale)
     }
 
     func testHostRoundTripsThroughRecordEncoding() throws {

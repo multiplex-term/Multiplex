@@ -25,6 +25,10 @@ struct Host: Identifiable, Codable, Hashable {
     /// The credentials above still authenticate the SSH bootstrap that
     /// launches `mosh-server`; deck probing stays on SSH either way.
     var useMosh: Bool = false
+    /// Reach this host's SSH endpoint through the app's embedded userspace
+    /// Tailscale node (tailscale-rs backend). Works on all three platforms;
+    /// for v1 it cannot carry mosh's datagram transport.
+    var useTailscale: Bool = false
     /// Absolute path to `mosh-server` when it isn't on the exec PATH.
     var moshServerPath: String?
     /// UDP port or range ("60000:61000") handed to `mosh-server -p`.
@@ -80,6 +84,7 @@ extension Host {
         username = try container.decode(String.self, forKey: .username)
         authMethod = try container.decodeIfPresent(AuthMethod.self, forKey: .authMethod) ?? .password
         useMosh = try container.decodeIfPresent(Bool.self, forKey: .useMosh) ?? false
+        useTailscale = try container.decodeIfPresent(Bool.self, forKey: .useTailscale) ?? false
         moshServerPath = try container.decodeIfPresent(String.self, forKey: .moshServerPath)
         moshPorts = try container.decodeIfPresent(String.self, forKey: .moshPorts)
         workingDirs = try container.decodeIfPresent([String].self, forKey: .workingDirs) ?? []

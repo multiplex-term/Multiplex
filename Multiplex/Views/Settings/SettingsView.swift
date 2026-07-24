@@ -16,6 +16,13 @@ struct SettingsView: View {
     /// a new one and is added (and selected) on save.
     @State private var editingTheme: TerminalTheme?
     @State private var showingPaywall = false
+    #if canImport(CTailscaleRS)
+    @State private var tailscaleAuthKey = ""
+    @State private var tailscaleControlURL = ""
+    @State private var savedTailscaleConfiguration: TailscaleTunnel.Configuration?
+    @State private var tailscaleState: TailscaleTunnel.State = .stopped
+    @State private var savingTailscaleConfiguration = false
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -25,6 +32,9 @@ struct SettingsView: View {
                     currentThemeSection
                     builtInThemesSection
                     customThemesSection
+                    #if canImport(CTailscaleRS)
+                    tailscaleSection
+                    #endif
                     alertsSection
                     appLockSection
                     proSection
@@ -40,16 +50,126 @@ struct SettingsView: View {
             .toolbar {
                 ChassisSheetTitle("Settings")
                 ToolbarItem(placement: .confirmationAction) {
-                    ChassisBarButton("Done") { dismiss() }
+                    ChassisBarButton("Done", action: finish)
+                        #if canImport(CTailscaleRS)
+                        .disabled(savingTailscaleConfiguration)
+                        #endif
                 }
             }
             .navigationDestination(item: $editingTheme) { theme in
                 ThemeEditorView(theme: theme, onSave: save)
             }
+            #if canImport(CTailscaleRS)
+            .interactiveDismissDisabled(
+                tailscaleConfigurationDirty || savingTailscaleConfiguration
+            )
+            .task {
+                let configuration = await TailscaleTunnel.loadConfiguration()
+                guard !Task.isCancelled else { return }
+                tailscaleAuthKey = configuration.authKey
+                tailscaleControlURL = configuration.controlURL
+                savedTailscaleConfiguration = configuration
+            }
+            .task {
+                let updates = await TailscaleTunnel.shared.stateUpdates()
+                for await update in updates {
+                    guard !Task.isCancelled else { return }
+                    tailscaleState = update
+                }
+            }
+            #endif
             #if DEBUG
             .task { presentThemeEditorForVerificationIfRequested() }
             #endif
         }
+    }
+
+    #if canImport(CTailscaleRS)
+    private var tailscaleSection: some View {
+        TallyFormSection(
+            "Tailscale",
+            detail: "Experimental · relayed through Tailscale's servers. Use a reusable auth key: every device becomes its own tailnet node, synced through iCloud Keychain. The optional Headscale control URL stays on this device. Changes apply the next time the embedded node starts."
+        ) {
+            TallyFormField("Auth key") {
+                RevealableSecureField(
+                    "Tailscale auth key",
+                    prompt: "tskey-auth-…",
+                    text: $tailscaleAuthKey
+                )
+            }
+
+            TallyFormField("Control URL") {
+                TextField("Optional · Headscale URL", text: $tailscaleControlURL)
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+            }
+
+            TallyFormRow {
+                HStack(spacing: 12) {
+                    TallyLamp(caption: tailscaleStatusCaption, color: tailscaleStatusColor)
+                    Spacer(minLength: 12)
+                    if case .running(let ips) = tailscaleState {
+                        Text(ips.isEmpty ? "TAILNET READY" : ips.joined(separator: " · "))
+                            .font(.mono(10, weight: .medium))
+                            .foregroundStyle(Theme.signal2)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+            }
+        }
+        .disabled(savedTailscaleConfiguration == nil || savingTailscaleConfiguration)
+    }
+
+    private var tailscaleStatusCaption: String {
+        switch tailscaleState {
+        case .stopped: "STOPPED"
+        case .starting: "STARTING"
+        case .running: "RUNNING"
+        }
+    }
+
+    private var tailscaleStatusColor: Color {
+        switch tailscaleState {
+        case .stopped: Theme.signal3
+        case .starting: Theme.caution
+        case .running: Theme.ok
+        }
+    }
+
+    private var tailscaleConfiguration: TailscaleTunnel.Configuration {
+        TailscaleTunnel.Configuration(authKey: tailscaleAuthKey, controlURL: tailscaleControlURL)
+    }
+
+    private var tailscaleConfigurationDirty: Bool {
+        guard let savedTailscaleConfiguration else { return false }
+        return tailscaleConfiguration != savedTailscaleConfiguration
+    }
+    #endif
+
+    private func finish() {
+        #if canImport(CTailscaleRS)
+        guard let savedTailscaleConfiguration,
+              tailscaleConfiguration != savedTailscaleConfiguration
+        else {
+            tailscaleAuthKey = ""
+            self.savedTailscaleConfiguration = nil
+            dismiss()
+            return
+        }
+
+        let configuration = tailscaleConfiguration
+        savingTailscaleConfiguration = true
+        Task {
+            await TailscaleTunnel.saveConfiguration(configuration)
+            tailscaleAuthKey = ""
+            self.savedTailscaleConfiguration = nil
+            savingTailscaleConfiguration = false
+            dismiss()
+        }
+        #else
+        dismiss()
+        #endif
     }
 
     /// SYSTEM follows the device; LIGHT/DARK pin the chassis. The choice is

@@ -1,0 +1,17 @@
+diff --git a/ts_netmon/src/lib.rs b/ts_netmon/src/lib.rs
+index 9d8ec90..f1aa7c3 100644
+--- a/ts_netmon/src/lib.rs
++++ b/ts_netmon/src/lib.rs
+@@ -14,7 +14,11 @@ pub mod windows;
+ 
+ pub use family::{Family, FamilyOrBoth};
+ pub use id::{InterfaceId, MonType};
+-pub use netmon::{BoxStream, Netmon, PlatformMon, platform_mon};
++pub use netmon::{BoxStream, Netmon, platform_mon};
++// Multiplex investigation patch: PlatformMon only exists on macos/linux/windows;
++// iOS/visionOS have no platform monitor and hit E0432 on this re-export.
++#[cfg(any(target_os = "macos", target_os = "linux", windows))]
++pub use netmon::PlatformMon;
+ 
+ /// An event produced by the network monitor.
+ #[derive(Debug, Clone, PartialEq, Eq)]
