@@ -1260,9 +1260,9 @@ private struct SessionDropTarget: Equatable {
 }
 
 /// The wall's New Session prompt: a name plus what launches in the fresh
-/// shell — the agent quick options that used to hide behind the tile's
-/// long press are explicit choices now. The name prefills the first free
-/// conventional name for the selection (main / claude / codex / pi, then
+/// shell. SHELL / AGENTS stays a clear top-level choice while the selected
+/// agent lives in a dropdown. The name prefills the first free conventional
+/// name for the selection (main / claude / codex / pi, then
 /// -2, -3…) so Create is one tap; picking an agent re-prefills it unless
 /// the user already typed their own. Each agent can receive a one-shot first
 /// prompt as its CLI argument. An opt-in remembers only the submitted launch
@@ -1279,8 +1279,14 @@ private struct NewSessionSheet: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    private enum LaunchMode: Hashable {
+        case shell
+        case agents
+    }
+
     @State private var name: String
-    @State private var agent: AgentKind?
+    @State private var launchMode: LaunchMode
+    @State private var selectedAgent: AgentKind
     @State private var initialPrompt: String
     @State private var directory: String?
     @State private var script: SessionScript?
@@ -1305,7 +1311,8 @@ private struct NewSessionSheet: View {
 
         let remembersLastLaunch = preferences.remembersLastLaunch
         let agent = preferences.rememberedAgent
-        _agent = State(initialValue: agent)
+        _launchMode = State(initialValue: agent == nil ? .shell : .agents)
+        _selectedAgent = State(initialValue: agent ?? .claudeCode)
         _initialPrompt = State(initialValue: "")
         _directory = State(initialValue: host.workingDirs.first)
         _script = State(initialValue: preferences.rememberedScript(for: host))
@@ -1348,10 +1355,9 @@ private struct NewSessionSheet: View {
 
                     TallyFormSection("Launch", detail: launchDetail) {
                         TallyFormRow {
-                            TallyChoiceBar(launchChoices, selection: $agent)
-                                .accessibilityLabel("What to launch")
+                            launchPicker
                         }
-                        if let agent {
+                        if let agent = agentToLaunch {
                             TallyFormField("Initial prompt (optional)") {
                                 TextField(
                                     "What should \(agent.displayName) do?",
@@ -1376,7 +1382,7 @@ private struct NewSessionSheet: View {
                                 Spacer()
                                 VStack(alignment: .trailing, spacing: 3) {
                                     ChassisLabel("Command", size: 7, color: Theme.signal3)
-                                    Text(agent?.launchCommand ?? "login shell")
+                                    Text(agentToLaunch?.launchCommand ?? "login shell")
                                         .font(.mono(9, weight: .medium))
                                         .foregroundStyle(Theme.signal2)
                                 }
@@ -1470,27 +1476,89 @@ private struct NewSessionSheet: View {
                     ChassisBarButton("Create & Attach") {
                         preferences.save(
                             remembersLastLaunch: remembersLastLaunch,
-                            agent: agent,
+                            agent: agentToLaunch,
                             script: script,
                             hostID: host.id
                         )
-                        create(name, agent, initialPrompt, directory, script)
+                        create(name, agentToLaunch, initialPrompt, directory, script)
                         dismiss()
                     }
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
-        .onChange(of: agent) { previous, selected in
+        .onChange(of: agentToLaunch) { previous, selected in
             let untouched = name == prefill(for: previous)
             if untouched { name = prefill(for: selected) }
         }
     }
 
-    private var launchChoices: [(String, AgentKind?)] {
-        [("Shell", nil)] + AgentKind.allCases.map {
-            ($0.displayName, Optional($0))
+    private var agentToLaunch: AgentKind? {
+        launchMode == .agents ? selectedAgent : nil
+    }
+
+    private var launchPicker: some View {
+        HStack(spacing: 1) {
+            Button { launchMode = .shell } label: {
+                launchChoiceFace("Shell", selected: launchMode == .shell)
+            }
+            .buttonStyle(.plain)
+            .chassisHover(2)
+            .accessibilityAddTraits(launchMode == .shell ? .isSelected : [])
+
+            Menu {
+                ForEach(AgentKind.allCases, id: \.self) { candidate in
+                    Button(candidate.displayName) {
+                        selectedAgent = candidate
+                        launchMode = .agents
+                    }
+                }
+            } label: {
+                launchChoiceFace(
+                    launchMode == .agents ? selectedAgent.displayName : "Agents",
+                    selected: launchMode == .agents,
+                    showsMenuIndicator: true
+                )
+            }
+            .buttonStyle(.plain)
+            .chassisHover(2)
+            .accessibilityLabel("Agents")
+            .accessibilityValue(
+                launchMode == .agents ? selectedAgent.displayName : "Not selected"
+            )
+            .accessibilityHint("Choose Claude Code, Codex, or Pi")
+            .accessibilityAddTraits(launchMode == .agents ? .isSelected : [])
         }
+        .background(Theme.bezelHi)
+        .animation(.easeOut(duration: 0.14), value: launchMode)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("What to launch")
+    }
+
+    private func launchChoiceFace(
+        _ label: String,
+        selected: Bool,
+        showsMenuIndicator: Bool = false
+    ) -> some View {
+        HStack(spacing: 6) {
+            ChassisLabel(
+                label,
+                size: 9,
+                color: selected ? Theme.signal : Theme.signal2
+            )
+            if showsMenuIndicator {
+                Image(systemName: "chevron.down")
+                    .font(.ui(8, weight: .semibold))
+                    .foregroundStyle(selected ? Theme.signal : Theme.signal2)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 34)
+        .background(selected ? Theme.bezelHi : Theme.chassis)
+        .overlay(Rectangle().strokeBorder(
+            selected ? Theme.signal2 : Theme.bezelHi,
+            lineWidth: 1
+        ))
     }
 
     private func prefill(for agent: AgentKind?) -> String {
@@ -1502,7 +1570,7 @@ private struct NewSessionSheet: View {
         let remembers = host.sessionScripts.isEmpty
             ? "REMEMBER saves only the launch choice."
             : "REMEMBER saves the launch and setup-script choices."
-        guard let agent else {
+        guard let agent = agentToLaunch else {
             return "Creates the tmux session, then attaches to its login shell. \(remembers)"
         }
         return "Starts \(agent.displayName) in the fresh shell. The optional prompt becomes its first message; \(remembers)"
