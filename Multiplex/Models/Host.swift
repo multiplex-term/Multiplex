@@ -40,10 +40,12 @@ struct Host: Identifiable, Codable, Hashable {
     var sessionScripts: [SessionScript] = []
     /// tmux options for sessions created from Multiplex — conf-style text
     /// stored in this record (never a file on the host), one option per
-    /// line (`mouse on`). Each line is applied to the freshly minted
-    /// session as an explicitly targeted `set-option -t <that session>`,
-    /// so sessions created host-side are never touched and attach never
-    /// applies anything. Hosts start with `defaultNewSessionTmuxConf`;
+    /// line (`mouse on`, `focus-events on`). Each line is applied to the
+    /// freshly minted session through an explicitly targeted
+    /// `set-option -t <that session>`. Session-scoped options never alter
+    /// sessions created host-side; tmux's server-scoped options remain
+    /// server-wide. Attach never applies anything. Hosts start with
+    /// `defaultNewSessionTmuxConf`;
     /// records written before the field existed decode to it too. Empty
     /// means the user cleared it: apply nothing, the host's own
     /// `~/.tmux.conf` alone keeps governing, as tmux always does.
@@ -52,8 +54,9 @@ struct Host: Identifiable, Codable, Hashable {
     /// `mouse on` is the app's premise, not a taste choice: pans scroll
     /// tmux's own scrollback through the wheel events SwiftTerm reports,
     /// and Claude Code history jumps take the sticky-click fast path only
-    /// while the pane reports mouse mode.
-    static let defaultNewSessionTmuxConf = "mouse on"
+    /// while the pane reports mouse mode. `focus-events on` lets tmux pass
+    /// the terminal client's focus changes through to focus-aware apps.
+    static let defaultNewSessionTmuxConf = "mouse on\nfocus-events on"
     /// Agent-helper commands and built-in Bar/More placement for this host.
     /// This is part of the mirrored host record so the setup follows the host
     /// to the user's other devices through iCloud Keychain.

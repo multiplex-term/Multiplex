@@ -101,9 +101,10 @@ Current product split:
   appearance setting (SYSTEM follows the device; the whole chassis, launch
   screen, and keyboard flip together), New Session launches for Claude Code,
   Codex, or Pi with optional per-host setup scripts and one-shot first
-  prompts, per-host new-session tmux options (one option per line, default
-  `mouse on`) applied only to sessions created from the app — host-made
-  sessions stay untouched, built-in terminal themes
+  prompts, per-host new-session tmux options (one option per line; defaults
+  `mouse on` and `focus-events on`) applied when sessions are created from
+  the app — session-scoped values leave host-made sessions untouched while
+  tmux's server-scoped values remain server-wide, built-in terminal themes
   and a separate theme selection per appearance (light adds Tally Frost/Paper/Ivory),
   free file attachment on SSH-backed tmux tabs from Files/Photos (plus camera
   on iPad) and drag-and-drop through the same SSH upload path, a most-used tmux

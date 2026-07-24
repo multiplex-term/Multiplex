@@ -551,10 +551,13 @@ final class TmuxProbeTests: XCTestCase {
                 TmuxProbe.TmuxConfOption(name: "status", value: "off"),
             ])
         XCTAssertEqual(TmuxProbe.tmuxConfOptions(nil), [])
-        // The shipped default must parse to exactly the option it claims.
+        // The shipped defaults must parse to exactly the options they claim.
         XCTAssertEqual(
             TmuxProbe.tmuxConfOptions(Host.defaultNewSessionTmuxConf),
-            [TmuxProbe.TmuxConfOption(name: "mouse", value: "on")])
+            [
+                TmuxProbe.TmuxConfOption(name: "mouse", value: "on"),
+                TmuxProbe.TmuxConfOption(name: "focus-events", value: "on"),
+            ])
     }
 
     func testParseNewSession() {

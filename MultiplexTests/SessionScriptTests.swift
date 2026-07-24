@@ -93,8 +93,12 @@ final class SessionScriptTests: XCTestCase {
 
     func testHostNewSessionTmuxConfDefaultsRoundTripsAndKeepsCleared() throws {
         // New hosts and records from before the field existed both carry
-        // the default — mouse on is the app's premise (pan-to-scroll and
-        // the history jump's click fast path ride tmux mouse mode).
+        // the default: mouse mode powers remote scrolling/history clicks,
+        // while focus events reach focus-aware apps inside tmux.
+        XCTAssertEqual(
+            Host.defaultNewSessionTmuxConf,
+            "mouse on\nfocus-events on"
+        )
         XCTAssertEqual(
             Host(name: "d", hostname: "d.example.com", username: "dev").newSessionTmuxConf,
             Host.defaultNewSessionTmuxConf

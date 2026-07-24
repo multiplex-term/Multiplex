@@ -576,8 +576,12 @@ views.
   the raced create** (`Host.newSessionTmuxConf`, Host Settings below the
   working dirs). Hosts default to `mouse on` — the app's premise (pans
   scroll tmux's own scrollback, history jumps take the sticky-click fast
-  path), and absent-key decodes take the default too, so legacy/peer
-  records inherit it. A cleared field persists as empty — "apply nothing"
+  path) — plus `focus-events on`, so tmux passes terminal-client focus
+  changes through to focus-aware apps. `focus-events` is server-scoped and
+  therefore the default instance of the documented server-wide exception;
+  the newly attached Multiplex client picks it up. Absent-key decodes take
+  the defaults too, so legacy/peer records inherit them. A cleared field
+  persists as empty — "apply nothing"
   survives saves and sync, the host's own `~/.tmux.conf` alone keeps
   governing as tmux always does. One option per line (`mouse on`), parsed
   by `TmuxProbe.tmuxConfOptions` — forgiving of `.tmux.conf` muscle memory
@@ -587,15 +591,16 @@ views.
   must be option-shaped or the line is skipped, and the value rides as one
   shell-quoted argv. Every control-connection creation path — New Session
   sheet, + TAB, the widget/Shortcut router — threads the live host's conf
-  into `createSession`; attach and host-side sessions are never touched, and
-  the legacy PTY-side `.create` route stays untouched like scripts (nothing
-  rides on `TerminalRoute`). Scope facts, verified on 3.6a: `set-option -t
-  <session id>` lands session options on the minted session only; window
-  options land on that session's current (first) window and later windows
-  do NOT inherit them; server-scoped options (e.g. `escape-time`) silently
-  reach the whole server — the one leak, said in the editor copy. Each line
-  is its own individually `2>/dev/null`-silenced client call inside the
-  mint's success guard, so a bad option skips only itself. Never fold conf
+  into `createSession`; attach never applies it and host-side sessions are
+  not directly targeted, while the server-scoped exception below still
+  applies. The legacy PTY-side `.create` route stays untouched like scripts
+  (nothing rides on `TerminalRoute`). Scope facts, verified on 3.6a:
+  `set-option -t <session id>` lands session options on the minted session
+  only; window options land on that session's current (first) window and later
+  windows do NOT inherit them; server-scoped options (`focus-events`, `escape-time`)
+  silently reach the whole server — the one leak, said in the editor copy.
+  Each line is its own individually `2>/dev/null`-silenced client call inside
+  the mint's success guard, so a bad option skips only itself. Never fold conf
   application into the create as a `\;` sequence: a failing command there
   exits that shared client nonzero — the unnamed retry then mints a
   DUPLICATE session — and its error text lands on stdout inside `$i`. Never

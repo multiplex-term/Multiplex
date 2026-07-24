@@ -504,12 +504,14 @@ struct AddHostSheet: View {
         TallyFormSection(
             "New session tmux conf",
             detail: "One option per line, like a .tmux.conf (mouse on, "
-                + "history-limit 50000). Each line is applied to sessions "
-                + "created from Multiplex with tmux set-option -t that "
-                + "session — sessions made on the host are untouched, and "
-                + "attaching never applies anything. Hosts start with mouse "
-                + "on; clear the field to apply nothing. Server-scoped "
-                + "options still reach the whole tmux server."
+                + "history-limit 50000). Each line is applied when Multiplex "
+                + "creates a session with tmux set-option -t that session. "
+                + "Attaching never applies anything, and session-scoped "
+                + "options do not change sessions made on the host. Hosts "
+                + "start with mouse on and focus-events on; clear the field "
+                + "to apply nothing. "
+                + "Focus events and other server-scoped options still reach "
+                + "the whole tmux server."
         ) {
             TallyFormField("Options") {
                 TextField("cleared — nothing applied", text: $newSessionTmuxConf, axis: .vertical)
