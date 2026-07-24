@@ -28,6 +28,7 @@ struct SettingsView: View {
                     alertsSection
                     appLockSection
                     proSection
+                    privacyLink
                 }
                 .frame(maxWidth: 680)
                 .padding(18)
@@ -271,6 +272,15 @@ struct SettingsView: View {
             )
             #endif
         }
+    }
+
+    private var privacyLink: some View {
+        Link(destination: URL(string: "https://multiplexterm.dev/privacy")!) {
+            ChassisBadge("PRIVACY POLICY", systemImage: "arrow.up.right")
+        }
+        .buttonStyle(.plain)
+        .chassisHover(2)
+        .accessibilityLabel("Privacy policy")
     }
 
     /// A Pro feature's lock status row.
