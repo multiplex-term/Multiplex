@@ -628,7 +628,7 @@ struct TerminalWindowRoot: View {
                     // ornament standoff; re-verify against that capture
                     // when touching them.
                     .alignmentGuide(VerticalAlignment.center) { _ in
-                        showsAgentHelper ? 48 : 24
+                        showsAgentHelper ? 40 : 24
                     }
                 }
         }

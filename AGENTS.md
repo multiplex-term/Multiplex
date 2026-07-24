@@ -478,7 +478,7 @@ views.
   stacked directly below the UMD row in the terminal window's bottom
   ornament, riding the same send path and latch mechanism. That ornament
   is positioned by an `alignmentGuide(VerticalAlignment.center)` override
-  with state-dependent constants (48 with an agent strip, 24 without):
+  with state-dependent constants (40 with an agent strip, 24 without):
   with an agent detected the strip/UMD boundary sits on the anchor, so the
   agent bar rides ON the tmux status row just inside the window edge —
   the store-capture geometry (fastlane/…/visionos-09-keys.png) — with the

@@ -64,9 +64,11 @@ struct AgentHelperStrip: View {
     var body: some View {
         Group {
             if floating {
+                // Chips keep their 22 pt faces; the slab hugs them so the
+                // ornament stack stays low over the tmux status row.
                 row
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 9)
+                    .padding(.vertical, 5)
                     .frame(maxWidth: floatingMaximumWidth ?? 760)
                     .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(
