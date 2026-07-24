@@ -804,6 +804,9 @@ struct FleetWall: View {
     ) -> some View {
         switch model.tmux {
         case .sessions(let sessions):
+            // Xcode 26 cannot type-check OS 27 SDK-only modifiers, even
+            // behind a runtime availability check.
+#if compiler(>=6.4)
             if #available(iOS 27.0, visionOS 27.0, *) {
                 animatedGrid(
                     reorderableSessionGrid(
@@ -825,6 +828,17 @@ struct FleetWall: View {
                     state: model.tmux
                 )
             }
+#else
+            animatedGrid(
+                legacySessionGrid(
+                    host,
+                    model: model,
+                    sessions: sessions,
+                    columns: columns
+                ),
+                state: model.tmux
+            )
+#endif
         case .noServer:
             animatedGrid(
                 LazyVGrid(
@@ -872,6 +886,7 @@ struct FleetWall: View {
         }
     }
 
+#if compiler(>=6.4)
     /// OS 27's reorder container is purpose-built for this interaction: a
     /// long press lifts one tile, leaves a placeholder, and makes the other
     /// tiles move out of the way as the drag crosses the responsive grid.
@@ -908,6 +923,7 @@ struct FleetWall: View {
             )
         }
     }
+#endif
 
     /// iOS/visionOS 16–26 fallback using the original Transferable drag/drop
     /// API. Dropping on a session moves the dragged tile into that tile's

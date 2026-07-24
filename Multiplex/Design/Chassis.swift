@@ -460,6 +460,11 @@ struct ChassisSheetTitle: ToolbarContent {
         ToolbarItem(placement: .principal) {
             ChassisLabel(title, size: 12)
         }
+        #else
+        // Xcode 26's ToolbarContentBuilder has no empty buildBlock overload.
+        ToolbarItem(placement: .automatic) {
+            EmptyView()
+        }
         #endif
     }
 }

@@ -2718,7 +2718,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             modifierFlags: [],
             action: #selector(consumeMacEscape(_:))
         )
-        escape.wantsPriorityOverSystemBehavior = true
+        if #available(iOS 15.0, *) {
+            escape.wantsPriorityOverSystemBehavior = true
+        }
         commands.append(escape)
         return commands
     }
