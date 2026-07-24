@@ -10,9 +10,10 @@ lamp when it's attached — before you ever attach.
 that produced it: [docs/design-bakeoff.md](docs/design-bakeoff.md). The
 product site — the App Store listing's marketing URL and privacy policy — is
 maintained in [multiplex-home](https://github.com/jhen0409/multiplex-home)
-and served at [preview.multiplexterm.dev](https://preview.multiplexterm.dev)
-until release (final home: multiplexterm.dev); its own design bake-off is
-recorded in [docs/landing/](docs/landing/).*
+and served at [multiplexterm.dev](https://multiplexterm.dev), with
+[preview.multiplexterm.dev](https://preview.multiplexterm.dev) retained as an
+alternate endpoint; its own design bake-off is recorded in
+[docs/landing/](docs/landing/).*
 
 ![The deck: a live monitor wall of tmux sessions](docs/visionos-deck.png)
 
