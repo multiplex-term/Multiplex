@@ -445,10 +445,11 @@ views.
   receive drags begun inside `TerminalView`.
 - **The iPad key rail is app-owned chrome, never an `inputAccessoryView`**:
   `TerminalKeyBar` is a TALLY rail (ESC / latching CTRL / TAB, the shell
-  symbols `~ | / -`, DECCKM-aware autorepeat arrows, and the keyboard
-  toggle — `TerminalFocusArbiter.toggle`, the app's only keyboard
-  show/hide control since the KBD chips were retired) installed as a
-  normal sibling beneath `TerminalView`. A physical-iPad A/B proved that even
+  symbols `~ | / -`, DECCKM-aware autorepeat arrows, an iPad-only RET
+  immediately to their right, and the keyboard toggle —
+  `TerminalFocusArbiter.toggle`, the app's only keyboard show/hide control
+  since the KBD chips were retired) installed as a normal sibling beneath
+  `TerminalView`. A physical-iPad A/B proved that even
   assigning the custom rail to `inputAccessoryView` makes TextInputUI rehost it
   while a Stage Manager window moves, repeatedly reactivating the floating
   keyboard and stalling the UI. Keep `TerminalView.inputAccessoryView = nil`.
@@ -463,9 +464,10 @@ views.
   Its popover opens downward; while it is presented, the focus arbiter
   temporarily resigns the terminal so a docked software keyboard cannot clip
   the fixed command grid, then restores input only if that tab still owns it.
-  ESC/CTRL/TAB, all four arrows, and the keyboard toggle never leave the rail.
-  Every key sends through `TerminalView.send` → delegate → the controller's
-  ordered pump (never a side channel); CTRL rides SwiftTerm's public
+  ESC/CTRL/TAB, all four arrows, and the keyboard toggle never leave the rail;
+  RET likewise stays present on iPad, while iPhone omits it to preserve the
+  phone-width ladder. Every key sends through `TerminalView.send` → delegate →
+  the controller's ordered pump (never a side channel); CTRL rides SwiftTerm's public
   `controlModifier`, consumed by the next typed character — the bar observes
   `.terminalViewControlModifierReset` to release the latch visual. visionOS
   keeps no accessory (its keyboard floats and shows none);

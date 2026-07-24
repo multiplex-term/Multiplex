@@ -146,8 +146,10 @@ agent's option picker without summoning it). The iPad toolbar keeps the
 full chip set: `DECK`,
 source label, lamp, then
 `A− · A+ · + TAB · FILE · TMUX · MERGE · DETACH` chips; the keyboard
-toggle lives on the bottom key rail. On an
-SSH-backed tmux tab, `FILE` opens Camera (iPad/iPhone), Photos, and Files
+toggle lives on the bottom key rail. On iPad that rail places a dedicated
+`RET` immediately to the right of the arrow keys; iPhone omits it to preserve
+its compact-width ladder. On an SSH-backed tmux tab, `FILE` opens Camera
+(iPad/iPhone), Photos, and Files
 pickers and rejoins the terminal's existing SFTP drop path; mosh and plain
 shell tabs omit it. `TMUX` opens a custom square-grid TALLY dropdown
 listing the stock command, friendly action, and default `⌃B` binding; iPad and

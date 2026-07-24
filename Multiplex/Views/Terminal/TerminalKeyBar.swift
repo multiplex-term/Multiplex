@@ -60,6 +60,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         let host = UIHostingController(rootView: KeyBarRow(
             model: model,
             showsTmuxShortcuts: showsTmuxShortcuts,
+            showsReturnKey: UIDevice.current.userInterfaceIdiom == .pad,
             press: { [weak self] key in self?.press(key) }
         ))
         host.safeAreaRegions = []
@@ -109,6 +110,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         case .tab:
             click()
             terminal.send([0x09])
+        case .returnKey:
+            click()
+            terminal.send([0x0D])
         case .text(let text):
             click()
             terminal.send(txt: text)
@@ -274,7 +278,7 @@ extension TerminalKeyBar: UIPopoverPresentationControllerDelegate {
 }
 
 private enum TerminalKey {
-    case esc, ctrl, tab
+    case esc, ctrl, tab, returnKey
     case text(String)
     case up, down, left, right
     case pageUp, pageDown
@@ -283,8 +287,8 @@ private enum TerminalKey {
     case tmux(TmuxShortcut)
 }
 
-/// The rail: modifiers left, shell symbols center, arrows + keyboard toggle
-/// right.
+/// The rail: modifiers left, shell symbols center, then arrows, an iPad-only
+/// RET key, and the keyboard toggle on the right.
 /// Fixed-size keys let ViewThatFits measure every tier honestly. The original
 /// iPad ladder stays first; phone tiers compact the key metric only after page
 /// keys and symbols are gone. Regular phones retain TMUX; below 390 points the
@@ -293,6 +297,7 @@ private enum TerminalKey {
 private struct KeyBarRow: View {
     var model: TerminalKeyBar.Model
     var showsTmuxShortcuts: Bool
+    var showsReturnKey: Bool
     var press: (TerminalKey) -> Void
 
     var body: some View {
@@ -310,7 +315,7 @@ private struct KeyBarRow: View {
                     symbols: [],
                     withPageKeys: false,
                     showsTmux: true,
-                    metric: .compactWithTmux
+                    metric: .compactTight
                 )
                 .padding(.horizontal, 8)
             }
@@ -318,7 +323,7 @@ private struct KeyBarRow: View {
                 symbols: [],
                 withPageKeys: false,
                 showsTmux: false,
-                metric: .compact
+                metric: showsReturnKey ? .compactTight : .compact
             )
             .padding(.horizontal, 8)
         }
@@ -341,7 +346,12 @@ private struct KeyBarRow: View {
         showsTmux: Bool = true,
         metric: KeyMetric = .regular
     ) -> some View {
-        HStack(spacing: metric.spacing) {
+        // RET adds one key on iPad. Slightly smaller minimum group gaps keep
+        // PgUp/PgDn in the standard 768-point portrait tier; at wider sizes
+        // the Spacers expand exactly as before.
+        let groupGap = showsReturnKey ? min(metric.groupGap, 8) : metric.groupGap
+
+        return HStack(spacing: metric.spacing) {
             capsKey("ESC", .esc, "Escape", metric: metric)
             capsKey(
                 "CTRL",
@@ -351,7 +361,7 @@ private struct KeyBarRow: View {
                 metric: metric
             )
             capsKey("TAB", .tab, "Tab", metric: metric)
-            Spacer(minLength: metric.groupGap)
+            Spacer(minLength: groupGap)
             if !symbols.isEmpty {
                 ForEach(symbols, id: \.self) { symbol in
                     Key(
@@ -363,7 +373,7 @@ private struct KeyBarRow: View {
                         Text(symbol).font(.mono(15))
                     }
                 }
-                Spacer(minLength: metric.groupGap)
+                Spacer(minLength: groupGap)
             }
             if withPageKeys {
                 // Page keys scroll pagers and CLI-agent transcripts
@@ -376,6 +386,9 @@ private struct KeyBarRow: View {
             arrowKey("arrow.up", .up, "Arrow up", metric: metric)
             arrowKey("arrow.down", .down, "Arrow down", metric: metric)
             arrowKey("arrow.right", .right, "Arrow right", metric: metric)
+            if showsReturnKey {
+                capsKey("RET", .returnKey, "Return", metric: metric)
+            }
             Key(
                 action: { press(.keyboard) },
                 width: metric.keyWidth,
@@ -443,10 +456,10 @@ private struct KeyBarRow: View {
 
         static let regular = KeyMetric(keyWidth: 46, spacing: 6, groupGap: 12)
         // Preserve 40-point hit regions while narrowing only their visible
-        // faces. The tighter transparent gaps buy the 390-point phone tier a
-        // real 8-point edge inset without dropping TMUX or crowding a face
-        // directly against the screen edge.
-        static let compactWithTmux = KeyMetric(
+        // faces. The tighter transparent gaps fit either the phone's 390-point
+        // TMUX tier or the iPad's RET-bearing essentials tier without crowding
+        // a face directly against the screen edge.
+        static let compactTight = KeyMetric(
             keyWidth: 40,
             spacing: 1,
             groupGap: 1,
@@ -603,6 +616,7 @@ enum KeyBarDebugHook {
     KeyBarRow(
         model: TerminalKeyBar.Model(),
         showsTmuxShortcuts: true,
+        showsReturnKey: true,
         press: { _ in }
     )
     .frame(width: 1024, height: TerminalKeyBar.barHeight)
@@ -612,6 +626,7 @@ enum KeyBarDebugHook {
     KeyBarRow(
         model: TerminalKeyBar.Model(),
         showsTmuxShortcuts: true,
+        showsReturnKey: false,
         press: { _ in }
     )
     .frame(width: 390, height: TerminalKeyBar.barHeight)

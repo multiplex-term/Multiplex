@@ -54,9 +54,11 @@ recorded in [docs/landing/](docs/landing/).*
   and controls. A custom TALLY dropdown in the UMD on visionOS and the bottom
   key rail on iPad/iPhone lists the most-used stock tmux shortcuts (windows,
   panes, and copy mode); on sub-390 pt iPhones it moves to the shell's
-  top-right so the compact key rail can keep every terminal key. Shortcuts
-  send their default `Ctrl-B` bindings through the same ordered input path as
-  the keyboard. Copy mode becomes a clear contextual
+  top-right so the compact key rail can keep every terminal key. The iPad rail
+  also places a dedicated **RET** immediately to the right of its arrow keys
+  (the phone rail omits it to preserve that compact ladder). Shortcuts send
+  their default `Ctrl-B` bindings through the same ordered input path as the
+  keyboard. Copy mode becomes a clear contextual
   state: swipe through remote history, hold text for native selection/copy,
   then press **Done** to return to the shell. On SSH-backed tmux tabs,
   **FILE** attaches from Photos or Files (plus Camera on iPad), uploads into

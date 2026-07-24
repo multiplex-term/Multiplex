@@ -93,8 +93,9 @@ submission.
 Current product split:
 
 - Free: two hosts, full SSH spatial windows/tabs/merge with multilingual
-  system-keyboard/IME input and primary-button touch/pointer input for
-  mouse-aware TUIs, all-pane agent detection and wall
+  system-keyboard/IME input, a dedicated iPad RET key immediately after the
+  direction keys, and primary-button touch/pointer input for mouse-aware TUIs,
+  all-pane agent detection and wall
   telemetry with foreground-aware helpers in tmux panes and plain SSH
   shells (including direct-shell NEEDS YOU chrome), a System/Light/Dark
   appearance setting (SYSTEM follows the device; the whole chassis, launch
