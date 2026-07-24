@@ -642,41 +642,45 @@ import notify
 #endif
 
 /// The visionOS terminal's key cluster — ESC, a latching CTRL, TAB, the
-/// DECCKM-aware autorepeat arrows, RET, and the keyboard toggle on a chassis
-/// slab in the window's bottom ornament. The floating visionOS keyboard has
+/// DECCKM-aware autorepeat arrows, RET, and the keyboard toggle as chassis
+/// slabs in the window's bottom ornament. The floating visionOS keyboard has
 /// none of these keys and SwiftTerm plumbs no input accessory on visionOS,
 /// so the window's chrome carries them instead; arrows + RET are how a CLI
 /// agent's option picker is driven without summoning the keyboard at all.
+///
+/// Two layouts, one instance either way (the latch state and the DEBUG
+/// proof hook must have a single owner per window): standalone, the
+/// original single slab (the shell overlay's key row), or flanking a
+/// `center` row — the classic window's UMD — with ESC/CTRL/TAB on its left
+/// and the navigation keys on its right, so the ornament spends one console
+/// line on keys and window controls together.
 ///
 /// Same guarantees as the iPad key rail: every key sends through
 /// `TerminalView.send` → the view delegate → the controller's ordered input
 /// pump, and CTRL rides SwiftTerm's `controlModifier`, consumed by the next
 /// character the keyboard types — the cluster observes the reset
 /// notification to release the latch visual.
-struct TerminalKeyCluster: View {
+struct TerminalKeyCluster<Center: View>: View {
     var controller: TerminalSessionController?
+
+    /// The row the keys flank (the classic window's UMD); nil renders the
+    /// original standalone slab.
+    private let center: Center?
 
     @State private var ctrlLatched = false
 
     private var terminal: TerminalView? { controller?.terminalView }
 
+    init(
+        controller: TerminalSessionController?,
+        @ViewBuilder center: () -> Center
+    ) {
+        self.controller = controller
+        self.center = center()
+    }
+
     var body: some View {
-        // Ornaments propose unbounded width, so a classic window always gets
-        // the regular tier; the tiers exist for the (debug-forced) shell,
-        // whose pane can be phone-narrow. Faces compact before any key
-        // leaves the cluster; the floor keeps the original trio plus RET
-        // and the keyboard toggle — the window's only keyboard control.
-        ViewThatFits(in: .horizontal) {
-            row(.regular)
-            row(.compact)
-            row(.compact, minimal: true)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.bezelHi, lineWidth: 1))
+        layout
         // SwiftTerm consumes the modifier on the next typed character.
         .onReceive(NotificationCenter.default.publisher(
             for: .terminalViewControlModifierReset
@@ -700,56 +704,149 @@ struct TerminalKeyCluster: View {
         #endif
     }
 
-    private struct Metric {
-        let keyWidth: CGFloat
-        let spacing: CGFloat
-        let groupGap: CGFloat
+    private typealias Metric = KeyClusterMetric
 
-        static let regular = Metric(keyWidth: 46, spacing: 6, groupGap: 12)
-        static let compact = Metric(keyWidth: 36, spacing: 4, groupGap: 8)
+    @ViewBuilder
+    private var layout: some View {
+        if let center {
+            // One console row at EVERY width: key faces compact first, and
+            // when even compact overflows the caller's clamp the row keeps
+            // its ideal width and spills past the window edges symmetrically
+            // — the shipped unclamped UMD's own narrow-window behavior.
+            // ViewThatFits compares each tier's IDEAL width against the
+            // proposal, so the fixedSize floor is only reached when compact
+            // genuinely cannot fit; without fixedSize the last tier would
+            // instead compress the UMD (title truncated to "AGEN…").
+            // A restacked keys-under-UMD fallback was tried and rejected:
+            // ornament content hanging ~100 pt below the anchor is clipped
+            // by the system at compact window widths — the key row rendered
+            // as an unusable sliver (2026-07, simulator-verified).
+            ViewThatFits(in: .horizontal) {
+                consoleRow(center, metric: .regular)
+                consoleRow(center, metric: .compact)
+                consoleRow(center, metric: .compact)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        } else {
+            standaloneSlab
+        }
+    }
+
+    /// ESC/CTRL/TAB ride one slab left of the center row, the navigation
+    /// keys another on its right. Slab padding (9) around the 26 pt key
+    /// faces matches the UMD's height, so the three slabs read as one
+    /// console line.
+    private func consoleRow(_ center: Center, metric: Metric) -> some View {
+        HStack(spacing: 10) {
+            slab {
+                HStack(spacing: metric.spacing) {
+                    escKey(metric)
+                    ctrlKey(metric)
+                    tabKey(metric)
+                }
+            }
+            center
+            slab {
+                HStack(spacing: metric.groupGap) {
+                    arrowGroup(metric)
+                    retKey(metric)
+                    keyboardToggleKey(metric)
+                }
+            }
+        }
+    }
+
+    private var standaloneSlab: some View {
+        slab {
+            // Ornaments propose unbounded width, so a classic window always
+            // gets the regular tier; the tiers exist for the (debug-forced)
+            // shell, whose pane can be phone-narrow. Faces compact before
+            // any key leaves the cluster; the floor keeps the original trio
+            // plus RET and the keyboard toggle — the window's only keyboard
+            // control.
+            ViewThatFits(in: .horizontal) {
+                row(.regular)
+                row(.compact)
+                row(.compact, minimal: true)
+            }
+        }
+    }
+
+    private func slab(@ViewBuilder _ content: () -> some View) -> some View {
+        content()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Theme.bezelHi, lineWidth: 1))
     }
 
     private func row(_ metric: Metric, minimal: Bool = false) -> some View {
         HStack(spacing: metric.groupGap) {
             HStack(spacing: metric.spacing) {
-                capsKey("ESC", "Escape", metric: metric) {
-                    $0.send(EscapeSequences.cmdEsc)
-                }
-                capsKey("CTRL", "Control", latched: ctrlLatched, metric: metric) { terminal in
-                    let latched = !terminal.controlModifier
-                    terminal.controlModifier = latched
-                    ctrlLatched = latched
-                }
-                capsKey("TAB", "Tab", metric: metric) { $0.send([0x09]) }
+                escKey(metric)
+                ctrlKey(metric)
+                tabKey(metric)
             }
             if !minimal {
-                HStack(spacing: metric.spacing) {
-                    arrowKey(
-                        "arrow.left", "Arrow left", metric: metric,
-                        app: EscapeSequences.moveLeftApp,
-                        normal: EscapeSequences.moveLeftNormal)
-                    arrowKey(
-                        "arrow.up", "Arrow up", metric: metric,
-                        app: EscapeSequences.moveUpApp,
-                        normal: EscapeSequences.moveUpNormal)
-                    arrowKey(
-                        "arrow.down", "Arrow down", metric: metric,
-                        app: EscapeSequences.moveDownApp,
-                        normal: EscapeSequences.moveDownNormal)
-                    arrowKey(
-                        "arrow.right", "Arrow right", metric: metric,
-                        app: EscapeSequences.moveRightApp,
-                        normal: EscapeSequences.moveRightNormal)
-                }
+                arrowGroup(metric)
             }
-            capsKey("RET", "Return", metric: metric) { $0.send([0x0D]) }
-            TerminalClusterKey(
-                face: .icon("keyboard"),
-                accessibility: "Show or hide keyboard",
-                width: metric.keyWidth,
-                action: { controller?.toggleKeyboard() }
-            )
+            retKey(metric)
+            keyboardToggleKey(metric)
         }
+    }
+
+    private func escKey(_ metric: Metric) -> some View {
+        capsKey("ESC", "Escape", metric: metric) {
+            $0.send(EscapeSequences.cmdEsc)
+        }
+    }
+
+    private func ctrlKey(_ metric: Metric) -> some View {
+        capsKey("CTRL", "Control", latched: ctrlLatched, metric: metric) { terminal in
+            let latched = !terminal.controlModifier
+            terminal.controlModifier = latched
+            ctrlLatched = latched
+        }
+    }
+
+    private func tabKey(_ metric: Metric) -> some View {
+        capsKey("TAB", "Tab", metric: metric) { $0.send([0x09]) }
+    }
+
+    private func arrowGroup(_ metric: Metric) -> some View {
+        HStack(spacing: metric.spacing) {
+            arrowKey(
+                "arrow.left", "Arrow left", metric: metric,
+                app: EscapeSequences.moveLeftApp,
+                normal: EscapeSequences.moveLeftNormal)
+            arrowKey(
+                "arrow.up", "Arrow up", metric: metric,
+                app: EscapeSequences.moveUpApp,
+                normal: EscapeSequences.moveUpNormal)
+            arrowKey(
+                "arrow.down", "Arrow down", metric: metric,
+                app: EscapeSequences.moveDownApp,
+                normal: EscapeSequences.moveDownNormal)
+            arrowKey(
+                "arrow.right", "Arrow right", metric: metric,
+                app: EscapeSequences.moveRightApp,
+                normal: EscapeSequences.moveRightNormal)
+        }
+    }
+
+    private func retKey(_ metric: Metric) -> some View {
+        capsKey("RET", "Return", metric: metric) { $0.send([0x0D]) }
+    }
+
+    private func keyboardToggleKey(_ metric: Metric) -> some View {
+        TerminalClusterKey(
+            face: .icon("keyboard"),
+            accessibility: "Show or hide keyboard",
+            width: metric.keyWidth,
+            action: { controller?.toggleKeyboard() }
+        )
     }
 
     #if DEBUG
@@ -798,6 +895,25 @@ struct TerminalKeyCluster: View {
             guard let terminal else { return }
             terminal.send(terminal.getTerminal().applicationCursor ? app : normal)
         }
+    }
+}
+
+/// Key sizing tiers, hoisted out of the generic cluster (generic types
+/// cannot hold static stored properties).
+private struct KeyClusterMetric {
+    let keyWidth: CGFloat
+    let spacing: CGFloat
+    let groupGap: CGFloat
+
+    static let regular = KeyClusterMetric(keyWidth: 46, spacing: 6, groupGap: 12)
+    static let compact = KeyClusterMetric(keyWidth: 36, spacing: 4, groupGap: 8)
+}
+
+/// The standalone slab — the shell overlay's key row, with no UMD to flank.
+extension TerminalKeyCluster where Center == EmptyView {
+    init(controller: TerminalSessionController?) {
+        self.controller = controller
+        self.center = nil
     }
 }
 
