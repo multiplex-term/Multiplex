@@ -110,7 +110,11 @@ Current product split:
   tmux's server-scoped values remain server-wide, built-in terminal themes
   and a separate theme selection per appearance (light adds Tally Frost/Paper/Ivory),
   free file attachment on SSH-backed tmux tabs from Files/Photos (plus camera
-  on iPad) and drag-and-drop through the same SSH upload path, a most-used tmux
+  on iPad) and drag-and-drop through the same SSH upload path, opening web and
+  mail links found in terminal output (long press, or tap where the remote is
+  not tracking the mouse; the confirmation shows the resolved target and its
+  host, and other schemes are shown for copying rather than followed), a
+  most-used tmux
   shortcut dropdown on both platforms (including touch-native copy-mode
   selection and explicit exit), Home Screen widgets (per-host monitor +
   fleet wall; iPadOS 17+, visionOS 26+) and App Shortcuts ("Open Shell" /

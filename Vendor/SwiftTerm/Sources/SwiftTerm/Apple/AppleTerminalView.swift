@@ -925,6 +925,17 @@ extension TerminalView {
 
     func linkVisibleForClick(match: Terminal.LinkMatch, hasCommandModifier: Bool) -> Bool
     {
+        // Multiplex patch: every activation mode below is gated on state only a
+        // pointer can produce — `.hover*` needs `linkHighlightRange`, which is
+        // populated exclusively by UIPointerInteraction/UIHoverGestureRecognizer,
+        // and `.always*` resolves explicit OSC 8 payloads only. Touch produces
+        // neither, so on a phone, an iPad without a trackpad, or Vision Pro
+        // driven by gaze + pinch, an implicitly detected URL could never be
+        // activated at all. When this is set the match itself is enough and the
+        // delegate decides what activation means.
+        if linkActivationIgnoresHighlight {
+            return true
+        }
         switch linkHighlightMode {
         case .always:
             return match.isExplicit

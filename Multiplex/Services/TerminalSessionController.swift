@@ -153,6 +153,10 @@ final class TerminalSessionController {
     private(set) var dropState: DropState?
     private var dropTask: Task<Void, Never>?
     private var dropClearTask: Task<Void, Never>?
+    /// A link the user activated in this pane, awaiting confirmation. The
+    /// pane never opens one straight from the gesture: the target is remote
+    /// output, so the destination is shown first (see `TerminalLink`).
+    private(set) var pendingLink: TerminalLink?
 
     init(route: TerminalRoute, host: Host, attention: AttentionCenter? = nil) {
         self.route = route
@@ -175,6 +179,13 @@ final class TerminalSessionController {
         terminalView = view
         view.allowMouseReporting = !tmuxCopyModeUIActive
         view.forceRemoteCursorScroll = tmuxCopyModeUIActive
+        // Touch never hovers, so SwiftTerm's pointer-gated activation can
+        // never fire here; this pane decides instead. The view owns the
+        // closure and this controller owns the view — capture weakly.
+        view.linkActivationIgnoresHighlight = true
+        view.linkActivationHandler = { [weak self] target, _ in
+            self?.activateLink(target) ?? false
+        }
         if !pendingOutput.isEmpty {
             view.feed(byteArray: pendingOutput[...])
             pendingOutput.removeAll()
@@ -1286,6 +1297,42 @@ final class TerminalSessionController {
             typedPrefix: nil,
             prepareGitIgnoredDirectory: false
         )
+    }
+
+    // MARK: Links
+
+    /// A link the terminal resolved under a tap or long press. Returns
+    /// whether this pane claims the gesture — declining lets it fall through
+    /// to selection, which is what a filesystem path (implicit detection
+    /// matches those too) must keep doing.
+    func activateLink(_ target: String) -> Bool {
+        // The jump search owns the pane's input while it pages and its veil
+        // covers the text being pressed — same rule as a drop.
+        if case .finding = historyJump { return false }
+        guard let link = TerminalLink.resolve(target) else { return false }
+        pendingLink = link
+        return true
+    }
+
+    /// Hands the confirmed target to the system. Only an allowlisted scheme
+    /// ever reaches here — `TerminalLink` decided that, and the sheet only
+    /// offers OPEN for `.openable`.
+    func openPendingLink() {
+        guard let url = pendingLink?.openableURL else { return }
+        pendingLink = nil
+        UIApplication.shared.open(url)
+    }
+
+    /// Copy is the answer for everything Multiplex will not open: a blocked
+    /// scheme, a malformed target, or a link the user wants elsewhere.
+    func copyPendingLink() {
+        guard let link = pendingLink else { return }
+        UIPasteboard.general.string = link.raw
+        pendingLink = nil
+    }
+
+    func dismissPendingLink() {
+        pendingLink = nil
     }
 
     // MARK: Actions

@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 #if DEBUG
 import notify
+import SwiftTerm
 #endif
 
 /// Root of one terminal window scene: the window's tabs (each one SSH
@@ -104,6 +105,14 @@ struct TerminalWindowRoot: View {
     }
     private var terminalFocusAllowed: Bool {
         shell?.terminalFocusAllowed ?? true
+    }
+    /// Kept out of the body's modifier chain, which sits at the Swift
+    /// type-checker's ceiling: an inline binding here fails to type-check.
+    private var newTabFailedAlertBinding: Binding<Bool> {
+        Binding(
+            get: { newTabFailedHost != nil },
+            set: { if !$0 { newTabFailedHost = nil } }
+        )
     }
     /// Only the in-scene shell spends the side safe areas on its panes; a
     /// classic terminal scene is laid out inside them already.
@@ -248,12 +257,10 @@ struct TerminalWindowRoot: View {
                     sessionNames: tip.sessionNames
                 )
             }
+            .terminalLinkConfirmation(for: activeController)
             .alert(
                 "Couldn't Create Session",
-                isPresented: Binding(
-                    get: { newTabFailedHost != nil },
-                    set: { if !$0 { newTabFailedHost = nil } }
-                )
+                isPresented: newTabFailedAlertBinding
             ) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -298,6 +305,16 @@ struct TerminalWindowRoot: View {
                 else { return }
                 controller.finishHistoryJump()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugLink)) { _ in
+                debugActivateFirstLink()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugLinkOpen)) { _ in
+                guard let controller = activeController,
+                      let view = controller.terminalView,
+                      view === TerminalFocusArbiter.current
+                else { return }
+                controller.openPendingLink()
+            }
             #endif
     }
 
@@ -324,6 +341,7 @@ struct TerminalWindowRoot: View {
         AgentChipDebugHook.install()
         NewTabDebugHook.install()
         MessageJumpDebugHook.install()
+        TerminalLinkDebugHook.install()
         #endif
         guard let hostID = activeTab?.hostID, let host = store.host(id: hostID) else { return }
         let model = hub.model(for: host)
@@ -463,6 +481,36 @@ struct TerminalWindowRoot: View {
               ).first(where: { $0.label.hasPrefix("/") })
         else { return }
         send(command, via: controller)
+    }
+
+    /// Headless link proof: scan the focused pane's visible screen for the
+    /// first resolvable link and run it through the same
+    /// `activateLink` policy a long press uses, so the confirmation sheet
+    /// that appears is the real one. Screen coordinates keep the scan on
+    /// what is actually rendered rather than the whole scrollback.
+    private func debugActivateFirstLink() {
+        guard let controller = activeController,
+              let view = controller.terminalView,
+              view === TerminalFocusArbiter.current
+        else { return }
+        let terminal = view.getTerminal()
+        for row in 0..<terminal.rows {
+            var col = 0
+            while col < terminal.cols {
+                guard let target = terminal.link(
+                    at: .screen(Position(col: col, row: row)),
+                    mode: .explicitAndImplicit
+                ) else {
+                    col += 1
+                    continue
+                }
+                if controller.activateLink(target) { return }
+                // A declined match (a filesystem path) must not stall the
+                // scan on its own cells — step past the whole match's worth
+                // of columns rather than re-resolving each one.
+                col += max(1, target.count)
+            }
+        }
     }
 
     /// Run the + TAB dropdown's New Session action for the focused window
@@ -1537,6 +1585,35 @@ extension Notification.Name {
     static let multiplexDebugMessageJumpBack = Notification.Name(
         "MultiplexDebugMessageJumpBack"
     )
+    static let multiplexDebugLink = Notification.Name("MultiplexDebugLink")
+    static let multiplexDebugLinkOpen = Notification.Name("MultiplexDebugLinkOpen")
+}
+
+/// `….debug.link` activates the first link on the focused terminal's visible
+/// screen — the same resolve → policy → confirmation path a long press takes,
+/// which is the only way to drive it headlessly (no sim tap injection exists,
+/// and ornament/gesture input can't be synthesized). `….debug.linkopen` then
+/// runs the sheet's OPEN action, so a screenshot shows Safari with the target.
+@MainActor
+enum TerminalLinkDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var findToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.link", &findToken, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugLink, object: nil)
+        }
+        var openToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.linkopen", &openToken, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugLinkOpen, object: nil)
+        }
+    }
 }
 
 /// Headless-verification hook, same shape as `AgentChipDebugHook`:

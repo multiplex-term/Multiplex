@@ -195,6 +195,12 @@ terminal's Command Setup editor for layout capture, and
 `… -p app.multiplexterm.multiplex.debug.msghistory` opens the focused
 terminal's agent HISTORY panel (session-file prompt list) for layout
 capture, and
+`… -p app.multiplexterm.multiplex.debug.link` activates the first link on
+the focused pane's visible screen through the same resolve → policy →
+confirmation path a long press takes (a screen of only filesystem paths
+must present nothing — that's the decline working), with
+`….debug.linkopen` running the sheet's OPEN action so the system log shows
+the URL reaching SurfBoard, and
 `… -p app.multiplexterm.multiplex.debug.msgjump` / `….debug.msgjumpback`
 jumps the focused Claude Code terminal to its oldest session-file prompt
 and runs BACK TO LIVE — host-side `tmux capture-pane` proves both (the old
@@ -388,8 +394,19 @@ views.
     keystrokes reach the UIKit pipeline but never the HID layer, so neither
     that rewrite nor the Ctrl bridge can be driven headlessly. Upstream
     1.15.0 encodes UIKit taps as xterm button 0
-    (primary/left), so that former Multiplex patch was retired. Sample apps
-    trimmed.
+    (primary/left), so that former Multiplex patch was retired. And link
+    activation is reachable by touch and answerable by the app:
+    `linkActivationIgnoresHighlight` lifts the pointer-only gate (every
+    upstream mode needs `linkHighlightRange`, which only
+    UIPointerInteraction/UIHoverGestureRecognizer set — touch and visionOS
+    gaze set neither, so an implicit URL could never be activated at all),
+    `linkActivationHandler` lets the app decline a match so a press over a
+    filesystem path still opens the selection menu, and both gestures route
+    through one `activateLink`: `singleTap` now skips the link check while
+    the remote wants the tap (upstream resolved links first, so URL-shaped
+    text swallowed tmux pane switches and vim cursor placement), while
+    `longPress` — local at every mouse mode — resolves one before its
+    context menu. Sample apps trimmed.
   - When bumping either, re-apply the patches and diff before trusting it.
 - **Citadel pinned to exactly 0.12.0**: 0.12.1 moved its swift-nio-ssh dep to an
   unaudited personal fork. Don't bump without review — this is the transport.
@@ -533,6 +550,35 @@ views.
   a keyboard Escape clears the state there too. Always restore mouse reporting
   when the mode ends or the transport closes, or normal tmux touch interaction
   silently stops.
+- **A terminal link is confirmed, never followed** (`TerminalLink`, pure +
+  tested; `TerminalLinkSheet`): SwiftTerm resolves the match (explicit OSC 8,
+  else ghostty-derived implicit detection, wrapped rows reassembled), the
+  patched gestures hand it to `TerminalSessionController.activateLink`, and
+  the pane presents the target rather than opening it. **Long press is the
+  activation route on every platform** — it is local at any mouse mode, while
+  a tap belongs to the remote whenever the client asked for tracking (tmux
+  `mouse on` is the default); tap activates only when it doesn't. Three
+  rules the model enforces, all load-bearing: the scheme allowlist is
+  `http`/`https`/`mailto` and nothing else — notably **not `multiplex:`,
+  which `ExternalActionRouter` would accept as a widget-grade
+  `open?host=…&action=agent&prompt=…`**, so pane output can't launch an
+  agent on another host; implicit detection matches **filesystem paths**
+  (`./x`, `/etc/hosts`, `~/x`) as readily as URLs, so those resolve to nil
+  and the press falls through to selection; and interior whitespace
+  disqualifies a target, because prose carrying a colon (`warning: unused
+  variable`) otherwise classifies as a `warning:` link. The sheet renders
+  the **resolved target** with the host on its own line — an OSC 8 label is
+  chosen independently of its destination, and that line is also what
+  exposes `https://github.com@evil.example/x`. Blocked and malformed
+  targets still get a sheet with COPY: an explanation beats a press that
+  does nothing. ⚠ **OSC 8 does not survive a tmux attach today** — tmux
+  3.6a stores hyperlinks (`capture-pane -e` proves it) but only emits them
+  to a client whose terminal advertises `Hls`, and the app requests
+  `TERM=xterm-256color`, which has none. So implicit detection is the live
+  path in tmux tabs; explicit links reach only direct `.shell` tabs. Don't
+  "fix" it with a server-scoped `terminal-features` default (the same leak
+  the per-host new-session conf documents). Full record + the verified
+  experiment table: `local-plan/terminal-links.md`.
 - **"Back to deck" reuses the one deck scene**: the data-driven `WindowGroup`
   always opens `DeckWindowRoute.main`, so `openWindow(id:value:)` raises the
   matching deck instead of minting another; `DeckScene` also destroys a second
