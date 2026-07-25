@@ -107,7 +107,11 @@ Current product split:
   prompts, per-host new-session tmux options (one option per line; defaults
   `mouse on` and `focus-events on`) applied when sessions are created from
   the app — session-scoped values leave host-made sessions untouched while
-  tmux's server-scoped values remain server-wide, built-in terminal themes
+  tmux's server-scoped values remain server-wide, a per-host switch (deck
+  menu, its tile, or Host Settings) that parks a host on the wall without
+  connecting to it — no probing, no local-network check, and widget or
+  Shortcut actions report it as disabled — carried with the host record to
+  the user's other devices, built-in terminal themes
   and a separate theme selection per appearance (light adds Tally Frost/Paper/Ivory),
   free file attachment on SSH-backed tmux tabs from Files/Photos (plus camera
   on iPad) and drag-and-drop through the same SSH upload path, opening web and

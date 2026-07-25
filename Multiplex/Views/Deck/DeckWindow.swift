@@ -204,7 +204,10 @@ struct DeckWindow: View {
             )
         ) {
             if scenePhase == .active {
-                localNetworkAccess.check(hosts: store.hosts)
+                // Switched-off hosts are never dialled, and that includes
+                // this diagnostic socket — a host nobody is connecting to
+                // must not be what raises the local-network prompt.
+                localNetworkAccess.check(hosts: store.hosts.filter(\.isEnabled))
             } else {
                 localNetworkAccess.suspend()
             }

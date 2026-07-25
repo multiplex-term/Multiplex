@@ -98,6 +98,17 @@ enum ExternalActionPerformer {
             ))
             return
         }
+        // A widget tile or Shortcut can outlive the switch being turned off.
+        // Say so instead of dialling a host the user has taken off the air —
+        // and instead of the resolution message above, which would blame the
+        // shortcut for a host that is right there on the deck.
+        guard host.isEnabled else {
+            context.presentFailure(ExternalActionFailure(
+                hostName: host.name,
+                message: "\(host.name) is disabled. Enable it on the deck to open sessions on it."
+            ))
+            return
+        }
         switch action {
         case .openShell(_, let sessionName):
             await openShell(on: host, requestedSession: sessionName, context: context)

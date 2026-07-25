@@ -21,6 +21,13 @@ struct Host: Identifiable, Codable, Hashable {
     var port: Int = 22
     var username: String
     var authMethod: AuthMethod = .password
+    /// Whether the deck monitors this host. A disabled host keeps its record,
+    /// its secrets, and its place in the fleet, but the app never dials it on
+    /// its own: no wall probe, no local-network check, and widget/Shortcut
+    /// actions refuse it instead of connecting. Turning it back on is one
+    /// press on its tile. Rides the synced record, so a host switched off
+    /// stays off on the user's other devices.
+    var isEnabled: Bool = true
     /// Attach terminals over mosh (SSP over UDP) instead of the SSH PTY.
     /// The credentials above still authenticate the SSH bootstrap that
     /// launches `mosh-server`; deck probing stays on SSH either way.
@@ -82,6 +89,9 @@ extension Host {
         port = try container.decodeIfPresent(Int.self, forKey: .port) ?? 22
         username = try container.decode(String.self, forKey: .username)
         authMethod = try container.decodeIfPresent(AuthMethod.self, forKey: .authMethod) ?? .password
+        // Records written before the switch existed are hosts the user
+        // expects to see probing: absent means enabled.
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         useMosh = try container.decodeIfPresent(Bool.self, forKey: .useMosh) ?? false
         moshServerPath = try container.decodeIfPresent(String.self, forKey: .moshServerPath)
         moshPorts = try container.decodeIfPresent(String.self, forKey: .moshPorts)
@@ -102,7 +112,9 @@ extension Host {
     /// Hashable identity for the connection model and the wall feed that
     /// drives it. Command-setup, setup-script, and new-session tmux conf
     /// edits must not tear down the probe connection; every other
-    /// current/future Host field remains part of the identity.
+    /// current/future Host field remains part of the identity — `isEnabled`
+    /// deliberately included, so a host switched off on another device
+    /// restarts the wall feed here, which is where the live probe is dropped.
     var connectionModelConfiguration: Host {
         var configuration = self
         configuration.agentCommandConfiguration = AgentCommandConfiguration()

@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+#if DEBUG
+import notify
+#endif
 
 /// Hosts persisted as JSON in Application Support — a local cache of the
 /// cross-device truth. Secrets and a mirrored copy of each host record live
@@ -44,7 +47,12 @@ final class HostStore {
         // unrelated device presentation preferences into that isolated store.
         sessionOrders = overrideDirectory == nil ? Self.loadSessionOrders() : [:]
         load()
-        if overrideDirectory == nil { seedFromEnvironmentIfNeeded() }
+        if overrideDirectory == nil {
+            seedFromEnvironmentIfNeeded()
+            #if DEBUG
+            installDebugHostEnableHook()
+            #endif
+        }
     }
 
     func add(_ host: Host) {
@@ -99,6 +107,18 @@ final class HostStore {
 
     func host(id: UUID) -> Host? {
         hosts.first { $0.id == id }
+    }
+
+    /// The deck's per-host power switch. Off means the app never dials this
+    /// host on its own — the wall stops probing it and every automatic
+    /// connect path refuses it — while the record, its secrets, and its
+    /// order all survive. It rides the synced host record like any other
+    /// edit, so the choice follows the user to their other devices.
+    func setEnabled(_ enabled: Bool, for hostID: UUID) {
+        guard let host = host(id: hostID), host.isEnabled != enabled else { return }
+        var updated = host
+        updated.isEnabled = enabled
+        update(updated)
     }
 
     func agentCommandConfiguration(for hostID: UUID) -> AgentCommandConfiguration {
@@ -302,6 +322,10 @@ final class HostStore {
         if let conf = seed.newSessionTmuxConf {
             host.newSessionTmuxConf = TmuxProbe.normalizedTmuxConf(conf) ?? ""
         }
+        // A seeded `enabled: false` starts the launch with the host switched
+        // off, which is how the never-dials-it promise is checked headlessly
+        // (the harness sshd log stays empty). Absent leaves it alone.
+        if let enabled = seed.enabled { host.isEnabled = enabled }
         if let key = seed.privateKey { KeychainStore.set(key, for: host.id, kind: .privateKey) }
         if let password = seed.password { KeychainStore.set(password, for: host.id, kind: .password) }
         if hosts.contains(where: { $0.id == host.id }) {
@@ -313,6 +337,24 @@ final class HostStore {
     }
 
     #if DEBUG
+    /// Headless-verification hook: the deck's Enable/Disable action can't be
+    /// tapped from the CLI, so
+    /// `xcrun simctl spawn <udid> notifyutil -p app.multiplexterm.multiplex.debug.hostenable`
+    /// flips the first host through the exact store mutation the menu and the
+    /// tile use — proving that switching off drops the probe and that
+    /// switching on brings the wall back.
+    private func installDebugHostEnableHook() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.hostenable", &token, .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let host = self.hosts.first else { return }
+                self.setEnabled(!host.isEnabled, for: host.id)
+            }
+        }
+    }
+
     private struct SeedHost: Decodable {
         var name: String
         var hostname: String
@@ -320,6 +362,7 @@ final class HostStore {
         var username: String
         var password: String?
         var privateKey: String?
+        var enabled: Bool?
         var useMosh: Bool?
         var moshServerPath: String?
         var moshPorts: String?

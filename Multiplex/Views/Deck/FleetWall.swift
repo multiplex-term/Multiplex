@@ -322,9 +322,16 @@ struct FleetWall: View {
                     awaitingSignal
                 } else {
                     ForEach(store.hosts) { host in
-                        let model = hub.model(for: host)
-                        HostSectionObservation(model: model) { observed in
-                            hostSection(host, model: observed, columns: columns)
+                        // A switched-off host never gets a connection model:
+                        // asking the hub for one is what would put it back on
+                        // the air.
+                        if host.isEnabled {
+                            let model = hub.model(for: host)
+                            HostSectionObservation(model: model) { observed in
+                                hostSection(host, model: observed, columns: columns)
+                            }
+                        } else {
+                            disabledHostSection(host, columns: columns)
                         }
                     }
                 }
@@ -374,7 +381,7 @@ struct FleetWall: View {
     /// slots empty rather than widening its own tiles out of step with the
     /// sections above and below it.
     private var tileCount: Int {
-        let counts = store.hosts.map { host -> Int in
+        let counts = store.hosts.filter(\.isEnabled).map { host -> Int in
             max(1, hub.model(for: host).sessionCount + 1)
         }
         return counts.max() ?? 1
@@ -404,8 +411,16 @@ struct FleetWall: View {
     /// While this view exists, keep the wall alive: re-probe each host and
     /// refresh its miniatures. Skips work while the app is backgrounded;
     /// `.task(id:)` restarts the loop when the fleet changes.
+    ///
+    /// Hosts the user switched off are the one thing the wall never dials.
+    /// Their live model is dropped here rather than only in the disable
+    /// action: `isEnabled` is part of the feed identity, so this also runs
+    /// when a peer device is what switched the host off.
     private func runFeed() async {
-        let models = store.hosts.map { hub.model(for: $0) }
+        for host in store.hosts where !host.isEnabled {
+            hub.suspendModel(for: host.id)
+        }
+        let models = store.hosts.filter(\.isEnabled).map { hub.model(for: $0) }
         await withTaskGroup(of: Void.self) { group in
             for model in models {
                 group.addTask { await runFeed(for: model) }
@@ -549,7 +564,10 @@ struct FleetWall: View {
     }
 
     private var fleetSummary: String {
-        let sessions = store.hosts.reduce(0) { count, host in
+        // Switched-off hosts still count in the fleet — they are configured,
+        // just not on the air — but asking the hub about them would mint the
+        // very model the wall is avoiding, and they have no sessions to add.
+        let sessions = store.hosts.filter(\.isEnabled).reduce(0) { count, host in
             count + hub.model(for: host).sessionCount
         }
         let hosts = store.hosts.count
@@ -600,16 +618,35 @@ struct FleetWall: View {
         .padding(.bottom, 22)
     }
 
-    private func rail(_ host: Host, model: HostConnectionModel) -> some View {
-        let connected = model.phase == .connected
+    /// A host the user switched off keeps its rail — it is still part of the
+    /// fleet — but there is no connection model behind it and nothing live to
+    /// show, so the whole section is one tile that switches it back on.
+    private func disabledHostSection(_ host: Host, columns: [GridItem]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            rail(host, model: nil)
+            LazyVGrid(
+                columns: columns,
+                alignment: gridAlignment,
+                spacing: FleetTileGridSizing.gutter
+            ) {
+                disabledTile(host)
+            }
+        }
+        .padding(.bottom, 22)
+    }
+
+    /// `model` is nil for a switched-off host: the wall shows its rail
+    /// without ever asking the hub to build (and so revive) a connection.
+    private func rail(_ host: Host, model: HostConnectionModel?) -> some View {
+        let connected = model?.phase == .connected
         return Group {
             if presentation == .shellRail {
                 VStack(alignment: .leading, spacing: 8) {
                     Rectangle().fill(Theme.bezel).frame(height: 1)
                     HStack(spacing: 8) {
-                        ChassisLabel(host.name, size: 11)
+                        ChassisLabel(host.name, size: 11, color: railNameColor(host))
                         Spacer(minLength: 4)
-                        railStatus(model)
+                        railStatus(host, model: model)
                         hostMenu(host)
                     }
                     HStack(spacing: 8) {
@@ -629,7 +666,7 @@ struct FleetWall: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Rectangle().fill(Theme.bezel).frame(height: 1)
                     HStack(alignment: .firstTextBaseline, spacing: 14) {
-                        ChassisLabel(host.name, size: 12)
+                        ChassisLabel(host.name, size: 12, color: railNameColor(host))
                         Text(host.address)
                             .font(.mono(11))
                             .foregroundStyle(Theme.signal2)
@@ -639,7 +676,7 @@ struct FleetWall: View {
                                 .accessibilityLabel("Connects over mosh")
                         }
                         Spacer()
-                        railStatus(model)
+                        railStatus(host, model: model)
                         // The SHELL chip is the row's tallest element —
                         // inserting/removing it with the phase resizes the
                         // whole rail. Keep its slot and fade it instead.
@@ -697,21 +734,49 @@ struct FleetWall: View {
         .disabled(!store.canMoveDown(host))
 
         Divider()
+        // Switching a host off is the reversible half of Remove: the record,
+        // its secrets, and its order all stay, the wall just stops dialling
+        // it. Non-destructive on purpose, so it takes no confirmation.
+        if host.isEnabled {
+            Button {
+                setEnabled(false, for: host)
+            } label: {
+                Label("Disable Host", systemImage: "pause.circle")
+            }
+        } else {
+            Button {
+                setEnabled(true, for: host)
+            } label: {
+                Label("Enable Host", systemImage: "play.circle")
+            }
+        }
         Button("Edit Host…") { editHost(host) }
         Button("Remove Host…", role: .destructive) { removingHost = host }
     }
 
+    /// The switched-off host's name is dimmed to the same rank as its status:
+    /// the rail still names it, but nothing on this row is live.
+    private func railNameColor(_ host: Host) -> Color {
+        host.isEnabled ? Theme.signal : Theme.signal3
+    }
+
     @ViewBuilder
-    private func railStatus(_ model: HostConnectionModel) -> some View {
+    private func railStatus(_ host: Host, model: HostConnectionModel?) -> some View {
         Group {
-            // Device-side condition beats every per-host phase: with no
-            // usable route, a lingering CONNECTED is stale (the socket just
-            // hasn't timed out yet) and UNREACHABLE blames the host for the
-            // device's state.
-            if networkChanges.isOffline {
+            // The user's own switch outranks everything below it: a host
+            // nobody is dialling is neither the device's network fault nor
+            // the host's.
+            if !host.isEnabled {
+                railLabel("DISABLED", dot: Theme.signal3, text: Theme.signal3)
+                    .accessibilityLabel("\(host.name) is disabled and is not being connected")
+            } else if networkChanges.isOffline {
+                // Device-side condition beats every per-host phase: with no
+                // usable route, a lingering CONNECTED is stale (the socket
+                // just hasn't timed out yet) and UNREACHABLE blames the host
+                // for the device's state.
                 railLabel("OFFLINE", dot: Theme.signal3, text: Theme.signal3)
                     .accessibilityLabel("This device has no network connection")
-            } else {
+            } else if let model {
                 phaseRailStatus(model)
             }
         }
@@ -1109,6 +1174,40 @@ struct FleetWall: View {
         )
     }
 
+    /// The whole section of a switched-off host: no probe ran, so there is
+    /// nothing to report — the tile's only job is to be the switch back on.
+    private func disabledTile(_ host: Host) -> some View {
+        Button {
+            setEnabled(true, for: host)
+        } label: {
+            VStack(spacing: 0) {
+                ZStack {
+                    HatchedScreen()
+                    ChassisLabel("Disabled", size: 13, color: Theme.signal3)
+                }
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: presentation == .shellRail ? 64 : 96
+                )
+                HStack {
+                    ChassisLabel(host.name, size: 12, color: Theme.signal3)
+                    Spacer()
+                    ChassisBadge("ENABLE")
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 8)
+            }
+            .padding(5)
+            .background(Theme.bezel)
+            .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .chassisHover(4)
+        .accessibilityLabel("\(host.name) is disabled. Enable")
+        .accessibilityHint("Starts monitoring this host on the deck again")
+    }
+
     private var presentedKeyPassphraseChallenge: SSHKeyPassphraseChallenge? {
         guard let keyPassphraseHostID,
               let host = store.host(id: keyPassphraseHostID)
@@ -1184,6 +1283,15 @@ struct FleetWall: View {
     private func remove(_ host: Host) {
         hub.dropModel(for: host.id)
         store.remove(host)
+    }
+
+    /// Switching off drops the live probe here as well as in the feed: the
+    /// record change restarts the feed anyway, but the connection should go
+    /// with the press, not with the next scheduling turn. Switching on needs
+    /// nothing extra — the restarted feed builds a fresh model and dials.
+    private func setEnabled(_ enabled: Bool, for host: Host) {
+        store.setEnabled(enabled, for: host.id)
+        if !enabled { hub.suspendModel(for: host.id) }
     }
 
     private func kill(_ target: DeleteTarget) {

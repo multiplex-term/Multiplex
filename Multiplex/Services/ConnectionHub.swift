@@ -58,6 +58,18 @@ final class ConnectionHub {
         return model
     }
 
+    /// The host was switched off. Nothing asks for its model again while it
+    /// stays off, so the live one would keep its control connection (and the
+    /// wall's stale idea of it) forever — drop it and disconnect. The deck
+    /// snapshot deliberately survives, unlike `dropModel`: switching the host
+    /// back on repaints its last-known tiles while the probe rebuilds.
+    /// Idempotent, because the disable action and the wall feed both call it
+    /// (the feed is how a disable synced from another device lands here).
+    func suspendModel(for hostID: UUID) {
+        guard let model = models.removeValue(forKey: hostID) else { return }
+        Task { await model.disconnect() }
+    }
+
     func dropModel(for hostID: UUID) {
         snapshots.remove(for: hostID)
         widgetProbeDates.removeValue(forKey: hostID)

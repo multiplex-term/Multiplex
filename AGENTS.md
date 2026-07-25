@@ -59,9 +59,17 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 
 - `MULTIPLEX_SEED_HOST=<path to seed.json>` — imports a ready `devbox` host
   (idempotent; stable UUID across relaunches so restored scenes stay valid).
+  ⚠ That idempotence is per install: `simctl uninstall` wipes `hosts.json`
+  but NOT the synchronizable Keychain mirror, so the next launch seeds a
+  NEW devbox *and* re-adopts the old record — two identically named hosts,
+  one of them probing when you meant to test a quiet wall. Prefer
+  terminate + relaunch over reinstall, or expect the duplicate and
+  attribute log traffic accordingly.
   Optional `workingDirs` / `sessionScripts` / `newSessionTmuxConf` keys feed
   headless checks of the New Session pickers and the setup-script and
-  tmux-conf creation paths.
+  tmux-conf creation paths. `"enabled": false` starts the launch with the
+  host switched off, so the never-dials-it promise can be checked against a
+  silent `Tools/dev-sshd/state/sshd.log`.
 - `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per comma entry via
   the same route the Attach button uses; `+` inside an entry groups sessions
   as tabs of one window (`main+scratch,deploy`). Fires **once per process**.
@@ -177,6 +185,10 @@ Keyboard**. In DEBUG builds,
 presses the focused terminal's "Show keyboard" button headlessly
 (`….debug.dismiss` is its counterpart — resigns the focused terminal so a
 screenshot run can hide the system keyboard),
+`… -p app.multiplexterm.multiplex.debug.hostenable` toggles the FIRST
+host's deck switch through the same `HostStore.setEnabled` the rail menu
+and the DISABLED tile call (the wall then drops or rebuilds that host's
+probe — watch `Tools/dev-sshd/state/sshd.log` go silent and come back),
 `… -p app.multiplexterm.multiplex.debug.appearance` cycles the global
 appearance SYSTEM → LIGHT → DARK through the exact `ThemeStore.appearance`
 property the Settings choice bar sets (persisted; flips every window's
@@ -579,6 +591,26 @@ views.
   "fix" it with a server-scoped `terminal-features` default (the same leak
   the per-host new-session conf documents). Full record + the verified
   experiment table: `local-plan/terminal-links.md`.
+- **A disabled host is one the app never dials on its own** (`Host.isEnabled`,
+  deck rail menu / DISABLED tile / Host Settings → Monitoring): the wall skips
+  it in `runFeed`, never asks `ConnectionHub` for its model (asking is what
+  would revive it), leaves it out of `tileCount`/`fleetSummary`, and drops it
+  from the deck's `localNetworkAccess.check` list so a host nobody connects to
+  can't raise the local-network prompt; `ExternalActionPerformer` refuses
+  widget/Shortcut actions with its own message rather than the generic
+  "no configured host". It rides the synced record and stays in
+  `connectionModelConfiguration`, which is load-bearing twice: the wall feed
+  restarts on the change, and that restart is where a disable made on
+  **another device** tears the probe down (`hub.suspendModel`, which unlike
+  `dropModel` keeps the deck snapshot so switching back on repaints
+  instantly). The local action calls the same method itself so the socket
+  goes with the press, not the next scheduling turn. Deliberately NOT
+  covered: terminal windows already open keep running — including
+  `keepHostProbeWarm`'s control connection — because a tab the user opened is
+  explicit intent, not automatic dialling; and Host Settings' Signal check
+  still connects on demand. Free host plumbing, not an agent-helper surface;
+  the free-tier host limit remains an add-flow check, so disabling never
+  buys back a host slot.
 - **"Back to deck" reuses the one deck scene**: the data-driven `WindowGroup`
   always opens `DeckWindowRoute.main`, so `openWindow(id:value:)` raises the
   matching deck instead of minting another; `DeckScene` also destroys a second

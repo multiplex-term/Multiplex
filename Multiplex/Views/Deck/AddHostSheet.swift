@@ -20,6 +20,8 @@ struct AddHostSheet: View {
     /// the field swaps in the editor. Add mode always shows the editor.
     @State private var privateKeyConcealed = false
     @State private var passphrase = ""
+    /// New hosts are added on the air; Host Settings mirrors the deck switch.
+    @State private var isEnabled = true
     @State private var useMosh = false
     @State private var moshServerPath = ""
     @State private var moshPorts = ""
@@ -78,6 +80,7 @@ struct AddHostSheet: View {
             ScrollView {
                 VStack(spacing: 18) {
                     hostSection
+                    monitoringSection
                     credentialsSection
                     testSection
                     workingDirsSection
@@ -148,6 +151,28 @@ struct AddHostSheet: View {
                     // any secret field below reads as a savable credential.
                     .textContentType(.init(rawValue: ""))
             }
+        }
+    }
+
+    /// Sits directly under the identity fields because it answers the first
+    /// question someone opens this sheet with when a host shows nothing:
+    /// whether anything is dialling it at all. The deck's host menu is the
+    /// quick way to flip it; this is the same switch, saved with the form.
+    private var monitoringSection: some View {
+        TallyFormSection("Monitoring", detail: monitoringDetail) {
+            TallyFormBoolField(
+                "Connect on the deck",
+                isOn: $isEnabled,
+                accessibilityHint: "Off keeps the host in the fleet without connecting to it"
+            )
+        }
+    }
+
+    private var monitoringDetail: String {
+        if isEnabled {
+            "The deck probes this host about every five seconds while it's in front, and its sessions appear as live tiles."
+        } else {
+            "Off parks the host on the deck without dialling it: no probing, no tiles, and widgets or Shortcuts report it as disabled. Terminal windows already open keep running, and Signal check below still connects on demand."
         }
     }
 
@@ -699,6 +724,7 @@ struct AddHostSheet: View {
         port = String(host.port)
         username = host.username
         authMethod = host.authMethod
+        isEnabled = host.isEnabled
         useMosh = host.useMosh
         moshServerPath = host.moshServerPath ?? ""
         moshPorts = host.moshPorts ?? ""
@@ -726,6 +752,7 @@ struct AddHostSheet: View {
         host.port = Int(port) ?? 22
         host.username = username.trimmingCharacters(in: .whitespaces)
         host.authMethod = authMethod
+        host.isEnabled = isEnabled
         host.useMosh = useMosh
         let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
