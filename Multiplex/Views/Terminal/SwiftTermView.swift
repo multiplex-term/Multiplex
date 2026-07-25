@@ -609,7 +609,13 @@ struct SwiftTermView: UIViewRepresentable {
 
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
         func scrolled(source: TerminalView, position: Double) {}
-        func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+        /// Only reached if the view's `linkActivationHandler` is ever absent —
+        /// `bind` installs one. Kept wired so the two routes can't disagree.
+        func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+            MainActor.assumeIsolated {
+                _ = controller.activateLink(link)
+            }
+        }
 
         func bell(source: TerminalView) {
             MainActor.assumeIsolated {

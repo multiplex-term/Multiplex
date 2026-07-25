@@ -196,6 +196,34 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
 
+    /// Multiplex patch: allow a resolved link to be activated without the
+    /// pointer state `linkHighlightMode` demands. Touch never hovers, so a
+    /// touch-only device could otherwise activate explicit OSC 8 links at
+    /// best and implicit URLs never. This only affects activation — hover
+    /// underlining still follows `linkHighlightMode`.
+    public var linkActivationIgnoresHighlight = false
+
+    /// Multiplex patch: app-owned policy for an activated link. Implicit
+    /// detection matches filesystem paths (`./src/main.swift`, `/etc/hosts`)
+    /// as readily as URLs, and those are everywhere in terminal output — a
+    /// long press over one must still open the selection menu. Returning
+    /// false declines the match and lets the gesture continue as if no link
+    /// were there. Install with a weak capture: the view owns this closure.
+    ///
+    /// With no handler installed, upstream behavior stands: the delegate's
+    /// `requestOpenLink` is called and the gesture is consumed.
+    public var linkActivationHandler: ((_ link: String, _ params: [String: String]) -> Bool)?
+
+    /// Multiplex patch: shared activation path for tap and long press.
+    func activateLink(_ result: (link: String, params: [String: String])) -> Bool
+    {
+        if let linkActivationHandler {
+            return linkActivationHandler(result.link, result.params)
+        }
+        terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
+        return true
+    }
+
     private var lastReportedLink: String?
     var commandActive = false
     private var activeCommandKeys: Set<UIKeyboardHIDUsage> = []
@@ -688,9 +716,20 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
              let _ = self.becomeFirstResponder()
              let tapLocation = gestureRecognizer.location(in: gestureRecognizer.view)
              let tapRegion = makeContextMenuRegionForTap (point: tapLocation)
-             
-             showContextMenu (forRegion: tapRegion,
-                              pos: calculateTapHit (gesture: gestureRecognizer).grid)
+             let hit = calculateTapHit (gesture: gestureRecognizer).grid
+
+             // Multiplex patch: a long press is a local gesture — no mouse
+             // report rides on it at any tracking mode — so it is the one
+             // activation route that always reaches the user's intent. A press
+             // over a link the app claims resolves it; a declined match (a
+             // filesystem path) or a press anywhere else opens the selection
+             // menu exactly as before.
+             if let result = linkForClick(at: hit, hasCommandModifier: commandActive),
+                activateLink(result) {
+                 return
+             }
+
+             showContextMenu (forRegion: tapRegion, pos: hit)
           }
     }
     
@@ -831,8 +870,18 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         if isFirstResponder {
             let tapHit = calculateTapHit(gesture: gestureRecognizer).grid
-            if let result = linkForClick(at: tapHit, hasCommandModifier: commandActive) {
-                terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
+            // Multiplex patch: a tap belongs to the remote whenever the client
+            // asked for mouse tracking. Upstream resolves links first, which
+            // means any URL-shaped text under the finger silently swallows the
+            // click — tmux `mouse on` (this app's default) stops switching
+            // panes there, and vim stops placing the cursor. Long press is the
+            // link route in that state; see `longPress`.
+            let remoteWantsTap = allowMouseReporting
+                && !shiftBypassesMouseReporting(for: gestureRecognizer)
+                && terminal.mouseMode.sendButtonPress()
+            if !remoteWantsTap,
+               let result = linkForClick(at: tapHit, hasCommandModifier: commandActive),
+               activateLink(result) {
                 return
             }
 

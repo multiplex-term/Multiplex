@@ -901,6 +901,11 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
 
     var linkHighlightRange: [Terminal.LinkMatch.RowRange]?
 
+    /// Multiplex patch: shared with the iOS view so `linkVisibleForClick` in
+    /// AppleTerminalView compiles on both platforms. macOS has a real pointer,
+    /// so nothing in Multiplex sets this here — Command-hover stays the rule.
+    public var linkActivationIgnoresHighlight = false
+
     /**
      * If set to true, this will call the TerminalViewDelegate's rangeChanged method
      * when there are changes that are being performed on the UI
