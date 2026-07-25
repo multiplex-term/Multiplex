@@ -419,7 +419,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // (transport/view teardown or tab reparenting), so discard its local composition.
     open override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window == nil, _markedTextRange != nil || markedTextOverlay != nil else { return }
+        guard window == nil else { return }
+        // Multiplex patch: the shared menu cannot still belong to a view that
+        // has left its window, so drop this view's record of it rather than
+        // let it swallow the first tap after the tab comes back.
+        contextMenuPresented = false
+        guard _markedTextRange != nil || markedTextOverlay != nil else { return }
         resetInputBuffer()
     }
 
@@ -595,7 +600,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         self.link.invalidate()
     }
     
+    // Multiplex patch: UIKit hides the menu once one of its items runs, so each
+    // action clears this view's record of it (`contextMenuPresented`). `select`
+    // re-shows the menu for the word it just selected and re-sets the flag from
+    // `showContextMenu`.
     @objc open override func paste (_ sender: Any?) {
+        contextMenuPresented = false
         disableSelectionPanGesture()
         if let start = UIPasteboard.general.string {
             if terminal.bracketedPasteMode {
@@ -610,18 +620,21 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     @objc open override func copy(_ sender: Any?) {
+        contextMenuPresented = false
         UIPasteboard.general.string = selection.getSelectedText()
         selection.selectNone()
         disableSelectionPanGesture()
     }
-        
+
     @objc open override func selectAll(_ sender: Any?) {
+        contextMenuPresented = false
         selection.selectAll()
         enableSelectionPanGesture()
     }
-    
+
     /// Invoked when the user has long-pressed and then clicked "Select"
     @objc public override func select (_ sender: Any?)  {
+        contextMenuPresented = false
         if let loc = lastLongSelect {
             selection.selectWordOrExpression(at: Position (col: loc.col, row: loc.row), in: terminal.displayBuffer)
             selection.selectionMode = .character
@@ -635,6 +648,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     @objc func resetCmd(_ sender: Any?) {
+        contextMenuPresented = false
         terminal.cmdReset()
         // Multiplex patch: terminal reset also resets UIKit's transient IME state
         // so no marked-text preview survives a rebuilt terminal view.
@@ -675,9 +689,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     ///  to auto-select a word
     func showContextMenu (forRegion: CGRect, pos: Position) {
         var items: [UIMenuItem] = []
-        
+
         lastLongSelect = pos
         lastLongSelectRegion = forRegion
+        // Multiplex patch: see `dismissLocalSelectionUI` — this view tracks its
+        // own menu so a tap can dismiss one that no selection accompanies.
+        contextMenuPresented = true
 
         //GAR: Declutter context menu
         //items.append (UIMenuItem(title: "Reset", action: #selector(resetCmd)))
@@ -694,6 +711,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // This is a position relative to the buffer
     var lastLongSelect: Position?
     var lastLongSelectRegion = CGRect.zero
+
+    /// Multiplex patch: true while this view believes its selection context
+    /// menu is on screen. Kept in step by `showContextMenu`/`hideContextMenu`
+    /// and cleared by every menu action, so it can never outlive the menu and
+    /// swallow a tap. See `dismissLocalSelectionUI`.
+    var contextMenuPresented = false
     
     /// Creates a region suitable to be passed to the showContextMenu that wants a
     /// region for the menu to avoid.
@@ -830,24 +853,48 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         gestureRecognizer.modifierFlags.contains(.shift) && !terminal.mouseShiftCapture
     }
 
-    /// Multiplex patch: a visible local selection is app-side UI painted over
-    /// the remote screen, so any tap while one is active dismisses it and is
-    /// consumed — before link opening and before mouse reporting. Previously
-    /// the dismissal only lived in singleTap's mouse-off branch: with mouse
-    /// tracking on (tmux `mouse on`, CLI agents, vim) the tap was forwarded
-    /// to the remote as a click and the highlight could never be cancelled by
-    /// touch — and pans kept extending the selection, since an active
-    /// selection owns the drag. Returns true when a selection was dismissed.
+    /// Multiplex patch: the selection highlight and its context menu are both
+    /// app-side UI painted over the remote screen, so any tap while either is
+    /// present dismisses them and is consumed — before link opening and before
+    /// mouse reporting. Previously the dismissal only lived in singleTap's
+    /// mouse-off branch: with mouse tracking on (tmux `mouse on`, CLI agents,
+    /// vim) the tap was forwarded to the remote as a click and the highlight
+    /// could never be cancelled by touch — and pans kept extending the
+    /// selection, since an active selection owns the drag.
+    ///
+    /// The menu is tracked independently of `selection.active` because a long
+    /// press opens PASTE / SELECT / SELECT ALL *without* selecting anything:
+    /// guarding on the selection alone left that menu stuck on screen with no
+    /// way to cancel it, unless the user pressed SELECT first (which finally
+    /// made the guard true). Returns true when anything was dismissed.
+    ///
+    /// `contextMenuPresented` is this view's own record of having shown the
+    /// menu, rather than `UIMenuController.isMenuVisible` alone: the whole
+    /// controller is deprecated since iOS 16 and only its `hideMenu()` is
+    /// exercised on a path known to work here, so the query is kept as a
+    /// second opinion and never as the sole authority.
     @discardableResult
-    func dismissActiveLocalSelection () -> Bool {
-        guard selection.active else { return false }
-        selection.selectNone()
-        disableSelectionPanGesture()
-        if UIMenuController.shared.isMenuVisible {
-            UIMenuController.shared.hideMenu()
+    func dismissLocalSelectionUI () -> Bool {
+        guard selection.active || contextMenuPresented || UIMenuController.shared.isMenuVisible
+        else { return false }
+        if selection.active {
+            selection.selectNone()
+            disableSelectionPanGesture()
         }
+        hideContextMenu()
         queuePendingDisplay()
         return true
+    }
+
+    /// Multiplex patch: hides the selection menu and clears this view's record
+    /// of it. Call instead of `UIMenuController.hideMenu()` so the record can
+    /// never outlive the menu and swallow a later tap.
+    func hideContextMenu () {
+        contextMenuPresented = false
+        // Unconditional: `isMenuVisible` is the untrusted half of the pair, so
+        // gating the hide on it would put it back in charge. `hideMenu()` on
+        // an already-hidden menu is a no-op.
+        UIMenuController.shared.hideMenu()
     }
 
     @objc func singleTap (_ gestureRecognizer: UITapGestureRecognizer)
@@ -861,7 +908,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         // Multiplex patch: the cancel tap also works while the terminal is
         // not first responder (keyboard dismissed) — it dismisses and
         // refocuses in one tap instead of needing a second one.
-        if dismissActiveLocalSelection() {
+        if dismissLocalSelectionUI() {
             if !isFirstResponder {
                 let _ = becomeFirstResponder()
             }
@@ -892,16 +939,17 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                     sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
                 }
             } else {
-                if UIMenuController.shared.isMenuVisible {
-                    UIMenuController.shared.hideMenu()
-                } else {
-                    let location = gestureRecognizer.location(in: gestureRecognizer.view)
-                    let tapLoc = calculateTapHit(gesture: gestureRecognizer).grid
-                    let displayBuffer = terminal.displayBuffer
-                    let cursorRow = displayBuffer.y + displayBuffer.yDisp
-                    if abs (tapLoc.col-displayBuffer.x) < 4 && abs (tapLoc.row - cursorRow) < 2 {
-                        showContextMenu (forRegion: makeContextMenuRegionForTap (point: location), pos: tapLoc)
-                    }
+                // Multiplex patch: upstream's "menu visible → hide it" arm
+                // lived here, reachable only with mouse reporting off and the
+                // terminal already first responder. `dismissLocalSelectionUI`
+                // above now owns that dismissal at every mouse mode, so only
+                // the show arm remains.
+                let location = gestureRecognizer.location(in: gestureRecognizer.view)
+                let tapLoc = calculateTapHit(gesture: gestureRecognizer).grid
+                let displayBuffer = terminal.displayBuffer
+                let cursorRow = displayBuffer.y + displayBuffer.yDisp
+                if abs (tapLoc.col-displayBuffer.x) < 4 && abs (tapLoc.row - cursorRow) < 2 {
+                    showContextMenu (forRegion: makeContextMenuRegionForTap (point: location), pos: tapLoc)
                 }
             }
             queuePendingDisplay()
@@ -919,10 +967,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
 
         if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode.sendButtonPress() {
-            // Multiplex patch: a fast re-tap on an active selection lands
-            // here (singleTap requires this recognizer to fail) — it must
-            // dismiss the selection, never reach the remote.
-            if dismissActiveLocalSelection() {
+            // Multiplex patch: a fast re-tap on an active selection or its
+            // menu lands here (singleTap requires this recognizer to fail) —
+            // it must dismiss that UI, never reach the remote.
+            if dismissLocalSelectionUI() {
                 return
             }
             sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
@@ -951,7 +999,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode.sendButtonPress() {
             // Multiplex patch: same dismissal rule as singleTap/doubleTap.
-            if dismissActiveLocalSelection() {
+            if dismissLocalSelectionUI() {
                 return
             }
             sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
@@ -3342,7 +3390,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 #endif
             
             if !self.selection.active {
-                UIMenuController.shared.hideMenu()
+                // Multiplex patch: route through hideContextMenu so this view's
+                // own record of the menu is cleared with it.
+                self.hideContextMenu()
                 self.selection.selectNone()
                 self.disableSelectionPanGesture()
             }

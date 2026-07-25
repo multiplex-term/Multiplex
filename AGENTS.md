@@ -366,13 +366,18 @@ views.
     its own scrollback), DECCKM-aware arrows in the alternate screen with
     mouse off (`performRemoteScroll`; the scroll view's own pan is disabled
     while remote scroll applies, so plain-shell tabs keep native local
-    scrollback); a tap while a local text selection is active always
-    dismisses it and is consumed (`dismissActiveLocalSelection`, checked
-    before link opening and mouse reporting, and mirrored into the double/
-    triple-tap mouse branches a fast re-tap lands in) — upstream only cleared
-    the selection in the mouse-off single-tap path, so with mouse tracking on
-    the tap went to the remote as a click and the highlight was uncancellable
-    by touch; UIKit marked text stays local in a caret-anchored overlay until
+    scrollback); a tap while a local text selection **or its context menu** is
+    present always dismisses it and is consumed (`dismissLocalSelectionUI`,
+    checked before link opening and mouse reporting, and mirrored into the
+    double/triple-tap mouse branches a fast re-tap lands in) — upstream only
+    cleared the selection in the mouse-off single-tap path, so with mouse
+    tracking on the tap went to the remote as a click and the highlight was
+    uncancellable by touch. **The menu is checked independently of
+    `selection.active`**: a long press opens PASTE / SELECT / SELECT ALL
+    without selecting anything, so guarding on the selection alone left that
+    menu stuck on screen — cancellable only by pressing SELECT first, which is
+    what finally made the guard true (user-reported); UIKit marked text stays
+    local in a caret-anchored overlay until
     commit, with honest candidate-window geometry and cleanup across reset,
     deletion, detach, and font/caret changes — this is merged with 1.15.0's
     upstream Korean resyllabification transaction, not a replacement for it;
