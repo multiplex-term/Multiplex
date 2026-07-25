@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 /// App-wide terminal state that outlives any single window scene:
 ///
@@ -21,8 +22,46 @@ final class TerminalWorkspace {
     /// bells. Weak both ways — the center holds this workspace weakly too.
     private weak var attention: AttentionCenter?
 
+    /// Suspension repair (`SessionResumePolicy`) is observed once, app-wide,
+    /// and fanned out to every tab: the app is suspended as a whole, and a
+    /// tab whose window is not currently mounted must be repaired too.
+    /// Rides UIApplication rather than a scene phase for the same reason.
+    private nonisolated(unsafe) var backgroundObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var foregroundObserver: NSObjectProtocol?
+
     init(attention: AttentionCenter? = nil) {
         self.attention = attention
+        backgroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.forEachController { $0.applicationDidEnterBackground() }
+            }
+        }
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.forEachController { $0.applicationWillEnterForeground() }
+            }
+        }
+    }
+
+    deinit {
+        if let backgroundObserver {
+            NotificationCenter.default.removeObserver(backgroundObserver)
+        }
+        if let foregroundObserver {
+            NotificationCenter.default.removeObserver(foregroundObserver)
+        }
+    }
+
+    private func forEachController(_ body: (TerminalSessionController) -> Void) {
+        for controller in controllers.values { body(controller) }
     }
 
     /// Get-or-create the controller for a tab, starting its connection on

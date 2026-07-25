@@ -1298,7 +1298,7 @@ private struct TerminalPane: View {
         case .connecting:
             chassisPanel {
                 ProgressView()
-                Text("Connecting to \(controller.host.name)…")
+                Text(connectingCaption(for: controller))
                     .font(.mono(14))
                     .foregroundStyle(Theme.signal2)
             }
@@ -1321,6 +1321,16 @@ private struct TerminalPane: View {
                 .padding(.top, 4)
             }
         }
+    }
+
+    /// Repairing a transport the system killed while the app was suspended
+    /// is not a first connection, and a tmux tab's work is still standing on
+    /// the host — say which one is happening.
+    private func connectingCaption(for controller: TerminalSessionController) -> String {
+        guard controller.isResuming else { return "Connecting to \(controller.host.name)…" }
+        return controller.route.sessionName == nil
+            ? "Reconnecting to \(controller.host.name)…"
+            : "Reattaching to \(controller.host.name)…"
     }
 
     /// A restored tab whose host was removed — say so, never a blank pane.

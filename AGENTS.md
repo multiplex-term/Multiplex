@@ -312,6 +312,8 @@ SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
   TerminalSessionController   one per tab; owns the input pump + TerminalView
     TerminalTransport    the tab's byte pipe (write/resize/close); picked by
                          host.useMosh. exec + SFTP stay SSH-only capabilities
+    SessionResumePolicy  pure: whether a dead transport is suspension damage
+                         (re-attach itself) or a session the user ended
     SSHConnection (actor)  Citadel → SwiftNIO SSH; the TerminalTransport for
       exec channel     tmux probing (+ mosh bootstrap, + file-drop SFTP)
       PTY shell        bytes ⇄ SwiftTerm.TerminalView (SSH tabs)
@@ -558,6 +560,34 @@ views.
   watch retires at tmux's alternate-screen takeover or a 32 KB cap. Both
   prompt wordings ship in the needle list; keep them phrase-exact so MOTD
   mentions of oh-my-zsh can't trigger a spurious re-type.
+- **A suspended app's dead transport repairs itself; a session the user
+  ended stays ended** (`SessionResumePolicy`, pure + unit-tested): locking
+  the screen is enough for iOS to suspend the app and kill its sockets,
+  while the tmux session on the host carries on — so a tab whose transport
+  died that way re-attaches on the next foreground instead of parking on
+  the manual RECONNECT panel, and the pane says "Reattaching" rather than
+  "Connecting". The channel closes identically for suspension damage and
+  for a deliberate `exit` / detach / `kill-session`, so the discriminator
+  is the only thing that separates them: whether the app left the
+  foreground while the session was live and hasn't been live since. Both
+  orderings count, because frozen event loops surface the socket's death
+  whenever the process resumes and that lands before OR after `.active` —
+  a close seen while still away is owed a repair on return (never
+  attempted from the background, where the app does no network work), and
+  a close seen within a short grace window after returning is still that
+  wake. Attempts are capped (3, spaced 0/2/5 s) and reset the moment a
+  session reaches live: a host that is genuinely gone must not be dialled
+  forever, and a failing attach that ends cleanly lands back on the honest
+  panel. `TerminalWorkspace` owns the one app-level `UIApplication`
+  background/foreground observation and fans it out — a tab whose window
+  isn't mounted needs repairing too, so this must not become a scene-phase
+  concern. A pending key-passphrase challenge always defers to the person.
+  Every decision logs its trigger and attempt (subsystem
+  `app.multiplexterm.multiplex`, category `resume`, debug level — use
+  `log stream --level debug`). Note what is deliberately NOT covered: a
+  transport that dies while the app is in the foreground (a network blip
+  you are watching) stays manual, exactly so a deliberate exit is never
+  undone.
 - **A first tmux server must outlive the SSH login scope on systemd Linux**:
   hosts with `KillUserProcesses=yes` reap a normally daemonized tmux server
   when the terminal SSH session closes. New sessions are therefore created

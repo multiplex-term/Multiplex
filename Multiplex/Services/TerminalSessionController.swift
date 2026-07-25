@@ -29,6 +29,10 @@ final class TerminalSessionController {
     private weak var attention: AttentionCenter?
 
     private(set) var status: Status = .connecting
+    /// True while this tab is re-attaching itself after the app was
+    /// suspended, rather than connecting for the first time — the pane says
+    /// so, because the session on the host was never lost.
+    private(set) var isResuming = false
     private(set) var remoteTitle: String = ""
     /// A user-opened terminal may ask immediately for an encrypted key's
     /// missing/corrected passphrase. Cancelling leaves the challenge here so
@@ -326,7 +330,7 @@ final class TerminalSessionController {
                 return
             }
             startTransportPumps(for: connection, openedAt: openedSize)
-            status = .live
+            markLive()
             startDirectShellMonitoring()
         } catch {
             await connection.close()
@@ -341,6 +345,7 @@ final class TerminalSessionController {
             transport = nil
             outputCoalescer = nil
             handoffWatch = nil
+            considerAutomaticResume()
         }
     }
 
@@ -400,7 +405,7 @@ final class TerminalSessionController {
                 return
             }
             startTransportPumps(for: session, openedAt: openedSize)
-            status = .live
+            markLive()
             startDirectShellMonitoring()
         } catch {
             let session = moshSession
@@ -417,6 +422,7 @@ final class TerminalSessionController {
             moshSession = nil
             transport = nil
             outputCoalescer = nil
+            considerAutomaticResume()
         }
     }
 
@@ -503,6 +509,7 @@ final class TerminalSessionController {
         moshSession = nil
         outputCoalescer = nil
         Task { await endedTransport?.close() }
+        considerAutomaticResume()
     }
 
     // MARK: Plain-shell agent monitoring
@@ -1287,6 +1294,7 @@ final class TerminalSessionController {
     /// session. (SSH: channel teardown does it. mosh: the shutdown
     /// handshake ends mosh-server, which HUPs its tmux client.)
     func detach() {
+        cancelPendingResume()
         dropTask?.cancel()
         dropTask = nil
         dropClearTask?.cancel()
@@ -1310,7 +1318,15 @@ final class TerminalSessionController {
         Task { await transport?.close() }
     }
 
+    /// The RECONNECT chip. The user is driving now, so their attempt also
+    /// re-arms automatic recovery for the next suspension.
     func reconnect() {
+        resumePolicy.userReconnected()
+        cancelPendingResume()
+        performReconnect()
+    }
+
+    private func performReconnect() {
         guard case .ended = status else { return }
         if let challenge = keyPassphraseChallenge {
             let revision = SSHKeyPassphraseSession.snapshot(for: host.id).revision
@@ -1324,6 +1340,83 @@ final class TerminalSessionController {
         resetHistoryState()
         status = .connecting
         beginTransportRun()
+    }
+
+    // MARK: Automatic resume after suspension
+
+    /// A backgrounded app is suspended and its sockets die with it, while
+    /// the tmux session on the host carries on. `SessionResumePolicy` holds
+    /// the (pure) decision of when a dead transport is that damage rather
+    /// than a session the user deliberately ended.
+    private var resumePolicy = SessionResumePolicy()
+    private var resumeTask: Task<Void, Never>?
+
+    private static let resumeLogger = Logger(
+        subsystem: "app.multiplexterm.multiplex",
+        category: "resume"
+    )
+
+    /// The app went away; note whether this tab had a live transport to lose.
+    func applicationDidEnterBackground() {
+        resumePolicy.appMovedToBackground(isLive: status == .live)
+    }
+
+    /// The app is back: repair a transport that died while it was away, and
+    /// arm the grace window for a close still in flight from the wake.
+    func applicationWillEnterForeground() {
+        guard let delay = resumePolicy.appReturnedToForeground(
+            now: .now,
+            isLive: status == .live
+        ) else { return }
+        scheduleAutomaticResume(after: delay, trigger: "foreground")
+    }
+
+    /// Every path that ends a transport on its own asks here; the user
+    /// closing the tab (`detach`) deliberately does not.
+    private func considerAutomaticResume() {
+        // An encrypted key needs its passphrase from a person, and retrying
+        // the same rejected secret only burns attempts.
+        let delay = keyPassphraseChallenge == nil
+            ? resumePolicy.transportEnded(
+                now: .now,
+                isForeground: UIApplication.shared.applicationState != .background
+            )
+            : nil
+        guard let delay else {
+            // Nothing further is owed: whatever the panel says next, it is
+            // not "Reattaching".
+            isResuming = false
+            return
+        }
+        scheduleAutomaticResume(after: delay, trigger: "transport-ended")
+    }
+
+    private func scheduleAutomaticResume(after delay: TimeInterval, trigger: String) {
+        guard case .ended = status else { return }
+        Self.resumeLogger.debug(
+            "auto-resume \(self.route.displayName, privacy: .public) host=\(self.host.name, privacy: .public) trigger=\(trigger, privacy: .public) attempt=\(self.resumePolicy.attempts, privacy: .public) delay=\(delay, privacy: .public)"
+        )
+        resumeTask?.cancel()
+        isResuming = true
+        resumeTask = Task { [weak self] in
+            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+            guard !Task.isCancelled, let self else { return }
+            self.resumeTask = nil
+            guard case .ended = self.status else { return }
+            self.performReconnect()
+        }
+    }
+
+    private func cancelPendingResume() {
+        resumeTask?.cancel()
+        resumeTask = nil
+        isResuming = false
+    }
+
+    private func markLive() {
+        status = .live
+        resumePolicy.sessionBecameLive()
+        isResuming = false
     }
 
     /// Called app-wide after one prompt accepts an answer. Tabs that were
