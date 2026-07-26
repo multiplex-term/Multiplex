@@ -4,7 +4,9 @@ import Foundation
 /// Pure functions — exercised directly by unit tests.
 ///
 /// Format design: tmux sanitizes control characters in `-F` output (0x1F
-/// becomes `_`), so fields are space-separated with the one variable-length
+/// becomes `_`) — and, unless it is in UTF-8 mode, every multibyte character
+/// too, which is why every invocation goes through `tmuxCommand`. Fields are
+/// space-separated with the one variable-length
 /// field — the name — placed LAST. Fixed fields (`$N` session ids, numeric
 /// flags) can never contain spaces, and tail-rejoining absorbs any spaces
 /// inside names. Session lines start with S, window lines with W, pane
@@ -34,6 +36,21 @@ enum TmuxProbe {
     static let pathPrefix =
         "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin\"; export PATH; "
 
+    /// Every tmux invocation the app makes over an exec channel. An SSH *exec*
+    /// channel inherits no locale — `LANG` and `LC_ALL` are both empty — so
+    /// tmux falls back to the C locale and its `-F` writer replaces every
+    /// multibyte character with `_`, exactly as it does control characters.
+    /// That silently gutted three things the app then acted on: the pane title
+    /// the deck spine shows (`✳ Claude Code` → `_ Claude Code`), the Braille
+    /// spinner `AgentAttention` reads RUNNING out of (U+2800…U+28FF → `_`, so
+    /// a title-only classification could never see one) and `AgentSignature`'s
+    /// `π - ` prefix for Pi, and `#{pane_current_path}` — a non-ASCII cwd
+    /// resolved to a directory that does not exist, aiming file drops at the
+    /// wrong place. `-u` is tmux's own "assume UTF-8" flag and needs no locale
+    /// to exist on the remote, which matters: Alpine ships none and macOS has
+    /// no `C.UTF-8`. Verified against the dev harness 2026-07-26.
+    static let tmuxCommand = "tmux -u"
+
     /// One exec round-trip carrying everything a wall tick needs: session/
     /// window/pane listings, the (pane-subtree-clipped) ps table for agent
     /// detection, and — after the MULTIPLEX_TAILS sentinel — every session's
@@ -46,19 +63,27 @@ enum TmuxProbe {
         let paneLineFormat = paneFormat(tag: "P")
         return pathPrefix
             + "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
-            + "tmux list-sessions -F '\(sessionFormat)' 2>/dev/null "
-            + "&& tmux list-windows -a -F '\(windowFormat)' 2>/dev/null "
+            // The server's own hostname — the exact string tmux seeded every
+            // untouched pane title with (see `PaneTitleDisplay`). Its own
+            // statement, not a link in the `&&` chain: a host whose tmux
+            // declines to answer must still get its session list. `#{host}`
+            // is a server-global, so the pane-format rule about
+            // display-message (which renders `pane_*` empty for outside
+            // clients on 3.6a) does not apply — verified headless over exec.
+            + "\(tmuxCommand) display-message -p 'H #{host}' 2>/dev/null; "
+            + "\(tmuxCommand) list-sessions -F '\(sessionFormat)' 2>/dev/null "
+            + "&& \(tmuxCommand) list-windows -a -F '\(windowFormat)' 2>/dev/null "
             // Keep the pane listing in one shell variable: it is printed for
             // the parser and reused to derive every pane-process root,
             // avoiding a second list-panes call in the process stage.
-            + "&& panes=$(tmux list-panes -a -F '\(paneLineFormat)' 2>/dev/null) "
+            + "&& panes=$(\(tmuxCommand) list-panes -a -F '\(paneLineFormat)' 2>/dev/null) "
             + "&& printf '%s\\n' \"$panes\" "
             + "&& { echo MULTIPLEX_PS; \(psPaneSubtreeCommand); } "
             + "|| true; "
             + "echo MULTIPLEX_TAILS; "
-            + "tmux list-sessions -F '#{session_id}' 2>/dev/null | while IFS= read -r s; do "
+            + "\(tmuxCommand) list-sessions -F '#{session_id}' 2>/dev/null | while IFS= read -r s; do "
             + "echo \"MPXS $s\"; "
-            + "tmux capture-pane -p -t \"$s\" -S -\(captureDepth) 2>/dev/null; "
+            + "\(tmuxCommand) capture-pane -p -t \"$s\" -S -\(captureDepth) 2>/dev/null; "
             + "done; echo MPXE"
     }()
 
@@ -121,6 +146,7 @@ enum TmuxProbe {
         }
         var sessions: [String: SessionInfo] = [:]
         var order: [String] = []
+        var serverHost = ""
         var windows: [String: [TmuxWindow]] = [:]
         var panes: [PaneInfo] = []
         var psRows: [PSRow] = []
@@ -144,6 +170,8 @@ enum TmuxProbe {
             let fields = line.split(separator: " ", omittingEmptySubsequences: false)
                 .map(String.init)
             switch fields.first {
+            case "H" where fields.count >= 2:
+                serverHost = fields[1...].joined(separator: " ")
             case "S" where fields.count >= 5:
                 let id = fields[1]
                 if sessions[id] == nil { order.append(id) }
@@ -219,7 +247,8 @@ enum TmuxProbe {
                 windows: (windows[id] ?? []).sorted { $0.index < $1.index },
                 clientCount: info.clients,
                 created: info.created,
-                tmuxID: id
+                tmuxID: id,
+                serverHost: serverHost
             )
         }
         return .sessions(list)
@@ -231,7 +260,7 @@ enum TmuxProbe {
     /// and their short cache are inconclusive.
     static func activePaneCommand(sessionName: String) -> String {
         pathPrefix
-            + "tmux list-panes -t \("=\(sessionName)".shellQuoted) "
+            + "\(tmuxCommand) list-panes -t \("=\(sessionName)".shellQuoted) "
             + "-F '\(paneFormat(tag: "A"))' 2>/dev/null"
     }
 
@@ -304,7 +333,7 @@ enum TmuxProbe {
     /// name match if the id is somehow missing.
     static func killCommand(for session: TmuxSession) -> String {
         let target = session.tmuxID.isEmpty ? "=\(session.name)" : session.tmuxID
-        return pathPrefix + "tmux kill-session -t \(target.shellQuoted)"
+        return pathPrefix + "\(tmuxCommand) kill-session -t \(target.shellQuoted)"
     }
 
     /// Execute a shortcut's destructive action from an SSH exec channel.
@@ -320,13 +349,13 @@ enum TmuxProbe {
         let kill: String
         switch shortcut {
         case .closePane:
-            lookup = "tmux list-panes -t \(exactSession)"
+            lookup = "\(tmuxCommand) list-panes -t \(exactSession)"
                 + " -F '#{?pane_active,#{pane_id},}' 2>/dev/null | grep -m1 ."
-            kill = "tmux kill-pane -t \"$target\""
+            kill = "\(tmuxCommand) kill-pane -t \"$target\""
         case .closeWindow:
-            lookup = "tmux list-windows -t \(exactSession)"
+            lookup = "\(tmuxCommand) list-windows -t \(exactSession)"
                 + " -F '#{?window_active,#{window_id},}' 2>/dev/null | grep -m1 ."
-            kill = "tmux kill-window -t \"$target\""
+            kill = "\(tmuxCommand) kill-window -t \"$target\""
         default:
             return nil
         }
@@ -349,7 +378,7 @@ enum TmuxProbe {
     /// window; only the active pane's line carries the path.
     static func dropDestinationCommand(sessionName: String) -> String {
         pathPrefix
-            + "p=$(tmux list-panes -t \("=\(sessionName)".shellQuoted)"
+            + "p=$(\(tmuxCommand) list-panes -t \("=\(sessionName)".shellQuoted)"
             + " -F '#{?pane_active,#{pane_current_path},}' 2>/dev/null | grep -m1 .); "
             + "printf '%s\\n' \"$p\"; "
             + "if [ -n \"$p\" ] && command -v git >/dev/null 2>&1"
@@ -418,7 +447,7 @@ enum TmuxProbe {
     ) -> String {
         var command = pathPrefix + TmuxSessionLaunch.persistentRunnerDefinition
         if let source = sourceSessionName {
-            command += "p=$(tmux list-panes -t \("=\(source)".shellQuoted)"
+            command += "p=$(\(tmuxCommand) list-panes -t \("=\(source)".shellQuoted)"
                 + " -F '#{?pane_active,#{pane_current_path},}' 2>/dev/null | grep -m1 .); "
                 + "d=\"${p:-$HOME}\"; "
         } else if let directory = startDirectory {
@@ -432,15 +461,15 @@ enum TmuxProbe {
             + " || i=$(\(create) 2>/dev/null); "
         var onSuccess = ""
         for option in tmuxConfOptions(tmuxConf) {
-            onSuccess += "tmux set-option -t \"${i%% *}\" -- \(option.name.shellQuoted)"
+            onSuccess += "\(tmuxCommand) set-option -t \"${i%% *}\" -- \(option.name.shellQuoted)"
             if let value = option.value {
                 onSuccess += " \(value.shellQuoted)"
             }
             onSuccess += " 2>/dev/null; "
         }
         for typed in [script, launch].compactMap({ $0 }) {
-            onSuccess += "tmux send-keys -t \"${i%% *}\" -l -- \(typed.shellQuoted); "
-                + "tmux send-keys -t \"${i%% *}\" Enter; "
+            onSuccess += "\(tmuxCommand) send-keys -t \"${i%% *}\" -l -- \(typed.shellQuoted); "
+                + "\(tmuxCommand) send-keys -t \"${i%% *}\" Enter; "
         }
         onSuccess += "printf 'MULTIPLEX_NEW %s\\n' \"${i#* }\""
         command += "[ -n \"$i\" ] && { \(onSuccess); }; true"

@@ -5,17 +5,24 @@ final class WidgetStateBuilderTests: XCTestCase {
     private func session(
         name: String,
         created: TimeInterval = 0,
+        serverHost: String = "",
         windows: [TmuxWindow]
     ) -> TmuxSession {
-        TmuxSession(name: name, windows: windows, created: Date(timeIntervalSince1970: created))
+        TmuxSession(
+            name: name,
+            windows: windows,
+            created: Date(timeIntervalSince1970: created),
+            serverHost: serverHost
+        )
     }
 
     private func window(
-        _ index: Int, name: String, active: Bool = false, agent: AgentKind? = nil
+        _ index: Int, name: String, active: Bool = false, agent: AgentKind? = nil,
+        paneTitle: String = ""
     ) -> TmuxWindow {
         TmuxWindow(
             index: index, name: name, isActive: active,
-            hasBell: false, hasActivity: false, agent: agent
+            hasBell: false, hasActivity: false, agent: agent, paneTitle: paneTitle
         )
     }
 
@@ -50,6 +57,46 @@ final class WidgetStateBuilderTests: XCTestCase {
         XCTAssertEqual(main.activeWindowIndex, 1)
         XCTAssertEqual(main.miniatureLines, ["$ pnpm build", "✓ done"])
         XCTAssertEqual(main.createdAt, Date(timeIntervalSince1970: 100))
+    }
+
+    func testPaneTitlesAreFilteredBeforeTheyReachTheWidget() {
+        let sessions = [session(
+            name: "main",
+            serverHost: "Jhen-MBPr14.local",
+            windows: [
+                window(0, name: "cc", paneTitle: "✳ Claude Code"),
+                // tmux's seed and a redundant repeat both project as "" so
+                // the widget process never has to know the rule.
+                window(1, name: "server", active: true, paneTitle: "Jhen-MBPr14.local"),
+                window(2, name: "logs", paneTitle: "logs"),
+            ]
+        )]
+        let state = WidgetStateBuilder.hostState(
+            host: Host(name: "devbox", hostname: "10.0.1.7", username: "jhen"),
+            sessions: sessions,
+            miniatures: [:],
+            probedAt: nil
+        )
+        let main = state.sessions[0]
+        XCTAssertEqual(main.windowPaneTitles, ["✳ Claude Code", "", ""])
+        // Parallel to windowNames, so activeWindowIndex indexes both.
+        XCTAssertEqual(main.windowPaneTitles.count, main.windowNames.count)
+        XCTAssertNil(main.activePaneTitle)
+    }
+
+    func testActivePaneTitleReadsTheActiveWindowAndSurvivesLegacyFiles() {
+        let titled = WidgetSessionState(
+            name: "main",
+            windowNames: ["cc", "server"],
+            windowPaneTitles: ["✳ Claude Code", "pnpm dev"],
+            activeWindowIndex: 1
+        )
+        XCTAssertEqual(titled.activePaneTitle, "pnpm dev")
+
+        // A file written before pane titles existed carries none at all.
+        let legacy = WidgetSessionState(
+            name: "main", windowNames: ["cc", "server"], activeWindowIndex: 1)
+        XCTAssertNil(legacy.activePaneTitle)
     }
 
     func testMiniatureLinesKeepOnlyTheTail() {

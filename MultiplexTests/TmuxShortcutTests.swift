@@ -38,17 +38,17 @@ final class TmuxShortcutTests: XCTestCase {
         let pane = try XCTUnwrap(TmuxProbe.directShortcutCommand(
             .closePane, sessionName: "my project"
         ))
-        XCTAssertTrue(pane.contains("tmux list-panes -t '=my project'"))
+        XCTAssertTrue(pane.contains("tmux -u list-panes -t '=my project'"))
         XCTAssertTrue(pane.contains("#{?pane_active,#{pane_id},}"))
-        XCTAssertTrue(pane.contains("tmux kill-pane -t \"$target\""))
+        XCTAssertTrue(pane.contains("tmux -u kill-pane -t \"$target\""))
         XCTAssertFalse(pane.contains("send-keys"))
 
         let window = try XCTUnwrap(TmuxProbe.directShortcutCommand(
             .closeWindow, sessionName: "my project"
         ))
-        XCTAssertTrue(window.contains("tmux list-windows -t '=my project'"))
+        XCTAssertTrue(window.contains("tmux -u list-windows -t '=my project'"))
         XCTAssertTrue(window.contains("#{?window_active,#{window_id},}"))
-        XCTAssertTrue(window.contains("tmux kill-window -t \"$target\""))
+        XCTAssertTrue(window.contains("tmux -u kill-window -t \"$target\""))
         XCTAssertFalse(window.contains("send-keys"))
 
         XCTAssertNil(TmuxProbe.directShortcutCommand(

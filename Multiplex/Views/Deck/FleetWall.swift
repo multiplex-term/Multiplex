@@ -1950,6 +1950,26 @@ private struct SessionTile: View, Equatable {
         return "\(max(1, Int(seconds / 60)))m"
     }
 
+    /// One line per window: `0 EDITOR · ✳ Claude Code`. The pane title is the
+    /// active pane's, so it only describes the whole window when that is the
+    /// *only* pane — a split window keeps reporting its pane count instead,
+    /// which is the fact a title would otherwise hide.
+    private func segment(_ window: TmuxWindow) -> Text {
+        let name = Text("\(window.index) \(window.name)".uppercased())
+            .foregroundStyle(window.isActive ? Theme.signal : Theme.signal2)
+        if window.paneCount > 1 {
+            return name + Text(" · \(window.paneCount)P")
+                .foregroundStyle(window.isActive ? Theme.signal : Theme.signal2)
+        }
+        guard let title = window.displayPaneTitle(serverHost: session.serverHost)
+        else { return name }
+        // Verbatim, unlike the window name it follows: a pane title is screen
+        // content, not a chassis label, and uppercasing mangles what an agent
+        // wrote there (`π - harness` → `Π - HARNESS`).
+        return name + Text(" · \(title)")
+            .foregroundStyle(window.isActive ? Theme.signal2 : Theme.signal3)
+    }
+
     private var segmentStrip: some View {
         HStack(spacing: 3) {
             ForEach(session.windows) { window in
@@ -1957,14 +1977,9 @@ private struct SessionTile: View, Equatable {
                     Rectangle()
                         .fill(window.isActive ? Theme.signal : Theme.bezelHi)
                         .frame(height: 2)
-                    Text(
-                        "\(window.index) \(window.name)"
-                            + (window.paneCount > 1 ? " · \(window.paneCount)P" : "")
-                    )
+                    segment(window)
                         .font(.mono(8))
                         .kerning(0.4)
-                        .textCase(.uppercase)
-                        .foregroundStyle(window.isActive ? Theme.signal : Theme.signal2)
                         .lineLimit(1)
                         .padding(.top, 4)
                 }
@@ -1986,8 +2001,12 @@ private struct SessionTile: View, Equatable {
     }
 
     private var spineSummary: String {
-        let active = session.windows.first(where: \.isActive).map { "\($0.name) active" } ?? ""
-        return "\(session.windowCount) windows, \(session.paneCount) panes. \(active)"
+        let activeWindow = session.windows.first(where: \.isActive)
+        let active = activeWindow.map { "\($0.name) active" } ?? ""
+        let title = activeWindow?
+            .displayPaneTitle(serverHost: session.serverHost)
+            .map { ", titled \($0)" } ?? ""
+        return "\(session.windowCount) windows, \(session.paneCount) panes. \(active)\(title)"
     }
 
     private func accessibilitySummary(

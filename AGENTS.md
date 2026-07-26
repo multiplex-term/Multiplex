@@ -430,6 +430,38 @@ views.
 - **tmux `-F` sanitizes control chars** (0x1F → `_`). The probe format is
   space-separated with the variable-length *name last*, correlated by
   `session_id`, tail-rejoined on parse. Don't switch to a control-char delimiter.
+- **Every tmux invocation is `tmux -u`** (`TmuxProbe.tmuxCommand`; the
+  `multiplex_tmux` runner too). An SSH *exec* channel inherits no locale —
+  `LANG` and `LC_ALL` are both empty — so tmux falls back to the C locale and
+  `-F` sanitizes every **multibyte** character to `_`, exactly as it does
+  control characters. That silently gutted four things the app then acted on:
+  the pane title the deck spine shows (`✳ Claude Code` → `_ Claude Code`), the
+  Braille spinner `AgentAttention` reads RUNNING out of (U+2800…U+28FF → `_`,
+  so a title-only classification could never see one), `AgentSignature`'s
+  `π - ` prefix for Pi, and `#{pane_current_path}` — a non-ASCII cwd resolved
+  to a directory that does not exist, aiming file drops at the wrong place.
+  `-u` is tmux's own "assume UTF-8" flag and needs no locale to exist on the
+  remote, which is why it beats exporting one: Alpine ships none and macOS has
+  no `C.UTF-8`. Capture-pane output was never affected (it is raw pane bytes,
+  not format output) — which is exactly why the miniatures looked fine while
+  the titles behind them did not. Verified against the harness 2026-07-26.
+- **A pane title is shown only where it can speak for its window**
+  (`PaneTitleDisplay`, pure + tested; deck spine + widget). tmux seeds every
+  new pane's title with the server's own hostname and replaces it only on an
+  OSC 0/2 title, so an untouched pane reports the same noise on every window
+  (six of the harness's thirteen panes read `Jhen-MBPr14.local`). Suppression
+  is exact, never a guess: the probe asks tmux for that seed directly
+  (`#{host}`, carried on the `H` record into `TmuxSession.serverHost` and the
+  deck snapshot) rather than comparing against `Host.hostname`, which is
+  routinely an IP or tunnel alias the remote's `gethostname()` never heard of.
+  Short/FQDN forms count as the same host. Also dropped: a title that merely
+  repeats the window name, and **any title on a split window** — it belongs to
+  the *active* pane, so beside a window name it would advertise one pane's
+  business as the whole window's (those windows keep reporting `2P`). Windows
+  from a pre-pane-inventory snapshot report `paneCount == 1` and fail open.
+  The spine line is `0 EDITOR · ✳ Claude Code`: name uppercased as a chassis
+  label, title **verbatim** — it is screen content, and uppercasing mangles
+  what an agent wrote (`π - harness` → `Π - HARNESS`).
 - **Keyboard focus goes through `TerminalFocusArbiter`, never per-view**: every
   visionOS window is its own always-key scene, so multiple first responders
   leave input stuck on the first session. Claiming resigns the previous owner

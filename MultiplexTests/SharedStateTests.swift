@@ -157,6 +157,7 @@ final class SharedStateTests: XCTestCase {
                     name: "main",
                     agentRaw: "claudeCode",
                     windowNames: ["editor", "server", "logs"],
+                    windowPaneTitles: ["✳ Claude Code", "pnpm dev", ""],
                     activeWindowIndex: 1,
                     miniatureLines: ["$ pnpm build", "✓ 214 modules · 3.2s"],
                     createdAt: Date(timeIntervalSince1970: 100)
@@ -168,6 +169,34 @@ final class SharedStateTests: XCTestCase {
 
         XCTAssertTrue(SharedStateStore.save(state, directory: directory))
         XCTAssertEqual(SharedStateStore.load(directory: directory), state)
+    }
+
+    func testStateWrittenBeforePaneTitlesStillDecodes() throws {
+        // A widget cannot ask the app to republish, so a file left by an older
+        // build has to keep rendering — the field defaults must be honoured on
+        // decode, not just by the memberwise initializer.
+        let json = """
+        {
+          "hosts": [{
+            "id": "00000000-0000-0000-0000-000000000001",
+            "name": "devbox",
+            "address": "jhen@10.0.1.7",
+            "sessions": [{
+              "name": "main",
+              "windowNames": ["editor", "server"],
+              "activeWindowIndex": 1,
+              "miniatureLines": ["$ pnpm build"],
+              "createdAt": -978307200
+            }]
+          }],
+          "generatedAt": -978307200
+        }
+        """
+        let state = try JSONDecoder().decode(WidgetFleetState.self, from: Data(json.utf8))
+        let session = try XCTUnwrap(state.hosts.first?.sessions.first)
+        XCTAssertEqual(session.windowNames, ["editor", "server"])
+        XCTAssertEqual(session.windowPaneTitles, [])
+        XCTAssertNil(session.activePaneTitle)
     }
 
     func testLoadFailsSoftOnMissingFile() {

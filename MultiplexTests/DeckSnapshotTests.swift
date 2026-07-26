@@ -33,7 +33,8 @@ final class DeckSnapshotTests: XCTestCase {
                     ],
                     clientCount: 2,
                     created: Date(timeIntervalSince1970: 1_751_500_000),
-                    tmuxID: "$0"
+                    tmuxID: "$0",
+                    serverHost: "Jhen-MBPr14.local"
                 ),
             ],
             miniatures: ["main": ["$ make test", "ok"]]
@@ -51,6 +52,16 @@ final class DeckSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.sessions[0].paneCount, 3)
         XCTAssertTrue(decoded.sessions[0].isAttached)
         XCTAssertEqual(decoded.miniatures["main"], ["$ make test", "ok"])
+        // A cold launch must still be able to tell a real pane title from
+        // tmux's seeded hostname, so the server host rides the snapshot.
+        XCTAssertEqual(decoded.sessions[0].serverHost, "Jhen-MBPr14.local")
+        // This window carries three panes, so the active pane's title is not
+        // the window's to advertise — the spine shows its pane count instead.
+        XCTAssertEqual(decoded.sessions[0].windows[0].paneCount, 3)
+        XCTAssertNil(
+            decoded.sessions[0].windows[0].displayPaneTitle(
+                serverHost: decoded.sessions[0].serverHost)
+        )
     }
 
     func testSnapshotWrittenBeforePaneInventoryStillDecodes() throws {
@@ -78,6 +89,13 @@ final class DeckSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.sessions[0].activeAgent, .codex)
         XCTAssertEqual(decoded.sessions[0].detectedAgents, [.codex])
         XCTAssertEqual(decoded.sessions[0].paneCount, 1)
+        // No serverHost was ever written, so suppression fails open rather
+        // than hiding this session's titles until the next live probe.
+        XCTAssertEqual(decoded.sessions[0].serverHost, "")
+        XCTAssertEqual(
+            decoded.sessions[0].windows[0].displayPaneTitle(serverHost: ""),
+            "repo"
+        )
     }
 
     @MainActor

@@ -85,6 +85,65 @@ struct TmuxWindow: Identifiable, Hashable, Codable {
     var paneCount: Int {
         panes?.count ?? 1
     }
+
+    /// The active pane's title, or nil when it says nothing worth showing.
+    ///
+    /// A split window never offers one: the title belongs to the *active*
+    /// pane, so presenting it beside the window name would advertise one
+    /// pane's business as the whole window's. Those windows report their pane
+    /// count instead. Snapshots written before pane inventory existed report
+    /// `paneCount == 1`, which fails open — the honest reading of a window we
+    /// only ever saw one pane of.
+    func displayPaneTitle(serverHost: String) -> String? {
+        guard paneCount == 1 else { return nil }
+        return PaneTitleDisplay.title(
+            paneTitle: paneTitle,
+            windowName: name,
+            serverHost: serverHost
+        )
+    }
+}
+
+/// Decides whether a pane title is worth showing next to its window name.
+/// Pure — the deck spine and the widget projection share it, so the two
+/// surfaces can never disagree about what counts as a real title.
+enum PaneTitleDisplay {
+    /// tmux seeds every new pane's title with the server's own hostname and
+    /// replaces it only when the program emits an OSC 0/2 title. An untouched
+    /// pane therefore reports the same noise on every window (six of the dev
+    /// harness's thirteen panes read `Jhen-MBPr14.local`), which is worth
+    /// suppressing — but only against the exact string tmux seeded it with.
+    /// That string is asked of tmux directly (`#{host}`, carried on the probe's
+    /// `H` record) rather than inferred from the Host record: `Host.hostname`
+    /// is routinely an IP or a tunnel alias that the remote's `gethostname()`
+    /// knows nothing about.
+    ///
+    /// Short and FQDN forms count as the same host: `gethostname()` reports
+    /// either depending on network state, so a pane seeded while the machine
+    /// still had its `.local` suffix must not outlive the suppression.
+    ///
+    /// A title that only repeats the window name is dropped as redundant — on
+    /// the tile it would sit directly beneath the name it duplicates.
+    static func title(
+        paneTitle: String, windowName: String, serverHost: String
+    ) -> String? {
+        let title = paneTitle.trimmingCharacters(in: .whitespaces)
+        guard !title.isEmpty, !isSameHost(title, serverHost) else { return nil }
+        let name = windowName.trimmingCharacters(in: .whitespaces)
+        guard title.caseInsensitiveCompare(name) != .orderedSame else { return nil }
+        return title
+    }
+
+    private static func isSameHost(_ candidate: String, _ host: String) -> Bool {
+        guard !host.isEmpty else { return false }
+        if candidate.caseInsensitiveCompare(host) == .orderedSame { return true }
+        // Compare first DNS labels, never a substring: `Jhen-MBPr14: ~/work`
+        // carries no dot and so stays a real title.
+        let candidateLabel = String(candidate.prefix { $0 != "." })
+        let hostLabel = String(host.prefix { $0 != "." })
+        guard !candidateLabel.isEmpty, !hostLabel.isEmpty else { return false }
+        return candidateLabel.caseInsensitiveCompare(hostLabel) == .orderedSame
+    }
 }
 
 /// A tmux session as reported by `tmux list-sessions` / `list-windows`.
@@ -97,6 +156,14 @@ struct TmuxSession: Identifiable, Hashable, Codable {
     /// tmux's own id ("$3") — the only unambiguous capture-pane target;
     /// names can prefix-collide.
     var tmuxID: String = ""
+    /// Hostname of the tmux server these sessions live on (`#{host}`), as the
+    /// probe read it. Carried per session — not per host record — because it
+    /// is what tmux seeded every untouched pane title with, and because riding
+    /// the session keeps it in device-local snapshots so a cold launch can
+    /// still tell a real pane title from that seed. Empty on legacy snapshots
+    /// and on hosts whose tmux declined to answer; `PaneTitleDisplay` then
+    /// simply suppresses nothing.
+    var serverHost: String = ""
 
     var id: String { name }
     var isAttached: Bool { clientCount > 0 }
@@ -122,6 +189,27 @@ struct TmuxSession: Identifiable, Hashable, Codable {
     }
     var paneCount: Int {
         windows.reduce(0) { $0 + $1.paneCount }
+    }
+}
+
+extension TmuxSession {
+    /// Hand-rolled because a property default does NOT make a non-optional key
+    /// optional to Swift's synthesized decoder: adding `serverHost` to the
+    /// struct alone would have thrown on every `deck-snapshots.json` written by
+    /// an older build, costing the whole fleet its instant cold-launch paint
+    /// (caught by `DeckSnapshotTests`). Only the three fields with no sensible
+    /// default stay required. Encoding stays synthesized, and living in an
+    /// extension keeps the memberwise initializer.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            name: try container.decode(String.self, forKey: .name),
+            windows: try container.decode([TmuxWindow].self, forKey: .windows),
+            clientCount: try container.decodeIfPresent(Int.self, forKey: .clientCount) ?? 0,
+            created: try container.decode(Date.self, forKey: .created),
+            tmuxID: try container.decodeIfPresent(String.self, forKey: .tmuxID) ?? "",
+            serverHost: try container.decodeIfPresent(String.self, forKey: .serverHost) ?? ""
+        )
     }
 }
 

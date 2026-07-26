@@ -143,10 +143,27 @@ struct HostWidgetView: View {
                     heldFrame(for: session)
                 }
                 if let session, !session.windowNames.isEmpty {
-                    SpineRow(
-                        names: session.windowNames,
-                        activeIndex: session.activeWindowIndex
-                    )
+                    VStack(alignment: .leading, spacing: 3) {
+                        SpineRow(
+                            names: session.windowNames,
+                            activeIndex: session.activeWindowIndex
+                        )
+                        // The deck's spine pairs a pane title with its window
+                        // name on one line; a medium widget's chips are ~10
+                        // characters wide, so only the active window's title
+                        // earns a row here — the highlighted chip above says
+                        // which window it belongs to. Verbatim like the deck's
+                        // (uppercasing mangles `π - harness`), and already
+                        // filtered app-side by `PaneTitleDisplay`.
+                        if let title = session.activePaneTitle {
+                            Text(title)
+                                .font(.widgetMono(6.5))
+                                .kerning(0.3)
+                                .foregroundStyle(palette.signal3)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
@@ -230,6 +247,7 @@ extension WidgetHostState {
             name: "main",
             agentRaw: "claudeCode",
             windowNames: ["editor", "server", "logs"],
+            windowPaneTitles: ["✳ Claude Code", "pnpm dev", ""],
             activeWindowIndex: 1,
             miniatureLines: [
                 "$ pnpm build",

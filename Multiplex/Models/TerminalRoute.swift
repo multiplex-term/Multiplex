@@ -86,9 +86,12 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
 /// ordinary tmux command.
 enum TmuxSessionLaunch {
     static let persistentRunnerDefinition =
+        // `-u` for the same reason every TmuxProbe invocation carries it: the
+        // create prints the server's chosen session name back to the app, and
+        // an exec channel's empty locale would sanitize a non-ASCII one.
         "multiplex_tmux() { if command -v systemd-run >/dev/null 2>&1"
-        + " && systemd-run --user --scope --quiet -- tmux \"$@\" 2>/dev/null;"
-        + " then return 0; fi; tmux \"$@\"; }; "
+        + " && systemd-run --user --scope --quiet -- tmux -u \"$@\" 2>/dev/null;"
+        + " then return 0; fi; tmux -u \"$@\"; }; "
 
     /// Legacy/restored `.create` routes still create from the PTY connection.
     /// Create detached first through the persistent runner, then attach; this

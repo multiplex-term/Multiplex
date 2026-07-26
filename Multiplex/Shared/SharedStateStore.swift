@@ -12,10 +12,50 @@ struct WidgetSessionState: Codable, Hashable {
     var agentRaw: String? = nil
     /// The window spine, in index order; `activeWindowIndex` indexes it.
     var windowNames: [String] = []
+    /// Each window's active-pane title, parallel to `windowNames`. Already
+    /// filtered app-side by `PaneTitleDisplay` — `""` means "nothing worth
+    /// showing", so the widget never has to know what tmux seeds a pane
+    /// title with (and never compiles the app's model chain to find out).
+    var windowPaneTitles: [String] = []
     var activeWindowIndex: Int = 0
     /// Last visible lines of the active pane — the tile's held frame.
     var miniatureLines: [String] = []
     var createdAt: Date = .distantPast
+
+    /// Pane title of the window an attached client is looking at. Index-guarded:
+    /// legacy files carry no titles at all, and the widget must render them
+    /// rather than trap.
+    var activePaneTitle: String? {
+        guard windowPaneTitles.indices.contains(activeWindowIndex) else { return nil }
+        let title = windowPaneTitles[activeWindowIndex]
+        return title.isEmpty ? nil : title
+    }
+}
+
+extension WidgetSessionState {
+    /// Hand-rolled: a property default does not make a non-optional key
+    /// optional to Swift's synthesized decoder, so adding `windowPaneTitles`
+    /// would have thrown on the `widget-state.json` an older build left behind
+    /// — and a widget cannot ask the app to republish, so it would have sat
+    /// blank until the user next opened Multiplex. Every field carries a
+    /// default, so every key is optional here. Encoding stays synthesized.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            name: try container.decodeIfPresent(String.self, forKey: .name) ?? "",
+            agentRaw: try container.decodeIfPresent(String.self, forKey: .agentRaw),
+            windowNames: try container.decodeIfPresent(
+                [String].self, forKey: .windowNames) ?? [],
+            windowPaneTitles: try container.decodeIfPresent(
+                [String].self, forKey: .windowPaneTitles) ?? [],
+            activeWindowIndex: try container.decodeIfPresent(
+                Int.self, forKey: .activeWindowIndex) ?? 0,
+            miniatureLines: try container.decodeIfPresent(
+                [String].self, forKey: .miniatureLines) ?? [],
+            createdAt: try container.decodeIfPresent(
+                Date.self, forKey: .createdAt) ?? .distantPast
+        )
+    }
 }
 
 struct WidgetHostState: Codable, Hashable, Identifiable {

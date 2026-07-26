@@ -82,6 +82,9 @@ enum WidgetStateBuilder {
             name: session.name,
             agentRaw: sessionAgent(session)?.rawValue,
             windowNames: session.windows.map(\.name),
+            windowPaneTitles: session.windows.map {
+                $0.displayPaneTitle(serverHost: session.serverHost) ?? ""
+            },
             activeWindowIndex: session.windows.firstIndex(where: \.isActive) ?? 0,
             miniatureLines: Array(miniatureLines.suffix(miniatureLineLimit)),
             createdAt: session.created
