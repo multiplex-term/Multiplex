@@ -142,6 +142,10 @@ extension TerminalView: UITextInput {
     }
     
     public func replace(_ range: UITextRange, withText text: String) {
+        // Multiplex patch: an incoming range addresses the real document, so the
+        // backspace filler must be cleared before it is coerced against the
+        // buffer. Ranges the caller derived from filler are dropped with it.
+        clearInputFiller()
         guard let r = coerceTextRange(range) else { return }
 
         guard _markedTextRange == nil else { return }
@@ -251,6 +255,9 @@ extension TerminalView: UITextInput {
 
     public func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
         uitiLog("setMarkedText(\(markedText?.debugDescription ?? "nil"), selectedRange:\(selectedRange)) \(textInputStateDescription())")
+        // Multiplex patch: composition is real input — the backspace filler must
+        // be gone before any marked range is computed against the buffer.
+        clearInputFiller()
         resetKoreanResyllabificationTransaction()
 
         let rangeToReplace = _markedTextRange ?? _selectedTextRange
@@ -348,6 +355,8 @@ extension TerminalView: UITextInput {
         beginTextInputEdit()
         pendingAutoPeriodDeleteWasSpace = false
         resetKoreanResyllabificationTransaction()
+        // Multiplex patch: the filler lives in this buffer, so it resets with it.
+        inputFillerCount = 0
         textInputStorage = ""
         _selectedTextRange = TextRange (from: TextPosition(offset: 0), to: TextPosition(offset: 0))
         _markedTextRange = nil
