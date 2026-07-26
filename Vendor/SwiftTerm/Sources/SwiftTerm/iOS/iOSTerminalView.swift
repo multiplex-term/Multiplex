@@ -2066,8 +2066,89 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         true
     }
     
+    /// Multiplex patch: a terminal's document is the remote screen, not this
+    /// view's local input mirror, so this always answers true.
+    ///
+    /// `textInputStorage` holds only what was typed through *this* view's text
+    /// input session. Text that arrived any other way — typed before the
+    /// attach, sent by another client, echoed by the remote, or left in a
+    /// composer when the app reattaches — is on screen and deletable while the
+    /// mirror is still empty, so reporting that mirror answered a question
+    /// about the wrong document. Backspace is unconditionally meaningful here:
+    /// `deleteBackward` sends 0x7f (or the kitty backspace event) and the remote
+    /// alone decides what that does. Nothing in SwiftTerm reads this property —
+    /// real editing addresses `textInputStorage` through ranges — so it is
+    /// advisory to UIKit only.
+    ///
+    /// ⚠ This does NOT restore held-backspace auto-repeat (tested: no change).
+    /// Once iOS accelerates a held delete it deletes word-wise, which reads the
+    /// document's actual characters to find boundaries — an empty mirror
+    /// starves that regardless of what this property claims. Same root cause as
+    /// upstream SwiftTerm #271 ("will not auto-repeat if it encounters a
+    /// space"), still open and undiagnosed there. Fixing it needs the document
+    /// stocked with real filler characters, which lands on the buffer that also
+    /// carries marked text and the Korean resyllabification transaction.
     public var hasText: Bool {
-        return !textInputStorage.isEmpty
+        return true
+    }
+
+    // MARK: - Input filler (held-backspace auto-repeat)
+    //
+    // Multiplex patch: iOS accelerates a held delete key into word-wise
+    // deletion, and to find a word boundary it reads the real characters of the
+    // `UITextInput` document. `textInputStorage` only ever mirrors what was
+    // typed through this view, so for text that came from anywhere else — typed
+    // before the attach, sent by another client, echoed by the remote — the
+    // document is empty and the repeat starves immediately: every backspace
+    // becomes a separate tap. (Upstream SwiftTerm #271 is the milder form,
+    // where the repeat dies at a space.) Neither `hasText` nor reporting the
+    // delete to `inputDelegate` fixes it; the keyboard wants characters it can
+    // consume.
+    //
+    // So when the buffer holds nothing real, it is stocked with filler, and
+    // each filler character the keyboard consumes is converted into one
+    // backspace byte for the remote. The load-bearing invariant is that filler
+    // exists ONLY while there is no real text: any actual input clears it
+    // first. That keeps filler from ever sitting next to typed text (where a
+    // word-wise delete spanning the boundary would over-count backspaces) and
+    // keeps it away from `.last`/`.suffix()` and the caret-at-end guards that
+    // the auto-period and Korean resyllabification paths read.
+    //
+    // Both constants are tuning knobs. The length bounds how many backspaces a
+    // single word-wise delete can emit in one tick; the character must not be a
+    // space (spaces are what upstream #271 trips over, and the auto-period path
+    // keys on a trailing space) and must not be Hangul (`tryComposeKoreanFinal`
+    // inspects the last character).
+    static let inputFillerLength = 16
+    static let inputFillerCharacter: Character = "x"
+
+    /// Count of filler characters at the head of `textInputStorage`. Non-zero
+    /// only while the buffer is *entirely* filler — see the invariant above.
+    var inputFillerCount = 0
+
+    /// Stocks the buffer with filler when it holds nothing real, so a held
+    /// delete key always has characters to consume. No-op during composition.
+    func seedInputFillerIfNeeded () {
+        guard _markedTextRange == nil else { return }
+        // Only when there is no real text: either empty, or already all filler.
+        guard textInputStorage.count == inputFillerCount,
+              inputFillerCount < TerminalView.inputFillerLength else { return }
+        textInputStorage = String(repeating: TerminalView.inputFillerCharacter,
+                                  count: TerminalView.inputFillerLength)
+        inputFillerCount = TerminalView.inputFillerLength
+        let end = TextPosition(offset: textInputStorage.textInputUTF16Count)
+        _selectedTextRange = TextRange(from: end, to: end)
+    }
+
+    /// Drops the filler before any real input touches the buffer, restoring the
+    /// empty-document state the text input paths were written against.
+    func clearInputFiller () {
+        guard inputFillerCount > 0 else { return }
+        inputFillerCount = 0
+        textInputStorage = ""
+        let start = TextPosition(offset: 0)
+        _selectedTextRange = TextRange(from: start, to: start)
+        _markedTextRange = nil
     }
 
     func isAutoPeriodReplacement(_ text: String) -> Bool {
@@ -2130,6 +2211,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     private func commitTextInput(_ text: String, applyModifiers: Bool) {
+        // Multiplex patch: real input never coexists with the backspace filler —
+        // drop it before anything reads the buffer, so every path below sees the
+        // empty document it was written against.
+        clearInputFiller()
         // Multiplex patch: on iOS-app-on-Mac the Cocoa text system owns
         // hardware Return — Shift+Return never reaches pressesBegan with its
         // modifier and arrives here as a bare "\n". The physical shift state
@@ -2730,7 +2815,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     private func trackKoreanResyllabificationDeletion(_ deletedText: Substring, range: TextRange) {
+        // Multiplex patch: deleted filler is not text the user composed, so it
+        // must never open a resyllabification transaction — the buffer is all
+        // filler whenever the count is non-zero.
         guard isKoreanTextInput,
+              inputFillerCount == 0,
               _markedTextRange == nil,
               range.endPosition.offset == textInputStorage.textInputUTF16Count else {
             resetKoreanResyllabificationTransaction()
@@ -2755,6 +2844,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     open func deleteBackward() {
         uitiLog("deleteBackward() \(textInputStateDescription())")
+
+        // Multiplex patch: make sure a held delete key has something to consume
+        // before the ranges below are read. See the input filler section.
+        seedInputFillerIfNeeded()
 
         // after backward deletion, marked range is always cleared, and length of selected range is always zero
         let rangeToDelete = _markedTextRange ?? _selectedTextRange
@@ -2813,6 +2906,20 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         _selectedTextRange = TextRange(from: rangeStartPosition, to: rangeStartPosition)
 
         endTextInputEdit()
+
+        // Multiplex patch: re-stock the filler for the next repeat tick. The
+        // buffer is all filler whenever the count is non-zero, so what survived
+        // the delete is simply what is left. Restocking happens *after*
+        // `endTextInputEdit` on purpose: the keyboard is told the shortened
+        // document this delete produced — it has to see the delete do something
+        // — and finds a full buffer again on its next read, so a held key never
+        // runs the document dry. Deleting the last of the user's own typed text
+        // lands here too, which is what lets a hold continue past it into text
+        // the remote owns.
+        if inputFillerCount > 0 {
+            inputFillerCount = textInputStorage.count
+        }
+        seedInputFillerIfNeeded()
     }
 
     enum SendData {

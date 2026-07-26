@@ -355,7 +355,7 @@ views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5), patched
     to declare the `NIO` product it imports (Xcode 27's module resolution
     rejects the undeclared import). Also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in eight behavior groups
+  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in nine behavior groups
     (marked `Multiplex patch`; the obscured-tab display guards share the marker
     on their owning state):
     `keyboardType` is settable (upstream is get-only), and Multiplex keeps it
@@ -376,7 +376,13 @@ views.
     `selection.active`**: a long press opens PASTE / SELECT / SELECT ALL
     without selecting anything, so guarding on the selection alone left that
     menu stuck on screen — cancellable only by pressing SELECT first, which is
-    what finally made the guard true (user-reported); UIKit marked text stays
+    what finally made the guard true (user-reported); **`hasText` always
+    answers true**, because a terminal's document is the remote screen and
+    never the local `textInputStorage` mirror — text typed before the attach,
+    sent by another client, or left in a composer is on screen and deletable
+    while that mirror is empty, so reporting the mirror answered about the
+    wrong document (⚠ this does NOT fix held-backspace auto-repeat — see the
+    open item below); UIKit marked text stays
     local in a caret-anchored overlay until
     commit, with honest candidate-window geometry and cleanup across reset,
     deletion, detach, and font/caret changes — this is merged with 1.15.0's
@@ -1320,3 +1326,30 @@ unchosen candidates stay here under `docs/landing/`.
   Citadel's `.custom` validator is the ship-blocker TODO.
 - csh/fish remote shells may need tmux on the default PATH (probe prepends common
   Homebrew/local paths but assumes POSIX-ish login shells).
+- **Held-backspace auto-repeat rides an input filler and is NOT verified**
+  (`inputFillerLength` / `inputFillerCharacter`, `seedInputFillerIfNeeded` /
+  `clearInputFiller`). iOS accelerates a held delete into word-wise deletion and
+  reads the `UITextInput` document's real characters to find boundaries, but
+  `textInputStorage` only mirrors what was typed through this view — empty for
+  text typed before the attach, sent by another client, or echoed by the remote,
+  so the repeat starved and every backspace was a separate tap (user-reported).
+  Upstream SwiftTerm #271 ("will not auto-repeat if it encounters a space") is
+  the milder form of the same mismatch, open since 2023. `hasText` returning
+  true and reporting the delete to `inputDelegate` were both tried first and
+  neither moved it. The buffer is now stocked with filler when it holds nothing
+  real, and each consumed filler character becomes one backspace byte. The
+  load-bearing invariant: **filler exists only while there is no real text** —
+  `commitTextInput`, `setMarkedText`, and `replace` clear it before reading the
+  buffer. That keeps it away from typed text (a word-wise delete spanning the
+  boundary would over-count backspaces) and away from the `.last` / `.suffix()`
+  / caret-at-end reads behind auto-period and Korean resyllabification;
+  filler deletions are also barred from opening a resyllabification
+  transaction. Restocking happens *after* `endTextInputEdit` on purpose, so the
+  keyboard is told the shortened document this delete produced and still finds
+  a full buffer on its next read. Geometry is unaffected (`caretRect` /
+  `firstRect` answer from the terminal caret, not buffer offsets).
+  ⚠ No headless route exists to drive a held software key (see the simulator
+  tap-injection note), so this shipped on device testing alone. If IME
+  regresses, suspect a mutation path that reads the buffer without clearing
+  filler first. Both constants are tuning knobs: the length bounds how many
+  backspaces one word-wise delete can emit in a tick.
