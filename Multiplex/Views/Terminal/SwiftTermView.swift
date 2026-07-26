@@ -110,6 +110,7 @@ struct SwiftTermView: UIViewRepresentable {
         let container = KeyboardAvoidingContainer()
         let keyBar = TerminalKeyBar(
             terminal: view,
+            controller: controller,
             performTmuxShortcut: { [weak controller] shortcut in
                 controller?.performTmuxShortcut(shortcut)
             },

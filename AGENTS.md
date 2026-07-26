@@ -228,6 +228,21 @@ path (disposable tmux sessions only), and
 `… -p app.multiplexterm.multiplex.debug.keybar` runs the focused terminal's
 iPad key-bar proof sequence — the four symbol keys plus a latched CTRL
 consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`, and
+`… -p app.multiplexterm.multiplex.debug.dictation` presses the rail's
+dictation key (the slot the hardware keyboard swaps in, which the simulator
+always shows). Grant both permissions first or the press parks on a system
+alert: `xcrun simctl privacy <UDID> grant microphone
+app.multiplexterm.multiplex` covers the mic, but simctl has no
+speech-recognition service — with the device **shut down**, insert
+`kTCCServiceSpeechRecognition` into
+`~/Library/Developer/CoreSimulator/Devices/<UDID>/data/Library/TCC/TCC.db`
+(a write while it is booted is ignored by the running tccd). Point the
+simulator at a real input under Device → Audio Input to transcribe; with
+silence the walk still proves the whole path — LISTENING appears, the 30 s
+silence timeout ends it (or press the hook a second time, which is STOP), and
+`tmux capture-pane` shows nothing typed. The on-device
+verdict is logged (subsystem `app.multiplexterm.multiplex`, category
+`dictation`, debug level — `log stream`, not `log show`), and
 `… -p app.multiplexterm.multiplex.keycluster` runs the visionOS ornament
 key cluster's proof — ESC and TAB through its send path plus a latched CTRL
 consumed by a typed `c` (a raw-mode `dd bs=1 count=3 | od -c` in the pane
@@ -497,9 +512,10 @@ views.
 - **The iPad key rail is app-owned chrome, never an `inputAccessoryView`**:
   `TerminalKeyBar` is a TALLY rail (ESC / latching CTRL / TAB, the shell
   symbols `~ | / -`, DECCKM-aware autorepeat arrows, an iPad-only RET
-  immediately to their right, and the keyboard toggle —
-  `TerminalFocusArbiter.toggle`, the app's only keyboard show/hide control
-  since the KBD chips were retired) installed as a normal sibling beneath
+  immediately to their right, and one slot that is either the keyboard toggle
+  — `TerminalFocusArbiter.toggle`, the app's only keyboard show/hide control
+  since the KBD chips were retired — or, while a physical keyboard is
+  attached, the dictation key described below) installed as a normal sibling beneath
   `TerminalView`. A physical-iPad A/B proved that even
   assigning the custom rail to `inputAccessoryView` makes TextInputUI rehost it
   while a Stage Manager window moves, repeatedly reactivating the floating
@@ -515,7 +531,8 @@ views.
   Its popover opens downward; while it is presented, the focus arbiter
   temporarily resigns the terminal so a docked software keyboard cannot clip
   the fixed command grid, then restores input only if that tab still owns it.
-  ESC/CTRL/TAB, all four arrows, and the keyboard toggle never leave the rail;
+  ESC/CTRL/TAB, all four arrows, and the keyboard/dictation slot never leave
+  the rail;
   RET likewise stays present on iPad, while iPhone omits it to preserve the
   phone-width ladder. Every key sends through `TerminalView.send` → delegate →
   the controller's ordered pump (never a side channel); CTRL rides SwiftTerm's public
@@ -556,6 +573,38 @@ views.
   `commitTextInput` prefers that (invisible) accessory's `controlModifier`
   over the view-level one — `SwiftTermView` nils `inputAccessoryView` there
   so the cluster's latch is authoritative; don't remove that.
+- **A physical keyboard turns the rail's keyboard toggle into a dictation
+  key** (`HardwareKeyboardMonitor`, `DictationSession`, `DictationText` —
+  pure + tested; the pane's `DictationBar`). iOS suppresses the software
+  keyboard outright while a hardware keyboard is attached, so the toggle has
+  nothing left to toggle; the slot spends itself on the one affordance the
+  hardware keyboard lacks — the mic key the software keyboard would have
+  carried. Detection is `GCKeyboard.coalesced` plus its connect/disconnect
+  notifications: **UIKit cannot answer this question**, because keyboard-frame
+  notifications describe only the software keyboard, whose absence is exactly
+  what a hardware keyboard causes. iOS also exposes no way to *trigger* system
+  dictation, so the key runs recognition itself (Speech + AVAudioEngine),
+  requesting `requiresOnDeviceRecognition` wherever the locale supports it —
+  a terminal's input is the most sensitive text in the app, and the recognizer
+  is the one place it would otherwise leave the device outside the user's own
+  SSH connection. Three rules the implementation holds to: **nothing is typed
+  until the dictation finishes** (the recognizer rewrites earlier words as it
+  refines its hypothesis and a terminal cannot take a byte back — the live
+  partial is bar-only); the finished text is typed through `TerminalView.send`
+  → delegate → ordered pump like every other rail key, sanitized to one line
+  with no control bytes (`DictationText`) and **never submitted**, the same
+  discipline as a dropped file's path; and **LISTENING means the microphone is
+  open**, never merely that the key was pressed — the first press waits behind
+  two system permission alerts, so the rail key latches on the press while the
+  bar waits for `AVAudioEngine.start()`. Recognition stops itself after 30 s
+  of quiet (5 min hard cap) — deliberately far longer than system dictation's
+  pause, because what gets dictated here is an agent prompt and a mid-sentence
+  think must not end the take. One session holds the
+  mic app-wide: a second tab starting takes it rather than failing. Free rail
+  plumbing, not an agent-helper surface. ⚠ In the simulator DeviceHub always
+  bridges the Mac keyboard as *hardware*, so the mic key — not the keyboard
+  key — is what every screenshot run captures; the no-hardware-keyboard branch
+  can only be seen on a device with no keyboard attached.
 - **Copy Mode is an app-owned interaction state over tmux's remote mode**:
   the shortcut still sends stock `Ctrl-B [` through SwiftTerm and the ordered
   pump, then `TerminalSessionController` temporarily disables SwiftTerm mouse
