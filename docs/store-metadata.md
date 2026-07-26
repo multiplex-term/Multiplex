@@ -20,8 +20,8 @@ behavior, or App Review flow changes.
 | Target release model | Free download with one non-consumable Pro unlock; confirm the base-app price manually |
 | Primary category | Developer Tools |
 | Secondary category | Utilities |
-| Privacy declaration | Target: Data Not Collected; selected files/photos and camera captures go directly to the user's SSH host; set/confirm manually in App Store Connect |
-| Runtime permissions | Camera only after FILE → Camera on iPad/iPhone; Local Network only for LAN hosts; Notifications only for enabled agent alerts; Face ID/Optic ID only when the optional App Lock setting is enabled (device passcode fallback). Photos/Files use system pickers. |
+| Privacy declaration | Target: Data Not Collected; selected files/photos and camera captures go directly to the user's SSH host; dictation audio is transcribed by Apple's Speech framework (on device wherever the locale supports it) and the resulting text is typed into the user's own session — Multiplex stores and transmits neither; set/confirm manually in App Store Connect |
+| Runtime permissions | Camera only after FILE → Camera on iPad/iPhone; Microphone + Speech Recognition only after the key rail's dictation key, which appears only while a physical keyboard is attached; Local Network only for LAN hosts; Notifications only for enabled agent alerts; Face ID/Optic ID only when the optional App Lock setting is enabled (device passcode fallback). Photos/Files use system pickers. |
 | Age rating | Target: all questionnaire answers None → 4+; complete/confirm manually |
 | Base-app price | Free; confirm in App Store Connect before submission |
 | Storefronts | Confirm intended coverage in App Store Connect; France needs the encryption step in the release playbook |

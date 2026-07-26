@@ -158,6 +158,24 @@ final class TerminalSessionController {
     /// output, so the destination is shown first (see `TerminalLink`).
     private(set) var pendingLink: TerminalLink?
 
+    #if !os(visionOS)
+    /// The rail's dictation key, from the pane's side: LISTENING while the
+    /// microphone is open (the bar shows the live hypothesis), or a short
+    /// failure the user can act on.
+    enum DictationState: Equatable {
+        case listening(String)
+        case failed(String)
+    }
+    private(set) var dictation: DictationState?
+    private var dictationSession: DictationSession?
+    private var dictationClearTask: Task<Void, Never>?
+    /// The key has been pressed and a dictation is in flight — which starts
+    /// before `dictation` does, because the first press waits on the system's
+    /// microphone and speech-recognition alerts. The rail's key latches on
+    /// this; the pane's LISTENING bar waits for the microphone itself.
+    private var dictationRequested = false
+    #endif
+
     init(route: TerminalRoute, host: Host, attention: AttentionCenter? = nil) {
         self.route = route
         self.host = host
@@ -792,6 +810,88 @@ final class TerminalSessionController {
         terminalView.send(EscapeSequences.cmdEsc)
     }
 
+    #if !os(visionOS)
+    /// What the rail's key shows: engaged from the press, not from the mic,
+    /// so a permission alert never leaves the key looking untouched.
+    var isDictating: Bool { dictationRequested }
+
+    /// The rail's dictation key. It replaces the keyboard toggle only while a
+    /// hardware keyboard is attached, so this is always the key the user
+    /// pressed rather than a second way to reach the software keyboard.
+    func toggleDictation() {
+        if dictationRequested {
+            stopDictation()
+        } else {
+            startDictation()
+        }
+    }
+
+    /// Finish and type what was heard. The recognizer gets a moment to make
+    /// its final pass first, so the tail of a sentence is not lost. A press
+    /// that has not reached the microphone yet has nothing to type, so it
+    /// simply abandons the attempt.
+    func stopDictation() {
+        guard let dictationSession else { return }
+        if dictationSession.isListening {
+            dictationSession.stop()
+        } else {
+            dictationSession.cancel()
+        }
+    }
+
+    /// Leave without typing anything.
+    func cancelDictation() {
+        dictationSession?.cancel()
+    }
+
+    private func startDictation() {
+        guard status == .live else { return }
+        // The jump search owns the pane's input while it pages the remote
+        // transcript; dictated text would interleave with its PgUp stream.
+        if case .finding = historyJump { return }
+        dictationClearTask?.cancel()
+        dictation = nil
+        dictationRequested = true
+        let session = dictationSession ?? DictationSession()
+        dictationSession = session
+        session.start(
+            onStart: { [weak self] in
+                guard let self, dictationRequested else { return }
+                dictation = .listening("")
+            },
+            onPartial: { [weak self] partial in
+                guard let self, dictationRequested else { return }
+                dictation = .listening(DictationText.preview(partial))
+            },
+            onFinish: { [weak self] outcome in
+                self?.finishDictation(outcome)
+            }
+        )
+    }
+
+    private func finishDictation(_ outcome: DictationSession.Outcome) {
+        dictationRequested = false
+        dictation = nil
+        switch outcome {
+        case .text(let raw):
+            // Typed exactly like a rail key or a dropped file's path —
+            // through SwiftTerm and the ordered input pump, never submitted.
+            guard let text = DictationText.typed(raw), let terminalView else { return }
+            terminalView.send(txt: text)
+        case .cancelled:
+            break
+        case .failure(let message):
+            dictation = .failed(message)
+            dictationClearTask?.cancel()
+            dictationClearTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                if case .failed = self?.dictation { self?.dictation = nil }
+            }
+        }
+    }
+    #endif
+
     private func setTmuxCopyModeUIActive(_ active: Bool) {
         guard tmuxCopyModeUIActive != active else { return }
         tmuxCopyModeUIActive = active
@@ -1342,6 +1442,15 @@ final class TerminalSessionController {
     /// handshake ends mosh-server, which HUPs its tmux client.)
     func detach() {
         cancelPendingResume()
+        #if !os(visionOS)
+        // The tab is going away — release the microphone rather than typing
+        // into a session that no longer exists.
+        dictationClearTask?.cancel()
+        dictationSession?.cancel()
+        dictationSession = nil
+        dictationRequested = false
+        dictation = nil
+        #endif
         dropTask?.cancel()
         dropTask = nil
         dropClearTask?.cancel()

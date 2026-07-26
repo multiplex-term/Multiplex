@@ -37,6 +37,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     }
 
     private weak var terminal: TerminalView?
+    private weak var controller: TerminalSessionController?
     private let performTmuxShortcut: (TmuxShortcut) -> Void
     private let finishTmuxCopyMode: () -> Void
     private let showsTmuxShortcuts: Bool
@@ -46,19 +47,27 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
 
     init(
         terminal: TerminalView,
+        controller: TerminalSessionController?,
         performTmuxShortcut: @escaping (TmuxShortcut) -> Void,
         finishTmuxCopyMode: @escaping () -> Void,
         showsTmuxShortcuts: Bool
     ) {
         self.terminal = terminal
+        self.controller = controller
         self.performTmuxShortcut = performTmuxShortcut
         self.finishTmuxCopyMode = finishTmuxCopyMode
         self.showsTmuxShortcuts = showsTmuxShortcuts
         super.init(frame: .zero)
         model.ctrlLatched = terminal.controlModifier
+        // The rightmost key depends on whether a physical keyboard is
+        // attached, which can change at any moment (a Magic Keyboard is
+        // detached mid-session all the time).
+        HardwareKeyboardMonitor.shared.startIfNeeded()
 
         let host = UIHostingController(rootView: KeyBarRow(
             model: model,
+            controller: controller,
+            hardwareKeyboard: HardwareKeyboardMonitor.shared,
             showsTmuxShortcuts: showsTmuxShortcuts,
             showsReturnKey: UIDevice.current.userInterfaceIdiom == .pad,
             press: { [weak self] key in self?.press(key) }
@@ -136,6 +145,8 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             terminal.send(EscapeSequences.cmdPageDown)
         case .keyboard:
             TerminalFocusArbiter.toggle(terminal)
+        case .dictation:
+            controller?.toggleDictation()
         case .showTmuxShortcuts:
             showTmuxShortcuts()
         case .tmux(let shortcut):
@@ -248,6 +259,16 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         press(.tmux(shortcut))
     }
 
+    /// Presses the rail's dictation key without touching the screen. The
+    /// simulator can be pointed at the Mac's microphone (Device → Audio
+    /// Input), so this drives the whole authorization → mic → recognizer →
+    /// ordered-pump path; the attached session's `tmux capture-pane` shows
+    /// the transcribed words typed at the prompt.
+    func debugToggleDictation() {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
+        press(.dictation)
+    }
+
     /// Headless proof sequence: the four symbol keys through the bar's own
     /// send path, then a latched CTRL consumed by a software-keyboard 'c' —
     /// at a shell prompt `tmux capture-pane` shows `~|/-^C`.
@@ -283,6 +304,7 @@ private enum TerminalKey {
     case up, down, left, right
     case pageUp, pageDown
     case keyboard
+    case dictation
     case showTmuxShortcuts
     case tmux(TmuxShortcut)
 }
@@ -296,6 +318,10 @@ private enum TerminalKey {
 /// available, and the iPhone shell moves the shortcut to its top-right bar.
 private struct KeyBarRow: View {
     var model: TerminalKeyBar.Model
+    /// Only for the dictation key's live state; every key still sends
+    /// through the bar's own `TerminalView` path.
+    var controller: TerminalSessionController?
+    var hardwareKeyboard: HardwareKeyboardMonitor
     var showsTmuxShortcuts: Bool
     var showsReturnKey: Bool
     var press: (TerminalKey) -> Void
@@ -389,14 +415,32 @@ private struct KeyBarRow: View {
             if showsReturnKey {
                 capsKey("RET", .returnKey, "Return", metric: metric)
             }
-            Key(
-                action: { press(.keyboard) },
-                width: metric.keyWidth,
-                faceHorizontalInset: metric.faceHorizontalInset,
-                accessibilityText: "Show or hide keyboard"
-            ) {
-                Image(systemName: "keyboard")
-                    .font(.ui(13, weight: .semibold))
+            // A physical keyboard suppresses the software one outright, so
+            // the toggle has nothing left to toggle. Spend the slot on the
+            // affordance the hardware keyboard genuinely lacks instead —
+            // the mic key the software keyboard would have carried.
+            if hardwareKeyboard.isConnected {
+                let listening = controller?.isDictating == true
+                Key(
+                    action: { press(.dictation) },
+                    width: metric.keyWidth,
+                    faceHorizontalInset: metric.faceHorizontalInset,
+                    latched: listening,
+                    accessibilityText: listening ? "Stop dictation" : "Dictate"
+                ) {
+                    Image(systemName: listening ? "mic.fill" : "mic")
+                        .font(.ui(13, weight: .semibold))
+                }
+            } else {
+                Key(
+                    action: { press(.keyboard) },
+                    width: metric.keyWidth,
+                    faceHorizontalInset: metric.faceHorizontalInset,
+                    accessibilityText: "Show or hide keyboard"
+                ) {
+                    Image(systemName: "keyboard")
+                        .font(.ui(13, weight: .semibold))
+                }
             }
             if showsTmux {
                 // Keep the tmux dropdown at the rail's trailing edge until
@@ -607,6 +651,17 @@ enum KeyBarDebugHook {
             else { return }
             bar.debugExercise()
         }
+
+        var dictationToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.dictation", &dictationToken, .main
+        ) { _ in
+            guard let view = TerminalFocusArbiter.current,
+                  let bar = view.superview?.subviews
+                    .compactMap({ $0 as? TerminalKeyBar }).first
+            else { return }
+            bar.debugToggleDictation()
+        }
     }
 }
 #endif
@@ -615,6 +670,8 @@ enum KeyBarDebugHook {
 #Preview("iPad Key Bar") {
     KeyBarRow(
         model: TerminalKeyBar.Model(),
+        controller: nil,
+        hardwareKeyboard: HardwareKeyboardMonitor.shared,
         showsTmuxShortcuts: true,
         showsReturnKey: true,
         press: { _ in }
@@ -625,6 +682,8 @@ enum KeyBarDebugHook {
 #Preview("Compact Key Bar") {
     KeyBarRow(
         model: TerminalKeyBar.Model(),
+        controller: nil,
+        hardwareKeyboard: HardwareKeyboardMonitor.shared,
         showsTmuxShortcuts: true,
         showsReturnKey: false,
         press: { _ in }

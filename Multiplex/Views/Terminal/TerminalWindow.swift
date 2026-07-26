@@ -1305,13 +1305,7 @@ private struct TerminalPane: View {
                 DropTargetVeil()
             }
         }
-        .overlay(alignment: .top) {
-            if isActive, let controller, controller.tmuxCopyModeUIActive {
-                TmuxCopyModeBar(done: controller.finishTmuxCopyMode)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 12)
-            }
-        }
+        .overlay(alignment: .top) { topContextualBar }
         // Trailing, not centered: the find loop stops on the page where the
         // message entered from the top, so the jumped-to line is usually the
         // FIRST row — a centered bar would sit right on it.
@@ -1338,6 +1332,40 @@ private struct TerminalPane: View {
             }
             .padding(.bottom, 12)
         }
+    }
+
+    /// The pane's app-owned interaction states share one slot at the top —
+    /// they are alternatives, never simultaneous (copy mode freezes the
+    /// pane; dictation is refused while the jump search holds it).
+    @ViewBuilder
+    private var topContextualBar: some View {
+        if isActive, let controller {
+            if controller.tmuxCopyModeUIActive {
+                TmuxCopyModeBar(done: controller.finishTmuxCopyMode)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+            } else {
+                dictationBar(for: controller)
+            }
+        }
+    }
+
+    /// Dictation is app-owned recognition, so the pane says what it is
+    /// hearing: nothing reaches the session until the dictation finishes,
+    /// and the live hypothesis is the only feedback until then.
+    @ViewBuilder
+    private func dictationBar(for controller: TerminalSessionController) -> some View {
+        #if !os(visionOS)
+        if let state = controller.dictation {
+            DictationBar(
+                state: state,
+                stop: controller.stopDictation,
+                cancel: controller.cancelDictation
+            )
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+        }
+        #endif
     }
 
     @ViewBuilder
@@ -1433,6 +1461,55 @@ private struct TmuxCopyModeBar: View {
         .accessibilityElement(children: .contain)
     }
 }
+
+#if !os(visionOS)
+/// The dictation counterpart of `TmuxCopyModeBar`: an open microphone is
+/// live state, so it gets a captioned tally lamp and the running hypothesis
+/// beside it. STOP types what was heard; CANCEL throws it away — recognition
+/// also stops itself after a pause, exactly like system dictation.
+private struct DictationBar: View {
+    let state: TerminalSessionController.DictationState
+    var stop: () -> Void
+    var cancel: () -> Void
+
+    var body: some View {
+        HStack(spacing: 18) {
+            switch state {
+            case .listening(let heard):
+                TallyLamp(caption: "LISTENING")
+                if !heard.isEmpty {
+                    Text(heard)
+                        .font(.mono(12))
+                        .foregroundStyle(Theme.signal2)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .frame(maxWidth: 320, alignment: .leading)
+                }
+                ChassisChip("CANCEL", action: cancel)
+                ChassisChip("STOP", prominent: true, action: stop)
+            case .failed(let message):
+                TallyLamp(caption: "DICTATION", color: Theme.caution)
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.signal2)
+                    .lineLimit(2)
+                    .frame(maxWidth: 320, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            Theme.bezel,
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.bezelHi, lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
+    }
+}
+#endif
 
 /// Jump-to-message state over the terminal: FINDING while the remote script
 /// pages the transcript (input is locked, the veil below explains why), and

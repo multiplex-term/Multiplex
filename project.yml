@@ -80,6 +80,11 @@ targets:
         # Also covers Optic ID on visionOS (there is no separate key).
         NSFaceIDUsageDescription: Multiplex unlocks with Face ID when the optional App Lock setting is turned on.
         NSLocalNetworkUsageDescription: Multiplex connects to SSH hosts on your local network.
+        # The key rail's dictation key, offered in place of the software
+        # keyboard toggle while a hardware keyboard is attached. Both are
+        # requested only on the first press of that key.
+        NSMicrophoneUsageDescription: Multiplex listens only while you hold a dictation going from the terminal key bar.
+        NSSpeechRecognitionUsageDescription: Multiplex transcribes your dictation so the words can be typed into the terminal session you are attached to. Recognition stays on device wherever your language supports it.
         # multiplex://open?host=…&action=shell|agent — widget taps and
         # automation deep links (parsed by ExternalActionURL).
         CFBundleURLTypes:
