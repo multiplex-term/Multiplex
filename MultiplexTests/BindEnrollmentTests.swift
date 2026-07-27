@@ -41,16 +41,26 @@ struct BindEnrollmentTests {
         // Every body line stays inside OpenSSH's wrap width.
         let body = key.privateOpenSSH.split(separator: "\n").filter { !$0.hasPrefix("-----") }
         #expect(body.allSatisfy { $0.count <= 70 })
-        // The rotation path recovers the public half from the private text
-        // alone — that is how it finds the line to delete.
-        #expect(BindSSHKey.publicB64(fromPrivateOpenSSH: key.privateOpenSSH) == key.publicB64)
     }
 
-    @Test func publicRecoveryRejectsNonKeyText() {
-        #expect(BindSSHKey.publicB64(fromPrivateOpenSSH: "not a key") == nil)
-        #expect(BindSSHKey.publicB64(
-            fromPrivateOpenSSH: "-----BEGIN OPENSSH PRIVATE KEY-----\nQUJD\n-----END OPENSSH PRIVATE KEY-----\n"
-        ) == nil)
+    /// An offline payload ships 32 raw seed bytes instead of ~370 bytes of
+    /// armored text, so the same seed must rebuild the same public half on
+    /// both sides — that identity is what the rotation's exact-match removal
+    /// depends on.
+    @Test func seedRebuildsTheSamePublicHalf() throws {
+        let seed = Data(repeating: 0x55, count: 32)
+        let first = try #require(BindSSHKey(seed: seed))
+        let second = try #require(BindSSHKey(seed: seed))
+        #expect(first.publicB64 == second.publicB64)
+        #expect(first.publicLine == second.publicLine)
+        #expect(
+            first.publicLine
+                == BindSSHKey.make(
+                    from: try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
+                ).publicLine
+        )
+        // A wrong-length seed is not a key.
+        #expect(BindSSHKey(seed: Data(repeating: 1, count: 16)) == nil)
     }
 
     // MARK: Marker grammar (shared with the CLI)

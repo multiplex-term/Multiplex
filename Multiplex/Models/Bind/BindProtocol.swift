@@ -8,7 +8,13 @@ import Foundation
 /// vendored copy in MultiplexTests pins these types to `mpx`'s exact bytes.
 enum BindWire {
     static let urlScheme = "multiplex"
-    static let urlAuthority = "bind"
+    /// Lowercase because the comparison is done on a lowercased string; the
+    /// base64url data after it is case-sensitive and never touched.
+    static let urlPrefix = "multiplex://b/"
+    static let payloadVersion: UInt8 = 2
+    /// The CLI caps candidates at 3; more would only cost QR modules for
+    /// addresses the app never reaches.
+    static let maxPayloadAddrs = 3
     static let hkdfSalt = Data("multiplex-bind-v1".utf8)
     static let pinInfo = Data("multiplex-bind-pin".utf8)
     static let maxFrame = 64 * 1024
@@ -16,39 +22,50 @@ enum BindWire {
     static let bonjourType = "_multiplex-bind._tcp"
 }
 
-/// The one string QR, clipboard, and `multiplex://bind` opens all carry.
+/// The one string QR, clipboard, and `multiplex://b/…` opens all carry.
+///
+/// Deliberately tiny, because it has to be drawable as a QR code in an 80×24
+/// terminal: it holds only what is needed to *reach and authenticate* the
+/// machine. Everything descriptive — the SSH user, the host key fingerprints
+/// the app pins — arrives moments later in the sealed OFFER, which is
+/// authenticated and unbounded. Offline payloads are the exception (no
+/// handshake exists to deliver a record), so they append the SSH user, port,
+/// key seed, and one raw host-key digest. Format: multiplex-cli
+/// `spec/bind-v1.md` §2.
 struct BindPayload: Equatable, Sendable {
+    /// What the CLI generates for an offline bind: no handshake happens, so
+    /// the record and the key itself have to travel in the payload.
+    struct Offline: Equatable, Sendable {
+        var sshUser: String
+        var sshPort: UInt16
+        /// Raw ed25519 seed. The armored OpenSSH text is derived from it, so
+        /// shipping the text instead would have cost ~370 QR bytes.
+        var seed: Data
+        /// A non-default authorized_keys the CLI enrolled into — rotation
+        /// must edit the file the sshd actually reads.
+        var authorizedKeysPath: String?
+        /// Rendered in OpenSSH's display form for `Host.pinnedHostKeys`.
+        var pinnedHostKey: String?
+    }
+
     var addrs: [String]
     /// Handshake TCP listener; 0 in offline payloads (no listener at all).
     var port: UInt16
     var spub: Data
     var token: Data
     var name: String
-    var sshUser: String
-    var sshPort: UInt16
-    var hostkeys: [String]
-    /// Offline only: the OpenSSH private key the CLI already installed.
-    var key: String?
-    /// Offline only: a non-default authorized_keys path the CLI enrolled
-    /// into (`--authorized-keys`) — rotate-on-first-connect must edit the
-    /// same file the sshd actually reads.
-    var akpath: String?
+    var offline: Offline?
 
-    var isOffline: Bool { key != nil }
+    var isOffline: Bool { offline != nil }
 
-    /// Accepts the canonical `multiplex://bind?v=1&d=…` string. Query-item
-    /// parsing (not a prefix match) so a future param can ride alongside.
     init?(url: URL) {
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              components.scheme?.lowercased() == BindWire.urlScheme,
-              components.host?.lowercased() == BindWire.urlAuthority
-        else { return nil }
-        let items = components.queryItems ?? []
-        guard items.first(where: { $0.name == "v" })?.value == "1",
-              let encoded = items.first(where: { $0.name == "d" })?.value,
-              let cbor = Data(base64URLNoPad: encoded)
-        else { return nil }
-        self.init(cbor: cbor)
+        // The prefix is a path, not a query: `?` and `&` cost QR modules and
+        // force byte mode, and the app is the only reader.
+        let text = url.absoluteString
+        guard text.lowercased().hasPrefix(BindWire.urlPrefix) else { return nil }
+        let encoded = String(text.dropFirst(BindWire.urlPrefix.count))
+        guard let bytes = Data(base64URLNoPad: encoded) else { return nil }
+        self.init(bytes: bytes)
     }
 
     init?(string: String) {
@@ -57,27 +74,113 @@ struct BindPayload: Equatable, Sendable {
         self.init(url: url)
     }
 
-    init?(cbor: Data) {
-        guard let value = try? BindCBOR.decode(cbor),
-              value["v"]?.uintValue == 1,
-              let port = value["port"]?.uintValue.flatMap(UInt16.init(exactly:)),
-              let spub = value["spub"]?.bytesValue, spub.count == 32,
-              let token = value["token"]?.bytesValue, token.count == 16,
-              let name = value["name"]?.textValue,
-              let ssh = value["ssh"],
-              let sshUser = ssh["user"]?.textValue,
-              let sshPort = ssh["port"]?.uintValue.flatMap(UInt16.init(exactly:))
+    init?(bytes: Data) {
+        var reader = ByteReader(bytes)
+        guard reader.byte() == BindWire.payloadVersion,
+              let flags = reader.byte(),
+              let spub = reader.take(32),
+              let token = reader.take(16),
+              let port = reader.uint16(),
+              let addrCount = reader.byte(), Int(addrCount) <= BindWire.maxPayloadAddrs
         else { return nil }
-        addrs = value["addrs"]?.textArrayValue ?? []
+
+        var addrs: [String] = []
+        for _ in 0..<addrCount {
+            switch reader.byte() {
+            case 4:
+                guard let raw = reader.take(4) else { return nil }
+                addrs.append(raw.map(String.init).joined(separator: "."))
+            case 6:
+                guard let raw = reader.take(16) else { return nil }
+                addrs.append(Self.ipv6String(raw))
+            default:
+                return nil
+            }
+        }
+
+        guard let nameLength = reader.byte(),
+              let nameBytes = reader.take(Int(nameLength)),
+              let name = String(data: nameBytes, encoding: .utf8)
+        else { return nil }
+
+        if flags & 0x01 != 0 {
+            guard let userLength = reader.byte(),
+                  let userBytes = reader.take(Int(userLength)),
+                  let user = String(data: userBytes, encoding: .utf8),
+                  let sshPort = reader.uint16(),
+                  let seed = reader.take(32),
+                  let pathLength = reader.byte(),
+                  let pathBytes = reader.take(Int(pathLength)),
+                  let path = String(data: pathBytes, encoding: .utf8),
+                  let digestLength = reader.byte()
+            else { return nil }
+            var pinnedHostKey: String?
+            switch digestLength {
+            case 0:
+                pinnedHostKey = nil
+            case 32:
+                guard let digest = reader.take(32) else { return nil }
+                // OpenSSH's own display form, so a pin from here is
+                // indistinguishable from one the OFFER delivered.
+                pinnedHostKey = "ssh-ed25519 SHA256:"
+                    + digest.base64EncodedString().replacingOccurrences(of: "=", with: "")
+            default:
+                return nil
+            }
+            offline = Offline(
+                sshUser: user,
+                sshPort: sshPort,
+                seed: seed,
+                authorizedKeysPath: path.isEmpty ? nil : path,
+                pinnedHostKey: pinnedHostKey
+            )
+        } else {
+            offline = nil
+        }
+
+        self.addrs = addrs
         self.port = port
         self.spub = spub
         self.token = token
         self.name = name
-        self.sshUser = sshUser
-        self.sshPort = sshPort
-        hostkeys = ssh["hostkeys"]?.textArrayValue ?? []
-        key = value["key"]?.textValue
-        akpath = value["akpath"]?.textValue
+    }
+
+    /// RFC 5952-ish rendering: enough for `NWEndpoint.Host`, which is the
+    /// only consumer. Full canonicalization would add nothing here.
+    private static func ipv6String(_ raw: Data) -> String {
+        let groups = stride(from: 0, to: 16, by: 2).map { index -> String in
+            let value = UInt16(raw[raw.startIndex + index]) << 8
+                | UInt16(raw[raw.startIndex + index + 1])
+            return String(value, radix: 16)
+        }
+        return groups.joined(separator: ":")
+    }
+
+    private struct ByteReader {
+        let data: Data
+        var index: Data.Index
+
+        init(_ data: Data) {
+            self.data = data
+            index = data.startIndex
+        }
+
+        mutating func take(_ count: Int) -> Data? {
+            guard count >= 0,
+                  let end = data.index(index, offsetBy: count, limitedBy: data.endIndex)
+            else { return nil }
+            defer { index = end }
+            return data.subdata(in: index..<end)
+        }
+
+        mutating func byte() -> UInt8? {
+            take(1)?.first
+        }
+
+        mutating func uint16() -> UInt16? {
+            guard let raw = take(2) else { return nil }
+            return UInt16(raw[raw.startIndex]) << 8 | UInt16(raw[raw.startIndex + 1])
+        }
     }
 }
 

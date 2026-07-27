@@ -232,7 +232,7 @@ bind() {
         echo $! > "$STATE/bind.pid"
         local url=""
         for _ in $(seq 1 50); do
-            url=$(grep -m1 '^multiplex://bind' "$STATE/bind.log" 2>/dev/null || true)
+            url=$(grep -m1 '^multiplex://b/' "$STATE/bind.log" 2>/dev/null || true)
             [ -n "$url" ] && break
             sleep 0.2
         done

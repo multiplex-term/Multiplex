@@ -108,7 +108,7 @@ struct BindSheet: View {
                 addHostManually()
             }
             if pasteFailed {
-                Text("The clipboard doesn’t hold a bind code. Copy the multiplex://bind line the CLI printed.")
+                Text("The clipboard doesn’t hold a bind code. Copy the multiplex:// line the CLI printed.")
                     .font(.mono(10))
                     .foregroundStyle(Theme.caution)
             }

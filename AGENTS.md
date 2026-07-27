@@ -97,7 +97,7 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   run; idb HID taps died with Xcode 27's SimulatorKit removal). E.g.
   `…open?host=devbox&action=agent&agent=pi&model=x` proves the launch line
   types `pi --model 'x'` — capture-pane the newly minted session host-side.
-- `MULTIPLEX_AUTO_BIND=<multiplex://bind?…>` / `MULTIPLEX_BIND_AUTOPIN=<6
+- `MULTIPLEX_AUTO_BIND=<multiplex://b/…>` / `MULTIPLEX_BIND_AUTOPIN=<6
   digits>` — drive the Bind Host flow headlessly (no camera, no taps). The
   first submits a scanned/pasted payload through the real parse → confirm →
   handshake seam; the second waits for the first machine heard on the

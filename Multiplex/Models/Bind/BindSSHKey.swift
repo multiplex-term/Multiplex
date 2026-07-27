@@ -69,26 +69,6 @@ struct BindSSHKey: Equatable, Sendable {
         )
     }
 
-    /// Recovers the public base64 field from an unencrypted openssh-key-v1
-    /// ed25519 private text — how rotation finds the transported key's exact
-    /// authorized_keys line without ever re-shipping it.
-    static func publicB64(fromPrivateOpenSSH text: String) -> String? {
-        let body = text
-            .split(separator: "\n")
-            .filter { !$0.hasPrefix("-----") }
-            .joined()
-        guard let payload = Data(base64Encoded: body) else { return nil }
-        var reader = Reader(data: payload)
-        guard reader.skip(Data("openssh-key-v1\0".utf8).count),
-              let cipher = reader.string(), String(data: cipher, encoding: .utf8) == "none",
-              reader.string() != nil,  // kdf name
-              reader.string() != nil,  // kdf options
-              let nkeys = reader.uint32(), nkeys == 1,
-              let publicBlob = reader.string()
-        else { return nil }
-        return publicBlob.base64EncodedString()
-    }
-
     private static func sshString(_ data: Data) -> Data {
         uint32(UInt32(data.count)) + data
     }
@@ -97,37 +77,21 @@ struct BindSSHKey: Equatable, Sendable {
         Data(withUnsafeBytes(of: value.bigEndian, Array.init))
     }
 
-    private struct Reader {
-        let data: Data
-        var index: Data.Index
+}
 
-        init(data: Data) {
-            self.data = data
-            index = data.startIndex
-        }
-
-        mutating func skip(_ count: Int) -> Bool {
-            guard let end = data.index(index, offsetBy: count, limitedBy: data.endIndex)
-            else { return false }
-            index = end
-            return true
-        }
-
-        mutating func uint32() -> UInt32? {
-            guard let end = data.index(index, offsetBy: 4, limitedBy: data.endIndex)
-            else { return nil }
-            let value = data.subdata(in: index..<end).reduce(0) { $0 << 8 | UInt32($1) }
-            index = end
-            return value
-        }
-
-        mutating func string() -> Data? {
-            guard let length = uint32(),
-                  let end = data.index(index, offsetBy: Int(length), limitedBy: data.endIndex)
-            else { return nil }
-            defer { index = end }
-            return data.subdata(in: index..<end)
-        }
+// The seed initializer lives in an extension so the memberwise initializer
+// survives — declaring it inside the struct would suppress it (same reason
+// Host's decoding init is an extension).
+extension BindSSHKey {
+    /// Rebuilds the key an offline payload carried as a raw 32-byte seed.
+    /// The public half is a pure function of the seed — which is what makes
+    /// the rotation's exact-match removal work — while the armored private
+    /// text may differ from the CLI's byte-for-byte, since OpenSSH's
+    /// `checkint` is arbitrary padding either side is free to choose.
+    init?(seed: Data) {
+        guard let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: seed)
+        else { return nil }
+        self = Self.make(from: key)
     }
 }
 

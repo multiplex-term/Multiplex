@@ -103,9 +103,9 @@ final class BindController {
 
     // MARK: Discovery lifecycle
 
-    /// Browsing runs only while a bind surface is on screen — that is what
-    /// keeps the local-network prompt tied to an explicit user action, and
-    /// keeps the wall from listening in the background.
+    /// Started and stopped by the mounted deck, which owns the policy: while
+    /// it is frontmost and the fleet is non-empty (or a bind surface is
+    /// open), never in the background. This class only holds the browser.
     func beginDiscovery() {
         discovery.start()
     }
@@ -164,17 +164,19 @@ final class BindController {
     }
 
     func submit(payload: BindPayload) {
+        // The compact payload knows the machine's address but, on the
+        // handshake path, not its SSH user or fingerprint — the OFFER brings
+        // those a moment later, so the tile shows what it actually knows.
         let id = payload.isOffline
-            ? "offline:\(payload.name):\(payload.sshUser)"
+            ? "offline:\(payload.name):\(payload.offline?.sshUser ?? "")"
             : payload.spub.base64EncodedString()
         var candidate = Pending(
             id: id,
             source: .payload(payload),
             name: payload.name,
-            user: payload.sshUser,
-            addressSummary: payload.addrs.first.map { "\($0) · ssh :\(payload.sshPort)" }
-                ?? "ssh :\(payload.sshPort)",
-            fingerprint: payload.hostkeys.first,
+            user: payload.offline?.sshUser ?? "",
+            addressSummary: Self.addressSummary(for: payload),
+            fingerprint: payload.offline?.pinnedHostKey,
             needsPIN: false
         )
         candidate.stage = .awaitingPIN
@@ -303,10 +305,12 @@ final class BindController {
         }
     }
 
-    /// `mpx bind --offline`: the key came with the payload, so there is no
-    /// handshake — import, then rotate it out on the first connection.
+    /// `mpx bind --offline`: the key came with the payload as a raw seed, so
+    /// there is no handshake — rebuild it, import, then rotate it out.
     private func importOffline(_ payload: BindPayload, id: String) async {
-        guard let privateKey = payload.key else {
+        guard let offline = payload.offline,
+              let key = BindSSHKey(seed: offline.seed)
+        else {
             fail(id: id, "That bind code is missing its key.")
             return
         }
@@ -315,13 +319,13 @@ final class BindController {
             id: id,
             name: payload.name,
             hostname: payload.addrs.first ?? payload.name,
-            port: payload.sshPort,
-            username: payload.sshUser,
-            privateKey: privateKey,
-            pins: payload.hostkeys,
+            port: offline.sshPort,
+            username: offline.sshUser,
+            privateKey: key.privateOpenSSH,
+            pins: offline.pinnedHostKey.map { [$0] } ?? [],
             rotation: BindRotationStore.Request(
-                transportedPublicB64: BindSSHKey.publicB64(fromPrivateOpenSSH: privateKey),
-                authorizedKeysPath: payload.akpath
+                transportedPublicB64: key.publicB64,
+                authorizedKeysPath: offline.authorizedKeysPath
             )
         )
     }
@@ -451,6 +455,15 @@ final class BindController {
         return name.isEmpty ? fallback : name
     }
 
+    /// What the ghost tile shows under the machine's name before a handshake
+    /// has told us anything more.
+    nonisolated static func addressSummary(for payload: BindPayload) -> String {
+        let port = payload.offline?.sshPort
+        let suffix = port.map { "ssh :\($0)" } ?? "ssh"
+        guard let addr = payload.addrs.first else { return suffix }
+        return "\(addr) · \(suffix)"
+    }
+
     /// Which address the saved host dials. The machine's own list is
     /// authoritative — where its *SSH* lives is not necessarily where its
     /// bind listener answered (a Bonjour resolve reports the interface the
@@ -487,7 +500,7 @@ final class BindController {
 
     #if DEBUG
     /// Headless hooks — the simulator can neither scan a QR nor tap a tile:
-    ///   MULTIPLEX_AUTO_BIND=<multiplex://bind?…>  submit a payload once
+    ///   MULTIPLEX_AUTO_BIND=<multiplex://b/…>     submit a payload once
     ///   MULTIPLEX_BIND_AUTOPIN=<6 digits>         answer the first heard
     ///                                             machine with that PIN
     /// plus notification `…debug.bind` to open discovery on demand.

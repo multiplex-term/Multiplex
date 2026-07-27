@@ -52,39 +52,83 @@ struct BindProtocolTests {
         let record = try vectors.section("record")
 
         #expect(payload.name == record["name"] as? String)
+        // Addresses ride as raw bytes and come back as text — that encoding
+        // is most of why the QR now fits a terminal.
         #expect(payload.addrs == record["addrs"] as? [String])
         #expect(payload.port == 41337)
-        #expect(payload.sshUser == record["ssh_user"] as? String)
-        #expect(payload.sshPort == 2222)
-        #expect(payload.hostkeys == record["hostkeys"] as? [String])
         let expectedSpub = try vectors.data("derived", "spub_hex")
         #expect(payload.spub == expectedSpub)
         let expectedToken = try vectors.data("inputs", "token_hex")
         #expect(payload.token == expectedToken)
-        #expect(payload.key == nil)
+        // The handshake payload deliberately carries no SSH user and no
+        // fingerprints: the sealed OFFER delivers those.
+        #expect(payload.offline == nil)
         #expect(!payload.isOffline)
     }
 
-    @Test func offlinePayloadCarriesItsKey() throws {
+    /// The whole reason for the compact format: this string has to be
+    /// drawable as a QR code in a plain terminal. The CBOR format it replaced
+    /// was 547 characters and rendered 97 columns wide.
+    @Test func handshakePayloadStaysQrSized() throws {
+        let vectors = try Vectors()
+        let url = try vectors.string("payload", "url")
+        #expect(
+            url.count <= 120,
+            "payload was \(url.count) characters — a QR version 6 at EC level L holds 134"
+        )
+    }
+
+    @Test func offlinePayloadCarriesItsKeyAsASeed() throws {
         let vectors = try Vectors()
         let payload = try #require(
             BindPayload(string: try vectors.string("payload_offline", "url"))
         )
         #expect(payload.isOffline)
-        #expect(payload.key?.contains("OPENSSH PRIVATE KEY") == true)
         #expect(payload.port == 0)
+        let offline = try #require(payload.offline)
+        let expectedSeed = try vectors.data("payload_offline", "seed_hex")
+        #expect(offline.seed == expectedSeed)
+        #expect(offline.sshUser == "jhen")
+        #expect(offline.sshPort == 2222)
+        // The digest renders as OpenSSH's display form, so a pin from an
+        // offline payload is indistinguishable from one the OFFER delivered.
+        let digest = try vectors.data("payload_offline", "hostkey_sha256_hex")
+        #expect(offline.pinnedHostKey
+            == "ssh-ed25519 SHA256:" + digest.base64EncodedString()
+                .replacingOccurrences(of: "=", with: ""))
+        // And the seed rebuilds a usable key.
+        let key = try #require(BindSSHKey(seed: offline.seed))
+        #expect(key.publicLine.hasPrefix("ssh-ed25519 "))
+        #expect(key.privateOpenSSH.hasPrefix("-----BEGIN OPENSSH PRIVATE KEY-----"))
     }
 
     @Test func payloadRejectsWrongSchemeVersionAndGarbage() throws {
         let vectors = try Vectors()
-        let good = try vectors.string("payload", "url")
-        let encoded = try #require(good.split(separator: "=").last).description
+        var bytes = try vectors.data("payload", "bytes_hex")
+        #expect(BindPayload(bytes: bytes) != nil)
+
+        // A future format version must not be read as this one.
+        bytes[bytes.startIndex] = 3
+        #expect(BindPayload(bytes: bytes) == nil)
 
         #expect(BindPayload(string: "https://example.com/x") == nil)
         #expect(BindPayload(string: "multiplex://open?host=devbox&action=shell") == nil)
-        #expect(BindPayload(string: "multiplex://bind?v=2&d=\(encoded)") == nil)
-        #expect(BindPayload(string: "multiplex://bind?v=1&d=%%%") == nil)
+        #expect(BindPayload(string: "multiplex://b/!!!") == nil)
+        #expect(BindPayload(string: "multiplex://b/") == nil)
         #expect(BindPayload(string: "") == nil)
+    }
+
+    /// Every truncation of a valid payload must fail closed rather than
+    /// producing a half-read offer.
+    @Test func payloadRejectsEveryTruncation() throws {
+        let vectors = try Vectors()
+        let bytes = try vectors.data("payload", "bytes_hex")
+        for cut in 1..<bytes.count {
+            #expect(
+                BindPayload(bytes: bytes.prefix(cut)) == nil,
+                "a payload truncated to \(cut) bytes decoded"
+            )
+        }
     }
 
     /// The deck's own scheme must never be re-parsed as a bind offer, and a
