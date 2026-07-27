@@ -65,6 +65,11 @@ struct WidgetHostState: Codable, Hashable, Identifiable {
     var sessions: [WidgetSessionState] = []
     /// When the app last had a live probe result for this host; nil = never.
     var probedAt: Date? = nil
+    /// Pre-configured launch models per agent raw value — what the Host
+    /// widget's Model setting offers as picker rows in the widget process.
+    /// Names only, no secrets. Optional-typed so files written before the
+    /// field existed keep decoding (synthesized decoder; nil = none).
+    var agentModels: [String: [String]]? = nil
 
     /// The session the per-host widget features and a bare shell deep link
     /// attaches — newest by creation, name-ordered on a tie. Must mirror

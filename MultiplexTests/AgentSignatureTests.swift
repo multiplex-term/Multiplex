@@ -12,15 +12,15 @@ final class AgentSignatureTests: XCTestCase {
         let prompt = "Review the SSH path"
 
         XCTAssertEqual(
-            AgentKind.claudeCode.launchCommand(initialPrompt: prompt),
+            AgentKind.claudeCode.launchCommand(model: nil, initialPrompt: prompt),
             "claude 'Review the SSH path'"
         )
         XCTAssertEqual(
-            AgentKind.codex.launchCommand(initialPrompt: prompt),
+            AgentKind.codex.launchCommand(model: nil, initialPrompt: prompt),
             "codex 'Review the SSH path'"
         )
         XCTAssertEqual(
-            AgentKind.pi.launchCommand(initialPrompt: prompt),
+            AgentKind.pi.launchCommand(model: nil, initialPrompt: prompt),
             "pi 'Review the SSH path'"
         )
     }
@@ -29,7 +29,7 @@ final class AgentSignatureTests: XCTestCase {
         let prompt = "Don't run $(touch /tmp/pwned); `id`"
 
         XCTAssertEqual(
-            AgentKind.claudeCode.launchCommand(initialPrompt: prompt),
+            AgentKind.claudeCode.launchCommand(model: nil, initialPrompt: prompt),
             "claude 'Don'\\''t run $(touch /tmp/pwned); `id`'"
         )
     }
@@ -38,19 +38,81 @@ final class AgentSignatureTests: XCTestCase {
         let prompt = "First line\r\nSecond\tcolumn\\n literal"
 
         XCTAssertEqual(
-            AgentKind.pi.launchCommand(initialPrompt: prompt),
+            AgentKind.pi.launchCommand(model: nil, initialPrompt: prompt),
             #"pi "$(printf '%b' 'First line\nSecond\tcolumn\\n literal')""#
         )
     }
 
     func testLaunchCommandIgnoresBlankPromptAndStripsTerminalControls() {
         XCTAssertEqual(
-            AgentKind.codex.launchCommand(initialPrompt: " \r\n\t "),
+            AgentKind.codex.launchCommand(model: nil, initialPrompt: " \r\n\t "),
             "codex"
         )
         XCTAssertEqual(
-            AgentKind.codex.launchCommand(initialPrompt: "Fix\u{0003} this"),
+            AgentKind.codex.launchCommand(model: nil, initialPrompt: "Fix\u{0003} this"),
             "codex 'Fix this'"
+        )
+    }
+
+    // Every supported CLI spells the override `--model <value>` (verified
+    // 2026-07-27: Claude Code 2.1.220, Codex rust 0.145.0, Pi 0.81.1).
+    func testLaunchCommandCarriesModelBeforeThePromptForEveryAgent() {
+        XCTAssertEqual(
+            AgentKind.claudeCode.launchCommand(model: "opus", initialPrompt: ""),
+            "claude --model 'opus'"
+        )
+        XCTAssertEqual(
+            AgentKind.codex.launchCommand(model: "gpt-5-codex", initialPrompt: "go"),
+            "codex --model 'gpt-5-codex' 'go'"
+        )
+        // Pi models may be provider-scoped with a thinking suffix.
+        XCTAssertEqual(
+            AgentKind.pi.launchCommand(
+                model: "anthropic/claude-opus-4:high", initialPrompt: ""),
+            "pi --model 'anthropic/claude-opus-4:high'"
+        )
+    }
+
+    func testLaunchCommandQuotesModelSoAliasBracketsCannotGlob() {
+        // `sonnet[1m]` is a real Claude Code alias; unquoted it is a zsh
+        // glob and a failed-match error instead of a launch.
+        XCTAssertEqual(
+            AgentKind.claudeCode.launchCommand(model: "sonnet[1m]", initialPrompt: ""),
+            "claude --model 'sonnet[1m]'"
+        )
+    }
+
+    func testNormalizedLaunchModelAcceptsRealIdentifierShapes() {
+        XCTAssertEqual(AgentKind.normalizedLaunchModel("  opus  "), "opus")
+        XCTAssertEqual(
+            AgentKind.normalizedLaunchModel("claude-sonnet-4-5-20250929"),
+            "claude-sonnet-4-5-20250929"
+        )
+        XCTAssertEqual(
+            AgentKind.normalizedLaunchModel("google/gemini-2.5-pro:minimal"),
+            "google/gemini-2.5-pro:minimal"
+        )
+    }
+
+    func testNormalizedLaunchModelRejectsNonTokenShapes() {
+        // Empty and whitespace-only mean "agent default".
+        XCTAssertNil(AgentKind.normalizedLaunchModel(""))
+        XCTAssertNil(AgentKind.normalizedLaunchModel("   "))
+        // Interior whitespace could smuggle a second shell word.
+        XCTAssertNil(AgentKind.normalizedLaunchModel(
+            "opus --dangerously-skip-permissions"))
+        // A leading dash must never read as another flag.
+        XCTAssertNil(AgentKind.normalizedLaunchModel("--help"))
+        // Control bytes strip first; what remains must still be a token.
+        XCTAssertEqual(AgentKind.normalizedLaunchModel("op\u{0003}us"), "opus")
+        XCTAssertNil(AgentKind.normalizedLaunchModel(String(repeating: "m", count: 65)))
+    }
+
+    func testLaunchCommandDropsRejectedModels() {
+        XCTAssertEqual(
+            AgentKind.claudeCode.launchCommand(
+                model: "opus extra-word", initialPrompt: "go"),
+            "claude 'go'"
         )
     }
 

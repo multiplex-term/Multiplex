@@ -46,7 +46,8 @@ struct MultiplexApp: App {
                             id: $0.id,
                             displayName: $0.displayName
                         )
-                    }
+                    },
+                    agentModels: $0.agentLaunchModels
                 )
             }
         }
@@ -175,6 +176,10 @@ private struct ExternalActionReceiver: ViewModifier {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
 
+    /// One shot per process, like `MULTIPLEX_AUTO_ATTACH` — the modifier is
+    /// on every scene root, and the hook must not resubmit per scene.
+    @MainActor private static var autoActionFired = false
+
     func body(content: Content) -> some View {
         content
             .onOpenURL { url in
@@ -185,6 +190,25 @@ private struct ExternalActionReceiver: ViewModifier {
                 guard !router.hasContext, supportsMultipleWindows else { return }
                 openWindow(id: "deck", value: DeckWindowRoute.main)
             }
+            .task { submitAutoActionIfNeeded() }
+    }
+
+    /// DEBUG-only headless stand-in for a widget tap:
+    /// `MULTIPLEX_AUTO_ACTION_URL=multiplex://open?…` runs the same
+    /// parse-then-submit seam as `onOpenURL`. It exists because
+    /// `simctl openurl` parks a fresh install's FIRST open on a system
+    /// "Open in Multiplex?" confirmation that a headless run cannot click
+    /// (idb HID taps died with Xcode 27's SimulatorKit removal).
+    @MainActor private func submitAutoActionIfNeeded() {
+        #if DEBUG
+        guard !Self.autoActionFired,
+              let raw = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ACTION_URL"],
+              let url = URL(string: raw),
+              let action = ExternalActionURL.action(from: url)
+        else { return }
+        Self.autoActionFired = true
+        router.submit(action)
+        #endif
     }
 }
 

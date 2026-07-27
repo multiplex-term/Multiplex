@@ -66,26 +66,33 @@ enum ExternalAction: Hashable {
     /// first prompt as its shell-quoted launch argument — then attach it.
     /// `askForPrompt` presents the in-app prompt sheet first (the widget's
     /// ASK mode); the sheet resubmits with the entered prompt, directory,
-    /// and setup-script choice. `directory` semantics: nil = the host's
-    /// default (first working dir), `"~"` = explicitly home (the quoting
-    /// layer expands it to `$HOME`), anything else = that path.
+    /// model, and setup-script choice. `directory` semantics: nil = the
+    /// host's default (first working dir), `"~"` = explicitly home (the
+    /// quoting layer expands it to `$HOME`), anything else = that path.
+    /// `model` rides the launch as `--model <value>`; nil — including any
+    /// value `AgentKind.normalizedLaunchModel` rejects — means the agent's
+    /// own default, never the New Session sheet's remembered choice (an
+    /// automation without a model must behave the same on every device).
     case openAgent(
         host: ExternalHostRef, agent: AgentKind, prompt: String?,
         askForPrompt: Bool, directory: String?,
-        setupScript: ExternalSetupScriptSelection)
+        setupScript: ExternalSetupScriptSelection, model: String?)
 
     var hostRef: ExternalHostRef {
         switch self {
         case .openShell(let host, _): host
-        case .openAgent(let host, _, _, _, _, _): host
+        case .openAgent(let host, _, _, _, _, _, _): host
         }
     }
 }
 
 /// `multiplex://open?host=<uuid|name>&action=shell|agent[&agent=<kind>]
-/// [&prompt=<text>][&ask=1][&dir=<path>][&script=<uuid|none>]` — built by
-/// widgets, parsed by `onOpenURL`. Omitting `script` uses the remembered New
-/// Session choice.
+/// [&prompt=<text>][&ask=1][&dir=<path>][&script=<uuid|none>][&model=<id>]`
+/// — built by widgets, parsed by `onOpenURL`. Omitting `script` uses the
+/// remembered New Session choice; omitting `model` uses the agent's own
+/// default (a malformed model token also parses as omitted — fail-soft, the
+/// setup-script id stays the one strict token because a wrong script runs
+/// arbitrary text).
 enum ExternalActionURL {
     static let scheme = "multiplex"
     static let authority = "open"
@@ -103,7 +110,7 @@ enum ExternalActionURL {
             }
         case .openAgent(
             _, let agent, let prompt, let askForPrompt, let directory,
-            let setupScript
+            let setupScript, let model
         ):
             items.append(URLQueryItem(name: "action", value: "agent"))
             items.append(URLQueryItem(name: "agent", value: agent.rawValue))
@@ -118,6 +125,9 @@ enum ExternalActionURL {
             }
             if let token = setupScript.token {
                 items.append(URLQueryItem(name: "script", value: token))
+            }
+            if let model, !model.isEmpty {
+                items.append(URLQueryItem(name: "model", value: model))
             }
         }
         components.queryItems = items
@@ -156,10 +166,11 @@ enum ExternalActionURL {
             } else {
                 setupScript = .remembered
             }
+            let model = value("model").flatMap(AgentKind.normalizedLaunchModel)
             return .openAgent(
                 host: hostRef, agent: agent, prompt: prompt,
                 askForPrompt: ask, directory: directory,
-                setupScript: setupScript)
+                setupScript: setupScript, model: model)
         default:
             return nil
         }
@@ -213,7 +224,7 @@ enum ExternalActionPlan {
 }
 
 /// The in-app "ask for the first prompt" sheet's payload (widget ASK mode).
-/// `directory` seeds the sheet's Starts-in picker with whatever the
+/// `directory` and `model` seed the sheet's fields with whatever the
 /// originating action carried (same nil/`"~"`/path semantics as the action).
 struct AgentPromptRequest: Identifiable {
     let id = UUID()
@@ -221,6 +232,7 @@ struct AgentPromptRequest: Identifiable {
     var agent: AgentKind
     var directory: String?
     var setupScript: ExternalSetupScriptSelection
+    var model: String?
 }
 
 /// What the deck's failure alert shows when an external action can't run.

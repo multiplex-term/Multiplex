@@ -51,10 +51,34 @@ final class SharedStateTests: XCTestCase {
                     .openAgent(
                         host: .id(id), agent: agent, prompt: nil,
                         askForPrompt: ask, directory: nil,
-                        setupScript: .remembered)
+                        setupScript: .remembered, model: nil)
                 )
             }
         }
+    }
+
+    func testWidgetAgentLinkCarriesConfiguredModel() {
+        let id = UUID()
+        XCTAssertEqual(
+            ExternalActionURL.action(from: WidgetLink.agentURL(
+                hostID: id, agentRaw: "codex", askForPrompt: false,
+                model: "gpt-5-codex")),
+            .openAgent(
+                host: .id(id), agent: .codex, prompt: nil,
+                askForPrompt: false, directory: nil,
+                setupScript: .remembered, model: "gpt-5-codex")
+        )
+        // The widget passes its configuration text through unvalidated; the
+        // app-side parser owns the grammar, so junk reads as agent default.
+        XCTAssertEqual(
+            ExternalActionURL.action(from: WidgetLink.agentURL(
+                hostID: id, agentRaw: "codex", askForPrompt: false,
+                model: "two words")),
+            .openAgent(
+                host: .id(id), agent: .codex, prompt: nil,
+                askForPrompt: false, directory: nil,
+                setupScript: .remembered, model: nil)
+        )
     }
 
     // MARK: Shortcut working directories
@@ -119,6 +143,52 @@ final class SharedStateTests: XCTestCase {
         )
     }
 
+    // MARK: Launch-model choices
+
+    func testAgentModelChoicesTrimAndDedupeInOrder() {
+        XCTAssertEqual(
+            AgentModelChoices.values(configured: [
+                "  gpt-5-codex  ",
+                "gpt-5-codex",
+                "",
+                "anthropic/claude-opus-4:high",
+                "   ",
+            ]),
+            ["gpt-5-codex", "anthropic/claude-opus-4:high"]
+        )
+        XCTAssertEqual(AgentModelChoices.values(configured: []), [])
+    }
+
+    func testAgentModelChoicesAreNeverEmptyAndLeadWithAgentDefault() {
+        // A zero-item options query flash-dismisses the widget config
+        // picker, so Agent Default always leads.
+        XCTAssertEqual(
+            AgentModelChoices.choices(configured: []),
+            [.init(value: "", title: "Agent Default")]
+        )
+        XCTAssertEqual(
+            AgentModelChoices.choices(configured: ["gpt-5-codex"]),
+            [
+                .init(value: "", title: "Agent Default"),
+                .init(value: "gpt-5-codex", title: "gpt-5-codex"),
+            ]
+        )
+        // The sentinel must read as "no model" where the value is consumed:
+        // the launch grammar rejects it and the widget link omits it.
+        XCTAssertNil(AgentKind.normalizedLaunchModel(AgentModelChoices.agentDefaultValue))
+        XCTAssertEqual(
+            ExternalActionURL.action(from: WidgetLink.agentURL(
+                hostID: UUID(), agentRaw: "codex", askForPrompt: false,
+                model: AgentModelChoices.agentDefaultValue))
+                .flatMap { action -> String?? in
+                    guard case .openAgent(_, _, _, _, _, _, let model) = action
+                    else { return nil }
+                    return .some(model)
+                },
+            .some(nil)
+        )
+    }
+
     // MARK: AgentChoice ↔ AgentKind
 
     func testAgentChoiceMirrorsAgentKindOneToOne() {
@@ -162,7 +232,8 @@ final class SharedStateTests: XCTestCase {
                     miniatureLines: ["$ pnpm build", "✓ 214 modules · 3.2s"],
                     createdAt: Date(timeIntervalSince1970: 100)
                 )],
-                probedAt: Date(timeIntervalSince1970: 200)
+                probedAt: Date(timeIntervalSince1970: 200),
+                agentModels: ["codex": ["gpt-5-codex"], "claudeCode": ["opus"]]
             )],
             generatedAt: Date(timeIntervalSince1970: 300)
         )
@@ -197,6 +268,8 @@ final class SharedStateTests: XCTestCase {
         XCTAssertEqual(session.windowNames, ["editor", "server"])
         XCTAssertEqual(session.windowPaneTitles, [])
         XCTAssertNil(session.activePaneTitle)
+        // Launch-model lists arrived later still; absent decodes as none.
+        XCTAssertNil(state.hosts.first?.agentModels)
     }
 
     func testLoadFailsSoftOnMissingFile() {

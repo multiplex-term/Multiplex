@@ -30,13 +30,14 @@ final class NewSessionPreferencesTests: XCTestCase {
 
         XCTAssertFalse(preferences.remembersLastLaunch)
         XCTAssertNil(preferences.rememberedAgent)
+        XCTAssertNil(preferences.rememberedModel(for: .claudeCode))
         XCTAssertNil(preferences.rememberedScript(for: host))
     }
 
     func testPersistsRememberedAgentAcrossInstances() {
         NewSessionPreferences(defaults: defaults).save(
             remembersLastLaunch: true,
-            agent: .codex,
+            agent: .codex, model: nil,
             script: nil,
             hostID: host.id
         )
@@ -49,7 +50,7 @@ final class NewSessionPreferencesTests: XCTestCase {
     func testPersistsRememberedPiAcrossInstances() {
         NewSessionPreferences(defaults: defaults).save(
             remembersLastLaunch: true,
-            agent: .pi,
+            agent: .pi, model: nil,
             script: nil,
             hostID: host.id
         )
@@ -62,7 +63,7 @@ final class NewSessionPreferencesTests: XCTestCase {
     func testCanRememberShellOnly() {
         let preferences = NewSessionPreferences(defaults: defaults)
         preferences.save(
-            remembersLastLaunch: true, agent: nil, script: nil, hostID: host.id
+            remembersLastLaunch: true, agent: nil, model: nil, script: nil, hostID: host.id
         )
 
         XCTAssertTrue(preferences.remembersLastLaunch)
@@ -73,11 +74,11 @@ final class NewSessionPreferencesTests: XCTestCase {
     func testDisablingClearsStaleAgent() {
         let preferences = NewSessionPreferences(defaults: defaults)
         preferences.save(
-            remembersLastLaunch: true, agent: .claudeCode,
+            remembersLastLaunch: true, agent: .claudeCode, model: "opus",
             script: script, hostID: host.id
         )
         preferences.save(
-            remembersLastLaunch: false, agent: .claudeCode,
+            remembersLastLaunch: false, agent: .claudeCode, model: "opus",
             script: script, hostID: host.id
         )
 
@@ -85,8 +86,61 @@ final class NewSessionPreferencesTests: XCTestCase {
         XCTAssertNil(preferences.rememberedAgent)
         XCTAssertNil(defaults.string(forKey: "newSession.lastAgent"))
         XCTAssertNil(preferences.rememberedScript(for: host))
-        // The whole per-host map goes, not just this host's entry.
+        // The whole per-host map goes, not just this host's entry — and the
+        // per-agent model map with it.
         XCTAssertNil(defaults.dictionary(forKey: "newSession.lastScripts"))
+        XCTAssertNil(preferences.rememberedModel(for: .claudeCode))
+        XCTAssertNil(defaults.dictionary(forKey: "newSession.lastModels"))
+    }
+
+    func testRemembersModelPerAgent() {
+        let preferences = NewSessionPreferences(defaults: defaults)
+        preferences.save(
+            remembersLastLaunch: true, agent: .claudeCode, model: "  opus  ",
+            script: nil, hostID: host.id
+        )
+        preferences.save(
+            remembersLastLaunch: true, agent: .codex, model: "gpt-5-codex",
+            script: nil, hostID: host.id
+        )
+
+        let reloaded = NewSessionPreferences(defaults: defaults)
+        XCTAssertEqual(reloaded.rememberedModel(for: .claudeCode), "opus")
+        XCTAssertEqual(reloaded.rememberedModel(for: .codex), "gpt-5-codex")
+        XCTAssertNil(reloaded.rememberedModel(for: .pi))
+    }
+
+    func testShellOnlySaveKeepsOtherAgentsModels() {
+        let preferences = NewSessionPreferences(defaults: defaults)
+        preferences.save(
+            remembersLastLaunch: true, agent: .claudeCode, model: "opus",
+            script: nil, hostID: host.id
+        )
+        preferences.save(
+            remembersLastLaunch: true, agent: nil, model: nil,
+            script: nil, hostID: host.id
+        )
+
+        XCTAssertEqual(preferences.rememberedModel(for: .claudeCode), "opus")
+    }
+
+    func testEmptyModelForgetsOnlyThatAgentsEntry() {
+        let preferences = NewSessionPreferences(defaults: defaults)
+        preferences.save(
+            remembersLastLaunch: true, agent: .claudeCode, model: "opus",
+            script: nil, hostID: host.id
+        )
+        preferences.save(
+            remembersLastLaunch: true, agent: .codex, model: "gpt-5-codex",
+            script: nil, hostID: host.id
+        )
+        preferences.save(
+            remembersLastLaunch: true, agent: .claudeCode, model: "   ",
+            script: nil, hostID: host.id
+        )
+
+        XCTAssertNil(preferences.rememberedModel(for: .claudeCode))
+        XCTAssertEqual(preferences.rememberedModel(for: .codex), "gpt-5-codex")
     }
 
     func testRemembersScriptPerHost() {
@@ -96,7 +150,7 @@ final class NewSessionPreferencesTests: XCTestCase {
         )
         let preferences = NewSessionPreferences(defaults: defaults)
         preferences.save(
-            remembersLastLaunch: true, agent: nil, script: script, hostID: host.id
+            remembersLastLaunch: true, agent: nil, model: nil, script: script, hostID: host.id
         )
 
         let reloaded = NewSessionPreferences(defaults: defaults)
@@ -108,10 +162,10 @@ final class NewSessionPreferencesTests: XCTestCase {
     func testRememberingNoneClearsTheHostEntry() {
         let preferences = NewSessionPreferences(defaults: defaults)
         preferences.save(
-            remembersLastLaunch: true, agent: nil, script: script, hostID: host.id
+            remembersLastLaunch: true, agent: nil, model: nil, script: script, hostID: host.id
         )
         preferences.save(
-            remembersLastLaunch: true, agent: nil, script: nil, hostID: host.id
+            remembersLastLaunch: true, agent: nil, model: nil, script: nil, hostID: host.id
         )
 
         XCTAssertNil(preferences.rememberedScript(for: host))
@@ -120,7 +174,7 @@ final class NewSessionPreferencesTests: XCTestCase {
     func testDeletedScriptFailsSoftToNone() {
         let preferences = NewSessionPreferences(defaults: defaults)
         preferences.save(
-            remembersLastLaunch: true, agent: nil, script: script, hostID: host.id
+            remembersLastLaunch: true, agent: nil, model: nil, script: script, hostID: host.id
         )
 
         var edited = host

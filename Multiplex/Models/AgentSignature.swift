@@ -35,15 +35,46 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         }
     }
 
-    /// The command typed into a fresh shell, optionally carrying the user's
-    /// first prompt as one safely quoted positional argument. Shell quoting
-    /// keeps prompt text inert; multiline prompts use printable `printf`
-    /// escapes so control bytes never reach the shell's line editor before
-    /// the final Enter.
-    func launchCommand(initialPrompt rawPrompt: String) -> String {
+    /// The command typed into a fresh shell, optionally carrying a model
+    /// override and the user's first prompt as one safely quoted positional
+    /// argument. Every supported CLI spells the override `--model <value>`
+    /// (verified 2026-07-27: Claude Code 2.1.220, Codex rust 0.145.0, Pi
+    /// 0.81.1 — Pi values may be `provider/id` with a `:<thinking>` suffix).
+    /// Shell quoting keeps prompt text inert; the model value is quoted too,
+    /// which is load-bearing beyond hygiene — Claude aliases like
+    /// `sonnet[1m]` would otherwise glob in zsh. Multiline prompts use
+    /// printable `printf` escapes so control bytes never reach the shell's
+    /// line editor before the final Enter.
+    func launchCommand(model rawModel: String?, initialPrompt rawPrompt: String) -> String {
+        var command = launchCommand
+        if let model = rawModel.flatMap(Self.normalizedLaunchModel) {
+            command += " --model \(model.shellQuoted)"
+        }
         let prompt = Self.normalizedInitialPrompt(rawPrompt)
-        guard !prompt.isEmpty else { return launchCommand }
-        return "\(launchCommand) \(Self.shellArgument(for: prompt))"
+        guard !prompt.isEmpty else { return command }
+        return "\(command) \(Self.shellArgument(for: prompt))"
+    }
+
+    /// A model identifier fit to ride `--model` as one argv token, or nil —
+    /// which every caller treats as "the agent's own default". Deliberately
+    /// not a curated list: model names churn far faster than app releases,
+    /// and a wrong value fails visibly in the agent's own UI (the chip
+    /// philosophy). The gate only enforces token shape: no whitespace (one
+    /// argument, never a smuggled second one), no control bytes, no leading
+    /// `-` (must never read as another flag), bounded length. Quoting at the
+    /// composition site keeps the surviving characters inert.
+    static func normalizedLaunchModel(_ raw: String) -> String? {
+        let safeScalars = raw.unicodeScalars.filter {
+            !CharacterSet.controlCharacters.contains($0)
+        }
+        let trimmed = String(String.UnicodeScalarView(safeScalars))
+            .trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty,
+              trimmed.count <= 64,
+              !trimmed.hasPrefix("-"),
+              !trimmed.contains(where: \.isWhitespace)
+        else { return nil }
+        return trimmed
     }
 
     private static func normalizedInitialPrompt(_ prompt: String) -> String {

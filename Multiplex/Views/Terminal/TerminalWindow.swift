@@ -555,9 +555,10 @@ struct TerminalWindowRoot: View {
     /// same host, same directory as its pane (an agent variant also types
     /// its launch command into the new shell) — and attach it as a new tab
     /// of this window. The session exists before the tab appears, so the
-    /// attach can't race it. The host's remembered setup script rides along
-    /// while the New Session sheet's REMEMBER opt-in is on — the quick path
-    /// inherits the choice made there, the way it inherits the pane's cwd.
+    /// attach can't race it. The host's remembered setup script — and, for
+    /// an agent variant, that agent's remembered model — rides along while
+    /// the New Session sheet's REMEMBER opt-in is on: the quick path
+    /// inherits the choices made there, the way it inherits the pane's cwd.
     private func openNewTab(launching agent: AgentKind?) {
         guard !creatingTab,
               let activeTab,
@@ -567,7 +568,8 @@ struct TerminalWindowRoot: View {
         // A plain shell tab has no pane to inherit a directory from —
         // the new session starts in $HOME, named after the host's habit.
         let source = activeTab.sessionName
-        let script = NewSessionPreferences().rememberedScript(for: host)
+        let preferences = NewSessionPreferences()
+        let script = preferences.rememberedScript(for: host)
         Task {
             defer { creatingTab = false }
             guard let name = await hub.model(for: host).createSession(
@@ -575,7 +577,12 @@ struct TerminalWindowRoot: View {
                 inDirectoryOf: source,
                 applying: host.newSessionTmuxConf,
                 running: script?.normalizedBody,
-                typing: agent?.launchCommand
+                typing: agent.map {
+                    $0.launchCommand(
+                        model: preferences.rememberedModel(for: $0),
+                        initialPrompt: ""
+                    )
+                }
             ) else {
                 newTabFailedHost = host.name
                 return

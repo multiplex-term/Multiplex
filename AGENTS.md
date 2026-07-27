@@ -65,9 +65,10 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   one of them probing when you meant to test a quiet wall. Prefer
   terminate + relaunch over reinstall, or expect the duplicate and
   attribute log traffic accordingly.
-  Optional `workingDirs` / `sessionScripts` / `newSessionTmuxConf` keys feed
-  headless checks of the New Session pickers and the setup-script and
-  tmux-conf creation paths. `"enabled": false` starts the launch with the
+  Optional `workingDirs` / `sessionScripts` / `newSessionTmuxConf` /
+  `agentLaunchModels` (agent rawValue → model-id list) keys feed
+  headless checks of the New Session pickers and the setup-script,
+  tmux-conf, and launch-model paths. `"enabled": false` starts the launch with the
   host switched off, so the never-dials-it promise can be checked against a
   silent `Tools/dev-sshd/state/sshd.log`.
 - `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per comma entry via
@@ -89,6 +90,13 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
 - `MULTIPLEX_AUTO_DROP=<local path>` — after auto-attach, drops that file
   into the first tab (the simulator shares the Mac's filesystem): SFTP
   upload + typed path, the same path a real drag takes.
+- `MULTIPLEX_AUTO_ACTION_URL=multiplex://open?…` — submits the parsed URL
+  through the exact `onOpenURL` → router seam once per process: the headless
+  stand-in for a widget tap when `simctl openurl`'s one-time "Open in
+  Multiplex?" confirmation can't be clicked (fresh install on a headless
+  run; idb HID taps died with Xcode 27's SimulatorKit removal). E.g.
+  `…open?host=devbox&action=agent&agent=pi&model=x` proves the launch line
+  types `pi --model 'x'` — capture-pane the newly minted session host-side.
 - `MULTIPLEX_PRO_LOCKED=1` — DEBUG-only free-tier mode for headless gate and
   daily-meter verification. Unlike the Settings toggle it does not persist;
   combine it with `MULTIPLEX_AUTO_ATTACH=agent` and the `debug.agentchip`
@@ -104,9 +112,12 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   editor for the same treatment.
 - `MULTIPLEX_AUTO_FAQ=1` — opens the deck's FAQ sheet (the wall's FAQ chip)
   for headless layout capture.
-- `MULTIPLEX_AUTO_HOST_SETTINGS=1` — opens the first host's edit sheet to
-  regression-check the Observation environment across the shell/scene sheet
-  boundary (a missing HostStore is a fatal error, not a recoverable blank).
+- `MULTIPLEX_AUTO_HOST_SETTINGS=1|models` — opens the first host's edit
+  sheet to regression-check the Observation environment across the
+  shell/scene sheet boundary (a missing HostStore is a fatal error, not a
+  recoverable blank); `models` also scrolls it to the Agent launch models
+  section for layout capture (the form outruns one frame and the sim can't
+  scroll).
 - `MULTIPLEX_KEYCHAIN_TIP=locked|unlocked|missing` — forces the keychain
   check's verdict for the deck's KEYCHAIN LOCKED tip. The sign-in-screen
   gate still applies: inject a real needle (e.g. `tmux send-keys -t
@@ -307,8 +318,8 @@ SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
                      refreshAndWait → phase==.connected → focusTab/attach
                      most-recent (or exact ?session=) / createSession with
                      the resolved setup-script choice followed by agent
-                     launchCommand(initialPrompt:). Failures alert on the
-                     deck; the widget's ASK mode presents
+                     launchCommand(model:initialPrompt:). Failures alert on
+                     the deck; the widget's ASK mode presents
                      AgentPromptSheet, which resubmits. A scene without a
                      mounted deck raises the one deck scene to drain.
   SharedStateStore   secret-free App Group projection (widget-state.json,
@@ -797,6 +808,42 @@ views.
   drop the probe link, never enter the widget projection, and are free-tier
   host plumbing, not an agent-helper surface. The dev seed may carry a
   `sessionScripts` array for headless checks of these paths.
+- **An agent launch's model override is one verified flag, picked from
+  host-configured lists, and fail-soft**
+  (`AgentKind.launchCommand(model:initialPrompt:)` +
+  `normalizedLaunchModel`, pure + tested): every supported CLI spells it
+  `--model <value>` (verified 2026-07-27 against Claude Code 2.1.220, Codex
+  rust 0.145.0, Pi 0.81.1). Values are deliberately NOT app-curated — model
+  names churn faster than app releases — but only Claude Code has friendly
+  aliases, so full Codex/Pi ids are typed ONCE into
+  `Host.agentLaunchModels` (Host Settings → Agent launch models; keyed by
+  agent rawValue, host-scoped on purpose — Pi's available models genuinely
+  differ per machine with its configured providers) and every surface then
+  offers them as a picker with free text kept as the escape hatch. The
+  normalizer only enforces argv-token shape (no whitespace, no controls,
+  no leading `-`, ≤64 chars) and rejection means "agent default", never an
+  error; it also gates list entries at save, and preserves UNKNOWN agent
+  keys verbatim so an edit-save here can't drop a newer schema's list. The
+  composed value is always shell-quoted, which is load-bearing — Claude's
+  `sonnet[1m]` alias would otherwise glob in zsh. Surfaces: New Session
+  sheet (field + preset menu + live Command preview; REMEMBER stores the
+  choice per agent, device-local — + TAB's agent variants inherit it), the
+  Open Agent Shortcut's Model parameter (host+agent-dependent suggestions
+  via `AgentModelChoices`, value stays a String for variables), the Host
+  widget's Model setting (same choices in the widget process — the lists
+  ride the App Group projection as `WidgetHostState.agentModels`, names
+  only, and the tap's `&model=` is validated app-side), and the ASK-mode
+  prompt sheet (seeded, editable, same menu). Both option providers lead
+  with an "Agent Default" row (empty-string value — rejected by the token
+  gate and skipped by the link builder, i.e. "no model") and are NEVER
+  empty: a zero-item options query makes the widget-config picker open and
+  immediately dismiss (user-reported), the same reason the setup-script
+  provider always returns its Default/None rows. Like scripts/conf, the lists
+  ride the synced Host record, are zeroed out of
+  `connectionModelConfiguration` (edits keep the probe link), and a model
+  is never applied because it exists — no choice means the agent's own
+  default; external actions never inherit the remembered model, so the
+  same widget behaves identically on every device.
 - **The per-host new-session tmux conf is Host-record text applied as
   targeted `set-option -t` calls — never a host file, never `-f`, never on
   the raced create** (`Host.newSessionTmuxConf`, Host Settings below the
@@ -1262,7 +1309,10 @@ views.
   variables still work; unset means the live host default and `"~"` means
   Home. The setup-script String is validated as DEFAULT/NONE/a UUID — unset
   preserves the remembered New Session choice, and arbitrary text never
-  reaches the remote shell. Intents/widget links and
+  reaches the remote shell. The Model String (Shortcut parameter and Host
+  widget setting alike) stays free text for the same variable reason and is
+  gated by `normalizedLaunchModel` before it can ride the launch line —
+  rejection means the agent's own default. Intents/widget links and
   `ExternalActionURL` formats are kept in lockstep by `SharedStateTests`
   (the widget target compiles only `Multiplex/Shared`, never the app model
   chain — don't import Host/Tmux/Agent types there). XcodeGen quirk: the
