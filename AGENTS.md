@@ -1363,6 +1363,23 @@ Record App Store Connect state only after a dated remote readback. Standard
 `deliver` lanes do not manage IAP metadata/review images; custom Spaceship/API
 automation or the App Store Connect UI is required.
 
+**Before committing a user-visible change, add it to the TestFlight
+changelog** — `fastlane/testflight-whats-new.txt`, which the `beta` lane
+uploads verbatim as the build's What to Test. It stages the *next* build, so
+append to whatever entries are already there rather than replacing them
+(create the file if it is absent) — whoever runs `beta` edits the
+accumulation into that build's final note. Write it as a
+**test script for testers**, not marketing: what changed, where to find it,
+and what to try (the template lives in `docs/appstore/release-playbook.md`).
+Keep it to what a tester can actually see — refactors, build plumbing, docs,
+and test-only changes get no entry.
+
+This is **not** the App Store release notes. Those are the per-locale
+`fastlane/metadata/*/release_notes_{ios,visionos}.txt` files above, written
+per *release* in customer-facing voice, and they are governed by the
+metadata rules — not by this per-commit habit. Never write a commit's
+changes into them as a side effect.
+
 The **landing site** (the listing's marketing URL + the privacy policy) is
 part of the same claim surface but lives in its own repo, **multiplex-home**
 (`github.com/jhen0409/multiplex-home` — Astro on Cloudflare Workers; deploys

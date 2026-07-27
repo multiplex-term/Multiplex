@@ -6,9 +6,12 @@
 #   bundle exec fastlane tests                 # unit tests (visionOS sim)
 #   bundle exec fastlane beta                  # archive + upload BOTH platforms to TestFlight
 #   bundle exec fastlane beta platform:visionos
+#   bundle exec fastlane beta external:true    # + add to the external group, submit for review
+#   bundle exec fastlane beta external:true submit_review:false   # add, don't submit
 #   bundle exec fastlane store_metadata        # push metadata to BOTH platform versions
 #   bundle exec fastlane store_metadata platform:visionos
 #   bundle exec fastlane store_screenshots     # push fastlane/screenshots → App Store Connect
+#   bundle exec fastlane testflight_group      # create/verify the external group
 #
 # The Xcode project is XcodeGen-generated: every lane regenerates it first, so
 # lanes work from a clean checkout. Build numbers use YYYYMMDDN, where N is
@@ -24,6 +27,11 @@ DESTINATIONS = {
   "ios"      => { generic: "generic/platform=iOS",      pilot: "ios"  },
   "visionos" => { generic: "generic/platform=visionOS", pilot: "xros" },
 }.freeze
+
+# The one external TestFlight group. Invitation only by construction: it is
+# created with no public link, so a tester joins by an emailed invite and the
+# seat cannot be forwarded on.
+EXTERNAL_GROUP = ENV.fetch("TESTFLIGHT_EXTERNAL_GROUP", "Public Beta")
 
 def asc_api_key
   app_store_connect_api_key(
@@ -66,9 +74,18 @@ def generate_project
   sh("cd .. && xcodegen generate")
 end
 
-def whats_new
+# The build's What to Test. AGENTS.md asks every user-visible commit to append
+# here, so by upload time the file is the release's tester script. Internal
+# builds may go out without one; an external build reaches real testers and a
+# placeholder would be the first thing they read.
+def whats_new(external)
   path = File.expand_path("testflight-whats-new.txt", __dir__)
-  File.exist?(path) ? File.read(path) : "Internal build."
+  body = File.exist?(path) ? File.read(path) : ""
+  if body.strip.empty?
+    UI.user_error!("Write #{path} before distributing externally") if external
+    return "Internal build."
+  end
+  body
 end
 
 # Deliver has one shared metadata path, so inject the one field that differs
@@ -84,19 +101,88 @@ def platform_release_notes(platform)
   notes
 end
 
-# Beta App Review contact + demo host. TestFlight external review and App
-# Store review both need a reachable SSH demo host — see
-# docs/appstore/release-playbook.md for the demo-host runbook.
+# Review information is ONE record, read once and handed to both reviews:
+# deliver's `app_review_information` (App Store) and pilot's
+# `beta_app_review_info` (TestFlight Beta App Review). They only differ in
+# how the two tools spell the fields, so mapping beats maintaining a second
+# copy — a reviewer contact or demo credential can never drift between them.
+#
+# Values live in fastlane/metadata/review_information/*.txt, deliver's own
+# convention. The two files deliberately kept out of git (phone_number,
+# demo_password) fall back to fastlane/.env. Both reviews need a reachable
+# SSH demo host — see docs/appstore/release-playbook.md for its runbook.
+REVIEW_INFORMATION = {
+  # deliver's key  => .env fallback for the git-ignored files
+  first_name:    "REVIEW_CONTACT_FIRST",
+  last_name:     "REVIEW_CONTACT_LAST",
+  phone_number:  "REVIEW_CONTACT_PHONE",
+  email_address: "REVIEW_CONTACT_EMAIL",
+  demo_user:     "DEMO_SSH_USER",
+  demo_password: "DEMO_SSH_PASSWORD",
+  notes:         nil,
+}.freeze
+
+# deliver's key => pilot's key for the same App Store Connect field.
+BETA_REVIEW_INFORMATION = {
+  first_name:    :contact_first_name,
+  last_name:     :contact_last_name,
+  phone_number:  :contact_phone,
+  email_address: :contact_email,
+  demo_user:     :demo_account_name,
+  demo_password: :demo_account_password,
+  notes:         :notes,
+}.freeze
+
+def app_review_information
+  REVIEW_INFORMATION.each_with_object({}) do |(key, env_key), info|
+    path = File.expand_path("metadata/review_information/#{key}.txt", __dir__)
+    value = File.exist?(path) ? File.read(path).strip : ""
+    value = ENV.fetch(env_key, "").strip if value.empty? && env_key
+    if value.empty?
+      hint = env_key ? " (or set #{env_key} in fastlane/.env)" : ""
+      UI.user_error!("Review information is missing: write #{path}#{hint}")
+    end
+    info[key] = value
+  end
+end
+
 def beta_review_info
-  {
-    contact_email:      ENV.fetch("REVIEW_CONTACT_EMAIL", "iainst0409@gmail.com"),
-    contact_first_name: ENV.fetch("REVIEW_CONTACT_FIRST", "Jhen-Jie"),
-    contact_last_name:  ENV.fetch("REVIEW_CONTACT_LAST", "Hong"),
-    contact_phone:      ENV.fetch("REVIEW_CONTACT_PHONE"),
-    demo_account_name:  ENV.fetch("DEMO_SSH_USER"),
-    demo_account_password: ENV.fetch("DEMO_SSH_PASSWORD"),
-    notes: File.read(File.expand_path("metadata/review_information/notes.txt", __dir__)),
-  }
+  info = app_review_information.each_with_object({}) do |(key, value), beta|
+    beta[BETA_REVIEW_INFORMATION.fetch(key)] = value
+  end
+  # deliver derives this from a filled-in demo account; pilot wants it stated.
+  info[:demo_account_required] = true
+  info
+end
+
+# pilot silently skips a `groups:` name App Store Connect does not know, so
+# the group has to exist before a build asks to be distributed to it.
+# Invitation only means no public link — and an existing group that grew one
+# gets it taken away again rather than being quietly accepted.
+def ensure_external_group(name)
+  identifier = CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier)
+  app = Spaceship::ConnectAPI::App.find(identifier)
+  UI.user_error!("No App Store Connect app record for #{identifier}") if app.nil?
+
+  group = app.get_beta_groups(filter: { name: name }).find { |candidate| candidate.name == name }
+
+  if group.nil?
+    UI.message("Creating invitation-only TestFlight group '#{name}'")
+    group = Spaceship::ConnectAPI.create_beta_group(
+      app_id: app.id,
+      group_name: name,
+      is_internal_group: false,
+      public_link_enabled: false,
+      public_link_limit_enabled: false,
+    ).to_models.first
+  elsif group.public_link_enabled
+    UI.important("TestFlight group '#{name}' had a public link — disabling it (invitation only)")
+    group = group.update(attributes: { public_link_enabled: false })
+  else
+    UI.message("TestFlight group '#{name}' is present and invitation only")
+  end
+
+  group
 end
 
 lane :tests do
@@ -131,13 +217,34 @@ lane :archive do |options|
   ipa
 end
 
-desc "Upload to TestFlight. platform:ios|visionos or omit for both. external:true to distribute to the external group after processing."
+desc "Create or verify the invitation-only external TestFlight group."
+lane :testflight_group do
+  asc_api_key
+  ensure_external_group(EXTERNAL_GROUP)
+end
+
+desc "Upload to TestFlight. platform:ios|visionos or omit for both. " \
+     "external:true adds the build to the external group; submit_review:false " \
+     "stages it there without posting the Beta App Review submission."
 lane :beta do |options|
   platforms = options[:platform] ? [options[:platform]] : DESTINATIONS.keys
   platforms.each { |platform| DESTINATIONS.fetch(platform) }
+  external = options[:external] == true
+  # Adding a build to the group and submitting it for Beta App Review are two
+  # separate calls, so they can be taken separately: submit_review:false lands
+  # the build in Public Beta and leaves the submission for later (Apple still
+  # gates external testers on that review — the build waits until it passes).
+  # Only meaningful with external:true; pilot ignores it otherwise.
+  submit_review = options[:submit_review] != false
+  # Resolve both before archiving, so a missing note or review field fails in
+  # seconds rather than after two platform archives. The review record is
+  # written either way — a later submission then already has it.
+  changelog = whats_new(external)
+  review_info = external ? beta_review_info : nil
   number = bump_build_number
   generate_project
   api_key = asc_api_key
+  ensure_external_group(EXTERNAL_GROUP) if external
   platforms.each do |platform|
     ipa = archive(platform: platform, build_number: number, skip_generate: true)
     upload_to_testflight(
@@ -148,13 +255,14 @@ lane :beta do |options|
       # fallback explicit so iOS and visionOS cannot diverge if ASC fails to
       # read the plist value while a build is processing.
       uses_non_exempt_encryption: false,
-      changelog: whats_new,
-      distribute_external: options[:external] == true,
-      groups: options[:external] == true ? [ENV.fetch("TESTFLIGHT_EXTERNAL_GROUP", "Multiplex Beta")] : nil,
-      beta_app_review_info: options[:external] == true ? beta_review_info : nil,
+      changelog: changelog,
+      distribute_external: external,
+      groups: external ? [EXTERNAL_GROUP] : nil,
+      submit_beta_review: submit_review,
+      beta_app_review_info: review_info,
       # External distribution must wait for processing; internal-only uploads
       # return as soon as the binary is accepted.
-      skip_waiting_for_build_processing: options[:external] != true,
+      skip_waiting_for_build_processing: !external,
     )
   end
 end
@@ -169,6 +277,10 @@ lane :store_metadata do |options|
       api_key: api_key,
       platform: DESTINATIONS.fetch(platform)[:pilot],
       release_notes: platform_release_notes(platform),
+      # Passed explicitly rather than left to deliver's own file discovery, so
+      # App Store review reads the exact record TestFlight's Beta App Review
+      # gets — including the two values that live in .env, not in git.
+      app_review_information: app_review_information,
       skip_binary_upload: true,
       skip_screenshots: true,
       force: true,                             # skip the HTML preview prompt (CI-friendly)

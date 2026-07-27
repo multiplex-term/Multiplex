@@ -32,20 +32,38 @@ Universal purchase is automatic — one bundle id, buy once, both devices.
 
 ## TestFlight cadence
 
-**Internal group ("Core")** — you + up to 100 App Store Connect users. No
+**Internal group ("Internal")** — you + up to 100 App Store Connect users. No
 review, available minutes after processing. `bundle exec fastlane beta` at
 whatever cadence is useful; write `fastlane/testflight-whats-new.txt` first
 (it becomes the build's What to Test).
 
-**External group ("Multiplex Beta")** — real testers via public link.
+**External group ("Public Beta")** — real testers, **invitation only**: the
+group is created with no public link, so a seat is an emailed invite and
+cannot be forwarded on. `bundle exec fastlane testflight_group` creates it
+(and takes a public link away again if one ever appears); `beta external:true`
+calls the same helper first, because pilot *silently skips* a group name App
+Store Connect does not know.
+
 The **first** external build (and later ones with significant changes) goes
-through Beta App Review (~1 day). It needs the demo host below and the review
-notes already in `fastlane/metadata/review_information/notes.txt` — the
-`beta` lane sends both with `external:true`:
+through Beta App Review (~1 day). Beta App Review gets the **same record as
+App Store review** — one hash in the Fastfile feeds deliver and pilot both,
+sourced from `fastlane/metadata/review_information/` with `.env` covering the
+two files kept out of git. So the demo host below and
+`review_information/notes.txt` are all it needs:
 
 ```sh
-bundle exec fastlane beta external:true
+bundle exec fastlane beta external:true                     # add + submit for review
+bundle exec fastlane beta external:true submit_review:false # add, submit later
 ```
+
+Adding a build to the group and submitting it for Beta App Review are two
+separate calls, so `submit_review:false` takes only the first: the build lands
+in Public Beta and the review submission waits for the App Store Connect UI
+(or a later run). Use it to stage a build before committing it to a ~1-day
+review queue. Apple still gates external testers on that review — until it
+passes, the staged build sits in the group untestable. The Beta App Review
+record (contact, demo host, notes) is written either way, so a later
+submission already has everything.
 
 What-to-Test template (keep it a test script, not marketing):
 

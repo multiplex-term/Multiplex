@@ -67,3 +67,22 @@ deliver fails with "forbidden for security reasons".
 - Demo host up + credentials in `.env` (`DEMO_SSH_USER/PASSWORD`) and in the
   ASC demo-account fields — runbook in the release playbook.
 - `fastlane/testflight-whats-new.txt` written for the build.
+
+`review_information/` is the single source for App Store review *and*
+TestFlight's Beta App Review: the Fastfile reads it once and maps it into
+deliver's and pilot's respective spellings. `.env` only covers the two files
+git ignores (`phone_number`, `demo_password`); anything still empty is a hard
+error before a lane archives anything.
+
+## 6. TestFlight external group
+
+```sh
+bundle exec fastlane testflight_group
+```
+
+Creates `Public Beta` (name overridable with `TESTFLIGHT_EXTERNAL_GROUP`) as
+an **invitation-only** external group — no public link, so testers join by
+emailed invite. The lane is idempotent, and it disables a public link if one
+appears later. `beta external:true` runs it first, because pilot silently
+ignores a `groups:` name that does not exist yet; add `submit_review:false` to
+put the build in the group without starting Beta App Review.

@@ -236,6 +236,10 @@ Before review, also supply the intentionally uncommitted contact phone in
 `fastlane/metadata/review_information/phone_number.txt`, plus
 `REVIEW_CONTACT_PHONE`, `DEMO_SSH_USER`, and `DEMO_SSH_PASSWORD` in
 `fastlane/.env`. Keep the demo host and the reviewer instructions current.
+That directory is the single source for **both** reviews: the Fastfile reads
+it once and hands the same record to deliver (App Store review) and to pilot
+(TestFlight Beta App Review), with `.env` as the fallback for the two files
+kept out of git. Editing the notes updates both.
 
 ## Agent maintenance checklist
 
