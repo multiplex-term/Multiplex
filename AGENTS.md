@@ -833,7 +833,12 @@ views.
   widget's Model setting (same choices in the widget process — the lists
   ride the App Group projection as `WidgetHostState.agentModels`, names
   only, and the tap's `&model=` is validated app-side), and the ASK-mode
-  prompt sheet (seeded, editable, same menu). Like scripts/conf, the lists
+  prompt sheet (seeded, editable, same menu). Both option providers lead
+  with an "Agent Default" row (empty-string value — rejected by the token
+  gate and skipped by the link builder, i.e. "no model") and are NEVER
+  empty: a zero-item options query makes the widget-config picker open and
+  immediately dismiss (user-reported), the same reason the setup-script
+  provider always returns its Default/None rows. Like scripts/conf, the lists
   ride the synced Host record, are zeroed out of
   `connectionModelConfiguration` (edits keep the probe link), and a model
   is never applied because it exists — no choice means the agent's own

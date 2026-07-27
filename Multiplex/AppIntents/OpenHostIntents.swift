@@ -149,8 +149,11 @@ struct AgentModelOptionsProvider: DynamicOptionsProvider {
             hosts.first { $0.id == dependency.host.id }?
                 .agentModels[dependency.agent.rawValue]
         } ?? []
-        let items = AgentModelChoices.values(configured: configured)
-            .map { IntentItem($0) }
+        // Same never-empty rule as the widget's provider: the leading
+        // Agent Default row keeps the picker presentable with nothing
+        // configured, and its empty value normalizes to "no model".
+        let items = AgentModelChoices.choices(configured: configured)
+            .map { IntentItem($0.value, title: "\($0.title)") }
         return IntentItemCollection(
             promptLabel: "Choose a model",
             sections: [IntentItemSection(items: items)]

@@ -159,6 +159,36 @@ final class SharedStateTests: XCTestCase {
         XCTAssertEqual(AgentModelChoices.values(configured: []), [])
     }
 
+    func testAgentModelChoicesAreNeverEmptyAndLeadWithAgentDefault() {
+        // A zero-item options query flash-dismisses the widget config
+        // picker, so Agent Default always leads.
+        XCTAssertEqual(
+            AgentModelChoices.choices(configured: []),
+            [.init(value: "", title: "Agent Default")]
+        )
+        XCTAssertEqual(
+            AgentModelChoices.choices(configured: ["gpt-5-codex"]),
+            [
+                .init(value: "", title: "Agent Default"),
+                .init(value: "gpt-5-codex", title: "gpt-5-codex"),
+            ]
+        )
+        // The sentinel must read as "no model" where the value is consumed:
+        // the launch grammar rejects it and the widget link omits it.
+        XCTAssertNil(AgentKind.normalizedLaunchModel(AgentModelChoices.agentDefaultValue))
+        XCTAssertEqual(
+            ExternalActionURL.action(from: WidgetLink.agentURL(
+                hostID: UUID(), agentRaw: "codex", askForPrompt: false,
+                model: AgentModelChoices.agentDefaultValue))
+                .flatMap { action -> String?? in
+                    guard case .openAgent(_, _, _, _, _, _, let model) = action
+                    else { return nil }
+                    return .some(model)
+                },
+            .some(nil)
+        )
+    }
+
     // MARK: AgentChoice ↔ AgentKind
 
     func testAgentChoiceMirrorsAgentKindOneToOne() {
