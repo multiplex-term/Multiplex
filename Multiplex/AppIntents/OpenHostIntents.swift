@@ -54,12 +54,24 @@ struct OpenHostAgentIntent: AppIntent {
         description: "Runs before the agent. Leave empty for the setup script remembered in Multiplex.",
         optionsProvider: AgentSetupScriptOptionsProvider()
     ) var setupScript: String?
+    /// Suggestions come from the host's pre-configured launch models (Host
+    /// Settings) — full Codex/Pi ids are typed once there, then picked here.
+    /// The value stays a free String so Shortcuts variables and unlisted
+    /// models keep working; a value the launch grammar rejects (whitespace,
+    /// leading `-`) falls back to the agent default rather than reaching the
+    /// shell malformed.
+    @Parameter(
+        title: "Model",
+        description: "Launches the agent with --model set to this value. Configure choices in Multiplex's Host Settings; leave empty for the agent's default model.",
+        optionsProvider: AgentModelOptionsProvider()
+    ) var model: String?
     /// Optional so Shortcuts users can leave it off or set "Ask Each Time";
     /// sent as the agent's shell-quoted launch argument.
     @Parameter(title: "First Prompt") var prompt: String?
 
     static var parameterSummary: some ParameterSummary {
         Summary("Start \(\.$agent) on \(\.$host)") {
+            \.$model
             \.$directory
             \.$setupScript
             \.$prompt
@@ -74,13 +86,15 @@ struct OpenHostAgentIntent: AppIntent {
         let text = prompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let path = directory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let script = ShortcutSetupScriptOptions.selection(for: setupScript)
+        let launchModel = model.flatMap(AgentKind.normalizedLaunchModel)
         router.submit(.openAgent(
             host: .id(host.id),
             agent: kind,
             prompt: text.isEmpty ? nil : text,
             askForPrompt: false,
             directory: path.isEmpty ? nil : path,
-            setupScript: script
+            setupScript: script,
+            model: launchModel
         ))
         return .result()
     }
@@ -119,6 +133,28 @@ enum ShortcutWorkingDirectoryOptions {
         }
         values.append("~")
         return values
+    }
+}
+
+/// The host's pre-configured launch models for the selected agent, as
+/// Shortcut suggestions. Same shared choice builder as the widget's Model
+/// setting, so both surfaces offer identical rows.
+struct AgentModelOptionsProvider: DynamicOptionsProvider {
+    @IntentParameterDependency<OpenHostAgentIntent>(\.$host, \.$agent)
+    private var intent
+
+    func results() async throws -> IntentItemCollection<String> {
+        let hosts = await HostEntityProvider.all()
+        let configured = intent.flatMap { dependency in
+            hosts.first { $0.id == dependency.host.id }?
+                .agentModels[dependency.agent.rawValue]
+        } ?? []
+        let items = AgentModelChoices.values(configured: configured)
+            .map { IntentItem($0) }
+        return IntentItemCollection(
+            promptLabel: "Choose a model",
+            sections: [IntentItemSection(items: items)]
+        )
     }
 }
 

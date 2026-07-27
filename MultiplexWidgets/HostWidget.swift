@@ -126,7 +126,8 @@ struct HostWidgetView: View {
             WidgetLink.agentURL(
                 hostID: host.id,
                 agentRaw: entry.configuration.agent.rawValue,
-                askForPrompt: entry.configuration.askForPrompt
+                askForPrompt: entry.configuration.askForPrompt,
+                model: entry.configuration.model
             )
         }
     }
@@ -194,7 +195,8 @@ struct HostWidgetView: View {
                     Link(destination: WidgetLink.agentURL(
                         hostID: host.id,
                         agentRaw: entry.configuration.agent.rawValue,
-                        askForPrompt: entry.configuration.askForPrompt
+                        askForPrompt: entry.configuration.askForPrompt,
+                        model: entry.configuration.model
                     )) {
                         ActionKey(
                             glyph: "✳",

@@ -28,7 +28,8 @@ final class ExternalActionTests: XCTestCase {
             prompt: "fix the build\nthen run tests & say \"done\" 100%",
             askForPrompt: true,
             directory: nil,
-            setupScript: .remembered
+            setupScript: .remembered,
+            model: nil
         )
         let url = ExternalActionURL.url(for: action)
         XCTAssertEqual(ExternalActionURL.action(from: url), action)
@@ -38,7 +39,7 @@ final class ExternalActionTests: XCTestCase {
         let action = ExternalAction.openAgent(
             host: .id(UUID()), agent: .pi, prompt: nil,
             askForPrompt: false, directory: nil,
-            setupScript: .remembered)
+            setupScript: .remembered, model: nil)
         XCTAssertEqual(
             ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
             action
@@ -50,7 +51,7 @@ final class ExternalActionTests: XCTestCase {
             let action = ExternalAction.openAgent(
                 host: .id(UUID()), agent: .claudeCode, prompt: "go",
                 askForPrompt: true, directory: directory,
-                setupScript: .remembered)
+                setupScript: .remembered, model: nil)
             XCTAssertEqual(
                 ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
                 action
@@ -66,13 +67,41 @@ final class ExternalActionTests: XCTestCase {
             let action = ExternalAction.openAgent(
                 host: .id(UUID()), agent: .codex, prompt: nil,
                 askForPrompt: false, directory: nil,
-                setupScript: selection
+                setupScript: selection, model: nil
             )
             XCTAssertEqual(
                 ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
                 action
             )
         }
+    }
+
+    func testAgentURLRoundTripsModel() {
+        for model in ["opus", "sonnet[1m]", "google/gemini-2.5-pro:minimal"] {
+            let action = ExternalAction.openAgent(
+                host: .id(UUID()), agent: .claudeCode, prompt: "go",
+                askForPrompt: false, directory: nil,
+                setupScript: .remembered, model: model)
+            XCTAssertEqual(
+                ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
+                action
+            )
+        }
+    }
+
+    func testMalformedModelParsesAsAgentDefaultNotAsFailure() {
+        // Unlike a bad script token (strict — a wrong script runs arbitrary
+        // text), a model the launch grammar rejects reads as omitted: the
+        // action still runs, on the agent's own default.
+        let url = URL(string:
+            "multiplex://open?host=devbox&action=agent&agent=claude&model=--help")!
+        XCTAssertEqual(
+            ExternalActionURL.action(from: url),
+            .openAgent(
+                host: .named("devbox"), agent: .claudeCode, prompt: nil,
+                askForPrompt: false, directory: nil,
+                setupScript: .remembered, model: nil)
+        )
     }
 
     // MARK: Parsing
@@ -100,13 +129,13 @@ final class ExternalActionTests: XCTestCase {
             .openAgent(
                 host: .named("devbox"), agent: .claudeCode, prompt: nil,
                 askForPrompt: false, directory: nil,
-                setupScript: .remembered)
+                setupScript: .remembered, model: nil)
         )
     }
 
     func testAgentDefaultsToClaudeCode() {
         let url = URL(string: "multiplex://open?host=devbox&action=agent")!
-        guard case .openAgent(_, let agent, _, _, _, _)? = ExternalActionURL.action(from: url) else {
+        guard case .openAgent(_, let agent, _, _, _, _, _)? = ExternalActionURL.action(from: url) else {
             return XCTFail("expected openAgent")
         }
         XCTAssertEqual(agent, .claudeCode)

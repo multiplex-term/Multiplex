@@ -315,6 +315,11 @@ final class HostStore {
         if let scripts = seed.sessionScripts {
             host.sessionScripts = SessionScript.normalized(scripts)
         }
+        // And for launch models — headless checks of the model pickers seed
+        // known per-agent lists; an absent key leaves the host's lists alone.
+        if let models = seed.agentLaunchModels {
+            host.agentLaunchModels = Host.normalizedLaunchModels(models)
+        }
         // And for the new-session tmux conf — headless checks seed option
         // lines and read them back host-side with show-options. An absent
         // key keeps the host's current conf (the default on first import);
@@ -369,6 +374,7 @@ final class HostStore {
         var workingDirs: [String]?
         var sessionScripts: [SessionScript]?
         var newSessionTmuxConf: String?
+        var agentLaunchModels: [String: [String]]?
     }
     #endif
 }

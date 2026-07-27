@@ -114,14 +114,15 @@ enum ExternalActionPerformer {
             await openShell(on: host, requestedSession: sessionName, context: context)
         case .openAgent(
             _, let agent, let prompt, let askForPrompt, let directory,
-            let setupScript
+            let setupScript, let model
         ):
             if askForPrompt {
                 context.presentAgentPrompt(AgentPromptRequest(
                     host: host,
                     agent: agent,
                     directory: directory,
-                    setupScript: setupScript
+                    setupScript: setupScript,
+                    model: model
                 ))
                 return
             }
@@ -130,6 +131,7 @@ enum ExternalActionPerformer {
                 prompt: prompt,
                 directory: directory,
                 setupScript: setupScript,
+                model: model,
                 on: host,
                 context: context
             )
@@ -185,6 +187,7 @@ enum ExternalActionPerformer {
         prompt: String?,
         directory: String?,
         setupScript: ExternalSetupScriptSelection,
+        model launchModel: String?,
         on host: Host,
         context: ExternalActionRouter.Context
     ) async {
@@ -192,7 +195,9 @@ enum ExternalActionPerformer {
         // nil = the host's default working dir; the sheet's explicit Home
         // choice arrives as "~", which the quoting layer expands to $HOME.
         // The Shortcut picker can select a stable script id, explicitly opt
-        // out, or preserve the remembered New Session choice.
+        // out, or preserve the remembered New Session choice. The launch
+        // model stays binary — carried or the agent's default — so the same
+        // widget/Shortcut behaves identically on every device.
         let script = ExternalActionPlan.setupScript(
             for: setupScript,
             available: host.sessionScripts,
@@ -204,7 +209,7 @@ enum ExternalActionPerformer {
             startingIn: directory ?? host.workingDirs.first,
             applying: host.newSessionTmuxConf,
             running: script?.normalizedBody,
-            typing: agent.launchCommand(initialPrompt: prompt ?? "")
+            typing: agent.launchCommand(model: launchModel, initialPrompt: prompt ?? "")
         ) else {
             presentCreateFailure(for: model, host: host, context: context)
             return

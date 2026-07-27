@@ -443,6 +443,7 @@ final class TmuxProbeTests: XCTestCase {
 
     func testNewSessionCommandTypesPromptLaunchLiterally() {
         let launch = AgentKind.claudeCode.launchCommand(
+            model: nil,
             initialPrompt: "Review John's $(touch /tmp/pwned)"
         )
         let command = TmuxProbe.newSessionCommand(

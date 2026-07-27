@@ -6,14 +6,19 @@ import Foundation
 /// is deliberately never persisted.
 ///
 /// The same single opt-in also covers the setup-script choice — per host,
-/// because script ids are host-scoped. While it is on, the remembered script
-/// is what pickerless creation paths (+ TAB, widgets) and Open Agent's
-/// Shortcut default type into fresh sessions; off means those paths type
-/// nothing unless the Shortcut explicitly selects a script.
+/// because script ids are host-scoped — and the model override — per agent,
+/// because a model belongs to the agent, not the host. While it is on, the
+/// remembered script is what pickerless creation paths (+ TAB, widgets) and
+/// Open Agent's Shortcut default type into fresh sessions, and + TAB's agent
+/// variants inherit the remembered model; off means those paths type nothing
+/// unless the Shortcut explicitly selects a script. External actions never
+/// inherit the remembered model — an automation carries its own or gets the
+/// agent default.
 struct NewSessionPreferences {
     private static let remembersLastLaunchKey = "newSession.remembersLastLaunch"
     private static let lastAgentKey = "newSession.lastAgent"
     private static let lastScriptsKey = "newSession.lastScripts"
+    private static let lastModelsKey = "newSession.lastModels"
 
     private let defaults: UserDefaults
 
@@ -34,6 +39,20 @@ struct NewSessionPreferences {
         return AgentKind(rawValue: rawValue)
     }
 
+    /// The remembered `--model` override, per agent — models belong to the
+    /// agent, not the host, so one choice follows Claude Code (or Codex, or
+    /// Pi) across the fleet. Stored as typed; the launch grammar re-validates
+    /// at composition, so a stale value fails soft to the agent default while
+    /// staying visible in the sheet's field for the user to fix.
+    func rememberedModel(for agent: AgentKind) -> String? {
+        guard remembersLastLaunch,
+              let stored = defaults.dictionary(forKey: Self.lastModelsKey),
+              let model = stored[agent.rawValue] as? String,
+              !model.isEmpty
+        else { return nil }
+        return model
+    }
+
     /// The host's remembered setup script, resolved against its current
     /// list. `nil` means NONE — an absent entry and a remembered id whose
     /// script was since deleted or unsynced read the same way, silently.
@@ -47,7 +66,7 @@ struct NewSessionPreferences {
     }
 
     func save(
-        remembersLastLaunch: Bool, agent: AgentKind?,
+        remembersLastLaunch: Bool, agent: AgentKind?, model: String?,
         script: SessionScript?, hostID: UUID
     ) {
         defaults.set(remembersLastLaunch, forKey: Self.remembersLastLaunchKey)
@@ -74,6 +93,26 @@ struct NewSessionPreferences {
             defaults.removeObject(forKey: Self.lastScriptsKey)
         } else {
             defaults.set(scripts, forKey: Self.lastScriptsKey)
+        }
+
+        // And per agent for the model. A shell-only submit (agent nil) says
+        // nothing about models, so other agents' entries survive it; an
+        // agent submitted with an empty field explicitly forgets its entry.
+        var models = remembersLastLaunch
+            ? (defaults.dictionary(forKey: Self.lastModelsKey) as? [String: String]) ?? [:]
+            : [:]
+        if let agent {
+            let trimmed = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if remembersLastLaunch, !trimmed.isEmpty {
+                models[agent.rawValue] = trimmed
+            } else {
+                models.removeValue(forKey: agent.rawValue)
+            }
+        }
+        if models.isEmpty {
+            defaults.removeObject(forKey: Self.lastModelsKey)
+        } else {
+            defaults.set(models, forKey: Self.lastModelsKey)
         }
     }
 }

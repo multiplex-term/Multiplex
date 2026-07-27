@@ -108,6 +108,32 @@ final class HostSyncTests: XCTestCase {
         XCTAssertNil(host.moshPorts)
         XCTAssertEqual(host.workingDirs, [])
         XCTAssertTrue(host.agentCommandConfiguration.isEmpty)
+        XCTAssertEqual(host.agentLaunchModels, [:])
+    }
+
+    func testHostLaunchModelsRoundTripNormalizedAndKeepUnknownAgents() throws {
+        var original = host("devbox", updatedAt: Date(timeIntervalSince1970: 1234))
+        original.agentLaunchModels = [
+            // Dupes collapse in order; a token the launch grammar rejects
+            // can never ride a launch line, so it never becomes a picker row.
+            "claudeCode": ["opus", "  opus  ", "sonnet[1m]", "not a model"],
+            "codex": [],
+            // A newer schema's agent must survive decode + re-encode here.
+            "futureAgent": ["shiny-model"],
+        ]
+        original.agentLaunchModels = Host.normalizedLaunchModels(original.agentLaunchModels)
+        XCTAssertEqual(
+            original.agentLaunchModels,
+            [
+                "claudeCode": ["opus", "sonnet[1m]"],
+                "futureAgent": ["shiny-model"],
+            ]
+        )
+        XCTAssertEqual(original.launchModels(for: .claudeCode), ["opus", "sonnet[1m]"])
+        XCTAssertEqual(original.launchModels(for: .codex), [])
+
+        let decoded = try JSONDecoder().decode(Host.self, from: JSONEncoder().encode(original))
+        XCTAssertEqual(decoded, original)
     }
 
     func testHostRoundTripsThroughRecordEncoding() throws {
@@ -153,6 +179,7 @@ final class HostSyncTests: XCTestCase {
             for: .claudeCode
         )
         commandsEdited.newSessionTmuxConf = "mouse on\nhistory-limit 50000"
+        commandsEdited.agentLaunchModels = ["claudeCode": ["opus"]]
         commandsEdited.updatedAt = .now
 
         XCTAssertTrue(

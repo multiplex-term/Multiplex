@@ -31,6 +31,10 @@ struct AddHostSheet: View {
     /// the first save, not invisible policy.
     @State private var newSessionTmuxConf = Host.defaultNewSessionTmuxConf
     @State private var scripts: [ScriptRow] = []
+    /// Launch-model lists as one-id-per-line text, one field per agent —
+    /// the tmux-conf field's compact grammar, not editable rows (model ids
+    /// are short single tokens; row chrome tripled the height).
+    @State private var modelText: [AgentKind: String] = [:]
     @State private var testState: TestState = .idle
     @State private var showingPaywall = false
 
@@ -77,6 +81,7 @@ struct AddHostSheet: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 18) {
                     hostSection
@@ -86,6 +91,8 @@ struct AddHostSheet: View {
                     workingDirsSection
                     tmuxConfSection
                     scriptsSection
+                    agentModelsSection
+                        .id("agent-models")
                     transportSection
                 }
                 .frame(maxWidth: 680)
@@ -96,6 +103,7 @@ struct AddHostSheet: View {
             // Fields, chips, and switches claim their own taps, so this only
             // fires on inert ground and never fights a control.
             .onTapGesture(perform: unfocusInputs)
+            .task { await scrollForVerificationIfRequested(proxy) }
             .chassisSheetGround()
             .navigationTitle(editing == nil ? "Add Host" : "Host Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -108,6 +116,7 @@ struct AddHostSheet: View {
                     ChassisBarButton("Save", action: save)
                         .disabled(!isValid)
                 }
+            }
             }
         }
         // This long form is easy to drag while scrolling. Require the
@@ -616,6 +625,66 @@ struct AddHostSheet: View {
             : "New Session offers these by name; the chosen one is typed into the fresh shell before the launch command."
     }
 
+    // MARK: Agent launch models
+
+    /// One compact field per agent, one model id per line — the tmux-conf
+    /// field's grammar. Model ids are short single tokens, so editable rows
+    /// with move/delete chrome only added height; line order IS the picker
+    /// order, and deleting a line deletes the model.
+    private var agentModelsSection: some View {
+        TallyFormSection("Agent launch models", detail: modelsDetail) {
+            ForEach(AgentKind.allCases, id: \.self) { agent in
+                TallyFormField(agent.displayName) {
+                    TextField(
+                        modelPlaceholder(for: agent),
+                        text: modelTextBinding(for: agent),
+                        axis: .vertical
+                    )
+                    .lineLimit(1...5)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .accessibilityLabel("\(agent.displayName) models, one per line")
+                }
+            }
+        }
+    }
+
+    private var modelsDetail: String {
+        "One model id per line, in picker order. New Session, the Open "
+            + "Agent shortcut, and the host widget offer them as choices, "
+            + "passed as --model; nothing is applied unless chosen at launch."
+    }
+
+    /// A hint only where the alias grammar is stable; Codex and Pi ids are
+    /// exactly what this feature saves the user from retyping, so those
+    /// fields never suggest one that would go stale.
+    private func modelPlaceholder(for agent: AgentKind) -> String {
+        switch agent {
+        case .claudeCode: "opus, sonnet, or a full model id"
+        case .codex: "model id per line"
+        case .pi: "provider/model-id per line"
+        }
+    }
+
+    private func modelTextBinding(for agent: AgentKind) -> Binding<String> {
+        Binding(
+            get: { modelText[agent] ?? "" },
+            set: { modelText[agent] = $0 }
+        )
+    }
+
+    /// Fields split back into lists, in editor order; the token gate and
+    /// dedupe happen in `Host.normalizedLaunchModels` at save.
+    private var resolvedLaunchModels: [String: [String]] {
+        var models: [String: [String]] = [:]
+        for agent in AgentKind.allCases {
+            models[agent.rawValue] = (modelText[agent] ?? "")
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+        return models
+    }
+
     /// Same late-write discipline as the working-dir rows: resolve through
     /// the row id, never a captured array index.
     private func scriptBinding(
@@ -706,6 +775,19 @@ struct AddHostSheet: View {
         }
     }
 
+    /// `MULTIPLEX_AUTO_HOST_SETTINGS=models` scrolls to the Agent launch
+    /// models section once the sheet settles — the form is taller than one
+    /// headless frame and the simulator cannot scroll (DEBUG capture only).
+    private func scrollForVerificationIfRequested(_ proxy: ScrollViewProxy) async {
+        #if DEBUG
+        guard ProcessInfo.processInfo.environment[
+            "MULTIPLEX_AUTO_HOST_SETTINGS"
+        ] == "models" else { return }
+        try? await Task.sleep(for: .milliseconds(700))
+        withAnimation(nil) { proxy.scrollTo("agent-models", anchor: .top) }
+        #endif
+    }
+
     /// Resigns whichever field currently holds the keyboard. Routed through
     /// the responder chain so it covers the SwiftUI fields and the
     /// UIKit-backed secret fields alike, without threading FocusState
@@ -731,6 +813,13 @@ struct AddHostSheet: View {
         workingDirs = host.workingDirs.map { WorkingDir(path: $0) }
         newSessionTmuxConf = host.newSessionTmuxConf
         scripts = host.sessionScripts.map(ScriptRow.init)
+        modelText = [:]
+        for agent in AgentKind.allCases {
+            let models = host.launchModels(for: agent)
+            if !models.isEmpty {
+                modelText[agent] = models.joined(separator: "\n")
+            }
+        }
         password = KeychainStore.get(for: host.id, kind: .password) ?? ""
         privateKey = KeychainStore.get(for: host.id, kind: .privateKey) ?? ""
         passphrase = KeychainStore.get(for: host.id, kind: .keyPassphrase) ?? ""
@@ -767,6 +856,16 @@ struct AddHostSheet: View {
         // Rows with nothing to type drop out; ids survive edits so the
         // remembered-selection memory keeps pointing at the same script.
         host.sessionScripts = SessionScript.normalized(scripts.map(\.script))
+        // Known agents' lists come from the editor; a newer schema's agent
+        // keys pass through from the live record so this save can't drop
+        // them. The normalizer applies the launch grammar's token gate.
+        var launchModels = host.agentLaunchModels.filter {
+            AgentKind(rawValue: $0.key) == nil
+        }
+        for (agentRaw, values) in resolvedLaunchModels {
+            launchModels[agentRaw] = values
+        }
+        host.agentLaunchModels = Host.normalizedLaunchModels(launchModels)
         return host
     }
 

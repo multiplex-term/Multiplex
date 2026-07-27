@@ -19,7 +19,12 @@ enum WidgetLink {
         return url(queryItems: items)
     }
 
-    static func agentURL(hostID: UUID, agentRaw: String, askForPrompt: Bool) -> URL {
+    /// `model` travels raw — the app-side parser owns validation (a value
+    /// the launch grammar rejects reads as "agent default"), so the widget
+    /// target never compiles the grammar it would need to pre-validate.
+    static func agentURL(
+        hostID: UUID, agentRaw: String, askForPrompt: Bool, model: String? = nil
+    ) -> URL {
         var items = [
             URLQueryItem(name: "host", value: hostID.uuidString),
             URLQueryItem(name: "action", value: "agent"),
@@ -27,6 +32,9 @@ enum WidgetLink {
         ]
         if askForPrompt {
             items.append(URLQueryItem(name: "ask", value: "1"))
+        }
+        if let model, !model.isEmpty {
+            items.append(URLQueryItem(name: "model", value: model))
         }
         return url(queryItems: items)
     }

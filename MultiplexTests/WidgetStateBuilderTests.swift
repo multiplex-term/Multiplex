@@ -27,7 +27,8 @@ final class WidgetStateBuilderTests: XCTestCase {
     }
 
     func testHostStateProjectsSessionsWindowsAndMiniatures() {
-        let host = Host(name: "devbox", hostname: "10.0.1.7", username: "jhen")
+        var host = Host(name: "devbox", hostname: "10.0.1.7", username: "jhen")
+        host.agentLaunchModels = ["codex": ["gpt-5-codex"]]
         let sessions = [session(
             name: "main",
             created: 100,
@@ -49,6 +50,14 @@ final class WidgetStateBuilderTests: XCTestCase {
         XCTAssertEqual(state.name, "devbox")
         XCTAssertEqual(state.address, "jhen@10.0.1.7")
         XCTAssertEqual(state.probedAt, probed)
+        // Configured launch models feed the widget's Model setting picker;
+        // a host with none stays nil so legacy-file shape and no-config
+        // shape read the same.
+        XCTAssertEqual(state.agentModels, ["codex": ["gpt-5-codex"]])
+        XCTAssertNil(WidgetStateBuilder.hostState(
+            host: Host(name: "b", hostname: "h", username: "u"),
+            sessions: [], miniatures: [:], probedAt: nil
+        ).agentModels)
         XCTAssertEqual(state.sessions.count, 1)
         let main = state.sessions[0]
         XCTAssertEqual(main.name, "main")

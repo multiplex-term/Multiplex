@@ -200,11 +200,12 @@ struct FleetWall: View {
             NewSessionSheet(
                 host: host,
                 existingNames: hub.model(for: host).tmux.sessions.map(\.name),
-                create: { name, agent, initialPrompt, directory, script in
+                create: { name, agent, model, initialPrompt, directory, script in
                     createSession(
                         on: host,
                         named: name,
                         launching: agent,
+                        model: model,
                         initialPrompt: initialPrompt,
                         startingIn: directory,
                         running: script
@@ -1308,8 +1309,8 @@ struct FleetWall: View {
     /// the problem.
     private func createSession(
         on host: Host, named rawName: String, launching agent: AgentKind?,
-        initialPrompt: String, startingIn directory: String?,
-        running script: SessionScript?
+        model launchModel: String?, initialPrompt: String,
+        startingIn directory: String?, running script: SessionScript?
     ) {
         let name = TmuxProbe.sanitizedSessionName(rawName)
         let model = hub.model(for: host)
@@ -1320,7 +1321,7 @@ struct FleetWall: View {
                 startingIn: directory,
                 applying: host.newSessionTmuxConf,
                 running: script?.normalizedBody,
-                typing: agent?.launchCommand(initialPrompt: initialPrompt)
+                typing: agent?.launchCommand(model: launchModel, initialPrompt: initialPrompt)
             ) else { return }
             open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: created)))
         }
@@ -1373,15 +1374,18 @@ private struct SessionDropTarget: Equatable {
 /// name for the selection (main / claude / codex / pi, then
 /// -2, -3…) so Create is one tap; picking an agent re-prefills it unless
 /// the user already typed their own. Each agent can receive a one-shot first
-/// prompt as its CLI argument. An opt-in remembers only the submitted launch
-/// and setup-script choices for the next sheet. Hosts with working
+/// prompt as its CLI argument and an optional model override (free text —
+/// model names churn faster than app releases; the Command preview shows the
+/// exact line, and a value the launch grammar rejects reads as the agent
+/// default). An opt-in remembers only the submitted launch, model, and
+/// setup-script choices for the next sheet. Hosts with working
 /// directories also get a "Starts in" picker, defaulting to the first (the
 /// host's own default); hosts with setup scripts get a "Runs first" picker,
 /// defaulting to NONE unless one is remembered.
 private struct NewSessionSheet: View {
     let host: Host
     let existingNames: [String]
-    let create: (String, AgentKind?, String, String?, SessionScript?) -> Void
+    let create: (String, AgentKind?, String?, String, String?, SessionScript?) -> Void
 
     private let preferences: NewSessionPreferences
 
@@ -1395,6 +1399,7 @@ private struct NewSessionSheet: View {
     @State private var name: String
     @State private var launchMode: LaunchMode
     @State private var selectedAgent: AgentKind
+    @State private var model: String
     @State private var initialPrompt: String
     @State private var directory: String?
     @State private var script: SessionScript?
@@ -1403,13 +1408,14 @@ private struct NewSessionSheet: View {
 
     private enum InputField: Hashable {
         case name
+        case model
         case initialPrompt
     }
 
     init(
         host: Host,
         existingNames: [String],
-        create: @escaping (String, AgentKind?, String, String?, SessionScript?) -> Void,
+        create: @escaping (String, AgentKind?, String?, String, String?, SessionScript?) -> Void,
         preferences: NewSessionPreferences = NewSessionPreferences()
     ) {
         self.host = host
@@ -1421,6 +1427,7 @@ private struct NewSessionSheet: View {
         let agent = preferences.rememberedAgent
         _launchMode = State(initialValue: agent == nil ? .shell : .agents)
         _selectedAgent = State(initialValue: agent ?? .claudeCode)
+        _model = State(initialValue: agent.flatMap(preferences.rememberedModel) ?? "")
         _initialPrompt = State(initialValue: "")
         _directory = State(initialValue: host.workingDirs.first)
         _script = State(initialValue: preferences.rememberedScript(for: host))
@@ -1466,6 +1473,44 @@ private struct NewSessionSheet: View {
                             launchPicker
                         }
                         if let agent = agentToLaunch {
+                            TallyFormField("Model (optional)") {
+                                HStack(spacing: 8) {
+                                    TextField("Agent default", text: $model)
+                                        .focused($focusedField, equals: .model)
+                                        .autocorrectionDisabled()
+                                        .textInputAutocapitalization(.never)
+                                        .accessibilityLabel(
+                                            "Optional model for \(agent.displayName)"
+                                        )
+                                    // Host Settings' pre-configured list —
+                                    // the picker that spares retyping full
+                                    // Codex/Pi ids; the field stays the
+                                    // free-text escape hatch.
+                                    let configured = host.launchModels(for: agent)
+                                    if !configured.isEmpty {
+                                        Menu {
+                                            ForEach(configured, id: \.self) { candidate in
+                                                Button(candidate) { model = candidate }
+                                            }
+                                            Divider()
+                                            Button("Agent default") { model = "" }
+                                        } label: {
+                                            Image(systemName: "chevron.down")
+                                                .font(.ui(9, weight: .semibold))
+                                                .foregroundStyle(Theme.signal2)
+                                                .frame(width: 25, height: 25)
+                                                .background(Theme.chassis)
+                                                .overlay(Rectangle().strokeBorder(
+                                                    Theme.bezelHi, lineWidth: 1))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .chassisHover(2)
+                                        .accessibilityLabel(
+                                            "Configured models for \(agent.displayName)"
+                                        )
+                                    }
+                                }
+                            }
                             TallyFormField("Initial prompt (optional)") {
                                 TextField(
                                     "What should \(agent.displayName) do?",
@@ -1490,9 +1535,14 @@ private struct NewSessionSheet: View {
                                 Spacer()
                                 VStack(alignment: .trailing, spacing: 3) {
                                     ChassisLabel("Command", size: 7, color: Theme.signal3)
-                                    Text(agentToLaunch?.launchCommand ?? "login shell")
+                                    // The live line minus the prompt — the
+                                    // honest surface for the model field: a
+                                    // rejected value visibly falls out.
+                                    Text(commandPreview)
                                         .font(.mono(9, weight: .medium))
                                         .foregroundStyle(Theme.signal2)
+                                        .lineLimit(1)
+                                        .truncationMode(.head)
                                 }
                             }
                         }
@@ -1585,10 +1635,11 @@ private struct NewSessionSheet: View {
                         preferences.save(
                             remembersLastLaunch: remembersLastLaunch,
                             agent: agentToLaunch,
+                            model: agentToLaunch == nil ? nil : model,
                             script: script,
                             hostID: host.id
                         )
-                        create(name, agentToLaunch, initialPrompt, directory, script)
+                        create(name, agentToLaunch, modelToLaunch, initialPrompt, directory, script)
                         dismiss()
                     }
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -1598,11 +1649,27 @@ private struct NewSessionSheet: View {
         .onChange(of: agentToLaunch) { previous, selected in
             let untouched = name == prefill(for: previous)
             if untouched { name = prefill(for: selected) }
+            // Same prefill contract for the model: an untouched field swaps
+            // to the newly selected agent's remembered model, a hand-typed
+            // one stays (its Command preview says what it will do).
+            let modelUntouched = model == modelPrefill(for: previous)
+            if modelUntouched { model = modelPrefill(for: selected) }
         }
     }
 
     private var agentToLaunch: AgentKind? {
         launchMode == .agents ? selectedAgent : nil
+    }
+
+    private var modelToLaunch: String? {
+        guard agentToLaunch != nil else { return nil }
+        let trimmed = model.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private var commandPreview: String {
+        guard let agent = agentToLaunch else { return "login shell" }
+        return agent.launchCommand(model: modelToLaunch, initialPrompt: "")
     }
 
     private var launchPicker: some View {
@@ -1672,6 +1739,10 @@ private struct NewSessionSheet: View {
     private func prefill(for agent: AgentKind?) -> String {
         TmuxProbe.uniqueSessionName(
             base: agent?.launchCommand ?? "main", existing: existingNames)
+    }
+
+    private func modelPrefill(for agent: AgentKind?) -> String {
+        agent.flatMap(preferences.rememberedModel) ?? ""
     }
 
     private var launchDetail: String {
@@ -2099,7 +2170,7 @@ private enum FleetWallPreviewData {
     NewSessionSheet(
         host: FleetWallPreviewData.host,
         existingNames: ["main", "scratch"],
-        create: { _, _, _, _, _ in },
+        create: { _, _, _, _, _, _ in },
         preferences: NewSessionPreferences(
             defaults: UserDefaults(
                 suiteName: "app.multiplexterm.multiplex.preview.new-session"

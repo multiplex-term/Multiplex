@@ -302,9 +302,12 @@ struct DeckWindow: View {
     /// deck's sheet boundary. A missing HostStore used to fatal as Host
     /// Settings opened from the compact shell.
     private func presentHostSettingsForVerificationIfRequested() async {
-        guard ProcessInfo.processInfo.environment[
+        // "models" also scrolls the sheet to the Agent launch models
+        // section (AddHostSheet reads the same variable) — the form is too
+        // tall for one headless frame and the sim cannot scroll.
+        guard ["1", "models"].contains(ProcessInfo.processInfo.environment[
             "MULTIPLEX_AUTO_HOST_SETTINGS"
-        ] == "1" else { return }
+        ]) else { return }
         for _ in 0..<50 {
             if let host = store.hosts.first {
                 editingHost = host

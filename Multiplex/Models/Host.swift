@@ -45,6 +45,18 @@ struct Host: Identifiable, Codable, Hashable {
     /// selected one is typed into a freshly created session's shell before
     /// the optional agent launch line.
     var sessionScripts: [SessionScript] = []
+    /// Pre-configured `--model` values per agent (keyed by
+    /// `AgentKind.rawValue`), in the user's order. Full model ids are typed
+    /// once here — Host Settings — and every launch surface (New Session
+    /// sheet, Open Agent Shortcut, Host widget setting) then offers them as
+    /// a picker; only Claude Code has human-friendly aliases, so free text
+    /// alone was a bad experience for Codex and Pi. Host-scoped on purpose,
+    /// not just for the sync ride: Pi's available models genuinely differ
+    /// per machine with its configured providers. A model is never applied
+    /// because it exists — launches without a choice use the agent's own
+    /// default. Unknown agent keys survive normalization so a record
+    /// written by a newer schema keeps its lists through an edit-save here.
+    var agentLaunchModels: [String: [String]] = [:]
     /// tmux options for sessions created from Multiplex — conf-style text
     /// stored in this record (never a file on the host), one option per
     /// line (`mouse on`, `focus-events on`). Each line is applied to the
@@ -75,6 +87,33 @@ struct Host: Identifiable, Codable, Hashable {
     var address: String {
         port == 22 ? "\(username)@\(hostname)" : "\(username)@\(hostname):\(port)"
     }
+
+    /// The configured launch models for one agent, picker-ready.
+    func launchModels(for agent: AgentKind) -> [String] {
+        agentLaunchModels[agent.rawValue] ?? []
+    }
+
+    /// Canonical form for persistence: known agents' lists pass the launch
+    /// grammar's token gate and dedupe in order (an invalid entry can never
+    /// ride a launch line, so storing it would only fabricate a dead picker
+    /// row); empty lists drop their key. Unknown agent keys pass through
+    /// verbatim — validating a newer schema's list against today's grammar
+    /// could destroy it.
+    static func normalizedLaunchModels(_ raw: [String: [String]]) -> [String: [String]] {
+        var result: [String: [String]] = [:]
+        for (agentRaw, models) in raw {
+            guard AgentKind(rawValue: agentRaw) != nil else {
+                if !models.isEmpty { result[agentRaw] = models }
+                continue
+            }
+            var seen = Set<String>()
+            let cleaned = models
+                .compactMap(AgentKind.normalizedLaunchModel)
+                .filter { seen.insert($0).inserted }
+            if !cleaned.isEmpty { result[agentRaw] = cleaned }
+        }
+        return result
+    }
 }
 
 // Decoding lives in an extension so the memberwise initializer survives.
@@ -99,6 +138,10 @@ extension Host {
         sessionScripts = SessionScript.normalized(
             try container.decodeIfPresent([SessionScript].self, forKey: .sessionScripts) ?? []
         )
+        agentLaunchModels = Host.normalizedLaunchModels(
+            try container.decodeIfPresent(
+                [String: [String]].self, forKey: .agentLaunchModels) ?? [:]
+        )
         newSessionTmuxConf = try container.decodeIfPresent(
             String.self, forKey: .newSessionTmuxConf
         ) ?? Host.defaultNewSessionTmuxConf
@@ -110,8 +153,8 @@ extension Host {
     }
 
     /// Hashable identity for the connection model and the wall feed that
-    /// drives it. Command-setup, setup-script, and new-session tmux conf
-    /// edits must not tear down the probe connection; every other
+    /// drives it. Command-setup, setup-script, launch-model, and new-session
+    /// tmux conf edits must not tear down the probe connection; every other
     /// current/future Host field remains part of the identity — `isEnabled`
     /// deliberately included, so a host switched off on another device
     /// restarts the wall feed here, which is where the live probe is dropped.
@@ -119,6 +162,7 @@ extension Host {
         var configuration = self
         configuration.agentCommandConfiguration = AgentCommandConfiguration()
         configuration.sessionScripts = []
+        configuration.agentLaunchModels = [:]
         configuration.newSessionTmuxConf = Host.defaultNewSessionTmuxConf
         configuration.updatedAt = .distantPast
         return configuration
