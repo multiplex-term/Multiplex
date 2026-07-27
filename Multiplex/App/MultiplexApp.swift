@@ -14,6 +14,7 @@ struct MultiplexApp: App {
     @State private var networkChanges = NetworkChangeMonitor()
     @State private var appLock = AppLockStore()
     private var externalActions: ExternalActionRouter { .shared }
+    private var bind: BindController { .shared }
 
     init() {
         // Attention wiring: every probe's events funnel through one center,
@@ -155,7 +156,8 @@ struct MultiplexApp: App {
             .environment(networkChanges)
             .environment(externalActions)
             .environment(appLock)
-            .modifier(ExternalActionReceiver(router: externalActions))
+            .environment(bind)
+            .modifier(ExternalActionReceiver(router: externalActions, bind: bind))
             // The lock veil sits inside PlatformChrome so it follows the
             // pinned appearance, and outside everything else so it covers
             // deck and terminal content alike.
@@ -172,6 +174,7 @@ struct MultiplexApp: App {
 /// the raise is correctly unavailable there.
 private struct ExternalActionReceiver: ViewModifier {
     var router: ExternalActionRouter
+    var bind: BindController
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
@@ -183,6 +186,16 @@ private struct ExternalActionReceiver: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onOpenURL { url in
+                // A bind URL is attacker-suppliable (a QR on a poster, a
+                // link in a message), so unlike a widget action it never
+                // executes: it only ever adds a tile the user confirms.
+                if let payload = BindPayload(url: url) {
+                    bind.submit(payload: payload)
+                    if !bind.hasContext, supportsMultipleWindows {
+                        openWindow(id: "deck", value: DeckWindowRoute.main)
+                    }
+                    return
+                }
                 guard let action = ExternalActionURL.action(from: url) else { return }
                 router.submit(action)
             }

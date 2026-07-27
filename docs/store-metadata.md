@@ -21,7 +21,7 @@ behavior, or App Review flow changes.
 | Primary category | Developer Tools |
 | Secondary category | Utilities |
 | Privacy declaration | Target: Data Not Collected; selected files/photos and camera captures go directly to the user's SSH host; dictation audio is transcribed by Apple's Speech framework (on device wherever the locale supports it) and the resulting text is typed into the user's own session — Multiplex stores and transmits neither; set/confirm manually in App Store Connect |
-| Runtime permissions | Camera only after FILE → Camera on iPad/iPhone; Microphone + Speech Recognition only after the key rail's dictation key, which appears only while a physical keyboard is attached; Local Network only for LAN hosts; Notifications only for enabled agent alerts; Face ID/Optic ID only when the optional App Lock setting is enabled (device passcode fallback). Photos/Files use system pickers. |
+| Runtime permissions | Camera only after FILE → Camera on iPad/iPhone, or BIND → Scan QR (iPhone/iPad; visionOS App Store apps have no camera access at all); Microphone + Speech Recognition only after the key rail's dictation key, which appears only while a physical keyboard is attached; Local Network for LAN hosts and for finding machines offering to bind (Bonjour browsing, deck-frontmost only, and only once at least one host exists or the user opens BIND); Notifications only for enabled agent alerts; Face ID/Optic ID only when the optional App Lock setting is enabled (device passcode fallback). Photos/Files use system pickers. |
 | Age rating | Target: all questionnaire answers None → 4+; complete/confirm manually |
 | Base-app price | Free; confirm in App Store Connect before submission |
 | Storefronts | Confirm intended coverage in App Store Connect; France needs the encryption step in the release playbook |
@@ -41,6 +41,21 @@ Do not duplicate the complete description in this document. The
 `store_metadata` lane uploads the shared files to both platform versions and
 injects the matching platform release notes into each `deliver` call. Pass
 `platform:ios` or `platform:visionos` to target only one.
+
+## Bind Host (companion CLI)
+
+Free surface added 2026-07-27 (unreleased; ships with the next binary):
+
+| Item | Facts |
+| --- | --- |
+| What it is | A deck `BIND` chip plus an open-source companion CLI (`mpx`, `github.com/multiplex-term/multiplex-cli`, MIT) that the user runs **on the machine being added**. The machine offers itself over a terminal QR, the clipboard, and a Bonjour announcement; the app enrolls **its own** newly generated ed25519 public key into that machine's `authorized_keys` |
+| Distribution of the CLI | Not shipped inside the app and not required to use it — Homebrew tap and a `curl | sh` script from `multiplexterm.dev`; the manual Add Host sheet remains unchanged |
+| Discovery | Bonjour `_multiplex-bind._tcp` (`NSBonjourServices`), browsed only while the deck is frontmost and only once a host exists or the user opens BIND. No `UIBackgroundModes`, no background sockets. A custom UDP beacon variant is **not** in this release — it needs `com.apple.developer.networking.multicast`, applied for separately |
+| Credentials | The normal path moves no private key: the device keeps its key, the machine gets the public half (comment-marked `multiplex:bind:<id>:<device>`, removable with `mpx unbind`). `mpx bind --offline`, for hosts reachable only over SSH, ships a CLI-generated key inside the payload; the app then replaces it with a device-generated key on the first connection |
+| Confirmation | Every enrollment is confirmed twice — a 6-digit PIN or single-use token app-side, and `[Y/n]` on the machine's own terminal. Scanned, pasted, or `multiplex://bind` URLs never bind automatically |
+| Tier | Free, and the two-host free limit is enforced **before** anything is written to the machine (the paywall appears instead) |
+| Privacy impact | None new: bind traffic is a direct connection between the user's device and the user's own machine; no telemetry, nothing leaves the local pair. The host's SSH key fingerprints it reports are stored in the app's existing synced host record |
+| Review note | Reviewers do not need the CLI: the manual Add Host path still adds hosts, and the demo host in review notes is reached that way |
 
 ## Widgets, Shortcuts, and the URL scheme
 
@@ -95,7 +110,9 @@ submission.
 
 Current product split:
 
-- Free: two hosts, full SSH spatial windows/tabs/merge with multilingual
+- Free: two hosts, adding one by running the companion CLI on it (QR,
+  clipboard, or local-network discovery with a PIN — the two-host limit
+  still applies), full SSH spatial windows/tabs/merge with multilingual
   system-keyboard/IME input, a dedicated iPad RET key immediately after the
   direction keys, and primary-button touch/pointer input for mouse-aware TUIs,
   all-pane agent detection and wall

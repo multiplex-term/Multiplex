@@ -76,10 +76,17 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         ITSAppUsesNonExemptEncryption: false
-        NSCameraUsageDescription: Multiplex uses the camera only when you take a photo to send to your remote SSH session.
+        NSCameraUsageDescription: Multiplex uses the camera when you take a photo to send to your remote SSH session, and when you scan the code that binds a machine to the app.
         # Also covers Optic ID on visionOS (there is no separate key).
         NSFaceIDUsageDescription: Multiplex unlocks with Face ID when the optional App Lock setting is turned on.
-        NSLocalNetworkUsageDescription: Multiplex connects to SSH hosts on your local network.
+        NSLocalNetworkUsageDescription: Multiplex connects to SSH hosts on your local network, and finds machines offering to bind themselves to the app.
+        # Bind Host discovery: the companion CLI (mpx bind) announces this
+        # service while it is offering to pair, and the deck browses for it
+        # while it is frontmost (never in the background — same discipline as
+        # the probe feed). Bonjour needs no entitlement; the custom UDP
+        # beacon variant does (see local-plan/bind-host.md).
+        NSBonjourServices:
+          - _multiplex-bind._tcp
         # The key rail's dictation key, offered in place of the software
         # keyboard toggle while a hardware keyboard is attached. Both are
         # requested only on the first press of that key.

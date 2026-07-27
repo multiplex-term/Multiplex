@@ -135,6 +135,7 @@ struct DeckWindow: View {
     @Environment(TerminalWorkspace.self) private var workspace
     @Environment(LocalNetworkAccessMonitor.self) private var localNetworkAccess
     @Environment(NetworkChangeMonitor.self) private var networkChanges
+    @Environment(BindController.self) private var bind
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
 
@@ -149,9 +150,19 @@ struct DeckWindow: View {
     @State private var showingFAQ = false
     @State private var showingPaywall = false
     @State private var showingLocalNetworkAlert = false
+    @State private var showingBind = false
 
     private struct LocalNetworkCheckID: Hashable {
         let hosts: [Host]
+        let active: Bool
+    }
+
+    /// What makes bind discovery start or stop. Any of these changing
+    /// re-evaluates the browser exactly once.
+    private struct BindBrowseID: Hashable {
+        let sheet: Bool
+        let pending: Bool
+        let hasHosts: Bool
         let active: Bool
     }
 
@@ -164,7 +175,8 @@ struct DeckWindow: View {
             addHost: requestAddHost,
             editHost: { editingHost = $0 },
             openSettings: { showingSettings = true },
-            openFAQ: { showingFAQ = true }
+            openFAQ: { showingFAQ = true },
+            openBind: { showingBind = true }
         )
         // Explicitly bridge Observation environments across the scene sheet
         // boundary. iOS 27 can otherwise present this sheet from the shell's
@@ -182,6 +194,32 @@ struct DeckWindow: View {
         .sheet(isPresented: $showingSettings) { SettingsView() }
         .sheet(isPresented: $showingFAQ) { FAQView() }
         .sheet(isPresented: $showingPaywall) { ProPaywallView() }
+        .sheet(isPresented: $showingBind) {
+            BindSheet(addHostManually: requestAddHost)
+                .environment(bind)
+                .environment(store)
+        }
+        .alert(
+            "Bind Code Not Recognized",
+            isPresented: Binding(
+                get: { bind.alert != nil },
+                set: { if !$0 { bind.alert = nil } }
+            ),
+            presenting: bind.alert
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { message in
+            Text(message)
+        }
+        // Binding creates a host, so it meets the same free-tier limit the
+        // Add Host flow does — refused before anything is enrolled on the
+        // machine, never after.
+        .onChange(of: bind.needsProForHostLimit) { _, needsPro in
+            guard needsPro else { return }
+            bind.needsProForHostLimit = false
+            showingBind = false
+            showingPaywall = true
+        }
         .alert("Local Network Access Is Off", isPresented: $showingLocalNetworkAlert) {
             Button("Open Settings") { openAppSettings() }
             Button("Not Now", role: .cancel) {}
@@ -189,6 +227,44 @@ struct DeckWindow: View {
             Text("Multiplex can’t reach SSH hosts on your local network. Turn on Local Network access in Settings.")
         }
         .background(DeckSceneReporter())
+        // The bind controller is app-level (onOpenURL fires on every scene
+        // root), but only the mounted deck can hand it the stores it needs
+        // and run its flows.
+        .task {
+            bind.attach(store: store, entitlements: entitlements)
+            await bind.rotatePendingKeysIfNeeded()
+        }
+        // Browsing runs while the deck is frontmost — that is what makes the
+        // promise true: run `mpx bind` on a machine and its tile appears on
+        // the wall without anyone opening anything first. Same discipline as
+        // the probe feed (foreground only, never a background socket).
+        //
+        // A fleet owner is already reaching the local network for probes, so
+        // this asks nothing new of them. On a wall with no hosts yet it stays
+        // off until the user opens BIND themselves, so a first launch cannot
+        // raise the local-network prompt before the user has asked for
+        // anything.
+        .task(
+            id: BindBrowseID(
+                sheet: showingBind,
+                pending: !bind.pending.isEmpty,
+                hasHosts: !store.hosts.isEmpty,
+                active: scenePhase == .active
+            )
+        ) {
+            let wanted = showingBind || !bind.pending.isEmpty || !store.hosts.isEmpty
+            if scenePhase == .active && wanted {
+                bind.beginDiscovery()
+            } else {
+                bind.endDiscovery()
+            }
+        }
+        .onChange(of: bind.discovery.announcements) { _, _ in
+            bind.syncDiscovered()
+        }
+        #if DEBUG
+        .task { await bind.runDebugAutomationIfRequested() }
+        #endif
         // Render the local cache first. Synchronizable Keychain reads may
         // involve securityd/iCloud, so cloud reconciliation begins only once
         // the deck exists instead of blocking App initialization.

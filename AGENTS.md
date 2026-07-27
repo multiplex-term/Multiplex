@@ -97,6 +97,23 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   run; idb HID taps died with Xcode 27's SimulatorKit removal). E.g.
   `…open?host=devbox&action=agent&agent=pi&model=x` proves the launch line
   types `pi --model 'x'` — capture-pane the newly minted session host-side.
+- `MULTIPLEX_AUTO_BIND=<multiplex://bind?…>` / `MULTIPLEX_BIND_AUTOPIN=<6
+  digits>` — drive the Bind Host flow headlessly (no camera, no taps). The
+  first submits a scanned/pasted payload through the real parse → confirm →
+  handshake seam; the second waits for the first machine heard on the
+  network and answers it with that PIN. Stage the other side with
+  `./Tools/dev-sshd/harness.sh bind` (interactive, prints the PIN) or
+  `bind --print-only` (detaches, prints the payload URL for
+  `MULTIPLEX_AUTO_BIND`, transcript in `state/bind.log`). Both fire once per
+  process, log under category `bind`, and the proof is host-side: a
+  `multiplex:bind:<id>:<device>` line appears in
+  `Tools/dev-sshd/state/authorized_keys` and `sshd.log` then shows
+  `Accepted publickey` for that new key. ⚠ These are `DeckWindow` tasks, so
+  a launch that restores a **terminal-only** scene never runs them (the
+  deck never mounts — verified 2026-07-27); clear restored scene state with
+  `simctl uninstall` (plus `simctl keychain <udid> reset`, or the Keychain
+  mirror re-adopts the old host and the free host limit then blocks the
+  bind) before a headless bind run.
 - `MULTIPLEX_PRO_LOCKED=1` — DEBUG-only free-tier mode for headless gate and
   daily-meter verification. Unlike the Settings toggle it does not persist;
   combine it with `MULTIPLEX_AUTO_ATTACH=agent` and the `debug.agentchip`
@@ -277,6 +294,16 @@ headlessly; `SwiftTermView` logs each decision to the unified log
 SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
          Shell = real FleetWall + one ordered TerminalWindowRoute tab set
          a terminal window/shell = ordered tabs; each tab a TerminalRoute
+  BindController     Bind Host: the deck's INCOMING ghost tiles, enrollment,
+                     and the offline payload's key rotation. `.shared`
+                     (onOpenURL fires on every scene root); the mounted deck
+                     attaches HostStore + EntitlementStore
+    BindDiscovery    NWBrowser over `_multiplex-bind._tcp` while the deck is
+                     frontmost — no entitlement, no background socket
+    BindClient       one NWConnection running the sealed handshake
+    Bind* models     payload/TXT codec, CBOR subset, X25519+HKDF+ChaCha20
+                     channel, ed25519 OpenSSH keygen — pure, and pinned to
+                     the CLI's bytes by vendored vectors
   HostStore          hosts.json local cache; secrets + host records sync via
                      iCloud Keychain as synchronizable items (KeychainStore);
                      host records include per-host agent command configuration
@@ -694,6 +721,47 @@ views.
   "fix" it with a server-scoped `terminal-features` default (the same leak
   the per-host new-session conf documents). Full record + the verified
   experiment table: `local-plan/terminal-links.md`.
+- **A bound host is one the machine itself vouched for; the app's key goes
+  out, never a private key** (`Multiplex/Models/Bind/`,
+  `Multiplex/Services/Bind/`; protocol + shared vectors live in the
+  companion repo `github.com/multiplex-term/multiplex-cli`,
+  `spec/bind-v1.md`). `mpx bind` runs **on the machine being added** and
+  offers itself three ways — a terminal QR, the clipboard (platform tool
+  locally, OSC 52 over SSH so Universal Clipboard carries it), and a Bonjour
+  announcement — then the app generates an ed25519 keypair and the CLI
+  appends the **public** half to `authorized_keys`, marked in the key line's
+  own comment field (`multiplex:bind:<8 hex>:<device-slug>`, which is how
+  `mpx unbind` finds exactly what it enrolled). The OFFER also carries the
+  host's SSH key fingerprints into `Host.pinnedHostKeys`, so bound hosts
+  arrive with the data the TOFU ship-blocker needs (storage only today —
+  enforcement is its own change). Load-bearing details:
+  **the free host limit is checked before the handshake**, never after — a
+  key must not land in someone's `authorized_keys` for a host this tier
+  can't use; **a scanned/pasted/opened payload never auto-binds** (it is
+  attacker-suppliable, so `onOpenURL` only ever adds a tile the user
+  confirms, and `TerminalLink`'s allowlist keeps refusing `multiplex:` from
+  pane text — regression-tested both ways); **the machine's own address list
+  outranks wherever its bind listener answered** (`BindController.hostname`
+  — a Bonjour resolve reports the interface the *service* was found on,
+  while `mpx bind --addr` exists so a host behind NAT or a port forward can
+  name the address that actually works; the reached address wins only when
+  the machine also endorses it, which is both proven and stated — this bug
+  saved a host at an address its sshd never listened on, caught by the
+  harness 2026-07-27); and **the PIN path's proof is transcript-bound**
+  (HKDF over the PIN salted with both public keys, 3 attempts then the
+  session locks), while a wrong *token* closes silently because counting
+  128-bit guesses would only hand a LAN spammer a denial of service.
+  Discovery browses while the deck is frontmost **and** the fleet is
+  non-empty (or a bind surface is open): that is what makes "run the command
+  and glance at the deck" true, while a first launch with no hosts still
+  cannot raise the local-network prompt before the user asks. `--offline`
+  (a VPS the device can only reach over SSH) inverts the key direction —
+  the CLI ships a private key inside the payload — so the app **retires it
+  on the first connection**, enrolling a device-held key and deleting the
+  transported line by its exact key material (`BindRotationStore`, whose
+  command appends before it removes: a failure between the two steps must
+  leave a working key, never none). Free host plumbing, not an agent-helper
+  surface.
 - **A disabled host is one the app never dials on its own** (`Host.isEnabled`,
   deck rail menu / DISABLED tile / Host Settings → Monitoring): the wall skips
   it in `runFeed`, never asks `ConnectionHub` for its model (asking is what
