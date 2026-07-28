@@ -195,7 +195,13 @@ enum BindClient {
         }
 
         func cancel() {
-            connection.stateUpdateHandler = nil
+            // Leave the state handler installed: when a connect deadline
+            // fires, `connect()`'s continuation is still pending, and the
+            // `.cancelled` transition this triggers is what resumes it (the
+            // resume-once lock makes any later callback a no-op). Nil-ing
+            // the handler first orphaned that continuation — a permanently
+            // hung Task and a continuation-misuse warning per timed-out
+            // candidate address.
             connection.cancel()
         }
 

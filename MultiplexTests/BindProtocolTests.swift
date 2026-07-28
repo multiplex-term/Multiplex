@@ -322,6 +322,24 @@ struct BindProtocolTests {
         let encoded = BindCBOR.encode(.map([("bytes", .bytes(Data(repeating: 1, count: 32)))]))
         #expect(throws: (any Error).self) { try BindCBOR.decode(encoded.dropLast(4)) }
     }
+
+    /// A sealed frame's plaintext is still a peer's bytes: a header claiming
+    /// more than the input holds must throw, never trap in the Int
+    /// conversion or pre-allocate the claim.
+    @Test func cborRejectsLengthsLargerThanTheInput() {
+        // A byte string claiming 2⁶³ bytes, in a nine-byte input.
+        var hugeBytes = Data([0x5B])
+        hugeBytes.append(contentsOf: withUnsafeBytes(of: (UInt64(1) << 63).bigEndian, Array.init))
+        #expect(throws: (any Error).self) { try BindCBOR.decode(hugeBytes) }
+
+        // An array claiming four billion elements, in five bytes.
+        var hugeArray = Data([0x9A])
+        hugeArray.append(contentsOf: withUnsafeBytes(of: UInt32.max.bigEndian, Array.init))
+        #expect(throws: (any Error).self) { try BindCBOR.decode(hugeArray) }
+
+        // Text one byte longer than what follows it.
+        #expect(throws: (any Error).self) { try BindCBOR.decode(Data([0x62, 0x61])) }
+    }
 }
 
 // MARK: - Helpers

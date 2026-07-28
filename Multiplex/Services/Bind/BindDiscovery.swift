@@ -15,6 +15,10 @@ final class BindDiscovery {
     private(set) var announcements: [BindAnnouncement] = []
 
     @ObservationIgnored private var browser: NWBrowser?
+    /// Whether this browsing session already spent its one quiet rebuild —
+    /// without it a browser that fails on creation rebuilds itself in a
+    /// tight forever loop, since every replacement fails the same way.
+    @ObservationIgnored private var rebuiltOnce = false
     @ObservationIgnored private var endpoints: [String: NWEndpoint] = [:]
     @ObservationIgnored private let log = Logger(
         subsystem: "app.multiplexterm.multiplex", category: "bind"
@@ -24,6 +28,11 @@ final class BindDiscovery {
 
     func start() {
         guard browser == nil else { return }
+        rebuiltOnce = false
+        startBrowser()
+    }
+
+    private func startBrowser() {
         let parameters = NWParameters()
         parameters.includePeerToPeer = true
         let browser = NWBrowser(
@@ -41,16 +50,22 @@ final class BindDiscovery {
                 self?.apply(parsed)
             }
         }
-        browser.stateUpdateHandler = { [weak self] state in
+        browser.stateUpdateHandler = { [weak self, weak browser] state in
             if case .failed(let error) = state {
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
+                Task { @MainActor [weak self, weak browser] in
+                    // Only the browser this class still owns may react: a
+                    // stale failure racing a stop/start must not tear down
+                    // its healthy replacement.
+                    guard let self, let browser, self.browser === browser
+                    else { return }
                     self.log.debug("bind browser failed: \(String(describing: error))")
                     // One quiet rebuild; a second failure stays down until
                     // the surface toggles again.
-                    let wasBrowsing = self.browser != nil
                     self.stop()
-                    if wasBrowsing { self.start() }
+                    if !self.rebuiltOnce {
+                        self.rebuiltOnce = true
+                        self.startBrowser()
+                    }
                 }
             }
         }
