@@ -864,11 +864,17 @@ struct AddHostSheet: View {
     /// headless frame and the simulator cannot scroll (DEBUG capture only).
     private func scrollForVerificationIfRequested(_ proxy: ScrollViewProxy) async {
         #if DEBUG
-        guard ProcessInfo.processInfo.environment[
-            "MULTIPLEX_AUTO_HOST_SETTINGS"
-        ] == "models" else { return }
+        let environment = ProcessInfo.processInfo.environment
+        let target: String
+        if environment["MULTIPLEX_AUTO_HOST_SETTINGS"] == "models" {
+            target = "agent-models"
+        } else if environment["MULTIPLEX_AUTO_ADD_HOST"] == "bind-elsewhere" {
+            target = BindPane.elsewhereID
+        } else {
+            return
+        }
         try? await Task.sleep(for: .milliseconds(700))
-        withAnimation(nil) { proxy.scrollTo("agent-models", anchor: .top) }
+        withAnimation(nil) { proxy.scrollTo(target, anchor: .top) }
         #endif
     }
 

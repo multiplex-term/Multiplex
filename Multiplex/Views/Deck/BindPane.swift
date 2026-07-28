@@ -21,6 +21,10 @@ struct BindPane: View {
     @State private var showingScanner = false
     @State private var pasteFailed = false
 
+    /// Scroll anchor for the headless layout capture (the pane outruns one
+    /// sheet height and the simulator cannot scroll).
+    static let elsewhereID = "bind-elsewhere"
+
     private static let log = Logger(
         subsystem: "app.multiplexterm.multiplex", category: "bind"
     )
@@ -30,6 +34,7 @@ struct BindPane: View {
             machineSection
             incomingSection
             elsewhereSection
+                .id(Self.elsewhereID)
             footer
         }
         .task {
@@ -136,11 +141,26 @@ struct BindPane: View {
         TallyFormSection(
             "Somewhere else",
             detail: "A machine on another network — a VPS, a box behind a "
-                + "firewall — can't announce itself here. Scan or paste the "
-                + "code its terminal printed instead."
+                + "firewall — can't announce itself here. Scan the QR its "
+                + "terminal printed, or have it hand you the code."
         ) {
             TallyFormRow {
                 VStack(alignment: .leading, spacing: 10) {
+                    // Paste can only work if the machine was asked to copy,
+                    // so the flag is shown before the button rather than
+                    // leaving someone pressing one that cannot do anything.
+                    Text("Paste needs the code on this device's clipboard, and mpx never takes a clipboard unless you ask it to. Run it with --copy instead:")
+                        .font(.ui(11))
+                        .foregroundStyle(Theme.signal2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    CopyableCommandField(
+                        label: HostGuide.mpxBindCopy.label,
+                        command: HostGuide.mpxBindCopy.command
+                    )
+                    Text("Over SSH that uses OSC 52, so the code lands on your local terminal's clipboard and Universal Clipboard carries it here.")
+                        .font(.ui(10))
+                        .foregroundStyle(Theme.signal3)
+                        .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 10) {
                         #if !os(visionOS)
                         // visionOS App Store apps have no camera access, so

@@ -24,8 +24,12 @@ Then try any of these:
    Same pane, SOMEWHERE ELSE → SCAN QR, pointed at the code in the terminal.
 
 3. PASTE (any device, including Vision Pro)
-   SOMEWHERE ELSE → Paste. Over SSH the CLI copies the code to your *local*
-   terminal's clipboard, so Universal Clipboard carries it to your device.
+   Run it as `mpx bind --copy` — copying is opt-in now, since the code is
+   credential-grade and Universal Clipboard would spread it to every device
+   you're signed in to. The SOMEWHERE ELSE section shows that exact command
+   with a COPY button. Over SSH the CLI uses OSC 52, so the code lands on
+   your *local* terminal's clipboard and Universal Clipboard carries it to
+   your device; then press Paste.
 
 4. A MACHINE THAT ISN'T ON YOUR NETWORK (VPS, firewalled box)
    Run `mpx bind --offline` and scan/paste. Multiplex imports it, connects,

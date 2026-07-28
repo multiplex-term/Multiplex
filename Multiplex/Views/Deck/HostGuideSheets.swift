@@ -41,6 +41,14 @@ enum HostGuide {
 
     /// The one command the whole flow turns on.
     static let mpxBind = Command(label: "Then run", command: "mpx bind")
+
+    /// The clipboard is opt-in in the CLI — a bind payload is
+    /// credential-grade, and over Universal Clipboard it would land on every
+    /// signed-in device. So Paste can only work if the machine was asked to
+    /// copy, and the app has to say so rather than let someone press a
+    /// button that cannot do anything.
+    static let mpxBindCopy = Command(
+        label: "For paste", command: "mpx bind --copy")
 }
 
 /// A copyable command on a screen surface — monospace stays the data voice.

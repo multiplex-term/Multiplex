@@ -733,9 +733,14 @@ views.
   `Multiplex/Services/Bind/`; protocol + shared vectors live in the
   companion repo `github.com/multiplex-term/multiplex-cli`,
   `spec/bind-v1.md`). `mpx bind` runs **on the machine being added** and
-  offers itself three ways — a terminal QR, the clipboard (platform tool
-  locally, OSC 52 over SSH so Universal Clipboard carries it), and a Bonjour
-  announcement — then the app generates an ed25519 keypair and the CLI
+  offers itself three ways — a terminal QR, a Bonjour announcement, and
+  **opt-in** the clipboard (`mpx bind --copy`: platform tool locally, OSC 52
+  over SSH so Universal Clipboard carries it). Copying is a flag, not a
+  default, because the payload is credential-grade and Universal Clipboard
+  would put it on every signed-in device unasked; the Bind pane therefore
+  prints `mpx bind --copy` beside its Paste button rather than leaving
+  someone pressing one that cannot work. Then the app generates an ed25519
+  keypair and the CLI
   appends the **public** half to `authorized_keys`, marked in the key line's
   own comment field (`multiplex:bind:<8 hex>:<device-slug>`, which is how
   `mpx unbind` finds exactly what it enrolled). The OFFER also carries the

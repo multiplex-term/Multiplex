@@ -341,14 +341,16 @@ struct DeckWindow: View {
         showingSettings = true
     }
 
-    /// Launch with `MULTIPLEX_AUTO_ADD_HOST=bind|manual` to open the Add
-    /// Host modal on either road — the whole bind flow lives on its Bind
-    /// pane now, and the simulator cannot tap a choice bar. Bypasses the
-    /// free-tier gate deliberately: this captures layout, not entitlement.
+    /// Launch with `MULTIPLEX_AUTO_ADD_HOST=bind|bind-elsewhere|manual` to
+    /// open the Add Host modal on either road — the whole bind flow lives on
+    /// its Bind pane now, and the simulator cannot tap a choice bar.
+    /// `bind-elsewhere` also scrolls to the scan/paste section, which sits
+    /// below one sheet height. Bypasses the free-tier gate deliberately:
+    /// this captures layout, not entitlement.
     private func presentAddHostForVerificationIfRequested() {
-        guard ["bind", "manual"].contains(ProcessInfo.processInfo.environment[
-            "MULTIPLEX_AUTO_ADD_HOST"
-        ]) else { return }
+        guard ["bind", "bind-elsewhere", "manual"].contains(
+            ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ADD_HOST"]
+        ) else { return }
         addingHost = true
     }
 

@@ -228,7 +228,7 @@ bind() {
     # afterwards) and prints just the payload URL, ready for
     # MULTIPLEX_AUTO_BIND. Its transcript lands in state/bind.log.
     if [ "${1:-}" = "--print-only" ]; then
-        nohup "$CLI" "${args[@]}" --no-qr --no-copy > "$STATE/bind.log" 2>&1 &
+        nohup "$CLI" "${args[@]}" --no-qr > "$STATE/bind.log" 2>&1 &
         echo $! > "$STATE/bind.pid"
         local url=""
         for _ in $(seq 1 50); do
@@ -244,7 +244,10 @@ bind() {
         return
     fi
     echo "PIN is $MPX_BIND_TEST_PIN · enrolling into $STATE/authorized_keys"
-    "$CLI" "${args[@]}" --no-copy
+    # No --copy: the clipboard is opt-in, and a harness run has no
+    # business taking the developer's (or, via Universal Clipboard,
+    # their devices') clipboard.
+    "$CLI" "${args[@]}"
 }
 
 case "${1:-}" in
