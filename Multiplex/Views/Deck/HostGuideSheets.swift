@@ -30,13 +30,19 @@ enum HostGuide {
     /// Installing the companion CLI on the machine being bound. These are
     /// typed on a *remote* machine, so they exist to be copied out of the
     /// app — into a terminal, a note, a message — never run here.
+    ///
+    /// Both lines cover both platforms, which is why neither is labelled by
+    /// one. The script was Linux-only in the first pass; plenty of machines
+    /// worth binding are Macs reached over SSH with no Homebrew on them, and
+    /// the release ships darwin archives regardless. Homebrew leads because
+    /// it also handles upgrades.
     static let mpxInstall: [Command] = [
         Command(
-            label: "macOS (Homebrew)",
+            label: "Homebrew",
             command: "brew install multiplex-term/tap/mpx"),
         Command(
-            label: "Linux",
-            command: "curl -fsSL https://multiplexterm.dev/install | sh"),
+            label: "Or, macOS or Linux",
+            command: "curl -fsSL https://multiplexterm.dev/install-mpx-cli | sh"),
     ]
 
     /// The one command the whole flow turns on.

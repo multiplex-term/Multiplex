@@ -743,7 +743,18 @@ views.
   keypair and the CLI
   appends the **public** half to `authorized_keys`, marked in the key line's
   own comment field (`multiplex:bind:<8 hex>:<device-slug>`, which is how
-  `mpx unbind` finds exactly what it enrolled). The OFFER also carries the
+  `mpx unbind` finds exactly what it enrolled). **Distribution is three
+  repos**: source in `multiplex-term/multiplex-cli` (private until the app
+  ships), prebuilt archives in `multiplex-term/multiplex-cli-releases`, and
+  `multiplex-term/tap` for Homebrew — the split exists because both install
+  paths need *anonymous* downloads while the source stays closed. A `v*` tag
+  on the source repo builds four targets (musl x86_64/aarch64 statically
+  linked, darwin x86_64/aarch64), publishes them with a `SHA256SUMS`, and
+  opens a formula bump; it needs a cross-repo `RELEASE_TOKEN`, since
+  `GITHUB_TOKEN` cannot reach another repository. `multiplexterm.dev`
+  serves `/install-mpx-cli` (in the `multiplex-home` repo), which covers
+  **macOS as well as Linux** and refuses to install anything whose SHA-256
+  does not match the release's. The OFFER also carries the
   host's SSH key fingerprints into `Host.pinnedHostKeys`, so bound hosts
   arrive with the data the TOFU ship-blocker needs (storage only today —
   enforcement is its own change). Load-bearing details:

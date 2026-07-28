@@ -7,8 +7,8 @@ job is to notice it and confirm.
 
 The BIND pane hands you the install lines with COPY buttons — paste them into
 a terminal on that machine:
-  brew install multiplex-term/tap/mpx                  # macOS
-  curl -fsSL https://multiplexterm.dev/install | sh    # Linux
+  brew install multiplex-term/tap/mpx                        # macOS or Linux
+  curl -fsSL https://multiplexterm.dev/install-mpx-cli | sh  # macOS or Linux
   mpx bind
 
 Then try any of these:
