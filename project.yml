@@ -82,9 +82,10 @@ targets:
         NSLocalNetworkUsageDescription: Multiplex connects to SSH hosts on your local network, and finds machines offering to bind themselves to the app.
         # Bind Host discovery: the companion CLI (mpx bind) announces this
         # service while it is offering to pair, and the deck browses for it
-        # while it is frontmost (never in the background — same discipline as
-        # the probe feed). Bonjour needs no entitlement; the custom UDP
-        # beacon variant does (see local-plan/bind-host.md).
+        # while the Add Host sheet's Bind pane is open (never in the
+        # background — same discipline as the probe feed). Bonjour is the
+        # whole discovery mechanism and needs no entitlement, which is why
+        # this key is the only declaration binding requires.
         NSBonjourServices:
           - _multiplex-bind._tcp
         # The key rail's dictation key, offered in place of the software
