@@ -205,7 +205,17 @@ struct DeckWindow: View {
         // and run its flows.
         .task {
             bind.attach(store: store, entitlements: entitlements)
+            // A bind URL may have arrived before this deck mounted (a cold
+            // start straight into the link): put its candidate on screen.
+            presentBindSurfaceIfRequested()
             await bind.rotatePendingKeysIfNeeded()
+        }
+        // A `multiplex://b/…` URL only ever adds a candidate row; this is
+        // where the deck answers it, by opening the one modal the whole bind
+        // flow lives on so that row is visible and waiting for ENROLL.
+        .onChange(of: bind.wantsBindSurface) { _, wants in
+            guard wants else { return }
+            presentBindSurfaceIfRequested()
         }
         // Browsing runs only while the Add Host modal's Bind pane is on
         // screen — the wall has no bind surface, so nothing else consumes
@@ -339,6 +349,18 @@ struct DeckWindow: View {
         guard let request = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_SETTINGS"],
               ["1", "theme"].contains(request) else { return }
         showingSettings = true
+    }
+
+    /// Answers `BindController.wantsBindSurface` — a bind URL arrived, its
+    /// candidate row is in `pending`, and the Add Host modal (which opens on
+    /// its Bind pane) is where that row is visible and confirmable.
+    private func presentBindSurfaceIfRequested() {
+        guard bind.wantsBindSurface else { return }
+        bind.wantsBindSurface = false
+        // The URL's intent wins over an open edit sheet; both sheets on this
+        // view cannot present at once.
+        editingHost = nil
+        addingHost = true
     }
 
     /// Launch with `MULTIPLEX_AUTO_ADD_HOST=bind|bind-elsewhere|manual` to

@@ -760,10 +760,14 @@ views.
   enforcement is its own change). Load-bearing details:
   **the free host limit is checked before the handshake**, never after — a
   key must not land in someone's `authorized_keys` for a host this tier
-  can't use; **a scanned/pasted/opened payload never auto-binds** (it is
-  attacker-suppliable, so `onOpenURL` only ever adds a candidate the user
-  confirms, and `TerminalLink`'s allowlist keeps refusing `multiplex:` from
-  pane text — regression-tested both ways); **the machine's own address list
+  can't use; **a payload from outside the modal never auto-binds** — a
+  `multiplex://b/…` URL is attacker-suppliable, so `onOpenURL` goes through
+  `BindController.receive`, which only adds a candidate row and raises the
+  Bind pane for the user's explicit ENROLL (`TerminalLink`'s allowlist
+  keeps refusing `multiplex:` from pane text — regression-tested both
+  ways), while the pane's own scan/paste keep their auto-confirm: pointing
+  the camera at the machine's QR *is* the confirmation, and the machine
+  still asks `[Y/n]` on its own terminal; **the machine's own address list
   outranks wherever its bind listener answered** (`BindController.hostname`
   — a Bonjour resolve reports the interface the *service* was found on,
   while `mpx bind --addr` exists so a host behind NAT or a port forward can

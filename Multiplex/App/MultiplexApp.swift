@@ -188,9 +188,11 @@ private struct ExternalActionReceiver: ViewModifier {
             .onOpenURL { url in
                 // A bind URL is attacker-suppliable (a QR on a poster, a
                 // link in a message), so unlike a widget action it never
-                // executes: it only ever adds a tile the user confirms.
+                // executes: `receive` only adds a candidate row and asks the
+                // deck to present the Bind pane, where the user's ENROLL is
+                // the confirmation the URL itself never carries.
                 if let payload = BindPayload(url: url) {
-                    bind.submit(payload: payload)
+                    bind.receive(payload: payload)
                     if !bind.hasContext, supportsMultipleWindows {
                         openWindow(id: "deck", value: DeckWindowRoute.main)
                     }

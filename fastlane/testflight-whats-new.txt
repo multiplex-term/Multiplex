@@ -36,6 +36,10 @@ Then try any of these:
    and then quietly replaces that key with one it generates itself.
 
 Worth checking:
+- Tap a multiplex://b/ link outside the app (mpx bind prints one — put it in
+  Notes/Messages and tap it). The app must open Add Host on the BIND pane
+  with that machine listed and waiting for your ENROLL — a link must never
+  bind by itself.
 - Press Ctrl-C on the machine while its row is showing under ASKING TO BIND.
   The row should disappear within a few seconds — it should never sit there
   waiting for a PIN that nothing is listening for. (This needs the current

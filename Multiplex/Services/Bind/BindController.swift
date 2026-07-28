@@ -72,12 +72,15 @@ final class BindController {
     }
 
     private(set) var pending: [Pending] = []
-    /// Set when a bind lands, so the wall can show its receipt briefly.
-    private(set) var lastBound: (name: String, hostID: UUID)?
     /// A paste/scan that couldn't even be parsed, or a limit refusal.
     var alert: String?
     /// Raised when the free host limit blocks a bind.
     var needsProForHostLimit = false
+    /// Raised when a payload arrives from outside the Add Host modal (a
+    /// `multiplex://b/…` URL): the mounted deck answers by presenting the
+    /// modal on its Bind pane, so the candidate the URL added is on screen
+    /// waiting for the user's ENROLL rather than parked invisibly.
+    var wantsBindSurface = false
     /// Set by `BindPane` while it is on screen. The whole flow lives on that
     /// one surface now, so this is what discovery is for: nothing on the wall
     /// consumes announcements, and a device that never opens the pane never
@@ -182,7 +185,27 @@ final class BindController {
         submit(payload: payload)
     }
 
+    /// Scan and paste live inside the Bind pane, so the act that delivered
+    /// this payload — pointing the camera at the machine's own QR, pressing
+    /// Paste — IS the user's confirmation, and the bind runs at once.
     func submit(payload: BindPayload) {
+        guard let id = upsert(payload) else { return }
+        confirm(id: id)
+    }
+
+    /// A payload that arrived from *outside* the modal — a `multiplex://b/…`
+    /// URL another app opened. That input is attacker-suppliable (a QR on a
+    /// poster, a link in a message), so unlike scan/paste it never executes:
+    /// it only ever adds a candidate row, and asks the deck to put the Bind
+    /// pane on screen so the user's ENROLL there is the confirmation.
+    func receive(payload: BindPayload) {
+        _ = upsert(payload)
+        wantsBindSurface = true
+    }
+
+    /// Adds or refreshes the candidate row for a payload and answers its id,
+    /// or nil while that row is mid-enrollment and must not be replaced.
+    private func upsert(_ payload: BindPayload) -> String? {
         // The compact payload knows the machine's address but, on the
         // handshake path, not its SSH user or fingerprint — the OFFER brings
         // those a moment later, so the row shows what it actually knows.
@@ -200,14 +223,12 @@ final class BindController {
         )
         candidate.stage = .awaitingPIN
         if let index = pending.firstIndex(where: { $0.id == id }) {
-            guard !pending[index].isBusy else { return }
+            guard !pending[index].isBusy else { return nil }
             pending[index] = candidate
         } else {
             pending.append(candidate)
         }
-        // A token-authenticated payload needs no further proof: the user
-        // pointed the camera at it (or pasted it) — that IS the intent.
-        confirm(id: id)
+        return id
     }
 
     func setPIN(_ pin: String, for id: String) {
@@ -387,13 +408,11 @@ final class BindController {
             // the wall and can be fixed in Host Settings. Say what happened.
             log.debug("bind test connect failed: \(message, privacy: .public)")
             setStage(id: id, .failed("Bound, but the first connection failed: \(message)"))
-            lastBound = (host.name, host.id)
         }
     }
 
     private func markBound(id: String, host: Host) {
         setStage(id: id, .bound(hostID: host.id))
-        lastBound = (host.name, host.id)
         // The receipt is the row saying BOUND; drop it shortly after so the
         // list settles back to whatever is still asking.
         Task { [weak self] in
