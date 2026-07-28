@@ -99,10 +99,22 @@ struct AddHostSheet: View {
             ScrollView {
                 VStack(spacing: 18) {
                     if showsModeBar {
-                        TallyChoiceBar(
-                            [("Bind", Mode.bind), ("Manual", Mode.manual)],
-                            selection: $mode
-                        )
+                        VStack(alignment: .leading, spacing: 8) {
+                            TallyChoiceBar(
+                                [("Bind", Mode.bind), ("Manual", Mode.manual)],
+                                selection: $mode
+                            )
+                            // Neither word says what it costs you. BIND needs
+                            // something installed on the machine, which is
+                            // the one thing that can make it the wrong road —
+                            // so each caption names that and points at the
+                            // other.
+                            Text(modeDetail)
+                                .font(.ui(10))
+                                .foregroundStyle(Theme.signal2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 2)
+                        }
                     }
                     switch resolvedMode {
                     case .bind:
@@ -178,6 +190,18 @@ struct AddHostSheet: View {
     }
 
     private var title: String { editing == nil ? "Add Host" : "Host Settings" }
+
+    private var modeDetail: String {
+        switch resolvedMode {
+        case .bind:
+            "Run the mpx CLI on the machine you're adding and it offers "
+                + "itself — no address, user, or key to type here. Can't "
+                + "install it? Switch to MANUAL."
+        case .manual:
+            "Type the SSH destination yourself. Nothing to install on the "
+                + "machine."
+        }
+    }
 
     /// Editing an existing host is form-only; there is no machine to bind.
     private var showsModeBar: Bool { editing == nil }
