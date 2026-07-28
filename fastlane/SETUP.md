@@ -86,3 +86,22 @@ emailed invite. The lane is idempotent, and it disables a public link if one
 appears later. `beta external:true` runs it first, because pilot silently
 ignores a `groups:` name that does not exist yet; add `submit_review:false` to
 put the build in the group without starting Beta App Review.
+
+## 7. TestFlight Test Information
+
+```sh
+bundle exec fastlane testflight_info
+```
+
+The app-level record testers read in TestFlight: description
+(`fastlane/metadata/<locale>/beta_app_description.txt`), feedback email (the
+review contact), and the listing's marketing/privacy URLs. App Store Connect
+**requires the description before it will accept an external submission** —
+without it a build uploads and joins the group, then the submission fails with
+`Beta App Description is missing`. `beta external:true` pushes the same record
+before it archives anything, so this lane is only needed to update the text on
+its own, or to repair a submission that was blocked on it.
+
+pilot's own `beta_app_description` option is deliberately unused: it only
+patches locales that already exist, so on an app that never had Test
+Information it writes nothing at all.
