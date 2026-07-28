@@ -6,8 +6,8 @@ import os
 import notify
 #endif
 
-/// The bind flow's one owner: it gates discovery, holds the incoming binds
-/// the wall renders as ghost tiles, runs enrollment, and saves the host.
+/// The bind flow's one owner: it gates discovery, holds the candidates the
+/// Add Host modal's Bind pane renders, runs enrollment, and saves the host.
 /// Reachable as `.shared` because `onOpenURL` fires on every scene root
 /// (same reason `ExternalActionRouter` is shared); the mounted deck attaches
 /// the stores it needs, exactly like that router's context.
@@ -16,7 +16,7 @@ import notify
 final class BindController {
     static let shared = BindController()
 
-    /// One machine offering to bind — a ghost tile on the wall.
+    /// One machine offering to bind — a row in the Bind pane.
     struct Pending: Identifiable, Equatable {
         enum Source: Equatable {
             /// Heard on the local network; the PIN in its terminal proves it.
@@ -42,7 +42,7 @@ final class BindController {
         var fingerprint: String?
         var pin: String = ""
         var stage: Stage = .awaitingPIN
-        /// Cleared on success so a bound tile stops asking for anything.
+        /// Cleared on success so a bound row stops asking for anything.
         var needsPIN: Bool
 
         var isBusy: Bool {
@@ -59,7 +59,7 @@ final class BindController {
 
         var statusCaption: String {
             switch stage {
-            // Say what the tile is waiting for, not what it is going to be:
+            // Say what the row is waiting for, not what it is going to be:
             // this state is the machine asking, and the PIN is the answer.
             case .awaitingPIN: needsPIN ? "NEEDS PIN" : "READY"
             case .binding: "BINDING"
@@ -87,6 +87,10 @@ final class BindController {
 
     let discovery = BindDiscovery()
 
+    /// When each announcement id was first heard, kept across pane opens so
+    /// the staleness clock is the offer's age, not this pane session's.
+    @ObservationIgnored private var firstHeard: [String: Date] = [:]
+
     @ObservationIgnored private weak var store: HostStore?
     @ObservationIgnored private weak var entitlements: EntitlementStore?
     @ObservationIgnored private let rotations = BindRotationStore()
@@ -110,16 +114,16 @@ final class BindController {
     // MARK: Discovery lifecycle
 
     /// Started and stopped by the mounted deck, which owns the policy: while
-    /// it is frontmost and the fleet is non-empty (or a bind surface is
-    /// open), never in the background. This class only holds the browser.
+    /// the Bind pane is on screen or an enrollment is in flight, and never in
+    /// the background. This class only holds the browser.
     func beginDiscovery() {
         discovery.start()
     }
 
     func endDiscovery() {
         discovery.stop()
-        // Ghost tiles for machines we can no longer hear go with it, except
-        // ones mid-flight or already bound (their receipt stays put).
+        // Rows for machines we can no longer hear go with it, except ones
+        // mid-flight or already bound (their receipt stays put).
         pending.removeAll { candidate in
             guard case .discovered = candidate.source else { return false }
             if candidate.isBusy { return false }
@@ -128,10 +132,19 @@ final class BindController {
         }
     }
 
-    /// Folds the browser's current list into the ghost tiles, preserving any
-    /// PIN the user has already typed and any in-flight stage.
-    func syncDiscovered() {
-        let heard = discovery.announcements
+    /// Folds the browser's current list into the candidate rows, preserving
+    /// any PIN the user has already typed and any in-flight stage, and drops
+    /// offers too old to still be live (`BindOfferLifetime`). Also called on
+    /// a slow tick by the pane, because a stale record produces no browse
+    /// change to react to — that is exactly its problem.
+    func syncDiscovered(now: Date = Date()) {
+        for announcement in discovery.announcements where firstHeard[announcement.id] == nil {
+            firstHeard[announcement.id] = now
+        }
+        let heard = discovery.announcements.filter { announcement in
+            guard let since = firstHeard[announcement.id] else { return true }
+            return !BindOfferLifetime.isStale(firstHeard: since, now: now)
+        }
         var updated = pending
         for announcement in heard where !updated.contains(where: { $0.id == announcement.id }) {
             updated.append(Pending(
@@ -157,7 +170,7 @@ final class BindController {
 
     // MARK: Payload entry (scan, paste, URL)
 
-    /// A scanned/pasted/opened payload always lands as a tile the user
+    /// A scanned/pasted/opened payload always lands as a row the user
     /// confirms — never an automatic bind. Attacker-suppliable input gets
     /// the same confirmation as anything else.
     func submit(payloadText: String) {
@@ -172,7 +185,7 @@ final class BindController {
     func submit(payload: BindPayload) {
         // The compact payload knows the machine's address but, on the
         // handshake path, not its SSH user or fingerprint — the OFFER brings
-        // those a moment later, so the tile shows what it actually knows.
+        // those a moment later, so the row shows what it actually knows.
         let id = payload.isOffline
             ? "offline:\(payload.name):\(payload.offline?.sshUser ?? "")"
             : payload.spub.base64EncodedString()
@@ -212,11 +225,11 @@ final class BindController {
 
     func confirm(id: String) {
         guard let index = pending.firstIndex(where: { $0.id == id }) else {
-            log.debug("bind confirm: no pending tile for that offer")
+            log.debug("bind confirm: no pending row for that offer")
             return
         }
         guard pending[index].canSubmit else {
-            log.debug("bind confirm: tile not ready (needs its PIN, or already running)")
+            log.debug("bind confirm: row not ready (needs its PIN, or already running)")
             return
         }
         guard let store, let entitlements else {
@@ -381,8 +394,8 @@ final class BindController {
     private func markBound(id: String, host: Host) {
         setStage(id: id, .bound(hostID: host.id))
         lastBound = (host.name, host.id)
-        // The receipt is the tile turning real; drop the ghost shortly after
-        // so the wall settles into its ordinary composition.
+        // The receipt is the row saying BOUND; drop it shortly after so the
+        // list settles back to whatever is still asking.
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(4))
             self?.dismiss(id: id)
@@ -461,8 +474,8 @@ final class BindController {
         return name.isEmpty ? fallback : name
     }
 
-    /// What the ghost tile shows under the machine's name before a handshake
-    /// has told us anything more.
+    /// What the row shows under the machine's name before a handshake has
+    /// told us anything more.
     nonisolated static func addressSummary(for payload: BindPayload) -> String {
         let port = payload.offline?.sshPort
         let suffix = port.map { "ssh :\($0)" } ?? "ssh"
@@ -505,7 +518,7 @@ final class BindController {
     }
 
     #if DEBUG
-    /// Headless hooks — the simulator can neither scan a QR nor tap a tile:
+    /// Headless hooks — the simulator can neither scan a QR nor tap a row:
     ///   MULTIPLEX_AUTO_BIND=<multiplex://b/…>     submit a payload once
     ///   MULTIPLEX_BIND_AUTOPIN=<6 digits>         answer the first heard
     ///                                             machine with that PIN

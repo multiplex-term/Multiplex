@@ -771,7 +771,24 @@ views.
   handshake resolves its endpoint through the running browser), never in the
   background — in-flight specifically, not merely a non-empty candidate
   list, or one parked on FAILED would hold the browser open for the session
-  behind a closed modal. So the local-network prompt can only ever follow an explicit
+  behind a closed modal.
+  **A row retires when the machine withdraws its announcement**, and every
+  way `mpx bind` ends its own wait does exactly that — Ctrl-C included, as
+  of the CLI's `cancel` module: it has no goodbye-capable exit otherwise, so
+  SIGINT/SIGTERM only set a flag that the accept loop already polls, and the
+  session unwinds through `Announcer::stop()` like any other ending. Fix it
+  there, never here: a **network liveness probe was tried and rejected**
+  (2026-07-28). A Bonjour name resolves to every address the machine ever
+  answered on — vmnet aliases, and here a `.0` network address — so a
+  connect to a live offer intermittently timed out and deleted it, twice in
+  four runs, and a deleted row cannot come back. Deleting a live machine is
+  strictly worse than showing a dead one. What the app *does* do is the one
+  thing that cannot false-positive: `BindOfferLifetime` retires a row older
+  than the CLI's own `--expires` ceiling (600 s) plus a margin, which covers
+  the case no signal handler can — a machine killed outright, crashed, or
+  slept, whose orphaned record was measured still advertising half an hour
+  later. Keep that constant in step with the CLI's clamp, or move the
+  expiry into the TXT record. So the local-network prompt can only ever follow an explicit
   ADD HOST tap — but "run the command and glance at the deck" is
   deliberately no longer true; you glance at the modal. `--offline`
   (a VPS the device can only reach over SSH) inverts the key direction —

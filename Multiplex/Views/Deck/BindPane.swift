@@ -30,6 +30,16 @@ struct BindPane: View {
         .task {
             bind.bindSurfaceOpen = true
         }
+        // A machine killed outright never withdrew its announcement, so no
+        // browse change will ever retire that row — only its age can. Slow
+        // on purpose: this is arithmetic, not a network call.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled else { return }
+                bind.syncDiscovered()
+            }
+        }
         .onDisappear {
             // Enrollment outlives this pane (the controller owns the task and
             // saves the host either way), so the browser it needs for an

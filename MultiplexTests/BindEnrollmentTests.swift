@@ -207,4 +207,42 @@ struct BindEnrollmentTests {
         let old = try JSONDecoder().decode(Host.self, from: Data(legacy.utf8))
         #expect(old.pinnedHostKeys.isEmpty)
     }
+
+    // MARK: Offer staleness
+
+    /// The backstop for a machine killed outright: it never withdrew its
+    /// announcement, so only the offer's own maximum lifetime can retire the
+    /// row. The one thing this must never do is expire a live offer.
+    @Test func anOfferIsNeverExpiredWhileItCouldStillBeLive() {
+        let heard = Date(timeIntervalSince1970: 1_000_000)
+        // The CLI's own ceiling — an offer exactly at it is still valid.
+        #expect(!BindOfferLifetime.isStale(
+            firstHeard: heard,
+            now: heard.addingTimeInterval(BindOfferLifetime.maximumOffer)
+        ))
+        // And the margin past it, for discovery lag and clock skew.
+        #expect(!BindOfferLifetime.isStale(
+            firstHeard: heard,
+            now: heard.addingTimeInterval(
+                BindOfferLifetime.maximumOffer + BindOfferLifetime.margin)
+        ))
+        #expect(!BindOfferLifetime.isStale(firstHeard: heard, now: heard))
+    }
+
+    @Test func anOfferPastEveryPossibleDeadlineIsStale() {
+        let heard = Date(timeIntervalSince1970: 1_000_000)
+        let past = BindOfferLifetime.maximumOffer + BindOfferLifetime.margin + 1
+        #expect(BindOfferLifetime.isStale(
+            firstHeard: heard, now: heard.addingTimeInterval(past)))
+        #expect(BindOfferLifetime.isStale(
+            firstHeard: heard, now: heard.addingTimeInterval(86_400)))
+    }
+
+    /// A clock that moves backwards (NTP correction, timezone-adjacent
+    /// nonsense) must not retire a row that was just heard.
+    @Test func aBackwardsClockNeverExpiresAnything() {
+        let heard = Date(timeIntervalSince1970: 1_000_000)
+        #expect(!BindOfferLifetime.isStale(
+            firstHeard: heard, now: heard.addingTimeInterval(-3_600)))
+    }
 }

@@ -32,6 +32,10 @@ Then try any of these:
    and then quietly replaces that key with one it generates itself.
 
 Worth checking:
+- Press Ctrl-C on the machine while its row is showing under ASKING TO BIND.
+  The row should disappear within a few seconds — it should never sit there
+  waiting for a PIN that nothing is listening for. (This needs the current
+  mpx; older builds left the row behind.)
 - The deck itself has no bind chrome at all — no BIND chip, nothing above
   your fleet. The whole flow lives in that one sheet. Tell us if you miss
   a machine announcing itself while you're just looking at the wall.

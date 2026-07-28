@@ -71,7 +71,7 @@ final class BindDiscovery {
     }
 
     private func apply(_ results: [(BindAnnouncement, NWEndpoint)]) {
-        // Dedupe by session key — one machine, several interfaces, one tile.
+        // Dedupe by session key — one machine, several interfaces, one row.
         var seen: Set<String> = []
         var list: [BindAnnouncement] = []
         var map: [String: NWEndpoint] = [:]
