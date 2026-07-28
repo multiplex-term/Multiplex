@@ -1,27 +1,30 @@
 BIND A HOST — add a machine without typing anything
 
-New on the deck: a BIND chip beside + HOST, and a companion CLI that runs on
-the machine you want to add. No hostname, no user, no pasted key.
+Adding a host used to mean a hostname, a user, and a pasted key. Now press
++ HOST and the sheet opens on a new BIND road (MANUAL is the old form, one
+tap away). A companion CLI runs on the machine you want to add, and the app's
+job is to notice it and confirm.
 
-On the machine (macOS or Linux), install and run the CLI:
-  brew install multiplex-term/tap/mpx     # macOS
-  curl -fsSL https://multiplexterm.dev/install | sh   # Linux
+The BIND pane hands you the install lines with COPY buttons — paste them into
+a terminal on that machine:
+  brew install multiplex-term/tap/mpx                  # macOS
+  curl -fsSL https://multiplexterm.dev/install | sh    # Linux
   mpx bind
 
 Then try any of these:
 
 1. LOCAL NETWORK (works on Vision Pro — no camera needed)
-   Leave `mpx bind` running and just look at the deck. The machine appears
-   below your fleet under an amber INCOMING rail, as a dashed tile showing
-   its user, address, and SSH fingerprint. Type the 6-digit PIN the terminal
-   printed into the tile, press ENROLL, answer [Y/n] in the terminal — the
-   tile turns into a real monitor and starts showing live sessions.
+   Leave `mpx bind` running and watch the ASKING TO BIND section. The machine
+   appears there on its own, showing its user, address, and SSH fingerprint —
+   check those against the terminal. Type the 6-digit PIN the terminal
+   printed, press ENROLL, answer [Y/n] on the machine, and the host lands on
+   the deck already probing.
 
 2. SCAN THE QR (iPhone/iPad)
-   Press BIND → SCAN QR and point it at the code in the terminal.
+   Same pane, SOMEWHERE ELSE → SCAN QR, pointed at the code in the terminal.
 
 3. PASTE (any device, including Vision Pro)
-   Press BIND → Paste. Over SSH the CLI copies the code to your *local*
+   SOMEWHERE ELSE → Paste. Over SSH the CLI copies the code to your *local*
    terminal's clipboard, so Universal Clipboard carries it to your device.
 
 4. A MACHINE THAT ISN'T ON YOUR NETWORK (VPS, firewalled box)
@@ -29,6 +32,11 @@ Then try any of these:
    and then quietly replaces that key with one it generates itself.
 
 Worth checking:
+- The deck itself has no bind chrome at all — no BIND chip, nothing above
+  your fleet. The whole flow lives in that one sheet. Tell us if you miss
+  a machine announcing itself while you're just looking at the wall.
+- Multiplex only listens for machines while the BIND pane is open, so the
+  local-network permission prompt should never appear until you ask for it.
 - Your device's own key is what gets installed — no private key ever leaves
   the device on the normal path. `mpx unbind --list` shows exactly what was
   enrolled; `mpx unbind <id>` removes it.
@@ -37,3 +45,4 @@ Worth checking:
 - On the free tier, binding still respects the two-host limit — you should
   see the Pro paywall instead of a key being installed.
 - Declining in the terminal must leave your authorized_keys untouched.
+- Host Settings (editing a host you already have) should show no BIND bar.

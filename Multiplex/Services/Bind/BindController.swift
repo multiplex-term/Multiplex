@@ -78,6 +78,12 @@ final class BindController {
     var alert: String?
     /// Raised when the free host limit blocks a bind.
     var needsProForHostLimit = false
+    /// Set by `BindPane` while it is on screen. The whole flow lives on that
+    /// one surface now, so this is what discovery is for: nothing on the wall
+    /// consumes announcements, and a device that never opens the pane never
+    /// raises the local-network prompt. The mounted deck still owns the
+    /// browser's lifecycle and reads this as one of its inputs.
+    var bindSurfaceOpen = false
 
     let discovery = BindDiscovery()
 
@@ -513,7 +519,13 @@ final class BindController {
         notify_register_dispatch(
             "app.multiplexterm.multiplex.debug.bind", &token, .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.beginDiscovery() }
+            MainActor.assumeIsolated {
+                // Stand in for the Bind pane being on screen, so the deck's
+                // own lifecycle task keeps the browser up instead of tearing
+                // it down on its next evaluation.
+                self?.bindSurfaceOpen = true
+                self?.beginDiscovery()
+            }
         }
     }
 
@@ -532,6 +544,10 @@ final class BindController {
             return
         }
         guard let autoPIN else { return }
+        // Same stand-in as the notification hook: the pane is what discovery
+        // serves now, and the deck's lifecycle task would otherwise stop the
+        // browser out from under this walk.
+        bindSurfaceOpen = true
         beginDiscovery()
         for _ in 0..<60 {
             syncDiscovered()

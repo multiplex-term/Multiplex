@@ -26,6 +26,21 @@ enum HostGuide {
     /// in any shell on the host, then restart the signed-out agent.
     static let keychainUnlock = Command(
         command: "security unlock-keychain ~/Library/Keychains/login.keychain-db")
+
+    /// Installing the companion CLI on the machine being bound. These are
+    /// typed on a *remote* machine, so they exist to be copied out of the
+    /// app — into a terminal, a note, a message — never run here.
+    static let mpxInstall: [Command] = [
+        Command(
+            label: "macOS (Homebrew)",
+            command: "brew install multiplex-term/tap/mpx"),
+        Command(
+            label: "Linux",
+            command: "curl -fsSL https://multiplexterm.dev/install | sh"),
+    ]
+
+    /// The one command the whole flow turns on.
+    static let mpxBind = Command(label: "Then run", command: "mpx bind")
 }
 
 /// A copyable command on a screen surface — monospace stays the data voice.

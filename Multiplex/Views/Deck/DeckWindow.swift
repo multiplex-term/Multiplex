@@ -150,7 +150,6 @@ struct DeckWindow: View {
     @State private var showingFAQ = false
     @State private var showingPaywall = false
     @State private var showingLocalNetworkAlert = false
-    @State private var showingBind = false
 
     private struct LocalNetworkCheckID: Hashable {
         let hosts: [Host]
@@ -160,9 +159,8 @@ struct DeckWindow: View {
     /// What makes bind discovery start or stop. Any of these changing
     /// re-evaluates the browser exactly once.
     private struct BindBrowseID: Hashable {
-        let sheet: Bool
-        let pending: Bool
-        let hasHosts: Bool
+        let surface: Bool
+        let inFlight: Bool
         let active: Bool
     }
 
@@ -175,8 +173,7 @@ struct DeckWindow: View {
             addHost: requestAddHost,
             editHost: { editingHost = $0 },
             openSettings: { showingSettings = true },
-            openFAQ: { showingFAQ = true },
-            openBind: { showingBind = true }
+            openFAQ: { showingFAQ = true }
         )
         // Explicitly bridge Observation environments across the scene sheet
         // boundary. iOS 27 can otherwise present this sheet from the shell's
@@ -185,41 +182,17 @@ struct DeckWindow: View {
             AddHostSheet()
                 .environment(store)
                 .environment(entitlements)
+                .environment(bind)
         }
         .sheet(item: $editingHost) { host in
             AddHostSheet(editing: host)
                 .environment(store)
                 .environment(entitlements)
+                .environment(bind)
         }
         .sheet(isPresented: $showingSettings) { SettingsView() }
         .sheet(isPresented: $showingFAQ) { FAQView() }
         .sheet(isPresented: $showingPaywall) { ProPaywallView() }
-        .sheet(isPresented: $showingBind) {
-            BindSheet(addHostManually: requestAddHost)
-                .environment(bind)
-                .environment(store)
-        }
-        .alert(
-            "Bind Code Not Recognized",
-            isPresented: Binding(
-                get: { bind.alert != nil },
-                set: { if !$0 { bind.alert = nil } }
-            ),
-            presenting: bind.alert
-        ) { _ in
-            Button("OK", role: .cancel) {}
-        } message: { message in
-            Text(message)
-        }
-        // Binding creates a host, so it meets the same free-tier limit the
-        // Add Host flow does — refused before anything is enrolled on the
-        // machine, never after.
-        .onChange(of: bind.needsProForHostLimit) { _, needsPro in
-            guard needsPro else { return }
-            bind.needsProForHostLimit = false
-            showingBind = false
-            showingPaywall = true
-        }
         .alert("Local Network Access Is Off", isPresented: $showingLocalNetworkAlert) {
             Button("Open Settings") { openAppSettings() }
             Button("Not Now", role: .cancel) {}
@@ -234,25 +207,26 @@ struct DeckWindow: View {
             bind.attach(store: store, entitlements: entitlements)
             await bind.rotatePendingKeysIfNeeded()
         }
-        // Browsing runs while the deck is frontmost — that is what makes the
-        // promise true: run `mpx bind` on a machine and its tile appears on
-        // the wall without anyone opening anything first. Same discipline as
-        // the probe feed (foreground only, never a background socket).
+        // Browsing runs only while the Add Host modal's Bind pane is on
+        // screen — the wall has no bind surface, so nothing else consumes
+        // announcements — and never in the background. An enrollment already
+        // in flight keeps it up regardless of what is showing: the handshake
+        // resolves its endpoint through the live browser. Deliberately
+        // in-flight and not merely non-empty — a candidate parked on FAILED
+        // or waiting for its PIN would otherwise hold the browser open for
+        // the rest of the session behind a closed modal.
         //
-        // A fleet owner is already reaching the local network for probes, so
-        // this asks nothing new of them. On a wall with no hosts yet it stays
-        // off until the user opens BIND themselves, so a first launch cannot
-        // raise the local-network prompt before the user has asked for
-        // anything.
+        // Scoping it this tightly also means the local-network prompt can
+        // only ever follow an explicit tap on ADD HOST, on any launch.
         .task(
             id: BindBrowseID(
-                sheet: showingBind,
-                pending: !bind.pending.isEmpty,
-                hasHosts: !store.hosts.isEmpty,
+                surface: bind.bindSurfaceOpen,
+                inFlight: bind.pending.contains(where: \.isBusy),
                 active: scenePhase == .active
             )
         ) {
-            let wanted = showingBind || !bind.pending.isEmpty || !store.hosts.isEmpty
+            let wanted = bind.bindSurfaceOpen
+                || bind.pending.contains(where: \.isBusy)
             if scenePhase == .active && wanted {
                 bind.beginDiscovery()
             } else {
@@ -325,6 +299,7 @@ struct DeckWindow: View {
         .task { presentPaywallForReviewCaptureIfRequested() }
         .task { presentSettingsForVerificationIfRequested() }
         .task { presentFAQForVerificationIfRequested() }
+        .task { presentAddHostForVerificationIfRequested() }
         .task { await presentHostSettingsForVerificationIfRequested() }
         .task {
             await DeckScene.autoAttachIfRequested(
@@ -364,6 +339,17 @@ struct DeckWindow: View {
         guard let request = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_SETTINGS"],
               ["1", "theme"].contains(request) else { return }
         showingSettings = true
+    }
+
+    /// Launch with `MULTIPLEX_AUTO_ADD_HOST=bind|manual` to open the Add
+    /// Host modal on either road — the whole bind flow lives on its Bind
+    /// pane now, and the simulator cannot tap a choice bar. Bypasses the
+    /// free-tier gate deliberately: this captures layout, not entitlement.
+    private func presentAddHostForVerificationIfRequested() {
+        guard ["bind", "manual"].contains(ProcessInfo.processInfo.environment[
+            "MULTIPLEX_AUTO_ADD_HOST"
+        ]) else { return }
+        addingHost = true
     }
 
     /// Launch with `MULTIPLEX_AUTO_FAQ=1` to open the deck's FAQ sheet for

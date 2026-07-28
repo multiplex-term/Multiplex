@@ -108,12 +108,19 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   process, log under category `bind`, and the proof is host-side: a
   `multiplex:bind:<id>:<device>` line appears in
   `Tools/dev-sshd/state/authorized_keys` and `sshd.log` then shows
-  `Accepted publickey` for that new key. ⚠ These are `DeckWindow` tasks, so
-  a launch that restores a **terminal-only** scene never runs them (the
-  deck never mounts — verified 2026-07-27); clear restored scene state with
-  `simctl uninstall` (plus `simctl keychain <udid> reset`, or the Keychain
-  mirror re-adopts the old host and the free host limit then blocks the
-  bind) before a headless bind run.
+  `Accepted publickey` for that new key. Neither needs the Bind pane open —
+  they set `bindSurfaceOpen` themselves, which is what keeps the deck's
+  lifecycle task from stopping the browser under them. ⚠ These are
+  `DeckWindow` tasks, so a launch that restores a **terminal-only** scene
+  never runs them (the deck never mounts — verified 2026-07-27); clear
+  restored scene state with `simctl uninstall` (plus `simctl keychain
+  <udid> reset`, or the Keychain mirror re-adopts the old host and the free
+  host limit then blocks the bind) before a headless bind run.
+- `MULTIPLEX_AUTO_ADD_HOST=bind|manual` — opens the Add Host modal on either
+  road (the simulator cannot tap its choice bar) for layout capture. Bypasses
+  the free-tier add gate deliberately: this captures layout, not entitlement.
+  Pair `bind` with `harness.sh bind --print-only` to photograph a real
+  candidate row waiting for its PIN.
 - `MULTIPLEX_PRO_LOCKED=1` — DEBUG-only free-tier mode for headless gate and
   daily-meter verification. Unlike the Settings toggle it does not persist;
   combine it with `MULTIPLEX_AUTO_ATTACH=agent` and the `debug.agentchip`
@@ -294,12 +301,12 @@ headlessly; `SwiftTermView` logs each decision to the unified log
 SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
          Shell = real FleetWall + one ordered TerminalWindowRoute tab set
          a terminal window/shell = ordered tabs; each tab a TerminalRoute
-  BindController     Bind Host: the deck's INCOMING ghost tiles, enrollment,
-                     and the offline payload's key rotation. `.shared`
-                     (onOpenURL fires on every scene root); the mounted deck
-                     attaches HostStore + EntitlementStore
-    BindDiscovery    NWBrowser over `_multiplex-bind._tcp` while the deck is
-                     frontmost — no entitlement, no background socket
+  BindController     Bind Host: the candidates Add Host ▸ BIND renders,
+                     enrollment, and the offline payload's key rotation.
+                     `.shared` (onOpenURL fires on every scene root); the
+                     mounted deck attaches HostStore + EntitlementStore
+    BindDiscovery    NWBrowser over `_multiplex-bind._tcp` while the Bind
+                     pane is open — no entitlement, no background socket
     BindClient       one NWConnection running the sealed handshake
     Bind* models     payload/TXT codec, CBOR subset, X25519+HKDF+ChaCha20
                      channel, ed25519 OpenSSH keygen — pure, and pinned to
@@ -738,7 +745,7 @@ views.
   **the free host limit is checked before the handshake**, never after — a
   key must not land in someone's `authorized_keys` for a host this tier
   can't use; **a scanned/pasted/opened payload never auto-binds** (it is
-  attacker-suppliable, so `onOpenURL` only ever adds a tile the user
+  attacker-suppliable, so `onOpenURL` only ever adds a candidate the user
   confirms, and `TerminalLink`'s allowlist keeps refusing `multiplex:` from
   pane text — regression-tested both ways); **the machine's own address list
   outranks wherever its bind listener answered** (`BindController.hostname`
@@ -751,10 +758,22 @@ views.
   (HKDF over the PIN salted with both public keys, 3 attempts then the
   session locks), while a wrong *token* closes silently because counting
   128-bit guesses would only hand a LAN spammer a denial of service.
-  Discovery browses while the deck is frontmost **and** the fleet is
-  non-empty (or a bind surface is open): that is what makes "run the command
-  and glance at the deck" true, while a first launch with no hosts still
-  cannot raise the local-network prompt before the user asks. `--offline`
+  **The whole flow is one modal**: Add Host opens on a BIND | MANUAL choice
+  bar (`AddHostSheet.Mode`), BIND first, and `BindPane` carries the install
+  commands, the machines heard, scan/paste, and the PIN. The deck has no
+  bind surface at all — no BIND chip, no INCOMING rail, no ghost tiles (all
+  three shipped first and were withdrawn 2026-07-28: half the flow sat on
+  the wall asking for a PIN while the other half, in a separate sheet,
+  explained what a PIN was). Editing a host shows no bar — there is nothing
+  to bind. Discovery follows from that: `BindPane` sets
+  `BindController.bindSurfaceOpen`, the mounted deck still owns begin/end
+  and browses while that flag **or** an enrollment is in flight (the
+  handshake resolves its endpoint through the running browser), never in the
+  background — in-flight specifically, not merely a non-empty candidate
+  list, or one parked on FAILED would hold the browser open for the session
+  behind a closed modal. So the local-network prompt can only ever follow an explicit
+  ADD HOST tap — but "run the command and glance at the deck" is
+  deliberately no longer true; you glance at the modal. `--offline`
   (a VPS the device can only reach over SSH) inverts the key direction —
   the CLI ships a private key inside the payload — so the app **retires it
   on the first connection**, enrolling a device-held key and deleting the

@@ -136,7 +136,6 @@ struct FleetWall: View {
     @Environment(ConnectionHub.self) private var hub
     @Environment(NetworkChangeMonitor.self) private var networkChanges
     @Environment(TerminalWorkspace.self) private var workspace
-    @Environment(BindController.self) private var bind
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -154,7 +153,6 @@ struct FleetWall: View {
     var editHost: (Host) -> Void
     var openSettings: () -> Void
     var openFAQ: () -> Void
-    var openBind: () -> Void
 
     @State private var namingHost: Host?
     @State private var deleteTarget: DeleteTarget?
@@ -338,12 +336,6 @@ struct FleetWall: View {
                         }
                     }
                 }
-                // Machines offering to bind land below the fleet: the wall
-                // grows one provisional monitor each, which is where the
-                // whole flow happens.
-                if !bind.pending.isEmpty {
-                    incomingSection(columns: columns)
-                }
             }
             .frame(
                 maxWidth: .infinity,
@@ -482,9 +474,6 @@ struct FleetWall: View {
             ChassisChip("HOST", systemImage: "plus", action: addHost)
                 .fixedSize()
                 .accessibilityLabel("Add host")
-            ChassisChip("BIND", systemImage: "qrcode", action: openBind)
-                .fixedSize()
-                .accessibilityLabel("Bind a host")
             ChassisChip("FAQ", systemImage: "questionmark", action: openFAQ)
                 .fixedSize()
                 .accessibilityLabel("Frequently asked questions")
@@ -511,8 +500,6 @@ struct FleetWall: View {
                     .minimumScaleFactor(0.75)
                 ChassisChip("", systemImage: "plus", action: addHost)
                     .accessibilityLabel("Add host")
-                ChassisChip("", systemImage: "qrcode", action: openBind)
-                    .accessibilityLabel("Bind a host")
                 ChassisChip("", systemImage: "questionmark", action: openFAQ)
                     .accessibilityLabel("Frequently asked questions")
                 ChassisChip("", systemImage: "gearshape", action: openSettings)
@@ -534,8 +521,6 @@ struct FleetWall: View {
                     .font(.mono(11))
                     .foregroundStyle(Theme.signal2)
                 ChassisChip("HOST", systemImage: "plus", action: addHost)
-                ChassisChip("BIND", systemImage: "qrcode", action: openBind)
-                    .accessibilityLabel("Bind a host")
                 ChassisChip("FAQ", systemImage: "questionmark", action: openFAQ)
                     .accessibilityLabel("Frequently asked questions")
                 ChassisChip("SETTINGS", systemImage: "gearshape", action: openSettings)
@@ -562,9 +547,6 @@ struct FleetWall: View {
             ChassisChip(iconOnly ? "" : "HOST", systemImage: "plus", action: addHost)
                 .fixedSize()
                 .accessibilityLabel("Add host")
-            ChassisChip(iconOnly ? "" : "BIND", systemImage: "qrcode", action: openBind)
-                .fixedSize()
-                .accessibilityLabel("Bind a host")
             ChassisChip(
                 iconOnly ? "" : "FAQ",
                 systemImage: "questionmark",
@@ -603,7 +585,11 @@ struct FleetWall: View {
                     Text("Every tmux session, its own window in space.")
                         .font(.footnote)
                         .foregroundStyle(Theme.signal2)
-                    Text(verbatim: "run  mpx bind  on any machine")
+                    // Not "run mpx bind" any more: the wall no longer hears
+                    // anything on its own, so pointing at the command here
+                    // would promise a tile that never arrives. Point at the
+                    // door the command is behind instead.
+                    Text(verbatim: "add host  ▸  bind  or  manual")
                         .font(.mono(10))
                         .foregroundStyle(Theme.signal3)
                 }
@@ -612,11 +598,7 @@ struct FleetWall: View {
             HStack(spacing: 8) {
                 ChassisLabel("No hosts", size: 12, color: Theme.signal3)
                 Spacer(minLength: 4)
-                // Binding is the shorter road onto an empty wall — run one
-                // command on the machine and it appears here — so it leads.
-                ChassisChip("BIND", systemImage: "qrcode", prominent: true, action: openBind)
-                    .accessibilityLabel("Bind a host")
-                ChassisChip("ADD HOST", systemImage: "plus", action: addHost)
+                ChassisChip("ADD HOST", systemImage: "plus", prominent: true, action: addHost)
             }
             .padding(.horizontal, 7)
             .padding(.vertical, 8)
@@ -642,57 +624,6 @@ struct FleetWall: View {
             tiles(host, model: model, columns: columns)
         }
         .padding(.bottom, 22)
-    }
-
-    /// The INCOMING rail and its ghost tiles: machines heard on the network
-    /// (or scanned/pasted) that are asking to join the fleet. Caution voice,
-    /// never tally red — nothing here is live yet — and the rail carries the
-    /// provenance so an unexpected tile can never be mistaken for a host the
-    /// user already had.
-    private func incomingSection(columns: [GridItem]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: presentation == .shellRail ? 8 : 10) {
-                Rectangle().fill(Theme.bezel).frame(height: 1)
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    ChassisLabel(
-                        "Incoming",
-                        size: presentation == .shellRail ? 11 : 12,
-                        color: Theme.caution
-                    )
-                    Text(incomingProvenance)
-                        .font(.mono(presentation == .shellRail ? 9.5 : 11))
-                        .foregroundStyle(Theme.signal2)
-                        .lineLimit(2)
-                    Spacer(minLength: 4)
-                }
-            }
-            LazyVGrid(
-                columns: columns,
-                alignment: gridAlignment,
-                spacing: FleetTileGridSizing.gutter
-            ) {
-                ForEach(bind.pending) { candidate in
-                    BindTile(
-                        pending: candidate,
-                        compact: presentation == .shellRail,
-                        setPIN: { bind.setPIN($0, for: candidate.id) },
-                        confirm: { bind.confirm(id: candidate.id) },
-                        dismiss: { bind.dismiss(id: candidate.id) }
-                    )
-                }
-            }
-        }
-        .padding(.bottom, 22)
-    }
-
-    private var incomingProvenance: String {
-        let discovered = bind.pending.contains {
-            if case .discovered = $0.source { return true }
-            return false
-        }
-        return discovered
-            ? "heard on your network · confirm with the PIN in its terminal"
-            : "from a scanned or pasted bind code"
     }
 
     /// A host the user switched off keeps its rail — it is still part of the
