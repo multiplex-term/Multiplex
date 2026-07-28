@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import os
 #if !os(visionOS)
 import VisionKit
 #endif
@@ -19,6 +20,10 @@ struct BindPane: View {
 
     @State private var showingScanner = false
     @State private var pasteFailed = false
+
+    private static let log = Logger(
+        subsystem: "app.multiplexterm.multiplex", category: "bind"
+    )
 
     var body: some View {
         VStack(spacing: 18) {
@@ -152,6 +157,12 @@ struct BindPane: View {
                         // hold a key. The system styling is the cost of not
                         // prompting.
                         PasteButton(payloadType: String.self) { strings in
+                            // Logged unconditionally so the absence of this
+                            // line is itself the diagnosis: no entry means the
+                            // control never fired (something above it ate the
+                            // touch), rather than a payload it disliked.
+                            Self.log.debug(
+                                "bind paste control delivered \(strings.count) item(s)")
                             guard let text = strings.first else { return }
                             Task { @MainActor in accept(text) }
                         }
@@ -181,6 +192,7 @@ struct BindPane: View {
 
     private func accept(_ text: String) {
         guard BindPayload(string: text) != nil else {
+            Self.log.debug("bind paste rejected (\(text.count) chars)")
             pasteFailed = true
             return
         }

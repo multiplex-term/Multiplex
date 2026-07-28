@@ -115,10 +115,6 @@ struct AddHostSheet: View {
                 .padding(18)
                 .frame(maxWidth: .infinity)
             }
-            // A tap on the chassis outside any field drops keyboard focus.
-            // Fields, chips, and switches claim their own taps, so this only
-            // fires on inert ground and never fights a control.
-            .onTapGesture(perform: unfocusInputs)
             .task { await scrollForVerificationIfRequested(proxy) }
             .task { openBindPaneForVerificationIfRequested() }
             .chassisSheetGround()
@@ -201,6 +197,21 @@ struct AddHostSheet: View {
                 .id("agent-models")
             transportSection
         }
+        // A tap on the chassis outside any field drops keyboard focus.
+        // SwiftUI fields, chips, and switches claim their own taps, so this
+        // only fires on inert ground.
+        //
+        // Scoped to this form on purpose — it used to sit on the whole scroll
+        // view, which put a `UITapGestureRecognizer` above the Bind pane's
+        // `PasteButton`. That is UIKit's `UIPasteControl`, a plain `UIControl`
+        // whose touch tracking an ancestor recognizer cancels, so the button
+        // rendered enabled and did nothing when pressed (user-reported).
+        // SwiftUI's own controls are unaffected because SwiftUI arbitrates
+        // its gestures internally; a hosted UIKit control is the odd one out.
+        // The Bind pane wants no such gesture anyway: its only input is the
+        // PIN field.
+        .contentShape(Rectangle())
+        .onTapGesture(perform: unfocusInputs)
     }
 
     // MARK: Form sections
