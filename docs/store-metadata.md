@@ -33,6 +33,9 @@ The canonical localized listing copy is stored in
 - platform-specific `release_notes_ios.txt` and
   `release_notes_visionos.txt` in each locale;
 - support, marketing, and privacy URLs;
+- `beta_app_description.txt` — TestFlight's Test Information, the tester-facing
+  description, pushed by `testflight_info` and by `beta external:true` (not an
+  App Store field; `deliver` ignores it);
 - categories and copyright in [`fastlane/metadata/`](../fastlane/metadata/);
 - App Review contact/demo flow in
   [`fastlane/metadata/review_information/`](../fastlane/metadata/review_information/).
@@ -219,6 +222,7 @@ can still be permission-gated or require App Store Connect UI work.
 | App listing metadata and review notes | `bundle exec fastlane store_metadata` (both platform versions by default; optional `platform:ios\|visionos`) |
 | Public App Store screenshots | `bundle exec fastlane store_screenshots` |
 | iOS (iPhone + iPad) + visionOS TestFlight binaries | `bundle exec fastlane beta` |
+| TestFlight Test Information (beta app description, feedback email, URLs) | `bundle exec fastlane testflight_info` (also pushed by `beta external:true`) |
 | IAP metadata and IAP review screenshot | Already configured; manual ASC or custom Spaceship/API for future changes |
 | App Privacy questionnaire | App Store Connect UI |
 | Age Rating questionnaire | App Store Connect UI |

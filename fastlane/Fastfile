@@ -12,6 +12,7 @@
 #   bundle exec fastlane store_metadata platform:visionos
 #   bundle exec fastlane store_screenshots     # push fastlane/screenshots → App Store Connect
 #   bundle exec fastlane testflight_group      # create/verify the external group
+#   bundle exec fastlane testflight_info       # push TestFlight Test Information
 #
 # The Xcode project is XcodeGen-generated: every lane regenerates it first, so
 # lanes work from a clean checkout. Build numbers use YYYYMMDDN, where N is
@@ -133,17 +134,20 @@ BETA_REVIEW_INFORMATION = {
   notes:         :notes,
 }.freeze
 
-def app_review_information
-  REVIEW_INFORMATION.each_with_object({}) do |(key, env_key), info|
-    path = File.expand_path("metadata/review_information/#{key}.txt", __dir__)
-    value = File.exist?(path) ? File.read(path).strip : ""
-    value = ENV.fetch(env_key, "").strip if value.empty? && env_key
-    if value.empty?
-      hint = env_key ? " (or set #{env_key} in fastlane/.env)" : ""
-      UI.user_error!("Review information is missing: write #{path}#{hint}")
-    end
-    info[key] = value
+def review_value(key)
+  env_key = REVIEW_INFORMATION.fetch(key)
+  path = File.expand_path("metadata/review_information/#{key}.txt", __dir__)
+  value = File.exist?(path) ? File.read(path).strip : ""
+  value = ENV.fetch(env_key, "").strip if value.empty? && env_key
+  if value.empty?
+    hint = env_key ? " (or set #{env_key} in fastlane/.env)" : ""
+    UI.user_error!("Review information is missing: write #{path}#{hint}")
   end
+  value
+end
+
+def app_review_information
+  REVIEW_INFORMATION.keys.each_with_object({}) { |key, info| info[key] = review_value(key) }
 end
 
 def beta_review_info
@@ -155,15 +159,89 @@ def beta_review_info
   info
 end
 
+def locale_metadata(locale, key)
+  path = File.expand_path("metadata/#{locale}/#{key}.txt", __dir__)
+  return nil unless File.exist?(path)
+
+  value = File.read(path).strip
+  value.empty? ? nil : value
+end
+
+# TestFlight's Test Information: the app-level description testers read, plus
+# the feedback address. App Store Connect **requires** the description before
+# it will accept an external submission — a build uploads and lands in the
+# group fine without it, then the Beta App Review submission fails with
+# "Beta App Description is missing", which is what an unset record looks like.
+#
+# Locale-keyed on purpose, matching pilot's `localized_app_info`. Its flat
+# `beta_app_description`/`beta_app_feedback_email` options only PATCH
+# localizations that already exist, so on an app whose Test Information has
+# never been set they iterate an empty list and silently write nothing.
+#
+# The feedback address is the review contact record, so a tester and a
+# reviewer can never be told to write to different places; the URLs are the
+# listing's own. Only the description is a file of its own.
+def beta_test_information
+  pattern = File.expand_path("metadata/*/beta_app_description.txt", __dir__)
+  paths = Dir.glob(pattern).sort
+  UI.user_error!("No TestFlight description found (expected #{pattern})") if paths.empty?
+
+  email = review_value(:email_address)
+  paths.each_with_object({}) do |path, info|
+    body = File.read(path).strip
+    UI.user_error!("TestFlight description is empty: #{path}") if body.empty?
+
+    locale = File.basename(File.dirname(path))
+    info[locale] = {
+      description: body,
+      feedback_email: email,
+      marketing_url: locale_metadata(locale, "marketing_url"),
+      privacy_policy_url: locale_metadata(locale, "privacy_url"),
+    }.compact
+  end
+end
+
+# Written straight through Spaceship rather than handed to pilot, so one code
+# path serves both the upload and the standalone `testflight_info` lane — and
+# so a submission blocked on missing Test Information can be repaired without
+# archiving anything.
+def push_beta_test_information(info_by_locale)
+  app = asc_app
+  existing = app.get_beta_app_localizations.each_with_object({}) do |localization, by_locale|
+    by_locale[localization.locale] = localization
+  end
+
+  info_by_locale.each do |locale, info|
+    attributes = {
+      description: info[:description],
+      feedbackEmail: info[:feedback_email],
+      marketingUrl: info[:marketing_url],
+      privacyPolicyUrl: info[:privacy_policy_url],
+    }.compact
+
+    if (localization = existing[locale])
+      Spaceship::ConnectAPI.patch_beta_app_localizations(localization_id: localization.id, attributes: attributes)
+      UI.message("Updated TestFlight Test Information (#{locale})")
+    else
+      Spaceship::ConnectAPI.post_beta_app_localizations(app_id: app.id, attributes: attributes.merge(locale: locale))
+      UI.message("Created TestFlight Test Information (#{locale})")
+    end
+  end
+end
+
+def asc_app
+  identifier = CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier)
+  app = Spaceship::ConnectAPI::App.find(identifier)
+  UI.user_error!("No App Store Connect app record for #{identifier}") if app.nil?
+  app
+end
+
 # pilot silently skips a `groups:` name App Store Connect does not know, so
 # the group has to exist before a build asks to be distributed to it.
 # Invitation only means no public link — and an existing group that grew one
 # gets it taken away again rather than being quietly accepted.
 def ensure_external_group(name)
-  identifier = CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier)
-  app = Spaceship::ConnectAPI::App.find(identifier)
-  UI.user_error!("No App Store Connect app record for #{identifier}") if app.nil?
-
+  app = asc_app
   group = app.get_beta_groups(filter: { name: name }).find { |candidate| candidate.name == name }
 
   if group.nil?
@@ -223,6 +301,13 @@ lane :testflight_group do
   ensure_external_group(EXTERNAL_GROUP)
 end
 
+desc "Push TestFlight Test Information (beta app description, feedback email, URLs). Uploads no binary."
+lane :testflight_info do
+  info = beta_test_information
+  asc_api_key
+  push_beta_test_information(info)
+end
+
 desc "Upload to TestFlight. platform:ios|visionos or omit for both. " \
      "external:true adds the build to the external group; submit_review:false " \
      "stages it there without posting the Beta App Review submission."
@@ -236,15 +321,22 @@ lane :beta do |options|
   # gates external testers on that review — the build waits until it passes).
   # Only meaningful with external:true; pilot ignores it otherwise.
   submit_review = options[:submit_review] != false
-  # Resolve both before archiving, so a missing note or review field fails in
-  # seconds rather than after two platform archives. The review record is
-  # written either way — a later submission then already has it.
+  # Resolve all three before archiving, so a missing note, review field, or
+  # Test Information file fails in seconds rather than after two platform
+  # archives. The review record is written either way — a later submission
+  # then already has it.
   changelog = whats_new(external)
   review_info = external ? beta_review_info : nil
+  test_information = external ? beta_test_information : nil
   number = bump_build_number
   generate_project
   api_key = asc_api_key
-  ensure_external_group(EXTERNAL_GROUP) if external
+  if external
+    ensure_external_group(EXTERNAL_GROUP)
+    # App Store Connect rejects the submission, not the upload, when Test
+    # Information is unset — so it goes up before any binary does.
+    push_beta_test_information(test_information)
+  end
   platforms.each do |platform|
     ipa = archive(platform: platform, build_number: number, skip_generate: true)
     upload_to_testflight(

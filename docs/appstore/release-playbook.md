@@ -51,6 +51,15 @@ sourced from `fastlane/metadata/review_information/` with `.env` covering the
 two files kept out of git. So the demo host below and
 `review_information/notes.txt` are all it needs:
 
+External testing additionally needs **Test Information** — the app-level
+description testers read, in
+`fastlane/metadata/<locale>/beta_app_description.txt`. `beta external:true`
+pushes it (with the review contact as the feedback address and the listing's
+marketing/privacy URLs) before it archives anything; `bundle exec fastlane
+testflight_info` pushes it alone. It is not optional: an unset record uploads
+and joins the group fine, then fails the submission call with
+`Beta App Description is missing`.
+
 ```sh
 bundle exec fastlane beta external:true                     # add + submit for review
 bundle exec fastlane beta external:true submit_review:false # add, submit later
