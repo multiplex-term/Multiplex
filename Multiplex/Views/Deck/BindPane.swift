@@ -33,6 +33,7 @@ struct BindPane: View {
         VStack(spacing: 18) {
             machineSection
             incomingSection
+            passphraseSection
             elsewhereSection
                 .id(Self.elsewhereID)
             footer
@@ -197,6 +198,33 @@ struct BindPane: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: Key passphrase
+
+    /// Applies to every bind executed from this pane, whichever road it
+    /// arrived by — the stored key is sealed with it in OpenSSH's own
+    /// encrypted format before it touches the Keychain. Deliberately not
+    /// per-row: scan and paste auto-confirm, so there is no row moment to
+    /// type into.
+    private var passphraseSection: some View {
+        @Bindable var bind = bind
+        return TallyFormSection(
+            "Key passphrase",
+            detail: "Optional, for every machine bound from this pane: its "
+                + "SSH key is generated sealed with this passphrase, which "
+                + "is then saved in the host's settings so connecting keeps "
+                + "working. Clear it in Host Settings to be asked when "
+                + "connecting instead. Empty means the key is stored "
+                + "unlocked, exactly as before."
+        ) {
+            TallyFormRow {
+                RevealableSecureField(
+                    "Key passphrase", prompt: "Optional",
+                    text: $bind.keyPassphrase
+                )
             }
         }
     }

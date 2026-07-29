@@ -112,7 +112,11 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   process, log under category `bind`, and the proof is host-side: a
   `multiplex:bind:<id>:<device>` line appears in
   `Tools/dev-sshd/state/authorized_keys` and `sshd.log` then shows
-  `Accepted publickey` for that new key. Neither needs the Bind pane open —
+  `Accepted publickey` for that new key. `MULTIPLEX_BIND_PASSPHRASE=<text>`
+  presets the pane's KEY PASSPHRASE for either hook, so a headless bind
+  stores its key sealed and saves the passphrase — the probe's `Accepted
+  publickey` then proves the sealed-key connect chain (verified
+  2026-07-29). Neither needs the Bind pane open —
   they set `bindSurfaceOpen` themselves, which is what keeps the deck's
   lifecycle task from stopping the browser under them. ⚠ These are
   `DeckWindow` tasks, so a launch that restores a **terminal-only** scene
@@ -826,25 +830,35 @@ views.
   on the first connection**, enrolling a device-held key and deleting the
   transported line by its exact key material (`BindRotationStore`, whose
   command appends before it removes: a failure between the two steps must
-  leave a working key, never none). `mpx bind --offline` first asks for an
-  **optional SSH-key passphrase** on its own tty (empty = today's raw-seed
-  payload, byte-identical; `MPX_BIND_TEST_PASSPHRASE` answers it headlessly).
-  A passphrase seals the key as a standard encrypted openssh-key-v1
-  container riding payload flag bit 1 (u16 length, spec §2 — readers reject
-  unknown flag bits rather than misparse key material). The app armors that
-  container verbatim (`BindSSHKey.armor`), stores it like a pasted encrypted
-  key, **skips the import probe** (auth construction refuses before dialing
-  when no passphrase is on file — the wall's NEEDS PASSPHRASE tile and its
-  UNLOCK prompt take over), and **never rotates it**: no
-  `BindRotationStore` request is recorded, because swapping the sealed key
-  for a device-generated plaintext one would trade the person's own
-  protection away. The passphrase never crosses any wire — the connect-time
-  key-unlock prompt is where it gets typed (Connect Once / Save & Connect),
-  and the dev seed's `passphrase` key stores it for headless connect proofs
-  (verified 2026-07-29: ssh-keygen-sealed seed key → probe `Accepted
-  publickey`; sealed offline bind → import + skip logged under `bind`, zero
-  rotation, zero auth attempts). Free host plumbing, not an agent-helper
-  surface.
+  leave a working key, never none). **The bind key passphrase lives in the
+  app, nowhere else** (`BindPane` KEY PASSPHRASE section, directly below
+  ASKING TO BIND): it is ssh-keygen's passphrase ask relocated to where
+  this flow generates its key, and it applies to every bind executed from
+  the pane — handshake and offline-seed alike. Empty (the default) is
+  today's plaintext store. Set, the stored key is sealed in the standard
+  encrypted openssh-key-v1 form by the app's own sealer
+  (`BindSSHKey.sealedPrivateOpenSSH`: vendored OpenBSD bcrypt-pbkdf under
+  `Models/Bind/CBcryptSeal` — `mpxbind_`-prefixed so it can never collide
+  with Citadel's copy, SHA-512/AES-256-CTR from CommonCrypto, exposed
+  through the app's one bridging header; Citadel's independent bcrypt is
+  the decrypt side, which is what makes the round-trip test a real
+  cross-check). The typed passphrase counts as the person's one Multiplex
+  typing and is **saved into the host's settings** (synced Keychain — the
+  same slot Host Settings' Passphrase field shows and clears), so the
+  bind's probe connects immediately and connecting keeps working; clearing
+  it in Host Settings makes the key-unlock prompt ask instead. A sealed
+  key is **never rotated** (an offline-seed bind with a passphrase records
+  no `BindRotationStore` request — swapping the sealed key for a
+  device-generated plaintext one would undo the protection), and `save()`
+  skips the probe for a sealed key with no passphrase on file rather than
+  dialing a connection that can only fail. The CLI knows nothing about
+  passphrases — a CLI-side prompt-and-seal variant (`02ed378`) shipped and
+  was reverted 2026-07-29; the wire still carries only raw seeds. Verified
+  2026-07-29 on the harness: offline payload + `MULTIPLEX_BIND_PASSPHRASE`
+  → sealed store, saved passphrase, probe `Accepted publickey`,
+  authorized_keys untouched, still connecting after relaunch; the dev
+  seed's `passphrase` key remains for pure connect proofs. Free host
+  plumbing, not an agent-helper surface.
 - **A disabled host is one the app never dials on its own** (`Host.isEnabled`,
   deck rail menu / DISABLED tile / Host Settings → Monitoring): the wall skips
   it in `runFeed`, never asks `ConnectionHub` for its model (asking is what

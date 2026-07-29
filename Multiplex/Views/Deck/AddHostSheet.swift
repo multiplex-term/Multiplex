@@ -1045,7 +1045,9 @@ struct AddHostSheet: View {
 /// and the save-to-Passwords prompt to secure entry — every content-type
 /// opt-out is ignored — and one secure field marks the whole sheet as a
 /// login form, dragging User and Private key into the same treatment.
-private struct RevealableSecureField: View {
+/// Internal (not file-private) because BindPane's KEY PASSPHRASE field is
+/// the same control under the same rules.
+struct RevealableSecureField: View {
     let title: String
     let prompt: String
     @Binding var text: String

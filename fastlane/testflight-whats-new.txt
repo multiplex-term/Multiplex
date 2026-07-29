@@ -32,14 +32,17 @@ Then try any of these:
    your device; then press Paste.
 
 4. A MACHINE THAT ISN'T ON YOUR NETWORK (VPS, firewalled box)
-   Run `mpx bind --offline` and scan/paste. The CLI now asks for an optional
-   SSH-key passphrase first — press Enter to skip. Skipped: Multiplex
-   imports the key, connects, and quietly replaces it with one it generates
-   itself, exactly as before. Typed (twice, hidden): the key travels sealed
-   with standard OpenSSH encryption, the host lands on the wall as NEEDS
-   PASSPHRASE, and its UNLOCK button asks you for the passphrase — Connect
-   Once keeps it for this run, Save & Connect stores it in iCloud Keychain.
-   The passphrase itself never leaves that terminal.
+   Run `mpx bind --offline` and scan/paste. Multiplex imports it, connects,
+   and then quietly replaces that key with one it generates itself.
+
+5. KEY PASSPHRASE (the section right below ASKING TO BIND)
+   Optional, and it works for every road above: type one before you bind
+   and the SSH key Multiplex stores for that machine is generated sealed
+   with it — the same encrypted key format ssh-keygen produces. The
+   passphrase is saved into the host's settings, so the host connects
+   immediately and keeps working; open Host Settings to see or clear it.
+   Clear it and the wall asks with an UNLOCK button the next time the key
+   is needed. Leave the field empty and nothing changes from before.
 
 Worth checking:
 - Tap a multiplex://b/ link outside the app (mpx bind prints one — put it in
@@ -63,7 +66,9 @@ Worth checking:
 - On the free tier, binding still respects the two-host limit — you should
   see the Pro paywall instead of a key being installed.
 - Declining in the terminal must leave your authorized_keys untouched.
-- A passphrase-sealed offline key must never be swapped out: after UNLOCK
-  connects, `mpx unbind --list` on the machine should still show the id the
-  bind installed (a skipped passphrase is the only case where it changes).
+- A host bound with a KEY PASSPHRASE must connect right away and survive a
+  relaunch without asking anything; its Host Settings must show the
+  passphrase saved. For an offline bind, the machine keeps the id the bind
+  installed (`mpx unbind --list`) — a passphrase-sealed key is never
+  swapped out.
 - Host Settings (editing a host you already have) should show no BIND bar.

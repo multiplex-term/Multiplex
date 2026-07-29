@@ -1,3 +1,4 @@
+import CommonCrypto
 import CryptoKit
 import Foundation
 
@@ -84,6 +85,101 @@ struct BindSSHKey: Equatable, Sendable {
         Data(withUnsafeBytes(of: value.bigEndian, Array.init))
     }
 
+}
+
+// MARK: - Passphrase sealing
+
+extension BindSSHKey {
+    /// ssh-keygen's own default; Citadel's reader additionally requires
+    /// rounds < 32, so this is both standard and openable.
+    static let sealRounds: UInt32 = 16
+
+    /// The same key, sealed in OpenSSH's standard encrypted container
+    /// (bcrypt-pbkdf ‖ aes256-ctr — byte-compatible with `ssh-keygen -p`).
+    /// This is what a bind stores when the person typed a KEY PASSPHRASE:
+    /// the vendored bcrypt derives 48 bytes (32 AES key ‖ 16 IV), the
+    /// private section is padded to the AES block and encrypted, and
+    /// Citadel — whose bcrypt is an independent compilation — opens it at
+    /// connect. `salt`/`checkint` are injectable for deterministic tests
+    /// only; nil means fresh randomness. Returns nil only if a CommonCrypto
+    /// call fails, and callers must treat that as "do not store anything",
+    /// never as "store it plain".
+    static func sealedPrivateOpenSSH(
+        key: Curve25519.Signing.PrivateKey,
+        passphrase: String,
+        salt fixedSalt: Data? = nil,
+        checkint fixedCheckint: UInt32? = nil
+    ) -> String? {
+        guard !passphrase.isEmpty else { return nil }
+        let salt = fixedSalt ?? Data((0..<16).map { _ in UInt8.random(in: .min ... .max) })
+        let check = fixedCheckint ?? UInt32.random(in: .min ... .max)
+
+        var derived = [UInt8](repeating: 0, count: 48)
+        let pass = Array(passphrase.utf8)
+        let saltBytes = [UInt8](salt)
+        guard mpxbind_bcrypt_pbkdf(
+            pass, pass.count, saltBytes, saltBytes.count,
+            &derived, derived.count, sealRounds
+        ) == 0 else { return nil }
+        let aesKey = Array(derived[0..<32])
+        let iv = Array(derived[32..<48])
+
+        let publicKey = key.publicKey.rawRepresentation
+        let publicBlob = sshString(Data(keyType.utf8)) + sshString(publicKey)
+
+        var priv = Data()
+        priv += uint32(check)
+        priv += uint32(check)
+        priv += sshString(Data(keyType.utf8))
+        priv += sshString(publicKey)
+        priv += sshString(key.rawRepresentation + publicKey)
+        priv += sshString(Data())
+        // aes256-ctr's block is 16; the padding bytes are the 1,2,3… ramp
+        // the format prescribes and readers verify after decrypting.
+        var pad: UInt8 = 1
+        while priv.count % 16 != 0 {
+            priv.append(pad)
+            pad += 1
+        }
+        guard let ciphertext = aes256ctr(priv, key: aesKey, iv: iv) else { return nil }
+
+        var container = Data("openssh-key-v1\0".utf8)
+        container += sshString(Data("aes256-ctr".utf8))
+        container += sshString(Data("bcrypt".utf8))
+        container += sshString(sshString(salt) + uint32(sealRounds))
+        container += uint32(1)
+        container += sshString(publicBlob)
+        container += sshString(ciphertext)
+        return armor(container: container)
+    }
+
+    /// One-shot AES-256-CTR (CommonCrypto). CTR is a stream mode, so the
+    /// output length equals the input's and no padding happens here — the
+    /// openssh-key-v1 ramp above is the only padding in the container.
+    private static func aes256ctr(_ input: Data, key: [UInt8], iv: [UInt8]) -> Data? {
+        var cryptor: CCCryptorRef?
+        let create = CCCryptorCreateWithMode(
+            CCOperation(kCCEncrypt), CCMode(kCCModeCTR),
+            CCAlgorithm(kCCAlgorithmAES), CCPadding(ccNoPadding),
+            iv, key, key.count, nil, 0, 0, 0, &cryptor
+        )
+        guard create == kCCSuccess, let cryptor else { return nil }
+        defer { CCCryptorRelease(cryptor) }
+        var output = Data(count: input.count + kCCBlockSizeAES128)
+        var moved = 0
+        let status = output.withUnsafeMutableBytes { outBytes in
+            input.withUnsafeBytes { inBytes in
+                CCCryptorUpdate(
+                    cryptor,
+                    inBytes.baseAddress, inBytes.count,
+                    outBytes.baseAddress, outBytes.count,
+                    &moved
+                )
+            }
+        }
+        guard status == kCCSuccess, moved == input.count else { return nil }
+        return output.prefix(moved)
+    }
 }
 
 // The seed initializer lives in an extension so the memberwise initializer

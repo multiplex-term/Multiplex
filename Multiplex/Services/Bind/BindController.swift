@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 import UIKit
@@ -86,7 +87,26 @@ final class BindController {
     /// consumes announcements, and a device that never opens the pane never
     /// raises the local-network prompt. The mounted deck still owns the
     /// browser's lifecycle and reads this as one of its inputs.
-    var bindSurfaceOpen = false
+    var bindSurfaceOpen = false {
+        didSet {
+            // A closed pane forgets its passphrase: the field is bind-flow
+            // state, not something to find pre-filled next week. In-flight
+            // binds already snapshotted their copy at confirm time.
+            if !bindSurfaceOpen { keyPassphrase = "" }
+        }
+    }
+    /// The pane's optional KEY PASSPHRASE — ssh-keygen's passphrase ask,
+    /// relocated to where this flow generates its key. Every bind executed
+    /// while it is set stores its private key sealed with it in OpenSSH's
+    /// own encrypted format; empty means today's plaintext store. Not tied
+    /// to any transport mode — handshake and offline-seed binds seal alike,
+    /// and a payload the CLI already sealed keeps its own passphrase (that
+    /// one Multiplex never saw, so its first connect asks through the
+    /// key-unlock prompt). Typing it here counts as the person's one
+    /// Multiplex typing: it is saved into the host's settings exactly like
+    /// the Host Settings Passphrase field (synced Keychain, visible and
+    /// clearable there), so connecting keeps working without a re-ask.
+    var keyPassphrase = ""
 
     let discovery = BindDiscovery()
 
@@ -272,14 +292,18 @@ final class BindController {
     }
 
     private func performBind(_ candidate: Pending) async {
+        // Snapshot the pane's passphrase now: the pane may close (and clear
+        // the field) while this bind is still talking to the machine.
+        let passphrase = keyPassphrase
         switch candidate.source {
         case .payload(let payload) where payload.isOffline:
-            await importOffline(payload, id: candidate.id)
+            await importOffline(payload, id: candidate.id, keyPassphrase: passphrase)
         case .payload(let payload):
             await handshake(
                 id: candidate.id,
                 spub: payload.spub,
                 credential: .token(payload.token),
+                keyPassphrase: passphrase,
                 endpointPayload: payload
             )
         case .discovered(let announcement):
@@ -287,6 +311,7 @@ final class BindController {
                 id: candidate.id,
                 spub: announcement.spub,
                 credential: .pin(candidate.pin),
+                keyPassphrase: passphrase,
                 announcement: announcement
             )
         }
@@ -296,10 +321,26 @@ final class BindController {
         id: String,
         spub: Data,
         credential: BindClientSession.Credential,
+        keyPassphrase: String,
         endpointPayload: BindPayload? = nil,
         announcement: BindAnnouncement? = nil
     ) async {
-        let key = BindSSHKey.generate()
+        let raw = Curve25519.Signing.PrivateKey()
+        let key = BindSSHKey.make(from: raw)
+        // Seal BEFORE enrolling: a sealing failure after the machine already
+        // added the public half would orphan an authorized_keys line whose
+        // private key the app then refuses to store.
+        let storedPrivateKey: String
+        if keyPassphrase.isEmpty {
+            storedPrivateKey = key.privateOpenSSH
+        } else if let sealed = BindSSHKey.sealedPrivateOpenSSH(
+            key: raw, passphrase: keyPassphrase
+        ) {
+            storedPrivateKey = sealed
+        } else {
+            fail(id: id, "Couldn’t seal the key with that passphrase — nothing was enrolled.")
+            return
+        }
         let device = Self.deviceName
         do {
             let completion: BindClient.Completion
@@ -335,9 +376,10 @@ final class BindController {
                 hostname: hostname,
                 port: completion.offer.sshPort,
                 username: completion.offer.sshUser,
-                privateKey: key.privateOpenSSH,
+                privateKey: storedPrivateKey,
                 pins: completion.offer.hostkeys,
-                rotation: nil
+                rotation: nil,
+                savedPassphrase: keyPassphrase.isEmpty ? nil : keyPassphrase
             )
         } catch {
             fail(id: id, (error as? LocalizedError)?.errorDescription
@@ -345,43 +387,41 @@ final class BindController {
         }
     }
 
-    /// `mpx bind --offline`: the key came with the payload, so there is no
-    /// handshake. A raw seed is rebuilt, imported, then rotated out; a
-    /// passphrase-sealed container is stored verbatim and NEVER rotated —
-    /// swapping it for a device-generated plaintext key would trade the
-    /// person's own protection away (spec §5). The passphrase itself never
-    /// crossed any wire; the existing key-unlock prompt asks for it at
-    /// connect time.
-    private func importOffline(_ payload: BindPayload, id: String) async {
-        guard let offline = payload.offline else {
+    /// `mpx bind --offline`: the key came with the payload as a raw seed, so
+    /// there is no handshake — rebuild it, import, then rotate it out. With
+    /// a pane passphrase set, the stored key is sealed instead and NEVER
+    /// rotated: swapping it for a device-generated plaintext key would
+    /// trade the person's own protection away.
+    private func importOffline(
+        _ payload: BindPayload, id: String, keyPassphrase: String
+    ) async {
+        guard let offline = payload.offline,
+              let key = BindSSHKey(seed: offline.seed)
+        else {
             fail(id: id, "That bind code is missing its key.")
             return
         }
         let privateKey: String
         let rotation: BindRotationStore.Request?
-        switch offline.secret {
-        case .seed(let seed):
-            guard let key = BindSSHKey(seed: seed) else {
-                fail(id: id, "That bind code is missing its key.")
-                return
-            }
+        var savedPassphrase: String?
+        if keyPassphrase.isEmpty {
             privateKey = key.privateOpenSSH
             rotation = BindRotationStore.Request(
                 transportedPublicB64: key.publicB64,
                 authorizedKeysPath: offline.authorizedKeysPath
             )
-        case .encryptedKey(let container):
-            let armored = BindSSHKey.armor(container: container)
-            // The flag promised a sealed key; a container that armors into
-            // anything else — plaintext included — is not what the CLI
-            // emits, and importing it would silently drop the protection
-            // the person chose.
-            guard OpenSSHPrivateKeyEnvelope.encryption(in: armored) == .encrypted else {
-                fail(id: id, "That bind code's key is damaged — run mpx bind --offline again.")
+        } else {
+            guard let raw = try? Curve25519.Signing.PrivateKey(
+                rawRepresentation: offline.seed
+            ), let sealed = BindSSHKey.sealedPrivateOpenSSH(
+                key: raw, passphrase: keyPassphrase
+            ) else {
+                fail(id: id, "Couldn’t seal the key with that passphrase — nothing was saved.")
                 return
             }
-            privateKey = armored
+            privateKey = sealed
             rotation = nil
+            savedPassphrase = keyPassphrase
         }
         setStage(id: id, .enrolling)
         await save(
@@ -392,7 +432,8 @@ final class BindController {
             username: offline.sshUser,
             privateKey: privateKey,
             pins: offline.pinnedHostKey.map { [$0] } ?? [],
-            rotation: rotation
+            rotation: rotation,
+            savedPassphrase: savedPassphrase
         )
     }
 
@@ -404,7 +445,8 @@ final class BindController {
         username: String,
         privateKey: String,
         pins: [String],
-        rotation: BindRotationStore.Request?
+        rotation: BindRotationStore.Request?,
+        savedPassphrase: String? = nil
     ) async {
         guard let store else { return }
         var host = Host(
@@ -417,6 +459,18 @@ final class BindController {
         host.pinnedHostKeys = pins
         KeychainStore.set(privateKey, for: host.id, kind: .privateKey)
         store.add(host)
+        if let savedPassphrase {
+            // Typed into the pane — the person's one Multiplex typing. It
+            // lands in the host's settings exactly as the Host Settings
+            // Passphrase field would put it (synced Keychain; visible and
+            // clearable there), so connecting never re-asks unless the
+            // person clears it. CLI-sealed imports pass nil: Multiplex
+            // never saw that passphrase, and the key-unlock prompt is
+            // where it gets typed.
+            SSHKeyPassphraseSession.accept(
+                savedPassphrase, for: host.id, saveToICloud: true
+            )
+        }
         if let rotation {
             rotations.record(rotation, for: host.id)
         }
@@ -580,6 +634,8 @@ final class BindController {
     ///   MULTIPLEX_AUTO_BIND=<multiplex://b/…>     submit a payload once
     ///   MULTIPLEX_BIND_AUTOPIN=<6 digits>         answer the first heard
     ///                                             machine with that PIN
+    ///   MULTIPLEX_BIND_PASSPHRASE=<text>          preset the pane's KEY
+    ///                                             PASSPHRASE for that bind
     /// plus notification `…debug.bind` to open discovery on demand.
     private static var autoBindFired = false
 
@@ -608,6 +664,10 @@ final class BindController {
         guard payload != nil || autoPIN != nil else { return }
         Self.autoBindFired = true
         log.debug("bind automation requested (payload: \(payload != nil), pin: \(autoPIN != nil))")
+        if let passphrase = environment["MULTIPLEX_BIND_PASSPHRASE"], !passphrase.isEmpty {
+            keyPassphrase = passphrase
+            log.debug("bind automation: pane passphrase preset")
+        }
         // Let the store finish its first load (and any seeded host land).
         try? await Task.sleep(for: .seconds(2))
         if let payload {
