@@ -21,11 +21,15 @@ import WebKit
 @Observable
 final class ViewportController {
     let tabID: UUID
-    /// The confirmation that admitted this page; `offer.reachTag` rides the
-    /// rail for the life of the tab.
+    /// The confirmation that admitted this page.
     let offer: ViewportOffer
+    /// Snapshot of the source host — the tether label and the rewrite
+    /// target for addresses typed into the rail. A value copy on purpose:
+    /// like a terminal's connection, the viewport keeps the record it was
+    /// opened against.
+    private let host: Host
     /// The source host's display name — the viewport's tether label.
-    let hostName: String
+    var hostName: String { host.name }
 
     @ObservationIgnored private(set) var webView: WKWebView!
     @ObservationIgnored private var bridge: ViewportWebBridge!
@@ -36,6 +40,13 @@ final class ViewportController {
     private(set) var isLoading = false
     private(set) var progress: Double = 0
     private(set) var canGoBack = false
+    /// Where the page currently lives, kept honest across typed addresses
+    /// and in-page navigation — the rail tag and the failure panel's hint
+    /// both read this, never the stale admission.
+    private(set) var currentReach: ViewportReach
+    /// The last URL this controller was *asked* to load (admission or rail
+    /// edit) — the reload target while nothing has committed yet.
+    private(set) var lastRequestedURL: URL
     /// A load that ended in an error the user should see — the TALLY panel
     /// renders it with the reach verdict, instead of WebKit's blank page.
     private(set) var failure: String?
@@ -43,11 +54,22 @@ final class ViewportController {
     /// the pane presents the same confirmation sheet a terminal press gets.
     var externalLink: TerminalLink?
 
-    init(tabID: UUID, offer: ViewportOffer, hostName: String) {
+    /// The rail's compact verdict for the page on screen.
+    var railTag: String {
+        switch currentReach {
+        case .internet: "NET"
+        case .lan: "LAN"
+        case .remoteLoopback: "VIA \(hostName.uppercased())"
+        }
+    }
+
+    init(tabID: UUID, offer: ViewportOffer, host: Host) {
         self.tabID = tabID
         self.offer = offer
-        self.hostName = hostName
+        self.host = host
         self.currentURL = offer.url
+        self.currentReach = offer.reach
+        self.lastRequestedURL = offer.url
 
         let configuration = WKWebViewConfiguration()
         // App-scoped and persistent (never shared with Safari): a dev
@@ -92,7 +114,14 @@ final class ViewportController {
         progress = webView.estimatedProgress
         isLoading = webView.isLoading
         canGoBack = webView.canGoBack
-        if let url = webView.url { currentURL = url }
+        if let url = webView.url {
+            currentURL = url
+            // In-page navigation can move the page between worlds (a LAN
+            // dev page linking out to docs); the tag follows. A loopback
+            // classification here is the rewrite's own address (a host
+            // dialled by loopback) — VIA stays the honest word for it.
+            currentReach = ViewportReach.classify(url) ?? currentReach
+        }
         pageTitle = webView.title?.isEmpty == false ? webView.title : nil
     }
 
@@ -103,11 +132,28 @@ final class ViewportController {
     func reload() {
         failure = nil
         if webView.url == nil {
-            // The very first load failed — there is nothing to reload yet.
-            webView.load(URLRequest(url: offer.url))
+            // Nothing has committed yet (the first load, or a typed address
+            // that failed before commit) — retry what was asked for.
+            webView.load(URLRequest(url: lastRequestedURL))
         } else {
             webView.reload()
         }
+    }
+
+    /// The rail's address editor: navigate to what the user typed, or say
+    /// no. Same admit path as a confirmed link (web schemes only, scheme
+    /// defaulted by reach, loopback rewritten via the host) — typing is the
+    /// user's own intent, so no sheet stands between.
+    @discardableResult
+    func navigate(toTyped input: String) -> Bool {
+        guard let typed = ViewportOffer.fromTypedInput(input, host: host)
+        else { return false }
+        failure = nil
+        lastRequestedURL = typed.url
+        currentReach = typed.reach
+        currentURL = typed.url
+        webView.load(URLRequest(url: typed.url))
+        return true
     }
 
     func stopLoading() {
@@ -128,6 +174,22 @@ final class ViewportController {
 
     func copyURL() {
         UIPasteboard.general.string = displayURL.absoluteString
+    }
+
+    /// Wipes the viewport's browsing state — cookies, caches, and site
+    /// storage. The data store is app-scoped and shared by every viewport
+    /// tab (that sharing is what keeps a dev login alive across pages), so
+    /// clearing is necessarily global; the confirmation that leads here
+    /// says so. Reloads this page afterward, so the effect is visible
+    /// exactly where it was asked for — signed out, cold cache.
+    func clearBrowsingData() {
+        let store = webView.configuration.websiteDataStore
+        store.removeData(
+            ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+            modifiedSince: .distantPast
+        ) { [weak self] in
+            MainActor.assumeIsolated { self?.reload() }
+        }
     }
 
     /// Tab is closing for real (never called on a move): stop work and break

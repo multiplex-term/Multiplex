@@ -112,6 +112,53 @@ struct ViewportOffer: Equatable {
     static func make(for link: TerminalLink, host: Host?) -> ViewportOffer? {
         guard let url = link.openableURL, let reach = ViewportReach.classify(url)
         else { return nil }
+        return admit(url, reach: reach, host: host)
+    }
+
+    /// The rail's typed address: the user's own intent, so no confirmation
+    /// sheet — but the same admit path as a confirmed link. Web schemes
+    /// only; a schemeless address is defaulted by where it lives (`http`
+    /// for LAN/loopback — dev servers are cleartext — `https` otherwise);
+    /// loopback rewrites via the host exactly as the sheet's chip does.
+    static func fromTypedInput(_ input: String, host: Host?) -> ViewportOffer? {
+        var text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !text.contains(where: \.isWhitespace) else { return nil }
+        if let separator = text.range(of: "://") {
+            let scheme = text[..<separator.lowerBound].lowercased()
+            guard scheme == "http" || scheme == "https" else { return nil }
+        } else {
+            // Scheme-shaped input without `//` (`mailto:…`, `javascript:…`)
+            // is not an address, and prefixing it with http:// would parse
+            // the scheme as USERINFO (`http://mailto:dev@example.com` reads
+            // host example.com) — the exact trick the link sheet exists to
+            // expose. Only host:port survives: after a colon in the
+            // authority part, digits. Bracketed IPv6 is exempt (its colons
+            // are the address).
+            let authority = text.prefix(while: { $0 != "/" })
+            if !authority.hasPrefix("["),
+               let colon = authority.firstIndex(of: ":"),
+               authority[authority.index(after: colon)...].first?.isNumber != true {
+                return nil
+            }
+            guard let probe = URL(string: "http://" + text),
+                  let reach = ViewportReach.classify(probe)
+            else { return nil }
+            text = (reach == .internet ? "https://" : "http://") + text
+        }
+        guard let url = URL(string: text),
+              // Typed input never needs userinfo, and a userinfo-padded
+              // authority is how a pasted address lies about its host.
+              URLComponents(url: url, resolvingAgainstBaseURL: false)?.user == nil,
+              let reach = ViewportReach.classify(url)
+        else { return nil }
+        return admit(url, reach: reach, host: host)
+    }
+
+    private static func admit(
+        _ url: URL,
+        reach: ViewportReach,
+        host: Host?
+    ) -> ViewportOffer? {
         switch reach {
         case .internet, .lan:
             return ViewportOffer(url: url, reach: reach, viaHostName: nil)

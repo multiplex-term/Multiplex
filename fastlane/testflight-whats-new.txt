@@ -105,3 +105,12 @@ Worth checking:
 - SYSTEM in the rail hands the page to Safari; CLOSE ends the tab. The
   ⌗ tab cell carries no red dot — only shells wear the tally.
 - iPhone: the viewport stays a docked tab in the shell (no windows there).
+- Tap the address in the rail: an ADDRESS bar opens at the top (above the
+  keyboard) — type host:port or a full URL and GO. Bare LAN addresses get
+  http://, names get https://, and localhost still means the host (same
+  rewrite). file: or javascript: input must be refused with WEB ADDRESSES
+  ONLY, and the ⌗ tab label should follow wherever you navigate.
+- Long-press the address: COPY ADDRESS and CLEAR BROWSING DATA… live
+  there. Clearing asks first (it wipes cookies/caches/site storage for
+  every viewport page), then reloads the page signed out — sign into a
+  dev server, clear, and the login must be gone.

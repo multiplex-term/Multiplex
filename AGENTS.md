@@ -758,14 +758,27 @@ views.
   the chip becomes `⌗ OPEN VIA <host>` and rewrites the authority to
   `Host.hostname` (by definition the address this device already dials),
   said in the open on the sheet; LAN/internet targets pass through
-  verbatim, and non-web links are never offered a viewport. **Nothing
+  verbatim, and non-web links are never offered a viewport. The rail's
+  readout is tap-to-edit: a typed address is the user's own intent, so it
+  skips the sheet but rides the same admit path
+  (`ViewportOffer.fromTypedInput` — web schemes only, a schemeless address
+  defaulted by reach: http for LAN/loopback, https otherwise, loopback
+  rewritten via the host), the editor lives in the pane's TOP contextual
+  slot because the pane opts out of keyboard avoidance for the terminal's
+  sake (a bottom-rail field would sit under a docked keyboard), and the
+  rail tag + tab label track the page the viewport is actually on, not the
+  address it was summoned with. **Nothing
   persists**: controllers live only in `TerminalWorkspace`'s memory and are
   registered BEFORE the tab enters any route, so `syncTabs` stripping
   controller-less viewport tabs removes exactly the ones scene restoration
   hands back from a dead process, never a live move. `WKNavigationDelegate`
   re-applies the scheme allowlist per navigation (`multiplex:` is never
   navigable; mailto re-presents the link sheet from the pane), there is no
-  JS bridge and no send path into any terminal, and a viewport never claims
+  JS bridge and no send path into any terminal; the app-scoped persistent
+  `WKWebsiteDataStore` is shared by every viewport (a dev login survives
+  across tabs and reloads) and **Clear Browsing Data…** on the readout's
+  long-press menu wipes it globally after a confirmation that says so,
+  then reloads the page signed out; and a viewport never claims
   `TerminalFocusArbiter` — switching to a ⌗ tab releases the previous
   terminal's responder so hardware keys can't type into a hidden shell.
   ATS is relaxed for **web content only** (`NSAllowsArbitraryLoadsInWebContent`

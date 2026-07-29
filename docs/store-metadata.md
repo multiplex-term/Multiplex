@@ -142,7 +142,9 @@ Current product split:
   tab beside the session that printed it, splits into its own window and
   merges back like any tab with the live page riding along, the sheet's
   REACH row says which network the address lives on and rewrites a remote
-  `localhost` to the host's own dialled address in the open, and viewport
+  `localhost` to the host's own dialled address in the open, the rail's
+  address is tap-to-edit (typed addresses ride the same web-only gate and
+  loopback rewrite), and viewport
   tabs never persist across launches, a
   most-used tmux
   shortcut dropdown on both platforms (including touch-native copy-mode

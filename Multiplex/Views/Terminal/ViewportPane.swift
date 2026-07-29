@@ -15,6 +15,18 @@ struct ViewportPane: View {
     var contentSafeArea = EdgeInsets()
     let close: () -> Void
 
+    /// The rail's address editor, presented as a top contextual bar — the
+    /// same slot Copy Mode and the jump bar use. Top on purpose: the pane
+    /// opts out of SwiftUI keyboard avoidance for the terminal's sake, so a
+    /// docked keyboard would cover an editor living in the bottom rail.
+    @State private var editingAddress = false
+    @State private var addressDraft = ""
+    @State private var addressRejected = false
+    @FocusState private var addressFieldFocused: Bool
+    /// Clearing wipes the store every viewport shares — destructive, so it
+    /// confirms (the deck's delete-action policy).
+    @State private var confirmingClearBrowsingData = false
+
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
@@ -24,9 +36,31 @@ struct ViewportPane: View {
                     failurePanel(failure)
                 }
             }
+            .overlay(alignment: .top) {
+                if editingAddress {
+                    addressEditor
+                        .padding(.horizontal, 12)
+                        .padding(.top, 12)
+                }
+            }
             rail
         }
         .background(Theme.bezel)
+        .alert(
+            "Clear Browsing Data",
+            isPresented: $confirmingClearBrowsingData
+        ) {
+            Button("Clear", role: .destructive) {
+                controller.clearBrowsingData()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Clears cookies, caches, and site storage for every "
+                    + "viewport page — dev-server logins included. "
+                    + "This page reloads signed out."
+            )
+        }
         // A page may navigate to something the gate refuses to render
         // (mailto, a custom scheme). Same discipline as a pane press: the
         // target is shown and confirmed, never followed.
@@ -57,9 +91,9 @@ struct ViewportPane: View {
             }
             .accessibilityLabel(controller.isLoading ? "Stop loading" : "Reload")
             urlReadout
-            ChassisBadge(controller.offer.reachTag)
+            ChassisBadge(controller.railTag)
                 .fixedSize()
-                .accessibilityLabel("Reach: \(controller.offer.reachTag)")
+                .accessibilityLabel("Reach: \(controller.railTag)")
             ChassisChip("SYSTEM") { controller.openInSystemBrowser() }
                 .fixedSize()
                 .accessibilityLabel("Open in the system browser")
@@ -95,22 +129,90 @@ struct ViewportPane: View {
     }
 
     /// Monospace readout, host bright, the rest dim — the identity voice.
-    /// The address is data, not an omnibox: it is never editable in place,
-    /// and a long press copies it.
+    /// Tap opens the address editor in the pane's top-bar slot; a long
+    /// press copies. The readout itself never becomes a field — the rail
+    /// stays a monitor's frame, and the editor gets the keyboard-safe slot.
     private var urlReadout: some View {
-        Text(readoutText)
-            .font(.mono(10))
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contextMenu {
-                Button {
-                    controller.copyURL()
-                } label: {
-                    Label("Copy Address", systemImage: "doc.on.doc")
-                }
+        Button {
+            beginEditingAddress()
+        } label: {
+            Text(readoutText)
+                .font(.mono(10))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .chassisHover(2)
+        .contextMenu {
+            Button {
+                controller.copyURL()
+            } label: {
+                Label("Copy Address", systemImage: "doc.on.doc")
             }
-            .accessibilityLabel(controller.displayURL.absoluteString)
+            Button(role: .destructive) {
+                confirmingClearBrowsingData = true
+            } label: {
+                Label("Clear Browsing Data…", systemImage: "trash")
+            }
+        }
+        .accessibilityLabel(controller.displayURL.absoluteString)
+        .accessibilityHint("Edits the address")
+    }
+
+    // MARK: Address editor
+
+    private func beginEditingAddress() {
+        addressDraft = controller.displayURL.absoluteString
+        addressRejected = false
+        editingAddress = true
+        addressFieldFocused = true
+    }
+
+    private func submitAddress() {
+        if controller.navigate(toTyped: addressDraft) {
+            editingAddress = false
+        } else {
+            addressRejected = true
+        }
+    }
+
+    private var addressEditor: some View {
+        HStack(spacing: 12) {
+            ChassisLabel("ADDRESS", size: 9, color: Theme.signal3)
+            TextField("host:port or https://…", text: $addressDraft)
+                .font(.mono(12))
+                .foregroundStyle(Theme.signal)
+                .textFieldStyle(.plain)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .submitLabel(.go)
+                .focused($addressFieldFocused)
+                .onSubmit(submitAddress)
+                .onChange(of: addressDraft) { addressRejected = false }
+                .frame(minWidth: 160, maxWidth: 420)
+            if addressRejected {
+                ChassisLabel("WEB ADDRESSES ONLY", size: 8, color: Theme.caution)
+                    .fixedSize()
+            }
+            ChassisChip("GO", prominent: true, action: submitAddress)
+                .fixedSize()
+            ChassisChip("CANCEL") { editingAddress = false }
+                .fixedSize()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            Theme.bezel,
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.bezelHi, lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
     }
 
     private var readoutText: AttributedString {
@@ -166,7 +268,7 @@ struct ViewportPane: View {
     }
 
     private var reachHint: String? {
-        switch controller.offer.reach {
+        switch controller.currentReach {
         case .internet:
             return nil
         case .lan:

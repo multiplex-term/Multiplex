@@ -92,12 +92,12 @@ final class TerminalWorkspace {
     /// Register the controller BEFORE the tab enters any route — the strip
     /// above runs on every tabs change, and a viewport tab that arrives
     /// without its controller is indistinguishable from a restored corpse.
-    func openViewport(tab: TerminalRoute, offer: ViewportOffer, hostName: String) {
+    func openViewport(tab: TerminalRoute, offer: ViewportOffer, host: Host) {
         guard tab.isViewport, viewportControllers[tab.id] == nil else { return }
         viewportControllers[tab.id] = ViewportController(
             tabID: tab.id,
             offer: offer,
-            hostName: hostName
+            host: host
         )
     }
 

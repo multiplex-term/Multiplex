@@ -647,7 +647,7 @@ struct TerminalWindowRoot: View {
             hostID: activeTab.hostID,
             mode: .viewport(urlString: offer.url.absoluteString)
         )
-        workspace.openViewport(tab: tab, offer: offer, hostName: host.name)
+        workspace.openViewport(tab: tab, offer: offer, host: host)
         if let index = route.tabs.firstIndex(where: { $0.id == activeTab.id }) {
             route.tabs.insert(tab, at: index + 1)
         } else {
@@ -1005,12 +1005,22 @@ struct TerminalWindowRoot: View {
         }
     }
 
+    /// A viewport tab's label follows the page it is on — the route's
+    /// urlString is only the address it was summoned with, and the rail's
+    /// editor can move the page after that.
+    private func tabTitle(for tab: TerminalRoute) -> String {
+        guard tab.isViewport,
+              let viewport = workspace.viewportController(for: tab.id)
+        else { return tab.displayName }
+        return TerminalRoute.viewportLabel(viewport.displayURL.absoluteString)
+    }
+
     private var tabItems: [TerminalTabStrip.Item] {
         let multiHost = Set(route.tabs.map(\.hostID)).count > 1
         return route.tabs.map { tab in
             .init(
                 id: tab.id,
-                title: tab.displayName,
+                title: tabTitle(for: tab),
                 hostName: multiHost ? store.host(id: tab.hostID)?.name : nil,
                 controller: workspace.controller(for: tab.id),
                 isActive: tab.id == activeTab?.id,
@@ -1033,7 +1043,7 @@ struct TerminalWindowRoot: View {
 
     private var windowTitle: String {
         if let activeController { return activeController.windowTitle }
-        if let activeTab { return activeTab.displayName }
+        if let activeTab { return tabTitle(for: activeTab) }
         return "terminal"
     }
 
@@ -1041,7 +1051,8 @@ struct TerminalWindowRoot: View {
     private var umdTitle: String {
         guard let activeTab else { return windowTitle }
         let host = store.host(id: activeTab.hostID)?.name
-        return host.map { "\(activeTab.displayName) · \($0)" } ?? activeTab.displayName
+        let name = tabTitle(for: activeTab)
+        return host.map { "\(name) · \($0)" } ?? name
     }
 
     #if !os(visionOS)

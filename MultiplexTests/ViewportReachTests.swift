@@ -133,6 +133,86 @@ final class ViewportReachTests: XCTestCase {
         }
     }
 
+    // MARK: Typed rail input
+
+    private func typed(_ input: String, host: Host? = nil) -> ViewportOffer? {
+        ViewportOffer.fromTypedInput(input, host: host)
+    }
+
+    func testTypedInputDefaultsSchemeByReach() {
+        // Dev servers are cleartext — LAN/loopback default http; names on
+        // the internet default https.
+        XCTAssertEqual(
+            typed("192.168.1.68:3000")?.url.absoluteString,
+            "http://192.168.1.68:3000"
+        )
+        XCTAssertEqual(
+            typed("devbox:8080")?.url.absoluteString,
+            "http://devbox:8080"
+        )
+        XCTAssertEqual(
+            typed("vercel.com/docs")?.url.absoluteString,
+            "https://vercel.com/docs"
+        )
+    }
+
+    func testTypedInputRewritesLoopbackViaTheHost() {
+        let offer = typed("localhost:5173", host: devbox)
+        XCTAssertEqual(offer?.url.absoluteString, "http://100.84.2.19:5173")
+        XCTAssertEqual(offer?.reach, .remoteLoopback)
+        XCTAssertEqual(offer?.viaHostName, "devbox")
+        // Without a host record there is nothing to rewrite via.
+        XCTAssertNil(typed("localhost:5173"))
+    }
+
+    func testTypedInputKeepsAnExplicitWebScheme() {
+        XCTAssertEqual(
+            typed("https://192.168.1.68/x")?.url.absoluteString,
+            "https://192.168.1.68/x"
+        )
+        XCTAssertEqual(
+            typed("HTTP://example.com")?.reach,
+            .internet
+        )
+    }
+
+    func testTypedInputRefusesNonWebInput() {
+        for input in [
+            "file:///etc/hosts",
+            "ssh://root@evil.example",
+            "javascript:alert(1)",
+            "mailto:dev@example.com",
+            "multiplex://open?host=devbox",
+            "",
+            "   ",
+            "two words",
+        ] {
+            XCTAssertNil(typed(input, host: devbox), input)
+        }
+    }
+
+    func testTypedInputRefusesUserinfoPaddedAuthorities() {
+        // `http://mailto:dev@example.com` parses "mailto:dev" as userinfo —
+        // the trick the link sheet renders a HOST line to expose. Typed
+        // input never needs userinfo, so it is refused outright.
+        for input in [
+            "https://mailto:dev@example.com",
+            "https://github.com@evil.example/x",
+            "user:pass@10.0.0.5:9090",
+        ] {
+            XCTAssertNil(typed(input, host: devbox), input)
+        }
+        // The colon-digits rule still admits ordinary host:port forms.
+        XCTAssertNotNil(typed("localhost:5173", host: devbox))
+    }
+
+    func testTypedInputTrimsWhitespace() {
+        XCTAssertEqual(
+            typed("  10.0.0.5:9090  ")?.url.absoluteString,
+            "http://10.0.0.5:9090"
+        )
+    }
+
     // MARK: Viewport routes
 
     func testViewportRouteIsNotATerminal() {
