@@ -744,10 +744,16 @@ views.
   appends the **public** half to `authorized_keys`, marked in the key line's
   own comment field (`multiplex:bind:<8 hex>:<device-slug>`, which is how
   `mpx unbind` finds exactly what it enrolled). **Distribution is three
-  repos**: source in `multiplex-term/multiplex-cli` (private until the app
-  ships), prebuilt archives in `multiplex-term/multiplex-cli-releases`, and
-  `multiplex-term/tap` for Homebrew — the split exists because both install
-  paths need *anonymous* downloads while the source stays closed. A `v*` tag
+  repos**: source in `multiplex-term/multiplex-cli` (not public, and no
+  copy anywhere may promise it will be; the support address
+  support@multiplexterm.dev does not exist either — problems go to the
+  releases repo's issue tracker), prebuilt archives in
+  `multiplex-term/multiplex-cli-releases`, and
+  `multiplex-term/homebrew-tap` for Homebrew — the `homebrew-` prefix is
+  brew's own resolution rule for the tap named `multiplex-term/tap`, so the
+  repo must carry it or every documented install line 404s. The split
+  exists because both install paths need *anonymous* downloads while the
+  source stays closed. A `v*` tag
   on the source repo builds four targets (musl x86_64/aarch64 statically
   linked, darwin x86_64/aarch64), publishes them with a `SHA256SUMS`, and
   opens a formula bump; it needs a cross-repo `RELEASE_TOKEN`, since
