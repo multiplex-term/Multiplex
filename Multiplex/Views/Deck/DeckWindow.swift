@@ -164,7 +164,14 @@ struct DeckWindow: View {
         let active: Bool
     }
 
-    var body: some View {
+    // The deck's body is split across these computed properties purely to
+    // keep each modifier chain short enough for the Swift type-checker: the
+    // combined chain (base + sheets + ~20 lifecycle tasks) exceeds its
+    // per-expression budget and fails to type-check on iOS. Slicing costs no
+    // plumbing — every property is on this struct, so all reach `self`
+    // directly. Order is preserved: chrome innermost, then core lifecycle,
+    // then the rest, then the DEBUG verification hooks outermost.
+    private var deckChrome: some View {
         FleetWall(
             terminalOpener: terminalOpener,
             presentation: wallPresentation,
@@ -200,6 +207,10 @@ struct DeckWindow: View {
             Text("Multiplex can’t reach SSH hosts on your local network. Turn on Local Network access in Settings.")
         }
         .background(DeckSceneReporter())
+    }
+
+    private var deckCore: some View {
+        deckChrome
         // The bind controller is app-level (onOpenURL fires on every scene
         // root), but only the mounted deck can hand it the stores it needs
         // and run its flows.
@@ -249,6 +260,10 @@ struct DeckWindow: View {
         #if DEBUG
         .task { await bind.runDebugAutomationIfRequested() }
         #endif
+    }
+
+    private var deckWithLifecycle: some View {
+        deckCore
         // Render the local cache first. Synchronizable Keychain reads may
         // involve securityd/iCloud, so cloud reconciliation begins only once
         // the deck exists instead of blocking App initialization.
@@ -305,6 +320,10 @@ struct DeckWindow: View {
                 hub.flushSnapshots()
             }
         }
+    }
+
+    var body: some View {
+        deckWithLifecycle
         #if DEBUG
         .task { presentPaywallForReviewCaptureIfRequested() }
         .task { presentSettingsForVerificationIfRequested() }
@@ -342,18 +361,11 @@ struct DeckWindow: View {
         openURL(url)
     }
 
-    #if DEBUG
-    /// Launch with `MULTIPLEX_AUTO_SETTINGS=1|theme` to open the global
-    /// Settings sheet for deterministic layout and entitlement-gate screenshots.
-    private func presentSettingsForVerificationIfRequested() {
-        guard let request = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_SETTINGS"],
-              ["1", "theme"].contains(request) else { return }
-        showingSettings = true
-    }
-
     /// Answers `BindController.wantsBindSurface` — a bind URL arrived, its
     /// candidate row is in `pending`, and the Add Host modal (which opens on
-    /// its Bind pane) is where that row is visible and confirmable.
+    /// its Bind pane) is where that row is visible and confirmable. A
+    /// production path (a real `multiplex://b/…` open), so it must live
+    /// OUTSIDE `#if DEBUG` — it is called unconditionally from `body`.
     private func presentBindSurfaceIfRequested() {
         guard bind.wantsBindSurface else { return }
         bind.wantsBindSurface = false
@@ -361,6 +373,15 @@ struct DeckWindow: View {
         // view cannot present at once.
         editingHost = nil
         addingHost = true
+    }
+
+    #if DEBUG
+    /// Launch with `MULTIPLEX_AUTO_SETTINGS=1|theme` to open the global
+    /// Settings sheet for deterministic layout and entitlement-gate screenshots.
+    private func presentSettingsForVerificationIfRequested() {
+        guard let request = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_SETTINGS"],
+              ["1", "theme"].contains(request) else { return }
+        showingSettings = true
     }
 
     /// Launch with `MULTIPLEX_AUTO_ADD_HOST=bind|bind-elsewhere|manual` to
