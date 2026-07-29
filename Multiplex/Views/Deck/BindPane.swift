@@ -41,16 +41,6 @@ struct BindPane: View {
         .task {
             bind.bindSurfaceOpen = true
         }
-        // A machine killed outright never withdrew its announcement, so no
-        // browse change will ever retire that row — only its age can. Slow
-        // on purpose: this is arithmetic, not a network call.
-        .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(30))
-                guard !Task.isCancelled else { return }
-                bind.syncDiscovered()
-            }
-        }
         .onDisappear {
             // Enrollment outlives this pane (the controller owns the task and
             // saves the host either way), so the browser it needs for an
@@ -61,7 +51,7 @@ struct BindPane: View {
         .sheet(isPresented: $showingScanner) {
             BindScannerSheet { payload in
                 showingScanner = false
-                bind.submit(payloadText: payload)
+                bind.submit(payload: payload)
             }
         }
         #endif
@@ -239,13 +229,30 @@ struct BindPane: View {
     }
 
     private func accept(_ text: String) {
-        guard BindPayload(string: text) != nil else {
+        guard let payload = BindPayload(string: text) else {
             Self.log.debug("bind paste rejected (\(text.count) chars)")
             pasteFailed = true
             return
         }
         pasteFailed = false
-        bind.submit(payloadText: text)
+        bind.submit(payload: payload)
+    }
+}
+
+private extension BindController.Pending {
+    /// Chrome caption for the row's corner. Presentation, so it lives with
+    /// the row that renders it, beside `busyCaption`/`retryLabel`.
+    var statusCaption: String {
+        switch stage {
+        // Say what the row is waiting for, not what it is going to be:
+        // this state is the machine asking, and the PIN is the answer.
+        case .awaitingPIN: needsPIN ? "NEEDS PIN" : "READY"
+        case .binding: "BINDING"
+        case .enrolling: "ENROLLING"
+        case .checking: "CHECKING"
+        case .bound: "BOUND"
+        case .failed: "FAILED"
+        }
     }
 }
 
@@ -368,9 +375,9 @@ struct BindCandidateRow: View {
     /// Six digits in mono wells. The real field is invisible and sits on top:
     /// the wells are the rendering, that field is the input.
     private var pinField: some View {
-        HStack(spacing: 4) {
+        let digits = Array(pending.pin)
+        return HStack(spacing: 4) {
             ForEach(0..<6, id: \.self) { index in
-                let digits = Array(pending.pin)
                 Text(index < digits.count ? String(digits[index]) : "·")
                     .font(.mono(13))
                     .foregroundStyle(index < digits.count ? Theme.signal : Theme.signal3)
@@ -398,7 +405,7 @@ struct BindCandidateRow: View {
 /// The QR scanner, live only where a camera exists (iPhone/iPad — visionOS
 /// App Store apps cannot reach the cameras at all).
 private struct BindScannerSheet: View {
-    var found: (String) -> Void
+    var found: (BindPayload) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -418,7 +425,7 @@ private struct BindScannerSheet: View {
 }
 
 private struct BindScannerView: UIViewControllerRepresentable {
-    var found: (String) -> Void
+    var found: (BindPayload) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(found: found) }
 
@@ -458,12 +465,12 @@ private struct BindScannerView: UIViewControllerRepresentable {
     }
 
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
-        private let found: (String) -> Void
+        private let found: (BindPayload) -> Void
         /// One payload per presentation: the scanner keeps recognizing the
         /// same code every frame while the sheet dismisses.
         private var delivered = false
 
-        init(found: @escaping (String) -> Void) {
+        init(found: @escaping (BindPayload) -> Void) {
             self.found = found
         }
 
@@ -485,12 +492,14 @@ private struct BindScannerView: UIViewControllerRepresentable {
         private func deliver(from items: [RecognizedItem]) {
             guard !delivered else { return }
             for item in items {
+                // The parse is also the filter: the scanner stays live past
+                // unrelated QR codes until a genuine bind code appears.
                 guard case .barcode(let barcode) = item,
                       let text = barcode.payloadStringValue,
-                      BindPayload(string: text) != nil
+                      let payload = BindPayload(string: text)
                 else { continue }
                 delivered = true
-                found(text)
+                found(payload)
                 return
             }
         }

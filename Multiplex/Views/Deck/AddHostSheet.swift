@@ -157,25 +157,10 @@ struct AddHostSheet: View {
         // down. The Bind pane holds no unsaved edits, so a swipe is allowed —
         // except mid-enrollment, where it would look like a cancel and isn't.
         .interactiveDismissDisabled(
-            resolvedMode == .manual || bind.pending.contains(where: \.isBusy)
+            resolvedMode == .manual || bind.enrollmentInFlight
         )
         .onAppear(perform: populate)
         .sheet(isPresented: $showingPaywall) { ProPaywallView() }
-        // A scan or paste that isn't a bind code at all. It belongs to this
-        // modal now: the deck has no bind surface to present it from, and an
-        // alert raised behind an open sheet would never be seen.
-        .alert(
-            "Bind Code Not Recognized",
-            isPresented: Binding(
-                get: { bind.alert != nil },
-                set: { if !$0 { bind.alert = nil } }
-            ),
-            presenting: bind.alert
-        ) { _ in
-            Button("OK", role: .cancel) {}
-        } message: { message in
-            Text(message)
-        }
         // Binding creates a host, so it meets the same free-tier limit the
         // manual form does — refused before anything is enrolled on the
         // machine, never after.
@@ -892,7 +877,7 @@ struct AddHostSheet: View {
         let target: String
         if environment["MULTIPLEX_AUTO_HOST_SETTINGS"] == "models" {
             target = "agent-models"
-        } else if environment["MULTIPLEX_AUTO_ADD_HOST"] == "bind-elsewhere" {
+        } else if AddHostAutoOpen.requested == .bindElsewhere {
             target = BindPane.elsewhereID
         } else {
             return
@@ -907,12 +892,8 @@ struct AddHostSheet: View {
     /// cannot tap the choice bar). Adding always defaults to Bind.
     private func openBindPaneForVerificationIfRequested() {
         #if DEBUG
-        guard showsModeBar,
-              let request = ProcessInfo.processInfo.environment[
-                "MULTIPLEX_AUTO_ADD_HOST"
-              ]
-        else { return }
-        mode = request == "manual" ? .manual : .bind
+        guard showsModeBar, let request = AddHostAutoOpen.requested else { return }
+        mode = request == .manual ? .manual : .bind
         #endif
     }
 
@@ -1230,5 +1211,22 @@ final class SecretTextField: UITextField {
     .padding()
     .frame(width: 420)
     .background(Theme.chassis)
+}
+#endif
+
+#if DEBUG
+/// `MULTIPLEX_AUTO_ADD_HOST`'s grammar, parsed in one place: DeckWindow
+/// opens the modal for any recognized value, this sheet picks the pane, and
+/// the scroll hook aims at the elsewhere section. Matching the raw strings
+/// at each site let them drift.
+enum AddHostAutoOpen: String {
+    case bind
+    case bindElsewhere = "bind-elsewhere"
+    case manual
+
+    static var requested: AddHostAutoOpen? {
+        ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ADD_HOST"]
+            .flatMap(Self.init(rawValue:))
+    }
 }
 #endif

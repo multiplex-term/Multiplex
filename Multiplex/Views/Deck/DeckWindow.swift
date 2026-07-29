@@ -157,11 +157,22 @@ struct DeckWindow: View {
     }
 
     /// What makes bind discovery start or stop. Any of these changing
-    /// re-evaluates the browser exactly once.
+    /// re-evaluates the browser exactly once, and the policy is a property
+    /// of the same values so the task body and its restart key can't drift.
     private struct BindBrowseID: Hashable {
         let surface: Bool
         let inFlight: Bool
         let active: Bool
+
+        var wantsBrowsing: Bool { active && (surface || inFlight) }
+    }
+
+    private var bindBrowseID: BindBrowseID {
+        BindBrowseID(
+            surface: bind.bindSurfaceOpen,
+            inFlight: bind.enrollmentInFlight,
+            active: scenePhase == .active
+        )
     }
 
     // The deck's body is split across these computed properties purely to
@@ -239,23 +250,12 @@ struct DeckWindow: View {
         //
         // Scoping it this tightly also means the local-network prompt can
         // only ever follow an explicit tap on ADD HOST, on any launch.
-        .task(
-            id: BindBrowseID(
-                surface: bind.bindSurfaceOpen,
-                inFlight: bind.pending.contains(where: \.isBusy),
-                active: scenePhase == .active
-            )
-        ) {
-            let wanted = bind.bindSurfaceOpen
-                || bind.pending.contains(where: \.isBusy)
-            if scenePhase == .active && wanted {
+        .task(id: bindBrowseID) {
+            if bindBrowseID.wantsBrowsing {
                 bind.beginDiscovery()
             } else {
                 bind.endDiscovery()
             }
-        }
-        .onChange(of: bind.discovery.announcements) { _, _ in
-            bind.syncDiscovered()
         }
         #if DEBUG
         .task { await bind.runDebugAutomationIfRequested() }
@@ -391,9 +391,7 @@ struct DeckWindow: View {
     /// below one sheet height. Bypasses the free-tier gate deliberately:
     /// this captures layout, not entitlement.
     private func presentAddHostForVerificationIfRequested() {
-        guard ["bind", "bind-elsewhere", "manual"].contains(
-            ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ADD_HOST"]
-        ) else { return }
+        guard AddHostAutoOpen.requested != nil else { return }
         addingHost = true
     }
 

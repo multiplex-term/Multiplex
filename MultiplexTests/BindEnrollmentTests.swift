@@ -87,13 +87,13 @@ struct BindEnrollmentTests {
     // MARK: Host naming
 
     @Test func boundHostNamesNeverCollideWithExistingOnes() {
-        #expect(BindController.uniqueName("devbox", taken: []) == "devbox")
-        #expect(BindController.uniqueName("devbox", taken: ["devbox"]) == "devbox 2")
-        #expect(BindController.uniqueName("devbox", taken: ["devbox", "devbox 2"]) == "devbox 3")
+        #expect(BindNaming.uniqueName("devbox", taken: []) == "devbox")
+        #expect(BindNaming.uniqueName("devbox", taken: ["devbox"]) == "devbox 2")
+        #expect(BindNaming.uniqueName("devbox", taken: ["devbox", "devbox 2"]) == "devbox 3")
         // Case-insensitive: two records called DEVBOX and devbox would be
         // indistinguishable on the rail.
-        #expect(BindController.uniqueName("devbox", taken: ["DEVBOX"]) == "devbox 2")
-        #expect(BindController.uniqueName("  ", taken: []) == "host")
+        #expect(BindNaming.uniqueName("devbox", taken: ["DEVBOX"]) == "devbox 2")
+        #expect(BindNaming.uniqueName("  ", taken: []) == "host")
     }
 
     // MARK: Which address the bound host dials
@@ -109,7 +109,7 @@ struct BindEnrollmentTests {
         ]))!
         // Bonjour resolved the service on a LAN interface, but the machine
         // says its SSH is reachable at the address it published.
-        #expect(BindController.hostname(
+        #expect(BindNaming.hostname(
             for: offer, connectedTo: "10.187.1.225", payload: nil) == "127.0.0.1")
     }
 
@@ -121,7 +121,7 @@ struct BindEnrollmentTests {
             ("addrs", .array([.text("10.0.5.2"), .text("192.168.1.24")])),
             ("ssh", .map([("user", .text("jhen")), ("port", .uint(22))])),
         ]))!
-        #expect(BindController.hostname(
+        #expect(BindNaming.hostname(
             for: offer, connectedTo: "192.168.1.24", payload: nil) == "192.168.1.24")
         // Nothing endorsed and nothing reached: the name is the last resort,
         // never an empty hostname.
@@ -129,8 +129,8 @@ struct BindEnrollmentTests {
             ("name", .text("devbox")),
             ("ssh", .map([("user", .text("jhen")), ("port", .uint(22))])),
         ]))!
-        #expect(BindController.hostname(for: bare, connectedTo: nil, payload: nil) == "devbox")
-        #expect(BindController.hostname(
+        #expect(BindNaming.hostname(for: bare, connectedTo: nil, payload: nil) == "devbox")
+        #expect(BindNaming.hostname(
             for: bare, connectedTo: "10.0.0.9", payload: nil) == "10.0.0.9")
     }
 

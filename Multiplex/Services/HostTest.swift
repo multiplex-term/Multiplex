@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// The host sheet's Test Connection button: one throwaway SSH connection
 /// using the form's (possibly unsaved) credentials, then a `command -v`
@@ -125,34 +124,4 @@ enum HostTest {
         return "Couldn't connect to \(host.hostname): \(detail)"
     }
 
-    // MARK: Deadline
-
-    struct DeadlineExceeded: Error {}
-
-    /// Same shape as `HostConnectionModel.deadlined` — a hung future
-    /// resolves as a failure instead of never.
-    private static func deadlined<T: Sendable>(
-        seconds: Double, _ operation: @escaping @Sendable () async throws -> T
-    ) async throws -> T {
-        let resumed = OSAllocatedUnfairLock(initialState: false)
-        return try await withCheckedThrowingContinuation { continuation in
-            @Sendable func finish(_ result: Result<T, Error>) {
-                let first = resumed.withLock { done -> Bool in
-                    if done { return false }
-                    done = true
-                    return true
-                }
-                if first { continuation.resume(with: result) }
-            }
-            let work = Task {
-                do { finish(.success(try await operation())) }
-                catch { finish(.failure(error)) }
-            }
-            Task {
-                try? await Task.sleep(for: .seconds(seconds))
-                finish(.failure(DeadlineExceeded()))
-                work.cancel()
-            }
-        }
-    }
 }

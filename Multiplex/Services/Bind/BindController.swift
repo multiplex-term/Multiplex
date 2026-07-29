@@ -17,7 +17,10 @@ import notify
 final class BindController {
     static let shared = BindController()
 
-    /// One machine offering to bind — a row in the Bind pane.
+    /// One machine offering to bind — a row in the Bind pane. Only the
+    /// source, the typed PIN, and the enrollment stage are stored; identity
+    /// and display facts derive from the source, so no construction site can
+    /// let them drift.
     struct Pending: Identifiable, Equatable {
         enum Source: Equatable {
             /// Heard on the local network; the PIN in its terminal proves it.
@@ -31,20 +34,63 @@ final class BindController {
             case binding
             case enrolling
             case checking
-            case bound(hostID: UUID)
+            case bound
             case failed(String)
         }
 
-        var id: String
         var source: Source
-        var name: String
-        var user: String
-        var addressSummary: String
-        var fingerprint: String?
         var pin: String = ""
         var stage: Stage = .awaitingPIN
-        /// Cleared on success so a bound row stops asking for anything.
-        var needsPIN: Bool
+
+        var id: String {
+            switch source {
+            case .discovered(let announcement):
+                announcement.id
+            case .payload(let payload):
+                payload.isOffline
+                    ? "offline:\(payload.name):\(payload.offline?.sshUser ?? "")"
+                    : payload.spub.base64EncodedString()
+            }
+        }
+
+        var name: String {
+            switch source {
+            case .discovered(let announcement): announcement.name
+            case .payload(let payload): payload.name
+            }
+        }
+
+        // The compact handshake payload knows the machine's address but not
+        // its SSH user or fingerprint — the OFFER brings those a moment
+        // later — so a payload row shows only what it actually knows.
+
+        var user: String {
+            switch source {
+            case .discovered(let announcement): announcement.user
+            case .payload(let payload): payload.offline?.sshUser ?? ""
+            }
+        }
+
+        var addressSummary: String {
+            switch source {
+            case .discovered(let announcement): "ssh :\(announcement.sshPort)"
+            case .payload(let payload): BindNaming.addressSummary(for: payload)
+            }
+        }
+
+        var fingerprint: String? {
+            switch source {
+            case .discovered(let announcement): announcement.fingerprint
+            case .payload(let payload): payload.offline?.pinnedHostKey
+            }
+        }
+
+        /// Only a network-discovered machine proves itself with the PIN its
+        /// terminal printed; scan/paste payloads carry their own token.
+        var needsPIN: Bool {
+            if case .discovered = source { return true }
+            return false
+        }
 
         var isBusy: Bool {
             switch stage {
@@ -57,24 +103,14 @@ final class BindController {
             guard !isBusy else { return false }
             return needsPIN ? pin.count == 6 : true
         }
-
-        var statusCaption: String {
-            switch stage {
-            // Say what the row is waiting for, not what it is going to be:
-            // this state is the machine asking, and the PIN is the answer.
-            case .awaitingPIN: needsPIN ? "NEEDS PIN" : "READY"
-            case .binding: "BINDING"
-            case .enrolling: "ENROLLING"
-            case .checking: "CHECKING"
-            case .bound: "BOUND"
-            case .failed: "FAILED"
-            }
-        }
     }
 
     private(set) var pending: [Pending] = []
-    /// A paste/scan that couldn't even be parsed, or a limit refusal.
-    var alert: String?
+    /// True while any row is mid-enrollment. Stored rather than computed on
+    /// purpose: the deck's browse task keys on this fact, and a computed
+    /// read of `pending` would re-evaluate the deck's whole body on every
+    /// PIN keystroke (Observation tracks the array, not the derived Bool).
+    private(set) var enrollmentInFlight = false
     /// Raised when the free host limit blocks a bind.
     var needsProForHostLimit = false
     /// Raised when a payload arrives from outside the Add Host modal (a
@@ -108,11 +144,14 @@ final class BindController {
     /// clearable there), so connecting keeps working without a re-ask.
     var keyPassphrase = ""
 
-    let discovery = BindDiscovery()
+    private let discovery = BindDiscovery()
 
     /// When each announcement id was first heard, kept across pane opens so
     /// the staleness clock is the offer's age, not this pane session's.
     @ObservationIgnored private var firstHeard: [String: Date] = [:]
+    /// Retires announcement rows whose machine died without withdrawing —
+    /// only their age can (`BindOfferLifetime`); runs while browsing does.
+    @ObservationIgnored private var staleSweep: Task<Void, Never>?
 
     @ObservationIgnored private weak var store: HostStore?
     @ObservationIgnored private weak var entitlements: EntitlementStore?
@@ -123,6 +162,14 @@ final class BindController {
     @ObservationIgnored private var debugHooksInstalled = false
 
     var hasContext: Bool { store != nil }
+
+    init() {
+        // The controller owns the announcements→rows fold: views consume
+        // `pending` and never have to pump between two objects it holds.
+        discovery.onAnnouncementsChanged = { [weak self] in
+            self?.syncDiscovered()
+        }
+    }
 
     /// The mounted deck hands over the stores; discovery stays off until the
     /// user opens a bind surface.
@@ -138,29 +185,37 @@ final class BindController {
 
     /// Started and stopped by the mounted deck, which owns the policy: while
     /// the Bind pane is on screen or an enrollment is in flight, and never in
-    /// the background. This class only holds the browser.
+    /// the background. This class holds the browser and runs the fold.
     func beginDiscovery() {
         discovery.start()
+        guard staleSweep == nil else { return }
+        // A machine killed outright never withdrew its announcement, so no
+        // browse change will ever retire that row — only its age can. Slow
+        // on purpose: this is arithmetic, not a network call.
+        staleSweep = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled else { return }
+                self?.syncDiscovered()
+            }
+        }
     }
 
     func endDiscovery() {
+        staleSweep?.cancel()
+        staleSweep = nil
+        // stop() empties the announcement list and the fold retires the
+        // rows for machines we can no longer hear — except ones mid-flight
+        // or already bound (their receipt stays put).
         discovery.stop()
-        // Rows for machines we can no longer hear go with it, except ones
-        // mid-flight or already bound (their receipt stays put).
-        pending.removeAll { candidate in
-            guard case .discovered = candidate.source else { return false }
-            if candidate.isBusy { return false }
-            if case .bound = candidate.stage { return false }
-            return true
-        }
     }
 
     /// Folds the browser's current list into the candidate rows, preserving
     /// any PIN the user has already typed and any in-flight stage, and drops
     /// offers too old to still be live (`BindOfferLifetime`). Also called on
-    /// a slow tick by the pane, because a stale record produces no browse
+    /// the slow sweep above, because a stale record produces no browse
     /// change to react to — that is exactly its problem.
-    func syncDiscovered(now: Date = Date()) {
+    private func syncDiscovered(now: Date = Date()) {
         for announcement in discovery.announcements where firstHeard[announcement.id] == nil {
             firstHeard[announcement.id] = now
         }
@@ -170,15 +225,7 @@ final class BindController {
         }
         var updated = pending
         for announcement in heard where !updated.contains(where: { $0.id == announcement.id }) {
-            updated.append(Pending(
-                id: announcement.id,
-                source: .discovered(announcement),
-                name: announcement.name,
-                user: announcement.user,
-                addressSummary: "ssh :\(announcement.sshPort)",
-                fingerprint: announcement.fingerprint,
-                needsPIN: true
-            ))
+            updated.append(Pending(source: .discovered(announcement)))
         }
         let heardIDs = Set(heard.map(\.id))
         updated.removeAll { candidate in
@@ -193,21 +240,11 @@ final class BindController {
 
     // MARK: Payload entry (scan, paste, URL)
 
-    /// A scanned/pasted/opened payload always lands as a row the user
-    /// confirms — never an automatic bind. Attacker-suppliable input gets
-    /// the same confirmation as anything else.
-    func submit(payloadText: String) {
-        guard let payload = BindPayload(string: payloadText) else {
-            log.debug("bind payload rejected (\(payloadText.count) chars)")
-            alert = "That isn’t a Multiplex bind code. Run mpx bind on the machine and scan or paste what it prints."
-            return
-        }
-        submit(payload: payload)
-    }
-
     /// Scan and paste live inside the Bind pane, so the act that delivered
     /// this payload — pointing the camera at the machine's own QR, pressing
-    /// Paste — IS the user's confirmation, and the bind runs at once.
+    /// Paste — IS the user's confirmation, and the bind runs at once. Both
+    /// surfaces parse before they submit; unparseable text never leaves the
+    /// pane (its inline caption is the one failure surface).
     func submit(payload: BindPayload) {
         guard let id = upsert(payload) else { return }
         confirm(id: id)
@@ -226,33 +263,18 @@ final class BindController {
     /// Adds or refreshes the candidate row for a payload and answers its id,
     /// or nil while that row is mid-enrollment and must not be replaced.
     private func upsert(_ payload: BindPayload) -> String? {
-        // The compact payload knows the machine's address but, on the
-        // handshake path, not its SSH user or fingerprint — the OFFER brings
-        // those a moment later, so the row shows what it actually knows.
-        let id = payload.isOffline
-            ? "offline:\(payload.name):\(payload.offline?.sshUser ?? "")"
-            : payload.spub.base64EncodedString()
-        var candidate = Pending(
-            id: id,
-            source: .payload(payload),
-            name: payload.name,
-            user: payload.offline?.sshUser ?? "",
-            addressSummary: Self.addressSummary(for: payload),
-            fingerprint: payload.offline?.pinnedHostKey,
-            needsPIN: false
-        )
-        candidate.stage = .awaitingPIN
-        if let index = pending.firstIndex(where: { $0.id == id }) {
+        let candidate = Pending(source: .payload(payload))
+        if let index = index(of: candidate.id) {
             guard !pending[index].isBusy else { return nil }
             pending[index] = candidate
         } else {
             pending.append(candidate)
         }
-        return id
+        return candidate.id
     }
 
     func setPIN(_ pin: String, for id: String) {
-        guard let index = pending.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = index(of: id) else { return }
         let digits = String(pin.filter(\.isNumber).prefix(6))
         guard pending[index].pin != digits else { return }
         pending[index].pin = digits
@@ -260,12 +282,17 @@ final class BindController {
 
     func dismiss(id: String) {
         pending.removeAll { $0.id == id }
+        refreshEnrollmentInFlight()
+    }
+
+    private func index(of id: String) -> Int? {
+        pending.firstIndex { $0.id == id }
     }
 
     // MARK: Enrollment
 
     func confirm(id: String) {
-        guard let index = pending.firstIndex(where: { $0.id == id }) else {
+        guard let index = index(of: id) else {
             log.debug("bind confirm: no pending row for that offer")
             return
         }
@@ -287,6 +314,7 @@ final class BindController {
         }
         let candidate = pending[index]
         pending[index].stage = .binding
+        refreshEnrollmentInFlight()
         log.debug("bind starting for \(candidate.name, privacy: .public)")
         Task { await performBind(candidate) }
     }
@@ -295,36 +323,15 @@ final class BindController {
         // Snapshot the pane's passphrase now: the pane may close (and clear
         // the field) while this bind is still talking to the machine.
         let passphrase = keyPassphrase
-        switch candidate.source {
-        case .payload(let payload) where payload.isOffline:
+        if case .payload(let payload) = candidate.source, payload.isOffline {
             await importOffline(payload, id: candidate.id, keyPassphrase: passphrase)
-        case .payload(let payload):
-            await handshake(
-                id: candidate.id,
-                spub: payload.spub,
-                credential: .token(payload.token),
-                keyPassphrase: passphrase,
-                endpointPayload: payload
-            )
-        case .discovered(let announcement):
-            await handshake(
-                id: candidate.id,
-                spub: announcement.spub,
-                credential: .pin(candidate.pin),
-                keyPassphrase: passphrase,
-                announcement: announcement
-            )
+        } else {
+            await handshake(for: candidate, keyPassphrase: passphrase)
         }
     }
 
-    private func handshake(
-        id: String,
-        spub: Data,
-        credential: BindClientSession.Credential,
-        keyPassphrase: String,
-        endpointPayload: BindPayload? = nil,
-        announcement: BindAnnouncement? = nil
-    ) async {
+    private func handshake(for candidate: Pending, keyPassphrase: String) async {
+        let id = candidate.id
         let raw = Curve25519.Signing.PrivateKey()
         let key = BindSSHKey.make(from: raw)
         // Seal BEFORE enrolling: a sealing failure after the machine already
@@ -333,9 +340,7 @@ final class BindController {
         let storedPrivateKey: String
         if keyPassphrase.isEmpty {
             storedPrivateKey = key.privateOpenSSH
-        } else if let sealed = BindSSHKey.sealedPrivateOpenSSH(
-            key: raw, passphrase: keyPassphrase
-        ) {
+        } else if let sealed = await Self.sealedOffMain(key: raw, passphrase: keyPassphrase) {
             storedPrivateKey = sealed
         } else {
             fail(id: id, "Couldn’t seal the key with that passphrase — nothing was enrolled.")
@@ -344,30 +349,34 @@ final class BindController {
         let device = Self.deviceName
         do {
             let completion: BindClient.Completion
-            if let payload = endpointPayload {
+            var payload: BindPayload?
+            switch candidate.source {
+            case .payload(let scanned):
+                payload = scanned
                 completion = try await BindClient.run(
-                    payload: payload,
+                    payload: scanned,
                     publicKeyLine: key.publicLine,
                     device: device
                 )
-            } else if let announcement, let endpoint = discovery.endpoint(for: announcement) {
+            case .discovered(let announcement):
+                guard let endpoint = discovery.endpoint(for: announcement) else {
+                    fail(id: id, "That machine stopped announcing — run mpx bind again.")
+                    return
+                }
                 completion = try await BindClient.run(
                     endpoint: endpoint,
-                    spub: spub,
-                    credential: credential,
+                    spub: announcement.spub,
+                    credential: .pin(candidate.pin),
                     publicKeyLine: key.publicLine,
                     device: device
                 )
-            } else {
-                fail(id: id, "That machine stopped announcing — run mpx bind again.")
-                return
             }
             log.debug("bind enrolled \(completion.comment, privacy: .public)")
             setStage(id: id, .enrolling)
-            let hostname = Self.hostname(
+            let hostname = BindNaming.hostname(
                 for: completion.offer,
                 connectedTo: completion.connectedHost,
-                payload: endpointPayload
+                payload: payload
             )
             log.debug("bind host address: \(hostname, privacy: .public)")
             await save(
@@ -387,6 +396,18 @@ final class BindController {
         }
     }
 
+    /// bcrypt-pbkdf at 16 rounds is ~150 ms of deliberate KDF work.
+    /// `Task.detached`, not merely nonisolated, so it stays off the main
+    /// actor under every language-mode default — the row's spinner (and the
+    /// wall behind the sheet) keep animating while the key seals.
+    private static func sealedOffMain(
+        key: Curve25519.Signing.PrivateKey, passphrase: String
+    ) async -> String? {
+        await Task.detached {
+            BindSSHKey.sealedPrivateOpenSSH(key: key, passphrase: passphrase)
+        }.value
+    }
+
     /// `mpx bind --offline`: the key came with the payload as a raw seed, so
     /// there is no handshake — rebuild it, import, then rotate it out. With
     /// a pane passphrase set, the stored key is sealed instead and NEVER
@@ -396,11 +417,12 @@ final class BindController {
         _ payload: BindPayload, id: String, keyPassphrase: String
     ) async {
         guard let offline = payload.offline,
-              let key = BindSSHKey(seed: offline.seed)
+              let raw = try? Curve25519.Signing.PrivateKey(rawRepresentation: offline.seed)
         else {
             fail(id: id, "That bind code is missing its key.")
             return
         }
+        let key = BindSSHKey.make(from: raw)
         let privateKey: String
         let rotation: BindRotationStore.Request?
         var savedPassphrase: String?
@@ -411,11 +433,8 @@ final class BindController {
                 authorizedKeysPath: offline.authorizedKeysPath
             )
         } else {
-            guard let raw = try? Curve25519.Signing.PrivateKey(
-                rawRepresentation: offline.seed
-            ), let sealed = BindSSHKey.sealedPrivateOpenSSH(
-                key: raw, passphrase: keyPassphrase
-            ) else {
+            guard let sealed = await Self.sealedOffMain(key: raw, passphrase: keyPassphrase)
+            else {
                 fail(id: id, "Couldn’t seal the key with that passphrase — nothing was saved.")
                 return
             }
@@ -446,11 +465,11 @@ final class BindController {
         privateKey: String,
         pins: [String],
         rotation: BindRotationStore.Request?,
-        savedPassphrase: String? = nil
+        savedPassphrase: String?
     ) async {
         guard let store else { return }
         var host = Host(
-            name: Self.uniqueName(name, taken: store.hosts.map(\.name)),
+            name: BindNaming.uniqueName(name, taken: store.hosts.map(\.name)),
             hostname: hostname,
             username: username
         )
@@ -484,7 +503,7 @@ final class BindController {
         if OpenSSHPrivateKeyEnvelope.encryption(in: privateKey) == .encrypted,
            HostSecrets.load(for: host).passphrase == nil {
             log.debug("bind import: key is passphrase-sealed — skipping the doomed probe; no rotation")
-            markBound(id: id, host: host)
+            markBound(id: id)
             return
         }
 
@@ -495,7 +514,7 @@ final class BindController {
             if rotation != nil {
                 await rotateIfNeeded(host: host)
             }
-            markBound(id: id, host: host)
+            markBound(id: id)
         case .failed(let message):
             // The record and its key are saved either way — the host is on
             // the wall and can be fixed in Host Settings. Say what happened.
@@ -504,8 +523,8 @@ final class BindController {
         }
     }
 
-    private func markBound(id: String, host: Host) {
-        setStage(id: id, .bound(hostID: host.id))
+    private func markBound(id: String) {
+        setStage(id: id, .bound)
         // The receipt is the row saying BOUND; drop it shortly after so the
         // list settles back to whatever is still asking.
         Task { [weak self] in
@@ -515,8 +534,14 @@ final class BindController {
     }
 
     private func setStage(id: String, _ stage: Pending.Stage) {
-        guard let index = pending.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = index(of: id) else { return }
         pending[index].stage = stage
+        refreshEnrollmentInFlight()
+    }
+
+    private func refreshEnrollmentInFlight() {
+        let busy = pending.contains(where: \.isBusy)
+        if enrollmentInFlight != busy { enrollmentInFlight = busy }
     }
 
     private func fail(id: String, _ message: String) {
@@ -586,49 +611,6 @@ final class BindController {
         return name.isEmpty ? fallback : name
     }
 
-    /// What the row shows under the machine's name before a handshake has
-    /// told us anything more.
-    nonisolated static func addressSummary(for payload: BindPayload) -> String {
-        let port = payload.offline?.sshPort
-        let suffix = port.map { "ssh :\($0)" } ?? "ssh"
-        guard let addr = payload.addrs.first else { return suffix }
-        return "\(addr) · \(suffix)"
-    }
-
-    /// Which address the saved host dials. The machine's own list is
-    /// authoritative — where its *SSH* lives is not necessarily where its
-    /// bind listener answered (a Bonjour resolve reports the interface the
-    /// service was found on, while `mpx bind --addr` exists precisely so a
-    /// machine behind NAT, a tunnel, or a port forward can name the address
-    /// that actually works). So prefer the address we reached only when the
-    /// machine also endorses it: that one is proven reachable *and* stated.
-    nonisolated static func hostname(
-        for offer: BindOffer,
-        connectedTo connected: String?,
-        payload: BindPayload?
-    ) -> String {
-        let stated = offer.addrs.isEmpty ? (payload?.addrs ?? []) : offer.addrs
-        if let connected, stated.contains(connected) { return connected }
-        if let first = stated.first { return first }
-        return connected ?? offer.name
-    }
-
-    /// Two machines can genuinely be called "devbox". Suffix rather than
-    /// merge — a bind never edits a host the user already had.
-    nonisolated static func uniqueName(_ name: String, taken: [String]) -> String {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = trimmed.isEmpty ? "host" : trimmed
-        guard taken.contains(where: { $0.caseInsensitiveCompare(base) == .orderedSame })
-        else { return base }
-        var suffix = 2
-        while taken.contains(where: {
-            $0.caseInsensitiveCompare("\(base) \(suffix)") == .orderedSame
-        }) {
-            suffix += 1
-        }
-        return "\(base) \(suffix)"
-    }
-
     #if DEBUG
     /// Headless hooks — the simulator can neither scan a QR nor tap a row:
     ///   MULTIPLEX_AUTO_BIND=<multiplex://b/…>     submit a payload once
@@ -647,11 +629,10 @@ final class BindController {
             "app.multiplexterm.multiplex.debug.bind", &token, .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                // Stand in for the Bind pane being on screen, so the deck's
-                // own lifecycle task keeps the browser up instead of tearing
-                // it down on its next evaluation.
+                // Stand in for the Bind pane being on screen: the mounted
+                // deck's lifecycle task reads this flag and runs the browser
+                // through the same policy the real pane gets.
                 self?.bindSurfaceOpen = true
-                self?.beginDiscovery()
             }
         }
     }
@@ -671,17 +652,19 @@ final class BindController {
         // Let the store finish its first load (and any seeded host land).
         try? await Task.sleep(for: .seconds(2))
         if let payload {
-            submit(payloadText: payload)
+            if let parsed = BindPayload(string: payload) {
+                submit(payload: parsed)
+            } else {
+                log.debug("MULTIPLEX_AUTO_BIND payload didn't parse (\(payload.count) chars)")
+            }
             return
         }
         guard let autoPIN else { return }
-        // Same stand-in as the notification hook: the pane is what discovery
-        // serves now, and the deck's lifecycle task would otherwise stop the
-        // browser out from under this walk.
+        // Same stand-in as the notification hook: the deck's lifecycle task
+        // sees the flag and starts the browser, and the announcement fold
+        // fills `pending` on its own — this walk only polls for the row.
         bindSurfaceOpen = true
-        beginDiscovery()
         for _ in 0..<60 {
-            syncDiscovered()
             if let candidate = pending.first(where: {
                 if case .discovered = $0.source { return $0.stage == .awaitingPIN }
                 return false

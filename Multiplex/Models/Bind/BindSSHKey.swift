@@ -21,41 +21,63 @@ struct BindSSHKey: Equatable, Sendable {
     }
 
     static func make(from key: Curve25519.Signing.PrivateKey) -> BindSSHKey {
-        let seed = key.rawRepresentation
         let publicKey = key.publicKey.rawRepresentation
         let publicBlob = sshString(Data(keyType.utf8)) + sshString(publicKey)
         let publicB64 = publicBlob.base64EncodedString()
-
-        // openssh-key-v1: magic ‖ cipher "none" ‖ kdf "none" ‖ kdfoptions ""
-        // ‖ nkeys=1 ‖ public blob ‖ private section (checkint ×2, key type,
-        // pub, seed‖pub, comment, pad 1,2,3… to the "none" blocksize of 8).
-        var payload = Data("openssh-key-v1\0".utf8)
-        payload += sshString(Data("none".utf8))
-        payload += sshString(Data("none".utf8))
-        payload += sshString(Data())
-        payload += uint32(1)
-        payload += sshString(publicBlob)
-
-        var priv = Data()
-        let check = UInt32.random(in: .min ... .max)
-        priv += uint32(check)
-        priv += uint32(check)
-        priv += sshString(Data(keyType.utf8))
-        priv += sshString(publicKey)
-        priv += sshString(seed + publicKey)
-        priv += sshString(Data())
-        var pad: UInt8 = 1
-        while priv.count % 8 != 0 {
-            priv.append(pad)
-            pad += 1
-        }
-        payload += sshString(priv)
-
+        let container = container(
+            cipher: "none", kdf: "none", kdfOptions: Data(),
+            publicBlob: publicBlob,
+            privateSection: privateSection(
+                key: key,
+                checkint: UInt32.random(in: .min ... .max),
+                // The "none" cipher's block size.
+                blockSize: 8
+            )
+        )
         return BindSSHKey(
-            privateOpenSSH: armor(container: payload),
+            privateOpenSSH: armor(container: container),
             publicLine: "\(keyType) \(publicB64)",
             publicB64: publicB64
         )
+    }
+
+    /// The container's private section: checkint ×2, key type, pub,
+    /// seed‖pub, empty comment, then the 1,2,3… pad ramp the format
+    /// prescribes (and readers verify after decrypting) up to the cipher's
+    /// block size.
+    private static func privateSection(
+        key: Curve25519.Signing.PrivateKey, checkint: UInt32, blockSize: Int
+    ) -> Data {
+        let publicKey = key.publicKey.rawRepresentation
+        var priv = Data()
+        priv += uint32(checkint)
+        priv += uint32(checkint)
+        priv += sshString(Data(keyType.utf8))
+        priv += sshString(publicKey)
+        priv += sshString(key.rawRepresentation + publicKey)
+        priv += sshString(Data())
+        var pad: UInt8 = 1
+        while priv.count % blockSize != 0 {
+            priv.append(pad)
+            pad += 1
+        }
+        return priv
+    }
+
+    /// openssh-key-v1: magic ‖ cipher ‖ kdf ‖ kdfoptions ‖ nkeys=1 ‖ public
+    /// blob ‖ private section (already encrypted when the cipher says so).
+    private static func container(
+        cipher: String, kdf: String, kdfOptions: Data,
+        publicBlob: Data, privateSection: Data
+    ) -> Data {
+        var payload = Data("openssh-key-v1\0".utf8)
+        payload += sshString(Data(cipher.utf8))
+        payload += sshString(Data(kdf.utf8))
+        payload += sshString(kdfOptions)
+        payload += uint32(1)
+        payload += sshString(publicBlob)
+        payload += sshString(privateSection)
+        return payload
     }
 
     /// Wraps an openssh-key-v1 container in its PEM armor — base64, 70-char
@@ -127,30 +149,16 @@ extension BindSSHKey {
         let publicKey = key.publicKey.rawRepresentation
         let publicBlob = sshString(Data(keyType.utf8)) + sshString(publicKey)
 
-        var priv = Data()
-        priv += uint32(check)
-        priv += uint32(check)
-        priv += sshString(Data(keyType.utf8))
-        priv += sshString(publicKey)
-        priv += sshString(key.rawRepresentation + publicKey)
-        priv += sshString(Data())
-        // aes256-ctr's block is 16; the padding bytes are the 1,2,3… ramp
-        // the format prescribes and readers verify after decrypting.
-        var pad: UInt8 = 1
-        while priv.count % 16 != 0 {
-            priv.append(pad)
-            pad += 1
-        }
+        // aes256-ctr's block is 16, so the pad ramp fills to that here.
+        let priv = privateSection(key: key, checkint: check, blockSize: 16)
         guard let ciphertext = aes256ctr(priv, key: aesKey, iv: iv) else { return nil }
 
-        var container = Data("openssh-key-v1\0".utf8)
-        container += sshString(Data("aes256-ctr".utf8))
-        container += sshString(Data("bcrypt".utf8))
-        container += sshString(sshString(salt) + uint32(sealRounds))
-        container += uint32(1)
-        container += sshString(publicBlob)
-        container += sshString(ciphertext)
-        return armor(container: container)
+        return armor(container: container(
+            cipher: "aes256-ctr", kdf: "bcrypt",
+            kdfOptions: sshString(salt) + uint32(sealRounds),
+            publicBlob: publicBlob,
+            privateSection: ciphertext
+        ))
     }
 
     /// One-shot AES-256-CTR (CommonCrypto). CTR is a stream mode, so the

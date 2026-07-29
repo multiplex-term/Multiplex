@@ -7,7 +7,6 @@ import Foundation
 /// vectors both live in the multiplex-cli repo (spec/bind-v1.md); the
 /// vendored copy in MultiplexTests pins these types to `mpx`'s exact bytes.
 enum BindWire {
-    static let urlScheme = "multiplex"
     /// Lowercase because the comparison is done on a lowercased string; the
     /// base64url data after it is case-sensitive and never touched.
     static let urlPrefix = "multiplex://b/"
@@ -296,28 +295,6 @@ struct BindChannel {
             throw ChannelError.authenticationFailed
         }
         seqS2C += 1
-        return plain
-    }
-
-    // Server-side halves — exercised by the vector tests so this one type
-    // proves both directions against mpx's bytes.
-    mutating func sealS2C(_ plain: Data) -> Data {
-        defer { seqS2C += 1 }
-        let box = try! ChaChaPoly.seal(plain, using: keyS2C, nonce: Self.nonce(seqS2C))
-        return box.ciphertext + box.tag
-    }
-
-    mutating func openC2S(_ sealed: Data) throws -> Data {
-        guard sealed.count >= 16 else { throw ChannelError.malformed }
-        let box = try ChaChaPoly.SealedBox(
-            nonce: Self.nonce(seqC2S),
-            ciphertext: sealed.dropLast(16),
-            tag: sealed.suffix(16)
-        )
-        guard let plain = try? ChaChaPoly.open(box, using: keyC2S) else {
-            throw ChannelError.authenticationFailed
-        }
-        seqC2S += 1
         return plain
     }
 

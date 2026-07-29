@@ -14,6 +14,11 @@ import os
 final class BindDiscovery {
     private(set) var announcements: [BindAnnouncement] = []
 
+    /// Fired whenever `announcements` changes — including emptying on
+    /// `stop()` — so the owner can fold the list into its own state without
+    /// any view pumping between the two.
+    @ObservationIgnored var onAnnouncementsChanged: (() -> Void)?
+
     @ObservationIgnored private var browser: NWBrowser?
     /// Whether this browsing session already spent its one quiet rebuild —
     /// without it a browser that fails on creation rebuilds itself in a
@@ -23,8 +28,6 @@ final class BindDiscovery {
     @ObservationIgnored private let log = Logger(
         subsystem: "app.multiplexterm.multiplex", category: "bind"
     )
-
-    var isBrowsing: Bool { browser != nil }
 
     func start() {
         guard browser == nil else { return }
@@ -79,6 +82,7 @@ final class BindDiscovery {
         browser = nil
         announcements = []
         endpoints = [:]
+        onAnnouncementsChanged?()
     }
 
     func endpoint(for announcement: BindAnnouncement) -> NWEndpoint? {
@@ -96,7 +100,10 @@ final class BindDiscovery {
             map[announcement.id] = endpoint
         }
         list.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        if list != announcements { announcements = list }
         endpoints = map
+        if list != announcements {
+            announcements = list
+            onAnnouncementsChanged?()
+        }
     }
 }

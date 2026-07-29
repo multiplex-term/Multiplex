@@ -782,7 +782,7 @@ views.
   ways), while the pane's own scan/paste keep their auto-confirm: pointing
   the camera at the machine's QR *is* the confirmation, and the machine
   still asks `[Y/n]` on its own terminal; **the machine's own address list
-  outranks wherever its bind listener answered** (`BindController.hostname`
+  outranks wherever its bind listener answered** (`BindNaming.hostname`
   — a Bonjour resolve reports the interface the *service* was found on,
   while `mpx bind --addr` exists so a host behind NAT or a port forward can
   name the address that actually works; the reached address wins only when
