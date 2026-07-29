@@ -2586,6 +2586,29 @@ extension TerminalView {
         selection.selectNone()
     }
 
+    // Multiplex patch: gaze link regions (visionOS). The visible screen's
+    // links with view-space rects — the exact inverse of calculateTapHit's
+    // point→grid mapping (col = x / cellWidth, row = y / cellHeight), so a
+    // region lights precisely the cells whose tap would resolve the link.
+    public struct VisibleLinkRegion {
+        public let target: String
+        public let rects: [CGRect]
+    }
+
+    public func visibleLinkRegions () -> [VisibleLinkRegion] {
+        guard cellDimension != nil else { return [] }
+        return terminal.visibleLinkMatches (mode: .explicitAndImplicit).map { match in
+            VisibleLinkRegion (
+                target: match.text,
+                rects: match.rowRanges.map { segment in
+                    CGRect (
+                        x: CGFloat (segment.columns.lowerBound) * cellDimension.width,
+                        y: CGFloat (segment.row) * cellDimension.height,
+                        width: CGFloat (segment.columns.count) * cellDimension.width,
+                        height: cellDimension.height)
+                })
+        }
+    }
 }
 
 #if canImport(UIKit) && DEBUG

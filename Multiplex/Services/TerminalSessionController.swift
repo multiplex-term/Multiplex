@@ -455,6 +455,11 @@ final class TerminalSessionController {
         }
     }
 
+    /// Pinged after every coalesced output flush reaches the terminal —
+    /// visionOS's gaze link-hover overlay debounces its region rebuild
+    /// behind this, so affordances follow the screen without polling.
+    var onOutputFlushed: (() -> Void)?
+
     private func feed(_ bytes: [UInt8]) {
         scanForSwallowedHandoff(bytes)
         guard let terminalView else {
@@ -462,6 +467,7 @@ final class TerminalSessionController {
             return
         }
         terminalView.feed(byteArray: bytes[...])
+        onOutputFlushed?()
     }
 
     /// Modern oh-my-zsh drains all buffered stdin before blocking on its

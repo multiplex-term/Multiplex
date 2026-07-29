@@ -114,3 +114,9 @@ Worth checking:
   there. Clearing asks first (it wipes cookies/caches/site storage for
   every viewport page), then reloads the page signed out — sign into a
   dev server, clear, and the login must be gone.
+- Vision Pro: URLs in terminal output now glow when you look at them —
+  and a pinch on a glowing link opens the same confirmation sheet a long
+  press does (never the page directly). File paths and plain prose must
+  never glow, links under your gaze in a build log should light within a
+  second of printing, and scrolling/pane-switching over a link must keep
+  working exactly as before.

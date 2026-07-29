@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 #if DEBUG
 import notify
+import os
 import SwiftTerm
 #endif
 
@@ -264,6 +265,9 @@ struct TerminalWindowRoot: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugViewportOpen)) { _ in
                 debugOpenViewportForPendingLink()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugLinkRegions)) { _ in
+                debugLogLinkRegions()
             }
             #endif
     }
@@ -564,6 +568,29 @@ struct TerminalWindowRoot: View {
         else { return }
         controller.dismissPendingLink()
         openViewport(offer)
+    }
+
+    /// Headless proof of the visionOS gaze link regions: logs what the
+    /// hover overlay would light for the focused terminal (category
+    /// `links`, debug level — `log stream`, not `log show`). Gaze itself
+    /// cannot be driven in the simulator; the region inventory can.
+    private func debugLogLinkRegions() {
+        guard let controller = activeController,
+              let view = controller.terminalView,
+              view === TerminalFocusArbiter.current
+        else { return }
+        let logger = Logger(
+            subsystem: "app.multiplexterm.multiplex",
+            category: "links"
+        )
+        let regions = view.visibleLinkRegions()
+            .filter { TerminalLink.resolve($0.target) != nil }
+        logger.debug("link-regions count=\(regions.count, privacy: .public)")
+        for region in regions {
+            logger.debug(
+                "link-region target=\(region.target, privacy: .public) rects=\(String(describing: region.rects), privacy: .public)"
+            )
+        }
     }
 
     /// Headless jump proof: load the focused pane's history and jump to the
@@ -1822,6 +1849,7 @@ extension Notification.Name {
     static let multiplexDebugLink = Notification.Name("MultiplexDebugLink")
     static let multiplexDebugLinkOpen = Notification.Name("MultiplexDebugLinkOpen")
     static let multiplexDebugViewportOpen = Notification.Name("MultiplexDebugViewportOpen")
+    static let multiplexDebugLinkRegions = Notification.Name("MultiplexDebugLinkRegions")
 }
 
 /// `….debug.link` activates the first link on the focused terminal's visible
@@ -1853,6 +1881,12 @@ enum TerminalLinkDebugHook {
             "app.multiplexterm.multiplex.debug.viewportopen", &viewportToken, .main
         ) { _ in
             NotificationCenter.default.post(name: .multiplexDebugViewportOpen, object: nil)
+        }
+        var regionsToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.linkregions", &regionsToken, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugLinkRegions, object: nil)
         }
     }
 }

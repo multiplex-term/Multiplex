@@ -259,7 +259,10 @@ the URL reaching SurfBoard, and `….debug.viewportopen` running the sheet's
 ⌗ VIEWPORT chip for the pending link — the headless way to dock the inline
 browser tab (raise the sheet with `….debug.link` first; the loopback proof
 is a `localhost:<port>` URL in the pane rewriting to the seed host's
-address and rendering a page served on the Mac), and
+address and rendering a page served on the Mac), and `….debug.linkregions`
+logging what the visionOS gaze hover overlay would light for the focused
+terminal (category `links`, debug level — gaze itself cannot be driven in
+the simulator; the region inventory can), and
 `… -p app.multiplexterm.multiplex.debug.msgjump` / `….debug.msgjumpback`
 jumps the focused Claude Code terminal to its oldest session-file prompt
 and runs BACK TO LIVE — host-side `tmux capture-pane` proves both (the old
@@ -432,7 +435,7 @@ views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5), patched
     to declare the `NIO` product it imports (Xcode 27's module resolution
     rejects the undeclared import). Also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in nine behavior groups
+  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in ten behavior groups
     (marked `Multiplex patch`; the obscured-tab display guards share the marker
     on their owning state):
     `keyboardType` is settable (upstream is get-only), and Multiplex keeps it
@@ -506,7 +509,12 @@ views.
     the remote wants the tap (upstream resolved links first, so URL-shaped
     text swallowed tmux pane switches and vim cursor placement), while
     `longPress` — local at every mouse mode — resolves one before its
-    context menu. Sample apps trimmed.
+    context menu. And the visible screen's links are enumerable —
+    `Terminal.visibleLinkMatches` (probe-stride scan, wrapped rows
+    reassembled, unit-tested in the fork) with view-space rect mapping in
+    `TerminalView.visibleLinkRegions`, the inverse of `calculateTapHit`'s
+    point→grid math — which is what visionOS gaze hover stands on. Sample
+    apps trimmed.
   - When bumping either, re-apply the patches and diff before trusting it.
 - **Citadel pinned to exactly 0.12.0**: 0.12.1 moved its swift-nio-ssh dep to an
   unaudited personal fork. Don't bump without review — this is the transport.
@@ -743,7 +751,19 @@ views.
   `TERM=xterm-256color`, which has none. So implicit detection is the live
   path in tmux tabs; explicit links reach only direct `.shell` tabs. Don't
   "fix" it with a server-scoped `terminal-features` default (the same leak
-  the per-host new-session conf documents). Full record + the verified
+  the per-host new-session conf documents). **On visionOS, links also glow
+  under the eye** (`TerminalLinkHoverOverlay`, a `TerminalView` subview so
+  its touches keep feeding the terminal's own pan recognizers): gaze is
+  never delivered to apps, so system hover regions are stood over the
+  fork's visible-link enumeration, rebuilt debounced behind
+  `TerminalSessionController.onOutputFlushed` and scrolls. Hover regions
+  ARE hit regions, so a pinch on a lit link deliberately outranks the
+  remote mouse click on those cells and runs the same confirm sheet — the
+  glow is visionOS's own "this activates" affordance (a vim/tmux click
+  landing exactly on URL text is the accepted trade; adjacent cells still
+  click through). Only targets `TerminalLink.resolve` would confirm get a
+  region, so filesystem paths in build logs never glow; obscured tabs
+  clear their regions. Full record + the verified
   experiment table: `local-plan/terminal-links.md`.
 - **The viewport is a citizen of the window system — summoned, never
   restored** (`TerminalRoute.Mode.viewport`; `ViewportReach`/`ViewportOffer`
