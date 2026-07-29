@@ -68,7 +68,11 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   Optional `workingDirs` / `sessionScripts` / `newSessionTmuxConf` /
   `agentLaunchModels` (agent rawValue → model-id list) keys feed
   headless checks of the New Session pickers and the setup-script,
-  tmux-conf, and launch-model paths. `"enabled": false` starts the launch with the
+  tmux-conf, and launch-model paths. An optional `passphrase` key stores
+  the private key's passphrase in the Keychain, so a
+  passphrase-encrypted `privateKey` (e.g. `ssh-keygen -p` on a copy of
+  the harness client key) proves the sealed-key connect path headlessly —
+  the probe must log `Accepted publickey` without any unlock prompt. `"enabled": false` starts the launch with the
   host switched off, so the never-dials-it promise can be checked against a
   silent `Tools/dev-sshd/state/sshd.log`.
 - `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per comma entry via
@@ -822,7 +826,24 @@ views.
   on the first connection**, enrolling a device-held key and deleting the
   transported line by its exact key material (`BindRotationStore`, whose
   command appends before it removes: a failure between the two steps must
-  leave a working key, never none). Free host plumbing, not an agent-helper
+  leave a working key, never none). `mpx bind --offline` first asks for an
+  **optional SSH-key passphrase** on its own tty (empty = today's raw-seed
+  payload, byte-identical; `MPX_BIND_TEST_PASSPHRASE` answers it headlessly).
+  A passphrase seals the key as a standard encrypted openssh-key-v1
+  container riding payload flag bit 1 (u16 length, spec §2 — readers reject
+  unknown flag bits rather than misparse key material). The app armors that
+  container verbatim (`BindSSHKey.armor`), stores it like a pasted encrypted
+  key, **skips the import probe** (auth construction refuses before dialing
+  when no passphrase is on file — the wall's NEEDS PASSPHRASE tile and its
+  UNLOCK prompt take over), and **never rotates it**: no
+  `BindRotationStore` request is recorded, because swapping the sealed key
+  for a device-generated plaintext one would trade the person's own
+  protection away. The passphrase never crosses any wire — the connect-time
+  key-unlock prompt is where it gets typed (Connect Once / Save & Connect),
+  and the dev seed's `passphrase` key stores it for headless connect proofs
+  (verified 2026-07-29: ssh-keygen-sealed seed key → probe `Accepted
+  publickey`; sealed offline bind → import + skip logged under `bind`, zero
+  rotation, zero auth attempts). Free host plumbing, not an agent-helper
   surface.
 - **A disabled host is one the app never dials on its own** (`Host.isEnabled`,
   deck rail menu / DISABLED tile / Host Settings → Monitoring): the wall skips

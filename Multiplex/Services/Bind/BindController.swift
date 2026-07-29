@@ -345,14 +345,43 @@ final class BindController {
         }
     }
 
-    /// `mpx bind --offline`: the key came with the payload as a raw seed, so
-    /// there is no handshake — rebuild it, import, then rotate it out.
+    /// `mpx bind --offline`: the key came with the payload, so there is no
+    /// handshake. A raw seed is rebuilt, imported, then rotated out; a
+    /// passphrase-sealed container is stored verbatim and NEVER rotated —
+    /// swapping it for a device-generated plaintext key would trade the
+    /// person's own protection away (spec §5). The passphrase itself never
+    /// crossed any wire; the existing key-unlock prompt asks for it at
+    /// connect time.
     private func importOffline(_ payload: BindPayload, id: String) async {
-        guard let offline = payload.offline,
-              let key = BindSSHKey(seed: offline.seed)
-        else {
+        guard let offline = payload.offline else {
             fail(id: id, "That bind code is missing its key.")
             return
+        }
+        let privateKey: String
+        let rotation: BindRotationStore.Request?
+        switch offline.secret {
+        case .seed(let seed):
+            guard let key = BindSSHKey(seed: seed) else {
+                fail(id: id, "That bind code is missing its key.")
+                return
+            }
+            privateKey = key.privateOpenSSH
+            rotation = BindRotationStore.Request(
+                transportedPublicB64: key.publicB64,
+                authorizedKeysPath: offline.authorizedKeysPath
+            )
+        case .encryptedKey(let container):
+            let armored = BindSSHKey.armor(container: container)
+            // The flag promised a sealed key; a container that armors into
+            // anything else — plaintext included — is not what the CLI
+            // emits, and importing it would silently drop the protection
+            // the person chose.
+            guard OpenSSHPrivateKeyEnvelope.encryption(in: armored) == .encrypted else {
+                fail(id: id, "That bind code's key is damaged — run mpx bind --offline again.")
+                return
+            }
+            privateKey = armored
+            rotation = nil
         }
         setStage(id: id, .enrolling)
         await save(
@@ -361,12 +390,9 @@ final class BindController {
             hostname: payload.addrs.first ?? payload.name,
             port: offline.sshPort,
             username: offline.sshUser,
-            privateKey: key.privateOpenSSH,
+            privateKey: privateKey,
             pins: offline.pinnedHostKey.map { [$0] } ?? [],
-            rotation: BindRotationStore.Request(
-                transportedPublicB64: key.publicB64,
-                authorizedKeysPath: offline.authorizedKeysPath
-            )
+            rotation: rotation
         )
     }
 
@@ -393,6 +419,19 @@ final class BindController {
         store.add(host)
         if let rotation {
             rotations.record(rotation, for: host.id)
+        }
+
+        // A sealed key with no passphrase on file cannot pass any probe —
+        // auth construction refuses before dialing — so don't run a test
+        // that exists only to fail with copy about a field this pane
+        // doesn't have. The wall's NEEDS PASSPHRASE tile takes over the
+        // moment the deck probes this host, and its UNLOCK flow is the
+        // prompt.
+        if OpenSSHPrivateKeyEnvelope.encryption(in: privateKey) == .encrypted,
+           HostSecrets.load(for: host).passphrase == nil {
+            log.debug("bind import: key is passphrase-sealed — skipping the doomed probe; no rotation")
+            markBound(id: id, host: host)
+            return
         }
 
         setStage(id: id, .checking)

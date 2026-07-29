@@ -50,7 +50,20 @@ struct BindSSHKey: Equatable, Sendable {
         }
         payload += sshString(priv)
 
-        let body = payload.base64EncodedString()
+        return BindSSHKey(
+            privateOpenSSH: armor(container: payload),
+            publicLine: "\(keyType) \(publicB64)",
+            publicB64: publicB64
+        )
+    }
+
+    /// Wraps an openssh-key-v1 container in its PEM armor — base64, 70-char
+    /// lines, the BEGIN/END fence. This is the only transform a
+    /// passphrase-sealed container from an offline payload gets app-side:
+    /// the bytes stay exactly the CLI's, and Citadel opens them at connect
+    /// with the passphrase the person types.
+    static func armor(container: Data) -> String {
+        let body = container.base64EncodedString()
         var lines: [String] = []
         var index = body.startIndex
         while index < body.endIndex {
@@ -58,15 +71,9 @@ struct BindSSHKey: Equatable, Sendable {
             lines.append(String(body[index..<end]))
             index = end
         }
-        let armored = "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        return "-----BEGIN OPENSSH PRIVATE KEY-----\n"
             + lines.joined(separator: "\n")
             + "\n-----END OPENSSH PRIVATE KEY-----\n"
-
-        return BindSSHKey(
-            privateOpenSSH: armored,
-            publicLine: "\(keyType) \(publicB64)",
-            publicB64: publicB64
-        )
     }
 
     private static func sshString(_ data: Data) -> Data {

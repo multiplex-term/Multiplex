@@ -32,8 +32,14 @@ Then try any of these:
    your device; then press Paste.
 
 4. A MACHINE THAT ISN'T ON YOUR NETWORK (VPS, firewalled box)
-   Run `mpx bind --offline` and scan/paste. Multiplex imports it, connects,
-   and then quietly replaces that key with one it generates itself.
+   Run `mpx bind --offline` and scan/paste. The CLI now asks for an optional
+   SSH-key passphrase first — press Enter to skip. Skipped: Multiplex
+   imports the key, connects, and quietly replaces it with one it generates
+   itself, exactly as before. Typed (twice, hidden): the key travels sealed
+   with standard OpenSSH encryption, the host lands on the wall as NEEDS
+   PASSPHRASE, and its UNLOCK button asks you for the passphrase — Connect
+   Once keeps it for this run, Save & Connect stores it in iCloud Keychain.
+   The passphrase itself never leaves that terminal.
 
 Worth checking:
 - Tap a multiplex://b/ link outside the app (mpx bind prints one — put it in
@@ -57,4 +63,7 @@ Worth checking:
 - On the free tier, binding still respects the two-host limit — you should
   see the Pro paywall instead of a key being installed.
 - Declining in the terminal must leave your authorized_keys untouched.
+- A passphrase-sealed offline key must never be swapped out: after UNLOCK
+  connects, `mpx unbind --list` on the machine should still show the id the
+  bind installed (a skipped passphrase is the only case where it changes).
 - Host Settings (editing a host you already have) should show no BIND bar.

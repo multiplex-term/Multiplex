@@ -1,3 +1,4 @@
+import Citadel
 import CryptoKit
 import Foundation
 import Testing
@@ -87,7 +88,11 @@ struct BindProtocolTests {
         #expect(payload.port == 0)
         let offline = try #require(payload.offline)
         let expectedSeed = try vectors.data("payload_offline", "seed_hex")
-        #expect(offline.seed == expectedSeed)
+        guard case .seed(let seed) = offline.secret else {
+            Issue.record("a plain offline payload must carry a raw seed")
+            return
+        }
+        #expect(seed == expectedSeed)
         #expect(offline.sshUser == "jhen")
         #expect(offline.sshPort == 2222)
         // The digest renders as OpenSSH's display form, so a pin from an
@@ -97,9 +102,121 @@ struct BindProtocolTests {
             == "ssh-ed25519 SHA256:" + digest.base64EncodedString()
                 .replacingOccurrences(of: "=", with: ""))
         // And the seed rebuilds a usable key.
-        let key = try #require(BindSSHKey(seed: offline.seed))
+        let key = try #require(BindSSHKey(seed: seed))
         #expect(key.publicLine.hasPrefix("ssh-ed25519 "))
         #expect(key.privateOpenSSH.hasPrefix("-----BEGIN OPENSSH PRIVATE KEY-----"))
+    }
+
+    /// A passphrase-sealed offline payload (flag bit 1) carries the CLI's
+    /// openssh-key-v1 container verbatim; the app only armors it. The
+    /// decisive check runs the container through Citadel — the parser that
+    /// will open it at connect time — with the vector passphrase, and the
+    /// key inside must be the very key the plain vector spells as a seed.
+    @Test func sealedOfflinePayloadOpensWithTheVectorPassphrase() throws {
+        let vectors = try Vectors()
+        let payload = try #require(
+            BindPayload(string: try vectors.string("payload_offline_encrypted", "url"))
+        )
+        let offline = try #require(payload.offline)
+        guard case .encryptedKey(let container) = offline.secret else {
+            Issue.record("bit 1 must decode as a sealed container")
+            return
+        }
+        let expectedContainer = try vectors.data("payload_offline_encrypted", "container_hex")
+        #expect(container == expectedContainer)
+
+        let armored = BindSSHKey.armor(container: container)
+        #expect(OpenSSHPrivateKeyEnvelope.encryption(in: armored) == .encrypted)
+
+        let passphrase = try vectors.string("payload_offline_encrypted", "passphrase")
+        let key = try Curve25519.Signing.PrivateKey(
+            sshEd25519: armored,
+            decryptionKey: Data(passphrase.utf8)
+        )
+        let publicLine = try vectors.string("payload_offline_encrypted", "public_openssh")
+        #expect(BindSSHKey.make(from: key).publicLine == publicLine)
+        // Same key both ways: the sealed container and the plain seed vector
+        // describe one identity.
+        let seed = try vectors.data("payload_offline", "seed_hex")
+        #expect(BindSSHKey(seed: seed)?.publicLine == publicLine)
+
+        #expect(throws: (any Error).self) {
+            try Curve25519.Signing.PrivateKey(
+                sshEd25519: armored,
+                decryptionKey: Data("not the passphrase".utf8)
+            )
+        }
+    }
+
+    /// The connect path's contract for sealed keys: no passphrase on file →
+    /// the typed "needs a passphrase" error (which is what raises the
+    /// key-unlock prompt), wrong one → "incorrect", right one → a built auth
+    /// method with no network involved.
+    @Test func sealedKeyDefersToTheConnectTimePrompt() throws {
+        let vectors = try Vectors()
+        let container = try vectors.data("payload_offline_encrypted", "container_hex")
+        let armored = BindSSHKey.armor(container: container)
+        let passphrase = try vectors.string("payload_offline_encrypted", "passphrase")
+        var host = Host(name: "sealed", hostname: "example.invalid", username: "jhen")
+        host.authMethod = .privateKey
+
+        func attempt(_ passphrase: String?) throws {
+            _ = try SSHConnection.makeAuthenticationMethod(
+                host: host,
+                secrets: HostSecrets(
+                    password: nil, privateKey: armored, passphrase: passphrase
+                )
+            )
+        }
+        let missing = #expect(throws: SSHConnectionError.self) { try attempt(nil) }
+        #expect(missing?.keyPassphraseReason == .required)
+        let wrong = #expect(throws: SSHConnectionError.self) { try attempt("wrong") }
+        #expect(wrong?.keyPassphraseReason == .incorrect)
+        #expect(throws: Never.self) { try attempt(passphrase) }
+    }
+
+    /// Flag bits are layout switches: bit 1 without bit 0, any unknown bit,
+    /// an empty container, one past the size cap, and every truncation must
+    /// all refuse to parse rather than misread key material.
+    @Test func sealedPayloadRejectsMalformedFlagsAndLengths() throws {
+        let vectors = try Vectors()
+        let bytes = try vectors.data("payload_offline_encrypted", "bytes_hex")
+        #expect(BindPayload(bytes: bytes) != nil)
+
+        var sealedWithoutOffline = bytes
+        sealedWithoutOffline[sealedWithoutOffline.startIndex + 1] = 0x02
+        #expect(BindPayload(bytes: sealedWithoutOffline) == nil)
+
+        var futureBit = bytes
+        futureBit[futureBit.startIndex + 1] |= 0x04
+        #expect(BindPayload(bytes: futureBit) == nil)
+
+        var plainWithFutureBit = try vectors.data("payload", "bytes_hex")
+        plainWithFutureBit[plainWithFutureBit.startIndex + 1] |= 0x04
+        #expect(BindPayload(bytes: plainWithFutureBit) == nil)
+
+        for cut in 1..<bytes.count {
+            #expect(
+                BindPayload(bytes: bytes.prefix(cut)) == nil,
+                "a sealed payload truncated to \(cut) bytes decoded"
+            )
+        }
+
+        // Hand-built offline block: user "" ‖ port 2222 ‖ container length N
+        // with N bytes of filler ‖ default path ‖ no digest. Only the length
+        // rule distinguishes the two cases below, so both must fail on it.
+        func offlinePayload(containerLength: Int, filler: Int) -> Data {
+            var bytes = Data([2, 0x03])
+            bytes += Data(repeating: 0, count: 48)  // spub ‖ token
+            bytes += Data([0, 0, 0, 0, 0])  // port, no addrs, empty name, empty user
+            bytes += Data([0x08, 0xAE])  // ssh port 2222
+            bytes += Data([UInt8(containerLength >> 8), UInt8(containerLength & 0xFF)])
+            bytes += Data(repeating: 0xAB, count: filler)
+            bytes += Data([0, 0])  // default path, no digest
+            return bytes
+        }
+        #expect(BindPayload(bytes: offlinePayload(containerLength: 0, filler: 0)) == nil)
+        #expect(BindPayload(bytes: offlinePayload(containerLength: 5000, filler: 5000)) == nil)
     }
 
     @Test func payloadRejectsWrongSchemeVersionAndGarbage() throws {

@@ -12,9 +12,17 @@ enum BindWire {
     /// base64url data after it is case-sensitive and never touched.
     static let urlPrefix = "multiplex://b/"
     static let payloadVersion: UInt8 = 2
+    /// bit 0: offline (a key rides along); bit 1: that key is a
+    /// passphrase-sealed openssh-key-v1 container. Any bit outside this set
+    /// means a layout this reader does not know — reject, never misparse
+    /// key material (spec §2).
+    static let knownPayloadFlags: UInt8 = 0b11
     /// The CLI caps candidates at 3; more would only cost QR modules for
     /// addresses the app never reaches.
     static let maxPayloadAddrs = 3
+    /// A real sealed ed25519 container is ~274 bytes; an order of magnitude
+    /// past that is not a key.
+    static let maxEncryptedKeyBytes = 4096
     static let hkdfSalt = Data("multiplex-bind-v1".utf8)
     static let pinInfo = Data("multiplex-bind-pin".utf8)
     static let maxFrame = 64 * 1024
@@ -36,11 +44,24 @@ struct BindPayload: Equatable, Sendable {
     /// What the CLI generates for an offline bind: no handshake happens, so
     /// the record and the key itself have to travel in the payload.
     struct Offline: Equatable, Sendable {
+        /// The transported key, in whichever of the two §2 forms flag bit 1
+        /// selected.
+        enum Secret: Equatable, Sendable {
+            /// Raw ed25519 seed. The armored OpenSSH text is derived from
+            /// it, so shipping the text instead would have cost ~370 QR
+            /// bytes.
+            case seed(Data)
+            /// A passphrase-sealed openssh-key-v1 container, verbatim from
+            /// `mpx bind --offline` (bcrypt-pbkdf + aes256-ctr — the form
+            /// Citadel already opens for pasted keys). Only armoring
+            /// happens app-side; the passphrase never rides any wire, so
+            /// the app asks the person for it at connect time.
+            case encryptedKey(Data)
+        }
+
         var sshUser: String
         var sshPort: UInt16
-        /// Raw ed25519 seed. The armored OpenSSH text is derived from it, so
-        /// shipping the text instead would have cost ~370 QR bytes.
-        var seed: Data
+        var secret: Secret
         /// A non-default authorized_keys the CLI enrolled into — rotation
         /// must edit the file the sshd actually reads.
         var authorizedKeysPath: String?
@@ -78,6 +99,9 @@ struct BindPayload: Equatable, Sendable {
         var reader = ByteReader(bytes)
         guard reader.byte() == BindWire.payloadVersion,
               let flags = reader.byte(),
+              flags & ~BindWire.knownPayloadFlags == 0,
+              // The sealed-key bit only refines an offline payload.
+              flags & 0x02 == 0 || flags & 0x01 != 0,
               let spub = reader.take(32),
               let token = reader.take(16),
               let port = reader.uint16(),
@@ -107,9 +131,21 @@ struct BindPayload: Equatable, Sendable {
             guard let userLength = reader.byte(),
                   let userBytes = reader.take(Int(userLength)),
                   let user = String(data: userBytes, encoding: .utf8),
-                  let sshPort = reader.uint16(),
-                  let seed = reader.take(32),
-                  let pathLength = reader.byte(),
+                  let sshPort = reader.uint16()
+            else { return nil }
+            let secret: Offline.Secret
+            if flags & 0x02 != 0 {
+                guard let containerLength = reader.uint16(),
+                      containerLength > 0,
+                      Int(containerLength) <= BindWire.maxEncryptedKeyBytes,
+                      let container = reader.take(Int(containerLength))
+                else { return nil }
+                secret = .encryptedKey(container)
+            } else {
+                guard let seed = reader.take(32) else { return nil }
+                secret = .seed(seed)
+            }
+            guard let pathLength = reader.byte(),
                   let pathBytes = reader.take(Int(pathLength)),
                   let path = String(data: pathBytes, encoding: .utf8),
                   let digestLength = reader.byte()
@@ -130,7 +166,7 @@ struct BindPayload: Equatable, Sendable {
             offline = Offline(
                 sshUser: user,
                 sshPort: sshPort,
-                seed: seed,
+                secret: secret,
                 authorizedKeysPath: path.isEmpty ? nil : path,
                 pinnedHostKey: pinnedHostKey
             )
