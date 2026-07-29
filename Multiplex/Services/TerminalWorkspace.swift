@@ -79,10 +79,38 @@ final class TerminalWorkspace {
         controllers[tabID]
     }
 
-    /// Close a tab for real: detach the SSH channel and drop the controller
-    /// (and with it the terminal view). Never called when a tab merely moves.
+    // MARK: Viewport controllers (one per ⌗ tab)
+
+    /// Transport-less controllers for viewport tabs, keyed like terminal
+    /// controllers so merge/split re-parent the live page the same way.
+    /// Deliberately in-memory only — this dictionary *is* the viewport's
+    /// no-persistence rule: `TerminalWindowRoot.syncTabs` strips any viewport
+    /// tab it cannot find here, which is exactly a tab restored from a dead
+    /// process. Summoned, not restored.
+    private var viewportControllers: [UUID: ViewportController] = [:]
+
+    /// Register the controller BEFORE the tab enters any route — the strip
+    /// above runs on every tabs change, and a viewport tab that arrives
+    /// without its controller is indistinguishable from a restored corpse.
+    func openViewport(tab: TerminalRoute, offer: ViewportOffer, hostName: String) {
+        guard tab.isViewport, viewportControllers[tab.id] == nil else { return }
+        viewportControllers[tab.id] = ViewportController(
+            tabID: tab.id,
+            offer: offer,
+            hostName: hostName
+        )
+    }
+
+    func viewportController(for tabID: UUID) -> ViewportController? {
+        viewportControllers[tabID]
+    }
+
+    /// Close a tab for real: detach the SSH channel (or shut the viewport's
+    /// web view down) and drop the controller. Never called when a tab
+    /// merely moves.
     func closeTab(_ tabID: UUID) {
         controllers.removeValue(forKey: tabID)?.detach()
+        viewportControllers.removeValue(forKey: tabID)?.shutdown()
     }
 
     func resumeConnectionsWaitingForKeyPassphrase(hostID: UUID) {

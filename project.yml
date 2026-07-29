@@ -76,6 +76,13 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         ITSAppUsesNonExemptEncryption: false
+        # The viewport (inline browser) renders dev servers, which are
+        # cleartext http on LAN addresses — blocked by default ATS. This is
+        # Apple's web-content-scoped relaxation: WKWebView loads only; every
+        # other connection the app makes keeps full ATS (SSH rides NIO and
+        # never sees ATS either way).
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsInWebContent: true
         NSCameraUsageDescription: Multiplex uses the camera when you take a photo to send to your remote SSH session, and when you scan the code that binds a machine to the app.
         # Also covers Optic ID on visionOS (there is no separate key).
         NSFaceIDUsageDescription: Multiplex unlocks with Face ID when the optional App Lock setting is turned on.

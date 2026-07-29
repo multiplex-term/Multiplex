@@ -13,6 +13,10 @@ struct TerminalTabStrip: View {
         var hostName: String?
         var controller: TerminalSessionController?
         var isActive: Bool
+        /// A viewport tab's cell carries the ⌗ mark in its title and NO
+        /// tally dot — a page is not a shell, and the red dot stays a
+        /// shell's live state.
+        var isViewport = false
     }
 
     let items: [Item]
@@ -36,13 +40,15 @@ struct TerminalTabStrip: View {
             activate(item.id)
         } label: {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(dotColor(item))
-                    .frame(width: 6, height: 6)
-                    .shadow(
-                        color: dotColor(item) == Theme.tally
-                            ? Theme.tally.opacity(0.7) : .clear,
-                        radius: 3)
+                if !item.isViewport {
+                    Circle()
+                        .fill(dotColor(item))
+                        .frame(width: 6, height: 6)
+                        .shadow(
+                            color: dotColor(item) == Theme.tally
+                                ? Theme.tally.opacity(0.7) : .clear,
+                            radius: 3)
+                }
                 ChassisLabel(
                     item.hostName.map { "\(item.title) · \($0)" } ?? item.title,
                     size: 10,

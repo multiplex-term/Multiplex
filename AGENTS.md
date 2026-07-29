@@ -255,7 +255,11 @@ the focused pane's visible screen through the same resolve → policy →
 confirmation path a long press takes (a screen of only filesystem paths
 must present nothing — that's the decline working), with
 `….debug.linkopen` running the sheet's OPEN action so the system log shows
-the URL reaching SurfBoard, and
+the URL reaching SurfBoard, and `….debug.viewportopen` running the sheet's
+⌗ VIEWPORT chip for the pending link — the headless way to dock the inline
+browser tab (raise the sheet with `….debug.link` first; the loopback proof
+is a `localhost:<port>` URL in the pane rewriting to the seed host's
+address and rendering a page served on the Mac), and
 `… -p app.multiplexterm.multiplex.debug.msgjump` / `….debug.msgjumpback`
 jumps the focused Claude Code terminal to its oldest session-file prompt
 and runs BACK TO LIVE — host-side `tmux capture-pane` proves both (the old
@@ -395,6 +399,11 @@ SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
                      only, the channel the remap preserves.
   TerminalWorkspace  tab controllers keyed by tab id + window directory —
                      merge/split move tabs across windows, shells stay live
+    ViewportController  one per ⌗ viewport tab (the inline browser): owns
+                     the WKWebView so merge/split re-parent the live page;
+                     kept in memory only — its absence after a relaunch IS
+                     the viewport's no-persistence rule (syncTabs strips
+                     controller-less viewport tabs)
   TerminalSessionController   one per tab; owns the input pump + TerminalView
     TerminalTransport    the tab's byte pipe (write/resize/close); picked by
                          host.useMosh. exec + SFTP stay SSH-only capabilities
@@ -736,6 +745,34 @@ views.
   "fix" it with a server-scoped `terminal-features` default (the same leak
   the per-host new-session conf documents). Full record + the verified
   experiment table: `local-plan/terminal-links.md`.
+- **The viewport is a citizen of the window system — summoned, never
+  restored** (`TerminalRoute.Mode.viewport`; `ViewportReach`/`ViewportOffer`
+  pure + tested; `ViewportController`, `ViewportPane`; bake-off record in
+  `local-plan/viewport-bakeoff/`): a *confirmed* web link docks as a ⌗ tab
+  beside the session that printed it and moves with the existing
+  merge/split machinery — the WKWebView is controller-owned and re-parents
+  exactly like SwiftTerm views, so the live page (HMR socket included)
+  survives every move; its cell never wears a tally dot (a page is not a
+  shell). The link sheet stays the only gate and grows a REACH row: a pane
+  runs on the host, so `localhost` printed there is the *host's* loopback —
+  the chip becomes `⌗ OPEN VIA <host>` and rewrites the authority to
+  `Host.hostname` (by definition the address this device already dials),
+  said in the open on the sheet; LAN/internet targets pass through
+  verbatim, and non-web links are never offered a viewport. **Nothing
+  persists**: controllers live only in `TerminalWorkspace`'s memory and are
+  registered BEFORE the tab enters any route, so `syncTabs` stripping
+  controller-less viewport tabs removes exactly the ones scene restoration
+  hands back from a dead process, never a live move. `WKNavigationDelegate`
+  re-applies the scheme allowlist per navigation (`multiplex:` is never
+  navigable; mailto re-presents the link sheet from the pane), there is no
+  JS bridge and no send path into any terminal, and a viewport never claims
+  `TerminalFocusArbiter` — switching to a ⌗ tab releases the previous
+  terminal's responder so hardware keys can't type into a hidden shell.
+  ATS is relaxed for **web content only** (`NSAllowsArbitraryLoadsInWebContent`
+  in project.yml — dev servers are cleartext http on LAN addresses; app
+  networking keeps full ATS). Load failures render a chassis NO ROUTE panel
+  naming which network the address lives on, not WebKit's blank page. Free
+  plumbing, not an agent-helper surface.
 - **A bound host is one the machine itself vouched for; the app's key goes
   out, never a private key** (`Multiplex/Models/Bind/`,
   `Multiplex/Services/Bind/`; protocol + shared vectors live in the

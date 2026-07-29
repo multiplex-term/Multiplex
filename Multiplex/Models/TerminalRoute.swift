@@ -10,6 +10,13 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         case create(sessionName: String, directory: String?)
         /// Plain login shell, no tmux.
         case shell
+        /// The viewport — an inline browser tab, docked beside the sessions
+        /// that produced its URL and moved with the same merge/split
+        /// machinery. Not a terminal: no remote command, no tmux session, no
+        /// transport. Never restored across launches — a viewport is
+        /// summoned, not restored (`TerminalWindowRoot.syncTabs` strips
+        /// viewport tabs whose controller didn't survive the process).
+        case viewport(urlString: String)
 
         /// Keeps the pre-directory call shape valid (and mirrors how records
         /// persisted by older builds decode: directory absent → nil).
@@ -32,7 +39,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
                 sessionName: name,
                 directory: directory
             )
-        case .shell:
+        case .shell, .viewport:
             return nil
         }
     }
@@ -55,7 +62,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
                 command += " -c \(directory.shellQuotedDirectory)"
             }
             return command
-        case .shell:
+        case .shell, .viewport:
             return nil
         }
     }
@@ -64,16 +71,37 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         switch mode {
         case .attach(let name), .create(let name, _): name
         case .shell: "shell"
+        case .viewport(let urlString): Self.viewportLabel(urlString)
         }
     }
 
     /// The tmux session this tab is bound to; nil for a plain shell (which
-    /// has no probe entry, so no agent detection).
+    /// has no probe entry, so no agent detection) and for the viewport.
     var sessionName: String? {
         switch mode {
         case .attach(let name), .create(let name, _): name
-        case .shell: nil
+        case .shell, .viewport: nil
         }
+    }
+
+    var isViewport: Bool {
+        if case .viewport = mode { return true }
+        return false
+    }
+
+    var viewportURL: URL? {
+        guard case .viewport(let urlString) = mode else { return nil }
+        return URL(string: urlString)
+    }
+
+    /// The viewport's tab-cell/UMD label: `⌗ 5173` for an explicit port
+    /// (the dev-server case, where the port *is* the page's identity), the
+    /// host otherwise. `⌗` — U+2317 VIEWDATA SQUARE — is the viewport mark
+    /// everywhere; a page never wears a tally dot.
+    static func viewportLabel(_ urlString: String) -> String {
+        guard let url = URL(string: urlString) else { return "⌗" }
+        if let port = url.port { return "⌗ \(port)" }
+        return "⌗ \(url.host() ?? "page")"
     }
 }
 
