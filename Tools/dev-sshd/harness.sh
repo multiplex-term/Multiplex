@@ -10,6 +10,10 @@
 #   ./harness.sh turn    fake agent turn in agent:cc (busy title → idle);
 #                        optional seconds arg, default 8
 #   ./harness.sh ask     fake permission dialog in agent:cc (needs-you state)
+#   ./harness.sh bind    run the real `mpx bind` against this sshd with a
+#                        pinned token/PIN, so the app's bind flow can be
+#                        driven headlessly (MULTIPLEX_AUTO_BIND /
+#                        MULTIPLEX_BIND_AUTOPIN); prints the payload URL
 #   ./harness.sh stop    stop sshd and kill demo sessions
 #
 # Everything lives in ./state/ (gitignored).
@@ -28,6 +32,10 @@ start() {
     [ -f "$STATE/client_ed25519" ] || ssh-keygen -q -t ed25519 -N '' -C multiplex-dev-client -f "$STATE/client_ed25519"
     cp "$STATE/client_ed25519.pub" "$STATE/authorized_keys"
     chmod 600 "$STATE/authorized_keys"
+    # `mpx bind --hostkeys-dir` looks for sshd's own naming, so publish the
+    # harness host key under that name too — the bind flow then pins a real
+    # fingerprint belonging to this sshd.
+    cp "$STATE/host_ed25519.pub" "$STATE/ssh_host_ed25519_key.pub"
 
     cat > "$STATE/sshd_config" <<EOF
 Port $PORT
@@ -154,6 +162,10 @@ EOF
 }
 
 stop() {
+    if [ -f "$STATE/bind.pid" ]; then
+        kill "$(cat "$STATE/bind.pid")" 2>/dev/null || true
+        rm -f "$STATE/bind.pid"
+    fi
     if [ -f "$STATE/sshd.pid" ]; then
         kill "$(cat "$STATE/sshd.pid")" 2>/dev/null || true
         rm -f "$STATE/sshd.pid"
@@ -174,11 +186,76 @@ stop() {
     done
 }
 
+# Run the real companion CLI against this harness sshd. It enrolls into the
+# harness's own authorized_keys (never ~/.ssh), announces on the LAN, and
+# takes a fixed token/PIN so a headless app launch can complete the bind:
+#
+#   MULTIPLEX_AUTO_BIND="$(./harness.sh bind --print-only)"   # QR/paste path
+#   MULTIPLEX_BIND_AUTOPIN=482163                             # discovery path
+#
+# The app ends up with a SECOND host (its own freshly enrolled key) beside
+# the seeded devbox — that separate record, and its key line in
+# state/authorized_keys, is the proof.
+bind() {
+    local CLI="${MPX_BIN:-$HOME/workspace2/multiplex-cli/target/debug/mpx}"
+    if [ ! -x "$CLI" ]; then
+        echo "no mpx binary at $CLI — build it: (cd ~/workspace2/multiplex-cli && cargo build)" >&2
+        exit 1
+    fi
+    [ -f "$STATE/authorized_keys" ] || { echo "run '$0 start' first" >&2; exit 1; }
+
+    # Fixed session material: the app side can then be launched with a known
+    # PIN, and the payload is reproducible across runs.
+    export MPX_BIND_TEST_TOKEN=33333333333333333333333333333333
+    export MPX_BIND_TEST_SESSION_SEED=1111111111111111111111111111111111111111111111111111111111111111
+    export MPX_BIND_TEST_PIN=${MPX_BIND_TEST_PIN:-482163}
+    export MPX_BIND_TEST_YES=1
+
+    local args=(
+        bind
+        --name harness-bind
+        --user "$USER"
+        --ssh-port "$PORT"
+        --authorized-keys "$STATE/authorized_keys"
+        --hostkeys-dir "$STATE"
+        --expires 600
+        # This sshd listens on loopback only, so advertise the address the
+        # app must actually dial — the simulator shares the Mac's stack, so
+        # 127.0.0.1 resolves to this machine from inside it.
+        --addr 127.0.0.1
+    )
+    # `--print-only` detaches the CLI (so the app can complete the handshake
+    # afterwards) and prints just the payload URL, ready for
+    # MULTIPLEX_AUTO_BIND. Its transcript lands in state/bind.log.
+    if [ "${1:-}" = "--print-only" ]; then
+        nohup "$CLI" "${args[@]}" --no-qr > "$STATE/bind.log" 2>&1 &
+        echo $! > "$STATE/bind.pid"
+        local url=""
+        for _ in $(seq 1 50); do
+            url=$(grep -m1 '^multiplex://b/' "$STATE/bind.log" 2>/dev/null || true)
+            [ -n "$url" ] && break
+            sleep 0.2
+        done
+        if [ -z "$url" ]; then
+            echo "mpx bind printed no payload — see $STATE/bind.log" >&2
+            exit 1
+        fi
+        echo "$url"
+        return
+    fi
+    echo "PIN is $MPX_BIND_TEST_PIN · enrolling into $STATE/authorized_keys"
+    # No --copy: the clipboard is opt-in, and a harness run has no
+    # business taking the developer's (or, via Universal Clipboard,
+    # their devices') clipboard.
+    "$CLI" "${args[@]}"
+}
+
 case "${1:-}" in
     start) start ;;
     demo) demo ;;
     turn) shift; turn "$@" ;;
     ask) ask ;;
+    bind) shift; bind "$@" ;;
     stop) stop ;;
-    *) echo "usage: $0 start|demo|turn [secs]|ask|stop" >&2; exit 1 ;;
+    *) echo "usage: $0 start|demo|turn [secs]|ask|bind [--print-only]|stop" >&2; exit 1 ;;
 esac

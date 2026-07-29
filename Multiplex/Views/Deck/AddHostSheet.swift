@@ -2,13 +2,27 @@ import SwiftUI
 import UIKit
 
 /// Add or edit a host. Secrets go straight to the Keychain on save.
+///
+/// Adding is two roads to the same place, so they share one modal behind a
+/// choice bar: BIND (run one command on the machine and confirm it) and
+/// MANUAL (type the destination). Editing an existing host has only the form
+/// — there is nothing to bind — so the bar is absent there entirely.
 struct AddHostSheet: View {
     @Environment(HostStore.self) private var store
     @Environment(EntitlementStore.self) private var entitlements
+    @Environment(BindController.self) private var bind
     @Environment(\.dismiss) private var dismiss
 
     var editing: Host?
 
+    /// Which road this modal is showing. Add opens on BIND: the deck no
+    /// longer carries a BIND chip, so this bar is where the flow lives.
+    enum Mode: Hashable {
+        case bind
+        case manual
+    }
+
+    @State private var mode: Mode = .bind
     @State private var name = ""
     @State private var hostname = ""
     @State private var port = "22"
@@ -84,50 +98,129 @@ struct AddHostSheet: View {
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 18) {
-                    hostSection
-                    monitoringSection
-                    credentialsSection
-                    testSection
-                    workingDirsSection
-                    tmuxConfSection
-                    scriptsSection
-                    agentModelsSection
-                        .id("agent-models")
-                    transportSection
+                    if showsModeBar {
+                        VStack(alignment: .leading, spacing: 8) {
+                            TallyChoiceBar(
+                                [("Bind", Mode.bind), ("Manual", Mode.manual)],
+                                selection: $mode
+                            )
+                            // Neither word says what it costs you. BIND needs
+                            // something installed on the machine, which is
+                            // the one thing that can make it the wrong road —
+                            // so each caption names that and points at the
+                            // other.
+                            Text(modeDetail)
+                                .font(.ui(10))
+                                .foregroundStyle(Theme.signal2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 2)
+                        }
+                    }
+                    switch resolvedMode {
+                    case .bind:
+                        BindPane()
+                    case .manual:
+                        manualForm
+                    }
                 }
                 .frame(maxWidth: 680)
                 .padding(18)
                 .frame(maxWidth: .infinity)
             }
-            // A tap on the chassis outside any field drops keyboard focus.
-            // Fields, chips, and switches claim their own taps, so this only
-            // fires on inert ground and never fights a control.
-            .onTapGesture(perform: unfocusInputs)
             .task { await scrollForVerificationIfRequested(proxy) }
+            .task { openBindPaneForVerificationIfRequested() }
             .chassisSheetGround()
-            .navigationTitle(editing == nil ? "Add Host" : "Host Settings")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ChassisSheetTitle(editing == nil ? "Add Host" : "Host Settings")
+                ChassisSheetTitle(title)
                 ToolbarItem(placement: .cancellationAction) {
-                    ChassisBarButton("Cancel") { clearSecretsAndDismiss() }
+                    // Nothing on the Bind pane is this modal's to save — the
+                    // machine and the controller finish that between them —
+                    // so the bar offers a way out, not a discard.
+                    ChassisBarButton(resolvedMode == .bind ? "Done" : "Cancel") {
+                        clearSecretsAndDismiss()
+                    }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    ChassisBarButton("Save", action: save)
-                        .disabled(!isValid)
+                if resolvedMode == .manual {
+                    ToolbarItem(placement: .confirmationAction) {
+                        ChassisBarButton("Save", action: save)
+                            .disabled(!isValid)
+                    }
                 }
             }
             }
         }
-        // This long form is easy to drag while scrolling. Require the
-        // explicit Cancel or Save action so a swipe cannot discard edits;
-        // both paths also clear secret bindings before the sheet tears down.
-        .interactiveDismissDisabled()
+        // The manual form is long and easy to drag while scrolling. Require
+        // the explicit Cancel or Save action there so a swipe cannot discard
+        // edits; both paths also clear secret bindings before the sheet tears
+        // down. The Bind pane holds no unsaved edits, so a swipe is allowed —
+        // except mid-enrollment, where it would look like a cancel and isn't.
+        .interactiveDismissDisabled(
+            resolvedMode == .manual || bind.enrollmentInFlight
+        )
         .onAppear(perform: populate)
         .sheet(isPresented: $showingPaywall) { ProPaywallView() }
+        // Binding creates a host, so it meets the same free-tier limit the
+        // manual form does — refused before anything is enrolled on the
+        // machine, never after.
+        .onChange(of: bind.needsProForHostLimit) { _, needsPro in
+            guard needsPro else { return }
+            bind.needsProForHostLimit = false
+            showingPaywall = true
+        }
         // Any edit that could change the outcome retires the shown result —
         // a stale PASSED next to a new address would vouch for the wrong host.
         .onChange(of: testFingerprint) { testState = .idle }
+    }
+
+    private var title: String { editing == nil ? "Add Host" : "Host Settings" }
+
+    private var modeDetail: String {
+        switch resolvedMode {
+        case .bind:
+            "Run the mpx CLI on the machine you're adding and it offers "
+                + "itself — no address, user, or key to type here. Can't "
+                + "install it? Switch to MANUAL."
+        case .manual:
+            "Type the SSH destination yourself. Nothing to install on the "
+                + "machine."
+        }
+    }
+
+    /// Editing an existing host is form-only; there is no machine to bind.
+    private var showsModeBar: Bool { editing == nil }
+
+    private var resolvedMode: Mode { showsModeBar ? mode : .manual }
+
+    private var manualForm: some View {
+        VStack(spacing: 18) {
+            hostSection
+            monitoringSection
+            credentialsSection
+            testSection
+            workingDirsSection
+            tmuxConfSection
+            scriptsSection
+            agentModelsSection
+                .id("agent-models")
+            transportSection
+        }
+        // A tap on the chassis outside any field drops keyboard focus.
+        // SwiftUI fields, chips, and switches claim their own taps, so this
+        // only fires on inert ground.
+        //
+        // Scoped to this form on purpose — it used to sit on the whole scroll
+        // view, which put a `UITapGestureRecognizer` above the Bind pane's
+        // `PasteButton`. That is UIKit's `UIPasteControl`, a plain `UIControl`
+        // whose touch tracking an ancestor recognizer cancels, so the button
+        // rendered enabled and did nothing when pressed (user-reported).
+        // SwiftUI's own controls are unaffected because SwiftUI arbitrates
+        // its gestures internally; a hosted UIKit control is the odd one out.
+        // The Bind pane wants no such gesture anyway: its only input is the
+        // PIN field.
+        .contentShape(Rectangle())
+        .onTapGesture(perform: unfocusInputs)
     }
 
     // MARK: Form sections
@@ -780,11 +873,27 @@ struct AddHostSheet: View {
     /// headless frame and the simulator cannot scroll (DEBUG capture only).
     private func scrollForVerificationIfRequested(_ proxy: ScrollViewProxy) async {
         #if DEBUG
-        guard ProcessInfo.processInfo.environment[
-            "MULTIPLEX_AUTO_HOST_SETTINGS"
-        ] == "models" else { return }
+        let environment = ProcessInfo.processInfo.environment
+        let target: String
+        if environment["MULTIPLEX_AUTO_HOST_SETTINGS"] == "models" {
+            target = "agent-models"
+        } else if AddHostAutoOpen.requested == .bindElsewhere {
+            target = BindPane.elsewhereID
+        } else {
+            return
+        }
         try? await Task.sleep(for: .milliseconds(700))
-        withAnimation(nil) { proxy.scrollTo("agent-models", anchor: .top) }
+        withAnimation(nil) { proxy.scrollTo(target, anchor: .top) }
+        #endif
+    }
+
+    /// `MULTIPLEX_AUTO_ADD_HOST=bind|manual` picks which road this modal
+    /// opens on, so both panes can be captured headlessly (the simulator
+    /// cannot tap the choice bar). Adding always defaults to Bind.
+    private func openBindPaneForVerificationIfRequested() {
+        #if DEBUG
+        guard showsModeBar, let request = AddHostAutoOpen.requested else { return }
+        mode = request == .manual ? .manual : .bind
         #endif
     }
 
@@ -917,7 +1026,9 @@ struct AddHostSheet: View {
 /// and the save-to-Passwords prompt to secure entry — every content-type
 /// opt-out is ignored — and one secure field marks the whole sheet as a
 /// login form, dragging User and Private key into the same treatment.
-private struct RevealableSecureField: View {
+/// Internal (not file-private) because BindPane's KEY PASSPHRASE field is
+/// the same control under the same rules.
+struct RevealableSecureField: View {
     let title: String
     let prompt: String
     @Binding var text: String
@@ -1100,5 +1211,22 @@ final class SecretTextField: UITextField {
     .padding()
     .frame(width: 420)
     .background(Theme.chassis)
+}
+#endif
+
+#if DEBUG
+/// `MULTIPLEX_AUTO_ADD_HOST`'s grammar, parsed in one place: DeckWindow
+/// opens the modal for any recognized value, this sheet picks the pane, and
+/// the scroll hook aims at the elsewhere section. Matching the raw strings
+/// at each site let them drift.
+enum AddHostAutoOpen: String {
+    case bind
+    case bindElsewhere = "bind-elsewhere"
+    case manual
+
+    static var requested: AddHostAutoOpen? {
+        ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ADD_HOST"]
+            .flatMap(Self.init(rawValue:))
+    }
 }
 #endif

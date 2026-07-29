@@ -68,7 +68,11 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   Optional `workingDirs` / `sessionScripts` / `newSessionTmuxConf` /
   `agentLaunchModels` (agent rawValue → model-id list) keys feed
   headless checks of the New Session pickers and the setup-script,
-  tmux-conf, and launch-model paths. `"enabled": false` starts the launch with the
+  tmux-conf, and launch-model paths. An optional `passphrase` key stores
+  the private key's passphrase in the Keychain, so a
+  passphrase-encrypted `privateKey` (e.g. `ssh-keygen -p` on a copy of
+  the harness client key) proves the sealed-key connect path headlessly —
+  the probe must log `Accepted publickey` without any unlock prompt. `"enabled": false` starts the launch with the
   host switched off, so the never-dials-it promise can be checked against a
   silent `Tools/dev-sshd/state/sshd.log`.
 - `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per comma entry via
@@ -97,6 +101,34 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   run; idb HID taps died with Xcode 27's SimulatorKit removal). E.g.
   `…open?host=devbox&action=agent&agent=pi&model=x` proves the launch line
   types `pi --model 'x'` — capture-pane the newly minted session host-side.
+- `MULTIPLEX_AUTO_BIND=<multiplex://b/…>` / `MULTIPLEX_BIND_AUTOPIN=<6
+  digits>` — drive the Bind Host flow headlessly (no camera, no taps). The
+  first submits a scanned/pasted payload through the real parse → confirm →
+  handshake seam; the second waits for the first machine heard on the
+  network and answers it with that PIN. Stage the other side with
+  `./Tools/dev-sshd/harness.sh bind` (interactive, prints the PIN) or
+  `bind --print-only` (detaches, prints the payload URL for
+  `MULTIPLEX_AUTO_BIND`, transcript in `state/bind.log`). Both fire once per
+  process, log under category `bind`, and the proof is host-side: a
+  `multiplex:bind:<id>:<device>` line appears in
+  `Tools/dev-sshd/state/authorized_keys` and `sshd.log` then shows
+  `Accepted publickey` for that new key. `MULTIPLEX_BIND_PASSPHRASE=<text>`
+  presets the pane's KEY PASSPHRASE for either hook, so a headless bind
+  stores its key sealed and saves the passphrase — the probe's `Accepted
+  publickey` then proves the sealed-key connect chain (verified
+  2026-07-29). Neither needs the Bind pane open —
+  they set `bindSurfaceOpen` themselves, which is what keeps the deck's
+  lifecycle task from stopping the browser under them. ⚠ These are
+  `DeckWindow` tasks, so a launch that restores a **terminal-only** scene
+  never runs them (the deck never mounts — verified 2026-07-27); clear
+  restored scene state with `simctl uninstall` (plus `simctl keychain
+  <udid> reset`, or the Keychain mirror re-adopts the old host and the free
+  host limit then blocks the bind) before a headless bind run.
+- `MULTIPLEX_AUTO_ADD_HOST=bind|manual` — opens the Add Host modal on either
+  road (the simulator cannot tap its choice bar) for layout capture. Bypasses
+  the free-tier add gate deliberately: this captures layout, not entitlement.
+  Pair `bind` with `harness.sh bind --print-only` to photograph a real
+  candidate row waiting for its PIN.
 - `MULTIPLEX_PRO_LOCKED=1` — DEBUG-only free-tier mode for headless gate and
   daily-meter verification. Unlike the Settings toggle it does not persist;
   combine it with `MULTIPLEX_AUTO_ATTACH=agent` and the `debug.agentchip`
@@ -277,6 +309,16 @@ headlessly; `SwiftTermView` logs each decision to the unified log
 SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
          Shell = real FleetWall + one ordered TerminalWindowRoute tab set
          a terminal window/shell = ordered tabs; each tab a TerminalRoute
+  BindController     Bind Host: the candidates Add Host ▸ BIND renders,
+                     enrollment, and the offline payload's key rotation.
+                     `.shared` (onOpenURL fires on every scene root); the
+                     mounted deck attaches HostStore + EntitlementStore
+    BindDiscovery    NWBrowser over `_multiplex-bind._tcp` while the Bind
+                     pane is open — no entitlement, no background socket
+    BindClient       one NWConnection running the sealed handshake
+    Bind* models     payload/TXT codec, CBOR subset, X25519+HKDF+ChaCha20
+                     channel, ed25519 OpenSSH keygen — pure, and pinned to
+                     the CLI's bytes by vendored vectors
   HostStore          hosts.json local cache; secrets + host records sync via
                      iCloud Keychain as synchronizable items (KeychainStore);
                      host records include per-host agent command configuration
@@ -694,6 +736,129 @@ views.
   "fix" it with a server-scoped `terminal-features` default (the same leak
   the per-host new-session conf documents). Full record + the verified
   experiment table: `local-plan/terminal-links.md`.
+- **A bound host is one the machine itself vouched for; the app's key goes
+  out, never a private key** (`Multiplex/Models/Bind/`,
+  `Multiplex/Services/Bind/`; protocol + shared vectors live in the
+  companion repo `github.com/multiplex-term/multiplex-cli`,
+  `spec/bind-v1.md`). `mpx bind` runs **on the machine being added** and
+  offers itself three ways — a terminal QR, a Bonjour announcement, and
+  **opt-in** the clipboard (`mpx bind --copy`: platform tool locally, OSC 52
+  over SSH so Universal Clipboard carries it). Copying is a flag, not a
+  default, because the payload is credential-grade and Universal Clipboard
+  would put it on every signed-in device unasked; the Bind pane therefore
+  prints `mpx bind --copy` beside its Paste button rather than leaving
+  someone pressing one that cannot work. Then the app generates an ed25519
+  keypair and the CLI
+  appends the **public** half to `authorized_keys`, marked in the key line's
+  own comment field (`multiplex:bind:<8 hex>:<device-slug>`, which is how
+  `mpx unbind` finds exactly what it enrolled). **Distribution is three
+  repos**: source in `multiplex-term/multiplex-cli` (not public, and no
+  copy anywhere may promise it will be; the support address
+  support@multiplexterm.dev does not exist either — problems go to the
+  releases repo's issue tracker), prebuilt archives in
+  `multiplex-term/multiplex-cli-releases`, and
+  `multiplex-term/homebrew-tap` for Homebrew — the `homebrew-` prefix is
+  brew's own resolution rule for the tap named `multiplex-term/tap`, so the
+  repo must carry it or every documented install line 404s. The split
+  exists because both install paths need *anonymous* downloads while the
+  source stays closed. A `v*` tag
+  on the source repo builds four targets (musl x86_64/aarch64 statically
+  linked, darwin x86_64/aarch64), publishes them with a `SHA256SUMS`, and
+  opens a formula bump; it needs a cross-repo `RELEASE_TOKEN`, since
+  `GITHUB_TOKEN` cannot reach another repository. `multiplexterm.dev`
+  serves `/install-mpx-cli` (in the `multiplex-home` repo), which covers
+  **macOS as well as Linux** and refuses to install anything whose SHA-256
+  does not match the release's. The OFFER also carries the
+  host's SSH key fingerprints into `Host.pinnedHostKeys`, so bound hosts
+  arrive with the data the TOFU ship-blocker needs (storage only today —
+  enforcement is its own change). Load-bearing details:
+  **the free host limit is checked before the handshake**, never after — a
+  key must not land in someone's `authorized_keys` for a host this tier
+  can't use; **a payload from outside the modal never auto-binds** — a
+  `multiplex://b/…` URL is attacker-suppliable, so `onOpenURL` goes through
+  `BindController.receive`, which only adds a candidate row and raises the
+  Bind pane for the user's explicit ENROLL (`TerminalLink`'s allowlist
+  keeps refusing `multiplex:` from pane text — regression-tested both
+  ways), while the pane's own scan/paste keep their auto-confirm: pointing
+  the camera at the machine's QR *is* the confirmation, and the machine
+  still asks `[Y/n]` on its own terminal; **the machine's own address list
+  outranks wherever its bind listener answered** (`BindNaming.hostname`
+  — a Bonjour resolve reports the interface the *service* was found on,
+  while `mpx bind --addr` exists so a host behind NAT or a port forward can
+  name the address that actually works; the reached address wins only when
+  the machine also endorses it, which is both proven and stated — this bug
+  saved a host at an address its sshd never listened on, caught by the
+  harness 2026-07-27); and **the PIN path's proof is transcript-bound**
+  (HKDF over the PIN salted with both public keys, 3 attempts then the
+  session locks), while a wrong *token* closes silently because counting
+  128-bit guesses would only hand a LAN spammer a denial of service.
+  **The whole flow is one modal**: Add Host opens on a BIND | MANUAL choice
+  bar (`AddHostSheet.Mode`), BIND first, and `BindPane` carries the install
+  commands, the machines heard, scan/paste, and the PIN. The deck has no
+  bind surface at all — no BIND chip, no INCOMING rail, no ghost tiles (all
+  three shipped first and were withdrawn 2026-07-28: half the flow sat on
+  the wall asking for a PIN while the other half, in a separate sheet,
+  explained what a PIN was). Editing a host shows no bar — there is nothing
+  to bind. Discovery follows from that: `BindPane` sets
+  `BindController.bindSurfaceOpen`, the mounted deck still owns begin/end
+  and browses while that flag **or** an enrollment is in flight (the
+  handshake resolves its endpoint through the running browser), never in the
+  background — in-flight specifically, not merely a non-empty candidate
+  list, or one parked on FAILED would hold the browser open for the session
+  behind a closed modal.
+  **A row retires when the machine withdraws its announcement**, and every
+  way `mpx bind` ends its own wait does exactly that — Ctrl-C included, as
+  of the CLI's `cancel` module: it has no goodbye-capable exit otherwise, so
+  SIGINT/SIGTERM only set a flag that the accept loop already polls, and the
+  session unwinds through `Announcer::stop()` like any other ending. Fix it
+  there, never here: a **network liveness probe was tried and rejected**
+  (2026-07-28). A Bonjour name resolves to every address the machine ever
+  answered on — vmnet aliases, and here a `.0` network address — so a
+  connect to a live offer intermittently timed out and deleted it, twice in
+  four runs, and a deleted row cannot come back. Deleting a live machine is
+  strictly worse than showing a dead one. What the app *does* do is the one
+  thing that cannot false-positive: `BindOfferLifetime` retires a row older
+  than the CLI's own `--expires` ceiling (600 s) plus a margin, which covers
+  the case no signal handler can — a machine killed outright, crashed, or
+  slept, whose orphaned record was measured still advertising half an hour
+  later. Keep that constant in step with the CLI's clamp, or move the
+  expiry into the TXT record. So the local-network prompt can only ever follow an explicit
+  ADD HOST tap — but "run the command and glance at the deck" is
+  deliberately no longer true; you glance at the modal. `--offline`
+  (a VPS the device can only reach over SSH) inverts the key direction —
+  the CLI ships a private key inside the payload — so the app **retires it
+  on the first connection**, enrolling a device-held key and deleting the
+  transported line by its exact key material (`BindRotationStore`, whose
+  command appends before it removes: a failure between the two steps must
+  leave a working key, never none). **The bind key passphrase lives in the
+  app, nowhere else** (`BindPane` KEY PASSPHRASE section, directly below
+  ASKING TO BIND): it is ssh-keygen's passphrase ask relocated to where
+  this flow generates its key, and it applies to every bind executed from
+  the pane — handshake and offline-seed alike. Empty (the default) is
+  today's plaintext store. Set, the stored key is sealed in the standard
+  encrypted openssh-key-v1 form by the app's own sealer
+  (`BindSSHKey.sealedPrivateOpenSSH`: vendored OpenBSD bcrypt-pbkdf under
+  `Models/Bind/CBcryptSeal` — `mpxbind_`-prefixed so it can never collide
+  with Citadel's copy, SHA-512/AES-256-CTR from CommonCrypto, exposed
+  through the app's one bridging header; Citadel's independent bcrypt is
+  the decrypt side, which is what makes the round-trip test a real
+  cross-check). The typed passphrase counts as the person's one Multiplex
+  typing and is **saved into the host's settings** (synced Keychain — the
+  same slot Host Settings' Passphrase field shows and clears), so the
+  bind's probe connects immediately and connecting keeps working; clearing
+  it in Host Settings makes the key-unlock prompt ask instead. A sealed
+  key is **never rotated** (an offline-seed bind with a passphrase records
+  no `BindRotationStore` request — swapping the sealed key for a
+  device-generated plaintext one would undo the protection), and `save()`
+  skips the probe for a sealed key with no passphrase on file rather than
+  dialing a connection that can only fail. The CLI knows nothing about
+  passphrases — a CLI-side prompt-and-seal variant (`02ed378`) shipped and
+  was reverted 2026-07-29; the wire still carries only raw seeds. Verified
+  2026-07-29 on the harness: offline payload + `MULTIPLEX_BIND_PASSPHRASE`
+  → sealed store, saved passphrase, probe `Accepted publickey`,
+  authorized_keys untouched, still connecting after relaunch; the dev
+  seed's `passphrase` key remains for pure connect proofs. Free host
+  plumbing, not an agent-helper surface.
 - **A disabled host is one the app never dials on its own** (`Host.isEnabled`,
   deck rail menu / DISABLED tile / Host Settings → Monitoring): the wall skips
   it in `runFeed`, never asks `ConnectionHub` for its model (asking is what

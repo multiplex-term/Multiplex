@@ -332,6 +332,12 @@ final class HostStore {
         // (the harness sshd log stays empty). Absent leaves it alone.
         if let enabled = seed.enabled { host.isEnabled = enabled }
         if let key = seed.privateKey { KeychainStore.set(key, for: host.id, kind: .privateKey) }
+        // For headless proofs of the encrypted-key connect path: a seed can
+        // carry the key's passphrase so the probe connects without the
+        // unlock prompt (which nothing can tap in a headless run).
+        if let passphrase = seed.passphrase, !passphrase.isEmpty {
+            KeychainStore.set(passphrase, for: host.id, kind: .keyPassphrase)
+        }
         if let password = seed.password { KeychainStore.set(password, for: host.id, kind: .password) }
         if hosts.contains(where: { $0.id == host.id }) {
             update(host)
@@ -367,6 +373,7 @@ final class HostStore {
         var username: String
         var password: String?
         var privateKey: String?
+        var passphrase: String?
         var enabled: Bool?
         var useMosh: Bool?
         var moshServerPath: String?

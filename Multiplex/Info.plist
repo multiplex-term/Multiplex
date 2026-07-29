@@ -33,12 +33,16 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_multiplex-bind._tcp</string>
+	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Multiplex uses the camera only when you take a photo to send to your remote SSH session.</string>
+	<string>Multiplex uses the camera when you take a photo to send to your remote SSH session, and when you scan the code that binds a machine to the app.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Multiplex unlocks with Face ID when the optional App Lock setting is turned on.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Multiplex connects to SSH hosts on your local network.</string>
+	<string>Multiplex connects to SSH hosts on your local network, and finds machines offering to bind themselves to the app.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Multiplex listens only while you hold a dictation going from the terminal key bar.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

@@ -1,0 +1,74 @@
+BIND A HOST — add a machine without typing anything
+
+Adding a host used to mean a hostname, a user, and a pasted key. Now press
++ HOST and the sheet opens on a new BIND road (MANUAL is the old form, one
+tap away). A companion CLI runs on the machine you want to add, and the app's
+job is to notice it and confirm.
+
+The BIND pane hands you the install lines with COPY buttons — paste them into
+a terminal on that machine:
+  brew install multiplex-term/tap/mpx                        # macOS or Linux
+  curl -fsSL https://multiplexterm.dev/install-mpx-cli | sh  # macOS or Linux
+  mpx bind
+
+Then try any of these:
+
+1. LOCAL NETWORK (works on Vision Pro — no camera needed)
+   Leave `mpx bind` running and watch the ASKING TO BIND section. The machine
+   appears there on its own, showing its user, address, and SSH fingerprint —
+   check those against the terminal. Type the 6-digit PIN the terminal
+   printed, press ENROLL, answer [Y/n] on the machine, and the host lands on
+   the deck already probing.
+
+2. SCAN THE QR (iPhone/iPad)
+   Same pane, SOMEWHERE ELSE → SCAN QR, pointed at the code in the terminal.
+
+3. PASTE (any device, including Vision Pro)
+   Run it as `mpx bind --copy` — copying is opt-in now, since the code is
+   credential-grade and Universal Clipboard would spread it to every device
+   you're signed in to. The SOMEWHERE ELSE section shows that exact command
+   with a COPY button. Over SSH the CLI uses OSC 52, so the code lands on
+   your *local* terminal's clipboard and Universal Clipboard carries it to
+   your device; then press Paste.
+
+4. A MACHINE THAT ISN'T ON YOUR NETWORK (VPS, firewalled box)
+   Run `mpx bind --offline` and scan/paste. Multiplex imports it, connects,
+   and then quietly replaces that key with one it generates itself.
+
+5. KEY PASSPHRASE (the section right below ASKING TO BIND)
+   Optional, and it works for every road above: type one before you bind
+   and the SSH key Multiplex stores for that machine is generated sealed
+   with it — the same encrypted key format ssh-keygen produces. The
+   passphrase is saved into the host's settings, so the host connects
+   immediately and keeps working; open Host Settings to see or clear it.
+   Clear it and the wall asks with an UNLOCK button the next time the key
+   is needed. Leave the field empty and nothing changes from before.
+
+Worth checking:
+- Tap a multiplex://b/ link outside the app (mpx bind prints one — put it in
+  Notes/Messages and tap it). The app must open Add Host on the BIND pane
+  with that machine listed and waiting for your ENROLL — a link must never
+  bind by itself.
+- Press Ctrl-C on the machine while its row is showing under ASKING TO BIND.
+  The row should disappear within a few seconds — it should never sit there
+  waiting for a PIN that nothing is listening for. (This needs the current
+  mpx; older builds left the row behind.)
+- The deck itself has no bind chrome at all — no BIND chip, nothing above
+  your fleet. The whole flow lives in that one sheet. Tell us if you miss
+  a machine announcing itself while you're just looking at the wall.
+- Multiplex only listens for machines while the BIND pane is open, so the
+  local-network permission prompt should never appear until you ask for it.
+- Your device's own key is what gets installed — no private key ever leaves
+  the device on the normal path. `mpx unbind --list` shows exactly what was
+  enrolled; `mpx unbind <id>` removes it.
+- A bound host records the machine's SSH fingerprints as it binds.
+- Wrong PIN three times must kill the offer (run `mpx bind` again).
+- On the free tier, binding still respects the two-host limit — you should
+  see the Pro paywall instead of a key being installed.
+- Declining in the terminal must leave your authorized_keys untouched.
+- A host bound with a KEY PASSPHRASE must connect right away and survive a
+  relaunch without asking anything; its Host Settings must show the
+  passphrase saved. For an offline bind, the machine keeps the id the bind
+  installed (`mpx unbind --list`) — a passphrase-sealed key is never
+  swapped out.
+- Host Settings (editing a host you already have) should show no BIND bar.

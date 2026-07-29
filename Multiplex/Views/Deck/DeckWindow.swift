@@ -135,6 +135,7 @@ struct DeckWindow: View {
     @Environment(TerminalWorkspace.self) private var workspace
     @Environment(LocalNetworkAccessMonitor.self) private var localNetworkAccess
     @Environment(NetworkChangeMonitor.self) private var networkChanges
+    @Environment(BindController.self) private var bind
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
 
@@ -155,7 +156,33 @@ struct DeckWindow: View {
         let active: Bool
     }
 
-    var body: some View {
+    /// What makes bind discovery start or stop. Any of these changing
+    /// re-evaluates the browser exactly once, and the policy is a property
+    /// of the same values so the task body and its restart key can't drift.
+    private struct BindBrowseID: Hashable {
+        let surface: Bool
+        let inFlight: Bool
+        let active: Bool
+
+        var wantsBrowsing: Bool { active && (surface || inFlight) }
+    }
+
+    private var bindBrowseID: BindBrowseID {
+        BindBrowseID(
+            surface: bind.bindSurfaceOpen,
+            inFlight: bind.enrollmentInFlight,
+            active: scenePhase == .active
+        )
+    }
+
+    // The deck's body is split across these computed properties purely to
+    // keep each modifier chain short enough for the Swift type-checker: the
+    // combined chain (base + sheets + ~20 lifecycle tasks) exceeds its
+    // per-expression budget and fails to type-check on iOS. Slicing costs no
+    // plumbing — every property is on this struct, so all reach `self`
+    // directly. Order is preserved: chrome innermost, then core lifecycle,
+    // then the rest, then the DEBUG verification hooks outermost.
+    private var deckChrome: some View {
         FleetWall(
             terminalOpener: terminalOpener,
             presentation: wallPresentation,
@@ -173,11 +200,13 @@ struct DeckWindow: View {
             AddHostSheet()
                 .environment(store)
                 .environment(entitlements)
+                .environment(bind)
         }
         .sheet(item: $editingHost) { host in
             AddHostSheet(editing: host)
                 .environment(store)
                 .environment(entitlements)
+                .environment(bind)
         }
         .sheet(isPresented: $showingSettings) { SettingsView() }
         .sheet(isPresented: $showingFAQ) { FAQView() }
@@ -189,6 +218,52 @@ struct DeckWindow: View {
             Text("Multiplex can’t reach SSH hosts on your local network. Turn on Local Network access in Settings.")
         }
         .background(DeckSceneReporter())
+    }
+
+    private var deckCore: some View {
+        deckChrome
+        // The bind controller is app-level (onOpenURL fires on every scene
+        // root), but only the mounted deck can hand it the stores it needs
+        // and run its flows.
+        .task {
+            bind.attach(store: store, entitlements: entitlements)
+            // A bind URL may have arrived before this deck mounted (a cold
+            // start straight into the link): put its candidate on screen.
+            presentBindSurfaceIfRequested()
+            await bind.rotatePendingKeysIfNeeded()
+        }
+        // A `multiplex://b/…` URL only ever adds a candidate row; this is
+        // where the deck answers it, by opening the one modal the whole bind
+        // flow lives on so that row is visible and waiting for ENROLL.
+        .onChange(of: bind.wantsBindSurface) { _, wants in
+            guard wants else { return }
+            presentBindSurfaceIfRequested()
+        }
+        // Browsing runs only while the Add Host modal's Bind pane is on
+        // screen — the wall has no bind surface, so nothing else consumes
+        // announcements — and never in the background. An enrollment already
+        // in flight keeps it up regardless of what is showing: the handshake
+        // resolves its endpoint through the live browser. Deliberately
+        // in-flight and not merely non-empty — a candidate parked on FAILED
+        // or waiting for its PIN would otherwise hold the browser open for
+        // the rest of the session behind a closed modal.
+        //
+        // Scoping it this tightly also means the local-network prompt can
+        // only ever follow an explicit tap on ADD HOST, on any launch.
+        .task(id: bindBrowseID) {
+            if bindBrowseID.wantsBrowsing {
+                bind.beginDiscovery()
+            } else {
+                bind.endDiscovery()
+            }
+        }
+        #if DEBUG
+        .task { await bind.runDebugAutomationIfRequested() }
+        #endif
+    }
+
+    private var deckWithLifecycle: some View {
+        deckCore
         // Render the local cache first. Synchronizable Keychain reads may
         // involve securityd/iCloud, so cloud reconciliation begins only once
         // the deck exists instead of blocking App initialization.
@@ -245,10 +320,15 @@ struct DeckWindow: View {
                 hub.flushSnapshots()
             }
         }
+    }
+
+    var body: some View {
+        deckWithLifecycle
         #if DEBUG
         .task { presentPaywallForReviewCaptureIfRequested() }
         .task { presentSettingsForVerificationIfRequested() }
         .task { presentFAQForVerificationIfRequested() }
+        .task { presentAddHostForVerificationIfRequested() }
         .task { await presentHostSettingsForVerificationIfRequested() }
         .task {
             await DeckScene.autoAttachIfRequested(
@@ -281,6 +361,20 @@ struct DeckWindow: View {
         openURL(url)
     }
 
+    /// Answers `BindController.wantsBindSurface` — a bind URL arrived, its
+    /// candidate row is in `pending`, and the Add Host modal (which opens on
+    /// its Bind pane) is where that row is visible and confirmable. A
+    /// production path (a real `multiplex://b/…` open), so it must live
+    /// OUTSIDE `#if DEBUG` — it is called unconditionally from `body`.
+    private func presentBindSurfaceIfRequested() {
+        guard bind.wantsBindSurface else { return }
+        bind.wantsBindSurface = false
+        // The URL's intent wins over an open edit sheet; both sheets on this
+        // view cannot present at once.
+        editingHost = nil
+        addingHost = true
+    }
+
     #if DEBUG
     /// Launch with `MULTIPLEX_AUTO_SETTINGS=1|theme` to open the global
     /// Settings sheet for deterministic layout and entitlement-gate screenshots.
@@ -288,6 +382,17 @@ struct DeckWindow: View {
         guard let request = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_SETTINGS"],
               ["1", "theme"].contains(request) else { return }
         showingSettings = true
+    }
+
+    /// Launch with `MULTIPLEX_AUTO_ADD_HOST=bind|bind-elsewhere|manual` to
+    /// open the Add Host modal on either road — the whole bind flow lives on
+    /// its Bind pane now, and the simulator cannot tap a choice bar.
+    /// `bind-elsewhere` also scrolls to the scan/paste section, which sits
+    /// below one sheet height. Bypasses the free-tier gate deliberately:
+    /// this captures layout, not entitlement.
+    private func presentAddHostForVerificationIfRequested() {
+        guard AddHostAutoOpen.requested != nil else { return }
+        addingHost = true
     }
 
     /// Launch with `MULTIPLEX_AUTO_FAQ=1` to open the deck's FAQ sheet for

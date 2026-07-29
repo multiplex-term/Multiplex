@@ -941,50 +941,6 @@ final class HostConnectionModel {
 /// treated as dead (see `HostConnectionModel.deadlined`).
 private struct ProbeTimeoutError: Error {}
 
-/// Resolves a deadline race once and cancels its losing task. In particular,
-/// a successful five-second wall probe no longer leaves a ten-second timer
-/// task alive behind it on every host and every tick.
-private final class DeadlineGate<Value>: @unchecked Sendable {
-    enum Winner: Equatable { case work, timer }
-
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Value, Error>?
-    private var work: Task<Void, Never>?
-    private var timer: Task<Void, Never>?
-    private var finished = false
-
-    init(_ continuation: CheckedContinuation<Value, Error>) {
-        self.continuation = continuation
-    }
-
-    func install(work: Task<Void, Never>, timer: Task<Void, Never>) {
-        lock.lock()
-        if finished {
-            lock.unlock()
-            work.cancel()
-            timer.cancel()
-            return
-        }
-        self.work = work
-        self.timer = timer
-        lock.unlock()
-    }
-
-    func finish(_ result: Result<Value, Error>, winner: Winner) {
-        lock.lock()
-        guard !finished else {
-            lock.unlock()
-            return
-        }
-        finished = true
-        let continuation = continuation
-        self.continuation = nil
-        let loser = winner == .work ? timer : work
-        work = nil
-        timer = nil
-        lock.unlock()
-
-        loser?.cancel()
-        continuation?.resume(with: result)
-    }
-}
+// The deadline race itself (first-wins resolution, loser cancelled both
+// ways) is the shared `DeadlineGate` in `Deadline.swift`; only the probe's
+// timeout error type is local.

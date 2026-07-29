@@ -585,12 +585,19 @@ struct FleetWall: View {
                     Text("Every tmux session, its own window in space.")
                         .font(.footnote)
                         .foregroundStyle(Theme.signal2)
+                    // Not "run mpx bind" any more: the wall no longer hears
+                    // anything on its own, so pointing at the command here
+                    // would promise a tile that never arrives. Point at the
+                    // door the command is behind instead.
+                    Text(verbatim: "add host  ▸  bind  or  manual")
+                        .font(.mono(10))
+                        .foregroundStyle(Theme.signal3)
                 }
             }
             .frame(maxWidth: 420, minHeight: 150)
-            HStack {
+            HStack(spacing: 8) {
                 ChassisLabel("No hosts", size: 12, color: Theme.signal3)
-                Spacer()
+                Spacer(minLength: 4)
                 ChassisChip("ADD HOST", systemImage: "plus", prominent: true, action: addHost)
             }
             .padding(.horizontal, 7)

@@ -207,7 +207,7 @@ final class HostTestTests: XCTestCase {
     }
 
     func testDeadlineFailureMentionsReachability() {
-        let message = HostTest.failureMessage(for: HostTest.DeadlineExceeded(), host: host())
+        let message = HostTest.failureMessage(for: DeadlineExceeded(), host: host())
         XCTAssertTrue(message.contains("No answer"))
         XCTAssertTrue(message.contains("devbox.example.com"))
     }
