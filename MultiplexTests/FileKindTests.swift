@@ -101,6 +101,38 @@ final class TerminalPathTargetTests: XCTestCase {
         XCTAssertNil(TerminalPathTarget.resolve("path with space/file.txt"))
     }
 
+    /// A hard-wrapped row glues a sentence's tail to the path below it (no
+    /// space at the seam), and the ghostty matcher reads the pair as one
+    /// bare-relative path — the `.`-prefixed path users see. The segment
+    /// ending in `.` right before a slash is the tell.
+    func testWrappedProseHeadStripped() {
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("sentence./Users/jhen/x.swift")?.path,
+            "/Users/jhen/x.swift"
+        )
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("sentence./Users/jhen/x.swift")?.base,
+            .absolute
+        )
+        // The suffix survives the cut.
+        let numbered = TerminalPathTarget.resolve("docs.md./etc/hosts:12")
+        XCTAssertEqual(numbered?.path, "/etc/hosts")
+        XCTAssertEqual(numbered?.line, 12)
+    }
+
+    func testRealPathsSurviveTheProseCut() {
+        // Base markers are their own root — never a prose suffix.
+        XCTAssertEqual(TerminalPathTarget.resolve("./src/main.rs")?.path, "./src/main.rs")
+        XCTAssertEqual(TerminalPathTarget.resolve("../lib/util.ts")?.path, "../lib/util.ts")
+        XCTAssertEqual(TerminalPathTarget.resolve("/var/./log/x")?.path, "/var/./log/x")
+        XCTAssertEqual(TerminalPathTarget.resolve("~/notes/todo.md")?.path, "~/notes/todo.md")
+        // A dot inside a segment is ordinary.
+        XCTAssertEqual(TerminalPathTarget.resolve("src/foo.ts")?.path, "src/foo.ts")
+        XCTAssertEqual(TerminalPathTarget.resolve("a.b/c.d")?.path, "a.b/c.d")
+        XCTAssertEqual(TerminalPathTarget.resolve("dir/./file")?.path, "dir/./file")
+        XCTAssertEqual(TerminalPathTarget.resolve("dir/../file")?.path, "dir/../file")
+    }
+
     func testTimeIsNotAPath() {
         XCTAssertNil(TerminalPathTarget.resolve("12:30"))
     }

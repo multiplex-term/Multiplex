@@ -20,14 +20,43 @@ import SwiftUI
 /// says exactly what will be dialled.
 struct TerminalLinkSheet: View {
     let link: TerminalLink
-    /// The inline-browser offer for this link, when it is a web page and the
-    /// tab's host is known. nil keeps the sheet exactly as it always was.
-    var viewport: ViewportOffer?
-    let onOpen: () -> Void
-    let onCopy: () -> Void
+    /// The inline-browser offer for whatever address the sheet currently
+    /// holds — asked per edit, because the target is editable and a typed
+    /// change moves which world it reaches. nil keeps the sheet exactly as
+    /// it always was (no viewport row, no chip).
+    var viewportOffer: (TerminalLink) -> ViewportOffer? = { _ in nil }
+    let onOpen: (TerminalLink) -> Void
+    let onCopy: (String) -> Void
     var onOpenViewport: ((ViewportOffer) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    /// The target as the sheet shows it. Detection is a guess made from
+    /// rendered rows — a wrapped line can glue a sentence's tail to the
+    /// address below it — so the person gets the last word before anything
+    /// opens. Everything below re-resolves from this, which keeps the
+    /// allowlist and the host line honest about what an edit produced.
+    @State private var text: String
+
+    init(
+        link: TerminalLink,
+        viewportOffer: @escaping (TerminalLink) -> ViewportOffer? = { _ in nil },
+        onOpen: @escaping (TerminalLink) -> Void,
+        onCopy: @escaping (String) -> Void,
+        onOpenViewport: ((ViewportOffer) -> Void)? = nil
+    ) {
+        self.link = link
+        self.viewportOffer = viewportOffer
+        self.onOpen = onOpen
+        self.onCopy = onCopy
+        self.onOpenViewport = onOpenViewport
+        _text = State(initialValue: link.raw)
+    }
+
+    /// The edited target, or nil while the field holds nothing Multiplex can
+    /// classify — the actions that need a link go quiet rather than acting
+    /// on the pressed one behind the person's back.
+    private var edited: TerminalLink? { TerminalLink.resolve(text) }
+    private var viewport: ViewportOffer? { edited.flatMap(viewportOffer) }
 
     var body: some View {
         NavigationStack {
@@ -36,7 +65,7 @@ struct TerminalLinkSheet: View {
                     TallyFormSection(sectionTitle, detail: detail) {
                         TallyFormRow {
                             VStack(alignment: .leading, spacing: 12) {
-                                if let host = link.host {
+                                if let host = edited?.host {
                                     VStack(alignment: .leading, spacing: 4) {
                                         ChassisLabel("HOST", size: 9, color: Theme.signal3)
                                         Text(host)
@@ -45,7 +74,13 @@ struct TerminalLinkSheet: View {
                                             .fixedSize(horizontal: false, vertical: true)
                                     }
                                 }
-                                TerminalSheetValueBox(label: "TARGET", value: link.raw)
+                                TerminalSheetEditableValueBox(
+                                    label: "TARGET",
+                                    value: $text,
+                                    note: edited == nil
+                                        ? "NOT AN ADDRESS MULTIPLEX CAN READ"
+                                        : nil
+                                )
 
                                 if let viewport {
                                     VStack(alignment: .leading, spacing: 4) {
@@ -67,18 +102,18 @@ struct TerminalLinkSheet: View {
                                             dismiss()
                                         }
                                     }
-                                    if link.openableURL != nil {
+                                    if let openable = edited, openable.openableURL != nil {
                                         ChassisChip(
                                             "OPEN",
                                             systemImage: "arrow.up.forward.app",
                                             prominent: viewport == nil || onOpenViewport == nil
                                         ) {
-                                            onOpen()
+                                            onOpen(openable)
                                             dismiss()
                                         }
                                     }
                                     ChassisChip("COPY", systemImage: "doc.on.doc") {
-                                        onCopy()
+                                        onCopy(text)
                                         dismiss()
                                     }
                                 }
@@ -103,7 +138,7 @@ struct TerminalLinkSheet: View {
     }
 
     private var navigationTitle: String {
-        link.openableURL == nil ? "Can't open link" : "Open link"
+        edited?.openableURL == nil ? "Can't open link" : "Open link"
     }
 
     private var sectionTitle: String {
@@ -115,7 +150,8 @@ struct TerminalLinkSheet: View {
                 "Lives on \(viewport.viaHostName ?? "the host"), not this device"
             }
         }
-        return switch link.kind {
+        guard let edited else { return "Not a usable address" }
+        return switch edited.kind {
         case .openable: "Leaves Multiplex"
         case .blockedScheme(let scheme): "\(scheme.uppercased()) links stay here"
         case .malformed: "Not a usable address"
@@ -137,11 +173,17 @@ struct TerminalLinkSheet: View {
                     + "answer."
             }
         }
-        return switch link.kind {
+        guard let edited else {
+            return "The field holds nothing Multiplex can open — a target "
+                + "needs a web or mail address. Edit it, or copy the text "
+                + "if it's still useful."
+        }
+        return switch edited.kind {
         case .openable:
             "This address came from the host, and a hyperlink's visible text "
                 + "can differ from where it points — check the host above "
-                + "before opening it outside Multiplex."
+                + "before opening it outside Multiplex. The target is "
+                + "editable when detection caught the wrong text."
         case .blockedScheme(let scheme):
             "Multiplex opens web and mail links only. A \(scheme): link from a "
                 + "remote pane would act on this device, so it is shown rather "
@@ -198,6 +240,46 @@ struct TerminalSheetValueBox: View {
     }
 }
 
+/// The confirm sheets' editable target — the same screen well as
+/// `TerminalSheetValueBox`, with the value as a real field.
+///
+/// Detection is a guess made from *rendered rows*, and a hard wrap leaves no
+/// space at the seam: a sentence ending in `.` above a path or URL reaches
+/// the matcher glued to it. The model trims what it can prove
+/// (`TerminalPathTarget.strippingWrappedProseHead`); the rest is the
+/// person's to fix here, before anything opens. Keyboard behavior is the
+/// address kind: no autocorrection, no autocapitalization, no smart quotes —
+/// a target is machine text.
+struct TerminalSheetEditableValueBox: View {
+    let label: String
+    @Binding var value: String
+    /// Caps note under the field when what it holds resolves to nothing —
+    /// the actions go quiet, and this says why.
+    var note: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ChassisLabel(label, size: 9, color: Theme.signal3)
+            TextField("", text: $value, axis: .vertical)
+                .font(.mono(11))
+                .foregroundStyle(Theme.signal)
+                .textFieldStyle(.plain)
+                .lineLimit(1...5)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+                .submitLabel(.done)
+            if let note {
+                ChassisLabel(note, size: 9, color: Theme.caution)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.screen)
+        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+    }
+}
+
 extension View {
     /// Presents `controller`'s pending link confirmation. Packaged as one
     /// modifier because `TerminalWindowRoot`'s body is already at the Swift
@@ -220,9 +302,9 @@ extension View {
         return sheet(item: binding) { link in
             TerminalLinkSheet(
                 link: link,
-                viewport: ViewportOffer.make(for: link, host: viewportHost),
-                onOpen: { controller?.openPendingLink() },
-                onCopy: { controller?.copyPendingLink() },
+                viewportOffer: { ViewportOffer.make(for: $0, host: viewportHost) },
+                onOpen: { controller?.openConfirmedLink($0) },
+                onCopy: { controller?.copyConfirmedTarget($0) },
                 onOpenViewport: openViewport
             )
         }
@@ -235,10 +317,10 @@ extension View {
         sheet(item: item) { link in
             TerminalLinkSheet(
                 link: link,
-                onOpen: {
-                    if let url = link.openableURL { UIApplication.shared.open(url) }
+                onOpen: { confirmed in
+                    if let url = confirmed.openableURL { UIApplication.shared.open(url) }
                 },
-                onCopy: { UIPasteboard.general.string = link.raw }
+                onCopy: { UIPasteboard.general.string = $0 }
             )
         }
     }
@@ -248,8 +330,8 @@ extension View {
 #Preview("Openable") {
     TerminalLinkSheet(
         link: TerminalLink.resolve("https://multiplexterm.dev/docs/tmux")!,
-        onOpen: {},
-        onCopy: {}
+        onOpen: { _ in },
+        onCopy: { _ in }
     )
     .frame(width: 720, height: 640)
     .preferredColorScheme(.dark)
@@ -258,13 +340,13 @@ extension View {
 #Preview("Viewport LAN") {
     TerminalLinkSheet(
         link: TerminalLink.resolve("http://192.168.1.68:5173/")!,
-        viewport: ViewportOffer(
-            url: URL(string: "http://192.168.1.68:5173/")!,
-            reach: .lan,
-            viaHostName: nil
-        ),
-        onOpen: {},
-        onCopy: {},
+        viewportOffer: { link in
+            link.openableURL.map {
+                ViewportOffer(url: $0, reach: .lan, viaHostName: nil)
+            }
+        },
+        onOpen: { _ in },
+        onCopy: { _ in },
         onOpenViewport: { _ in }
     )
     .frame(width: 720, height: 700)
@@ -274,13 +356,15 @@ extension View {
 #Preview("Viewport loopback") {
     TerminalLinkSheet(
         link: TerminalLink.resolve("http://localhost:5173/")!,
-        viewport: ViewportOffer(
-            url: URL(string: "http://100.84.2.19:5173/")!,
-            reach: .remoteLoopback,
-            viaHostName: "devbox"
-        ),
-        onOpen: {},
-        onCopy: {},
+        viewportOffer: { _ in
+            ViewportOffer(
+                url: URL(string: "http://100.84.2.19:5173/")!,
+                reach: .remoteLoopback,
+                viaHostName: "devbox"
+            )
+        },
+        onOpen: { _ in },
+        onCopy: { _ in },
         onOpenViewport: { _ in }
     )
     .frame(width: 720, height: 700)
@@ -290,8 +374,8 @@ extension View {
 #Preview("Blocked") {
     TerminalLinkSheet(
         link: TerminalLink.resolve("file:///etc/shadow")!,
-        onOpen: {},
-        onCopy: {}
+        onOpen: { _ in },
+        onCopy: { _ in }
     )
     .frame(width: 720, height: 640)
     .preferredColorScheme(.dark)

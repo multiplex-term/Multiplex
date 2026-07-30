@@ -781,7 +781,15 @@ views.
   chosen independently of its destination, and that line is also what
   exposes `https://github.com@evil.example/x`. Blocked and malformed
   targets still get a sheet with COPY: an explanation beats a press that
-  does nothing. ⚠ **OSC 8 does not survive a tmux attach today** — tmux
+  does nothing. **That target is an editable field** (both sheets;
+  `TerminalSheetEditableValueBox`) — detection reads *rendered rows*, so it
+  can hand over the wrong text and the person gets the last word. Editing
+  changes nothing about the gate: every keystroke re-runs
+  `TerminalLink.resolve` / `TerminalPathTarget.resolve`, so the host line,
+  the REACH row, the title, and which chips exist all follow the field, and
+  the actions carry the *resolved* value (`openConfirmedLink(_:)` /
+  `copyConfirmedTarget(_:)`) rather than the pending one. Text that resolves
+  to nothing shows a caps note and offers COPY alone. ⚠ **OSC 8 does not survive a tmux attach today** — tmux
   3.6a stores hyperlinks (`capture-pane -e` proves it) but only emits them
   to a client whose terminal advertises `Hls`, and the app requests
   `TERM=xterm-256color`, which has none. So implicit detection is the live
@@ -857,6 +865,15 @@ views.
   selection; now only what BOTH resolvers decline ($VAR/…, colon prose,
   interior whitespace) still does. visionOS gaze regions stay URL-only on
   purpose (hover regions are hit regions; build logs are walls of paths).
+  **A wrapped row can hand over a sentence glued to the path below it** —
+  the fork reassembles wrapped rows and a hard wrap leaves no space at the
+  seam, so `…the file.` above `/Users/me/x.swift` arrives as one
+  bare-relative match. `strippingWrappedProseHead` cuts at the first `X./`
+  whose `X` is neither `.` nor `..`, and only when the text doesn't already
+  start with its own base marker (`/`, `~`, `.`, `$`) — so real paths,
+  including `a.b/c.d` and `dir/./file`, are untouched. A join whose lower
+  row carried a *relative* path is unrecoverable by construction; that is
+  what the sheet's editable field is for.
   Load-bearing details: **the viewer dials its own SSHConnection** — never
   the probe's (a disabled host must not be revived by a tab) and never the
   summoning tab's transport (merge/split moves the viewer away) — redialed

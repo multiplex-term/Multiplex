@@ -9,9 +9,41 @@ struct TerminalFilePathSheet: View {
     let target: TerminalPathTarget
     let hostName: String
     let onView: (TerminalPathTarget) -> Void
-    let onCopy: () -> Void
+    let onCopy: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    /// The path as the sheet shows it, editable. Detection reads *rendered
+    /// rows*, and a hard wrap glues a sentence's tail to the path beneath it
+    /// with no space at the seam; the model strips what it can prove and the
+    /// person fixes the rest here, before a viewer tab is docked at the
+    /// wrong file.
+    @State private var text: String
+
+    init(
+        target: TerminalPathTarget,
+        hostName: String,
+        onView: @escaping (TerminalPathTarget) -> Void,
+        onCopy: @escaping (String) -> Void
+    ) {
+        self.target = target
+        self.hostName = hostName
+        self.onView = onView
+        self.onCopy = onCopy
+        _text = State(initialValue: Self.editorText(for: target))
+    }
+
+    /// What the field starts with: the classified path, plus the `:line`
+    /// suffix if the press carried one — the spelling the viewer accepts
+    /// back, so an untouched field re-resolves to the same target.
+    private static func editorText(for target: TerminalPathTarget) -> String {
+        guard let line = target.line else { return target.path }
+        return "\(target.path):\(line)"
+    }
+
+    /// The edited target, or nil while the field holds nothing that
+    /// classifies — VIEW goes quiet rather than opening the pressed path
+    /// behind the person's back.
+    private var edited: TerminalPathTarget? { TerminalPathTarget.resolve(text) }
 
     var body: some View {
         NavigationStack {
@@ -26,9 +58,15 @@ struct TerminalFilePathSheet: View {
                                         .font(.mono(13, weight: .semibold))
                                         .foregroundStyle(Theme.signal)
                                 }
-                                TerminalSheetValueBox(label: "PATH", value: target.path)
+                                TerminalSheetEditableValueBox(
+                                    label: "PATH",
+                                    value: $text,
+                                    note: edited == nil
+                                        ? "NOT A PATH MULTIPLEX CAN READ"
+                                        : nil
+                                )
 
-                                if let line = target.line {
+                                if let line = edited?.line {
                                     HStack(spacing: 8) {
                                         ChassisLabel("LINE", size: 9, color: Theme.signal3)
                                         Text("\(line)")
@@ -38,12 +76,14 @@ struct TerminalFilePathSheet: View {
                                 }
 
                                 HStack(spacing: 10) {
-                                    ChassisChip("▤ VIEW", prominent: true) {
-                                        onView(target)
-                                        dismiss()
+                                    if let edited {
+                                        ChassisChip("▤ VIEW", prominent: true) {
+                                            onView(edited)
+                                            dismiss()
+                                        }
                                     }
                                     ChassisChip("COPY", systemImage: "doc.on.doc") {
-                                        onCopy()
+                                        onCopy(text)
                                         dismiss()
                                     }
                                 }
@@ -68,18 +108,25 @@ struct TerminalFilePathSheet: View {
     }
 
     private var sectionTitle: String {
-        switch target.base {
+        switch edited?.base {
         case .absolute: "A path on \(hostName)"
         case .home: "In \(hostName)'s home"
         case .workingDirectory: "Relative to the pane's directory"
+        case nil: "Not a usable path"
         }
     }
 
     private var detail: String {
+        guard let edited else {
+            return "The field holds nothing the viewer can resolve — a path "
+                + "needs a directory in it, and no spaces. Edit it, or copy "
+                + "the text if it's still useful."
+        }
         var text = "VIEW opens it read-only in the file viewer, beside this "
-            + "session — nothing runs, nothing is written."
-        if target.base == .workingDirectory {
-            text += " The path resolves against the pane's current directory."
+            + "session — nothing runs, nothing is written. The path is "
+            + "editable when detection caught the wrong text."
+        if edited.base == .workingDirectory {
+            text += " It resolves against the pane's current directory."
         }
         return text
     }
@@ -103,7 +150,7 @@ extension View {
                 target: target,
                 hostName: hostName ?? "the host",
                 onView: { openViewer?($0) },
-                onCopy: { controller?.copyPendingPath() }
+                onCopy: { controller?.copyConfirmedTarget($0) }
             )
         }
     }
@@ -115,7 +162,7 @@ extension View {
         target: TerminalPathTarget.resolve("Multiplex/Services/TmuxProbe.swift:42")!,
         hostName: "devbox",
         onView: { _ in },
-        onCopy: {}
+        onCopy: { _ in }
     )
     .frame(width: 720, height: 620)
     .preferredColorScheme(.dark)

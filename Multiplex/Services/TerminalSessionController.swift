@@ -1492,22 +1492,28 @@ final class TerminalSessionController {
         UIApplication.shared.open(url)
     }
 
+    /// Hands over the link the *sheet* holds, which is not always the one
+    /// that was pressed: detection reads rendered rows, so a wrapped line
+    /// can hand over a sentence's tail glued to an address, and the sheet's
+    /// target is editable. The allowlist still decides — the field's text
+    /// went back through `TerminalLink.resolve`, and only `.openable`
+    /// reaches here.
+    func openConfirmedLink(_ link: TerminalLink) {
+        guard let url = link.openableURL else { return }
+        pendingActivation = nil
+        UIApplication.shared.open(url)
+    }
+
     /// Copy is the answer for everything Multiplex will not open: a blocked
-    /// scheme, a malformed target, or a link the user wants elsewhere.
-    func copyPendingLink() {
-        guard let link = pendingLink else { return }
-        UIPasteboard.general.string = link.raw
+    /// scheme, a malformed target, or a link the user wants elsewhere. What
+    /// lands on the pasteboard is what the sheet shows, edits included.
+    func copyConfirmedTarget(_ text: String) {
+        UIPasteboard.general.string = text
         pendingActivation = nil
     }
 
     func dismissPendingLink() {
         if case .link = pendingActivation { pendingActivation = nil }
-    }
-
-    func copyPendingPath() {
-        guard let path = pendingPath else { return }
-        UIPasteboard.general.string = path.raw
-        pendingActivation = nil
     }
 
     func dismissPendingPath() {

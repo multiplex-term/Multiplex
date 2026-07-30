@@ -72,6 +72,7 @@ struct TerminalPathTarget: Equatable, Identifiable {
             text.removeLast()
         }
         guard !text.isEmpty else { return nil }
+        text = strippingWrappedProseHead(text)
 
         // `path:12` / `path:12:5` — strip, keep the line.
         var line: Int?
@@ -95,6 +96,38 @@ struct TerminalPathTarget: Equatable, Identifiable {
         // more than declining into text selection.
         guard !text.contains(":") else { return nil }
         return classified(raw: raw, path: text, line: line)
+    }
+
+    /// Drops a sentence's tail that a *row join* glued to the front of a
+    /// path. The fork reassembles wrapped rows before matching, and a hard
+    /// wrap puts no space at the seam: a line ending `…changed the file.`
+    /// followed by a line starting `/Users/me/x.swift` reaches the matcher
+    /// as `file./Users/me/x.swift`, which the ghostty pattern happily reads
+    /// as one bare-relative path — the reported `.`-prefixed path.
+    ///
+    /// The tell is a segment ending in `.` immediately before a slash: real
+    /// paths spell that `.` and `..` alone, and only at the front (`./x`,
+    /// `../x`) or after a slash (`a/./b`). So the cut is taken at the first
+    /// `X./` whose `X` is neither, and only when the text does NOT already
+    /// start with a base marker — an absolute, home, or dot-relative match
+    /// began at its own root and is nobody's suffix.
+    ///
+    /// What remains starts at the slash, i.e. an absolute path. A join whose
+    /// lower row carried a *relative* path is unrecoverable by construction
+    /// (`word.src/foo.ts` cannot be told from a real `word.src/foo.ts`) —
+    /// that is what the confirmation sheet's editable field is for.
+    private static func strippingWrappedProseHead(_ text: String) -> String {
+        guard let first = text.first,
+              first != "/", first != "~", first != ".", first != "$"
+        else { return text }
+        let characters = Array(text)
+        for index in 1..<max(1, characters.count - 1)
+        where characters[index] == "." && characters[index + 1] == "/" {
+            let previous = characters[index - 1]
+            guard previous != "/", previous != "." else { continue }
+            return String(characters[(index + 1)...])
+        }
+        return text
     }
 
     private static func classified(

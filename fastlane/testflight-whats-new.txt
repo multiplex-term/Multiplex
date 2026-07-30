@@ -112,3 +112,29 @@ Worth checking:
   actions with their own chips (A−/A+, + TAB, FILE, MERGE, DETACH) must not
   be duplicated inside it. In a narrow window it still carries everything.
 - Vision Pro is unchanged: no ⋯ button and no keyboard lock there.
+
+PRESSED LINKS AND PATHS ARE EDITABLE — AND STOP EATING THE LINE ABOVE
+
+The confirmation sheet a long-pressed link or file path raises now shows its
+target in an editable field: if detection grabbed the wrong text, fix it in
+place and OPEN / ⌗ VIEWPORT / ▤ VIEW act on what the sheet shows (COPY copies
+it too). When the field holds nothing usable, the actions go quiet and the
+sheet says why.
+
+Detection also stops gluing a sentence to a path. A hard-wrapped line leaves
+no space at the seam, so "…updated the file." above "/Users/me/x.swift"
+reached the matcher as one string and opened a path with a "." head. That
+head is now trimmed.
+
+Worth checking:
+- Long-press a path an agent printed on a line that wraps (or print
+  something like: echo "updated the file./etc/hosts"). PATH should read
+  /etc/hosts, not "file./etc/hosts", and the section should say it's a path
+  on that host.
+- In either sheet, edit the field: type a different path or URL and confirm
+  the sheet re-reads it live (host line, REACH row, and the title all
+  follow). Clear it and the OPEN/VIEW chips should disappear with a caps
+  note under the field.
+- ▤ VIEW / ⌗ VIEWPORT / OPEN must act on the EDITED text, not the pressed
+  text. Real paths must be untouched: ./src/main.rs, ../lib/util.ts,
+  ~/notes/todo.md, src/app.ts:42 all still open exactly as before.
