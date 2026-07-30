@@ -158,3 +158,8 @@ Worth checking:
   its own connection). Relaunch the app: ▤ tabs must be gone.
 - mosh hosts: the viewer works there too (it reads over SSH).
 - iPhone: the tree is a drawer behind the TREE chip in the bottom rail.
+- The tree hides what your editor hides (.git, .DS_Store and friends) —
+  but .gitignore and other dotfiles stay visible, and opening a pressed
+  path into a hidden folder still works.
+- Open an image: it fits the screen; pinch to zoom (double-tap flips
+  fit ↔ 2×), pan when zoomed, and the % chip bottom-right resets to fit.

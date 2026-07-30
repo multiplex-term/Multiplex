@@ -850,6 +850,12 @@ views.
   Honesty rules: NUL-sniff says BINARY (never garbage), >1.5 MB text renders
   its head under TRUNCATED, a deleted file's row opens its diff (there are
   no working-tree bytes), failures name the cause on a chassis panel.
+  Images aspect-fit the screen with pinch zoom (0.25–8×, double-tap
+  toggles fit ↔ 2×, the % readout resets); the tree hides the
+  editor-default set everywhere — rows, CHANGED, change dots —
+  (`FileTree.hiddenNames`: .git/.svn/.hg/CVS/.DS_Store/Thumbs.db,
+  deliberately NOT all dotfiles: .gitignore stays a file people open;
+  content is untouched, a pressed path into .git still opens).
   Markdown links confirm through the link sheet; relative ones navigate
   inside the viewer; images render as captioned placeholders (fetching is
   its own decision). Shared auxiliary-pane rules with the viewport: no

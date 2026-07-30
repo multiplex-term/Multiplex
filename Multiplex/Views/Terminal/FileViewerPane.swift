@@ -284,17 +284,7 @@ struct FileViewerPane: View {
     private func imageBody(_ document: FileViewerController.Document, data: Data) -> some View {
         Group {
             if let image = UIImage(data: data) {
-                ScrollView([.vertical, .horizontal]) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(
-                            maxWidth: max(80, min(image.size.width, 1600)),
-                            maxHeight: max(80, min(image.size.height, 1600))
-                        )
-                        .padding(18)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                FileViewerImageView(image: image)
             } else {
                 failurePanel(
                     title: "CAN'T DECODE",
@@ -488,6 +478,107 @@ enum CodePalette {
             result = AttributedString(" ")
         }
         return result
+    }
+}
+
+// MARK: - Image view
+
+/// Fit-to-screen with pinch zoom. 1 = aspect-fit inside the visible
+/// screen; pinch scales 0.25–8× around that baseline (double-tap toggles
+/// fit ↔ 2×), and the surrounding ScrollView owns panning once the image
+/// outgrows the viewport. The zoom readout is TALLY state — captioned,
+/// tappable to reset — and appears only away from fit.
+private struct FileViewerImageView: View {
+    let image: UIImage
+
+    @State private var zoom: CGFloat = 1
+    /// Transient pinch factor; committed into `zoom` when the gesture ends.
+    @State private var pinch: CGFloat = 1
+
+    private static let range: ClosedRange<CGFloat> = 0.25...8
+
+    var body: some View {
+        GeometryReader { geometry in
+            let fitted = fittedSize(in: geometry.size)
+            let scale = min(max(zoom * pinch, Self.range.lowerBound), Self.range.upperBound)
+            ScrollView([.vertical, .horizontal], showsIndicators: false) {
+                Image(uiImage: image)
+                    .resizable()
+                    .frame(
+                        width: fitted.width * scale,
+                        height: fitted.height * scale
+                    )
+                    // Centers the image while it is smaller than the
+                    // viewport; once it outgrows it, these floors are inert
+                    // and the scroll view pans.
+                    .frame(
+                        minWidth: geometry.size.width,
+                        minHeight: geometry.size.height
+                    )
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            // Simultaneous, or the scroll view's pan starves the pinch.
+            .simultaneousGesture(magnify)
+            .onTapGesture(count: 2) {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    zoom = zoom == 1 ? 2 : 1
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if scale != 1 {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.18)) { zoom = 1 }
+                        pinch = 1
+                    } label: {
+                        ChassisLabel("\(Int((scale * 100).rounded()))% · FIT", size: 8)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Theme.bezel)
+                            .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .chassisHover(2)
+                    .padding(10)
+                    .accessibilityLabel("Zoom \(Int((scale * 100).rounded())) percent; resets to fit")
+                }
+            }
+        }
+        .background(Theme.screen)
+        .accessibilityLabel("Image, pinch to zoom")
+    }
+
+    private var magnify: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                pinch = value.magnification
+            }
+            .onEnded { value in
+                zoom = min(
+                    max(zoom * value.magnification, Self.range.lowerBound),
+                    Self.range.upperBound
+                )
+                pinch = 1
+            }
+    }
+
+    /// Aspect-fit inside the viewport, with breathing room; zoom multiplies
+    /// this baseline so 100% always means "fits the screen".
+    private func fittedSize(in container: CGSize) -> CGSize {
+        let available = CGSize(
+            width: max(40, container.width - 24),
+            height: max(40, container.height - 24)
+        )
+        let size = image.size
+        guard size.width > 0, size.height > 0 else { return available }
+        let ratio = min(
+            available.width / size.width,
+            available.height / size.height,
+            // Small images render at natural size instead of blowing up
+            // to fill a wall-sized window.
+            1
+        )
+        return CGSize(width: size.width * ratio, height: size.height * ratio)
     }
 }
 
