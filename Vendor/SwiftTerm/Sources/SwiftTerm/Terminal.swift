@@ -5974,6 +5974,54 @@ open class Terminal {
         return linkMatch(at: location, mode: mode)?.text
     }
 
+    // Multiplex patch: gaze link regions (visionOS). The system renders gaze
+    // hover out of process — an app never learns where the user looks — so
+    // hover affordances require enumerating where the links ARE. One pass
+    // over the visible screen, probing every `probeStride` cells: a match
+    // found at any probed cell reports its full range (including wrapped
+    // continuation rows), and no URL is narrower than the stride.
+    public struct VisibleLinkMatch {
+        public let text: String
+        public let isExplicit: Bool
+        /// Visible-screen segments, topmost first: row + column range.
+        public let rowRanges: [(row: Int, columns: Range<Int>)]
+    }
+
+    public func visibleLinkMatches(mode: LinkLookupMode = .explicitAndImplicit) -> [VisibleLinkMatch]
+    {
+        var results: [VisibleLinkMatch] = []
+        var covered = Set<Int>()
+        let probeStride = 4
+        func key (_ row: Int, _ col: Int) -> Int { row * 10_000 + col }
+        for row in 0..<rows {
+            var col = 0
+            while col < cols {
+                if covered.contains (key (row, col)) {
+                    col += 1
+                    continue
+                }
+                guard let match = linkMatch (at: .screen(Position(col: col, row: row)), mode: mode) else {
+                    col += probeStride
+                    continue
+                }
+                var segments: [(row: Int, columns: Range<Int>)] = []
+                for rowRange in match.rowRanges {
+                    segments.append ((row: rowRange.row, columns: rowRange.range))
+                    for coveredCol in rowRange.range {
+                        covered.insert (key (rowRange.row, coveredCol))
+                    }
+                }
+                results.append (VisibleLinkMatch (text: match.text, isExplicit: match.isExplicit, rowRanges: segments))
+                if let currentRow = match.rowRanges.first (where: { $0.row == row }) {
+                    col = max (col + 1, currentRow.range.upperBound)
+                } else {
+                    col += probeStride
+                }
+            }
+        }
+        return results
+    }
+
     func getDisplayText (start: Position, end: Position) -> String
     {
         getText(start: start, end: end, buffer: displayBuffer)

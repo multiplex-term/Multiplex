@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 #if DEBUG
 import notify
+import os
 import SwiftTerm
 #endif
 
@@ -90,6 +91,12 @@ struct TerminalWindowRoot: View {
     private var activeTab: TerminalRoute? { route.activeTab }
     private var activeController: TerminalSessionController? {
         activeTab.flatMap { workspace.controller(for: $0.id) }
+    }
+    /// The active tab's host record — the viewport's rewrite target and
+    /// tether name. Computed here so the body's modifier chain (at the
+    /// type-checker's ceiling) never carries the closure.
+    private var activeTabHost: Host? {
+        activeTab.flatMap { store.host(id: $0.hostID) }
     }
     /// Tabs connect concurrently. Surface the active tab's encrypted-key
     /// challenge first, then any background tab's; accepting one answer
@@ -183,73 +190,10 @@ struct TerminalWindowRoot: View {
     }
 
     var body: some View {
-        platformBody
-            .task { syncTabs() }
-            // A restored terminal scene may exist without constructing the
-            // deck. Refresh the mirrored Host record here too so its command
-            // setup can arrive from another device before the editor opens.
-            .task { await store.refreshFromCloud() }
-            .task { entitlements.refreshSlashChipMeter() }
-            .task(id: activeTab?.hostID) { await keepHostProbeWarm() }
-            .task(id: activeTab?.id) { await watchActivePane() }
-            #if DEBUG
-            .task {
-                await DeckScene.autoAttachIfRequested(
-                    store: store,
-                    workspace: workspace,
-                    openTerminalWindow: { route in
-                        if let shell {
-                            shell.openTerminalRoute(route)
-                        } else {
-                            openWindow(id: "terminal", value: route)
-                        }
-                    }
-                )
-            }
-            #endif
-            .onChange(of: route.tabs) { syncTabs() }
-            .onChange(of: terminalFocusAllowed) { _, allowed in
-                guard !allowed else { return }
-                activeController?.restoreFocusIfOwner(allowed: false)
-            }
-            // Keyboard focus follows the visible tab…
-            .onChange(of: route.activeTabID) {
-                if terminalFocusAllowed {
-                    activeController?.focusTerminal()
-                }
-                // No detection grace across tabs — chips must describe the
-                // pane on screen, immediately.
-                hideAgentTask?.cancel()
-                activePaneFingerprint = nil
-                shownAgent = detectedAgent
-            }
-            .onChange(of: detectedAgent) { _, agent in
-                hideAgentTask?.cancel()
-                if let agent {
-                    shownAgent = agent
-                } else {
-                    hideAgentTask = Task {
-                        try? await Task.sleep(for: .seconds(11))
-                        guard !Task.isCancelled else { return }
-                        shownAgent = nil
-                    }
-                }
-            }
-            // …and the window: restore the owner when the scene reactivates,
-            // and prod any mosh transport so it re-establishes contact within
-            // a round trip instead of a heartbeat interval.
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active {
-                    Task { await store.refreshFromCloud() }
-                    entitlements.refreshSlashChipMeter()
-                    activeController?.restoreFocusIfOwner(
-                        allowed: terminalFocusAllowed
-                    )
-                    for tab in route.tabs {
-                        workspace.controller(for: tab.id)?.transportForegrounded()
-                    }
-                }
-            }
+        // Split from `lifecycleBody` so neither half's modifier chain
+        // reaches the type-checker's ceiling — one combined chain fails to
+        // type-check in reasonable time.
+        lifecycleBody
             .sheet(isPresented: $showingPaywall) { ProPaywallView() }
             .sheet(item: $keychainTipRequest) { tip in
                 KeychainUnlockSheet(
@@ -257,7 +201,11 @@ struct TerminalWindowRoot: View {
                     sessionNames: tip.sessionNames
                 )
             }
-            .terminalLinkConfirmation(for: activeController)
+            .terminalLinkConfirmation(
+                for: activeController,
+                viewportHost: activeTabHost,
+                openViewport: openViewport
+            )
             .alert(
                 "Couldn't Create Session",
                 isPresented: newTabFailedAlertBinding
@@ -315,7 +263,89 @@ struct TerminalWindowRoot: View {
                 else { return }
                 controller.openPendingLink()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugViewportOpen)) { _ in
+                debugOpenViewportForPendingLink()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugLinkRegions)) { _ in
+                debugLogLinkRegions()
+            }
             #endif
+    }
+
+    private var lifecycleBody: some View {
+        platformBody
+            .task { syncTabs() }
+            // A restored terminal scene may exist without constructing the
+            // deck. Refresh the mirrored Host record here too so its command
+            // setup can arrive from another device before the editor opens.
+            .task { await store.refreshFromCloud() }
+            .task { entitlements.refreshSlashChipMeter() }
+            .task(id: activeTab?.hostID) { await keepHostProbeWarm() }
+            .task(id: activeTab?.id) { await watchActivePane() }
+            #if DEBUG
+            .task {
+                await DeckScene.autoAttachIfRequested(
+                    store: store,
+                    workspace: workspace,
+                    openTerminalWindow: { route in
+                        if let shell {
+                            shell.openTerminalRoute(route)
+                        } else {
+                            openWindow(id: "terminal", value: route)
+                        }
+                    }
+                )
+            }
+            #endif
+            .onChange(of: route.tabs) { syncTabs() }
+            .onChange(of: terminalFocusAllowed) { _, allowed in
+                guard !allowed else { return }
+                activeController?.restoreFocusIfOwner(allowed: false)
+            }
+            // Keyboard focus follows the visible tab…
+            .onChange(of: route.activeTabID) { previousTabID, _ in
+                if let activeTab, activeTab.isViewport {
+                    // A page makes no responder claim; the terminal now
+                    // hidden behind it must not keep receiving hardware keys.
+                    if let previousTabID {
+                        workspace.controller(for: previousTabID)?.releaseFocus()
+                    }
+                } else if terminalFocusAllowed {
+                    activeController?.focusTerminal()
+                }
+                // No detection grace across tabs — chips must describe the
+                // pane on screen, immediately.
+                hideAgentTask?.cancel()
+                activePaneFingerprint = nil
+                shownAgent = detectedAgent
+            }
+            .onChange(of: detectedAgent) { _, agent in
+                hideAgentTask?.cancel()
+                if let agent {
+                    shownAgent = agent
+                } else {
+                    hideAgentTask = Task {
+                        try? await Task.sleep(for: .seconds(11))
+                        guard !Task.isCancelled else { return }
+                        shownAgent = nil
+                    }
+                }
+            }
+            // …and the window: restore the owner when the scene reactivates,
+            // and prod any mosh transport so it re-establishes contact within
+            // a round trip instead of a heartbeat interval.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    Task { await store.refreshFromCloud() }
+                    entitlements.refreshSlashChipMeter()
+                    activeController?.restoreFocusIfOwner(
+                        allowed: terminalFocusAllowed
+                    )
+                    for tab in route.tabs {
+                        workspace.controller(for: tab.id)?.transportForegrounded()
+                    }
+                }
+            }
     }
 
     private func acceptKeyPassphrase(
@@ -363,8 +393,10 @@ struct TerminalWindowRoot: View {
     /// reaches the network-heavy branch app-wide.
     private func watchActivePane() async {
         guard let activeTab,
+              !activeTab.isViewport,
               let host = store.host(id: activeTab.hostID)
         else {
+            // A viewport tab has no pane, no agent, and no PTY to watch.
             activePaneFingerprint = nil
             shownAgent = nil
             return
@@ -524,6 +556,43 @@ struct TerminalWindowRoot: View {
         openNewTab(launching: nil)
     }
 
+    /// The sheet's ⌗ VIEWPORT chip, headlessly: requires a pending link
+    /// (raised by `….debug.link`) and runs the exact offer → dock path the
+    /// chip takes.
+    private func debugOpenViewportForPendingLink() {
+        guard let controller = activeController,
+              let view = controller.terminalView,
+              view === TerminalFocusArbiter.current,
+              let link = controller.pendingLink,
+              let offer = ViewportOffer.make(for: link, host: activeTabHost)
+        else { return }
+        controller.dismissPendingLink()
+        openViewport(offer)
+    }
+
+    /// Headless proof of the visionOS gaze link regions: logs what the
+    /// hover overlay would light for the focused terminal (category
+    /// `links`, debug level — `log stream`, not `log show`). Gaze itself
+    /// cannot be driven in the simulator; the region inventory can.
+    private func debugLogLinkRegions() {
+        guard let controller = activeController,
+              let view = controller.terminalView,
+              view === TerminalFocusArbiter.current
+        else { return }
+        let logger = Logger(
+            subsystem: "app.multiplexterm.multiplex",
+            category: "links"
+        )
+        let regions = view.visibleLinkRegions()
+            .filter { TerminalLink.resolve($0.target) != nil }
+        logger.debug("link-regions count=\(regions.count, privacy: .public)")
+        for region in regions {
+            logger.debug(
+                "link-region target=\(region.target, privacy: .public) rects=\(String(describing: region.rects), privacy: .public)"
+            )
+        }
+    }
+
     /// Headless jump proof: load the focused pane's history and jump to the
     /// oldest REACHABLE prompt (prompts behind a /compact boundary are
     /// peek-only by design) — the deepest exercise of the pipeline (cwd
@@ -593,6 +662,27 @@ struct TerminalWindowRoot: View {
         }
     }
 
+    /// Dock a confirmed page as a viewport tab immediately after the tab
+    /// whose pane printed the URL — the + TAB precedent: arrive where you
+    /// are, move later (split it out to stand beside the terminal, merge it
+    /// back; the page rides along live). The controller is registered BEFORE
+    /// the tab enters the route — `syncTabs` treats a controller-less
+    /// viewport tab as a restored corpse, which is the no-persistence rule.
+    private func openViewport(_ offer: ViewportOffer) {
+        guard let activeTab, let host = store.host(id: activeTab.hostID) else { return }
+        let tab = TerminalRoute(
+            hostID: activeTab.hostID,
+            mode: .viewport(urlString: offer.url.absoluteString)
+        )
+        workspace.openViewport(tab: tab, offer: offer, host: host)
+        if let index = route.tabs.firstIndex(where: { $0.id == activeTab.id }) {
+            route.tabs.insert(tab, at: index + 1)
+        } else {
+            route.tabs.append(tab)
+        }
+        route.activate(tab.id)
+    }
+
     // MARK: Layout
 
     @ViewBuilder
@@ -637,6 +727,20 @@ struct TerminalWindowRoot: View {
                 // below-edge anchor (.top) parked the keys and window bar in
                 // the floating keyboard's summon zone (both user-reported).
                 .ornament(attachmentAnchor: .scene(.bottom), contentAlignment: .center) {
+                    if activeTab?.isViewport == true {
+                        // A page needs no keys, helper strip, or session
+                        // controls — the viewport face carries DECK, the
+                        // source label, MERGE, and CLOSE; the in-window rail
+                        // owns everything page-scoped.
+                        ViewportUMD(
+                            title: umdTitle,
+                            mergeSources: mergeSources,
+                            showDeck: showDeck,
+                            merge: { merge($0) },
+                            close: { if let activeTab { close(activeTab.id) } }
+                        )
+                        .alignmentGuide(VerticalAlignment.center) { _ in 24 }
+                    } else {
                     VStack(spacing: 10) {
                         // An ornament has its own intrinsic width. Clamp the
                         // long agent row to the live window width so narrowing
@@ -702,6 +806,7 @@ struct TerminalWindowRoot: View {
                     .alignmentGuide(VerticalAlignment.center) { _ in
                         showsAgentHelper ? 40 : 24
                     }
+                    }
                 }
         }
     }
@@ -731,6 +836,18 @@ struct TerminalWindowRoot: View {
 
     private func shellBody(_ configuration: ShellConfiguration) -> some View {
         VStack(spacing: 0) {
+            if activeTab?.isViewport == true {
+                ViewportUMD(
+                    title: umdTitle,
+                    mergeSources: [],
+                    showDeck: configuration.showDeck,
+                    merge: { _ in },
+                    close: { if let activeTab { close(activeTab.id) } },
+                    style: .shell,
+                    deckControlLabel: configuration.deckControlLabel,
+                    contentSafeArea: configuration.contentSafeArea
+                )
+            } else {
             UMDBar(
                 controller: activeController,
                 title: umdTitle,
@@ -751,6 +868,7 @@ struct TerminalWindowRoot: View {
                 availableWidth: configuration.availableWidth,
                 contentSafeArea: configuration.contentSafeArea
             )
+            }
             if route.tabs.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
                     tabStrip
@@ -764,23 +882,25 @@ struct TerminalWindowRoot: View {
             #if os(visionOS)
             paneStack
                 .overlay(alignment: .bottom) {
-                    VStack(spacing: 8) {
-                        helperStrip(
-                            floating: true,
-                            floatingMaximumWidth: max(
-                                1,
-                                configuration.availableWidth - 24
+                    if activeTab?.isViewport != true {
+                        VStack(spacing: 8) {
+                            helperStrip(
+                                floating: true,
+                                floatingMaximumWidth: max(
+                                    1,
+                                    configuration.availableWidth - 24
+                                )
                             )
-                        )
-                        // The width clamp engages the cluster's compact
-                        // tiers in a phone-narrow shell.
-                        TerminalKeyCluster(controller: activeController)
-                            .frame(maxWidth: max(
-                                1,
-                                configuration.availableWidth - 24
-                            ))
+                            // The width clamp engages the cluster's compact
+                            // tiers in a phone-narrow shell.
+                            TerminalKeyCluster(controller: activeController)
+                                .frame(maxWidth: max(
+                                    1,
+                                    configuration.availableWidth - 24
+                                ))
+                        }
+                        .padding(.bottom, 10)
                     }
-                    .padding(.bottom, 10)
                 }
             #else
             iOSPaneSurface
@@ -824,17 +944,31 @@ struct TerminalWindowRoot: View {
         ZStack {
             ForEach(route.tabs) { tab in
                 let isActive = tab.id == activeTab?.id
-                TerminalPane(
-                    controller: workspace.controller(for: tab.id),
-                    hostExists: store.host(id: tab.hostID) != nil,
-                    fontSize: fontSize,
-                    bottomChromeHeight: terminalBottomChromeHeight,
-                    contentSafeArea: contentSafeArea,
-                    railOwnsBottomSafeArea: railOwnsBottomSafeArea,
-                    isActive: isActive,
-                    focusAllowed: terminalFocusAllowed,
-                    close: { close(tab.id) }
-                )
+                Group {
+                    if tab.isViewport {
+                        // syncTabs guarantees a controller exists for every
+                        // viewport tab still in the route.
+                        if let viewport = workspace.viewportController(for: tab.id) {
+                            ViewportPane(
+                                controller: viewport,
+                                contentSafeArea: contentSafeArea,
+                                close: { close(tab.id) }
+                            )
+                        }
+                    } else {
+                        TerminalPane(
+                            controller: workspace.controller(for: tab.id),
+                            hostExists: store.host(id: tab.hostID) != nil,
+                            fontSize: fontSize,
+                            bottomChromeHeight: terminalBottomChromeHeight,
+                            contentSafeArea: contentSafeArea,
+                            railOwnsBottomSafeArea: railOwnsBottomSafeArea,
+                            isActive: isActive,
+                            focusAllowed: terminalFocusAllowed,
+                            close: { close(tab.id) }
+                        )
+                    }
+                }
                 .opacity(isActive ? 1 : 0)
                 .allowsHitTesting(isActive)
                 .accessibilityHidden(!isActive)
@@ -898,15 +1032,26 @@ struct TerminalWindowRoot: View {
         }
     }
 
+    /// A viewport tab's label follows the page it is on — the route's
+    /// urlString is only the address it was summoned with, and the rail's
+    /// editor can move the page after that.
+    private func tabTitle(for tab: TerminalRoute) -> String {
+        guard tab.isViewport,
+              let viewport = workspace.viewportController(for: tab.id)
+        else { return tab.displayName }
+        return TerminalRoute.viewportLabel(viewport.displayURL.absoluteString)
+    }
+
     private var tabItems: [TerminalTabStrip.Item] {
         let multiHost = Set(route.tabs.map(\.hostID)).count > 1
         return route.tabs.map { tab in
             .init(
                 id: tab.id,
-                title: tab.displayName,
+                title: tabTitle(for: tab),
                 hostName: multiHost ? store.host(id: tab.hostID)?.name : nil,
                 controller: workspace.controller(for: tab.id),
-                isActive: tab.id == activeTab?.id
+                isActive: tab.id == activeTab?.id,
+                isViewport: tab.isViewport
             )
         }
     }
@@ -925,7 +1070,7 @@ struct TerminalWindowRoot: View {
 
     private var windowTitle: String {
         if let activeController { return activeController.windowTitle }
-        if let activeTab { return activeTab.displayName }
+        if let activeTab { return tabTitle(for: activeTab) }
         return "terminal"
     }
 
@@ -933,7 +1078,8 @@ struct TerminalWindowRoot: View {
     private var umdTitle: String {
         guard let activeTab else { return windowTitle }
         let host = store.host(id: activeTab.hostID)?.name
-        return host.map { "\(activeTab.displayName) · \($0)" } ?? activeTab.displayName
+        let name = tabTitle(for: activeTab)
+        return host.map { "\(name) · \($0)" } ?? name
     }
 
     #if !os(visionOS)
@@ -991,7 +1137,20 @@ struct TerminalWindowRoot: View {
             )
             .accessibilityHint("Shows how to unlock the keychain")
         }
-        if horizontalSizeClass == .compact {
+        if activeTab?.isViewport == true {
+            // A page needs none of the terminal's controls: MERGE (the road
+            // home for a split-out viewport) and CLOSE are the window's
+            // whole vocabulary — the rail under the page owns the rest.
+            if !mergeSources.isEmpty {
+                mergeMenu
+            }
+            ChassisChip("CLOSE", prominent: true) {
+                if let activeTab { close(activeTab.id) }
+            }
+            .fixedSize()
+            .accessibilityLabel("Close viewport")
+            .padding(.trailing, trailingPadding)
+        } else if horizontalSizeClass == .compact {
             // UIKit's automatic toolbar overflow keeps only the trailing
             // DETACH menu when custom chassis controls no longer fit. Own the
             // compact overflow just like the iPhone shell so every displaced
@@ -1140,6 +1299,24 @@ struct TerminalWindowRoot: View {
     /// closes), otherwise controllers exist for every tab and the window's
     /// directory entry is fresh.
     private func syncTabs() {
+        // The viewport's no-persistence rule: its controllers exist only in
+        // the process that summoned them (`openViewport` registers before
+        // the tab enters any route), so a viewport tab without one can only
+        // be scene restoration handing back a previous launch's page —
+        // summoned, not restored, it is stripped rather than resurrected.
+        // The mutation re-enters here through onChange; the second pass
+        // finds nothing to strip.
+        let restoredViewports = route.tabs.filter {
+            $0.isViewport && workspace.viewportController(for: $0.id) == nil
+        }
+        if !restoredViewports.isEmpty {
+            let ids = Set(restoredViewports.map(\.id))
+            route.tabs.removeAll { ids.contains($0.id) }
+            if let active = route.activeTabID, ids.contains(active) {
+                route.activeTabID = route.tabs.first?.id
+            }
+            return
+        }
         if route.tabs.isEmpty {
             workspace.unregisterWindow(id: route.id)
             if let shell {
@@ -1152,7 +1329,7 @@ struct TerminalWindowRoot: View {
             }
             return
         }
-        for tab in route.tabs {
+        for tab in route.tabs where !tab.isViewport {
             _ = workspace.controller(for: tab, store: store)
         }
         workspace.registerWindow(.init(
@@ -1671,6 +1848,8 @@ extension Notification.Name {
     )
     static let multiplexDebugLink = Notification.Name("MultiplexDebugLink")
     static let multiplexDebugLinkOpen = Notification.Name("MultiplexDebugLinkOpen")
+    static let multiplexDebugViewportOpen = Notification.Name("MultiplexDebugViewportOpen")
+    static let multiplexDebugLinkRegions = Notification.Name("MultiplexDebugLinkRegions")
 }
 
 /// `….debug.link` activates the first link on the focused terminal's visible
@@ -1696,6 +1875,18 @@ enum TerminalLinkDebugHook {
             "app.multiplexterm.multiplex.debug.linkopen", &openToken, .main
         ) { _ in
             NotificationCenter.default.post(name: .multiplexDebugLinkOpen, object: nil)
+        }
+        var viewportToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.viewportopen", &viewportToken, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugViewportOpen, object: nil)
+        }
+        var regionsToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.linkregions", &regionsToken, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugLinkRegions, object: nil)
         }
     }
 }

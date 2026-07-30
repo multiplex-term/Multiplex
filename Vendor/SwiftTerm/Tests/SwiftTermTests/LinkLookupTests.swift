@@ -145,3 +145,49 @@ final class LinkLookupTests: TerminalDelegate {
         #expect(link == "https://www.example.com")
     }
 }
+
+// Multiplex patch: gaze link regions (visionOS) — the visible-screen
+// enumerator behind hover affordances.
+final class VisibleLinkMatchTests: TerminalDelegate {
+    func send(source: Terminal, data: ArraySlice<UInt8>) {
+    }
+
+    @Test func testEnumeratesEveryVisibleLink() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 60, rows: 6))
+        terminal.feed(text: "see https://example.com/docs now\r\n")
+        terminal.feed(text: "plain text row\r\n")
+        terminal.feed(text: "next http://192.168.1.68:5173/ here")
+
+        let matches = terminal.visibleLinkMatches()
+        let urls = matches.map(\.text)
+        #expect(urls.contains("https://example.com/docs"))
+        #expect(urls.contains("http://192.168.1.68:5173/"))
+
+        let first = matches.first { $0.text == "https://example.com/docs" }
+        #expect(first?.rowRanges.count == 1)
+        #expect(first?.rowRanges.first?.row == 0)
+        #expect(first?.rowRanges.first?.columns == 4..<28)
+    }
+
+    @Test func testMatchesAreReportedOnceAndProbeStrideCannotMissThem() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 40, rows: 4))
+        // Offset by 2 so the match straddles probe-stride boundaries.
+        terminal.feed(text: "ab http://a.io x http://b.io\r\n")
+
+        let matches = terminal.visibleLinkMatches()
+        #expect(matches.filter { $0.text == "http://a.io" }.count == 1)
+        #expect(matches.filter { $0.text == "http://b.io" }.count == 1)
+    }
+
+    @Test func testWrappedLinkReportsBothRowsOnce() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 20, rows: 4))
+        // 20-column terminal: the URL wraps onto the second row.
+        terminal.feed(text: "https://example.com/abcdefgh")
+
+        let matches = terminal.visibleLinkMatches()
+        #expect(matches.count == 1)
+        #expect(matches.first?.rowRanges.count == 2)
+        #expect(matches.first?.rowRanges.first?.row == 0)
+        #expect(matches.first?.rowRanges.last?.row == 1)
+    }
+}

@@ -106,6 +106,24 @@ struct SwiftTermView: UIViewRepresentable {
             view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.terminalInsets.right),
             view.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Self.terminalInsets.bottom),
         ])
+        // Gaze hover for links: the overlay is a subview of the terminal
+        // (its touches keep feeding the terminal's own pan recognizers) and
+        // survives merge/split with it — reuse the one already riding an
+        // adopted view rather than stacking another.
+        let overlay = view.subviews.compactMap { $0 as? TerminalLinkHoverOverlay }.first
+            ?? {
+                let created = TerminalLinkHoverOverlay(terminalView: view)
+                view.addSubview(created)
+                return created
+            }()
+        overlay.activate = { [weak controller] target in
+            _ = controller?.activateLink(target)
+        }
+        context.coordinator.linkHoverOverlay = overlay
+        controller.onOutputFlushed = { [weak overlay] in
+            overlay?.scheduleRefresh()
+        }
+        overlay.scheduleRefresh()
         #else
         let container = KeyboardAvoidingContainer()
         let keyBar = TerminalKeyBar(
@@ -202,6 +220,19 @@ struct SwiftTermView: UIViewRepresentable {
         if view.renderUpdatesEnabled != isActive {
             view.renderUpdatesEnabled = isActive
         }
+        #if os(visionOS)
+        // An obscured tab's links must not glow through the tab on screen.
+        if let overlay = context.coordinator.linkHoverOverlay {
+            if overlay.isHidden == isActive {
+                overlay.isHidden = !isActive
+                if isActive {
+                    overlay.scheduleRefresh()
+                } else {
+                    overlay.clearRegions()
+                }
+            }
+        }
+        #endif
         let fontChanged = view.font.pointSize != fontSize
         if fontChanged {
             view.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
@@ -263,6 +294,11 @@ struct SwiftTermView: UIViewRepresentable {
     final class Coordinator: NSObject, TerminalViewDelegate, UIGestureRecognizerDelegate {
         let controller: TerminalSessionController
         weak var terminalView: TerminalView?
+        #if os(visionOS)
+        /// Gaze link regions — owned by the terminal view it floats over,
+        /// referenced here for visibility gating and scroll refreshes.
+        weak var linkHoverOverlay: TerminalLinkHoverOverlay?
+        #endif
         var appliedTheme: TerminalTheme?
 
         init(controller: TerminalSessionController) {
@@ -609,7 +645,13 @@ struct SwiftTermView: UIViewRepresentable {
         }
 
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-        func scrolled(source: TerminalView, position: Double) {}
+        func scrolled(source: TerminalView, position: Double) {
+            #if os(visionOS)
+            // Scrollback browsing moves links under fixed regions — re-place
+            // them for the rows now visible.
+            linkHoverOverlay?.scheduleRefresh()
+            #endif
+        }
         /// Only reached if the view's `linkActivationHandler` is ever absent —
         /// `bind` installs one. Kept wired so the two routes can't disagree.
         func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {

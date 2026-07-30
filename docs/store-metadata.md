@@ -137,7 +137,15 @@ Current product split:
   on iPad) and drag-and-drop through the same SSH upload path, opening web and
   mail links found in terminal output (long press, or tap where the remote is
   not tracking the mouse; the confirmation shows the resolved target and its
-  host, and other schemes are shown for copying rather than followed), a
+  host, and other schemes are shown for copying rather than followed), an
+  inline viewport browser for confirmed web links (⌗): the page docks as a
+  tab beside the session that printed it, splits into its own window and
+  merges back like any tab with the live page riding along, the sheet's
+  REACH row says which network the address lives on and rewrites a remote
+  `localhost` to the host's own dialled address in the open, the rail's
+  address is tap-to-edit (typed addresses ride the same web-only gate and
+  loopback rewrite), and viewport
+  tabs never persist across launches, a
   most-used tmux
   shortcut dropdown on both platforms (including touch-native copy-mode
   selection and explicit exit), Home Screen widgets (per-host monitor +

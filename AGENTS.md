@@ -255,7 +255,14 @@ the focused pane's visible screen through the same resolve → policy →
 confirmation path a long press takes (a screen of only filesystem paths
 must present nothing — that's the decline working), with
 `….debug.linkopen` running the sheet's OPEN action so the system log shows
-the URL reaching SurfBoard, and
+the URL reaching SurfBoard, and `….debug.viewportopen` running the sheet's
+⌗ VIEWPORT chip for the pending link — the headless way to dock the inline
+browser tab (raise the sheet with `….debug.link` first; the loopback proof
+is a `localhost:<port>` URL in the pane rewriting to the seed host's
+address and rendering a page served on the Mac), and `….debug.linkregions`
+logging what the visionOS gaze hover overlay would light for the focused
+terminal (category `links`, debug level — gaze itself cannot be driven in
+the simulator; the region inventory can), and
 `… -p app.multiplexterm.multiplex.debug.msgjump` / `….debug.msgjumpback`
 jumps the focused Claude Code terminal to its oldest session-file prompt
 and runs BACK TO LIVE — host-side `tmux capture-pane` proves both (the old
@@ -395,6 +402,11 @@ SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
                      only, the channel the remap preserves.
   TerminalWorkspace  tab controllers keyed by tab id + window directory —
                      merge/split move tabs across windows, shells stay live
+    ViewportController  one per ⌗ viewport tab (the inline browser): owns
+                     the WKWebView so merge/split re-parent the live page;
+                     kept in memory only — its absence after a relaunch IS
+                     the viewport's no-persistence rule (syncTabs strips
+                     controller-less viewport tabs)
   TerminalSessionController   one per tab; owns the input pump + TerminalView
     TerminalTransport    the tab's byte pipe (write/resize/close); picked by
                          host.useMosh. exec + SFTP stay SSH-only capabilities
@@ -423,7 +435,7 @@ views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5), patched
     to declare the `NIO` product it imports (Xcode 27's module resolution
     rejects the undeclared import). Also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in nine behavior groups
+  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in ten behavior groups
     (marked `Multiplex patch`; the obscured-tab display guards share the marker
     on their owning state):
     `keyboardType` is settable (upstream is get-only), and Multiplex keeps it
@@ -497,7 +509,12 @@ views.
     the remote wants the tap (upstream resolved links first, so URL-shaped
     text swallowed tmux pane switches and vim cursor placement), while
     `longPress` — local at every mouse mode — resolves one before its
-    context menu. Sample apps trimmed.
+    context menu. And the visible screen's links are enumerable —
+    `Terminal.visibleLinkMatches` (probe-stride scan, wrapped rows
+    reassembled, unit-tested in the fork) with view-space rect mapping in
+    `TerminalView.visibleLinkRegions`, the inverse of `calculateTapHit`'s
+    point→grid math — which is what visionOS gaze hover stands on. Sample
+    apps trimmed.
   - When bumping either, re-apply the patches and diff before trusting it.
 - **Citadel pinned to exactly 0.12.0**: 0.12.1 moved its swift-nio-ssh dep to an
   unaudited personal fork. Don't bump without review — this is the transport.
@@ -734,8 +751,61 @@ views.
   `TERM=xterm-256color`, which has none. So implicit detection is the live
   path in tmux tabs; explicit links reach only direct `.shell` tabs. Don't
   "fix" it with a server-scoped `terminal-features` default (the same leak
-  the per-host new-session conf documents). Full record + the verified
+  the per-host new-session conf documents). **On visionOS, links also glow
+  under the eye** (`TerminalLinkHoverOverlay`, a `TerminalView` subview so
+  its touches keep feeding the terminal's own pan recognizers): gaze is
+  never delivered to apps, so system hover regions are stood over the
+  fork's visible-link enumeration, rebuilt debounced behind
+  `TerminalSessionController.onOutputFlushed` and scrolls. Hover regions
+  ARE hit regions, so a pinch on a lit link deliberately outranks the
+  remote mouse click on those cells and runs the same confirm sheet — the
+  glow is visionOS's own "this activates" affordance (a vim/tmux click
+  landing exactly on URL text is the accepted trade; adjacent cells still
+  click through). Only targets `TerminalLink.resolve` would confirm get a
+  region, so filesystem paths in build logs never glow; obscured tabs
+  clear their regions. Full record + the verified
   experiment table: `local-plan/terminal-links.md`.
+- **The viewport is a citizen of the window system — summoned, never
+  restored** (`TerminalRoute.Mode.viewport`; `ViewportReach`/`ViewportOffer`
+  pure + tested; `ViewportController`, `ViewportPane`; bake-off record in
+  `local-plan/viewport-bakeoff/`): a *confirmed* web link docks as a ⌗ tab
+  beside the session that printed it and moves with the existing
+  merge/split machinery — the WKWebView is controller-owned and re-parents
+  exactly like SwiftTerm views, so the live page (HMR socket included)
+  survives every move; its cell never wears a tally dot (a page is not a
+  shell). The link sheet stays the only gate and grows a REACH row: a pane
+  runs on the host, so `localhost` printed there is the *host's* loopback —
+  the chip becomes `⌗ OPEN VIA <host>` and rewrites the authority to
+  `Host.hostname` (by definition the address this device already dials),
+  said in the open on the sheet; LAN/internet targets pass through
+  verbatim, and non-web links are never offered a viewport. The rail's
+  readout is tap-to-edit: a typed address is the user's own intent, so it
+  skips the sheet but rides the same admit path
+  (`ViewportOffer.fromTypedInput` — web schemes only, a schemeless address
+  defaulted by reach: http for LAN/loopback, https otherwise, loopback
+  rewritten via the host), the editor lives in the pane's TOP contextual
+  slot because the pane opts out of keyboard avoidance for the terminal's
+  sake (a bottom-rail field would sit under a docked keyboard), and the
+  rail tag + tab label track the page the viewport is actually on, not the
+  address it was summoned with. **Nothing
+  persists**: controllers live only in `TerminalWorkspace`'s memory and are
+  registered BEFORE the tab enters any route, so `syncTabs` stripping
+  controller-less viewport tabs removes exactly the ones scene restoration
+  hands back from a dead process, never a live move. `WKNavigationDelegate`
+  re-applies the scheme allowlist per navigation (`multiplex:` is never
+  navigable; mailto re-presents the link sheet from the pane), there is no
+  JS bridge and no send path into any terminal; the app-scoped persistent
+  `WKWebsiteDataStore` is shared by every viewport (a dev login survives
+  across tabs and reloads) and **Clear Browsing Data…** on the readout's
+  long-press menu wipes it globally after a confirmation that says so,
+  then reloads the page signed out; and a viewport never claims
+  `TerminalFocusArbiter` — switching to a ⌗ tab releases the previous
+  terminal's responder so hardware keys can't type into a hidden shell.
+  ATS is relaxed for **web content only** (`NSAllowsArbitraryLoadsInWebContent`
+  in project.yml — dev servers are cleartext http on LAN addresses; app
+  networking keeps full ATS). Load failures render a chassis NO ROUTE panel
+  naming which network the address lives on, not WebKit's blank page. Free
+  plumbing, not an agent-helper surface.
 - **A bound host is one the machine itself vouched for; the app's key goes
   out, never a private key** (`Multiplex/Models/Bind/`,
   `Multiplex/Services/Bind/`; protocol + shared vectors live in the

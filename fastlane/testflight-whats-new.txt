@@ -72,3 +72,51 @@ Worth checking:
   installed (`mpx unbind --list`) — a passphrase-sealed key is never
   swapped out.
 - Host Settings (editing a host you already have) should show no BIND bar.
+
+VIEWPORT — open a page from the terminal, inside Multiplex
+
+Long-press a URL printed in any pane (tap also works where the remote
+isn't tracking the mouse). The link sheet now shows a REACH row saying
+which network the address lives on, plus a ⌗ VIEWPORT chip. Confirming
+docks the page as a ⌗ tab right beside the session that printed it —
+it moves like any tab: context-menu it to split into its own window
+beside the terminal, MERGE to bring it back, and the live page rides
+along without reloading.
+
+The localhost trick: a pane runs on the host, so http://localhost:5173
+printed there is the HOST's localhost, not your device's. The chip
+becomes ⌗ VIA <HOST> and the sheet shows the rewritten address (the one
+your device already reaches the host by). It works when the dev server
+listens beyond loopback — vite --host, next -H 0.0.0.0.
+
+Worth checking:
+- Print a dev server's Network: URL (LAN address) in a pane, long-press,
+  confirm — the page should render in the ⌗ tab with the address and a
+  LAN tag in the rail below it.
+- The localhost line instead: chip reads ⌗ VIA <your host>, and with the
+  server on --host the page must still load.
+- Split the ⌗ tab to its own window (context menu on the tab cell), put
+  it beside the terminal, save a file, reload — the dev loop with both
+  visible. Merge it back; the page must not reload either way.
+- Quit and relaunch Multiplex: terminals come back, viewport tabs must
+  NOT — a page is summoned, not restored.
+- A page linking to mailto: shows the same confirmation sheet; multiplex://
+  and file: links inside the page must go nowhere.
+- SYSTEM in the rail hands the page to Safari; CLOSE ends the tab. The
+  ⌗ tab cell carries no red dot — only shells wear the tally.
+- iPhone: the viewport stays a docked tab in the shell (no windows there).
+- Tap the address in the rail: an ADDRESS bar opens at the top (above the
+  keyboard) — type host:port or a full URL and GO. Bare LAN addresses get
+  http://, names get https://, and localhost still means the host (same
+  rewrite). file: or javascript: input must be refused with WEB ADDRESSES
+  ONLY, and the ⌗ tab label should follow wherever you navigate.
+- Long-press the address: COPY ADDRESS and CLEAR BROWSING DATA… live
+  there. Clearing asks first (it wipes cookies/caches/site storage for
+  every viewport page), then reloads the page signed out — sign into a
+  dev server, clear, and the login must be gone.
+- Vision Pro: URLs in terminal output now glow when you look at them —
+  and a pinch on a glowing link opens the same confirmation sheet a long
+  press does (never the page directly). File paths and plain prose must
+  never glow, links under your gaze in a build log should light within a
+  second of printing, and scrolling/pane-switching over a link must keep
+  working exactly as before.
