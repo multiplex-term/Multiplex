@@ -1,24 +1,24 @@
-Multiplex is an SSH client: the live wall and persistent session features need a remote host running tmux; plain SSH shells do not. A dedicated tmux demo server is provisioned for review, so nothing has to be installed on your side.
+Multiplex is an SSH client: the live wall and persistent sessions need a remote host running tmux. A demo tmux server is provisioned for review — nothing to install on your side.
 
 CONNECT
 1. Launch Multiplex and tap + HOST.
 2. Name: demo — Address: demo-for-review.multiplexterm.dev — Port: 22 — User and password: the demo credentials above (Auth: Password).
-3. Save. The wall probes the host and live session tiles appear within a few seconds — each tile streams that session's actual last screen lines.
+3. Save. Live session tiles appear within seconds, each streaming that session's actual last screen lines.
 
 CORE FLOW
-- The free tier can save two hosts; Multiplex Pro removes the host limit.
-- + NEW SESSION can start a plain tmux shell or launch Claude Code, Codex, or Pi with an optional first prompt; Multiplex passes that prompt once as the CLI's first message and does not retain it as a New Session default.
-- Tap a tile to attach: the session opens in its own window wearing a red LIVE lamp. Attach a second session and place the windows side by side (each terminal is its own spatial window on Vision Pro; on iPad use Stage Manager).
-- MERGE in a terminal's bottom bar pulls another window's session in as a tab; a tab's context menu moves it back out into its own window. The shell stays connected while it moves.
-- TMUX in the Vision Pro bottom bar or iPad/iPhone key bar opens the shortcut menu (on narrow iPhones it moves to the top-right). Pick New Window, Split, or Copy Mode to send its displayed default Ctrl-B binding. In Copy Mode, swipe history, hold to select/copy, and press Done to exit.
-- The key bar's rightmost keyboard key becomes a dictation (microphone) key whenever a physical keyboard is attached — including a review device with a hardware keyboard, and always in the Simulator. Press it, speak, and the transcribed words are typed into the session; it stops itself after a pause, and STOP/CANCEL are on the bar it shows.
-- FILE attaches Photos/Files (and Camera on iPad), uploads into the active pane's working directory, and types the remote path without Return. Drops use the same pipeline.
+- The free tier saves two hosts; Multiplex Pro removes the limit.
+- + NEW SESSION starts a plain tmux shell or launches Claude Code, Codex, or Pi with an optional first prompt, passed once as the CLI's first message and not retained.
+- Tap a tile to attach: the session opens in its own window with a red LIVE lamp. Attach a second and place them side by side (its own spatial window on Vision Pro; Stage Manager on iPad).
+- MERGE in a terminal's bottom bar pulls another window's session in as a tab; a tab's context menu moves it back out, still connected.
+- TMUX in the Vision Pro bottom bar or iPad/iPhone key bar opens the shortcut menu (top-right on narrow iPhones): New Window, Split, or Copy Mode send the displayed Ctrl-B binding. In Copy Mode, swipe history, hold to select/copy, press Done.
+- The key bar's rightmost keyboard key becomes a dictation (microphone) key while a physical keyboard is attached — including in the Simulator. Press it, speak, and the words are typed into the session; STOP/CANCEL are on the bar it shows.
+- FILE attaches Photos/Files (Camera on iPad), uploads into the active pane's working directory, and types the remote path without Return. Drops use the same pipeline.
 - DETACH closes the window; tmux keeps the session running, so its tile stays on the wall.
 
 AGENT FEATURES (Pro)
-- Multiplex Pro is a one-time in-app purchase; during review it completes as a sandbox transaction at no charge (the strip's PRO pill or Settings opens the paywall). The free tier also includes a small daily allowance of command-chip taps, so the strip is demonstrable without purchasing.
-- The session named "agent" runs simulated CLI coding agents — stub processes that reproduce the Claude Code, Codex, and Pi terminal signatures, so detection is reproducible during review. Real installs use the same detection and helper paths.
-- Its tile carries an agent glyph. Attach, and the command strip appears at the bottom of the window; tapping a chip types that command into the session (you'll see it echoed). MORE → Customize Commands opens Command Setup for the current host: expand Built-in to give each stock command an explicit Bar/More choice. Custom rows can be reordered or deleted, content can span multiple lines, Submit decides whether a tap also sends Return, Bar controls placement, and Shared keeps that command available in Claude Code, Codex, and Pi on this host. Each host keeps its own setup, and iCloud Keychain syncs it to the user's other devices.
+- Multiplex Pro is a one-time in-app purchase; in review it completes as a free sandbox transaction (the strip's PRO pill or Settings opens the paywall). The free tier also allows a few command-chip taps daily, so the strip is demonstrable without purchasing.
+- The session named "agent" runs stub processes reproducing the Claude Code, Codex, and Pi terminal signatures, so detection is reproducible; real installs use the same code paths.
+- Its tile carries an agent glyph. Attach, and the command strip appears at the bottom of the window; tapping a chip types that command into the session (you'll see it echoed). MORE → Customize Commands opens Command Setup, where stock commands take a Bar/More placement and custom commands can be added, reordered, and shared across the three agents; each host keeps its own setup, synced by iCloud Keychain.
 - Notifications permission is requested only to alert you when Claude Code or Codex finishes or asks something while its window isn't focused (Settings → AGENT ALERTS). Optional.
 
 MOSH (Pro)
@@ -26,8 +26,8 @@ MOSH (Pro)
 
 PERMISSIONS
 - Camera: only after FILE → Camera on iPad; capture goes directly to the SSH host. Photos/Files need no library access.
-- Microphone and Speech Recognition: only after the key bar's dictation key. That key replaces the show/hide-keyboard key while a physical keyboard is attached, because iOS suppresses the software keyboard (and its mic key) in that state. Transcription uses Apple's Speech framework, on device wherever the language supports it, and the finished text is typed into the session without Return — Multiplex neither stores nor transmits the audio or the text.
-- Local Network: requested only when a host address is on the local network. The demo host is on the public internet, so you may never see this prompt.
+- Microphone and Speech Recognition: only after the dictation key above, which exists because iOS suppresses the software keyboard (and its mic key) while a physical keyboard is attached. Transcription uses Apple's Speech framework, on device wherever the language supports it, and the text is typed without Return; Multiplex never stores or transmits the audio or the text.
+- Local Network: only for a host on the local network; the demo host is public, so you may not see this prompt.
 - Notifications: agent alerts, as above.
 
-The demo server is an isolated VM provisioned only for App Review: the account is unprivileged and its outbound traffic is firewalled. It stays online for the entire review period — if it is ever unreachable, contact the review email and it will be fixed within hours.
+The demo server is an isolated VM provisioned only for App Review: unprivileged account, firewalled outbound traffic. It stays online for the whole review period — if it is ever unreachable, contact the review email and it will be fixed within hours.

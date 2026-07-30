@@ -123,6 +123,16 @@ REVIEW_INFORMATION = {
   notes:         nil,
 }.freeze
 
+# App Store Connect's own caps on these fields, enforced here so an over-long
+# note fails the lane on the file that can fix it — before an archive — instead
+# of surfacing mid-upload as Spaceship's opaque "An attribute value is too
+# long. - /data/attributes/notes". Measured in CHARACTERS, which is what the
+# API counts: notes.txt is full of em dashes and arrows, so its byte length
+# runs several hundred over its character length.
+REVIEW_INFORMATION_LIMITS = {
+  notes: 4000,
+}.freeze
+
 # deliver's key => pilot's key for the same App Store Connect field.
 BETA_REVIEW_INFORMATION = {
   first_name:    :contact_first_name,
@@ -142,6 +152,13 @@ def review_value(key)
   if value.empty?
     hint = env_key ? " (or set #{env_key} in fastlane/.env)" : ""
     UI.user_error!("Review information is missing: write #{path}#{hint}")
+  end
+  limit = REVIEW_INFORMATION_LIMITS[key]
+  if limit && value.length > limit
+    UI.user_error!(
+      "Review information is too long: #{key} is #{value.length} characters, " \
+      "App Store Connect allows #{limit}. Trim #{path}."
+    )
   end
   value
 end

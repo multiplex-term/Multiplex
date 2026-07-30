@@ -39,6 +39,12 @@ The canonical localized listing copy is stored in
 - categories and copyright in [`fastlane/metadata/`](../fastlane/metadata/);
 - App Review contact/demo flow in
   [`fastlane/metadata/review_information/`](../fastlane/metadata/review_information/).
+  `notes.txt` is capped by App Store Connect at **4000 characters** (characters,
+  not bytes — em dashes and arrows make the byte count run several hundred
+  higher). Keep it a page shorter than that: the Fastfile enforces the cap in
+  `review_value` and fails the lane before archiving, since the API's own
+  rejection arrives mid-upload as `An attribute value is too long. -
+  /data/attributes/notes`.
 
 Do not duplicate the complete description in this document. The
 `store_metadata` lane uploads the shared files to both platform versions and

@@ -49,7 +49,10 @@ through Beta App Review (~1 day). Beta App Review gets the **same record as
 App Store review** — one hash in the Fastfile feeds deliver and pilot both,
 sourced from `fastlane/metadata/review_information/` with `.env` covering the
 two files kept out of git. So the demo host below and
-`review_information/notes.txt` are all it needs:
+`review_information/notes.txt` are all it needs — and that file must stay under
+**4000 characters** (the Fastfile checks it before archiving; App Store Connect
+otherwise rejects it mid-upload with `An attribute value is too long. -
+/data/attributes/notes`):
 
 External testing additionally needs **Test Information** — the app-level
 description testers read, in
