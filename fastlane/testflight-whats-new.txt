@@ -189,3 +189,20 @@ Worth checking:
 - Short-press the padlock: keyboard returns at once, badge gone.
 - With a physical keyboard attached the slot shows the mic key as before —
   the lock only exists where a software keyboard could appear.
+
+TMUX PANEL — the session's windows, one tap to switch
+
+The TMUX shortcut panel now ends with a SWITCH WINDOW section: every
+window of the attached session, numbered and named, the current one
+marked ACTIVE. Tap a row and tmux switches to it — no prefix key, no
+choose-tree.
+
+Worth checking:
+- Open the TMUX panel on a session with a few windows: the list should
+  appear a beat after the panel (it asks the host), match the tmux
+  status line, and the popover should grow to fit rather than clip.
+- Tap a row: the terminal must switch to that window immediately.
+- A session with many windows scrolls inside the section instead of
+  running the panel off a short screen (easy on iPhone landscape).
+- A window renamed or created mid-session shows correctly the next time
+  the panel opens.

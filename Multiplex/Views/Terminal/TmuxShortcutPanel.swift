@@ -9,9 +9,15 @@ struct TmuxShortcutPanel: View {
 
     var width: CGFloat = Self.preferredWidth
     var select: (TmuxShortcut) -> Void
+    /// Optional bottom section: the attached session's windows, tappable to
+    /// switch. Loaded when the panel opens; nil or empty shows nothing, so
+    /// the shortcut grid never waits on the control round-trip.
+    var loadWindows: (() async -> [TmuxWindowChoice]?)?
+    var selectWindow: ((TmuxWindowChoice) -> Void)?
 
     @State private var armedShortcut: TmuxShortcut?
     @State private var disarmTask: Task<Void, Never>?
+    @State private var windows: [TmuxWindowChoice] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -39,6 +45,16 @@ struct TmuxShortcutPanel: View {
                     .background(Theme.bezelHi)
                 }
             }
+
+            // A single window has nothing to switch to — the section only
+            // earns its space when a choice exists.
+            if windows.count > 1 {
+                windowSection
+            }
+        }
+        .task {
+            guard let loadWindows else { return }
+            windows = await loadWindows() ?? []
         }
         .padding(14)
         .frame(width: width)
@@ -59,6 +75,66 @@ struct TmuxShortcutPanel: View {
             GridItem(.flexible(), spacing: 1),
             GridItem(.flexible(), spacing: 1),
         ]
+    }
+
+    /// The session's windows, one tappable row each. Many-window sessions
+    /// scroll inside a capped height so the popover can't outgrow a short
+    /// scene; the common few-window case renders flat.
+    private var windowSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ChassisLabel("Switch Window", size: 9, color: Theme.signal2)
+            if windows.count > 8 {
+                ScrollView {
+                    windowGrid
+                }
+                .frame(maxHeight: 200)
+            } else {
+                windowGrid
+            }
+        }
+    }
+
+    private var windowGrid: some View {
+        LazyVGrid(columns: columns, spacing: 1) {
+            ForEach(windows) { window in
+                windowButton(window)
+            }
+        }
+        .background(Theme.bezelHi)
+    }
+
+    private func windowButton(_ window: TmuxWindowChoice) -> some View {
+        Button {
+            disarm()
+            selectWindow?(window)
+        } label: {
+            HStack(spacing: 10) {
+                Text("\(window.index)")
+                    .font(.mono(9, weight: .semibold))
+                    .foregroundStyle(Theme.signal2)
+                Text(window.name.uppercased())
+                    .font(.ui(10, weight: .bold).width(.compressed))
+                    .kerning(0.8)
+                    .foregroundStyle(Theme.signal)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if window.isActive {
+                    Text("ACTIVE")
+                        .font(.mono(9, weight: .semibold))
+                        .foregroundStyle(Theme.signal2)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(TmuxShortcutRowStyle(armed: false))
+        .chassisHover(2)
+        .accessibilityLabel(
+            window.isActive
+                ? "Window \(window.index), \(window.name), current window"
+                : "Switch to window \(window.index), \(window.name)"
+        )
     }
 
     private func shortcutButton(_ shortcut: TmuxShortcut) -> some View {

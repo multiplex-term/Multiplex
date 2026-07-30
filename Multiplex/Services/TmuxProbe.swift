@@ -364,6 +364,38 @@ enum TmuxProbe {
             + "if [ -n \"$target\" ]; then \(kill); fi"
     }
 
+    /// The shortcut panel's window list for one session. Same `-F`
+    /// discipline as the probe: space-separated with the variable-length
+    /// name last, rejoined on parse.
+    static func windowListCommand(sessionName: String) -> String {
+        pathPrefix
+            + "\(tmuxCommand) list-windows -t \("=\(sessionName)".shellQuoted)"
+            + " -F '#{window_id} #{window_index} #{window_active} #{window_name}'"
+            + " 2>/dev/null"
+    }
+
+    static func parseWindowList(_ output: String) -> [TmuxWindowChoice] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: " ", maxSplits: 3)
+            guard fields.count >= 3,
+                  fields[0].hasPrefix("@"),
+                  let index = Int(fields[1])
+            else { return nil }
+            return TmuxWindowChoice(
+                tmuxID: String(fields[0]),
+                index: index,
+                isActive: fields[2] == "1",
+                name: fields.count > 3 ? String(fields[3]) : ""
+            )
+        }
+    }
+
+    /// Switch the session to one of its windows from an SSH exec channel.
+    /// Targets the window id captured by `windowListCommand`.
+    static func selectWindowCommand(windowID: String) -> String {
+        pathPrefix + "\(tmuxCommand) select-window -t \(windowID.shellQuoted)"
+    }
+
     /// Where a drop should land for one session: line 1 is the *active*
     /// pane's working directory (while an agent runs there, the agent's own
     /// cwd — `pane_current_path` follows the foreground process), and a

@@ -113,3 +113,16 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         allCases.filter { $0.group == group }
     }
 }
+
+/// One row of the shortcut panel's window list — the attached session's
+/// windows, tappable to switch. Carries tmux's own window id so the switch
+/// can target it directly: `-t` name matching is prefix-based and pane/window
+/// name targets misbehave on 3.6a, ids never do.
+struct TmuxWindowChoice: Identifiable, Equatable, Sendable {
+    var tmuxID: String
+    var index: Int
+    var isActive: Bool
+    var name: String
+
+    var id: String { tmuxID }
+}

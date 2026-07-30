@@ -270,10 +270,20 @@ struct UMDBar: View {
             // stage and must open downward into the terminal instead.
             arrowEdge: tmuxPopoverArrowEdge
         ) {
-            TmuxShortcutPanel(width: shortcutPanelWidth) { shortcut in
-                showingTmuxShortcuts = false
-                controller?.performTmuxShortcut(shortcut)
-            }
+            TmuxShortcutPanel(
+                width: shortcutPanelWidth,
+                select: { shortcut in
+                    showingTmuxShortcuts = false
+                    controller?.performTmuxShortcut(shortcut)
+                },
+                loadWindows: { [weak controller] in
+                    await controller?.loadTmuxWindowList()
+                },
+                selectWindow: { window in
+                    showingTmuxShortcuts = false
+                    controller?.selectTmuxWindow(window)
+                }
+            )
             .presentationCompactAdaptation(.popover)
             .tmuxShortcutPresentationSizing()
             .followsAppAppearance()

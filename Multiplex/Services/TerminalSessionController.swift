@@ -820,6 +820,28 @@ final class TerminalSessionController {
         Task { await executeTmuxControlCommand(command) }
     }
 
+    /// The shortcut panel's window list, read through the control path so
+    /// SSH and mosh tabs answer alike. A failure returns nil and the panel
+    /// simply shows no window section — the shortcut grid stays useful.
+    func loadTmuxWindowList() async -> [TmuxWindowChoice]? {
+        guard status == .live, let sessionName = route.sessionName else { return nil }
+        let command = TmuxProbe.windowListCommand(sessionName: sessionName)
+        guard let output = try? await withControlConnection({
+            try await $0.exec(command)
+        }) else { return nil }
+        return TmuxProbe.parseWindowList(output)
+    }
+
+    /// Switch the attached session to one of its windows. Direct control
+    /// path like the confirmed close actions: no terminal input, no `:`
+    /// prompt, and the attached client follows tmux's own state change.
+    func selectTmuxWindow(_ window: TmuxWindowChoice) {
+        guard status == .live, route.sessionName != nil else { return }
+        if case .finding = historyJump { return }
+        let command = TmuxProbe.selectWindowCommand(windowID: window.tmuxID)
+        Task { await executeTmuxControlCommand(command) }
+    }
+
     /// Leave the contextual copy UI and tmux copy mode together. Escape is
     /// deliberately sent through SwiftTerm, so DONE, the rail, and a physical
     /// keyboard all preserve the terminal's single ordered input path.

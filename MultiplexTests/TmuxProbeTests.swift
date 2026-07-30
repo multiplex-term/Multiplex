@@ -421,6 +421,36 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertFalse(empty.insideGitWorktree)
     }
 
+    func testWindowListCommandTargetsExactSession() {
+        let command = TmuxProbe.windowListCommand(sessionName: "my project")
+        XCTAssertTrue(command.contains("tmux -u list-windows -t '=my project'"))
+        // Space-separated, variable-length name last (rejoined on parse).
+        XCTAssertTrue(command.contains(
+            "#{window_id} #{window_index} #{window_active} #{window_name}"))
+    }
+
+    func testParseWindowListReadsRowsAndKeepsSpacedNames() {
+        let windows = TmuxProbe.parseWindowList("""
+        @1 0 0 editor
+        @4 1 1 my long window name
+        @7 2 0
+        garbage line without a window id
+        """)
+        XCTAssertEqual(windows.count, 3)
+        XCTAssertEqual(windows[0], TmuxWindowChoice(
+            tmuxID: "@1", index: 0, isActive: false, name: "editor"))
+        XCTAssertEqual(windows[1], TmuxWindowChoice(
+            tmuxID: "@4", index: 1, isActive: true, name: "my long window name"))
+        // A window whose name is empty still lists and still targets by id.
+        XCTAssertEqual(windows[2], TmuxWindowChoice(
+            tmuxID: "@7", index: 2, isActive: false, name: ""))
+    }
+
+    func testSelectWindowCommandTargetsWindowID() {
+        let command = TmuxProbe.selectWindowCommand(windowID: "@4")
+        XCTAssertTrue(command.contains("tmux -u select-window -t '@4'"))
+    }
+
     // MARK: New sessions (the + TAB button, the deck tile's quick options)
 
     func testNewSessionCommandInheritsSourceDirectoryAndTypesLaunch() {

@@ -175,10 +175,21 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             TmuxShortcutPanel.preferredWidth,
             max(280, sceneWidth - 24)
         )
-        let panel = TmuxShortcutPanel(width: panelWidth) { [weak self] shortcut in
-            self?.tmuxPopoverController?.dismiss(animated: true)
-            self?.press(.tmux(shortcut))
-        }
+        let panel = TmuxShortcutPanel(
+            width: panelWidth,
+            select: { [weak self] shortcut in
+                self?.tmuxPopoverController?.dismiss(animated: true)
+                self?.press(.tmux(shortcut))
+            },
+            loadWindows: { [weak self] in
+                await self?.controller?.loadTmuxWindowList()
+            },
+            selectWindow: { [weak self] window in
+                self?.tmuxPopoverController?.dismiss(animated: true)
+                self?.click()
+                self?.controller?.selectTmuxWindow(window)
+            }
+        )
         let controller = UIHostingController(rootView: panel)
         tmuxPopoverController = controller
         // Preserve the popover container boundary, but opt this app-owned
@@ -186,6 +197,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         // keyboard otherwise translates the grid after presentation, clipping
         // its top and leaving the displaced height as an empty bottom tail.
         controller.safeAreaRegions = .container
+        // The window list arrives after presentation; live preferred-size
+        // tracking grows the popover for it, the same Command Setup boundary.
+        controller.sizingOptions = .preferredContentSize
         controller.modalPresentationStyle = .popover
         controller.view.backgroundColor = UIColor(Theme.bezel)
 
