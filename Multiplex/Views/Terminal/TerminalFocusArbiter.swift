@@ -16,6 +16,19 @@ import os
 /// activates the claimed terminal's scene session. On iPadOS the user's tap
 /// has already activated its Stage Manager window; requesting activation
 /// again can make the system re-place that existing window.
+/// App-wide keyboard-lock state, observable by the key rail's lock face and
+/// the pane's LOCKED badge. Only `TerminalFocusArbiter` writes it.
+@Observable @MainActor
+final class KeyboardLock {
+    static let shared = KeyboardLock()
+    fileprivate(set) var isLocked = false
+}
+
+/// A zero-size custom input view: while the keyboard is locked, the focused
+/// terminal keeps its live input session (rail keys, hardware keys) but
+/// UIKit has nothing to present, so taps cannot raise the software keyboard.
+private final class LockedKeyboardInputView: UIView {}
+
 @MainActor
 enum TerminalFocusArbiter {
     private(set) static weak var current: TerminalView?
@@ -77,11 +90,56 @@ enum TerminalFocusArbiter {
             #endif
         }
         current = view
+        // A newly claimed view must present the lock's suppression before it
+        // becomes first responder; an unlocked claim also clears a stale
+        // locked input view left on a tab that was focused while locked.
+        applyLockState(to: view)
         if let window = view.window, !window.isKeyWindow {
             window.makeKey()
         }
         if !view.isFirstResponder {
             _ = view.becomeFirstResponder()
+        }
+    }
+
+    /// Long press on the chrome's keyboard key: keep input alive but refuse
+    /// to present the software keyboard until unlocked. Locking while the
+    /// keyboard is up dismisses it.
+    static func lock(_ view: TerminalView) {
+        guard !KeyboardLock.shared.isLocked else { return }
+        #if DEBUG
+        keyboardLogger.debug("kbd-lock engaged")
+        #endif
+        KeyboardLock.shared.isLocked = true
+        applyLockState(to: view)
+        if let current, current !== view {
+            applyLockState(to: current)
+        }
+    }
+
+    /// Short press on the (locked) keyboard key: release the lock and ask
+    /// for the keyboard — the press means "I want to type again".
+    static func unlock(_ view: TerminalView) {
+        guard KeyboardLock.shared.isLocked else { return }
+        #if DEBUG
+        keyboardLogger.debug("kbd-lock released")
+        #endif
+        KeyboardLock.shared.isLocked = false
+        applyLockState(to: view)
+        if let current, current !== view {
+            applyLockState(to: current)
+        }
+        summon(view, force: true)
+    }
+
+    private static func applyLockState(to view: TerminalView) {
+        if KeyboardLock.shared.isLocked {
+            guard !(view.inputView is LockedKeyboardInputView) else { return }
+            view.inputView = LockedKeyboardInputView(frame: .zero)
+            view.reloadInputViews()
+        } else if view.inputView is LockedKeyboardInputView {
+            view.inputView = nil
+            view.reloadInputViews()
         }
     }
 
@@ -161,6 +219,13 @@ enum TerminalFocusArbiter {
     /// blips; the app-owned key rail remains independent of this lifecycle.
     static func summon(_ view: TerminalView, force: Bool = false) {
         installObserversIfNeeded()
+        // A locked keyboard still hands the tapped terminal the input
+        // session (hardware keys, rail keys); presentation stays suppressed
+        // by the locked input view, so skip the resign-and-rebuild dance.
+        if KeyboardLock.shared.isLocked {
+            claim(view)
+            return
+        }
         if current === view, view.isFirstResponder, force || !keyboardVisible {
             #if DEBUG
             keyboardLogger.debug(
@@ -191,6 +256,11 @@ enum TerminalFocusArbiter {
     /// authority there: first responder means the keyboard is up.
     static func toggle(_ view: TerminalView) {
         installObserversIfNeeded()
+        // While locked, the keyboard key's short press is the unlock.
+        if KeyboardLock.shared.isLocked {
+            unlock(view)
+            return
+        }
         #if os(visionOS)
         let presenting = current === view && view.isFirstResponder
         #else
@@ -283,6 +353,28 @@ enum TerminalFocusArbiter {
         }
         installDebugDismissHook()
         installDebugScrollHooks()
+        installDebugKeyboardLockHook()
+    }
+
+    /// Headless stand-in for the keyboard key's long press (no simulator
+    /// route can hold a software key): `… -p
+    /// app.multiplexterm.multiplex.debug.kbdlock` locks the focused
+    /// terminal's keyboard, and posting it again unlocks — the same
+    /// lock/unlock pair the rail key drives.
+    private static func installDebugKeyboardLockHook() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.kbdlock", &token, .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                guard let view = current else { return }
+                if KeyboardLock.shared.isLocked {
+                    unlock(view)
+                } else {
+                    lock(view)
+                }
+            }
+        }
     }
 
     /// Headless-capture hook: `… -p app.multiplexterm.multiplex.debug.dismiss`

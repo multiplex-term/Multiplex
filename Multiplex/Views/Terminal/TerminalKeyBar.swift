@@ -145,6 +145,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             terminal.send(EscapeSequences.cmdPageDown)
         case .keyboard:
             TerminalFocusArbiter.toggle(terminal)
+        case .lockKeyboard:
+            click()
+            TerminalFocusArbiter.lock(terminal)
         case .dictation:
             controller?.toggleDictation()
         case .showTmuxShortcuts:
@@ -304,6 +307,7 @@ private enum TerminalKey {
     case up, down, left, right
     case pageUp, pageDown
     case keyboard
+    case lockKeyboard
     case dictation
     case showTmuxShortcuts
     case tmux(TmuxShortcut)
@@ -325,6 +329,9 @@ private struct KeyBarRow: View {
     var showsTmuxShortcuts: Bool
     var showsReturnKey: Bool
     var press: (TerminalKey) -> Void
+    /// The keyboard key doubles as the lock control: read here so the face
+    /// flips to the latched lock the moment the arbiter engages it.
+    private let keyboardLock = KeyboardLock.shared
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -432,13 +439,21 @@ private struct KeyBarRow: View {
                         .font(.ui(13, weight: .semibold))
                 }
             } else {
+                // Short press toggles the keyboard (or unlocks a locked
+                // one); a long press locks it so terminal taps stop
+                // summoning it. Locked wears the latched face + a padlock.
+                let locked = keyboardLock.isLocked
                 Key(
                     action: { press(.keyboard) },
                     width: metric.keyWidth,
                     faceHorizontalInset: metric.faceHorizontalInset,
-                    accessibilityText: "Show or hide keyboard"
+                    latched: locked,
+                    longPressAction: locked ? nil : { press(.lockKeyboard) },
+                    accessibilityText: locked
+                        ? "Unlock keyboard"
+                        : "Show or hide keyboard. Hold to lock the keyboard closed"
                 ) {
-                    Image(systemName: "keyboard")
+                    Image(systemName: locked ? "lock.fill" : "keyboard")
                         .font(.ui(13, weight: .semibold))
                 }
             }
@@ -521,25 +536,59 @@ private struct Key<Label: View>: View {
     var faceHorizontalInset: CGFloat = 0
     var repeats = false
     var latched = false
+    /// A second, hold-to-fire action (the keyboard key's lock). Keys with
+    /// one carry their own tap + long-press pair instead of a Button — a
+    /// gesture riding alongside a Button cannot reliably suppress the
+    /// button's touch-up action after the hold fires.
+    var longPressAction: (() -> Void)? = nil
     var accessibilityText: String
     @ViewBuilder var label: () -> Label
 
+    @State private var holding = false
+
     var body: some View {
-        Button(action: action) {
+        if let longPressAction {
             label()
                 .frame(
                     width: width - (faceHorizontalInset * 2),
                     height: 34
                 )
+                .foregroundStyle(latched ? Theme.chassis : Theme.signal2)
+                .background(latched ? Theme.signal2
+                    : holding ? Theme.bezelHi : Theme.chassis)
+                .overlay(Rectangle().strokeBorder(
+                    latched ? Theme.signal2 : Theme.bezelHi, lineWidth: 1))
+                .padding(.horizontal, faceHorizontalInset)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: action)
+                .onLongPressGesture(
+                    minimumDuration: 0.5,
+                    perform: {
+                        holding = false
+                        longPressAction()
+                    },
+                    onPressingChanged: { holding = $0 }
+                )
+                .chassisHover(2)
+                .accessibilityLabel(accessibilityText)
+                .accessibilityAddTraits(latched ? .isSelected : [])
+        } else {
+            Button(action: action) {
+                label()
+                    .frame(
+                        width: width - (faceHorizontalInset * 2),
+                        height: 34
+                    )
+            }
+            .buttonStyle(KeyFace(
+                latched: latched,
+                horizontalHitPadding: faceHorizontalInset
+            ))
+            .buttonRepeatBehavior(repeats ? .enabled : .disabled)
+            .chassisHover(2)
+            .accessibilityLabel(accessibilityText)
+            .accessibilityAddTraits(latched ? .isSelected : [])
         }
-        .buttonStyle(KeyFace(
-            latched: latched,
-            horizontalHitPadding: faceHorizontalInset
-        ))
-        .buttonRepeatBehavior(repeats ? .enabled : .disabled)
-        .chassisHover(2)
-        .accessibilityLabel(accessibilityText)
-        .accessibilityAddTraits(latched ? .isSelected : [])
     }
 }
 

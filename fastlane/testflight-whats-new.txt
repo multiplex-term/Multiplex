@@ -170,3 +170,22 @@ Worth checking:
   open file shows FILE GONE rather than stale bytes.
 - iPhone: + TAB > File Viewer now opens with the tree already out, so the
   first file is one tap; opening a pressed path still lands on the file.
+
+KEYBOARD LOCK — hold the rail's keyboard key to keep the keyboard closed
+
+On iPad/iPhone, hold the key rail's keyboard key (~half a second) and it
+latches into a padlock: the software keyboard closes and terminal taps no
+longer summon it — tap, scroll, and select freely while an agent runs. A
+KEYBOARD LOCKED badge sits at the pane's top right the whole time. Press
+the padlock key once to unlock and bring the keyboard straight back.
+
+Worth checking:
+- Lock with the keyboard open: it must dismiss immediately and the badge
+  appear; tapping the terminal must NOT bring it back while locked.
+- The rail's own keys (ESC/CTRL/TAB, arrows, symbols, TMUX) and a
+  hardware keyboard must keep typing into the session while locked.
+- Switch tabs and windows: the lock holds everywhere (it's one keyboard),
+  and the badge rides whichever pane is on screen.
+- Short-press the padlock: keyboard returns at once, badge gone.
+- With a physical keyboard attached the slot shows the mic key as before —
+  the lock only exists where a software keyboard could appear.

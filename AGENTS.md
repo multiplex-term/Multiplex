@@ -635,6 +635,17 @@ views.
   keyboard and stalling the UI. Keep `TerminalView.inputAccessoryView = nil`.
   The rail is full-width and bottommost; the agent helper strip occupies a
   fixed gap immediately above it. Both move above a genuinely docked keyboard.
+  The keyboard key also carries the **keyboard lock**: a ~0.5 s hold locks the
+  software keyboard closed (`TerminalFocusArbiter.lock` — a zero-size custom
+  `inputView` on the focused terminal, so the input session, rail keys, and
+  hardware keys stay live while UIKit has nothing to present and terminal
+  taps stop summoning), the key face flips to a latched padlock, and the pane
+  shows a KEYBOARD LOCKED badge top-trailing; a short press unlocks and
+  summons. The state is app-wide (`KeyboardLock.shared`, observable,
+  arbiter-written only), never persisted, and `claim` re-applies it to
+  whichever terminal takes focus. DEBUG hook: `notifyutil -p
+  app.multiplexterm.multiplex.debug.kbdlock` toggles it headlessly (no
+  simulator route can hold a software key).
   PgUp/PgDn ride along (autorepeating, `CSI 5~`/`6~`) — pagers and CLI
   agents like Claude Code page their transcripts with them. Narrow tiers drop
   page keys, then symbols; a 390 pt phone tier compacts keys to 40 pt while

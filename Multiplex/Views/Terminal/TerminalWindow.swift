@@ -1529,6 +1529,11 @@ private struct TerminalPane: View {
     let close: () -> Void
 
     @State private var dropTargeted = false
+    #if !os(visionOS)
+    /// The keyboard key's hold-to-lock state — read here so the badge
+    /// appears and clears with the arbiter's lock.
+    private let keyboardLock = KeyboardLock.shared
+    #endif
 
     var body: some View {
         let theme = themes.selected(for: colorScheme)
@@ -1597,16 +1602,25 @@ private struct TerminalPane: View {
         // message entered from the top, so the jumped-to line is usually the
         // FIRST row — a centered bar would sit right on it.
         .overlay(alignment: .topTrailing) {
-            if isActive, let controller, !controller.tmuxCopyModeUIActive,
-               let phase = controller.historyJump {
-                HistoryJumpBar(
-                    phase: phase,
-                    cancel: controller.cancelHistoryJump,
-                    backToLive: controller.finishHistoryJump
-                )
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
+            VStack(alignment: .trailing, spacing: 8) {
+                #if !os(visionOS)
+                // The lock is app-wide (one keyboard), so the badge rides
+                // whichever pane is on screen.
+                if isActive, controller != nil, keyboardLock.isLocked {
+                    KeyboardLockedBadge()
+                }
+                #endif
+                if isActive, let controller, !controller.tmuxCopyModeUIActive,
+                   let phase = controller.historyJump {
+                    HistoryJumpBar(
+                        phase: phase,
+                        cancel: controller.cancelHistoryJump,
+                        backToLive: controller.finishHistoryJump
+                    )
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
         }
         .overlay(alignment: .bottom) {
             VStack(spacing: 8) {
@@ -1712,6 +1726,35 @@ private struct TerminalPane: View {
         }
     }
 }
+
+#if !os(visionOS)
+/// The keyboard key was held: the software keyboard is locked closed and
+/// terminal taps won't summon it. A quiet chassis badge — a lock is a chosen
+/// mode, not live state, so no tally red.
+private struct KeyboardLockedBadge: View {
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "lock.fill")
+                .font(.ui(10, weight: .semibold))
+            Text("KEYBOARD LOCKED")
+                .font(.mono(10, weight: .semibold))
+                .kerning(1.1)
+        }
+        .foregroundStyle(Theme.signal2)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            Theme.bezel,
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.bezelHi, lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+    }
+}
+#endif
 
 /// tmux's native copy-mode marker is a tiny `[position/history]` token inside
 /// the terminal grid. This compact contextual bar keeps the mode visible and
