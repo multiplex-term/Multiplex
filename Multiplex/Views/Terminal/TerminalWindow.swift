@@ -1260,7 +1260,7 @@ struct TerminalWindowRoot: View {
             // DETACH menu when custom chassis controls no longer fit. Own the
             // compact overflow just like the iPhone shell so every displaced
             // action remains reachable in a narrow Stage Manager window.
-            terminalOverflowMenu
+            terminalOverflowMenu(displacesDirectActions: true)
                 .padding(.trailing, trailingPadding)
         } else {
             newTabMenu
@@ -1270,12 +1270,18 @@ struct TerminalWindowRoot: View {
             if !mergeSources.isEmpty {
                 mergeMenu
             }
+            // Nothing was displaced at this width, but the actions menu is
+            // still where the keyboard lock is named — the hold gesture on the
+            // rail's keyboard key is otherwise undiscoverable.
+            if activeController != nil {
+                terminalOverflowMenu(displacesDirectActions: false)
+            }
             detachMenu
                 .padding(.trailing, trailingPadding)
         }
     }
 
-    private var terminalOverflowMenu: some View {
+    private func terminalOverflowMenu(displacesDirectActions: Bool) -> some View {
         TerminalOverflowMenu(
             controller: activeController,
             mergeSources: mergeSources,
@@ -1286,7 +1292,8 @@ struct TerminalWindowRoot: View {
             merge: { merge($0) },
             detach: { detachActiveTab() },
             closeSession: activeTabHasSession
-                ? { confirmingCloseActiveSession = true } : nil
+                ? { confirmingCloseActiveSession = true } : nil,
+            displacesDirectActions: displacesDirectActions
         )
         .fixedSize()
     }

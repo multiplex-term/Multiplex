@@ -279,6 +279,22 @@ final class TerminalSessionController {
         TerminalFocusArbiter.toggle(terminalView)
     }
 
+    #if !os(visionOS)
+    /// The keyboard lock as a named menu action. The rail key's hold gesture
+    /// stays the fast path, but nothing on screen announced it — a held key
+    /// is unfindable, so the same lock/unlock lives in the terminal's actions
+    /// menu, spelled out. Unlocking asks for the keyboard back, exactly like
+    /// the padlock's short press.
+    func toggleKeyboardLock() {
+        guard let terminalView else { return }
+        if KeyboardLock.shared.isLocked {
+            TerminalFocusArbiter.unlock(terminalView)
+        } else {
+            TerminalFocusArbiter.lock(terminalView)
+        }
+    }
+    #endif
+
     /// Scene became active again: re-assert focus only if this terminal is
     /// (or nothing is) the app-wide owner — every window's scene activates
     /// at once on foreground, and they must not steal from each other.

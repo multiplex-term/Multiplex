@@ -90,3 +90,25 @@ Worth checking (needs a host with mosh turned on):
   path/to/file.swift:42) and tap ▤ VIEW: it should open the file in that
   project, at the cited line.
 - SSH hosts must behave exactly as before.
+
+KEYBOARD LOCK, FINDABLE — a named action in the ⋯ menu
+
+Locking the software keyboard closed used to be a hidden gesture: hold the
+rail's keyboard key. It is now also a spelled-out action — "Lock Keyboard
+Closed" / "Unlock Keyboard" — at the top of the terminal's ⋯ actions menu,
+and that ⋯ button now sits in the top-right chrome at EVERY window width,
+not only in narrow windows where it stood in for chips that didn't fit.
+
+Worth checking:
+- Full-screen iPad / iPhone: the ⋯ button should be present in the top bar
+  beside DETACH. Open it — the first item is Lock Keyboard Closed.
+- Tap it: the keyboard closes, the rail's keyboard key becomes a padlock,
+  and the KEYBOARD LOCKED tip appears. Tapping the terminal must not raise
+  the keyboard; rail keys and hardware keys keep typing.
+- Re-open ⋯ while locked: the item now reads Unlock Keyboard, and tapping
+  it releases the lock and brings the keyboard back (same as a short press
+  on the padlock).
+- In a wide window the ⋯ menu should carry ONLY the keyboard lock — the
+  actions with their own chips (A−/A+, + TAB, FILE, MERGE, DETACH) must not
+  be duplicated inside it. In a narrow window it still carries everything.
+- Vision Pro is unchanged: no ⋯ button and no keyboard lock there.

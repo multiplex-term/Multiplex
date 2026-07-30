@@ -646,7 +646,14 @@ views.
   closed software keyboard took away; it latches while permissions resolve,
   then yields the top slot to the full LISTENING bar once the microphone is
   open, avoiding a phone-width collision. A short padlock press unlocks and
-  summons. The state is app-wide (`KeyboardLock.shared`, observable,
+  summons. **A held key advertises nothing, so the lock is also a named
+  action in the terminal's `⋯` menu** ("Lock Keyboard Closed" /
+  "Unlock Keyboard" → `TerminalSessionController.toggleKeyboardLock`, the
+  same arbiter calls). That menu is therefore present at EVERY width, not
+  only where chrome was displaced: wide chrome passes
+  `displacesDirectActions: false` so it carries the lock alone and never
+  duplicates the chips beside it (a second Close Session in particular).
+  The state is app-wide (`KeyboardLock.shared`, observable,
   arbiter-written only), never persisted, and `claim` re-applies it to
   whichever terminal takes focus. DEBUG hook: `notifyutil -p
   app.multiplexterm.multiplex.debug.kbdlock` toggles it headlessly (no

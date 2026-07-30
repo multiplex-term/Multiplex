@@ -168,9 +168,15 @@ struct UMDBar: View {
                 if showsTmuxShortcuts {
                     tmuxShortcutButton.fixedSize()
                 }
+                // The actions menu stays on the bar even when nothing was
+                // displaced: it is where the keyboard lock is named. DETACH
+                // keeps the trailing edge.
+                if showsChipCompanionMenu {
+                    overflowMenu(displacesDirectActions: false).fixedSize()
+                }
                 detachControl.fixedSize()
             } else {
-                overflowMenu.fixedSize()
+                overflowMenu(displacesDirectActions: true).fixedSize()
                 // The unlocked sub-390-point rail drops TMUX to preserve every
                 // terminal key. Lock-only RET raises that cutoff to 420 points;
                 // keep the displaced shortcut explicit rather than burying it.
@@ -233,7 +239,7 @@ struct UMDBar: View {
         controller?.resumeFocusAfterPresentation()
     }
 
-    private var overflowMenu: some View {
+    private func overflowMenu(displacesDirectActions: Bool) -> some View {
         TerminalOverflowMenu(
             controller: controller,
             mergeSources: mergeSources,
@@ -243,8 +249,20 @@ struct UMDBar: View {
             openFileViewer: openFileViewer,
             merge: merge,
             detach: detach,
-            closeSession: closeSession
+            closeSession: closeSession,
+            displacesDirectActions: displacesDirectActions
         )
+    }
+
+    /// Beside the direct chips the menu carries only the keyboard lock, so it
+    /// appears exactly where that control exists: never on visionOS (no
+    /// software keyboard to lock), never without a terminal to lock.
+    private var showsChipCompanionMenu: Bool {
+        #if os(visionOS)
+        false
+        #else
+        controller != nil
+        #endif
     }
 
     @ViewBuilder
@@ -382,9 +400,14 @@ struct NewTabMenuItems: View {
     }
 }
 
-/// Shared compact action menu for the iPhone shell and narrow classic iPad
-/// windows. Keeping one menu definition prevents either compact surface from
-/// silently losing actions as the regular terminal chrome evolves.
+/// The terminal's actions menu. It is the *whole* action set on the compact
+/// iPhone shell and narrow classic iPad windows — keeping one menu definition
+/// prevents either compact surface from silently losing actions as the regular
+/// terminal chrome evolves. Wider chrome shows those actions as direct chips
+/// and passes `displacesDirectActions: false`, leaving the menu with the
+/// controls that have no chip of their own (today: the keyboard lock). It is
+/// present at every width on purpose: the lock is otherwise reachable only by
+/// holding the rail's keyboard key, which nothing on screen advertises.
 struct TerminalOverflowMenu: View {
     var controller: TerminalSessionController?
     var mergeSources: [TerminalWorkspace.WindowEntry]
@@ -395,47 +418,59 @@ struct TerminalOverflowMenu: View {
     var merge: (UUID) -> Void
     var detach: () -> Void
     var closeSession: (() -> Void)?
+    /// True where this menu stands in for chrome that didn't fit. False where
+    /// the chips are on screen beside it — duplicating them (DETACH's
+    /// destructive Close Session included) would put the same action in two
+    /// places at once.
+    var displacesDirectActions = true
 
     /// The picker presenter must belong to this outer menu, not to its nested
     /// Send File submenu. iPhone destroys submenu presentation state while
     /// dismissing the menu selection.
     @State private var requestedFileAttachPicker: FileAttachPicker?
+    #if !os(visionOS)
+    /// The lock is app-wide state, so the item's verb flips with it.
+    private let keyboardLock = KeyboardLock.shared
+    #endif
 
     var body: some View {
         Menu {
-            Section("Text Size") {
-                Button("Smaller Text", action: fontDown)
-                Button("Larger Text", action: fontUp)
-            }
-            Menu("New Tab") {
-                NewTabMenuItems(newSession: newSession, openFileViewer: openFileViewer)
-            }
-            FileAttachSubmenu(controller: controller) {
-                requestedFileAttachPicker = $0
-            }
-            if !mergeSources.isEmpty {
-                Menu("Merge Window") {
-                    ForEach(mergeSources) { entry in
-                        Button {
-                            merge(entry.id)
-                        } label: {
-                            Label(entry.label, systemImage: "macwindow")
+            keyboardLockItem
+            if displacesDirectActions {
+                Section("Text Size") {
+                    Button("Smaller Text", action: fontDown)
+                    Button("Larger Text", action: fontUp)
+                }
+                Menu("New Tab") {
+                    NewTabMenuItems(newSession: newSession, openFileViewer: openFileViewer)
+                }
+                FileAttachSubmenu(controller: controller) {
+                    requestedFileAttachPicker = $0
+                }
+                if !mergeSources.isEmpty {
+                    Menu("Merge Window") {
+                        ForEach(mergeSources) { entry in
+                            Button {
+                                merge(entry.id)
+                            } label: {
+                                Label(entry.label, systemImage: "macwindow")
+                            }
                         }
-                    }
-                    if mergeSources.count > 1 {
-                        Divider()
-                        Button {
-                            for entry in mergeSources { merge(entry.id) }
-                        } label: {
-                            Label("Merge All Windows", systemImage: "rectangle.stack")
+                        if mergeSources.count > 1 {
+                            Divider()
+                            Button {
+                                for entry in mergeSources { merge(entry.id) }
+                            } label: {
+                                Label("Merge All Windows", systemImage: "rectangle.stack")
+                            }
                         }
                     }
                 }
-            }
-            Divider()
-            Button("Detach", action: detach)
-            if let closeSession {
-                Button("Close Session", role: .destructive, action: closeSession)
+                Divider()
+                Button("Detach", action: detach)
+                if let closeSession {
+                    Button("Close Session", role: .destructive, action: closeSession)
+                }
             }
         } label: {
             ChassisBadge("", systemImage: "ellipsis")
@@ -448,6 +483,27 @@ struct TerminalOverflowMenu: View {
             controller: controller,
             request: $requestedFileAttachPicker
         )
+    }
+
+    /// Locking keeps the input session — rail keys, hardware keys, and
+    /// dictation stay live — while terminal taps stop summoning the software
+    /// keyboard, so the screen belongs to the session. visionOS has no
+    /// software keyboard to lock.
+    @ViewBuilder
+    private var keyboardLockItem: some View {
+        #if !os(visionOS)
+        if let controller {
+            let locked = keyboardLock.isLocked
+            Button {
+                controller.toggleKeyboardLock()
+            } label: {
+                Label(
+                    locked ? "Unlock Keyboard" : "Lock Keyboard Closed",
+                    systemImage: locked ? "lock.open" : "lock"
+                )
+            }
+        }
+        #endif
     }
 }
 
