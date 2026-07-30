@@ -1,6 +1,7 @@
 import Citadel
 import Foundation
 import Observation
+import UIKit
 
 /// One file-viewer tab's state: its own SSH connection (dialed lazily,
 /// redialed per operation after suspension — request/response needs no
@@ -82,6 +83,14 @@ final class FileViewerController {
     /// The document behind a per-file DIFF, so SOURCE flips back without a
     /// round trip.
     private(set) var lastDocument: Document?
+    /// Bumped by every user-driven content change (open, diff, source,
+    /// refresh) — a quiet watch update finishing late must never clobber
+    /// what the person navigated to since.
+    private var contentGeneration = 0
+    /// (size, mtime) of the path the watch is minding — the open document,
+    /// or the worktree side of a per-file diff.
+    private var watchedStamp: SSHConnection.FileStat?
+    private var watchTickCount = 0
     /// Markdown RAW toggle — kept across files (a preference, not a mode).
     var markdownRaw = false {
         didSet {
@@ -251,24 +260,26 @@ final class FileViewerController {
         branch = parsed.branch
     }
 
-    private func refreshGitVerdicts() async {
+    /// One `watchProbe` round trip refreshes branch, statuses, and the ±
+    /// counts together — the refresh path and the watch tick share it.
+    /// Returns whether anything actually moved.
+    @discardableResult
+    private func refreshGitVerdicts() async -> Bool {
         guard let gitRoot else {
             statuses = []
             shortStat = GitShortStat()
-            return
+            return false
         }
-        if let output = try? await withConnection({
-            try await $0.exec(GitCommands.status(root: gitRoot))
-        }) {
-            let (body, exit) = GitCommands.splitExit(output)
-            statuses = exit == 0 ? GitFileStatus.parse(porcelainZ: body) : []
-        }
-        if let output = try? await withConnection({
-            try await $0.exec(GitCommands.shortstat(root: gitRoot))
-        }) {
-            let (body, exit) = GitCommands.splitExit(output)
-            shortStat = exit == 0 ? GitShortStat.parse(body) : GitShortStat()
-        }
+        guard let output = try? await withConnection({
+            try await $0.exec(GitCommands.watchProbe(root: gitRoot))
+        }), let probe = GitCommands.parseWatchProbe(output) else { return false }
+        let changed = probe.branch != branch
+            || probe.statuses != statuses
+            || probe.shortStat != shortStat
+        branch = probe.branch
+        statuses = probe.statuses
+        shortStat = probe.shortStat
+        return changed
     }
 
     // MARK: Tree operations
@@ -282,7 +293,7 @@ final class FileViewerController {
                 try await $0.listDirectory(atPath: directory)
             }
             treeFailure = nil
-            childrenByPath[directory] = listed.map { entry in
+            let entries = listed.map { entry in
                 let typeBits = (entry.permissions ?? 0) & 0o170000
                 return FileTreeEntry(
                     name: entry.name,
@@ -291,6 +302,11 @@ final class FileViewerController {
                     isSymlink: typeBits == 0o120000,
                     size: entry.size
                 )
+            }
+            // Compare before writing: the watch relists on a cadence, and
+            // an identical assignment would still churn observers.
+            if childrenByPath[directory] != entries {
+                childrenByPath[directory] = entries
             }
         } catch {
             treeFailure = failureMessage(error)
@@ -389,6 +405,8 @@ final class FileViewerController {
 
     func open(path: String, line: Int?) async {
         let name = FileTree.name(of: path)
+        contentGeneration += 1
+        let generation = contentGeneration
         content = .loading(label: name)
         do {
             let stat = try await withConnection { try await $0.statFile(atPath: path) }
@@ -401,61 +419,85 @@ final class FileViewerController {
                     rootPath = path
                     await list(path)
                 }
-                content = .idle
+                if generation == contentGeneration { content = .idle }
                 return
             }
-            let size = stat.size ?? 0
-            var document = Document(path: path, size: size, kind: FileKind.classify(fileName: name))
-            document.targetLine = line
-
-            switch document.kind {
-            case .binary:
-                document.isBinary = true
-            case .image:
-                guard size <= UInt64(Self.imageByteLimit) else {
-                    content = .failure(
-                        title: "TOO LARGE",
-                        message: "\(name) is \(Self.formatBytes(size)) — the viewer renders images up to \(Self.formatBytes(UInt64(Self.imageByteLimit)))."
-                    )
-                    return
-                }
-                let (data, _) = try await withConnection {
-                    try await $0.readFile(atPath: path, limit: Self.imageByteLimit)
-                }
-                document.imageData = data
-            case .markdown, .code:
-                let (data, truncated) = try await withConnection {
-                    try await $0.readFile(atPath: path, limit: Self.textByteLimit)
-                }
-                document.truncated = truncated
-                if FileKind.looksBinary(data) {
-                    document.isBinary = true
-                    break
-                }
-                let text = String(decoding: data, as: UTF8.self)
-                if document.kind == .markdown, !markdownRaw {
-                    document.markdown = await Task.detached {
-                        MarkdownDocument.parse(text)
-                    }.value
-                } else {
-                    let language: CodeLanguage? = {
-                        if case .code(let detected) = document.kind { return detected }
-                        return nil // markdown RAW renders plain
-                    }()
-                    document.language = language
-                    document.codeLines = await Task.detached {
-                        CodeHighlighter.highlight(text, language: language)
-                    }.value
-                }
+            let document = try await makeDocument(path: path, line: line, stat: stat)
+            guard generation == contentGeneration else { return }
+            switch document {
+            case .success(let document):
+                lastDocument = document
+                watchedStamp = stat
+                content = .document(document)
+            case .failure(let title, let message):
+                content = .failure(title: title, message: message)
             }
-            lastDocument = document
-            content = .document(document)
         } catch {
+            guard generation == contentGeneration else { return }
             content = .failure(
                 title: "CAN'T READ \(name.uppercased())",
                 message: failureMessage(error)
             )
         }
+    }
+
+    private enum DocumentResult {
+        case success(Document)
+        case failure(title: String, message: String)
+    }
+
+    /// The read → classify → parse/highlight pipeline, shared by the loud
+    /// open above and the watch's quiet rebuild.
+    private func makeDocument(
+        path: String,
+        line: Int?,
+        stat: SSHConnection.FileStat
+    ) async throws -> DocumentResult {
+        let name = FileTree.name(of: path)
+        let size = stat.size ?? 0
+        var document = Document(path: path, size: size, kind: FileKind.classify(fileName: name))
+        document.targetLine = line
+
+        switch document.kind {
+        case .binary:
+            document.isBinary = true
+        case .image:
+            guard size <= UInt64(Self.imageByteLimit) else {
+                return .failure(
+                    title: "TOO LARGE",
+                    message: "\(name) is \(Self.formatBytes(size)) — the viewer renders images up to \(Self.formatBytes(UInt64(Self.imageByteLimit)))."
+                )
+            }
+            let (data, _) = try await withConnection {
+                try await $0.readFile(atPath: path, limit: Self.imageByteLimit)
+            }
+            document.imageData = data
+        case .markdown, .code:
+            let (data, truncated) = try await withConnection {
+                try await $0.readFile(atPath: path, limit: Self.textByteLimit)
+            }
+            document.truncated = truncated
+            if FileKind.looksBinary(data) {
+                document.isBinary = true
+                break
+            }
+            let text = String(decoding: data, as: UTF8.self)
+            if document.kind == .markdown, !markdownRaw {
+                document.markdown = await Task.detached {
+                    MarkdownDocument.parse(text)
+                }.value
+            } else {
+                let language: CodeLanguage? = {
+                    if case .code(let detected) = document.kind { return detected }
+                    return nil // markdown RAW renders plain
+                }()
+                document.language = language
+                document.codeLines = await Task.detached {
+                    CodeHighlighter.highlight(text, language: language)
+                }.value
+            }
+        }
+        return .success(document)
     }
 
     // MARK: Diff
@@ -478,34 +520,55 @@ final class FileViewerController {
 
     func showFileDiff(path: String) async {
         guard let gitRoot else { return }
+        contentGeneration += 1
+        let generation = contentGeneration
         let name = FileTree.name(of: path)
         let relative = relativeToRepo(path) ?? path
         content = .loading(label: "DIFF · \(name)")
+        // Baseline the stamp now, so the watch compares against the
+        // worktree the diff was cut from — not against nothing.
+        watchedStamp = try? await withConnection { try await $0.statFile(atPath: path) }
         let command = badges[path] == .untracked
             ? GitCommands.untrackedDiff(root: gitRoot, path: relative)
             : GitCommands.diffFile(root: gitRoot, path: relative)
-        await runDiff(command: command, scope: .file(path: path), emptyLabel: name)
+        await runDiff(
+            command: command,
+            scope: .file(path: path),
+            emptyLabel: name,
+            generation: generation
+        )
     }
 
     func showRepoDiff() async {
         guard let gitRoot else { return }
+        contentGeneration += 1
+        let generation = contentGeneration
+        watchedStamp = nil
         content = .loading(label: "DIFF")
         await runDiff(
             command: GitCommands.fullDiff(root: gitRoot),
             scope: .repo,
-            emptyLabel: FileTree.name(of: gitRoot)
+            emptyLabel: FileTree.name(of: gitRoot),
+            generation: generation
         )
     }
 
-    private func runDiff(command: String, scope: DiffScope, emptyLabel: String) async {
+    private func runDiff(
+        command: String,
+        scope: DiffScope,
+        emptyLabel: String,
+        generation: Int
+    ) async {
         do {
             let output = try await withConnection { try await $0.exec(command) }
             let (body, _) = GitCommands.splitExit(output)
             // --no-index exits 1 whenever sides differ; the body is the
             // verdict that matters.
             let diff = await Task.detached { GitDiff.parse(body) }.value
+            guard generation == contentGeneration else { return }
             content = .diff(diff, scope: scope)
         } catch {
+            guard generation == contentGeneration else { return }
             content = .failure(
                 title: "CAN'T DIFF \(emptyLabel.uppercased())",
                 message: failureMessage(error)
@@ -513,15 +576,140 @@ final class FileViewerController {
         }
     }
 
+    /// The watch's diff refresh: recompute whatever diff is on screen and
+    /// swap it in place — no .loading, no scroll reset, and a stale result
+    /// (the person navigated meanwhile) is dropped on the floor.
+    private func refreshDiffQuietly(generation: Int) async {
+        guard let gitRoot, case .diff(_, let scope) = content else { return }
+        let command: String
+        switch scope {
+        case .repo:
+            command = GitCommands.fullDiff(root: gitRoot)
+        case .file(let path):
+            let relative = relativeToRepo(path) ?? path
+            command = badges[path] == .untracked
+                ? GitCommands.untrackedDiff(root: gitRoot, path: relative)
+                : GitCommands.diffFile(root: gitRoot, path: relative)
+        }
+        guard let output = try? await withConnection({ try await $0.exec(command) })
+        else { return }
+        let (body, _) = GitCommands.splitExit(output)
+        let diff = await Task.detached { GitDiff.parse(body) }.value
+        guard generation == contentGeneration,
+              case .diff(_, let still) = content, still == scope
+        else { return }
+        content = .diff(diff, scope: scope)
+    }
+
     /// The SOURCE chip: back to the document behind a per-file diff.
     func showSource() {
         if let lastDocument, case .diff(_, .file(let path)) = content,
            lastDocument.path == path {
+            contentGeneration += 1
             content = .document(lastDocument)
             return
         }
         if case .diff(_, .file(let path)) = content {
             Task { await open(path: path, line: nil) }
+        }
+    }
+
+    // MARK: Watch
+
+    /// Run by the pane while this tab is the window's ACTIVE tab — the
+    /// deck's own cadence and gates: a 5 s tick, network work only while
+    /// the app is frontmost-active, and an obscured tab ticks not at all
+    /// (the pane's task cancels). Each tick costs one git round trip
+    /// (`watchProbe`) plus one stat on the watched path; everything it
+    /// learns lands as a quiet swap — no .loading, no scroll reset.
+    func watchWhileActive() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            await watchTick()
+        }
+    }
+
+    /// The path whose bytes the current screen shows: the open document,
+    /// or the worktree side of a per-file diff. Repo diffs and idle
+    /// screens watch git state alone.
+    private var watchedContentPath: String? {
+        switch content {
+        case .document(let document): return document.path
+        case .diff(_, .file(let path)): return path
+        default: return nil
+        }
+    }
+
+    private func watchTick() async {
+        guard UIApplication.shared.applicationState == .active,
+              !isBusy, !rootPath.isEmpty else { return }
+        if case .loading = content { return }
+        watchTickCount += 1
+        let generation = contentGeneration
+
+        var gitChanged = false
+        if gitRoot != nil {
+            gitChanged = await refreshGitVerdicts()
+        }
+        if gitChanged {
+            await relistVisibleDirectories()
+            await refreshDiffQuietly(generation: generation)
+        } else if watchTickCount.isMultiple(of: 3) {
+            // Ignored files and non-repo directories change without a
+            // porcelain verdict; a slower sweep keeps the tree honest.
+            await relistVisibleDirectories()
+        }
+
+        guard generation == contentGeneration,
+              let path = watchedContentPath else { return }
+        do {
+            let stat = try await withConnection { try await $0.statFile(atPath: path) }
+            guard stat != watchedStamp else { return }
+            watchedStamp = stat
+            await reloadWatchedContent(generation: generation, stat: stat)
+        } catch {
+            // A transport blip must not tear the screen down; only the
+            // server's own verdict that the file is gone is worth acting
+            // on, and only for a document (a deleted file's diff IS the
+            // record of the deletion).
+            if error is SFTPError,
+               generation == contentGeneration,
+               case .document(let document) = content {
+                content = .failure(
+                    title: "FILE GONE",
+                    message: "The host says \(document.name) no longer exists."
+                )
+            }
+        }
+    }
+
+    private func relistVisibleDirectories() async {
+        for directory in Set([rootPath]).union(expanded).sorted() {
+            await list(directory)
+        }
+    }
+
+    private func reloadWatchedContent(
+        generation: Int,
+        stat: SSHConnection.FileStat
+    ) async {
+        switch content {
+        case .document(let current):
+            guard !stat.isDirectory,
+                  let result = try? await makeDocument(
+                      path: current.path, line: nil, stat: stat
+                  ),
+                  case .success(let document) = result,
+                  generation == contentGeneration,
+                  case .document(let still) = content, still.path == current.path
+            else { return }
+            lastDocument = document
+            content = .document(document)
+        case .diff:
+            await refreshDiffQuietly(generation: generation)
+        default:
+            break
         }
     }
 

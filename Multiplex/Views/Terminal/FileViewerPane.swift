@@ -14,6 +14,9 @@ import SwiftUI
 struct FileViewerPane: View {
     @Bindable var controller: FileViewerController
     var contentSafeArea = EdgeInsets()
+    /// The window's active tab is the only one that watches: an obscured
+    /// pane spends no network on a screen nobody sees (the wall's rule).
+    var isActive = true
     let close: () -> Void
 
     /// The standing column's presence at regular widths.
@@ -58,6 +61,12 @@ struct FileViewerPane: View {
         }
         .background(Theme.screen)
         .task { await controller.start() }
+        // Cancelled the moment the tab stops being active; re-created on
+        // return, so the first tick lands ~5 s after coming back.
+        .task(id: isActive) {
+            guard isActive else { return }
+            await controller.watchWhileActive()
+        }
         .sheet(item: $confirmingLink) { link in
             TerminalLinkSheet(
                 link: link,

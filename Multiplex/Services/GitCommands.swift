@@ -85,6 +85,52 @@ enum GitCommands {
         tailed(git(root, "status --porcelain=v1 -z --untracked-files=normal"))
     }
 
+    /// The watch tick's whole git read in ONE round trip — branch, porcelain
+    /// status, and shortstat, sentinel-framed (the deck's one-exec probe
+    /// discipline; a 5 s cadence must not cost three channel setups).
+    /// Layout: `MPXFV_BR:<branch>\n<status -z bytes>\nMPXFV_STAT:<shortstat>`
+    /// then the usual exit sentinel carrying the STATUS command's code.
+    static let watchStatSentinel = "\nMPXFV_STAT:"
+
+    static func watchProbe(root: String) -> String {
+        let quoted = root.shellQuoted
+        return TmuxProbe.pathPrefix
+            + "printf '\(branchSentinel)%s\\n' "
+            + "\"$(git -C \(quoted) rev-parse --abbrev-ref HEAD 2>/dev/null)\"; "
+            + "git -C \(quoted) -c core.quotepath=false status --porcelain=v1 -z"
+            + " --untracked-files=normal 2>/dev/null; s=$?; "
+            + "printf '\\nMPXFV_STAT:'; "
+            + "git -C \(quoted) diff --shortstat --no-ext-diff HEAD -- 2>/dev/null; "
+            + "printf '\\nMPXFV_EXIT:%s' \"$s\""
+    }
+
+    struct WatchProbe: Equatable {
+        var branch: String?
+        var statuses: [GitFileStatus]
+        var shortStat: GitShortStat
+    }
+
+    /// nil when the status command failed (not a repo anymore, git gone).
+    /// Both sentinels are matched from the back — they are the last things
+    /// printed, and a -z filename could theoretically embed lookalikes.
+    static func parseWatchProbe(_ output: String) -> WatchProbe? {
+        let (body, exit) = splitExit(output)
+        guard exit == 0 else { return nil }
+        guard let statRange = body.range(of: watchStatSentinel, options: .backwards)
+        else { return nil }
+        let shortStat = GitShortStat.parse(String(body[statRange.upperBound...]))
+        let head = body[..<statRange.lowerBound]
+        guard head.hasPrefix(branchSentinel) else { return nil }
+        let afterSentinel = head.dropFirst(branchSentinel.count)
+        let branchLine = afterSentinel.prefix(while: { $0 != "\n" })
+        let statusBytes = afterSentinel.dropFirst(branchLine.count).dropFirst()
+        return WatchProbe(
+            branch: branchLine.isEmpty ? nil : String(branchLine),
+            statuses: GitFileStatus.parse(porcelainZ: String(statusBytes)),
+            shortStat: shortStat
+        )
+    }
+
     /// The tree header's ± counts. `HEAD --` so staged and unstaged changes
     /// both count; prints nothing on a clean tree.
     static func shortstat(root: String) -> String {

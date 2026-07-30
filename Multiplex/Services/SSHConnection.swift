@@ -496,9 +496,12 @@ actor SSHConnection {
         var permissions: UInt32?
     }
 
-    struct FileStat: Sendable {
+    struct FileStat: Sendable, Equatable {
         var size: UInt64?
         var permissions: UInt32?
+        /// SFTP v3 mtime is whole seconds — good enough for the viewer's
+        /// change watch (paired with size).
+        var modified: Date?
 
         var isDirectory: Bool {
             permissions.map { ($0 & 0o170000) == 0o040000 } ?? false
@@ -530,7 +533,11 @@ actor SSHConnection {
         guard let client else { throw SSHConnectionError.notConnected }
         return try await client.withSFTP { sftp in
             let attributes = try await sftp.getAttributes(at: path)
-            return FileStat(size: attributes.size, permissions: attributes.permissions)
+            return FileStat(
+                size: attributes.size,
+                permissions: attributes.permissions,
+                modified: attributes.accessModificationTime?.modificationTime
+            )
         }
     }
 

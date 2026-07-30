@@ -88,6 +88,35 @@ final class GitStatusTests: XCTestCase {
         XCTAssertTrue(command.hasSuffix("printf '\\nMPXFV_EXIT:%s' \"$?\""))
     }
 
+    func testWatchProbeParse() {
+        // One round trip: branch line, porcelain -z bytes (NULs and all),
+        // shortstat behind its sentinel, exit behind the usual tail.
+        let output = "MPXFV_BR:main\n M src/app.ts\0?? probe.ts\0"
+            + "\nMPXFV_STAT: 1 file changed, 4 insertions(+), 2 deletions(-)"
+            + "\nMPXFV_EXIT:0"
+        guard let probe = GitCommands.parseWatchProbe(output) else {
+            return XCTFail("watch probe should parse")
+        }
+        XCTAssertEqual(probe.branch, "main")
+        XCTAssertEqual(probe.statuses.map(\.path), ["src/app.ts", "probe.ts"])
+        XCTAssertEqual(probe.statuses.map(\.badge), [.modified, .untracked])
+        XCTAssertEqual(
+            probe.shortStat,
+            GitShortStat(filesChanged: 1, insertions: 4, deletions: 2)
+        )
+
+        // Clean tree: empty status, empty shortstat, unborn branch.
+        let clean = GitCommands.parseWatchProbe("MPXFV_BR:\n\nMPXFV_STAT:\nMPXFV_EXIT:0")
+        XCTAssertNotNil(clean)
+        XCTAssertNil(clean?.branch)
+        XCTAssertEqual(clean?.statuses, [])
+        XCTAssertEqual(clean?.shortStat.isEmpty, true)
+
+        // Status failed (repo vanished, git gone) → nil, never garbage.
+        XCTAssertNil(GitCommands.parseWatchProbe("MPXFV_BR:x\n\nMPXFV_STAT:\nMPXFV_EXIT:128"))
+        XCTAssertNil(GitCommands.parseWatchProbe("truncated mid-flight"))
+    }
+
     func testRepoProbeParse() {
         let body = "/home/dev/app\nMPXFV_BR:main"
         let parsed = GitCommands.parseRepoProbe(body: body)

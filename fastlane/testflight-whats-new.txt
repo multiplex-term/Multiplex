@@ -163,3 +163,8 @@ Worth checking:
   path into a hidden folder still works.
 - Open an image: it fits the screen; pinch to zoom (double-tap flips
   fit ↔ 2×), pan when zoomed, and the % chip bottom-right resets to fit.
+- The viewer now follows the host on its own: with its tab frontmost it
+  re-checks every ~5 seconds — edit a file in the session beside it and
+  the open document, diff, tree badges, and ± counts catch up without
+  touching REFRESH (which stays for forcing the issue). Deleting the
+  open file shows FILE GONE rather than stale bytes.

@@ -856,6 +856,22 @@ views.
   (`FileTree.hiddenNames`: .git/.svn/.hg/CVS/.DS_Store/Thumbs.db,
   deliberately NOT all dotfiles: .gitignore stays a file people open;
   content is untouched, a pressed path into .git still opens).
+  **The viewer watches by polling, the deck's way** (never a remote
+  inotify/fswatch process — nothing long-running is assumed onto the
+  host): while its tab is the window's ACTIVE tab and
+  `applicationState == .active`, a 5 s tick runs ONE combined git exec
+  (`GitCommands.watchProbe`: branch + porcelain -z + shortstat behind
+  sentinels, parsed by `parseWatchProbe`) plus one SFTP stat
+  (size+mtime) on the path on screen; expanded listings sweep every
+  third tick and on any git change. Everything lands as a QUIET swap —
+  no .loading, no scroll reset (row ids are indices, so the offset
+  survives a content swap) — and a `contentGeneration` counter drops
+  any watch result that finishes after the person navigated. Known
+  blind spot, on record: a net-zero-delta edit under an unchanged
+  porcelain line escapes the repo-wide diff until REFRESH (the
+  per-file stamp catches it everywhere a single file is on screen);
+  a watched document the server says is gone flips to an honest FILE
+  GONE panel, while transport blips change nothing.
   Markdown links confirm through the link sheet; relative ones navigate
   inside the viewer; images render as captioned placeholders (fetching is
   its own decision). Shared auxiliary-pane rules with the viewport: no

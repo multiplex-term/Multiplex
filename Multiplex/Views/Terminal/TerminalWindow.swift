@@ -1046,6 +1046,7 @@ struct TerminalWindowRoot: View {
                             FileViewerPane(
                                 controller: fileViewer,
                                 contentSafeArea: contentSafeArea,
+                                isActive: isActive,
                                 close: { close(tab.id) }
                             )
                         }
