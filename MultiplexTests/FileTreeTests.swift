@@ -86,6 +86,39 @@ final class FileTreeTests: XCTestCase {
         XCTAssertEqual(rows[0].badge, .added)
     }
 
+    func testEditorHiddenSetIsInvisibleEverywhere() {
+        let root = "/repo"
+        let children: [String: [FileTreeEntry]] = [
+            root: [
+                entry(".git", in: root, dir: true),
+                entry(".DS_Store", in: root),
+                entry(".gitignore", in: root),
+                entry("src", in: root, dir: true),
+            ]
+        ]
+        let rows = FileTree.rows(
+            root: root, children: children,
+            expanded: [], badges: [:], changedDirectories: []
+        )
+        // .git and .DS_Store vanish; .gitignore is a file people open.
+        XCTAssertEqual(rows.map(\.entry.name), ["src", ".gitignore"])
+
+        // A stray untracked .DS_Store must not light its directory's dot
+        // or appear in the CHANGED review index.
+        let statuses = [
+            GitFileStatus(path: "src/.DS_Store", originPath: nil, badge: .untracked),
+            GitFileStatus(path: "src/app.ts", originPath: nil, badge: .modified),
+        ]
+        XCTAssertEqual(
+            FileTree.changedDirectories(statuses: [statuses[0]], repoRoot: root),
+            []
+        )
+        XCTAssertEqual(
+            FileTree.changedRows(statuses: statuses, repoRoot: root).map(\.entry.name),
+            ["src/app.ts"]
+        )
+    }
+
     func testPathHelpers() {
         XCTAssertEqual(FileTree.join("/a/b", "c.txt"), "/a/b/c.txt")
         XCTAssertEqual(FileTree.join("/a/b/", "c.txt"), "/a/b/c.txt")

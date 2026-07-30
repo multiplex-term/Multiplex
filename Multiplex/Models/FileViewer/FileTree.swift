@@ -30,6 +30,28 @@ enum FileTree {
         var id: String { entry.path }
     }
 
+    /// The names every code editor hides by default (VS Code's
+    /// files.exclude set plus each platform's litter) — invisible to the
+    /// tree everywhere: rows, the CHANGED list, and the change-dot trail,
+    /// so a stray untracked .DS_Store can't light a directory whose
+    /// expansion then shows nothing. Deliberately NOT all dotfiles:
+    /// .gitignore, .env, .zshrc are files people open, and this is a dev
+    /// tool. Content is untouched — a pressed path into .git still opens;
+    /// only the tree declines to advertise it.
+    static let hiddenNames: Set<String> = [
+        ".git", ".svn", ".hg", "CVS", ".DS_Store", "Thumbs.db",
+    ]
+
+    static func isHidden(_ name: String) -> Bool {
+        hiddenNames.contains(name)
+    }
+
+    /// A repo-relative status path touching any hidden component (the
+    /// .DS_Store itself, or anything under a hidden directory).
+    private static func statusIsHidden(_ path: String) -> Bool {
+        path.split(separator: "/").contains { hiddenNames.contains(String($0)) }
+    }
+
     /// Directories first, then files, case-insensitive by name — the one
     /// order every file browser owes its user.
     static func sorted(_ entries: [FileTreeEntry]) -> [FileTreeEntry] {
@@ -71,7 +93,7 @@ enum FileTree {
         into rows: inout [Row]
     ) {
         guard let entries = children[directory] else { return }
-        for entry in sorted(entries) {
+        for entry in sorted(entries) where !isHidden(entry.name) {
             let isExpanded = entry.isDirectory && expanded.contains(entry.path)
             rows.append(Row(
                 entry: entry,
@@ -105,13 +127,14 @@ enum FileTree {
     }
 
     /// Every directory that holds a change, up to (and excluding) the repo
-    /// root — the tree marks the trail to what moved.
+    /// root — the tree marks the trail to what moved. Hidden-set statuses
+    /// don't count: a dot must never point at a row the tree won't show.
     static func changedDirectories(
         statuses: [GitFileStatus],
         repoRoot: String
     ) -> Set<String> {
         var set: Set<String> = []
-        for status in statuses {
+        for status in statuses where !statusIsHidden(status.path) {
             var components = status.path.split(separator: "/").dropLast()
             while !components.isEmpty {
                 set.insert(join(repoRoot, components.joined(separator: "/")))
@@ -122,12 +145,14 @@ enum FileTree {
     }
 
     /// The CHANGED filter's flat rows: repo-relative paths straight from
-    /// porcelain, no directory nesting — the review index.
+    /// porcelain, no directory nesting — the review index. Same hidden-set
+    /// rule as the tree.
     static func changedRows(
         statuses: [GitFileStatus],
         repoRoot: String
     ) -> [Row] {
         statuses
+            .filter { !statusIsHidden($0.path) }
             .sorted { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending }
             .map { status in
                 Row(
