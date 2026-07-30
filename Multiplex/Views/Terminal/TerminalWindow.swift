@@ -206,6 +206,11 @@ struct TerminalWindowRoot: View {
                 viewportHost: activeTabHost,
                 openViewport: openViewport
             )
+            .terminalPathConfirmation(
+                for: activeController,
+                hostName: activeTabHost?.name,
+                openViewer: { openFileViewer(target: $0) }
+            )
             .alert(
                 "Couldn't Create Session",
                 isPresented: newTabFailedAlertBinding
@@ -266,6 +271,20 @@ struct TerminalWindowRoot: View {
             .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugViewportOpen)) { _ in
                 debugOpenViewportForPendingLink()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugFileViewer)) { _ in
+                debugOpenFileViewer()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugPathView)) { _ in
+                debugViewPendingPath()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugFileViewerRepoDiff)) { _ in
+                // The tree's ± chip, headlessly: the active file-viewer tab
+                // flips to the repo-wide diff.
+                guard let activeTab, activeTab.isFileViewer,
+                      let fileViewer = workspace.fileViewerController(for: activeTab.id)
+                else { return }
+                Task { await fileViewer.showRepoDiff() }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .multiplexDebugLinkRegions)) { _ in
                 debugLogLinkRegions()
             }
@@ -304,9 +323,9 @@ struct TerminalWindowRoot: View {
             }
             // Keyboard focus follows the visible tab…
             .onChange(of: route.activeTabID) { previousTabID, _ in
-                if let activeTab, activeTab.isViewport {
-                    // A page makes no responder claim; the terminal now
-                    // hidden behind it must not keep receiving hardware keys.
+                if let activeTab, activeTab.isAuxiliaryPane {
+                    // A page (or file) makes no responder claim; the terminal
+                    // now hidden behind it must not keep receiving hardware keys.
                     if let previousTabID {
                         workspace.controller(for: previousTabID)?.releaseFocus()
                     }
@@ -372,6 +391,7 @@ struct TerminalWindowRoot: View {
         NewTabDebugHook.install()
         MessageJumpDebugHook.install()
         TerminalLinkDebugHook.install()
+        FileViewerDebugHook.install()
         #endif
         guard let hostID = activeTab?.hostID, let host = store.host(id: hostID) else { return }
         let model = hub.model(for: host)
@@ -393,10 +413,11 @@ struct TerminalWindowRoot: View {
     /// reaches the network-heavy branch app-wide.
     private func watchActivePane() async {
         guard let activeTab,
-              !activeTab.isViewport,
+              !activeTab.isAuxiliaryPane,
               let host = store.host(id: activeTab.hostID)
         else {
-            // A viewport tab has no pane, no agent, and no PTY to watch.
+            // A viewport/file-viewer tab has no pane, no agent, and no PTY
+            // to watch.
             activePaneFingerprint = nil
             shownAgent = nil
             return
@@ -570,6 +591,29 @@ struct TerminalWindowRoot: View {
         openViewport(offer)
     }
 
+    /// The + TAB dropdown's File Viewer action, headlessly — focused
+    /// window only, same gating as the chip hook.
+    private func debugOpenFileViewer() {
+        guard let controller = activeController,
+              let view = controller.terminalView,
+              view === TerminalFocusArbiter.current
+        else { return }
+        openFileViewer(target: nil)
+    }
+
+    /// The path sheet's ▤ VIEW chip, headlessly: requires a pending path
+    /// (raised by `….debug.link` over path-shaped text) and runs the exact
+    /// resolve → dock path the chip takes.
+    private func debugViewPendingPath() {
+        guard let controller = activeController,
+              let view = controller.terminalView,
+              view === TerminalFocusArbiter.current,
+              let target = controller.pendingPath
+        else { return }
+        controller.dismissPendingPath()
+        openFileViewer(target: target)
+    }
+
     /// Headless proof of the visionOS gaze link regions: logs what the
     /// hover overlay would light for the focused terminal (category
     /// `links`, debug level — `log stream`, not `log show`). Gaze itself
@@ -662,6 +706,38 @@ struct TerminalWindowRoot: View {
         }
     }
 
+    /// The active tab's monitor-face close wording — the one string the
+    /// shared chrome varies between the viewport and the file viewer.
+    private var auxiliaryCloseLabel: String {
+        activeTab?.isFileViewer == true ? "Close file viewer" : "Close viewport"
+    }
+
+    /// Dock a file viewer beside the active tab — the viewport's summon
+    /// shape exactly: resolve the pane's cwd first (the same `list-panes`
+    /// truth drops use; nil → the controller roots at $HOME), register the
+    /// controller BEFORE the tab enters the route, insert after the active
+    /// tab, activate. `target` carries a pressed path (and its line) when
+    /// the summon came from the path sheet.
+    private func openFileViewer(target: TerminalPathTarget?) {
+        guard let activeTab, let host = store.host(id: activeTab.hostID) else { return }
+        let anchorID = activeTab.id
+        let hostID = activeTab.hostID
+        Task {
+            let cwd = await workspace.controller(for: anchorID)?.paneWorkingDirectory()
+            let tab = TerminalRoute(
+                hostID: hostID,
+                mode: .fileViewer(path: target?.path ?? cwd ?? "~")
+            )
+            workspace.openFileViewer(
+                tab: tab,
+                host: host,
+                startDirectory: cwd,
+                target: target
+            )
+            dock(tab, after: anchorID)
+        }
+    }
+
     /// Dock a confirmed page as a viewport tab immediately after the tab
     /// whose pane printed the URL — the + TAB precedent: arrive where you
     /// are, move later (split it out to stand beside the terminal, merge it
@@ -675,7 +751,14 @@ struct TerminalWindowRoot: View {
             mode: .viewport(urlString: offer.url.absoluteString)
         )
         workspace.openViewport(tab: tab, offer: offer, host: host)
-        if let index = route.tabs.firstIndex(where: { $0.id == activeTab.id }) {
+        dock(tab, after: activeTab.id)
+    }
+
+    /// Insert a freshly summoned tab immediately after its anchor (the
+    /// + TAB precedent: arrive where you are, move later) and make it
+    /// active — the shared tail of every auxiliary summon.
+    private func dock(_ tab: TerminalRoute, after anchorID: UUID) {
+        if let index = route.tabs.firstIndex(where: { $0.id == anchorID }) {
             route.tabs.insert(tab, at: index + 1)
         } else {
             route.tabs.append(tab)
@@ -727,17 +810,18 @@ struct TerminalWindowRoot: View {
                 // below-edge anchor (.top) parked the keys and window bar in
                 // the floating keyboard's summon zone (both user-reported).
                 .ornament(attachmentAnchor: .scene(.bottom), contentAlignment: .center) {
-                    if activeTab?.isViewport == true {
-                        // A page needs no keys, helper strip, or session
-                        // controls — the viewport face carries DECK, the
-                        // source label, MERGE, and CLOSE; the in-window rail
-                        // owns everything page-scoped.
+                    if activeTab?.isAuxiliaryPane == true {
+                        // A page (or file screen) needs no keys, helper
+                        // strip, or session controls — the monitor face
+                        // carries DECK, the source label, MERGE, and CLOSE;
+                        // the in-window rail owns everything pane-scoped.
                         ViewportUMD(
                             title: umdTitle,
                             mergeSources: mergeSources,
                             showDeck: showDeck,
                             merge: { merge($0) },
-                            close: { if let activeTab { close(activeTab.id) } }
+                            close: { if let activeTab { close(activeTab.id) } },
+                            closeAccessibilityLabel: auxiliaryCloseLabel
                         )
                         .alignmentGuide(VerticalAlignment.center) { _ in 24 }
                     } else {
@@ -779,6 +863,7 @@ struct TerminalWindowRoot: View {
                                     fontDown: { fontSize = max(9, fontSize - 1) },
                                     fontUp: { fontSize = min(32, fontSize + 1) },
                                     newSession: { openNewTab(launching: $0) },
+                                    openFileViewer: { openFileViewer(target: nil) },
                                     merge: { merge($0) },
                                     detach: { detachActiveTab() },
                                     closeSession: activeTabHasSession
@@ -836,7 +921,7 @@ struct TerminalWindowRoot: View {
 
     private func shellBody(_ configuration: ShellConfiguration) -> some View {
         VStack(spacing: 0) {
-            if activeTab?.isViewport == true {
+            if activeTab?.isAuxiliaryPane == true {
                 ViewportUMD(
                     title: umdTitle,
                     mergeSources: [],
@@ -845,7 +930,8 @@ struct TerminalWindowRoot: View {
                     close: { if let activeTab { close(activeTab.id) } },
                     style: .shell,
                     deckControlLabel: configuration.deckControlLabel,
-                    contentSafeArea: configuration.contentSafeArea
+                    contentSafeArea: configuration.contentSafeArea,
+                    closeAccessibilityLabel: auxiliaryCloseLabel
                 )
             } else {
             UMDBar(
@@ -856,6 +942,7 @@ struct TerminalWindowRoot: View {
                 fontDown: { fontSize = max(9, fontSize - 1) },
                 fontUp: { fontSize = min(32, fontSize + 1) },
                 newSession: { openNewTab(launching: $0) },
+                openFileViewer: { openFileViewer(target: nil) },
                 merge: { _ in },
                 detach: { detachActiveTab() },
                 closeSession: activeTabHasSession
@@ -882,7 +969,7 @@ struct TerminalWindowRoot: View {
             #if os(visionOS)
             paneStack
                 .overlay(alignment: .bottom) {
-                    if activeTab?.isViewport != true {
+                    if activeTab?.isAuxiliaryPane != true {
                         VStack(spacing: 8) {
                             helperStrip(
                                 floating: true,
@@ -952,6 +1039,16 @@ struct TerminalWindowRoot: View {
                             ViewportPane(
                                 controller: viewport,
                                 contentSafeArea: contentSafeArea,
+                                close: { close(tab.id) }
+                            )
+                        }
+                    } else if tab.isFileViewer {
+                        // Same guarantee, same strip rule (isAuxiliaryPane).
+                        if let fileViewer = workspace.fileViewerController(for: tab.id) {
+                            FileViewerPane(
+                                controller: fileViewer,
+                                contentSafeArea: contentSafeArea,
+                                isActive: isActive,
                                 close: { close(tab.id) }
                             )
                         }
@@ -1032,14 +1129,15 @@ struct TerminalWindowRoot: View {
         }
     }
 
-    /// A viewport tab's label follows the page it is on — the route's
-    /// urlString is only the address it was summoned with, and the rail's
-    /// editor can move the page after that.
+    /// An auxiliary tab's label follows what its pane is showing NOW — the
+    /// route only knows the summons (a viewport's page moves, a viewer
+    /// navigates), so the live controller answers whenever it exists.
     private func tabTitle(for tab: TerminalRoute) -> String {
-        guard tab.isViewport,
-              let viewport = workspace.viewportController(for: tab.id)
-        else { return tab.displayName }
-        return TerminalRoute.viewportLabel(viewport.displayURL.absoluteString)
+        if tab.isAuxiliaryPane,
+           let auxiliary = workspace.auxiliaryController(for: tab.id) {
+            return auxiliary.tabLabel
+        }
+        return tab.displayName
     }
 
     private var tabItems: [TerminalTabStrip.Item] {
@@ -1051,7 +1149,7 @@ struct TerminalWindowRoot: View {
                 hostName: multiHost ? store.host(id: tab.hostID)?.name : nil,
                 controller: workspace.controller(for: tab.id),
                 isActive: tab.id == activeTab?.id,
-                isViewport: tab.isViewport
+                isAuxiliary: tab.isAuxiliaryPane
             )
         }
     }
@@ -1137,10 +1235,11 @@ struct TerminalWindowRoot: View {
             )
             .accessibilityHint("Shows how to unlock the keychain")
         }
-        if activeTab?.isViewport == true {
-            // A page needs none of the terminal's controls: MERGE (the road
-            // home for a split-out viewport) and CLOSE are the window's
-            // whole vocabulary — the rail under the page owns the rest.
+        if activeTab?.isAuxiliaryPane == true {
+            // A page (or file screen) needs none of the terminal's
+            // controls: MERGE (the road home for a split-out tab) and
+            // CLOSE are the window's whole vocabulary — the rail under
+            // the pane owns the rest.
             if !mergeSources.isEmpty {
                 mergeMenu
             }
@@ -1148,7 +1247,7 @@ struct TerminalWindowRoot: View {
                 if let activeTab { close(activeTab.id) }
             }
             .fixedSize()
-            .accessibilityLabel("Close viewport")
+            .accessibilityLabel(auxiliaryCloseLabel)
             .padding(.trailing, trailingPadding)
         } else if horizontalSizeClass == .compact {
             // UIKit's automatic toolbar overflow keeps only the trailing
@@ -1177,6 +1276,7 @@ struct TerminalWindowRoot: View {
             fontDown: { fontSize = max(9, fontSize - 1) },
             fontUp: { fontSize = min(32, fontSize + 1) },
             newSession: { openNewTab(launching: $0) },
+            openFileViewer: { openFileViewer(target: nil) },
             merge: { merge($0) },
             detach: { detachActiveTab() },
             closeSession: activeTabHasSession
@@ -1212,13 +1312,14 @@ struct TerminalWindowRoot: View {
     }
 
     /// Dropdown: a fresh session in the active tab's directory, plain or
-    /// launching an agent — mirrors the deck's New Session options.
+    /// launching an agent — mirrors the deck's New Session options — plus
+    /// the file viewer, which docks beside this tab at the pane's cwd.
     private var newTabMenu: some View {
         Menu {
-            Button("New Session") { openNewTab(launching: nil) }
-            ForEach(AgentKind.allCases, id: \.self) { agent in
-                Button(agent.displayName) { openNewTab(launching: agent) }
-            }
+            NewTabMenuItems(
+                newSession: { openNewTab(launching: $0) },
+                openFileViewer: { openFileViewer(target: nil) }
+            )
         } label: {
             ChassisBadge("TAB", systemImage: "plus")
         }
@@ -1226,7 +1327,7 @@ struct TerminalWindowRoot: View {
         .buttonStyle(.plain)
         .chassisHover(2)
         .fixedSize()
-        .accessibilityLabel("New tab: another session in this window")
+        .accessibilityLabel("New tab: another session or the file viewer")
     }
 
     private var deckButton: some View {
@@ -1299,18 +1400,18 @@ struct TerminalWindowRoot: View {
     /// closes), otherwise controllers exist for every tab and the window's
     /// directory entry is fresh.
     private func syncTabs() {
-        // The viewport's no-persistence rule: its controllers exist only in
-        // the process that summoned them (`openViewport` registers before
-        // the tab enters any route), so a viewport tab without one can only
-        // be scene restoration handing back a previous launch's page —
-        // summoned, not restored, it is stripped rather than resurrected.
-        // The mutation re-enters here through onChange; the second pass
-        // finds nothing to strip.
-        let restoredViewports = route.tabs.filter {
-            $0.isViewport && workspace.viewportController(for: $0.id) == nil
+        // The auxiliary panes' no-persistence rule: their controllers exist
+        // only in the process that summoned them (`openViewport`/
+        // `openFileViewer` register before the tab enters any route), so an
+        // auxiliary tab without one can only be scene restoration handing
+        // back a previous launch's pane — summoned, not restored, it is
+        // stripped rather than resurrected. The mutation re-enters here
+        // through onChange; the second pass finds nothing to strip.
+        let orphanedAuxiliaries = route.tabs.filter { tab in
+            tab.isAuxiliaryPane && workspace.auxiliaryController(for: tab.id) == nil
         }
-        if !restoredViewports.isEmpty {
-            let ids = Set(restoredViewports.map(\.id))
+        if !orphanedAuxiliaries.isEmpty {
+            let ids = Set(orphanedAuxiliaries.map(\.id))
             route.tabs.removeAll { ids.contains($0.id) }
             if let active = route.activeTabID, ids.contains(active) {
                 route.activeTabID = route.tabs.first?.id
@@ -1329,7 +1430,9 @@ struct TerminalWindowRoot: View {
             }
             return
         }
-        for tab in route.tabs where !tab.isViewport {
+        for tab in route.tabs where !tab.isAuxiliaryPane {
+            // Auxiliary tabs must never mint a TerminalSessionController —
+            // a file-viewer route has no PTY to dial.
             _ = workspace.controller(for: tab, store: store)
         }
         workspace.registerWindow(.init(
@@ -1556,7 +1659,7 @@ private struct TerminalPane: View {
     private func statusOverlay(for controller: TerminalSessionController) -> some View {
         switch controller.status {
         case .connecting:
-            chassisPanel {
+            ChassisPanel {
                 ProgressView()
                 Text(connectingCaption(for: controller))
                     .font(.mono(14))
@@ -1565,7 +1668,7 @@ private struct TerminalPane: View {
         case .live:
             EmptyView()
         case .ended(let reason):
-            chassisPanel {
+            ChassisPanel {
                 TallyLamp(caption: reason == nil ? "DETACHED" : "ENDED", color: Theme.signal3)
                 if let reason {
                     Text(reason)
@@ -1595,7 +1698,7 @@ private struct TerminalPane: View {
 
     /// A restored tab whose host was removed — say so, never a blank pane.
     private var missingHost: some View {
-        chassisPanel {
+        ChassisPanel {
             Text("This host was removed")
                 .font(.mono(17, weight: .semibold))
                 .foregroundStyle(Theme.signal)
@@ -1607,17 +1710,6 @@ private struct TerminalPane: View {
             ChassisChip("CLOSE TAB", prominent: true) { close() }
                 .padding(.top, 4)
         }
-    }
-
-    private func chassisPanel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(spacing: 14) {
-            content()
-        }
-        .padding(30)
-        .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.bezelHi, lineWidth: 1))
     }
 }
 
@@ -1850,6 +1942,46 @@ extension Notification.Name {
     static let multiplexDebugLinkOpen = Notification.Name("MultiplexDebugLinkOpen")
     static let multiplexDebugViewportOpen = Notification.Name("MultiplexDebugViewportOpen")
     static let multiplexDebugLinkRegions = Notification.Name("MultiplexDebugLinkRegions")
+    static let multiplexDebugFileViewer = Notification.Name("MultiplexDebugFileViewer")
+    static let multiplexDebugPathView = Notification.Name("MultiplexDebugPathView")
+    static let multiplexDebugFileViewerRepoDiff = Notification.Name(
+        "MultiplexDebugFileViewerRepoDiff"
+    )
+}
+
+/// `….debug.fileviewer` runs the focused window's + TAB ▸ File Viewer
+/// action (pane-cwd resolve → controller registration → tab dock);
+/// `….debug.pathview` runs the path sheet's ▤ VIEW for the pending path a
+/// prior `….debug.link` raised over path-shaped text — together the
+/// headless walk of both summon doors.
+@MainActor
+enum FileViewerDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var openToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.fileviewer", &openToken, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugFileViewer, object: nil)
+        }
+        var viewToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.pathview", &viewToken, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugPathView, object: nil)
+        }
+        var repoDiffToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.fvrepodiff", &repoDiffToken, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugFileViewerRepoDiff, object: nil
+            )
+        }
+    }
 }
 
 /// `….debug.link` activates the first link on the focused terminal's visible

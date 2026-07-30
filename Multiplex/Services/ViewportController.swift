@@ -19,7 +19,7 @@ import WebKit
 /// restored") falls out of their absence after a relaunch.
 @MainActor
 @Observable
-final class ViewportController {
+final class ViewportController: AuxiliaryPaneController {
     let tabID: UUID
     /// The confirmation that admitted this page.
     let offer: ViewportOffer
@@ -128,6 +128,8 @@ final class ViewportController {
     /// The rail's readout: current host emphasized by the view; falls back
     /// to the confirmed offer before the first commit.
     var displayURL: URL { currentURL ?? offer.url }
+
+    var tabLabel: String { TerminalRoute.viewportLabel(displayURL.absoluteString) }
 
     func reload() {
         failure = nil

@@ -13,10 +13,10 @@ struct TerminalTabStrip: View {
         var hostName: String?
         var controller: TerminalSessionController?
         var isActive: Bool
-        /// A viewport tab's cell carries the ⌗ mark in its title and NO
-        /// tally dot — a page is not a shell, and the red dot stays a
-        /// shell's live state.
-        var isViewport = false
+        /// An auxiliary tab (viewport ⌗, file viewer ▤) carries its mark in
+        /// its title and NO tally dot — a page or a file is not a shell,
+        /// and the red dot stays a shell's live state.
+        var isAuxiliary = false
     }
 
     let items: [Item]
@@ -40,7 +40,7 @@ struct TerminalTabStrip: View {
             activate(item.id)
         } label: {
             HStack(spacing: 8) {
-                if !item.isViewport {
+                if !item.isAuxiliary {
                     Circle()
                         .fill(dotColor(item))
                         .frame(width: 6, height: 6)

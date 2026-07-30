@@ -484,6 +484,172 @@ actor SSHConnection {
         }
     }
 
+    // MARK: SFTP (file viewer)
+
+    /// One remote directory entry as SFTP reported it — a transport-side
+    /// value so Citadel types never cross into Models. `permissions` carry
+    /// the S_IFMT type bits; readdir has lstat semantics, so a symlink
+    /// reports itself (the viewer stats on select to follow it).
+    struct DirectoryEntry: Sendable {
+        var name: String
+        var permissions: UInt32?
+
+        var isDirectory: Bool { isDirectoryMode(permissions) }
+    }
+
+    struct FileStat: Sendable, Equatable {
+        var size: UInt64?
+        var permissions: UInt32?
+        /// SFTP v3 mtime is whole seconds — good enough for the viewer's
+        /// change watch (paired with size).
+        var modified: Date?
+
+        var isDirectory: Bool { isDirectoryMode(permissions) }
+    }
+
+    /// The one S_IFMT read — both entry types answer through it.
+    private static func isDirectoryMode(_ permissions: UInt32?) -> Bool {
+        permissions.map { ($0 & 0o170000) == 0o040000 } ?? false
+    }
+
+    func listDirectory(atPath path: String) async throws -> [DirectoryEntry] {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            var entries: [DirectoryEntry] = []
+            for name in try await sftp.listDirectory(atPath: path) {
+                for component in name.components {
+                    let filename = component.filename
+                    guard filename != "." && filename != ".." else { continue }
+                    entries.append(DirectoryEntry(
+                        name: filename,
+                        permissions: component.attributes.permissions
+                    ))
+                }
+            }
+            return entries
+        }
+    }
+
+    /// SFTP `stat` — follows symlinks, which is exactly what selecting a
+    /// tree row needs (a linked directory navigates, a linked file opens).
+    func statFile(atPath path: String) async throws -> FileStat {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            let attributes = try await sftp.getAttributes(at: path)
+            return FileStat(
+                size: attributes.size,
+                permissions: attributes.permissions,
+                modified: attributes.accessModificationTime?.modificationTime
+            )
+        }
+    }
+
+    func canonicalPath(atPath path: String) async throws -> String {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            try await sftp.getRealPath(atPath: path)
+        }
+    }
+
+    /// Read up to `limit` bytes. One SFTP READ is server-capped (commonly
+    /// 32–64 KB) and costs a full round trip, so chunks at precomputed
+    /// offsets are requested concurrently — request IDs are per-call and
+    /// outstanding READs on one handle are protocol-legal (OpenSSH's own
+    /// sftp client keeps dozens in flight); a serialized walk pays
+    /// size ÷ grant round trips, seconds of latency on a megabyte file.
+    /// `truncated` reports whether the file continued past the limit.
+    func readFile(
+        atPath path: String,
+        limit: Int
+    ) async throws -> (data: Data, truncated: Bool) {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            let file = try await sftp.openFile(filePath: path, flags: .read)
+            do {
+                let size = try await file.readAttributes().size
+                let result = try await Self.readChunks(of: file, size: size, limit: limit)
+                try await file.close()
+                return result
+            } catch {
+                try? await file.close()
+                throw error
+            }
+        }
+    }
+
+    private static let readChunkSize = 128 * 1024
+    private static let readsInFlight = 6
+
+    /// Fill one fixed slice: loops because a single READ may legally return
+    /// less than asked. A short result means EOF landed inside the slice.
+    private static func readChunk(
+        _ file: SFTPFile, offset: Int, length: Int
+    ) async throws -> Data {
+        var data = Data()
+        while data.count < length {
+            var buffer = try await file.read(
+                from: UInt64(offset + data.count),
+                length: UInt32(length - data.count)
+            )
+            guard buffer.readableBytes > 0,
+                  let piece = buffer.readData(length: buffer.readableBytes)
+            else { break }
+            data.append(piece)
+        }
+        return data
+    }
+
+    /// `limit + 1` is the read target — the one extra byte answers "did the
+    /// file continue?" without reading the rest. With the server-reported
+    /// size in hand the chunk plan is fixed up front and a bounded window
+    /// keeps `readsInFlight` requests going; assembly stops at the first
+    /// short chunk (the file shrank underneath us — the watch's next stat
+    /// reconciles). A server that reports no size gets the sequential walk.
+    private static func readChunks(
+        of file: SFTPFile, size: UInt64?, limit: Int
+    ) async throws -> (data: Data, truncated: Bool) {
+        let wanted = limit + 1
+        var data = Data()
+        if let size {
+            let total = Int(min(size, UInt64(wanted)))
+            let offsets = Array(stride(from: 0, to: total, by: readChunkSize))
+            var chunks = [Data?](repeating: nil, count: offsets.count)
+            try await withThrowingTaskGroup(of: (Int, Data).self) { group in
+                var next = 0
+                func addNext() {
+                    let offset = offsets[next]
+                    let length = min(readChunkSize, total - offset)
+                    let index = next
+                    group.addTask {
+                        (index, try await readChunk(file, offset: offset, length: length))
+                    }
+                    next += 1
+                }
+                while next < offsets.count, next < readsInFlight { addNext() }
+                while let (index, chunk) = try await group.next() {
+                    chunks[index] = chunk
+                    if next < offsets.count { addNext() }
+                }
+            }
+            for (index, chunk) in chunks.enumerated() {
+                guard let chunk else { break }
+                data.append(chunk)
+                let planned = min(readChunkSize, total - offsets[index])
+                if chunk.count < planned { break }
+            }
+        } else {
+            while data.count < wanted {
+                let length = min(readChunkSize, wanted - data.count)
+                let chunk = try await readChunk(file, offset: data.count, length: length)
+                data.append(chunk)
+                if chunk.count < length { break }
+            }
+        }
+        let truncated = data.count > limit
+        if truncated { data = data.prefix(limit) }
+        return (data, truncated)
+    }
+
     // MARK: Interactive PTY shell
 
     /// Opens a PTY'd login shell. When `command` is set (tmux attach/create),

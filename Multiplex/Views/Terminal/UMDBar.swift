@@ -25,6 +25,8 @@ struct UMDBar: View {
     /// New tab: a fresh session on the active tab's host, in its pane's
     /// directory — nil for a plain shell session, or an agent to launch.
     var newSession: (AgentKind?) -> Void
+    /// New tab: the file viewer, rooted at the active pane's directory.
+    var openFileViewer: () -> Void
     var merge: (UUID) -> Void
     var detach: () -> Void
     /// Kill the active tab's tmux session, then close the tab — the detach
@@ -186,17 +188,14 @@ struct UMDBar: View {
 
     private var newTabMenu: some View {
         Menu {
-            Button("New Session") { newSession(nil) }
-            ForEach(AgentKind.allCases, id: \.self) { agent in
-                Button(agent.displayName) { newSession(agent) }
-            }
+            NewTabMenuItems(newSession: newSession, openFileViewer: openFileViewer)
         } label: {
             ChassisBadge("TAB", systemImage: "plus")
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .chassisHover(2)
-        .accessibilityLabel("New tab: another session in this window")
+        .accessibilityLabel("New tab: another session or the file viewer")
     }
 
     private var tmuxShortcutButton: some View {
@@ -237,6 +236,7 @@ struct UMDBar: View {
             fontDown: fontDown,
             fontUp: fontUp,
             newSession: newSession,
+            openFileViewer: openFileViewer,
             merge: merge,
             detach: detach,
             closeSession: closeSession
@@ -349,6 +349,25 @@ struct UMDBar: View {
     }
 }
 
+/// The + TAB dropdown's content — a fresh session in the active tab's
+/// directory, plain or launching an agent (the deck's New Session grammar),
+/// plus the file viewer. ONE spelling for its three homes — the classic
+/// toolbar, the UMD bar, and the compact overflow's New Tab submenu — so a
+/// new entry lands on every surface or none.
+struct NewTabMenuItems: View {
+    var newSession: (AgentKind?) -> Void
+    var openFileViewer: () -> Void
+
+    var body: some View {
+        Button("New Session") { newSession(nil) }
+        ForEach(AgentKind.allCases, id: \.self) { agent in
+            Button(agent.displayName) { newSession(agent) }
+        }
+        Divider()
+        Button("File Viewer") { openFileViewer() }
+    }
+}
+
 /// Shared compact action menu for the iPhone shell and narrow classic iPad
 /// windows. Keeping one menu definition prevents either compact surface from
 /// silently losing actions as the regular terminal chrome evolves.
@@ -358,6 +377,7 @@ struct TerminalOverflowMenu: View {
     var fontDown: () -> Void
     var fontUp: () -> Void
     var newSession: (AgentKind?) -> Void
+    var openFileViewer: () -> Void
     var merge: (UUID) -> Void
     var detach: () -> Void
     var closeSession: (() -> Void)?
@@ -374,10 +394,7 @@ struct TerminalOverflowMenu: View {
                 Button("Larger Text", action: fontUp)
             }
             Menu("New Tab") {
-                Button("New Session") { newSession(nil) }
-                ForEach(AgentKind.allCases, id: \.self) { agent in
-                    Button(agent.displayName) { newSession(agent) }
-                }
+                NewTabMenuItems(newSession: newSession, openFileViewer: openFileViewer)
             }
             FileAttachSubmenu(controller: controller) {
                 requestedFileAttachPicker = $0
@@ -430,6 +447,7 @@ struct TerminalOverflowMenu: View {
         fontDown: {},
         fontUp: {},
         newSession: { _ in },
+        openFileViewer: {},
         merge: { _ in },
         detach: {},
         closeSession: {}
@@ -447,6 +465,7 @@ struct TerminalOverflowMenu: View {
         fontDown: {},
         fontUp: {},
         newSession: { _ in },
+        openFileViewer: {},
         merge: { _ in },
         detach: {},
         closeSession: {},

@@ -120,3 +120,53 @@ Worth checking:
   never glow, links under your gaze in a build log should light within a
   second of printing, and scrolling/pane-switching over a link must keep
   working exactly as before.
+
+FILE VIEWER — the host's files and git diffs, beside the terminal
+
+Two ways in. Long-press a file path printed in any pane — ./src/app.ts,
+~/notes/todo.md, Multiplex/App.swift:120 — and a sheet names the host and
+the resolved path; ▤ VIEW docks a read-only file viewer as a tab beside
+that session. Or press + TAB ▸ File Viewer to open one rooted at the
+pane's current directory. It moves like any tab (split it out beside the
+terminal, MERGE it back) and never survives a relaunch — summoned, not
+restored, like the viewport.
+
+Inside: code with syntax highlighting (Swift, TS/JS, Rust, Python, Go,
+C/C++, JSON, YAML, shell, and more), Markdown rendered as a document
+(RAW one chip away), images, and — the point — git. The tree on the
+right stands on its own screen: branch, +/− counts, letter badges
+(M modified, A staged, U untracked, D deleted), and a CHANGED filter.
+A modified file grows a SOURCE | DIFF pair; the ± counts in the tree
+header open the whole working tree's diff, grouped per file.
+
+Worth checking:
+- Long-press a path an agent printed (with a :12 line suffix if you can) —
+  the viewer must open scrolled to that line, highlighted.
+- Paths that aren't paths must keep falling through to text selection:
+  "warning:", $VAR/things, prose with spaces.
+- In a repo, edit a file, open the viewer: the file wears M in the tree,
+  DIFF shows the hunks (green adds, red deletes), CHANGED collapses the
+  tree to what moved, and the ± chip opens the repo-wide diff.
+- README.md renders as a document — headings, lists, tables, fenced code
+  with highlighting. Links in it confirm through the same sheet as pane
+  links; relative links (docs/x.md) navigate inside the viewer.
+- A binary file must say BINARY and its size, never garbage; a huge file
+  renders its head under a TRUNCATED banner.
+- Split the ▤ tab into its own window beside the terminal, keep working,
+  press REFRESH — tree badges and diffs follow your edits.
+- Close the terminal that summoned it: the viewer keeps working (it holds
+  its own connection). Relaunch the app: ▤ tabs must be gone.
+- mosh hosts: the viewer works there too (it reads over SSH).
+- iPhone: the tree is a drawer behind the TREE chip in the bottom rail.
+- The tree hides what your editor hides (.git, .DS_Store and friends) —
+  but .gitignore and other dotfiles stay visible, and opening a pressed
+  path into a hidden folder still works.
+- Open an image: it fits the screen; pinch to zoom (double-tap flips
+  fit ↔ 2×), pan when zoomed, and the % chip bottom-right resets to fit.
+- The viewer now follows the host on its own: with its tab frontmost it
+  re-checks every ~5 seconds — edit a file in the session beside it and
+  the open document, diff, tree badges, and ± counts catch up without
+  touching REFRESH (which stays for forcing the issue). Deleting the
+  open file shows FILE GONE rather than stale bytes.
+- iPhone: + TAB > File Viewer now opens with the tree already out, so the
+  first file is one tap; opening a pressed path still lands on the file.

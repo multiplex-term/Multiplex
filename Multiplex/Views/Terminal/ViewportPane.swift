@@ -64,15 +64,7 @@ struct ViewportPane: View {
         // A page may navigate to something the gate refuses to render
         // (mailto, a custom scheme). Same discipline as a pane press: the
         // target is shown and confirmed, never followed.
-        .sheet(item: $controller.externalLink) { link in
-            TerminalLinkSheet(
-                link: link,
-                onOpen: {
-                    if let url = link.openableURL { UIApplication.shared.open(url) }
-                },
-                onCopy: { UIPasteboard.general.string = link.raw }
-            )
-        }
+        .terminalLinkConfirmation(item: $controller.externalLink)
     }
 
     // MARK: Rail
@@ -239,8 +231,7 @@ struct ViewportPane: View {
     /// happened and, when the address lives on the host's network, whose
     /// network that is.
     private func failurePanel(_ message: String) -> some View {
-        VStack(spacing: 14) {
-            TallyLamp(caption: "NO ROUTE", color: Theme.caution)
+        ChassisPanel(caption: "NO ROUTE") {
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(Theme.signal2)
@@ -259,11 +250,6 @@ struct ViewportPane: View {
             }
             .padding(.top, 4)
         }
-        .padding(30)
-        .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.bezelHi, lineWidth: 1))
         .padding(20)
     }
 
@@ -338,6 +324,9 @@ struct ViewportUMD: View {
     var style: Style = .regular
     var deckControlLabel = "DECK"
     var contentSafeArea = EdgeInsets()
+    /// The file viewer shares this monitor face; only the close wording
+    /// differs.
+    var closeAccessibilityLabel = "Close viewport"
 
     @ViewBuilder
     var body: some View {
@@ -357,7 +346,7 @@ struct ViewportUMD: View {
             }
             divider
             ChassisChip("CLOSE", prominent: true, action: close)
-                .accessibilityLabel("Close viewport")
+                .accessibilityLabel(closeAccessibilityLabel)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 11)
@@ -376,7 +365,7 @@ struct ViewportUMD: View {
             Spacer(minLength: 4)
             ChassisChip("CLOSE", prominent: true, action: close)
                 .fixedSize()
-                .accessibilityLabel("Close viewport")
+                .accessibilityLabel(closeAccessibilityLabel)
         }
         .padding(.leading, 10 + contentSafeArea.leading)
         .padding(.trailing, 10 + contentSafeArea.trailing)

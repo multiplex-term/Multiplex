@@ -406,6 +406,21 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertTrue(command.contains("echo MULTIPLEX_GIT"))
     }
 
+    func testParseDropDestinationReadsPathAndWorktreeMarker() {
+        let inWorktree = TmuxProbe.parseDropDestination("/home/dev/repo\nMULTIPLEX_GIT\n")
+        XCTAssertEqual(inWorktree.cwd, "/home/dev/repo")
+        XCTAssertTrue(inWorktree.insideGitWorktree)
+
+        let plain = TmuxProbe.parseDropDestination("  /srv/data \n")
+        XCTAssertEqual(plain.cwd, "/srv/data")
+        XCTAssertFalse(plain.insideGitWorktree)
+
+        // No pane answered: empty output, or noise without a /-prefixed line.
+        let empty = TmuxProbe.parseDropDestination("\n")
+        XCTAssertNil(empty.cwd)
+        XCTAssertFalse(empty.insideGitWorktree)
+    }
+
     // MARK: New sessions (the + TAB button, the deck tile's quick options)
 
     func testNewSessionCommandInheritsSourceDirectoryAndTypesLaunch() {

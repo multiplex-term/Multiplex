@@ -383,7 +383,24 @@ enum TmuxProbe {
             + "printf '%s\\n' \"$p\"; "
             + "if [ -n \"$p\" ] && command -v git >/dev/null 2>&1"
             + " && [ \"$(git -C \"$p\" rev-parse --is-inside-work-tree 2>/dev/null)\" = true ]; "
-            + "then echo MULTIPLEX_GIT; fi"
+            + "then echo \(gitWorktreeMarker); fi"
+    }
+
+    private static let gitWorktreeMarker = "MULTIPLEX_GIT"
+
+    /// `dropDestinationCommand` output → the active pane's cwd (the first
+    /// `/`-prefixed line; nil when no pane answered) and whether it sits
+    /// inside a git worktree. Shared by file drops and the file viewer's
+    /// cwd anchor — the wire format has exactly one parser.
+    static func parseDropDestination(
+        _ output: String
+    ) -> (cwd: String?, insideGitWorktree: Bool) {
+        let lines = output.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        return (
+            lines.first { $0.hasPrefix("/") },
+            lines.contains(gitWorktreeMarker)
+        )
     }
 
     // MARK: - New sessions (the window's + TAB button, the deck tile's quick options)
