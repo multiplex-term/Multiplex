@@ -16,3 +16,20 @@ Worth checking:
 - Latch CTRL and type c on the keyboard instead: same ^C, strip goes away.
 - iPad/iPhone: the strip is square chassis (no rounded popover); Vision
   Pro shows a small glass popover over the ornament's CTRL key.
+
+IPHONE LOCKED RETURN — keep RET on the rail with the keyboard closed
+
+Locking the software keyboard on iPhone now adds RET immediately after the
+arrow keys, so the rail can still submit a command without bringing the
+keyboard back. iPhone Air keeps RET, the padlock, and TMUX together in the
+bottom rail; narrower phones move TMUX to its dedicated top-right button
+while locked. Unlocking restores the previous compact rail.
+
+Worth checking:
+- iPhone Air: hold the keyboard key. RET should appear between the right
+  arrow and padlock, with TMUX still at the bottom and no clipping.
+- Type a command with a hardware keyboard or rail controls, then press RET:
+  it must send Return while the software keyboard stays locked closed.
+- On a narrower iPhone, lock and confirm RET stays below while TMUX appears
+  at top-right; unlock and confirm TMUX returns below with no duplicate.
+- iPad is unchanged: RET remains visible whether keyboard lock is on or off.

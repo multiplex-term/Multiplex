@@ -122,8 +122,9 @@ Current product split:
 - Free: two hosts, adding one by running the companion CLI on it (QR,
   clipboard (opt-in, `--copy`), or local-network discovery with a PIN — the two-host limit
   still applies), full SSH spatial windows/tabs/merge with multilingual
-  system-keyboard/IME input, a dedicated iPad RET key immediately after the
-  direction keys, and primary-button touch/pointer input for mouse-aware TUIs,
+  system-keyboard/IME input, a dedicated RET key immediately after the
+  direction keys (always on iPad, and while iPhone's software keyboard is
+  locked closed), and primary-button touch/pointer input for mouse-aware TUIs,
   all-pane agent detection and wall
   telemetry with foreground-aware helpers in tmux panes and plain SSH
   shells (including direct-shell NEEDS YOU chrome), a System/Light/Dark

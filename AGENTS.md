@@ -622,14 +622,14 @@ views.
   and re-checks at begin, so a rightward selection-handle drag can never
   navigate to the deck. A SwiftUI gesture on the shell does not reliably
   receive drags begun inside `TerminalView`.
-- **The iPad key rail is app-owned chrome, never an `inputAccessoryView`**:
+- **The iPad/iPhone key rail is app-owned chrome, never an `inputAccessoryView`**:
   `TerminalKeyBar` is a TALLY rail (ESC / latching CTRL / TAB, the shell
-  symbols `~ | / -`, DECCKM-aware autorepeat arrows, an iPad-only RET
-  immediately to their right, and one slot that is either the keyboard toggle
-  — `TerminalFocusArbiter.toggle`, the app's only keyboard show/hide control
-  since the KBD chips were retired — or, while a physical keyboard is
-  attached, the dictation key described below) installed as a normal sibling beneath
-  `TerminalView`. A physical-iPad A/B proved that even
+  symbols `~ | / -`, DECCKM-aware autorepeat arrows, RET immediately to their
+  right on iPad and on a keyboard-locked iPhone, and one slot that is either
+  the keyboard toggle — `TerminalFocusArbiter.toggle`, the app's only keyboard
+  show/hide control since the KBD chips were retired — or, while a physical
+  keyboard is attached, the dictation key described below) installed as a
+  normal sibling beneath `TerminalView`. A physical-iPad A/B proved that even
   assigning the custom rail to `inputAccessoryView` makes TextInputUI rehost it
   while a Stage Manager window moves, repeatedly reactivating the floating
   keyboard and stalling the UI. Keep `TerminalView.inputAccessoryView = nil`.
@@ -648,18 +648,23 @@ views.
   simulator route can hold a software key).
   PgUp/PgDn ride along (autorepeating, `CSI 5~`/`6~`) — pagers and CLI
   agents like Claude Code page their transcripts with them. Narrow tiers drop
-  page keys, then symbols; a 390 pt phone tier compacts keys to 40 pt while
-  retaining TMUX. The final sub-390 pt tier drops TMUX from the rail; on the
-  iPhone shell, a dedicated TMUX button then moves to the top-right beside the
+  page keys, then symbols; while unlocked, a 390 pt phone tier compacts keys to
+  40 pt and retains TMUX. Locking an iPhone removes the software keyboard's
+  Return, so the rail inserts RET: a zero-stack-gap tier preserves 40 pt hit
+  regions and keeps RET + TMUX together at the iPhone Air's 420 pt width,
+  while narrower locked phones drop TMUX from the rail and move a dedicated
+  TMUX button to the top-right beside the
   overflow (the overflow itself deliberately has no duplicate tmux entry).
-  Its popover opens downward; while it is presented, the focus arbiter
-  temporarily resigns the terminal so a docked software keyboard cannot clip
-  the fixed command grid, then restores input only if that tab still owns it.
-  ESC/CTRL/TAB, all four arrows, and the keyboard/dictation slot never leave
-  the rail;
-  RET likewise stays present on iPad, while iPhone omits it to preserve the
-  phone-width ladder. Every key sends through `TerminalView.send` → delegate →
-  the controller's ordered pump (never a side channel); CTRL rides SwiftTerm's public
+  `SingleWindowShellLayout`'s 390/420 cutoffs must stay in lockstep with those
+  measured `KeyBarRow` tiers; the 375 pt locked floor keeps RET and every other
+  essential key. The top popover opens downward; while it is presented, the
+  focus arbiter temporarily resigns the terminal so a docked software keyboard
+  cannot clip the fixed command grid, then restores input only if that tab
+  still owns it. ESC/CTRL/TAB, all four arrows, and the keyboard/dictation slot
+  never leave the rail; RET stays present on iPad and joins iPhone exactly
+  while keyboard lock is held. Every key sends through `TerminalView.send` →
+  delegate → the controller's ordered pump (never a side channel); CTRL rides
+  SwiftTerm's public
   `controlModifier`, consumed by the next typed character — the bar observes
   `.terminalViewControlModifierReset` to release the latch visual. visionOS
   keeps no accessory (its keyboard floats and shows none);

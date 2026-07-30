@@ -48,6 +48,9 @@ struct UMDBar: View {
     var contentSafeArea = EdgeInsets()
 
     @State private var showingTmuxShortcuts = false
+    /// The phone rail inserts RET while this lock is held. Observe it here too
+    /// so TMUX moves to the top bar exactly when the widened key row cannot fit.
+    private let keyboardLock = KeyboardLock.shared
     /// A top-anchored phone popover cannot fit between the UMD and a docked
     /// software keyboard. Remember whether this presentation temporarily
     /// resigned the terminal so input can resume when the panel closes.
@@ -168,9 +171,9 @@ struct UMDBar: View {
                 detachControl.fixedSize()
             } else {
                 overflowMenu.fixedSize()
-                // The sub-390-point phone rail drops TMUX to preserve every
-                // terminal lifeline key. Keep the shortcut as its own trailing
-                // top-bar control rather than burying it in the action menu.
+                // The unlocked sub-390-point rail drops TMUX to preserve every
+                // terminal key. Lock-only RET raises that cutoff to 420 points;
+                // keep the displaced shortcut explicit rather than burying it.
                 if showsCompactTopBarTmuxShortcut {
                     tmuxShortcutButton.fixedSize()
                 }
@@ -182,7 +185,8 @@ struct UMDBar: View {
         guard let availableWidth else { return false }
         return SingleWindowShellLayout.showsTopBarTmuxShortcut(
             availableWidth: availableWidth,
-            supportsTmuxShortcuts: showsTmuxShortcuts
+            supportsTmuxShortcuts: showsTmuxShortcuts,
+            keyBarIncludesReturnKey: keyboardLock.isLocked
         )
     }
 

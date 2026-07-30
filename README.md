@@ -54,8 +54,10 @@ bake-off is recorded in [docs/landing/](docs/landing/).*
   key rail on iPad/iPhone lists the most-used stock tmux shortcuts (windows,
   panes, and copy mode); on sub-390 pt iPhones it moves to the shell's
   top-right so the compact key rail can keep every terminal key. The iPad rail
-  also places a dedicated **RET** immediately to the right of its arrow keys
-  (the phone rail omits it to preserve that compact ladder). Shortcuts send
+  always places a dedicated **RET** immediately to the right of its arrow keys;
+  iPhone adds the same key while keyboard lock is held, so Return remains
+  reachable with the software keyboard closed. iPhone Air keeps RET and TMUX
+  together below; narrower locked phones move TMUX above. Shortcuts send
   their default `Ctrl-B` bindings through the same ordered input path as the
   keyboard. Copy mode becomes a clear contextual
   state: swipe through remote history, hold text for native selection/copy,

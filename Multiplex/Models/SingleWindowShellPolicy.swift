@@ -40,10 +40,11 @@ enum ShellModeDecision {
 enum SingleWindowShellLayout {
     static let expandedThreshold: CGFloat = 620
     static let deckRailWidth: CGFloat = 316
-    /// The compact key rail retains its TMUX key at 390 points. Below this,
-    /// its essentials-only tier takes over and the shell's top bar becomes
-    /// the shortcut entry point instead.
+    /// An unlocked compact key rail retains TMUX at 390 points. Keyboard lock
+    /// adds RET on iPhone; its slightly tighter Air tier keeps both controls at
+    /// 420 points, while narrower locked phones move TMUX to the top bar.
     static let keyBarTmuxMinimumWidth: CGFloat = 390
+    static let keyBarTmuxWithReturnMinimumWidth: CGFloat = 420
 
     static func isExpanded(width: CGFloat) -> Bool {
         width >= expandedThreshold
@@ -51,9 +52,13 @@ enum SingleWindowShellLayout {
 
     static func showsTopBarTmuxShortcut(
         availableWidth: CGFloat,
-        supportsTmuxShortcuts: Bool
+        supportsTmuxShortcuts: Bool,
+        keyBarIncludesReturnKey: Bool = false
     ) -> Bool {
-        supportsTmuxShortcuts && availableWidth < keyBarTmuxMinimumWidth
+        let minimumWidth = keyBarIncludesReturnKey
+            ? keyBarTmuxWithReturnMinimumWidth
+            : keyBarTmuxMinimumWidth
+        return supportsTmuxShortcuts && availableWidth < minimumWidth
     }
 }
 

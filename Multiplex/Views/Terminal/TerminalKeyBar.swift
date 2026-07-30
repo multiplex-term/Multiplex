@@ -73,6 +73,8 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             controller: controller,
             hardwareKeyboard: HardwareKeyboardMonitor.shared,
             showsTmuxShortcuts: showsTmuxShortcuts,
+            // iPad keeps RET permanently. On iPhone the row adds it from
+            // `KeyboardLock` only while the software keyboard is locked shut.
             showsReturnKey: UIDevice.current.userInterfaceIdiom == .pad,
             press: { [weak self] key in self?.press(key) }
         ))
@@ -414,13 +416,15 @@ private enum TerminalKey {
     case tmux(TmuxShortcut)
 }
 
-/// The rail: modifiers left, shell symbols center, then arrows, an iPad-only
-/// RET key, and the keyboard toggle on the right.
+/// The rail: modifiers left, shell symbols center, then arrows, RET on iPad
+/// (and on iPhone while its software keyboard is locked), and the keyboard
+/// control on the right.
 /// Fixed-size keys let ViewThatFits measure every tier honestly. The original
 /// iPad ladder stays first; phone tiers compact the key metric only after page
-/// keys and symbols are gone. Regular phones retain TMUX; below 390 points the
-/// essentials-only tier drops it while every terminal lifeline key remains
-/// available, and the iPhone shell moves the shortcut to its top-right bar.
+/// keys and symbols are gone. An unlocked 390-point phone retains TMUX. With
+/// lock-only RET inserted, the 420-point iPhone Air retains it too; narrower
+/// phones move TMUX to the shell's top-right bar while every terminal key stays
+/// available.
 private struct KeyBarRow: View {
     var model: TerminalKeyBar.Model
     /// Only for the dictation key's live state; every key still sends
@@ -428,11 +432,17 @@ private struct KeyBarRow: View {
     var controller: TerminalSessionController?
     var hardwareKeyboard: HardwareKeyboardMonitor
     var showsTmuxShortcuts: Bool
+    /// Whether RET remains visible while the software keyboard is available
+    /// (true on iPad). A locked iPhone adds it independently below.
     var showsReturnKey: Bool
     var press: (TerminalKey) -> Void
     /// The keyboard key doubles as the lock control: read here so the face
     /// flips to the latched lock the moment the arbiter engages it.
     private let keyboardLock = KeyboardLock.shared
+
+    private var includesReturnKey: Bool {
+        showsReturnKey || keyboardLock.isLocked
+    }
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -453,13 +463,26 @@ private struct KeyBarRow: View {
                 )
                 .padding(.horizontal, 8)
             }
+            if showsTmuxShortcuts, includesReturnKey {
+                // Ten 40-point hit regions plus a real TAB→arrows group break
+                // fit exactly at 420: Air keeps lock-only RET and TMUX together.
+                row(
+                    symbols: [],
+                    withPageKeys: false,
+                    showsTmux: true,
+                    metric: .compactReturnWithTmux
+                )
+                .padding(.horizontal, 8)
+            }
             row(
                 symbols: [],
                 withPageKeys: false,
                 showsTmux: false,
-                metric: showsReturnKey ? .compactTight : .compact
+                metric: includesReturnKey ? .compactReturn : .compact
             )
-            .padding(.horizontal, 8)
+            // The 375-point return-bearing floor gives its nine essential
+            // keys seven points at each edge; an unlocked phone keeps eight.
+            .padding(.horizontal, includesReturnKey ? 7 : 8)
         }
         .padding(.vertical, 7)
         // Inside the ViewThatFits' proposal, so a pane spanning the Island's
@@ -483,10 +506,10 @@ private struct KeyBarRow: View {
         showsTmux: Bool = true,
         metric: KeyMetric = .regular
     ) -> some View {
-        // RET adds one key on iPad. Slightly smaller minimum group gaps keep
-        // PgUp/PgDn in the standard 768-point portrait tier; at wider sizes
-        // the Spacers expand exactly as before.
-        let groupGap = showsReturnKey ? min(metric.groupGap, 8) : metric.groupGap
+        // RET adds one key on iPad and while an iPhone keyboard is locked.
+        // Slightly smaller minimum group gaps keep PgUp/PgDn in the standard
+        // 768-point portrait tier; at wider sizes the Spacers expand as before.
+        let groupGap = includesReturnKey ? min(metric.groupGap, 8) : metric.groupGap
 
         return HStack(spacing: metric.spacing) {
             capsKey("ESC", .esc, "Escape", metric: metric)
@@ -530,7 +553,7 @@ private struct KeyBarRow: View {
             arrowKey("arrow.up", .up, "Arrow up", metric: metric)
             arrowKey("arrow.down", .down, "Arrow down", metric: metric)
             arrowKey("arrow.right", .right, "Arrow right", metric: metric)
-            if showsReturnKey {
+            if includesReturnKey {
                 capsKey("RET", .returnKey, "Return", metric: metric)
             }
             // A physical keyboard suppresses the software one outright, so
@@ -632,6 +655,24 @@ private struct KeyBarRow: View {
         static let compactTight = KeyMetric(
             keyWidth: 40,
             spacing: 1,
+            groupGap: 1,
+            faceHorizontalInset: 1
+        )
+        // Locked iPhone Air: 10 keys × 40 + a 4-point group spacer + 16
+        // points of edge padding = its 420-point width exactly. Zero stack
+        // spacing compacts only transparent gaps; 1-point face insets keep
+        // adjacent borders separated while preserving 40-point hit regions.
+        static let compactReturnWithTmux = KeyMetric(
+            keyWidth: 40,
+            spacing: 0,
+            groupGap: 4,
+            faceHorizontalInset: 1
+        )
+        // Narrow locked phone without TMUX: 9 keys × 40 + a 1-point group
+        // spacer + 14 points of edge padding = 375 points exactly.
+        static let compactReturn = KeyMetric(
+            keyWidth: 40,
+            spacing: 0,
             groupGap: 1,
             faceHorizontalInset: 1
         )
@@ -874,7 +915,7 @@ enum KeyBarDebugHook {
     .frame(width: 1024, height: TerminalKeyBar.barHeight)
 }
 
-#Preview("Compact Key Bar") {
+#Preview("iPhone Key Bar — Unlocked") {
     KeyBarRow(
         model: TerminalKeyBar.Model(),
         controller: nil,
@@ -884,6 +925,19 @@ enum KeyBarDebugHook {
         press: { _ in }
     )
     .frame(width: 390, height: TerminalKeyBar.barHeight)
+}
+
+#Preview("iPhone Air Key Bar — Locked Layout") {
+    // Stage the lock-only RET layout without mutating the shared preview lock.
+    KeyBarRow(
+        model: TerminalKeyBar.Model(),
+        controller: nil,
+        hardwareKeyboard: HardwareKeyboardMonitor.shared,
+        showsTmuxShortcuts: true,
+        showsReturnKey: true,
+        press: { _ in }
+    )
+    .frame(width: 420, height: TerminalKeyBar.barHeight)
 }
 #endif
 #endif

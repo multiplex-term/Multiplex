@@ -146,16 +146,19 @@ agent's option picker without summoning it). The iPad toolbar keeps the
 full chip set: `DECK`,
 source label, lamp, then
 `A− · A+ · + TAB · FILE · TMUX · MERGE · DETACH` chips; the keyboard
-toggle lives on the bottom key rail. On iPad that rail places a dedicated
-`RET` immediately to the right of the arrow keys; iPhone omits it to preserve
-its compact-width ladder. On an SSH-backed tmux tab, `FILE` opens Camera
+toggle lives on the bottom key rail. On iPad that rail always places a dedicated
+`RET` immediately to the right of the arrow keys. On iPhone it joins the rail
+while keyboard lock is held, replacing the Return key that disappeared with
+the software keyboard. On an SSH-backed tmux tab, `FILE` opens Camera
 (iPad/iPhone), Photos, and Files
 pickers and rejoins the terminal's existing SFTP drop path; mosh and plain
 shell tabs omit it. `TMUX` opens a custom square-grid TALLY dropdown
 listing the stock command, friendly action, and default `⌃B` binding; iPad and
 iPhone carry the same dropdown immediately after the keyboard control in the
-bottom key rail. Below 390 pt, the iPhone rail's essentials-only tier moves
-`TMUX` to a dedicated trailing control in the top UMD instead; opening it
+bottom key rail. Below 390 pt while unlocked, the iPhone rail's essentials-only
+tier moves `TMUX` to a dedicated trailing control in the top UMD instead. A
+locked iPhone raises that cutoff to 420 pt so Air keeps `RET · TMUX` together
+while narrower phones keep RET below and move TMUX above; opening the top control
 briefly yields the software keyboard's region to the downward popover, then
 restores terminal input on dismissal. Connection overlays are chassis panels
 with the same lamp anatomy.
