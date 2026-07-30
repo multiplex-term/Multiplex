@@ -1,5 +1,9 @@
-Multiplex 1.1.0 — add a host by running one command, choose the model an agent launches with, and dictate from the key rail.
+Multiplex 1.2.0 — browse host files and live web apps beside your terminal, lock the software keyboard closed, and switch tmux windows in one tap.
 
+• Open a confirmed web link in a ⌗ Viewport tab beside the terminal. The live page moves with its tab when you split or merge it, remote localhost addresses are rewritten to that host's address, and the rail can edit addresses or clear browsing data. Viewports are summoned, never restored.
+• Long-press a path in terminal output, or choose + TAB → File Viewer, to browse host files and git diffs without leaving Multiplex. View code, Markdown, images, changed files, and line targets; split or merge the viewer like any tab. Active viewers quietly refresh as files change and keep their own SSH connection—even for mosh hosts.
+• Hold the software-keyboard button to lock the keyboard closed while you tap, scroll, and select. Rail and hardware keys stay active; tap the padlock to unlock and summon the keyboard.
+• The TMUX shortcut panel now lists every window in the session. The current window is marked ACTIVE; tap another to switch immediately.
 • Add Host now opens on BIND. Run “mpx bind” on a Mac or Linux machine, then enroll it over the local network, scan its QR code, or paste its payload. MANUAL remains one tap away. In the normal connected flow, Multiplex creates the SSH key on your device and sends only its public half; an optional key passphrase keeps the stored key encrypted.
 • Configure each host's Claude Code, Codex, and Pi model lists once in Host Settings, then choose a model from New Session, the Host widget, the Open Agent Shortcut, or the ASK prompt sheet. Free text remains available for models not in the list.
 • With a physical keyboard connected, the key rail now offers Dictation. Multiplex waits for the final transcript, types it as one line, and never presses Return; recognition stays on device wherever the language supports it.
