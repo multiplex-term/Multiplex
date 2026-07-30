@@ -7,9 +7,10 @@ import os
 /// One live dictation: microphone → Speech framework → a finished string the
 /// pane types into its session.
 ///
-/// iOS exposes no way to *trigger* the system keyboard's dictation, and with
-/// a hardware keyboard attached that keyboard (and its mic key) never appears
-/// at all — so the rail's dictation key runs recognition itself. On-device
+/// iOS exposes no way to *trigger* the system keyboard's dictation, and that
+/// keyboard (and its mic key) is absent with a hardware keyboard attached or
+/// while the user locks it closed — so Multiplex's dictation controls run
+/// recognition themselves. On-device
 /// recognition is requested whenever the locale supports it: a terminal's
 /// input is the most sensitive text in the app, and the recognizer is the one
 /// place it would otherwise leave the device outside the user's own SSH

@@ -56,7 +56,9 @@ bake-off is recorded in [docs/landing/](docs/landing/).*
   top-right so the compact key rail can keep every terminal key. The iPad rail
   always places a dedicated **RET** immediately to the right of its arrow keys;
   iPhone adds the same key while keyboard lock is held, so Return remains
-  reachable with the software keyboard closed. iPhone Air keeps RET and TMUX
+  reachable with the software keyboard closed. The top-right **KEYBOARD
+  LOCKED** tip then carries a microphone button for the same app-owned
+  Dictation available with a physical keyboard. iPhone Air keeps RET and TMUX
   together below; narrower locked phones move TMUX above. Shortcuts send
   their default `Ctrl-B` bindings through the same ordered input path as the
   keyboard. Copy mode becomes a clear contextual

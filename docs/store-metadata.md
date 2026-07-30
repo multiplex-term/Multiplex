@@ -21,7 +21,7 @@ behavior, or App Review flow changes.
 | Primary category | Developer Tools |
 | Secondary category | Utilities |
 | Privacy declaration | Target: Data Not Collected; selected files/photos and camera captures go directly to the user's SSH host; dictation audio is transcribed by Apple's Speech framework (on device wherever the locale supports it) and the resulting text is typed into the user's own session — Multiplex stores and transmits neither; set/confirm manually in App Store Connect |
-| Runtime permissions | Camera only after FILE → Camera on iPad/iPhone, or Add Host ▸ BIND → SCAN QR (iPhone/iPad; visionOS App Store apps have no camera access at all); Microphone + Speech Recognition only after the key rail's dictation key, which appears only while a physical keyboard is attached; Local Network for LAN hosts and for finding machines offering to bind (Bonjour browsing, only while the Add Host sheet's BIND pane is open); Notifications only for enabled agent alerts; Face ID/Optic ID only when the optional App Lock setting is enabled (device passcode fallback). Photos/Files use system pickers. |
+| Runtime permissions | Camera only after FILE → Camera on iPad/iPhone, or Add Host ▸ BIND → SCAN QR (iPhone/iPad; visionOS App Store apps have no camera access at all); Microphone + Speech Recognition only after a terminal dictation button (in the key rail while a physical keyboard is attached, or in the top-right KEYBOARD LOCKED tip while the software keyboard is locked closed); Local Network for LAN hosts and for finding machines offering to bind (Bonjour browsing, only while the Add Host sheet's BIND pane is open); Notifications only for enabled agent alerts; Face ID/Optic ID only when the optional App Lock setting is enabled (device passcode fallback). Photos/Files use system pickers. |
 | Age rating | Target: all questionnaire answers None → 4+; complete/confirm manually |
 | Base-app price | Free; confirm in App Store Connect before submission |
 | Storefronts | Confirm intended coverage in App Store Connect; France needs the encryption step in the release playbook |
@@ -124,8 +124,10 @@ Current product split:
   still applies), full SSH spatial windows/tabs/merge with multilingual
   system-keyboard/IME input, a dedicated RET key immediately after the
   direction keys (always on iPad, and while iPhone's software keyboard is
-  locked closed), and primary-button touch/pointer input for mouse-aware TUIs,
-  all-pane agent detection and wall
+  locked closed), app-owned terminal dictation from the physical-keyboard rail
+  or software-keyboard-lock tip (on device wherever the locale supports it),
+  and primary-button touch/pointer input for mouse-aware TUIs, all-pane agent
+  detection and wall
   telemetry with foreground-aware helpers in tmux panes and plain SSH
   shells (including direct-shell NEEDS YOU chrome), a System/Light/Dark
   appearance setting (SYSTEM follows the device; the whole chassis, launch

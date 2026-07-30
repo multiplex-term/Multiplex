@@ -278,10 +278,11 @@ path (disposable tmux sessions only), and
 `… -p app.multiplexterm.multiplex.debug.keybar` runs the focused terminal's
 iPad key-bar proof sequence — the four symbol keys plus a latched CTRL
 consumed by a typed `c`, so a shell prompt capture shows `~|/-^C`, and
-`… -p app.multiplexterm.multiplex.debug.dictation` presses the rail's
-dictation key (the slot the hardware keyboard swaps in, which the simulator
-always shows). Grant both permissions first or the press parks on a system
-alert: `xcrun simctl privacy <UDID> grant microphone
+`… -p app.multiplexterm.multiplex.debug.dictation` presses the focused
+terminal's shared dictation action (the rail slot a hardware keyboard swaps in,
+or the top-right KEYBOARD LOCKED tip while the software keyboard is locked;
+the simulator always shows the rail path). Grant both permissions first or the
+press parks on a system alert: `xcrun simctl privacy <UDID> grant microphone
 app.multiplexterm.multiplex` covers the mic, but simctl has no
 speech-recognition service — with the device **shut down**, insert
 `kTCCServiceSpeechRecognition` into
@@ -640,7 +641,11 @@ views.
   `inputView` on the focused terminal, so the input session, rail keys, and
   hardware keys stay live while UIKit has nothing to present and terminal
   taps stop summoning), the key face flips to a latched padlock, and the pane
-  shows a KEYBOARD LOCKED badge top-trailing; a short press unlocks and
+  shows a KEYBOARD LOCKED tip top-trailing. That tip carries the same app-owned
+  dictation action as the physical-keyboard rail slot, restoring the mic the
+  closed software keyboard took away; it latches while permissions resolve,
+  then yields the top slot to the full LISTENING bar once the microphone is
+  open, avoiding a phone-width collision. A short padlock press unlocks and
   summons. The state is app-wide (`KeyboardLock.shared`, observable,
   arbiter-written only), never persisted, and `claim` re-applies it to
   whichever terminal takes focus. DEBUG hook: `notifyutil -p
@@ -702,17 +707,20 @@ views.
   `commitTextInput` prefers that (invisible) accessory's `controlModifier`
   over the view-level one — `SwiftTermView` nils `inputAccessoryView` there
   so the cluster's latch is authoritative; don't remove that.
-- **A physical keyboard turns the rail's keyboard toggle into a dictation
-  key** (`HardwareKeyboardMonitor`, `DictationSession`, `DictationText` —
+- **A physical keyboard or software-keyboard lock exposes app-owned
+  dictation** (`HardwareKeyboardMonitor`, `DictationSession`, `DictationText` —
   pure + tested; the pane's `DictationBar`). iOS suppresses the software
-  keyboard outright while a hardware keyboard is attached, so the toggle has
-  nothing left to toggle; the slot spends itself on the one affordance the
-  hardware keyboard lacks — the mic key the software keyboard would have
-  carried. Detection is `GCKeyboard.coalesced` plus its connect/disconnect
-  notifications: **UIKit cannot answer this question**, because keyboard-frame
-  notifications describe only the software keyboard, whose absence is exactly
-  what a hardware keyboard causes. iOS also exposes no way to *trigger* system
-  dictation, so the key runs recognition itself (Speech + AVAudioEngine),
+  keyboard outright while a hardware keyboard is attached, so the rail's
+  toggle has nothing left to toggle; that slot spends itself on the one
+  affordance the hardware keyboard lacks — the mic key the software keyboard
+  would have carried. An explicit software-keyboard lock removes the same mic,
+  so the top-right KEYBOARD LOCKED tip exposes the identical controller action
+  without displacing the rail's padlock. Hardware detection is
+  `GCKeyboard.coalesced` plus its connect/disconnect notifications: **UIKit
+  cannot answer this question**, because keyboard-frame notifications describe
+  only the software keyboard, whose absence is exactly what a hardware keyboard
+  causes. iOS also exposes no way to *trigger* system dictation, so either
+  action runs recognition itself (Speech + AVAudioEngine),
   requesting `requiresOnDeviceRecognition` wherever the locale supports it —
   a terminal's input is the most sensitive text in the app, and the recognizer
   is the one place it would otherwise leave the device outside the user's own
@@ -724,7 +732,7 @@ views.
   with no control bytes (`DictationText`) and **never submitted**, the same
   discipline as a dropped file's path; and **LISTENING means the microphone is
   open**, never merely that the key was pressed — the first press waits behind
-  two system permission alerts, so the rail key latches on the press while the
+  two system permission alerts, so the pressed mic control latches while the
   bar waits for `AVAudioEngine.start()`. Recognition stops itself after 30 s
   of quiet (5 min hard cap) — deliberately far longer than system dictation's
   pause, because what gets dictated here is an agent prompt and a mid-sentence

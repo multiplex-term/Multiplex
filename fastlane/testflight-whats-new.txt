@@ -33,3 +33,21 @@ Worth checking:
 - On a narrower iPhone, lock and confirm RET stays below while TMUX appears
   at top-right; unlock and confirm TMUX returns below with no duplicate.
 - iPad is unchanged: RET remains visible whether keyboard lock is on or off.
+
+LOCKED DICTATION — use the mic with the software keyboard closed
+
+The top-right KEYBOARD LOCKED tip now includes a microphone button. It uses
+Multiplex's existing Dictation path, so an iPhone can keep the software
+keyboard locked and still dictate terminal input without a physical keyboard.
+
+Worth checking:
+- On an iPhone without a physical keyboard, hold the bottom keyboard key.
+  Confirm the locked tip shows a mic at top-right and the bottom key remains
+  a padlock.
+- Tap the mic. After permissions, LISTENING should replace the locked tip;
+  STOP types the final one-line transcript but does not press Return, while
+  CANCEL types nothing.
+- During the permission prompts, the mic should latch immediately; tapping it
+  again must cancel the pending attempt.
+- After Dictation ends, the KEYBOARD LOCKED tip and mic should return. Tap the
+  bottom padlock and confirm both disappear as the keyboard opens.

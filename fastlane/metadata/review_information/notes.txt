@@ -11,7 +11,7 @@ CORE FLOW
 - Tap a tile to attach: the session opens in its own window with a red LIVE lamp. Attach a second and place them side by side (its own spatial window on Vision Pro; Stage Manager on iPad).
 - MERGE in a terminal's bottom bar pulls another window's session in as a tab; a tab's context menu moves it back out, still connected.
 - TMUX in the Vision Pro bottom bar or iPad/iPhone key bar opens the shortcut menu (top-right on narrow iPhones): New Window, Split, or Copy Mode send the displayed Ctrl-B binding. In Copy Mode, swipe history, hold to select/copy, press Done.
-- The key bar's rightmost keyboard key becomes a dictation (microphone) key while a physical keyboard is attached — including in the Simulator. Press it, speak, and the words are typed into the session; STOP/CANCEL are on the bar it shows.
+- The dictation (microphone) key appears with a physical keyboard (including Simulator), or in the top-right KEYBOARD LOCKED tip after holding the keyboard key. Press it; speech is typed into the session, with STOP/CANCEL on its bar.
 - FILE attaches Photos/Files (Camera on iPad), uploads into the active pane's working directory, and types the remote path without Return. Drops use the same pipeline.
 - DETACH closes the window; tmux keeps the session running, so its tile stays on the wall.
 
@@ -26,7 +26,7 @@ MOSH (Pro)
 
 PERMISSIONS
 - Camera: only after FILE → Camera on iPad; capture goes directly to the SSH host. Photos/Files need no library access.
-- Microphone and Speech Recognition: only after the dictation key above, which exists because iOS suppresses the software keyboard (and its mic key) while a physical keyboard is attached. Transcription uses Apple's Speech framework, on device wherever the language supports it, and the text is typed without Return; Multiplex never stores or transmits the audio or the text.
+- Microphone and Speech Recognition: only after either dictation key above. It restores the mic affordance iOS suppresses with a physical keyboard or a locked software keyboard. Apple's Speech framework transcribes on device where supported and types without Return; Multiplex stores/transmits neither audio nor text.
 - Local Network: only for a host on the local network; the demo host is public, so you may not see this prompt.
 - Notifications: agent alerts, as above.
 

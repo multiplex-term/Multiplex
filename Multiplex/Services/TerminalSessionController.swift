@@ -175,9 +175,9 @@ final class TerminalSessionController {
     }
 
     #if !os(visionOS)
-    /// The rail's dictation key, from the pane's side: LISTENING while the
-    /// microphone is open (the bar shows the live hypothesis), or a short
-    /// failure the user can act on.
+    /// The terminal's app-owned dictation controls, from the pane's side:
+    /// LISTENING while the microphone is open (the bar shows the live
+    /// hypothesis), or a short failure the user can act on.
     enum DictationState: Equatable {
         case listening(String)
         case failed(String)
@@ -187,8 +187,9 @@ final class TerminalSessionController {
     private var dictationClearTask: Task<Void, Never>?
     /// The key has been pressed and a dictation is in flight — which starts
     /// before `dictation` does, because the first press waits on the system's
-    /// microphone and speech-recognition alerts. The rail's key latches on
-    /// this; the pane's LISTENING bar waits for the microphone itself.
+    /// microphone and speech-recognition alerts. Whichever mic control was
+    /// pressed latches on this; the pane's LISTENING bar waits for the
+    /// microphone itself.
     private var dictationRequested = false
     #endif
 
@@ -855,13 +856,14 @@ final class TerminalSessionController {
     }
 
     #if !os(visionOS)
-    /// What the rail's key shows: engaged from the press, not from the mic,
-    /// so a permission alert never leaves the key looking untouched.
+    /// What either mic control shows: engaged from the press, not from the
+    /// microphone, so a permission alert never leaves the action looking
+    /// untouched.
     var isDictating: Bool { dictationRequested }
 
-    /// The rail's dictation key. It replaces the keyboard toggle only while a
-    /// hardware keyboard is attached, so this is always the key the user
-    /// pressed rather than a second way to reach the software keyboard.
+    /// One dictation action shared by the physical-keyboard rail slot and the
+    /// software-keyboard lock tip. Neither path reaches the system keyboard's
+    /// own microphone, so both run the same app-owned recognition session.
     func toggleDictation() {
         if dictationRequested {
             stopDictation()

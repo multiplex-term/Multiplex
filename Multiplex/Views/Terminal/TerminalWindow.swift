@@ -1604,10 +1604,18 @@ private struct TerminalPane: View {
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 8) {
                 #if !os(visionOS)
-                // The lock is app-wide (one keyboard), so the badge rides
-                // whichever pane is on screen.
-                if isActive, controller != nil, keyboardLock.isLocked {
-                    KeyboardLockedBadge()
+                // The lock is app-wide (one keyboard), so the tip rides
+                // whichever pane is on screen. Its mic restores the
+                // dictation affordance the locked software keyboard took
+                // away. Once the microphone opens, the full LISTENING bar
+                // owns this top slot instead so the two controls never
+                // collide at phone width.
+                if isActive, let controller, keyboardLock.isLocked,
+                   controller.dictation == nil {
+                    KeyboardLockedBadge(
+                        isDictating: controller.isDictating,
+                        toggleDictation: { controller.toggleDictation() }
+                    )
                 }
                 #endif
                 if isActive, let controller, !controller.tmuxCopyModeUIActive,
@@ -1729,29 +1737,53 @@ private struct TerminalPane: View {
 
 #if !os(visionOS)
 /// The keyboard key was held: the software keyboard is locked closed and
-/// terminal taps won't summon it. A quiet chassis badge — a lock is a chosen
-/// mode, not live state, so no tally red.
+/// terminal taps won't summon it. The trailing mic keeps dictation reachable
+/// without reopening the keyboard — especially on iPhone, where the software
+/// keyboard was the only other place that affordance lived. Lock is a chosen
+/// mode, not live state, so the tip spends no tally red.
 private struct KeyboardLockedBadge: View {
+    let isDictating: Bool
+    var toggleDictation: () -> Void
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+    }
+
     var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "lock.fill")
-                .font(.ui(10, weight: .semibold))
-            Text("KEYBOARD LOCKED")
-                .font(.mono(10, weight: .semibold))
-                .kerning(1.1)
+        HStack(spacing: 0) {
+            HStack(spacing: 7) {
+                Image(systemName: "lock.fill")
+                    .font(.ui(10, weight: .semibold))
+                Text("KEYBOARD LOCKED")
+                    .font(.mono(10, weight: .semibold))
+                    .kerning(1.1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .accessibilityElement(children: .combine)
+
+            Rectangle()
+                .fill(Theme.bezelHi)
+                .frame(width: 1, height: 20)
+
+            Button(action: toggleDictation) {
+                Image(systemName: isDictating ? "mic.fill" : "mic")
+                    .font(.ui(12, weight: .semibold))
+                    .frame(width: 36, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(isDictating ? Theme.chassis : Theme.signal2)
+            .background(isDictating ? Theme.signal2 : Color.clear)
+            .chassisHover(2)
+            .accessibilityLabel(isDictating ? "Stop dictation" : "Dictate")
+            .accessibilityHint("Types the finished dictation without pressing Return")
         }
         .foregroundStyle(Theme.signal2)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(
-            Theme.bezel,
-            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Theme.bezelHi, lineWidth: 1)
-        )
-        .accessibilityElement(children: .combine)
+        .background(Theme.bezel, in: shape)
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(Theme.bezelHi, lineWidth: 1))
+        .accessibilityElement(children: .contain)
     }
 }
 #endif

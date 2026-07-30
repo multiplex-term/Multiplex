@@ -355,9 +355,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         press(.tmux(shortcut))
     }
 
-    /// Presses the rail's dictation key without touching the screen. The
-    /// simulator can be pointed at the Mac's microphone (Device → Audio
-    /// Input), so this drives the whole authorization → mic → recognizer →
+    /// Presses the terminal's shared dictation action without touching the
+    /// screen. The simulator can be pointed at the Mac's microphone (Device →
+    /// Audio Input), so this drives the whole authorization → mic → recognizer →
     /// ordered-pump path; the attached session's `tmux capture-pane` shows
     /// the transcribed words typed at the prompt.
     func debugToggleDictation() {
@@ -427,8 +427,8 @@ private enum TerminalKey {
 /// available.
 private struct KeyBarRow: View {
     var model: TerminalKeyBar.Model
-    /// Only for the dictation key's live state; every key still sends
-    /// through the bar's own `TerminalView` path.
+    /// The shared dictation action's live state; the physical-keyboard rail
+    /// key and the keyboard-lock tip both drive this same controller.
     var controller: TerminalSessionController?
     var hardwareKeyboard: HardwareKeyboardMonitor
     var showsTmuxShortcuts: Bool
