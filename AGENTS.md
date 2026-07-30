@@ -850,6 +850,10 @@ views.
   Honesty rules: NUL-sniff says BINARY (never garbage), >1.5 MB text renders
   its head under TRUNCATED, a deleted file's row opens its diff (there are
   no working-tree bytes), failures name the cause on a chassis panel.
+  A browse summon (+ TAB ▸ File Viewer — `opensBrowsing`, target == nil)
+  starts the compact drawer OPEN: the tree is the subject until a file is
+  chosen, so the first pick is one tap; a pressed path keeps its file as
+  the subject, and a pane re-parented mid-session keeps what's on screen.
   Images aspect-fit the screen with pinch zoom (0.25–8×, double-tap
   toggles fit ↔ 2×, the % readout resets); the tree hides the
   editor-default set everywhere — rows, CHANGED, change dots —

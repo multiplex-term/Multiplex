@@ -168,3 +168,5 @@ Worth checking:
   the open document, diff, tree badges, and ± counts catch up without
   touching REFRESH (which stays for forcing the issue). Deleting the
   open file shows FILE GONE rather than stale bytes.
+- iPhone: + TAB > File Viewer now opens with the tree already out, so the
+  first file is one tap; opening a pressed path still lands on the file.

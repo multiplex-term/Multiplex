@@ -32,6 +32,11 @@ final class FileViewerController {
     private let startDirectory: String?
     /// The pressed path this tab was summoned to show, when it was.
     private let target: TerminalPathTarget?
+    /// True when the tab was summoned to BROWSE (+ TAB ▸ File Viewer)
+    /// rather than to show a specific pressed file — the tree is the
+    /// subject until a file is chosen, so the compact drawer opens itself
+    /// and picking the first file costs one tap, not two.
+    let opensBrowsing: Bool
 
     init(
         tabID: UUID,
@@ -43,6 +48,7 @@ final class FileViewerController {
         self.host = host
         self.startDirectory = startDirectory
         self.target = target
+        self.opensBrowsing = target == nil
     }
 
     // MARK: Content

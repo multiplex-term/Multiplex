@@ -21,11 +21,41 @@ struct FileViewerPane: View {
 
     /// The standing column's presence at regular widths.
     @State private var treeDocked = true
-    /// The drawer's presence at compact widths.
-    @State private var drawerOpen = false
+    /// The drawer's presence at compact widths. A browse summon starts
+    /// with it out — see `startsWithDrawerOpen`.
+    @State private var drawerOpen: Bool
     /// A markdown link awaiting the link sheet's confirmation — the same
     /// gate a pane press gets; a document never opens anything itself.
     @State private var confirmingLink: TerminalLink?
+
+    init(
+        controller: FileViewerController,
+        contentSafeArea: EdgeInsets = EdgeInsets(),
+        isActive: Bool = true,
+        close: @escaping () -> Void
+    ) {
+        self.controller = controller
+        self.contentSafeArea = contentSafeArea
+        self.isActive = isActive
+        self.close = close
+        _drawerOpen = State(initialValue: Self.startsWithDrawerOpen(controller))
+    }
+
+    /// A browse summon (+ TAB ▸ File Viewer) has no file to show, so at
+    /// compact widths the tree drawer starts out — picking the first file
+    /// is the whole point of that door. A pressed path keeps its file as
+    /// the subject, and a pane re-parented mid-session (merge/split)
+    /// keeps whatever is already on screen instead of re-opening the
+    /// drawer over it.
+    private static func startsWithDrawerOpen(
+        _ controller: FileViewerController
+    ) -> Bool {
+        guard controller.opensBrowsing else { return false }
+        switch controller.content {
+        case .document, .diff: return false
+        default: return true
+        }
+    }
 
     private static let treeWidth: CGFloat = 236
     private static let compactThreshold: CGFloat = 700
