@@ -88,13 +88,15 @@ final class FileTreeTests: XCTestCase {
 
     func testEditorHiddenSetIsInvisibleEverywhere() {
         let root = "/repo"
+        // rows() consumes children pre-sorted, the way the controller
+        // stores them.
         let children: [String: [FileTreeEntry]] = [
-            root: [
+            root: FileTree.sorted([
                 entry(".git", in: root, dir: true),
                 entry(".DS_Store", in: root),
                 entry(".gitignore", in: root),
                 entry("src", in: root, dir: true),
-            ]
+            ])
         ]
         let rows = FileTree.rows(
             root: root, children: children,

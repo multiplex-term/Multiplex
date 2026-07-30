@@ -2,6 +2,22 @@ import Foundation
 import Observation
 import UIKit
 
+/// What every auxiliary (non-terminal) pane controller owes the window
+/// system: a live tab label and a teardown. Construction stays per-type —
+/// a viewport takes an admitted offer, a file viewer a start directory —
+/// but lookup, label, and close dispatch through this one seam, so
+/// `syncTabs`' restored-corpse strip, the tab strip's titles, and
+/// `closeTab` don't grow per-type branches when the next auxiliary pane
+/// type arrives (missing the strip branch would leave an invisible zombie
+/// tab; missing close would leak the pane's resources).
+@MainActor
+protocol AuxiliaryPaneController: AnyObject {
+    /// The live tab-cell/UMD label (mark + subject) — follows what the pane
+    /// is showing NOW, where the route only knows the summons.
+    var tabLabel: String { get }
+    func shutdown()
+}
+
 /// App-wide terminal state that outlives any single window scene:
 ///
 /// - **Controllers** are keyed by tab id and owned here, not by window views,
@@ -79,39 +95,27 @@ final class TerminalWorkspace {
         controllers[tabID]
     }
 
-    // MARK: Viewport controllers (one per ⌗ tab)
+    // MARK: Auxiliary controllers (one per ⌗ / ▤ tab)
 
-    /// Transport-less controllers for viewport tabs, keyed like terminal
-    /// controllers so merge/split re-parent the live page the same way.
-    /// Deliberately in-memory only — this dictionary *is* the viewport's
-    /// no-persistence rule: `TerminalWindowRoot.syncTabs` strips any viewport
-    /// tab it cannot find here, which is exactly a tab restored from a dead
-    /// process. Summoned, not restored.
-    private var viewportControllers: [UUID: ViewportController] = [:]
+    /// Transport-less controllers for auxiliary tabs, keyed like terminal
+    /// controllers so merge/split re-parent the live pane the same way.
+    /// Deliberately in-memory only — this dictionary *is* the auxiliary
+    /// no-persistence rule: `TerminalWindowRoot.syncTabs` strips any
+    /// auxiliary tab it cannot find here, which is exactly a tab restored
+    /// from a dead process. Summoned, not restored.
+    private var auxiliaryControllers: [UUID: any AuxiliaryPaneController] = [:]
 
     /// Register the controller BEFORE the tab enters any route — the strip
-    /// above runs on every tabs change, and a viewport tab that arrives
+    /// above runs on every tabs change, and an auxiliary tab that arrives
     /// without its controller is indistinguishable from a restored corpse.
     func openViewport(tab: TerminalRoute, offer: ViewportOffer, host: Host) {
-        guard tab.isViewport, viewportControllers[tab.id] == nil else { return }
-        viewportControllers[tab.id] = ViewportController(
+        guard tab.isViewport, auxiliaryControllers[tab.id] == nil else { return }
+        auxiliaryControllers[tab.id] = ViewportController(
             tabID: tab.id,
             offer: offer,
             host: host
         )
     }
-
-    func viewportController(for tabID: UUID) -> ViewportController? {
-        viewportControllers[tabID]
-    }
-
-    // MARK: File-viewer controllers (one per ▤ tab)
-
-    /// Same lifecycle as viewport controllers: in-memory only (this
-    /// dictionary IS the no-persistence rule), registered BEFORE the tab
-    /// enters any route so `syncTabs` never mistakes a fresh summon for a
-    /// restored corpse.
-    private var fileViewerControllers: [UUID: FileViewerController] = [:]
 
     func openFileViewer(
         tab: TerminalRoute,
@@ -119,8 +123,8 @@ final class TerminalWorkspace {
         startDirectory: String?,
         target: TerminalPathTarget?
     ) {
-        guard tab.isFileViewer, fileViewerControllers[tab.id] == nil else { return }
-        fileViewerControllers[tab.id] = FileViewerController(
+        guard tab.isFileViewer, auxiliaryControllers[tab.id] == nil else { return }
+        auxiliaryControllers[tab.id] = FileViewerController(
             tabID: tab.id,
             host: host,
             startDirectory: startDirectory,
@@ -128,17 +132,26 @@ final class TerminalWorkspace {
         )
     }
 
-    func fileViewerController(for tabID: UUID) -> FileViewerController? {
-        fileViewerControllers[tabID]
+    /// The general question — "does this auxiliary tab have a live pane,
+    /// and what does it call itself" — for the strip and the tab titles.
+    func auxiliaryController(for tabID: UUID) -> (any AuxiliaryPaneController)? {
+        auxiliaryControllers[tabID]
     }
 
-    /// Close a tab for real: detach the SSH channel (or shut the viewport's
-    /// web view / file viewer's connection down) and drop the controller.
-    /// Never called when a tab merely moves.
+    func viewportController(for tabID: UUID) -> ViewportController? {
+        auxiliaryControllers[tabID] as? ViewportController
+    }
+
+    func fileViewerController(for tabID: UUID) -> FileViewerController? {
+        auxiliaryControllers[tabID] as? FileViewerController
+    }
+
+    /// Close a tab for real: detach the SSH channel (or shut the auxiliary
+    /// pane down) and drop the controller. Never called when a tab merely
+    /// moves.
     func closeTab(_ tabID: UUID) {
         controllers.removeValue(forKey: tabID)?.detach()
-        viewportControllers.removeValue(forKey: tabID)?.shutdown()
-        fileViewerControllers.removeValue(forKey: tabID)?.shutdown()
+        auxiliaryControllers.removeValue(forKey: tabID)?.shutdown()
     }
 
     func resumeConnectionsWaitingForKeyPassphrase(hostID: UUID) {

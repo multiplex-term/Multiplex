@@ -83,7 +83,7 @@ struct TerminalPathTarget: Equatable, Identifiable {
                 // path:line:column
                 line = first
                 text = pieces.dropLast(2).joined(separator: ":")
-            } else if let only = Int(pieces.last!), pieces.count >= 2 {
+            } else if let only = Int(pieces.last!) {
                 line = only
                 text = pieces.dropLast().joined(separator: ":")
             }

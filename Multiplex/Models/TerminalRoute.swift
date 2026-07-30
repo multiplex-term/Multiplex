@@ -127,8 +127,13 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
     /// `▤` — U+25A4 SQUARE WITH HORIZONTAL FILL — is the file-viewer mark
     /// everywhere, the viewport's sibling; a file never wears a tally dot.
     static func fileViewerLabel(_ path: String) -> String {
-        let name = FileTree.name(of: path)
-        return name.isEmpty ? "▤" : "▤ \(name)"
+        fileViewerLabel(name: FileTree.name(of: path))
+    }
+
+    /// The name-based spelling — the live controller labels itself with the
+    /// file on screen, which is not a path. The ▤ mark lives here only.
+    static func fileViewerLabel(name: String) -> String {
+        name.isEmpty ? "▤" : "▤ \(name)"
     }
 }
 

@@ -2,7 +2,7 @@ import Foundation
 
 /// The languages the viewer's highlighter has rule tables for. The raw
 /// value is the badge the file header shows.
-enum CodeLanguage: String, Equatable {
+enum CodeLanguage: String, Equatable, CaseIterable {
     case swift = "SWIFT"
     case typescript = "TYPESCRIPT"
     case javascript = "JAVASCRIPT"

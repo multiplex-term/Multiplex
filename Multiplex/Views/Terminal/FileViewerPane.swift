@@ -13,10 +13,10 @@ import SwiftUI
 /// tokens), while every frame, rail, and caption stays on `Theme`.
 struct FileViewerPane: View {
     @Bindable var controller: FileViewerController
-    var contentSafeArea = EdgeInsets()
+    let contentSafeArea: EdgeInsets
     /// The window's active tab is the only one that watches: an obscured
     /// pane spends no network on a screen nobody sees (the wall's rule).
-    var isActive = true
+    let isActive: Bool
     let close: () -> Void
 
     /// The standing column's presence at regular widths.
@@ -97,15 +97,7 @@ struct FileViewerPane: View {
             guard isActive else { return }
             await controller.watchWhileActive()
         }
-        .sheet(item: $confirmingLink) { link in
-            TerminalLinkSheet(
-                link: link,
-                onOpen: {
-                    if let url = link.openableURL { UIApplication.shared.open(url) }
-                },
-                onCopy: { UIPasteboard.general.string = link.raw }
-            )
-        }
+        .terminalLinkConfirmation(item: $confirmingLink)
     }
 
     // MARK: Content column
@@ -130,7 +122,7 @@ struct FileViewerPane: View {
         case .document(let document):
             documentBody(document)
         case .diff(let diff, let scope):
-            FileViewerDiffView(diff: diff, scope: scope, controller: controller)
+            FileViewerDiffView(diff: diff, scope: scope)
         case .failure(let title, let message):
             failurePanel(title: title, message: message)
         }
@@ -138,11 +130,18 @@ struct FileViewerPane: View {
 
     @ViewBuilder
     private func documentBody(_ document: FileViewerController.Document) -> some View {
-        if document.isBinary {
+        switch document.kind {
+        case .binary:
             binaryPanel(document)
-        } else if let imageData = document.imageData {
-            imageBody(document, data: imageData)
-        } else if !document.markdown.isEmpty {
+        case .image:
+            if let image = document.image {
+                FileViewerImageView(image: image)
+            } else {
+                // The controller reclassifies undecodable image bytes to
+                // .binary; this is the defensive twin.
+                binaryPanel(document)
+            }
+        case .markdown where !document.markdown.isEmpty:
             FileViewerMarkdownView(
                 blocks: document.markdown,
                 openLink: { destination in
@@ -165,7 +164,8 @@ struct FileViewerPane: View {
                     }
                 }
             )
-        } else {
+        case .markdown, .code:
+            // Markdown RAW renders as plain lines through the code screen.
             FileViewerCodeView(
                 lines: document.codeLines,
                 truncated: document.truncated,
@@ -243,24 +243,10 @@ struct FileViewerPane: View {
     }
 
     private var headerCounts: Text? {
-        switch controller.content {
-        case .diff(let diff, _) where !(diff.additions == 0 && diff.deletions == 0):
-            return plusMinus(diff.additions, diff.deletions)
-        case .document where controller.documentDiffBadge != nil:
-            guard case .document(let document) = controller.content,
-                  controller.badges[document.path] != nil,
-                  !controller.shortStat.isEmpty
-            else { return nil }
-            return nil
-        default:
-            return nil
-        }
-    }
-
-    private func plusMinus(_ additions: Int, _ deletions: Int) -> Text {
-        (Text("+\(additions) ").foregroundColor(CodePalette.diffAddText)
-            + Text("−\(deletions)").foregroundColor(CodePalette.diffDeleteText))
-            .font(.mono(9, weight: .semibold))
+        guard case .diff(let diff, _) = controller.content,
+              diff.additions > 0 || diff.deletions > 0
+        else { return nil }
+        return CodePalette.plusMinus(diff.additions, diff.deletions)
     }
 
     private func badgeCaption(_ badge: GitFileStatus.Badge) -> String {
@@ -302,8 +288,7 @@ struct FileViewerPane: View {
     }
 
     private func binaryPanel(_ document: FileViewerController.Document) -> some View {
-        VStack(spacing: 14) {
-            TallyLamp(caption: "BINARY", color: Theme.caution)
+        ChassisPanel(caption: "BINARY") {
             Text("\(document.name) · \(FileViewerController.formatBytes(document.size))")
                 .font(.mono(12))
                 .foregroundStyle(Theme.signal2)
@@ -311,31 +296,11 @@ struct FileViewerPane: View {
                 .font(.footnote)
                 .foregroundStyle(Theme.signal3)
         }
-        .padding(28)
-        .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.bezelHi, lineWidth: 1)
-        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func imageBody(_ document: FileViewerController.Document, data: Data) -> some View {
-        Group {
-            if let image = UIImage(data: data) {
-                FileViewerImageView(image: image)
-            } else {
-                failurePanel(
-                    title: "CAN'T DECODE",
-                    message: "\(document.name) didn't decode as an image."
-                )
-            }
-        }
-    }
-
     private func failurePanel(title: String, message: String) -> some View {
-        VStack(spacing: 14) {
-            TallyLamp(caption: title, color: Theme.caution)
+        ChassisPanel(caption: title) {
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(Theme.signal2)
@@ -343,12 +308,6 @@ struct FileViewerPane: View {
                 .frame(maxWidth: 380)
             ChassisChip("REFRESH", prominent: true) { controller.refresh() }
         }
-        .padding(30)
-        .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.bezelHi, lineWidth: 1)
-        )
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -373,15 +332,9 @@ struct FileViewerPane: View {
             ChassisBadge(controller.hostName.uppercased())
                 .fixedSize()
                 .accessibilityLabel("Files on \(controller.hostName)")
-            if compact {
-                ChassisChip(drawerOpen ? "HIDE" : "TREE") { drawerOpen.toggle() }
-                    .fixedSize()
-                    .accessibilityLabel(drawerOpen ? "Hide the file tree" : "Show the file tree")
-            } else {
-                ChassisChip(treeDocked ? "HIDE" : "TREE") { treeDocked.toggle() }
-                    .fixedSize()
-                    .accessibilityLabel(treeDocked ? "Hide the file tree" : "Show the file tree")
-            }
+            // Same chip, two homes: compact toggles the drawer, regular
+            // the standing column.
+            treeChip(compact ? $drawerOpen : $treeDocked)
             ChassisChip("REFRESH") { controller.refresh() }
                 .fixedSize()
                 .disabled(controller.isBusy)
@@ -407,6 +360,16 @@ struct FileViewerPane: View {
                 }
             }
         }
+    }
+
+    private func treeChip(_ visible: Binding<Bool>) -> some View {
+        ChassisChip(visible.wrappedValue ? "HIDE" : "TREE") {
+            visible.wrappedValue.toggle()
+        }
+        .fixedSize()
+        .accessibilityLabel(
+            visible.wrappedValue ? "Hide the file tree" : "Show the file tree"
+        )
     }
 
     private var isWorking: Bool {
@@ -481,6 +444,14 @@ enum CodePalette {
 
     static let diffAddText = Color(light: 0x3E7C58, dark: 0x7FBF9A)
     static let diffDeleteText = Color(light: 0xC13439, dark: 0xE5484D)
+
+    /// The `+N −M` counts voice — one spelling for the content header, the
+    /// repo diff's file sections, and the tree's branch block.
+    static func plusMinus(_ additions: Int, _ deletions: Int) -> Text {
+        (Text("+\(additions) ").foregroundColor(diffAddText)
+            + Text("−\(deletions)").foregroundColor(diffDeleteText))
+            .font(.mono(9, weight: .semibold))
+    }
     static let diffAddGround = Color(light: 0x3E7C58, dark: 0x7FBF9A).opacity(0.10)
     static let diffDeleteGround = Color(light: 0xC13439, dark: 0xE5484D).opacity(0.09)
     static let hunkHeader = Color(light: 0x2E6E8E, dark: 0x7FB4C9).opacity(0.8)
@@ -873,7 +844,6 @@ private enum MarkdownInlineText {
 struct FileViewerDiffView: View {
     let diff: GitDiff
     let scope: FileViewerController.DiffScope
-    var controller: FileViewerController
 
     var body: some View {
         ScrollView {
@@ -919,9 +889,7 @@ struct FileViewerDiffView: View {
                     ChassisLabel("RENAMED", size: 7, color: Theme.signal3).fixedSize()
                 }
                 Spacer(minLength: 6)
-                (Text("+\(file.additions) ").foregroundColor(CodePalette.diffAddText)
-                    + Text("−\(file.deletions)").foregroundColor(CodePalette.diffDeleteText))
-                    .font(.mono(9, weight: .semibold))
+                CodePalette.plusMinus(file.additions, file.deletions)
                     .fixedSize()
             }
             .padding(.horizontal, 12)

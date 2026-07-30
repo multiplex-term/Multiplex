@@ -65,7 +65,7 @@ struct GitFileStatus: Equatable {
         if x == "R" || x == "C" || y == "R" || y == "C" { return .renamed }
         if y == "D" || x == "D" { return .deleted }
         if x == "A" { return .added }
-        if y == "M" || x == "M" || y == "T" || x == "T" { return .modified }
+        // M/T on either side, and any pair porcelain grows later.
         return .modified
     }
 }

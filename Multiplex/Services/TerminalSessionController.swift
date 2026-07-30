@@ -153,14 +153,26 @@ final class TerminalSessionController {
     private(set) var dropState: DropState?
     private var dropTask: Task<Void, Never>?
     private var dropClearTask: Task<Void, Never>?
-    /// A link the user activated in this pane, awaiting confirmation. The
-    /// pane never opens one straight from the gesture: the target is remote
-    /// output, so the destination is shown first (see `TerminalLink`).
-    private(set) var pendingLink: TerminalLink?
-    /// A filesystem path activated the same way, awaiting the file-viewer
-    /// confirmation — the path twin of `pendingLink` (see
-    /// `TerminalPathTarget`). Same discipline: shown, never followed.
-    private(set) var pendingPath: TerminalPathTarget?
+    /// The target the user activated in this pane, awaiting confirmation.
+    /// The pane never opens one straight from the gesture: the target is
+    /// remote output, so the destination is shown first (see `TerminalLink`
+    /// / `TerminalPathTarget`). ONE slot for both kinds — the link sheet and
+    /// the path sheet structurally cannot contend for the same press.
+    private enum PendingActivation {
+        case link(TerminalLink)
+        case path(TerminalPathTarget)
+    }
+    private var pendingActivation: PendingActivation?
+
+    var pendingLink: TerminalLink? {
+        if case .link(let link) = pendingActivation { return link }
+        return nil
+    }
+
+    var pendingPath: TerminalPathTarget? {
+        if case .path(let path) = pendingActivation { return path }
+        return nil
+    }
 
     #if !os(visionOS)
     /// The rail's dictation key, from the pane's side: LISTENING while the
@@ -1385,10 +1397,9 @@ final class TerminalSessionController {
             let output = (try? await connection.exec(
                 TmuxProbe.dropDestinationCommand(sessionName: sessionName)
             )) ?? ""
-            let lines = output.split(separator: "\n")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-            if let path = lines.first(where: { $0.hasPrefix("/") }) {
-                if lines.contains("MULTIPLEX_GIT") {
+            let destination = TmuxProbe.parseDropDestination(output)
+            if let path = destination.cwd {
+                if destination.insideGitWorktree {
                     return DropDestination(
                         directory: path + "/" + DropText.dropsDirectoryName,
                         typedPrefix: DropText.dropsDirectoryName + "/",
@@ -1422,11 +1433,11 @@ final class TerminalSessionController {
         // covers the text being pressed — same rule as a drop.
         if case .finding = historyJump { return false }
         if let link = TerminalLink.resolve(target) {
-            pendingLink = link
+            pendingActivation = .link(link)
             return true
         }
         if let path = TerminalPathTarget.resolve(target) {
-            pendingPath = path
+            pendingActivation = .path(path)
             return true
         }
         return false
@@ -1437,7 +1448,7 @@ final class TerminalSessionController {
     /// offers OPEN for `.openable`.
     func openPendingLink() {
         guard let url = pendingLink?.openableURL else { return }
-        pendingLink = nil
+        pendingActivation = nil
         UIApplication.shared.open(url)
     }
 
@@ -1446,21 +1457,21 @@ final class TerminalSessionController {
     func copyPendingLink() {
         guard let link = pendingLink else { return }
         UIPasteboard.general.string = link.raw
-        pendingLink = nil
+        pendingActivation = nil
     }
 
     func dismissPendingLink() {
-        pendingLink = nil
+        if case .link = pendingActivation { pendingActivation = nil }
     }
 
     func copyPendingPath() {
         guard let path = pendingPath else { return }
         UIPasteboard.general.string = path.raw
-        pendingPath = nil
+        pendingActivation = nil
     }
 
     func dismissPendingPath() {
-        pendingPath = nil
+        if case .path = pendingActivation { pendingActivation = nil }
     }
 
     /// The pane's cwd for the file viewer's anchor — the same `list-panes`
@@ -1472,9 +1483,7 @@ final class TerminalSessionController {
         let output = (try? await connection.exec(
             TmuxProbe.dropDestinationCommand(sessionName: sessionName)
         )) ?? ""
-        return output.split(separator: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { $0.hasPrefix("/") }
+        return TmuxProbe.parseDropDestination(output).cwd
     }
 
     // MARK: Actions

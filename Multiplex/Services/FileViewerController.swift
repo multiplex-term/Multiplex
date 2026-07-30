@@ -17,7 +17,7 @@ import UIKit
 /// host's control plane, so mosh hosts open viewers the same way.
 @MainActor
 @Observable
-final class FileViewerController {
+final class FileViewerController: AuxiliaryPaneController {
     /// Text render cap: the capped head still renders, under a TRUNCATED
     /// banner. Big enough for every source file that matters; small enough
     /// that highlighting stays interactive.
@@ -56,15 +56,21 @@ final class FileViewerController {
     struct Document: Equatable {
         var path: String
         var size: UInt64
+        /// The render verdict — including binary: a NUL-sniffed text file
+        /// re-classifies to `.binary` here, so header and body always
+        /// agree on what the screen is.
         var kind: FileRenderKind
-        var language: CodeLanguage?
-        var isBinary = false
         var truncated = false
         /// Code (and markdown RAW) render.
         var codeLines: [HighlightedLine] = []
         /// Markdown rendered blocks.
         var markdown: [MarkdownBlock] = []
-        var imageData: Data?
+        /// Decoded once at load — re-decoding megabytes per body
+        /// evaluation is what image views must never do.
+        var image: UIImage?
+        /// The text behind a markdown render, kept so the RAW toggle
+        /// re-renders locally instead of re-downloading the file.
+        var sourceText: String?
         /// From a `path:12` press — the code view scrolls here once.
         var targetLine: Int?
 
@@ -98,13 +104,24 @@ final class FileViewerController {
     private var watchedStamp: SSHConnection.FileStat?
     private var watchTickCount = 0
     /// Markdown RAW toggle — kept across files (a preference, not a mode).
+    /// Re-renders from the text already in hand; flipping a preference
+    /// must not cost a network round trip.
     var markdownRaw = false {
         didSet {
             guard markdownRaw != oldValue,
-                  let document = lastDocument, document.kind == .markdown,
-                  case .document = content
+                  case .document(let document) = content,
+                  document.kind == .markdown
             else { return }
-            Task { await open(path: document.path, line: nil) }
+            contentGeneration += 1
+            let generation = contentGeneration
+            Task {
+                let updated = await Self.renderedMarkdown(document, raw: markdownRaw)
+                guard generation == contentGeneration,
+                      case .document(let still) = content, still.path == updated.path
+                else { return }
+                lastDocument = updated
+                content = .document(updated)
+            }
         }
     }
 
@@ -153,6 +170,8 @@ final class FileViewerController {
         default: rootPath.isEmpty ? "FILES" : FileTree.name(of: rootPath)
         }
     }
+
+    var tabLabel: String { TerminalRoute.fileViewerLabel(name: displayName) }
 
     /// The rail readout: where the screen actually is.
     var railPath: String {
@@ -234,15 +253,16 @@ final class FileViewerController {
             let anchor = resolvedTarget.map { FileTree.parent(of: $0) ?? "/" } ?? base
             await probeGit(at: anchor)
             rootPath = gitRoot ?? anchor
+            // The pressed file is the summons — render it before the
+            // listing and the (possibly seconds-cold) git status; tree
+            // rows and badges fill in quietly behind the document.
+            if let resolvedTarget {
+                await open(path: resolvedTarget, line: target?.line)
+            }
             await list(rootPath)
             expandChain(to: anchor)
             await refreshGitVerdicts()
-
-            if let resolvedTarget {
-                await open(path: resolvedTarget, line: target?.line)
-            } else {
-                content = .idle
-            }
+            if resolvedTarget == nil { content = .idle }
         } catch {
             content = .failure(
                 title: "NO CONNECTION",
@@ -271,20 +291,22 @@ final class FileViewerController {
     /// Returns whether anything actually moved.
     @discardableResult
     private func refreshGitVerdicts() async -> Bool {
+        // Every write below is equality-gated: @Observable has no gate of
+        // its own, an identical assignment still churns every observer,
+        // and this runs on the watch's 5 s tick — an idle repo must cost
+        // the wall nothing.
         guard let gitRoot else {
-            statuses = []
-            shortStat = GitShortStat()
+            if !statuses.isEmpty { statuses = [] }
+            if shortStat != GitShortStat() { shortStat = GitShortStat() }
             return false
         }
         guard let output = try? await withConnection({
             try await $0.exec(GitCommands.watchProbe(root: gitRoot))
         }), let probe = GitCommands.parseWatchProbe(output) else { return false }
-        let changed = probe.branch != branch
-            || probe.statuses != statuses
-            || probe.shortStat != shortStat
-        branch = probe.branch
-        statuses = probe.statuses
-        shortStat = probe.shortStat
+        var changed = false
+        if branch != probe.branch { branch = probe.branch; changed = true }
+        if statuses != probe.statuses { statuses = probe.statuses; changed = true }
+        if shortStat != probe.shortStat { shortStat = probe.shortStat; changed = true }
         return changed
     }
 
@@ -299,16 +321,17 @@ final class FileViewerController {
                 try await $0.listDirectory(atPath: directory)
             }
             treeFailure = nil
-            let entries = listed.map { entry in
-                let typeBits = (entry.permissions ?? 0) & 0o170000
-                return FileTreeEntry(
+            // Sorted at write time: rows() renders straight from storage
+            // (re-sorting per render is ICU work the tree pays on every
+            // body evaluation), and a stable order also keeps the
+            // compare-before-write below honest against server ordering.
+            let entries = FileTree.sorted(listed.map { entry in
+                FileTreeEntry(
                     name: entry.name,
                     path: FileTree.join(directory, entry.name),
-                    isDirectory: typeBits == 0o040000,
-                    isSymlink: typeBits == 0o120000,
-                    size: entry.size
+                    isDirectory: entry.isDirectory
                 )
-            }
+            })
             // Compare before writing: the watch relists on a cadence, and
             // an identical assignment would still churn observers.
             if childrenByPath[directory] != entries {
@@ -391,9 +414,7 @@ final class FileViewerController {
             defer { isBusy = false }
             await probeGit(at: rootPath)
             await refreshGitVerdicts()
-            for directory in [rootPath] + expanded.sorted() {
-                await list(directory)
-            }
+            await relistVisibleDirectories()
             switch content {
             case .document(let document):
                 await open(path: document.path, line: nil)
@@ -430,26 +451,27 @@ final class FileViewerController {
             }
             let document = try await makeDocument(path: path, line: line, stat: stat)
             guard generation == contentGeneration else { return }
-            switch document {
-            case .success(let document):
-                lastDocument = document
-                watchedStamp = stat
-                content = .document(document)
-            case .failure(let title, let message):
-                content = .failure(title: title, message: message)
-            }
+            lastDocument = document
+            watchedStamp = stat
+            content = .document(document)
         } catch {
             guard generation == contentGeneration else { return }
-            content = .failure(
-                title: "CAN'T READ \(name.uppercased())",
-                message: failureMessage(error)
-            )
+            if let refusal = error as? LoadRefusal {
+                content = .failure(title: refusal.title, message: refusal.message)
+            } else {
+                content = .failure(
+                    title: "CAN'T READ \(name.uppercased())",
+                    message: failureMessage(error)
+                )
+            }
         }
     }
 
-    private enum DocumentResult {
-        case success(Document)
-        case failure(title: String, message: String)
+    /// A refusal the pipeline can title itself (the size cap) — one error
+    /// channel: `makeDocument` throws, callers catch into the panel.
+    private struct LoadRefusal: Error {
+        var title: String
+        var message: String
     }
 
     /// The read → classify → parse/highlight pipeline, shared by the loud
@@ -458,7 +480,7 @@ final class FileViewerController {
         path: String,
         line: Int?,
         stat: SSHConnection.FileStat
-    ) async throws -> DocumentResult {
+    ) async throws -> Document {
         let name = FileTree.name(of: path)
         let size = stat.size ?? 0
         var document = Document(path: path, size: size, kind: FileKind.classify(fileName: name))
@@ -466,10 +488,10 @@ final class FileViewerController {
 
         switch document.kind {
         case .binary:
-            document.isBinary = true
+            break
         case .image:
             guard size <= UInt64(Self.imageByteLimit) else {
-                return .failure(
+                throw LoadRefusal(
                     title: "TOO LARGE",
                     message: "\(name) is \(Self.formatBytes(size)) — the viewer renders images up to \(Self.formatBytes(UInt64(Self.imageByteLimit)))."
                 )
@@ -477,33 +499,56 @@ final class FileViewerController {
             let (data, _) = try await withConnection {
                 try await $0.readFile(atPath: path, limit: Self.imageByteLimit)
             }
-            document.imageData = data
+            // Undecodable "image" bytes are binary content by any honest
+            // reading — same verdict as the NUL sniff below.
+            if let image = UIImage(data: data) {
+                document.image = image
+            } else {
+                document.kind = .binary
+            }
         case .markdown, .code:
             let (data, truncated) = try await withConnection {
                 try await $0.readFile(atPath: path, limit: Self.textByteLimit)
             }
             document.truncated = truncated
             if FileKind.looksBinary(data) {
-                document.isBinary = true
+                document.kind = .binary
                 break
             }
-            let text = String(decoding: data, as: UTF8.self)
-            if document.kind == .markdown, !markdownRaw {
-                document.markdown = await Task.detached {
-                    MarkdownDocument.parse(text)
-                }.value
+            let text = await Task.detached { String(decoding: data, as: UTF8.self) }.value
+            if document.kind == .markdown {
+                document.sourceText = text
+                document = await Self.renderedMarkdown(document, raw: markdownRaw)
             } else {
                 let language: CodeLanguage? = {
                     if case .code(let detected) = document.kind { return detected }
-                    return nil // markdown RAW renders plain
+                    return nil
                 }()
-                document.language = language
                 document.codeLines = await Task.detached {
                     CodeHighlighter.highlight(text, language: language)
                 }.value
             }
         }
-        return .success(document)
+        return document
+    }
+
+    /// Markdown renders both ways from the same held text: blocks when
+    /// rendered, plain lines when RAW.
+    private static func renderedMarkdown(_ document: Document, raw: Bool) async -> Document {
+        var document = document
+        guard let text = document.sourceText else { return document }
+        if raw {
+            document.markdown = []
+            document.codeLines = await Task.detached {
+                CodeHighlighter.highlight(text, language: nil)
+            }.value
+        } else {
+            document.codeLines = []
+            document.markdown = await Task.detached {
+                MarkdownDocument.parse(text)
+            }.value
+        }
+        return document
     }
 
     // MARK: Diff
@@ -524,21 +569,27 @@ final class FileViewerController {
         return String(path.dropFirst(gitRoot.count + 1))
     }
 
+    /// Untracked files diff `--no-index /dev/null` (an all-additions
+    /// render); tracked files diff against HEAD. Both spellings live here
+    /// only — the loud diff and the watch's quiet one share it.
+    private func fileDiffCommand(gitRoot: String, path: String) -> String {
+        let relative = relativeToRepo(path) ?? path
+        return badges[path] == .untracked
+            ? GitCommands.untrackedDiff(root: gitRoot, path: relative)
+            : GitCommands.diffFile(root: gitRoot, path: relative)
+    }
+
     func showFileDiff(path: String) async {
         guard let gitRoot else { return }
         contentGeneration += 1
         let generation = contentGeneration
         let name = FileTree.name(of: path)
-        let relative = relativeToRepo(path) ?? path
         content = .loading(label: "DIFF · \(name)")
         // Baseline the stamp now, so the watch compares against the
         // worktree the diff was cut from — not against nothing.
         watchedStamp = try? await withConnection { try await $0.statFile(atPath: path) }
-        let command = badges[path] == .untracked
-            ? GitCommands.untrackedDiff(root: gitRoot, path: relative)
-            : GitCommands.diffFile(root: gitRoot, path: relative)
         await runDiff(
-            command: command,
+            command: fileDiffCommand(gitRoot: gitRoot, path: path),
             scope: .file(path: path),
             emptyLabel: name,
             generation: generation
@@ -592,10 +643,7 @@ final class FileViewerController {
         case .repo:
             command = GitCommands.fullDiff(root: gitRoot)
         case .file(let path):
-            let relative = relativeToRepo(path) ?? path
-            command = badges[path] == .untracked
-                ? GitCommands.untrackedDiff(root: gitRoot, path: relative)
-                : GitCommands.diffFile(root: gitRoot, path: relative)
+            command = fileDiffCommand(gitRoot: gitRoot, path: path)
         }
         guard let output = try? await withConnection({ try await $0.exec(command) })
         else { return }
@@ -609,13 +657,11 @@ final class FileViewerController {
 
     /// The SOURCE chip: back to the document behind a per-file diff.
     func showSource() {
-        if let lastDocument, case .diff(_, .file(let path)) = content,
-           lastDocument.path == path {
+        guard case .diff(_, .file(let path)) = content else { return }
+        if let lastDocument, lastDocument.path == path {
             contentGeneration += 1
             content = .document(lastDocument)
-            return
-        }
-        if case .diff(_, .file(let path)) = content {
+        } else {
             Task { await open(path: path, line: nil) }
         }
     }
@@ -703,10 +749,9 @@ final class FileViewerController {
         switch content {
         case .document(let current):
             guard !stat.isDirectory,
-                  let result = try? await makeDocument(
+                  let document = try? await makeDocument(
                       path: current.path, line: nil, stat: stat
                   ),
-                  case .success(let document) = result,
                   generation == contentGeneration,
                   case .document(let still) = content, still.path == current.path
             else { return }
@@ -725,16 +770,16 @@ final class FileViewerController {
         if let connectionError = error as? SSHConnectionError {
             switch connectionError {
             case .keyPassphraseRequired, .incorrectKeyPassphrase:
+                // The stock copy asks for the passphrase; the viewer has no
+                // prompt to offer, so point at the two places that can
+                // unlock the key instead.
                 return "The host's key is sealed. Set its passphrase in "
                     + "Host Settings, or open a terminal to this host first."
-            case .missingCredentials:
-                return "No credentials for \(host.name) — check Host Settings."
-            case .connectFailed(let reason):
-                return reason
             case .notConnected:
-                return "The connection dropped. REFRESH dials again."
-            case .unsupportedKey:
-                return "The host's key format isn't supported."
+                return connectionError.userMessage(host: host) + " REFRESH dials again."
+            case .missingCredentials, .unsupportedKey, .connectFailed:
+                // One copy source for connection failures, app-wide.
+                return connectionError.userMessage(host: host)
             }
         }
         let message = "\(error)"

@@ -27,6 +27,13 @@ struct GitDiff: Equatable {
 
         func closeHunk() {
             if let done = hunk, var file = current {
+                for line in done.lines {
+                    switch line.kind {
+                    case .addition: file.additions += 1
+                    case .deletion: file.deletions += 1
+                    case .context: break
+                    }
+                }
                 file.hunks.append(done)
                 current = file
                 hunk = nil
@@ -61,9 +68,6 @@ struct GitDiff: Equatable {
                 if line.hasPrefix("@@") {
                     closeHunk()
                     // fall through to the hunk-open branch below
-                } else if line.hasPrefix("diff --git ") {
-                    // handled above; unreachable, kept for clarity
-                    continue
                 } else if line.hasPrefix("\\") {
                     // "\ No newline at end of file" — annotate the previous
                     // line rather than rendering a phantom row.
@@ -157,19 +161,16 @@ struct GitDiffFile: Equatable {
     var kind: Kind = .modified
     var isBinary = false
     var hunks: [GitDiffHunk] = []
+    /// Counted once as hunks close during parse — headers re-read these on
+    /// every render, and a repo-wide diff's line count is unbounded.
+    var additions = 0
+    var deletions = 0
 
     /// The path the viewer shows and keys by: where the file lives NOW —
     /// the old path only when the new side is gone.
     var displayPath: String {
         if kind == .deleted { return oldPath.isEmpty ? newPath : oldPath }
         return newPath.isEmpty ? oldPath : newPath
-    }
-
-    var additions: Int {
-        hunks.reduce(0) { $0 + $1.lines.filter { $0.kind == .addition }.count }
-    }
-    var deletions: Int {
-        hunks.reduce(0) { $0 + $1.lines.filter { $0.kind == .deletion }.count }
     }
 
     init() {}

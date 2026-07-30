@@ -45,18 +45,7 @@ struct TerminalLinkSheet: View {
                                             .fixedSize(horizontal: false, vertical: true)
                                     }
                                 }
-                                VStack(alignment: .leading, spacing: 4) {
-                                    ChassisLabel("TARGET", size: 9, color: Theme.signal3)
-                                    Text(link.raw)
-                                        .font(.mono(11))
-                                        .foregroundStyle(Theme.signal2)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .textSelection(.enabled)
-                                }
-                                .padding(10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Theme.screen)
-                                .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+                                TerminalSheetValueBox(label: "TARGET", value: link.raw)
 
                                 if let viewport {
                                     VStack(alignment: .leading, spacing: 4) {
@@ -186,6 +175,29 @@ struct TerminalLinkSheet: View {
     }
 }
 
+/// The confirm sheets' boxed value — the resolved target in the mono data
+/// voice on a screen inset. One spelling for the link sheet's TARGET and
+/// the path sheet's PATH, so the two deliberate twins can't drift.
+struct TerminalSheetValueBox: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ChassisLabel(label, size: 9, color: Theme.signal3)
+            Text(value)
+                .font(.mono(11))
+                .foregroundStyle(Theme.signal2)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.screen)
+        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+    }
+}
+
 extension View {
     /// Presents `controller`'s pending link confirmation. Packaged as one
     /// modifier because `TerminalWindowRoot`'s body is already at the Swift
@@ -212,6 +224,21 @@ extension View {
                 onOpen: { controller?.openPendingLink() },
                 onCopy: { controller?.copyPendingLink() },
                 onOpenViewport: openViewport
+            )
+        }
+    }
+
+    /// The binding-backed spelling, for panes that confirm a link without a
+    /// session controller (a viewport's refused navigation, a markdown
+    /// link) — same sheet, same open/copy actions, no viewport row.
+    func terminalLinkConfirmation(item: Binding<TerminalLink?>) -> some View {
+        sheet(item: item) { link in
+            TerminalLinkSheet(
+                link: link,
+                onOpen: {
+                    if let url = link.openableURL { UIApplication.shared.open(url) }
+                },
+                onCopy: { UIPasteboard.general.string = link.raw }
             )
         }
     }

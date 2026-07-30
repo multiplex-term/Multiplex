@@ -7,8 +7,6 @@ struct FileTreeEntry: Equatable, Identifiable {
     /// Absolute remote path.
     var path: String
     var isDirectory: Bool
-    var isSymlink = false
-    var size: UInt64?
 
     var id: String { path }
 }
@@ -65,7 +63,9 @@ enum FileTree {
 
     /// Flattens the loaded tree into visible rows: expanded directories
     /// contribute their (already listed) children; an expanded directory
-    /// whose listing hasn't arrived contributes only itself.
+    /// whose listing hasn't arrived contributes only itself. `children`
+    /// values are stored pre-sorted (`sorted(_:)` at listing time) — this
+    /// runs on every tree render and must not re-sort them.
     static func rows(
         root: String,
         children: [String: [FileTreeEntry]],
@@ -93,7 +93,7 @@ enum FileTree {
         into rows: inout [Row]
     ) {
         guard let entries = children[directory] else { return }
-        for entry in sorted(entries) where !isHidden(entry.name) {
+        for entry in entries where !isHidden(entry.name) {
             let isExpanded = entry.isDirectory && expanded.contains(entry.path)
             rows.append(Row(
                 entry: entry,

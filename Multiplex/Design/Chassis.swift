@@ -409,6 +409,31 @@ struct TallyLamp: View {
     }
 }
 
+/// The chassis verdict card: content on a bezel panel, optionally led by a
+/// captioned tally lamp — NO ROUTE, BINARY, FILE GONE, "host removed". One
+/// spelling so every pane's verdict surface stays aligned; callers add
+/// their own outer padding/frame.
+struct ChassisPanel<Content: View>: View {
+    var caption: String? = nil
+    var color = Theme.caution
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(spacing: 14) {
+            if let caption {
+                TallyLamp(caption: caption, color: color)
+            }
+            content
+        }
+        .padding(30)
+        .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.bezelHi, lineWidth: 1)
+        )
+    }
+}
+
 extension View {
     /// Square-cornered gaze-hover highlight. The default visionOS platter is
     /// heavily rounded and fights the chassis geometry; buttonBorderShape

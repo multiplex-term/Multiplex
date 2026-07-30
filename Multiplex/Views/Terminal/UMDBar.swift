@@ -188,12 +188,7 @@ struct UMDBar: View {
 
     private var newTabMenu: some View {
         Menu {
-            Button("New Session") { newSession(nil) }
-            ForEach(AgentKind.allCases, id: \.self) { agent in
-                Button(agent.displayName) { newSession(agent) }
-            }
-            Divider()
-            Button("File Viewer") { openFileViewer() }
+            NewTabMenuItems(newSession: newSession, openFileViewer: openFileViewer)
         } label: {
             ChassisBadge("TAB", systemImage: "plus")
         }
@@ -354,6 +349,25 @@ struct UMDBar: View {
     }
 }
 
+/// The + TAB dropdown's content — a fresh session in the active tab's
+/// directory, plain or launching an agent (the deck's New Session grammar),
+/// plus the file viewer. ONE spelling for its three homes — the classic
+/// toolbar, the UMD bar, and the compact overflow's New Tab submenu — so a
+/// new entry lands on every surface or none.
+struct NewTabMenuItems: View {
+    var newSession: (AgentKind?) -> Void
+    var openFileViewer: () -> Void
+
+    var body: some View {
+        Button("New Session") { newSession(nil) }
+        ForEach(AgentKind.allCases, id: \.self) { agent in
+            Button(agent.displayName) { newSession(agent) }
+        }
+        Divider()
+        Button("File Viewer") { openFileViewer() }
+    }
+}
+
 /// Shared compact action menu for the iPhone shell and narrow classic iPad
 /// windows. Keeping one menu definition prevents either compact surface from
 /// silently losing actions as the regular terminal chrome evolves.
@@ -380,12 +394,7 @@ struct TerminalOverflowMenu: View {
                 Button("Larger Text", action: fontUp)
             }
             Menu("New Tab") {
-                Button("New Session") { newSession(nil) }
-                ForEach(AgentKind.allCases, id: \.self) { agent in
-                    Button(agent.displayName) { newSession(agent) }
-                }
-                Divider()
-                Button("File Viewer") { openFileViewer() }
+                NewTabMenuItems(newSession: newSession, openFileViewer: openFileViewer)
             }
             FileAttachSubmenu(controller: controller) {
                 requestedFileAttachPicker = $0

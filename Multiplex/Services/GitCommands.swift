@@ -12,7 +12,13 @@ import Foundation
 /// `--no-ext-diff` ensures a host's configured diff tool can never run under
 /// an app-initiated read.
 enum GitCommands {
-    static let exitSentinel = "\nMPXFV_EXIT:"
+    /// Every sentinel is spelled ONCE as a bare token and interpolated into
+    /// both the builders and the parser-side constants — a hand-respelled
+    /// copy desynchronizing them would read as "channel failed" at runtime.
+    private static let exitToken = "MPXFV_EXIT:"
+    private static let statToken = "MPXFV_STAT:"
+
+    static let exitSentinel = "\n" + exitToken
 
     /// `(body, exitCode)` from a sentinel-tailed command's output. The
     /// sentinel is the final thing the command prints, so the LAST
@@ -40,7 +46,7 @@ enum GitCommands {
     }
 
     private static func tailed(_ command: String) -> String {
-        TmuxProbe.pathPrefix + command + " 2>/dev/null; printf '\\nMPXFV_EXIT:%s' \"$?\""
+        TmuxProbe.pathPrefix + command + " 2>/dev/null; printf '\\n\(exitToken)%s' \"$?\""
     }
 
     private static func git(_ root: String, _ arguments: String) -> String {
@@ -61,7 +67,7 @@ enum GitCommands {
             + "t=$(git -C \(quoted) rev-parse --show-toplevel 2>/dev/null); s=$?; "
             + "b=$(git -C \(quoted) rev-parse --abbrev-ref HEAD 2>/dev/null); "
             + "printf '%s\\n\(branchSentinel)%s' \"$t\" \"$b\"; "
-            + "printf '\\nMPXFV_EXIT:%s' \"$s\""
+            + "printf '\\n\(exitToken)%s' \"$s\""
     }
 
     /// `(toplevel, branch)` out of `repoProbe`'s body. Branch is nil when
@@ -81,16 +87,12 @@ enum GitCommands {
         return (toplevel, branch)
     }
 
-    static func status(root: String) -> String {
-        tailed(git(root, "status --porcelain=v1 -z --untracked-files=normal"))
-    }
-
-    /// The watch tick's whole git read in ONE round trip — branch, porcelain
-    /// status, and shortstat, sentinel-framed (the deck's one-exec probe
-    /// discipline; a 5 s cadence must not cost three channel setups).
+    /// The whole git read — branch, porcelain status, and shortstat — in ONE
+    /// round trip, sentinel-framed (the deck's one-exec probe discipline; the
+    /// watch's 5 s cadence must not cost three channel setups).
     /// Layout: `MPXFV_BR:<branch>\n<status -z bytes>\nMPXFV_STAT:<shortstat>`
     /// then the usual exit sentinel carrying the STATUS command's code.
-    static let watchStatSentinel = "\nMPXFV_STAT:"
+    static let watchStatSentinel = "\n" + statToken
 
     static func watchProbe(root: String) -> String {
         let quoted = root.shellQuoted
@@ -99,9 +101,9 @@ enum GitCommands {
             + "\"$(git -C \(quoted) rev-parse --abbrev-ref HEAD 2>/dev/null)\"; "
             + "git -C \(quoted) -c core.quotepath=false status --porcelain=v1 -z"
             + " --untracked-files=normal 2>/dev/null; s=$?; "
-            + "printf '\\nMPXFV_STAT:'; "
+            + "printf '\\n\(statToken)'; "
             + "git -C \(quoted) diff --shortstat --no-ext-diff HEAD -- 2>/dev/null; "
-            + "printf '\\nMPXFV_EXIT:%s' \"$s\""
+            + "printf '\\n\(exitToken)%s' \"$s\""
     }
 
     struct WatchProbe: Equatable {
@@ -129,12 +131,6 @@ enum GitCommands {
             statuses: GitFileStatus.parse(porcelainZ: String(statusBytes)),
             shortStat: shortStat
         )
-    }
-
-    /// The tree header's ± counts. `HEAD --` so staged and unstaged changes
-    /// both count; prints nothing on a clean tree.
-    static func shortstat(root: String) -> String {
-        tailed(git(root, "diff --shortstat --no-ext-diff HEAD --"))
     }
 
     /// One file's uncommitted changes (staged + unstaged) vs HEAD.

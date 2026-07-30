@@ -53,7 +53,9 @@ enum CodeHighlighter {
         case blockComment(open: String, close: String, depth: Int, nests: Bool)
         /// Inside a multi-line string: Python/Swift triple quotes, JS
         /// template literals, markup `<!--` handled as comment above.
-        case multilineString(delimiter: String, escapes: Bool)
+        /// Backslash escapes always apply — every carrying string form has
+        /// them.
+        case multilineString(delimiter: String)
     }
 
     struct Rules {
@@ -144,48 +146,24 @@ enum CodeHighlighter {
             case .normal:
                 break carried
             case .blockComment(let open, let close, let depth, let nests):
-                var cursor = index
-                var level = depth
-                while cursor < characters.count {
-                    if nests, matches(open, at: cursor) {
-                        level += 1
-                        cursor += open.count
-                        continue
-                    }
-                    if matches(close, at: cursor) {
-                        level -= 1
-                        cursor += close.count
-                        if level == 0 { break }
-                        continue
-                    }
-                    cursor += 1
-                }
-                emit(String(characters[index..<min(cursor, characters.count)]), .comment)
-                index = cursor
-                if level == 0 {
+                let scan = scanBlockComment(
+                    characters, from: index,
+                    open: Array(open), close: Array(close),
+                    depth: depth, nests: nests
+                )
+                emit(String(characters[index..<scan.end]), .comment)
+                index = scan.end
+                if scan.depth == 0 {
                     state = .normal
                 } else {
-                    state = .blockComment(open: open, close: close, depth: level, nests: nests)
+                    state = .blockComment(open: open, close: close, depth: scan.depth, nests: nests)
                     return HighlightedLine(segments: segments)
                 }
-            case .multilineString(let delimiter, let escapes):
-                var cursor = index
-                var closed = false
-                while cursor < characters.count {
-                    if escapes, characters[cursor] == "\\", cursor + 1 < characters.count {
-                        cursor += 2
-                        continue
-                    }
-                    if matches(delimiter, at: cursor) {
-                        cursor += delimiter.count
-                        closed = true
-                        break
-                    }
-                    cursor += 1
-                }
-                emit(String(characters[index..<min(cursor, characters.count)]), .string)
-                index = cursor
-                if closed {
+            case .multilineString(let delimiter):
+                let scan = scanToDelimiter(characters, from: index, delimiter: Array(delimiter))
+                emit(String(characters[index..<scan.end]), .string)
+                index = scan.end
+                if scan.closed {
                     state = .normal
                 } else {
                     return HighlightedLine(segments: segments)
@@ -194,7 +172,7 @@ enum CodeHighlighter {
         }
 
         if rules.markup {
-            scanMarkup(characters, from: &index, emit: emit, matches: matches, state: &state, rules: rules)
+            scanMarkup(characters, from: &index, emit: emit, state: &state)
             return HighlightedLine(segments: segments.isEmpty && line.isEmpty
                 ? [.init(text: "", kind: .plain)]
                 : segments)
@@ -241,34 +219,17 @@ enum CodeHighlighter {
 
             // Block comment open.
             if let block = rules.blockComment, matches(block.open, at: index) {
-                state = .blockComment(
-                    open: block.open, close: block.close,
+                let scan = scanBlockComment(
+                    characters, from: index + block.open.count,
+                    open: Array(block.open), close: Array(block.close),
                     depth: 1, nests: rules.nestedBlockComments
                 )
-                var cursor = index + block.open.count
-                var level = 1
-                while cursor < characters.count {
-                    if rules.nestedBlockComments, matches(block.open, at: cursor) {
-                        level += 1
-                        cursor += block.open.count
-                        continue
-                    }
-                    if matches(block.close, at: cursor) {
-                        level -= 1
-                        cursor += block.close.count
-                        if level == 0 { break }
-                        continue
-                    }
-                    cursor += 1
-                }
-                emit(String(characters[index..<min(cursor, characters.count)]), .comment)
-                index = cursor
-                if level == 0 {
-                    state = .normal
-                } else {
+                emit(String(characters[index..<scan.end]), .comment)
+                index = scan.end
+                if scan.depth > 0 {
                     state = .blockComment(
                         open: block.open, close: block.close,
-                        depth: level, nests: rules.nestedBlockComments
+                        depth: scan.depth, nests: rules.nestedBlockComments
                     )
                     return HighlightedLine(segments: segments)
                 }
@@ -279,24 +240,13 @@ enum CodeHighlighter {
             // Multi-line quotes (longest first by construction of the rule).
             var openedMultiline = false
             for delimiter in rules.multilineQuotes where matches(delimiter, at: index) {
-                var cursor = index + delimiter.count
-                var closed = false
-                while cursor < characters.count {
-                    if characters[cursor] == "\\", cursor + 1 < characters.count {
-                        cursor += 2
-                        continue
-                    }
-                    if matches(delimiter, at: cursor) {
-                        cursor += delimiter.count
-                        closed = true
-                        break
-                    }
-                    cursor += 1
-                }
-                emit(String(characters[index..<min(cursor, characters.count)]), .string)
-                index = cursor
-                if !closed {
-                    state = .multilineString(delimiter: delimiter, escapes: true)
+                let scan = scanToDelimiter(
+                    characters, from: index + delimiter.count, delimiter: Array(delimiter)
+                )
+                emit(String(characters[index..<scan.end]), .string)
+                index = scan.end
+                if !scan.closed {
+                    state = .multilineString(delimiter: delimiter)
                     return HighlightedLine(segments: segments)
                 }
                 openedMultiline = true
@@ -306,24 +256,11 @@ enum CodeHighlighter {
 
             // Template literal.
             if rules.backtickTemplate, character == "`" {
-                var cursor = index + 1
-                var closed = false
-                while cursor < characters.count {
-                    if characters[cursor] == "\\", cursor + 1 < characters.count {
-                        cursor += 2
-                        continue
-                    }
-                    if characters[cursor] == "`" {
-                        cursor += 1
-                        closed = true
-                        break
-                    }
-                    cursor += 1
-                }
-                emit(String(characters[index..<min(cursor, characters.count)]), .string)
-                index = cursor
-                if !closed {
-                    state = .multilineString(delimiter: "`", escapes: true)
+                let scan = scanToDelimiter(characters, from: index + 1, delimiter: ["`"])
+                emit(String(characters[index..<scan.end]), .string)
+                index = scan.end
+                if !scan.closed {
+                    state = .multilineString(delimiter: "`")
                     return HighlightedLine(segments: segments)
                 }
                 lineStart = false
@@ -334,20 +271,9 @@ enum CodeHighlighter {
             // no carry: most languages' plain strings cannot span lines,
             // and carrying one would paint the rest of the file green.
             if rules.quotes.contains(character) {
-                var cursor = index + 1
-                while cursor < characters.count {
-                    if characters[cursor] == "\\", cursor + 1 < characters.count {
-                        cursor += 2
-                        continue
-                    }
-                    if characters[cursor] == character {
-                        cursor += 1
-                        break
-                    }
-                    cursor += 1
-                }
-                emit(String(characters[index..<min(cursor, characters.count)]), .string)
-                index = cursor
+                let scan = scanToDelimiter(characters, from: index + 1, delimiter: [character])
+                emit(String(characters[index..<scan.end]), .string)
+                index = scan.end
                 lineStart = false
                 continue
             }
@@ -446,31 +372,95 @@ enum CodeHighlighter {
         return HighlightedLine(segments: segments)
     }
 
+    // MARK: Shared scan loops
+
+    /// Walk block-comment content from `start` until the comment closes or
+    /// the line ends. Returns the index just past the scan (never beyond the
+    /// line) and the nesting depth still open — 0 means it closed here.
+    private static func scanBlockComment(
+        _ characters: [Character],
+        from start: Int,
+        open: [Character],
+        close: [Character],
+        depth: Int,
+        nests: Bool
+    ) -> (end: Int, depth: Int) {
+        var cursor = start
+        var level = depth
+        while cursor < characters.count {
+            if nests, matches(characters, open, at: cursor) {
+                level += 1
+                cursor += open.count
+                continue
+            }
+            if matches(characters, close, at: cursor) {
+                level -= 1
+                cursor += close.count
+                if level == 0 { break }
+                continue
+            }
+            cursor += 1
+        }
+        return (cursor, level)
+    }
+
+    /// Walk string content from `start` until the delimiter closes it or the
+    /// line ends; a backslash escapes the next character. `end` sits just
+    /// past the closing delimiter when `closed`.
+    private static func scanToDelimiter(
+        _ characters: [Character],
+        from start: Int,
+        delimiter: [Character]
+    ) -> (end: Int, closed: Bool) {
+        var cursor = start
+        while cursor < characters.count {
+            if characters[cursor] == "\\", cursor + 1 < characters.count {
+                cursor += 2
+                continue
+            }
+            if matches(characters, delimiter, at: cursor) {
+                return (cursor + delimiter.count, true)
+            }
+            cursor += 1
+        }
+        return (cursor, false)
+    }
+
+    /// Needle pre-converted to `[Character]` so the per-character scan loops
+    /// above never re-allocate it. (The `String` closure in `highlightLine`
+    /// stays for once-per-token checks, where the conversion is cheap.)
+    private static func matches(
+        _ characters: [Character], _ needle: [Character], at position: Int
+    ) -> Bool {
+        guard position + needle.count <= characters.count else { return false }
+        for (offset, character) in needle.enumerated()
+        where characters[position + offset] != character {
+            return false
+        }
+        return true
+    }
+
     // MARK: Markup scanning (XML/HTML)
+
+    private static let markupCommentOpen: [Character] = Array("<!--")
+    private static let markupCommentClose: [Character] = Array("-->")
 
     private static func scanMarkup(
         _ characters: [Character],
         from index: inout Int,
         emit: (String, CodeTokenKind) -> Void,
-        matches: (String, Int) -> Bool,
-        state: inout LineState,
-        rules: Rules
+        state: inout LineState
     ) {
         while index < characters.count {
-            if matches("<!--", index) {
-                var cursor = index + 4
-                var closed = false
-                while cursor < characters.count {
-                    if matches("-->", cursor) {
-                        cursor += 3
-                        closed = true
-                        break
-                    }
-                    cursor += 1
-                }
-                emit(String(characters[index..<min(cursor, characters.count)]), .comment)
-                index = cursor
-                if !closed {
+            if matches(characters, markupCommentOpen, at: index) {
+                let scan = scanBlockComment(
+                    characters, from: index + markupCommentOpen.count,
+                    open: markupCommentOpen, close: markupCommentClose,
+                    depth: 1, nests: false
+                )
+                emit(String(characters[index..<scan.end]), .comment)
+                index = scan.end
+                if scan.depth > 0 {
                     state = .blockComment(open: "<!--", close: "-->", depth: 1, nests: false)
                     return
                 }
@@ -564,8 +554,21 @@ enum CodeHighlighter {
     // MARK: Rule tables
 
     /// nil = render plain (markdown raw mode uses its own renderer; CONF
-    /// falls through to the INI profile).
+    /// falls through to the INI profile). Tables are built once — diff rows
+    /// look rules up per row, so this must never rebuild the keyword sets.
     static func rules(for language: CodeLanguage) -> Rules? {
+        rulesCache[language]
+    }
+
+    private static let rulesCache: [CodeLanguage: Rules] = {
+        var cache: [CodeLanguage: Rules] = [:]
+        for language in CodeLanguage.allCases {
+            cache[language] = makeRules(for: language)
+        }
+        return cache
+    }()
+
+    private static func makeRules(for language: CodeLanguage) -> Rules? {
         switch language {
         case .swift:
             var rules = cFamily(keywords: [
@@ -765,7 +768,6 @@ enum CodeHighlighter {
             rules.lineCommentPrefixes = ["#"]
             rules.quotes = ["\"", "'"]
             rules.propertyBeforeColon = true
-            rules.dollarVariables = false
             return rules
         case .toml, .ini:
             var rules = Rules()
@@ -775,7 +777,6 @@ enum CodeHighlighter {
             rules.quotes = ["\"", "'"]
             rules.multilineQuotes = ["\"\"\""]
             rules.sectionHeaders = true
-            rules.propertyBeforeColon = false
             return rules
         case .xml, .html:
             var rules = Rules()

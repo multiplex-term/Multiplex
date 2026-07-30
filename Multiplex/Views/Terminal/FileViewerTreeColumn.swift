@@ -84,11 +84,10 @@ struct FileViewerTreeColumn: View {
                 .font(.mono(9))
                 .foregroundColor(Theme.signal3)
         }
-        return (Text("+\(controller.shortStat.insertions) ")
-            .foregroundColor(CodePalette.diffAddText)
-            + Text("−\(controller.shortStat.deletions)")
-            .foregroundColor(CodePalette.diffDeleteText))
-            .font(.mono(9, weight: .semibold))
+        return CodePalette.plusMinus(
+            controller.shortStat.insertions,
+            controller.shortStat.deletions
+        )
     }
 
     private var rows: some View {

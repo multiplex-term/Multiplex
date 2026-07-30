@@ -832,7 +832,9 @@ views.
   once per op when a reused socket died in suspension, which is the whole
   resume story (request/response needs no policy); works for mosh hosts
   (SSH stays the control plane). **SFTP for listings/bytes** (structural —
-  never parse `ls`; one SFTP READ is server-capped so reads loop chunks),
+  never parse `ls`; one SFTP READ is server-capped AND costs a round trip,
+  so reads fill fixed chunks concurrently — sequential chunk walks cost
+  seconds per megabyte at real RTT),
   **exec for git** with the TmuxProbe discipline plus one more rule:
   Citadel's `executeCommand` THROWS on nonzero exit, so every git command
   tails `printf '\nMPXFV_EXIT:%s' "$?"` (`GitCommands.splitExit`) — "not a

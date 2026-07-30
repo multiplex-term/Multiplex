@@ -26,18 +26,7 @@ struct TerminalFilePathSheet: View {
                                         .font(.mono(13, weight: .semibold))
                                         .foregroundStyle(Theme.signal)
                                 }
-                                VStack(alignment: .leading, spacing: 4) {
-                                    ChassisLabel("PATH", size: 9, color: Theme.signal3)
-                                    Text(target.path)
-                                        .font(.mono(11))
-                                        .foregroundStyle(Theme.signal2)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .textSelection(.enabled)
-                                }
-                                .padding(10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Theme.screen)
-                                .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+                                TerminalSheetValueBox(label: "PATH", value: target.path)
 
                                 if let line = target.line {
                                     HStack(spacing: 8) {
