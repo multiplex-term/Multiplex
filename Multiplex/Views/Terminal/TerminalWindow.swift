@@ -2022,13 +2022,18 @@ extension Notification.Name {
     static let multiplexDebugFileViewerRepoDiff = Notification.Name(
         "MultiplexDebugFileViewerRepoDiff"
     )
+    static let multiplexDebugFileViewerSelect = Notification.Name(
+        "MultiplexDebugFileViewerSelect"
+    )
 }
 
 /// `….debug.fileviewer` runs the focused window's + TAB ▸ File Viewer
 /// action (pane-cwd resolve → controller registration → tab dock);
 /// `….debug.pathview` runs the path sheet's ▤ VIEW for the pending path a
 /// prior `….debug.link` raised over path-shaped text — together the
-/// headless walk of both summon doors.
+/// headless walk of both summon doors. `….debug.fvselect` toggles the
+/// active viewer's rendered-markdown SELECT mode (the rail chip the
+/// simulator can't tap).
 @MainActor
 enum FileViewerDebugHook {
     private static var installed = false
@@ -2054,6 +2059,14 @@ enum FileViewerDebugHook {
         ) { _ in
             NotificationCenter.default.post(
                 name: .multiplexDebugFileViewerRepoDiff, object: nil
+            )
+        }
+        var selectToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.fvselect", &selectToken, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugFileViewerSelect, object: nil
             )
         }
     }

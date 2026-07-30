@@ -49,7 +49,7 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Multiplex connects to SSH hosts on your local network, and finds machines offering to bind themselves to the app.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Multiplex listens only after you start dictation from the terminal controls, and stops when dictation ends.</string>
+	<string>Multiplex listens only while you hold a dictation going from the terminal key bar.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Multiplex transcribes your dictation so the words can be typed into the terminal session you are attached to. Recognition stays on device wherever your language supports it.</string>
 	<key>UIApplicationSceneManifest</key>

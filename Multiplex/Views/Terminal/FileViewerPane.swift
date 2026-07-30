@@ -27,6 +27,12 @@ struct FileViewerPane: View {
     /// A markdown link awaiting the link sheet's confirmation — the same
     /// gate a pane press gets; a document never opens anything itself.
     @State private var confirmingLink: TerminalLink?
+    /// SELECT mode for RENDERED markdown only: its blocks select
+    /// per-paragraph (rich layout is worth that), so the rail chip
+    /// re-hosts the raw source in the selectable text screen for a
+    /// cross-line copy; DONE returns to the render. Code, diffs, and RAW
+    /// need no mode — their screens select by default.
+    @State private var selectingMarkdownSource = false
 
     init(
         controller: FileViewerController,
@@ -90,6 +96,7 @@ struct FileViewerPane: View {
             .animation(.easeOut(duration: 0.18), value: drawerOpen)
         }
         .background(Theme.screen)
+        .onChange(of: markdownSelectKey) { selectingMarkdownSource = false }
         .task { await controller.start() }
         // Cancelled the moment the tab stops being active; re-created on
         // return, so the first tick lands ~5 s after coming back.
@@ -98,6 +105,15 @@ struct FileViewerPane: View {
             await controller.watchWhileActive()
         }
         .terminalLinkConfirmation(item: $confirmingLink)
+        #if DEBUG
+        // Headless stand-in for the markdown SELECT chip (no sim tap route).
+        .onReceive(
+            NotificationCenter.default.publisher(for: .multiplexDebugFileViewerSelect)
+        ) { _ in
+            guard isActive, markdownSelectAvailable else { return }
+            selectingMarkdownSource.toggle()
+        }
+        #endif
     }
 
     // MARK: Content column
@@ -142,28 +158,11 @@ struct FileViewerPane: View {
                 binaryPanel(document)
             }
         case .markdown where !document.markdown.isEmpty:
-            FileViewerMarkdownView(
-                blocks: document.markdown,
-                openLink: { destination in
-                    // External targets are untrusted document text — the
-                    // link sheet decides, exactly like a pane press. A
-                    // scheme-less relative target is in-document
-                    // navigation (docs/setup.md), which stays inside the
-                    // already-confirmed viewer.
-                    if let link = TerminalLink.resolve(destination) {
-                        confirmingLink = link
-                    } else if !destination.contains(":"),
-                              let current = controller.lastDocument {
-                        let base = FileTree.parent(of: current.path) ?? "/"
-                        Task {
-                            await controller.open(
-                                path: FileTree.join(base, destination),
-                                line: nil
-                            )
-                        }
-                    }
-                }
-            )
+            if selectingMarkdownSource, let text = document.sourceText {
+                MarkdownSourceSelectView(text: text)
+            } else {
+                markdownBody(document)
+            }
         case .markdown, .code:
             // Markdown RAW renders as plain lines through the code screen.
             FileViewerCodeView(
@@ -172,6 +171,53 @@ struct FileViewerPane: View {
                 targetLine: document.targetLine
             )
         }
+    }
+
+    private func markdownBody(_ document: FileViewerController.Document) -> some View {
+        FileViewerMarkdownView(
+            blocks: document.markdown,
+            openLink: { destination in
+                // External targets are untrusted document text — the
+                // link sheet decides, exactly like a pane press. A
+                // scheme-less relative target is in-document
+                // navigation (docs/setup.md), which stays inside the
+                // already-confirmed viewer.
+                if let link = TerminalLink.resolve(destination) {
+                    confirmingLink = link
+                } else if !destination.contains(":"),
+                          let current = controller.lastDocument {
+                    let base = FileTree.parent(of: current.path) ?? "/"
+                    Task {
+                        await controller.open(
+                            path: FileTree.join(base, destination),
+                            line: nil
+                        )
+                    }
+                }
+            }
+        )
+    }
+
+    /// The SELECT chip exists only where a mode is genuinely needed:
+    /// rendered markdown with its source in hand. RAW and code/diff
+    /// screens select by default.
+    private var markdownSelectAvailable: Bool {
+        if case .document(let document) = controller.content,
+           document.kind == .markdown,
+           !document.markdown.isEmpty,
+           document.sourceText != nil {
+            return true
+        }
+        return false
+    }
+
+    /// What SELECT mode is scoped to — navigating away or flipping RAW
+    /// ends it.
+    private var markdownSelectKey: String? {
+        guard case .document(let document) = controller.content,
+              document.kind == .markdown
+        else { return nil }
+        return "\(document.path):\(controller.markdownRaw)"
     }
 
     // MARK: File header
@@ -222,7 +268,11 @@ struct FileViewerPane: View {
             if case .code(let language) = document.kind {
                 parts.append(language?.rawValue ?? "TEXT")
             } else if document.kind == .markdown {
-                parts.append(controller.markdownRaw ? "MARKDOWN · RAW" : "MARKDOWN")
+                parts.append(
+                    controller.markdownRaw
+                        ? "MARKDOWN · RAW"
+                        : (selectingMarkdownSource ? "MARKDOWN · SOURCE" : "MARKDOWN")
+                )
             } else if document.kind == .image {
                 parts.append("IMAGE")
             } else {
@@ -327,6 +377,20 @@ struct FileViewerPane: View {
         HStack(spacing: 8) {
             if controller.documentDiffBadge != nil {
                 modeChips
+            }
+            if markdownSelectAvailable {
+                ChassisChip(
+                    selectingMarkdownSource ? "DONE" : "SELECT",
+                    prominent: selectingMarkdownSource
+                ) {
+                    selectingMarkdownSource.toggle()
+                }
+                .fixedSize()
+                .accessibilityLabel(
+                    selectingMarkdownSource
+                        ? "Back to rendered markdown"
+                        : "Select source text to copy"
+                )
             }
             pathReadout
             ChassisBadge(controller.hostName.uppercased())
@@ -599,49 +663,31 @@ struct FileViewerCodeView: View {
     var truncated = false
     var targetLine: Int?
 
+    /// Built off-main once per content change — a truncated-cap file is
+    /// ~1.5 MB of attributed text.
+    @State private var content: FileViewerTextContent?
+
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if truncated {
-                        truncatedBanner
-                    }
-                    ForEach(lines.indices, id: \.self) { index in
-                        codeRow(number: index + 1, line: lines[index])
-                            .id(index + 1)
-                    }
-                }
-                .padding(.vertical, 10)
+        VStack(spacing: 0) {
+            if truncated {
+                truncatedBanner
             }
-            .onAppear {
-                if let targetLine, targetLine > 1, targetLine <= lines.count {
-                    proxy.scrollTo(targetLine, anchor: .center)
+            ZStack {
+                if let content {
+                    FileViewerTextScreen(content: content, targetLine: targetLine)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Theme.screen)
-    }
-
-    private func codeRow(number: Int, line: HighlightedLine) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
-            Text("\(number)")
-                .font(.mono(9))
-                .foregroundStyle(
-                    number == targetLine ? Theme.caution : CodePalette.gutter
-                )
-                .frame(width: 44, alignment: .trailing)
-                .padding(.trailing, 12)
-            Text(CodePalette.attributed(line))
-                .font(.mono(11))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.trailing, 14)
+        .task(id: lines) {
+            let lines = lines
+            let target = targetLine
+            let built = await Task.detached {
+                FileViewerTextContent.code(lines, targetLine: target)
+            }.value
+            if !Task.isCancelled { content = built }
         }
-        .padding(.vertical, 1)
-        .background(
-            number == targetLine ? Theme.caution.opacity(0.12) : Color.clear
-        )
     }
 
     private var truncatedBanner: some View {
@@ -659,6 +705,31 @@ struct FileViewerCodeView: View {
 }
 
 // MARK: - Markdown view
+
+/// SELECT mode's screen for rendered markdown: the raw source on the
+/// selectable text surface (plain-highlighted, numbered like RAW), so a
+/// copy can cross what the render splits into blocks.
+struct MarkdownSourceSelectView: View {
+    let text: String
+    @State private var lines: [HighlightedLine]?
+
+    var body: some View {
+        ZStack {
+            if let lines {
+                FileViewerCodeView(lines: lines)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.screen)
+        .task(id: text) {
+            let text = text
+            let built = await Task.detached {
+                CodeHighlighter.highlight(text, language: nil)
+            }.value
+            if !Task.isCancelled { lines = built }
+        }
+    }
+}
 
 struct FileViewerMarkdownView: View {
     let blocks: [MarkdownBlock]
@@ -845,19 +916,30 @@ struct FileViewerDiffView: View {
     let diff: GitDiff
     let scope: FileViewerController.DiffScope
 
+    @State private var content: FileViewerTextContent?
+
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if diff.files.isEmpty {
-                    cleanState
-                }
-                ForEach(diff.files.indices, id: \.self) { index in
-                    fileSection(diff.files[index], standalone: isRepoScope)
-                }
+        ZStack {
+            if diff.files.isEmpty {
+                cleanState
+            } else if let content {
+                FileViewerTextScreen(content: content)
             }
-            .padding(.bottom, 12)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.screen)
+        .task(id: diff) {
+            guard !diff.files.isEmpty else {
+                content = nil
+                return
+            }
+            let diff = diff
+            let repoScope = isRepoScope
+            let built = await Task.detached {
+                FileViewerTextContent.diff(diff, repoScope: repoScope)
+            }.value
+            if !Task.isCancelled { content = built }
+        }
     }
 
     private var isRepoScope: Bool {
@@ -872,135 +954,8 @@ struct FileViewerDiffView: View {
                 .font(.footnote)
                 .foregroundStyle(Theme.signal3)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.top, 60)
-    }
-
-    @ViewBuilder
-    private func fileSection(_ file: GitDiffFile, standalone: Bool) -> some View {
-        if standalone {
-            HStack(spacing: 8) {
-                Text(file.displayPath)
-                    .font(.mono(10, weight: .semibold))
-                    .foregroundStyle(Theme.signal)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if file.kind == .renamed {
-                    ChassisLabel("RENAMED", size: 7, color: Theme.signal3).fixedSize()
-                }
-                Spacer(minLength: 6)
-                CodePalette.plusMinus(file.additions, file.deletions)
-                    .fixedSize()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(Theme.bezel)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(Theme.bezelHi).frame(height: 1)
-            }
-        }
-        if file.isBinary {
-            HStack {
-                ChassisLabel("BINARY", size: 8, color: Theme.signal3)
-                Text("Binary files differ.")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.signal3)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-        } else if file.hunks.isEmpty {
-            HStack {
-                Text(file.kind == .renamed ? "Rename only — contents unchanged." : "No textual hunks.")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.signal3)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-        }
-        ForEach(file.hunks.indices, id: \.self) { hunkIndex in
-            hunkView(file.hunks[hunkIndex], language: language(for: file))
-        }
-    }
-
-    private func language(for file: GitDiffFile) -> CodeLanguage? {
-        if case .code(let language) = FileKind.classify(
-            fileName: FileTree.name(of: file.displayPath)
-        ) { return language }
-        return nil
-    }
-
-    @ViewBuilder
-    private func hunkView(_ hunk: GitDiffHunk, language: CodeLanguage?) -> some View {
-        Text(hunk.header)
-            .font(.mono(9))
-            .foregroundStyle(CodePalette.hunkHeader)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.bezel.opacity(0.5))
-        ForEach(hunk.lines.indices, id: \.self) { lineIndex in
-            diffRow(hunk.lines[lineIndex], language: language)
-        }
-    }
-
-    private func diffRow(_ line: GitDiffLine, language: CodeLanguage?) -> some View {
-        // Stateless per-row highlight: a diff row mid-block-comment loses
-        // comment color — the accepted trade for lazy rows (recorded in
-        // local-plan/file-viewer.md).
-        var state = CodeHighlighter.LineState.normal
-        let highlighted: HighlightedLine =
-            if let rules = language.flatMap({ CodeHighlighter.rules(for: $0) }) {
-                CodeHighlighter.highlightLine(line.text, state: &state, rules: rules)
-            } else {
-                HighlightedLine(segments: [.init(text: line.text, kind: .plain)])
-            }
-        return HStack(alignment: .firstTextBaseline, spacing: 0) {
-            Text(line.oldNumber.map(String.init) ?? "")
-                .font(.mono(8.5))
-                .foregroundStyle(CodePalette.gutter)
-                .frame(width: 34, alignment: .trailing)
-            Text(line.newNumber.map(String.init) ?? "")
-                .font(.mono(8.5))
-                .foregroundStyle(CodePalette.gutter)
-                .frame(width: 34, alignment: .trailing)
-                .padding(.trailing, 8)
-            Text(sign(for: line.kind))
-                .font(.mono(10, weight: .semibold))
-                .foregroundStyle(signColor(for: line.kind))
-                .frame(width: 14, alignment: .center)
-            Text(CodePalette.attributed(highlighted))
-                .font(.mono(10.5))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.trailing, 14)
-        }
-        .padding(.vertical, 0.5)
-        .background(ground(for: line.kind))
-    }
-
-    private func sign(for kind: GitDiffLine.Kind) -> String {
-        switch kind {
-        case .addition: "+"
-        case .deletion: "−"
-        case .context: " "
-        }
-    }
-
-    private func signColor(for kind: GitDiffLine.Kind) -> Color {
-        switch kind {
-        case .addition: CodePalette.diffAddText
-        case .deletion: CodePalette.diffDeleteText
-        case .context: CodePalette.gutter
-        }
-    }
-
-    private func ground(for kind: GitDiffLine.Kind) -> Color {
-        switch kind {
-        case .addition: CodePalette.diffAddGround
-        case .deletion: CodePalette.diffDeleteGround
-        case .context: .clear
-        }
     }
 }
 

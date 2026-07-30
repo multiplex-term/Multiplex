@@ -51,3 +51,26 @@ Worth checking:
   again must cancel the pending attempt.
 - After Dictation ends, the KEYBOARD LOCKED tip and mic should return. Tap the
   bottom padlock and confirm both disappear as the keyboard opens.
+
+FILE VIEWER SELECTION — select and copy like a document
+
+Code files and git diffs in the File Viewer (+ TAB ▸ File Viewer, or
+long-press a file path in a pane) are now one continuous selectable
+surface: press and drag across as many lines as you want, then Copy.
+Line numbers and diff gutters never come along — code copies as plain
+code, and a diff copies as a real unified diff with +/- prefixes and
+@@ headers you can paste into a review or apply.
+
+Worth checking:
+- Open a source file, long-press and drag a selection across several
+  lines, Copy, paste somewhere: no line numbers in the pasted text.
+- Open a file at a line (long-press a path:12-style reference): the line
+  should land centered with an amber wash, numbered in amber.
+- Open DIFF (or the tree's ± counts for the repo-wide diff), select a
+  few rows across a hunk header, Copy: pasted text reads as a unified
+  diff (+/-/space prefixes, @@ header), without the old/new numbers.
+- Rendered Markdown keeps its layout (per-paragraph selection), and a new
+  SELECT chip in the bottom rail swaps in the raw source for cross-line
+  selection — DONE returns to the rendered page.
+- Scroll a big file while a change lands host-side (the 5 s watch): the
+  view must not jump back to the top.

@@ -869,10 +869,29 @@ views.
   local-plan doc: no maintained pure-Swift multi-language highlighter
   exists, and every alternative vendors MBs of C or JS): `CodeHighlighter`
   is a line-oriented table-driven scanner whose carry state survives line
-  breaks (what lets rows render lazily and diff rows highlight per-side),
-  `MarkdownDocument` a GFM subset, `GitDiff`/`GitFileStatus` pure parsers —
+  breaks (what lets diff rows highlight per-side), `MarkdownDocument` a
+  GFM subset, `GitDiff`/`GitFileStatus` pure parsers —
   all fixture-tested; the recorded graduation path is the tree-sitter
   stack, and the seam is exactly `CodeHighlighter.highlight(_:language:)`.
+  **Code and diff screens are ONE selectable TextKit 2 view, so select →
+  copy works like a document by default** (`FileViewerTextView`; content
+  assembled off-main): what is *text* is exactly what a copy should carry
+  — the file's characters, and for diffs real unified-diff lines (`@@`
+  headers, ASCII `+`/`-`/` ` prefixes) — while line numbers, diff old/new
+  numbers, row grounds, and the target-line wash are decor drawn by
+  pinned companion views from the layout fragments, unselectable by
+  construction. Two traps on record: the `usingTextLayoutManager:`
+  convenience init builds the instance outside a Swift subclass's
+  designated init (stored properties stay uninitialized — crashed on
+  first use; the subclass hand-builds its TextKit 2 stack instead), and a
+  `path:12` centered scroll must defer one main-queue hop past the first
+  layout pass or SwiftUI's staged sizing lands it short. Rendered
+  markdown deliberately keeps its SwiftUI blocks — but blocks select
+  per-paragraph, so it is the one screen with a mode: a rail SELECT chip
+  (DEBUG hook `….debug.fvselect`) re-hosts the raw source on the
+  selectable screen (header reads MARKDOWN · SOURCE), DONE returns to
+  the render, and navigating or flipping RAW exits it; RAW itself rides
+  the selectable screen like any code file.
   Honesty rules: NUL-sniff says BINARY (never garbage), >1.5 MB text renders
   its head under TRUNCATED, a deleted file's row opens its diff (there are
   no working-tree bytes), failures name the cause on a chassis panel.
@@ -894,8 +913,8 @@ views.
   sentinels, parsed by `parseWatchProbe`) plus one SFTP stat
   (size+mtime) on the path on screen; expanded listings sweep every
   third tick and on any git change. Everything lands as a QUIET swap —
-  no .loading, no scroll reset (row ids are indices, so the offset
-  survives a content swap) — and a `contentGeneration` counter drops
+  no .loading, no scroll reset (the text view restores its own
+  contentOffset across a content swap) — and a `contentGeneration` counter drops
   any watch result that finishes after the person navigated. Known
   blind spot, on record: a net-zero-delta edit under an unchanged
   porcelain line escapes the repo-wide diff until REFRESH (the
