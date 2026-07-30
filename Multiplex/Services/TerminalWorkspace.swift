@@ -121,6 +121,7 @@ final class TerminalWorkspace {
         tab: TerminalRoute,
         host: Host,
         startDirectory: String?,
+        anchorSessionName: String?,
         target: TerminalPathTarget?
     ) {
         guard tab.isFileViewer, auxiliaryControllers[tab.id] == nil else { return }
@@ -128,6 +129,7 @@ final class TerminalWorkspace {
             tabID: tab.id,
             host: host,
             startDirectory: startDirectory,
+            anchorSessionName: anchorSessionName,
             target: target
         )
     }

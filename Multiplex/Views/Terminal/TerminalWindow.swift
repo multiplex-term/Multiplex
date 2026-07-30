@@ -714,14 +714,19 @@ struct TerminalWindowRoot: View {
 
     /// Dock a file viewer beside the active tab — the viewport's summon
     /// shape exactly: resolve the pane's cwd first (the same `list-panes`
-    /// truth drops use; nil → the controller roots at $HOME), register the
-    /// controller BEFORE the tab enters the route, insert after the active
-    /// tab, activate. `target` carries a pressed path (and its line) when
-    /// the summon came from the path sheet.
+    /// truth drops use), register the controller BEFORE the tab enters the
+    /// route, insert after the active tab, activate. `target` carries a
+    /// pressed path (and its line) when the summon came from the path sheet.
+    ///
+    /// A mosh tab has no exec channel, so it cannot answer that query at
+    /// all — its session name rides along instead and the viewer asks over
+    /// its own SSH connection. Without it a mosh worktree session rooted the
+    /// tree, and every relative path press, at $HOME.
     private func openFileViewer(target: TerminalPathTarget?) {
         guard let activeTab, let host = store.host(id: activeTab.hostID) else { return }
         let anchorID = activeTab.id
         let hostID = activeTab.hostID
+        let anchorSessionName = activeTab.sessionName
         Task {
             let cwd = await workspace.controller(for: anchorID)?.paneWorkingDirectory()
             let tab = TerminalRoute(
@@ -732,6 +737,7 @@ struct TerminalWindowRoot: View {
                 tab: tab,
                 host: host,
                 startDirectory: cwd,
+                anchorSessionName: anchorSessionName,
                 target: target
             )
             dock(tab, after: anchorID)

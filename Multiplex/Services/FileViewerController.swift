@@ -28,8 +28,15 @@ final class FileViewerController: AuxiliaryPaneController {
     private let host: Host
     var hostName: String { host.name }
 
-    /// The pane cwd at summon time (absolute), when a pane could answer.
+    /// The pane cwd at summon time (absolute), when the summoning tab could
+    /// answer over its own transport.
     private let startDirectory: String?
+    /// The tmux session the summoning tab was attached to, when it was one.
+    /// A mosh tab has no exec surface, so it cannot resolve its own pane
+    /// cwd — but SSH is still every host's control plane and this viewer
+    /// dials its own SSH connection, so the query simply moves here rather
+    /// than silently rooting a worktree at $HOME.
+    private let anchorSessionName: String?
     /// The pressed path this tab was summoned to show, when it was.
     private let target: TerminalPathTarget?
     /// True when the tab was summoned to BROWSE (+ TAB ▸ File Viewer)
@@ -42,11 +49,13 @@ final class FileViewerController: AuxiliaryPaneController {
         tabID: UUID,
         host: Host,
         startDirectory: String?,
+        anchorSessionName: String? = nil,
         target: TerminalPathTarget?
     ) {
         self.tabID = tabID
         self.host = host
         self.startDirectory = startDirectory
+        self.anchorSessionName = anchorSessionName
         self.target = target
         self.opensBrowsing = target == nil
     }
@@ -233,7 +242,12 @@ final class FileViewerController: AuxiliaryPaneController {
         do {
             let home = try await withConnection { try await $0.remoteHomeDirectory() }
             homePath = home
-            let base = startDirectory ?? home
+            // The summoning tab answers when it can; a mosh tab cannot, so
+            // the same query runs over this viewer's own SSH connection
+            // before $HOME is ever settled for.
+            var resolvedBase = startDirectory
+            if resolvedBase == nil { resolvedBase = await anchorPaneDirectory() }
+            let base = resolvedBase ?? home
 
             var resolvedTarget: String?
             if let target {
@@ -269,6 +283,21 @@ final class FileViewerController: AuxiliaryPaneController {
                 message: failureMessage(error)
             )
         }
+    }
+
+    /// The summoning tab's active-pane cwd, asked over this viewer's own
+    /// SSH connection. Only reached when the tab itself could not answer —
+    /// a mosh tab has no exec channel, and without this its worktree
+    /// sessions rooted the tree (and every relative path press) at $HOME.
+    /// Same one-exec query and one parser as file drops.
+    private func anchorPaneDirectory() async -> String? {
+        guard let anchorSessionName else { return nil }
+        guard let output = try? await withConnection({
+            try await $0.exec(
+                TmuxProbe.dropDestinationCommand(sessionName: anchorSessionName)
+            )
+        }) else { return nil }
+        return TmuxProbe.parseDropDestination(output).cwd
     }
 
     // MARK: Git

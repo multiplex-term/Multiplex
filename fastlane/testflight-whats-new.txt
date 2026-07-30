@@ -74,3 +74,19 @@ Worth checking:
   selection — DONE returns to the rendered page.
 - Scroll a big file while a change lands host-side (the 5 s watch): the
   view must not jump back to the top.
+
+The File Viewer now finds the right directory on mosh hosts. A mosh tab
+has no exec channel, so the viewer could not ask tmux where its pane was
+and quietly started from your home directory — a session running an
+agent in a git worktree opened the wrong tree, and relative paths
+pressed in that pane resolved under home. The viewer now asks over its
+own SSH connection instead.
+
+Worth checking (needs a host with mosh turned on):
+- Attach a tmux session whose pane sits in a project or git worktree,
+  then + TAB ▸ File Viewer: the tree should root at that project (branch
+  and ± counts in the header), not at your home directory.
+- Long-press a relative path an agent printed (src/foo.ts, or
+  path/to/file.swift:42) and tap ▤ VIEW: it should open the file in that
+  project, at the cited line.
+- SSH hosts must behave exactly as before.
