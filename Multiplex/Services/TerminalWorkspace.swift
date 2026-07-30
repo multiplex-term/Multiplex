@@ -105,12 +105,40 @@ final class TerminalWorkspace {
         viewportControllers[tabID]
     }
 
+    // MARK: File-viewer controllers (one per ▤ tab)
+
+    /// Same lifecycle as viewport controllers: in-memory only (this
+    /// dictionary IS the no-persistence rule), registered BEFORE the tab
+    /// enters any route so `syncTabs` never mistakes a fresh summon for a
+    /// restored corpse.
+    private var fileViewerControllers: [UUID: FileViewerController] = [:]
+
+    func openFileViewer(
+        tab: TerminalRoute,
+        host: Host,
+        startDirectory: String?,
+        target: TerminalPathTarget?
+    ) {
+        guard tab.isFileViewer, fileViewerControllers[tab.id] == nil else { return }
+        fileViewerControllers[tab.id] = FileViewerController(
+            tabID: tab.id,
+            host: host,
+            startDirectory: startDirectory,
+            target: target
+        )
+    }
+
+    func fileViewerController(for tabID: UUID) -> FileViewerController? {
+        fileViewerControllers[tabID]
+    }
+
     /// Close a tab for real: detach the SSH channel (or shut the viewport's
-    /// web view down) and drop the controller. Never called when a tab
-    /// merely moves.
+    /// web view / file viewer's connection down) and drop the controller.
+    /// Never called when a tab merely moves.
     func closeTab(_ tabID: UUID) {
         controllers.removeValue(forKey: tabID)?.detach()
         viewportControllers.removeValue(forKey: tabID)?.shutdown()
+        fileViewerControllers.removeValue(forKey: tabID)?.shutdown()
     }
 
     func resumeConnectionsWaitingForKeyPassphrase(hostID: UUID) {

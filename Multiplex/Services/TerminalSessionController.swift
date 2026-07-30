@@ -157,6 +157,10 @@ final class TerminalSessionController {
     /// pane never opens one straight from the gesture: the target is remote
     /// output, so the destination is shown first (see `TerminalLink`).
     private(set) var pendingLink: TerminalLink?
+    /// A filesystem path activated the same way, awaiting the file-viewer
+    /// confirmation — the path twin of `pendingLink` (see
+    /// `TerminalPathTarget`). Same discipline: shown, never followed.
+    private(set) var pendingPath: TerminalPathTarget?
 
     #if !os(visionOS)
     /// The rail's dictation key, from the pane's side: LISTENING while the
@@ -1408,16 +1412,24 @@ final class TerminalSessionController {
     // MARK: Links
 
     /// A link the terminal resolved under a tap or long press. Returns
-    /// whether this pane claims the gesture — declining lets it fall through
-    /// to selection, which is what a filesystem path (implicit detection
-    /// matches those too) must keep doing.
+    /// whether this pane claims the gesture. URLs confirm through the link
+    /// sheet; path-shaped text (implicit detection matches those too) now
+    /// confirms through the file-viewer sheet instead of falling to
+    /// selection; only what neither resolver accepts ($VAR/…, colon prose)
+    /// still declines into text selection.
     func activateLink(_ target: String) -> Bool {
         // The jump search owns the pane's input while it pages and its veil
         // covers the text being pressed — same rule as a drop.
         if case .finding = historyJump { return false }
-        guard let link = TerminalLink.resolve(target) else { return false }
-        pendingLink = link
-        return true
+        if let link = TerminalLink.resolve(target) {
+            pendingLink = link
+            return true
+        }
+        if let path = TerminalPathTarget.resolve(target) {
+            pendingPath = path
+            return true
+        }
+        return false
     }
 
     /// Hands the confirmed target to the system. Only an allowlisted scheme
@@ -1439,6 +1451,30 @@ final class TerminalSessionController {
 
     func dismissPendingLink() {
         pendingLink = nil
+    }
+
+    func copyPendingPath() {
+        guard let path = pendingPath else { return }
+        UIPasteboard.general.string = path.raw
+        pendingPath = nil
+    }
+
+    func dismissPendingPath() {
+        pendingPath = nil
+    }
+
+    /// The pane's cwd for the file viewer's anchor — the same `list-panes`
+    /// truth drops resolve (the first `/`-prefixed line; the MULTIPLEX_GIT
+    /// marker is ignored here). nil when no pane can answer: a plain shell,
+    /// a mosh tab (no exec surface), or a dead transport.
+    func paneWorkingDirectory() async -> String? {
+        guard let sessionName = route.sessionName, let connection else { return nil }
+        let output = (try? await connection.exec(
+            TmuxProbe.dropDestinationCommand(sessionName: sessionName)
+        )) ?? ""
+        return output.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { $0.hasPrefix("/") }
     }
 
     // MARK: Actions

@@ -484,6 +484,101 @@ actor SSHConnection {
         }
     }
 
+    // MARK: SFTP (file viewer)
+
+    /// One remote directory entry as SFTP reported it — a transport-side
+    /// value so Citadel types never cross into Models. `permissions` carry
+    /// the S_IFMT type bits; readdir has lstat semantics, so a symlink
+    /// reports itself (the viewer stats on select to follow it).
+    struct DirectoryEntry: Sendable {
+        var name: String
+        var size: UInt64?
+        var permissions: UInt32?
+    }
+
+    struct FileStat: Sendable {
+        var size: UInt64?
+        var permissions: UInt32?
+
+        var isDirectory: Bool {
+            permissions.map { ($0 & 0o170000) == 0o040000 } ?? false
+        }
+    }
+
+    func listDirectory(atPath path: String) async throws -> [DirectoryEntry] {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            var entries: [DirectoryEntry] = []
+            for name in try await sftp.listDirectory(atPath: path) {
+                for component in name.components {
+                    let filename = component.filename
+                    guard filename != "." && filename != ".." else { continue }
+                    entries.append(DirectoryEntry(
+                        name: filename,
+                        size: component.attributes.size,
+                        permissions: component.attributes.permissions
+                    ))
+                }
+            }
+            return entries
+        }
+    }
+
+    /// SFTP `stat` — follows symlinks, which is exactly what selecting a
+    /// tree row needs (a linked directory navigates, a linked file opens).
+    func statFile(atPath path: String) async throws -> FileStat {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            let attributes = try await sftp.getAttributes(at: path)
+            return FileStat(size: attributes.size, permissions: attributes.permissions)
+        }
+    }
+
+    func canonicalPath(atPath path: String) async throws -> String {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            try await sftp.getRealPath(atPath: path)
+        }
+    }
+
+    /// Read up to `limit` bytes. One SFTP READ is server-capped (commonly
+    /// 32–64 KB), so this loops chunks; an empty chunk is EOF. `truncated`
+    /// reports whether the file continued past the limit.
+    func readFile(
+        atPath path: String,
+        limit: Int
+    ) async throws -> (data: Data, truncated: Bool) {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            let file = try await sftp.openFile(filePath: path, flags: .read)
+            do {
+                var data = Data()
+                let chunkSize: UInt32 = 128 * 1024
+                var truncated = false
+                while data.count <= limit {
+                    var buffer = try await file.read(
+                        from: UInt64(data.count),
+                        length: chunkSize
+                    )
+                    guard buffer.readableBytes > 0 else { break }
+                    if let bytes = buffer.readBytes(length: buffer.readableBytes) {
+                        data.append(contentsOf: bytes)
+                    }
+                    if data.count > limit {
+                        data = data.prefix(limit)
+                        truncated = true
+                        break
+                    }
+                }
+                try await file.close()
+                return (data, truncated)
+            } catch {
+                try? await file.close()
+                throw error
+            }
+        }
+    }
+
     // MARK: Interactive PTY shell
 
     /// Opens a PTY'd login shell. When `command` is set (tmux attach/create),

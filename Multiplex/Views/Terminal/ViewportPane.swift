@@ -338,6 +338,9 @@ struct ViewportUMD: View {
     var style: Style = .regular
     var deckControlLabel = "DECK"
     var contentSafeArea = EdgeInsets()
+    /// The file viewer shares this monitor face; only the close wording
+    /// differs.
+    var closeAccessibilityLabel = "Close viewport"
 
     @ViewBuilder
     var body: some View {
@@ -357,7 +360,7 @@ struct ViewportUMD: View {
             }
             divider
             ChassisChip("CLOSE", prominent: true, action: close)
-                .accessibilityLabel("Close viewport")
+                .accessibilityLabel(closeAccessibilityLabel)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 11)
@@ -376,7 +379,7 @@ struct ViewportUMD: View {
             Spacer(minLength: 4)
             ChassisChip("CLOSE", prominent: true, action: close)
                 .fixedSize()
-                .accessibilityLabel("Close viewport")
+                .accessibilityLabel(closeAccessibilityLabel)
         }
         .padding(.leading, 10 + contentSafeArea.leading)
         .padding(.trailing, 10 + contentSafeArea.trailing)

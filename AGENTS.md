@@ -407,6 +407,11 @@ SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
                      kept in memory only — its absence after a relaunch IS
                      the viewport's no-persistence rule (syncTabs strips
                      controller-less viewport tabs)
+    FileViewerController  one per ▤ file-viewer tab (host files + git
+                     diffs): dials its OWN SSHConnection lazily (SFTP for
+                     bytes/listings, exec for git), owns tree/git/document
+                     state; same in-memory-only lifecycle as the viewport
+                     (the two share the isAuxiliaryPane rules)
   TerminalSessionController   one per tab; owns the input pump + TerminalView
     TerminalTransport    the tab's byte pipe (write/resize/close); picked by
                          host.useMosh. exec + SFTP stay SSH-only capabilities
@@ -806,6 +811,53 @@ views.
   networking keeps full ATS). Load failures render a chassis NO ROUTE panel
   naming which network the address lives on, not WebKit's blank page. Free
   plumbing, not an agent-helper surface.
+- **The file viewer is the viewport's sibling for paths — and path presses
+  now confirm instead of falling to selection**
+  (`TerminalRoute.Mode.fileViewer`; pure models under `Models/FileViewer/`;
+  `FileViewerController`, `FileViewerPane`; bake-off + stack research in
+  `local-plan/file-viewer-bakeoff/` and `local-plan/file-viewer.md`). Two
+  summon doors: + TAB ▸ File Viewer roots at the pane's cwd (the same
+  `list-panes` truth drops use; $HOME when no pane answers), and a
+  long-pressed filesystem path — `TerminalPathTarget` classifies what the
+  fork's ghostty matcher hands over (`/x`, `~/x`, `./x`, `src/foo.ts`,
+  `:12[:col]` suffixes ride along as a scroll target) — raises
+  `TerminalFilePathSheet`, whose ▤ VIEW docks the tab. **This changed a
+  load-bearing behavior**: path-shaped presses used to fall through to text
+  selection; now only what BOTH resolvers decline ($VAR/…, colon prose,
+  interior whitespace) still does. visionOS gaze regions stay URL-only on
+  purpose (hover regions are hit regions; build logs are walls of paths).
+  Load-bearing details: **the viewer dials its own SSHConnection** — never
+  the probe's (a disabled host must not be revived by a tab) and never the
+  summoning tab's transport (merge/split moves the viewer away) — redialed
+  once per op when a reused socket died in suspension, which is the whole
+  resume story (request/response needs no policy); works for mosh hosts
+  (SSH stays the control plane). **SFTP for listings/bytes** (structural —
+  never parse `ls`; one SFTP READ is server-capped so reads loop chunks),
+  **exec for git** with the TmuxProbe discipline plus one more rule:
+  Citadel's `executeCommand` THROWS on nonzero exit, so every git command
+  tails `printf '\nMPXFV_EXIT:%s' "$?"` (`GitCommands.splitExit`) — "not a
+  repo" ≠ "empty diff", and `--no-index` (untracked files rendered as
+  all-adds) exits 1 routinely. `-c core.quotepath=false` keeps non-ASCII
+  paths raw; `--no-ext-diff` keeps host diff tools from running under app
+  reads. **Rendering is zero-dependency on purpose** (2026 survey in the
+  local-plan doc: no maintained pure-Swift multi-language highlighter
+  exists, and every alternative vendors MBs of C or JS): `CodeHighlighter`
+  is a line-oriented table-driven scanner whose carry state survives line
+  breaks (what lets rows render lazily and diff rows highlight per-side),
+  `MarkdownDocument` a GFM subset, `GitDiff`/`GitFileStatus` pure parsers —
+  all fixture-tested; the recorded graduation path is the tree-sitter
+  stack, and the seam is exactly `CodeHighlighter.highlight(_:language:)`.
+  Honesty rules: NUL-sniff says BINARY (never garbage), >1.5 MB text renders
+  its head under TRUNCATED, a deleted file's row opens its diff (there are
+  no working-tree bytes), failures name the cause on a chassis panel.
+  Markdown links confirm through the link sheet; relative ones navigate
+  inside the viewer; images render as captioned placeholders (fetching is
+  its own decision). Shared auxiliary-pane rules with the viewport: no
+  tally dot, no `TerminalFocusArbiter` claim, `syncTabs` strips
+  controller-less tabs (summoned, never restored), and **`syncTabs` must
+  never mint a `TerminalSessionController` for an auxiliary route** — a
+  file-viewer route has no PTY to dial. Free host plumbing, not an
+  agent-helper surface.
 - **A bound host is one the machine itself vouched for; the app's key goes
   out, never a private key** (`Multiplex/Models/Bind/`,
   `Multiplex/Services/Bind/`; protocol + shared vectors live in the

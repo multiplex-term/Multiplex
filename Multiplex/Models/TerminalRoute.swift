@@ -17,6 +17,12 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         /// summoned, not restored (`TerminalWindowRoot.syncTabs` strips
         /// viewport tabs whose controller didn't survive the process).
         case viewport(urlString: String)
+        /// The file viewer — the host's files and git diffs as an inline
+        /// tab, the viewport's sibling: no PTY transport of its own record
+        /// (the controller dials SSH for reads), never restored across
+        /// launches (same `syncTabs` strip rule). `path` is only the
+        /// summoning label; the live location belongs to the controller.
+        case fileViewer(path: String)
 
         /// Keeps the pre-directory call shape valid (and mirrors how records
         /// persisted by older builds decode: directory absent → nil).
@@ -39,7 +45,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
                 sessionName: name,
                 directory: directory
             )
-        case .shell, .viewport:
+        case .shell, .viewport, .fileViewer:
             return nil
         }
     }
@@ -62,7 +68,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
                 command += " -c \(directory.shellQuotedDirectory)"
             }
             return command
-        case .shell, .viewport:
+        case .shell, .viewport, .fileViewer:
             return nil
         }
     }
@@ -72,15 +78,17 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         case .attach(let name), .create(let name, _): name
         case .shell: "shell"
         case .viewport(let urlString): Self.viewportLabel(urlString)
+        case .fileViewer(let path): Self.fileViewerLabel(path)
         }
     }
 
     /// The tmux session this tab is bound to; nil for a plain shell (which
-    /// has no probe entry, so no agent detection) and for the viewport.
+    /// has no probe entry, so no agent detection) and for the viewport and
+    /// file viewer.
     var sessionName: String? {
         switch mode {
         case .attach(let name), .create(let name, _): name
-        case .shell, .viewport: nil
+        case .shell, .viewport, .fileViewer: nil
         }
     }
 
@@ -88,6 +96,17 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         if case .viewport = mode { return true }
         return false
     }
+
+    var isFileViewer: Bool {
+        if case .fileViewer = mode { return true }
+        return false
+    }
+
+    /// A tab whose surface is a controller-owned monitor, not a terminal:
+    /// the viewport and the file viewer. These make no responder claim,
+    /// carry no tally dot, wear the slim monitor chrome, and are stripped
+    /// by `syncTabs` when their controller didn't survive the process.
+    var isAuxiliaryPane: Bool { isViewport || isFileViewer }
 
     var viewportURL: URL? {
         guard case .viewport(let urlString) = mode else { return nil }
@@ -102,6 +121,14 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         guard let url = URL(string: urlString) else { return "⌗" }
         if let port = url.port { return "⌗ \(port)" }
         return "⌗ \(url.host() ?? "page")"
+    }
+
+    /// The file viewer's tab-cell/UMD label: `▤` + the last path component.
+    /// `▤` — U+25A4 SQUARE WITH HORIZONTAL FILL — is the file-viewer mark
+    /// everywhere, the viewport's sibling; a file never wears a tally dot.
+    static func fileViewerLabel(_ path: String) -> String {
+        let name = FileTree.name(of: path)
+        return name.isEmpty ? "▤" : "▤ \(name)"
     }
 }
 
