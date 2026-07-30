@@ -25,6 +25,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         /// Side safe areas the pane spans. The rail's bezel fills them; the
         /// keys stay inside, clear of the Dynamic Island and the corners.
         var contentSafeArea = EdgeInsets()
+        /// The CTRL key's frame in the bar's own coordinate space — the
+        /// anchor for the quick-combo popover the latch raises.
+        var ctrlKeyFrame = CGRect.zero
     }
 
     static let barHeight: CGFloat = 48
@@ -44,6 +47,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     private let model = Model()
     private var host: UIHostingController<KeyBarRow>?
     private weak var tmuxPopoverController: UIViewController?
+    private var ctrlComboHost: UIHostingController<CtrlComboRow>?
 
     init(
         terminal: TerminalView,
@@ -104,6 +108,14 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
 
     @objc private func controlModifierDidReset() {
         model.ctrlLatched = false
+        hideCtrlCombos()
+    }
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        super.willMove(toWindow: newWindow)
+        // The combo slab lives on the container, not the bar — a tab switch
+        // that unmounts the bar must not orphan it.
+        if newWindow == nil { hideCtrlCombos() }
     }
 
     private func press(_ key: TerminalKey) {
@@ -116,6 +128,11 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             let latched = !terminal.controlModifier
             terminal.controlModifier = latched
             model.ctrlLatched = latched
+            if latched {
+                showCtrlCombos()
+            } else {
+                hideCtrlCombos()
+            }
         case .tab:
             click()
             terminal.send([0x09])
@@ -227,6 +244,66 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         presenter.present(controller, animated: true)
     }
 
+    /// A latched CTRL raises one line of C / B keys over the latch key —
+    /// the combos a touch keyboard reaches slowest (interrupt and tmux's
+    /// prefix). Each tap types its letter while the
+    /// modifier is held, so the byte rides SwiftTerm's own control-character
+    /// path and the reset notification releases the latch like any typed key.
+    ///
+    /// Deliberately NOT a `UIPopoverPresentationController`: rapid CTRL
+    /// presses race its animated present/dismiss (a present landing during
+    /// an in-flight dismissal is silently dropped — user-reported as "the
+    /// popover sometimes doesn't open"), and iOS 26's popover container
+    /// rounds its corners with no supported opt-out. An app-owned slab on
+    /// the bar's container shows and hides synchronously, wears square
+    /// TALLY chrome, and rides the bar wherever keyboard avoidance puts it.
+    private func showCtrlCombos() {
+        // The slab joins the WINDOW, not the bar's container: the agent
+        // helper strip renders in the SwiftUI layer above the whole terminal
+        // container, so a container subview is drawn under it
+        // (user-reported). Constraints still tie it to the bar's anchors —
+        // same window, shared ancestor — so it rides keyboard avoidance and
+        // rotation without manual frame upkeep.
+        guard ctrlComboHost == nil, let window else { return }
+
+        let host = UIHostingController(rootView: CtrlComboRow { [weak self] letter in
+            self?.sendCtrlCombo(letter)
+        })
+        host.safeAreaRegions = []
+        host.view.backgroundColor = .clear
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        window.addSubview(host.view)
+        let anchorX = model.ctrlKeyFrame.isEmpty
+            ? 85
+            : model.ctrlKeyFrame.midX
+        let centerX = host.view.centerXAnchor.constraint(
+            equalTo: leadingAnchor, constant: anchorX
+        )
+        centerX.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            centerX,
+            host.view.leadingAnchor.constraint(
+                greaterThanOrEqualTo: leadingAnchor, constant: 8
+            ),
+            host.view.bottomAnchor.constraint(equalTo: topAnchor, constant: -6),
+        ])
+        ctrlComboHost = host
+    }
+
+    private func hideCtrlCombos() {
+        ctrlComboHost?.view.removeFromSuperview()
+        ctrlComboHost = nil
+    }
+
+    private func sendCtrlCombo(_ letter: String) {
+        hideCtrlCombos()
+        // The slab lives exactly as long as the latch, but a consumed or
+        // released modifier mid-flight must not type a bare letter.
+        guard let terminal, terminal.controlModifier else { return }
+        click()
+        terminal.insertText(letter)
+    }
+
     private var presentingViewController: UIViewController? {
         var responder: UIResponder? = self
         while let current = responder {
@@ -292,8 +369,18 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     func debugExercise() {
         guard let terminal, TerminalFocusArbiter.current === terminal else { return }
         for symbol in ["~", "|", "/", "-"] { press(.text(symbol)) }
-        press(.ctrl)
+        // Latch directly, not through press(.ctrl) — the headless proof
+        // wants the byte path, not the combo popover.
+        terminal.controlModifier = true
+        model.ctrlLatched = true
         terminal.insertText("c")
+    }
+
+    /// Opens the CTRL combo popover (and latches CTRL) for layout capture —
+    /// the simulator cannot tap the rail.
+    func debugShowCtrlCombos() {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
+        if !terminal.controlModifier { press(.ctrl) }
     }
     #endif
 }
@@ -385,7 +472,10 @@ private struct KeyBarRow: View {
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.bezelHi).frame(height: 1)
         }
+        .coordinateSpace(name: KeyBarRow.coordinateSpace)
     }
+
+    static let coordinateSpace = "terminalKeyBar"
 
     private func row(
         symbols: [String],
@@ -407,6 +497,13 @@ private struct KeyBarRow: View {
                 latched: model.ctrlLatched,
                 metric: metric
             )
+            // The combo popover anchors on this key; the bar's coordinate
+            // space maps 1:1 onto the hosting TerminalKeyBar's bounds.
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .named(KeyBarRow.coordinateSpace))
+            } action: { frame in
+                model.ctrlKeyFrame = frame
+            }
             capsKey("TAB", .tab, "Tab", metric: metric)
             Spacer(minLength: groupGap)
             if !symbols.isEmpty {
@@ -622,6 +719,30 @@ private struct KeyFace: ButtonStyle {
     }
 }
 
+/// The CTRL latch's quick combos: one line of C / B keys. Each tap types
+/// its letter into the still-latched terminal — Ctrl+C and tmux's Ctrl+B
+/// prefix without summoning the keyboard. A square chassis slab, not
+/// a system popover — see `showCtrlCombos`.
+private struct CtrlComboRow: View {
+    var send: (String) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(["c", "b"], id: \.self) { letter in
+                Key(
+                    action: { send(letter) },
+                    accessibilityText: "Control \(letter.uppercased())"
+                ) {
+                    Text(letter.uppercased()).font(.mono(15))
+                }
+            }
+        }
+        .padding(8)
+        .background(Theme.bezel)
+        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
+    }
+}
+
 #if DEBUG
 /// Opens the focused iPad terminal's tmux shortcut popover for real-device
 /// and simulator layout capture without synthesizing a screen tap.
@@ -689,6 +810,17 @@ enum TmuxShortcutDebugHook {
                     .compactMap({ $0 as? TerminalKeyBar }).first
             else { return }
             bar.debugPerformConfirmedTmuxClose(.closeWindow)
+        }
+
+        var ctrlCombosToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.ctrlcombos", &ctrlCombosToken, .main
+        ) { _ in
+            guard let view = TerminalFocusArbiter.current,
+                  let bar = view.superview?.subviews
+                    .compactMap({ $0 as? TerminalKeyBar }).first
+            else { return }
+            bar.debugShowCtrlCombos()
         }
     }
 }
@@ -790,6 +922,7 @@ struct TerminalKeyCluster<Center: View>: View {
     private let center: Center?
 
     @State private var ctrlLatched = false
+    @State private var showingCtrlCombos = false
 
     private var terminal: TerminalView? { controller?.terminalView }
 
@@ -809,12 +942,14 @@ struct TerminalKeyCluster<Center: View>: View {
         )) { notification in
             if notification.object as? TerminalView === terminal {
                 ctrlLatched = false
+                showingCtrlCombos = false
             }
         }
         // A tab switch swaps the terminal under the cluster — show the
         // incoming view's own latch state, not the outgoing tab's.
         .onChange(of: controller?.route.id) {
             ctrlLatched = terminal?.controlModifier ?? false
+            showingCtrlCombos = false
         }
         #if DEBUG
         .onAppear { KeyClusterDebugHook.install() }
@@ -822,6 +957,11 @@ struct TerminalKeyCluster<Center: View>: View {
             for: .multiplexDebugKeyCluster
         )) { _ in
             debugExercise()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .multiplexDebugCtrlCombos
+        )) { _ in
+            debugShowCtrlCombos()
         }
         #endif
     }
@@ -925,11 +1065,31 @@ struct TerminalKeyCluster<Center: View>: View {
         }
     }
 
+    /// The latch also raises one line of C / B quick combos over the key
+    /// (interrupt and tmux's prefix) — the ornament
+    /// pattern the UMD's tmux panel uses. The keys ride the same
+    /// modifier-consuming typed path as the iPad rail's popover; the ornament
+    /// hangs below the window, so the popover opens upward.
     private func ctrlKey(_ metric: Metric) -> some View {
         capsKey("CTRL", "Control", latched: ctrlLatched, metric: metric) { terminal in
             let latched = !terminal.controlModifier
             terminal.controlModifier = latched
             ctrlLatched = latched
+            showingCtrlCombos = latched
+        }
+        .popover(
+            isPresented: $showingCtrlCombos,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            CtrlComboPopover { letter in
+                showingCtrlCombos = false
+                // The popover lives exactly as long as the latch, but a
+                // consumed modifier mid-flight must not type a bare letter.
+                guard let terminal, terminal.controlModifier else { return }
+                terminal.insertText(letter)
+            }
+            .followsAppAppearance()
         }
     }
 
@@ -985,6 +1145,17 @@ struct TerminalKeyCluster<Center: View>: View {
         ctrlLatched = true
         terminal.insertText("c")
     }
+
+    /// Latches CTRL and opens the combo popover for layout capture — ornament
+    /// keys can't be driven synthetically.
+    private func debugShowCtrlCombos() {
+        guard let terminal, TerminalFocusArbiter.current === terminal,
+              !terminal.controlModifier
+        else { return }
+        terminal.controlModifier = true
+        ctrlLatched = true
+        showingCtrlCombos = true
+    }
     #endif
 
     private func capsKey(
@@ -1029,6 +1200,25 @@ private struct KeyClusterMetric {
 
     static let regular = KeyClusterMetric(keyWidth: 46, spacing: 6, groupGap: 12)
     static let compact = KeyClusterMetric(keyWidth: 36, spacing: 4, groupGap: 8)
+}
+
+/// The CTRL latch's quick combos: one line of C / B keys, same
+/// semantics as the iPad rail's popover.
+private struct CtrlComboPopover: View {
+    var send: (String) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(["c", "b"], id: \.self) { letter in
+                TerminalClusterKey(
+                    face: .caps(letter.uppercased()),
+                    accessibility: "Control \(letter.uppercased())",
+                    action: { send(letter) }
+                )
+            }
+        }
+        .padding(12)
+    }
 }
 
 /// The standalone slab — the shell overlay's key row, with no UMD to flank.
@@ -1089,6 +1279,7 @@ struct TerminalClusterKey: View {
 #if DEBUG
 extension Notification.Name {
     static let multiplexDebugKeyCluster = Notification.Name("MultiplexDebugKeyCluster")
+    static let multiplexDebugCtrlCombos = Notification.Name("MultiplexDebugCtrlCombos")
 }
 
 /// Headless-verification hook, same shape as the iPad `KeyBarDebugHook`:
@@ -1108,6 +1299,13 @@ enum KeyClusterDebugHook {
             "app.multiplexterm.multiplex.debug.keycluster", &token, .main
         ) { _ in
             NotificationCenter.default.post(name: .multiplexDebugKeyCluster, object: nil)
+        }
+
+        var combosToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.ctrlcombos", &combosToken, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugCtrlCombos, object: nil)
         }
     }
 }
