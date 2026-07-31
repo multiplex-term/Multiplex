@@ -1,156 +1,77 @@
 CTRL QUICK COMBOS — press CTRL, get C / B
 
-Pressing the rail's CTRL key (or the visionOS cluster's) now raises a
-one-line C / B strip over the key while the latch is held: one tap sends
-Ctrl+C (interrupt) or Ctrl+B (the tmux prefix) without summoning the
-keyboard. Unlatching CTRL, typing any key, or tapping a combo puts it
-away.
+Holding the rail's CTRL latch (or the visionOS cluster's) raises a C / B
+strip over the key: one tap sends Ctrl+C or Ctrl+B, no keyboard needed.
 
-Worth checking:
-- Press CTRL at a shell prompt, tap C: the line aborts with ^C and the
-  CTRL latch releases. B likewise (B then a key drives tmux).
-- Mash CTRL quickly: the strip must appear/disappear in step with the
-  latch every time, never get stuck or skip a beat.
-- With an agent running (helper chips above the rail), the strip must sit
-  ON TOP of the chip row, tappable, not hidden behind it.
-- Latch CTRL and type c on the keyboard instead: same ^C, strip goes away.
-- iPad/iPhone: the strip is square chassis (no rounded popover); Vision
-  Pro shows a small glass popover over the ornament's CTRL key.
+- CTRL then C at a shell prompt: the line aborts with ^C, latch releases.
+- Mash CTRL: the strip follows the latch every time, never sticks.
+- With agent chips on screen, the strip sits on top of them, tappable.
 
 IPHONE LOCKED RETURN — keep RET on the rail with the keyboard closed
 
-Locking the software keyboard on iPhone now adds RET immediately after the
-arrow keys, so the rail can still submit a command without bringing the
-keyboard back. iPhone Air keeps RET, the padlock, and TMUX together in the
-bottom rail; narrower phones move TMUX to its dedicated top-right button
-while locked. Unlocking restores the previous compact rail.
+Locking the software keyboard on iPhone adds RET after the arrow keys.
+iPhone Air keeps RET, padlock, and TMUX together; narrower phones move
+TMUX to its top-right button while locked.
 
-Worth checking:
-- iPhone Air: hold the keyboard key. RET should appear between the right
-  arrow and padlock, with TMUX still at the bottom and no clipping.
-- Type a command with a hardware keyboard or rail controls, then press RET:
-  it must send Return while the software keyboard stays locked closed.
-- On a narrower iPhone, lock and confirm RET stays below while TMUX appears
-  at top-right; unlock and confirm TMUX returns below with no duplicate.
-- iPad is unchanged: RET remains visible whether keyboard lock is on or off.
+- Hold the keyboard key on iPhone Air: RET appears, nothing clips.
+- Press RET: it sends Return while the keyboard stays locked shut.
+- Unlock: the previous rail returns, with no duplicate TMUX.
 
 LOCKED DICTATION — use the mic with the software keyboard closed
 
-The top-right KEYBOARD LOCKED tip now includes a microphone button. It uses
-Multiplex's existing Dictation path, so an iPhone can keep the software
-keyboard locked and still dictate terminal input without a physical keyboard.
+The KEYBOARD LOCKED tip carries a mic, so a phone with no physical keyboard
+can still dictate while the keyboard is locked.
 
-Worth checking:
-- On an iPhone without a physical keyboard, hold the bottom keyboard key.
-  Confirm the locked tip shows a mic at top-right and the bottom key remains
-  a padlock.
-- Tap the mic. After permissions, LISTENING should replace the locked tip;
-  STOP types the final one-line transcript but does not press Return, while
-  CANCEL types nothing.
-- During the permission prompts, the mic should latch immediately; tapping it
-  again must cancel the pending attempt.
-- After Dictation ends, the KEYBOARD LOCKED tip and mic should return. Tap the
-  bottom padlock and confirm both disappear as the keyboard opens.
+- Tap the mic: LISTENING replaces the tip; STOP types the transcript
+  without pressing Return, CANCEL types nothing.
+- The mic latches immediately during the permission prompts; tapping it
+  again cancels the pending attempt.
 
 FILE VIEWER SELECTION — select and copy like a document
 
-Code files and git diffs in the File Viewer (+ TAB ▸ File Viewer, or
-long-press a file path in a pane) are now one continuous selectable
-surface: press and drag across as many lines as you want, then Copy.
-Line numbers and diff gutters never come along — code copies as plain
-code, and a diff copies as a real unified diff with +/- prefixes and
-@@ headers you can paste into a review or apply.
+Code files and git diffs are one selectable surface. Line numbers and diff
+gutters never come along: code copies as code, a diff as a real unified
+diff (+/- prefixes, @@ headers).
 
-Worth checking:
-- Open a source file, long-press and drag a selection across several
-  lines, Copy, paste somewhere: no line numbers in the pasted text.
-- Open a file at a line (long-press a path:12-style reference): the line
-  should land centered with an amber wash, numbered in amber.
-- Open DIFF (or the tree's ± counts for the repo-wide diff), select a
-  few rows across a hunk header, Copy: pasted text reads as a unified
-  diff (+/-/space prefixes, @@ header), without the old/new numbers.
-- Rendered Markdown keeps its layout (per-paragraph selection), and a new
-  SELECT chip in the bottom rail swaps in the raw source for cross-line
-  selection — DONE returns to the rendered page.
-- Scroll a big file while a change lands host-side (the 5 s watch): the
-  view must not jump back to the top.
+- Drag a selection across several lines, Copy, paste: no line numbers.
+- Copy across a hunk header in DIFF: pastes as an applicable diff.
+- Rendered Markdown keeps its layout; the rail's SELECT chip swaps in raw
+  source for cross-line selection, DONE returns.
+- Scroll a big file while a change lands host-side: no jump to the top.
 
-The File Viewer now finds the right directory on mosh hosts. A mosh tab
-has no exec channel, so the viewer could not ask tmux where its pane was
-and quietly started from your home directory — a session running an
-agent in a git worktree opened the wrong tree, and relative paths
-pressed in that pane resolved under home. The viewer now asks over its
-own SSH connection instead.
+The viewer also finds the right directory on mosh hosts — it asks over its
+own SSH connection instead of falling back to your home directory.
 
-Worth checking (needs a host with mosh turned on):
-- Attach a tmux session whose pane sits in a project or git worktree,
-  then + TAB ▸ File Viewer: the tree should root at that project (branch
-  and ± counts in the header), not at your home directory.
-- Long-press a relative path an agent printed (src/foo.ts, or
-  path/to/file.swift:42) and tap ▤ VIEW: it should open the file in that
-  project, at the cited line.
-- SSH hosts must behave exactly as before.
+- mosh host, pane in a git worktree, + TAB ▸ File Viewer: the tree roots at
+  that project, and pressed relative paths resolve inside it.
 
 KEYBOARD LOCK, FINDABLE — a named action in the ⋯ menu
 
-Locking the software keyboard closed used to be a hidden gesture: hold the
-rail's keyboard key. It is now also a spelled-out action — "Lock Keyboard
-Closed" / "Unlock Keyboard" — at the top of the terminal's ⋯ actions menu,
-and that ⋯ button now sits in the top-right chrome at EVERY window width,
-not only in narrow windows where it stood in for chips that didn't fit.
+"Lock Keyboard Closed" / "Unlock Keyboard" is the first item in the
+terminal's ⋯ menu, and ⋯ is now present at every window width.
 
-Worth checking:
-- Full-screen iPad / iPhone: the ⋯ button should be present in the top bar
-  beside DETACH. Open it — the first item is Lock Keyboard Closed.
-- Tap it: the keyboard closes, the rail's keyboard key becomes a padlock,
-  and the KEYBOARD LOCKED tip appears. Tapping the terminal must not raise
-  the keyboard; rail keys and hardware keys keep typing.
-- Re-open ⋯ while locked: the item now reads Unlock Keyboard, and tapping
-  it releases the lock and brings the keyboard back (same as a short press
-  on the padlock).
-- In a wide window the ⋯ menu should carry ONLY the keyboard lock — the
-  actions with their own chips (A−/A+, + TAB, FILE, MERGE, DETACH) must not
-  be duplicated inside it. In a narrow window it still carries everything.
-- Vision Pro is unchanged: no ⋯ button and no keyboard lock there.
+- Full-screen iPad/iPhone: ⋯ sits beside DETACH and locks the keyboard.
+- While locked, terminal taps must not raise the keyboard; rail and
+  hardware keys keep typing.
+- Wide windows: ⋯ carries ONLY the lock — no duplicate A−/A+, + TAB, FILE,
+  MERGE, DETACH. Vision Pro has neither ⋯ nor the lock.
 
 PRESSED LINKS AND PATHS ARE EDITABLE — AND STOP EATING THE LINE ABOVE
 
-The confirmation sheet a long-pressed link or file path raises now shows its
-target in an editable field: if detection grabbed the wrong text, fix it in
-place and OPEN / ⌗ VIEWPORT / ▤ VIEW act on what the sheet shows (COPY copies
-it too). When the field holds nothing usable, the actions go quiet and the
-sheet says why.
+The link/path confirmation sheet shows its target in an editable field, and
+OPEN / ⌗ VIEWPORT / ▤ VIEW / COPY act on what the sheet shows. A wrapped
+sentence glued to a path ("…the file./etc/hosts") is trimmed to the path.
 
-Detection also stops gluing a sentence to a path. A hard-wrapped line leaves
-no space at the seam, so "…updated the file." above "/Users/me/x.swift"
-reached the matcher as one string and opened a path with a "." head. That
-head is now trimmed.
+- Long-press a path on a wrapped line: PATH reads /etc/hosts.
+- Edit the field: host line, REACH row, and title follow live; clearing it
+  hides the action chips.
+- Real paths are untouched: ./src/main.rs, ~/notes/todo.md, src/app.ts:42.
 
-Worth checking:
-- Long-press a path an agent printed on a line that wraps (or print
-  something like: echo "updated the file./etc/hosts"). PATH should read
-  /etc/hosts, not "file./etc/hosts", and the section should say it's a path
-  on that host.
-- In either sheet, edit the field: type a different path or URL and confirm
-  the sheet re-reads it live (host line, REACH row, and the title all
-  follow). Clear it and the OPEN/VIEW chips should disappear with a caps
-  note under the field.
-- ▤ VIEW / ⌗ VIEWPORT / OPEN must act on the EDITED text, not the pressed
-  text. Real paths must be untouched: ./src/main.rs, ../lib/util.ts,
-  ~/notes/todo.md, src/app.ts:42 all still open exactly as before.
+CHIP TAILS IN LANDSCAPE — no smear under the bottom-rail buttons
 
-CHIP TAILS IN LANDSCAPE — no more smear under the bottom-rail buttons
+A phone in landscape printed a tail of chip fill through the home-indicator
+strip under every bottom-rail button.
 
-On a phone in landscape, every chassis chip resting on the bottom rail
-printed a tail of its own fill through the home-indicator strip: the File
-Viewer / Viewport rail's buttons (host tag, HIDE/TREE, REFRESH, CLOSE) each
-grew a block below their border. The chip's face is now exactly its border
-box; only the rail's own surface spends the safe-area strip.
-
-Worth checking:
-- iPhone in landscape: open + TAB ▸ File Viewer and look at the bottom rail.
-  Each button should be a clean bordered square with rail ground below it —
-  no shaded tail running to the screen edge.
-- Same for a ⌗ viewport tab's rail, and in both light and dark appearance.
-- Rotate back to portrait and check the rail is unchanged; chips elsewhere
-  (deck rail, UMD, host sheets) must look exactly as before.
+- iPhone landscape, + TAB ▸ File Viewer: each rail button is a clean square
+  with rail ground below it. Same for a ⌗ viewport rail, light and dark.
+- Portrait, and chips elsewhere (deck rail, UMD, sheets), look as before.
