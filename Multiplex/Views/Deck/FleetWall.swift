@@ -483,18 +483,31 @@ struct FleetWall: View {
                 ChassisLabel("Multiplex", size: 15)
             }
         }
-        ToolbarItemGroup(placement: .primaryAction) {
-            ChassisChip("HOST", systemImage: "plus", action: addHost)
-                .fixedSize()
-                .accessibilityLabel("Add host")
-            ChassisChip("FAQ", systemImage: "questionmark", action: openFAQ)
-                .fixedSize()
-                .accessibilityLabel("Frequently asked questions")
-            ChassisChip("SETTINGS", systemImage: "gearshape", action: openSettings)
-                .fixedSize()
-                // The system's compact trailing margin looks crowded against
-                // the rounded corner when the deck is an iPad window.
-                .padding(.trailing, 12)
+        // ⚠ ONE item holding all three chips, not a `ToolbarItemGroup` of
+        // three. On iOS-app-on-Mac UIKit rebuilds a toolbar item natively
+        // whenever it resolves to a single control, extracting a title/image
+        // and dropping the chip's border, background, and padding — which is
+        // why HOST, FAQ, and SETTINGS rendered as bare glyphs there. An item
+        // holding several controls cannot be reduced that way, so UIKit hosts
+        // the real views and the TALLY faces survive. (The terminal window's
+        // `A− A+` was always correct on Mac for exactly this reason: it is an
+        // `HStack` of two chips.) Verified 2026-07-31 on macOS 27 / iOS 27;
+        // iPad and visionOS render identically either way.
+        ToolbarItem(placement: .primaryAction) {
+            HStack(spacing: 8) {
+                ChassisChip("HOST", systemImage: "plus", action: addHost)
+                    .fixedSize()
+                    .accessibilityLabel("Add host")
+                ChassisChip("FAQ", systemImage: "questionmark", action: openFAQ)
+                    .fixedSize()
+                    .accessibilityLabel("Frequently asked questions")
+                ChassisChip("SETTINGS", systemImage: "gearshape", action: openSettings)
+                    .fixedSize()
+                    // The system's compact trailing margin looks crowded
+                    // against the rounded corner when the deck is an iPad
+                    // window.
+                    .padding(.trailing, 12)
+            }
         }
         .sharedBackgroundVisibility(.hidden)
     }
