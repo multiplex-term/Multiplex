@@ -138,3 +138,19 @@ Worth checking:
 - ▤ VIEW / ⌗ VIEWPORT / OPEN must act on the EDITED text, not the pressed
   text. Real paths must be untouched: ./src/main.rs, ../lib/util.ts,
   ~/notes/todo.md, src/app.ts:42 all still open exactly as before.
+
+CHIP TAILS IN LANDSCAPE — no more smear under the bottom-rail buttons
+
+On a phone in landscape, every chassis chip resting on the bottom rail
+printed a tail of its own fill through the home-indicator strip: the File
+Viewer / Viewport rail's buttons (host tag, HIDE/TREE, REFRESH, CLOSE) each
+grew a block below their border. The chip's face is now exactly its border
+box; only the rail's own surface spends the safe-area strip.
+
+Worth checking:
+- iPhone in landscape: open + TAB ▸ File Viewer and look at the bottom rail.
+  Each button should be a clean bordered square with rail ground below it —
+  no shaded tail running to the screen edge.
+- Same for a ⌗ viewport tab's rail, and in both light and dark appearance.
+- Rotate back to portrait and check the rail is unchanged; chips elsewhere
+  (deck rail, UMD, host sheets) must look exactly as before.

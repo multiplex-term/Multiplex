@@ -95,7 +95,14 @@ struct ChassisBadge: View {
         .foregroundStyle(color ?? (prominent ? Theme.signal : Theme.signal2))
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
-        .background(Theme.chassis)
+        // A chip's face is exactly its border box. `background(_ style:)`
+        // defaults to `ignoresSafeAreaEdges: .all`, so a chip resting against
+        // a safe-area band — the file viewer / viewport rail sitting on the
+        // home indicator in landscape — bled its chassis fill through the
+        // strip while the border stayed put, printing a tail under every
+        // chip (user-reported). Surfaces spend the safe areas; a control
+        // never does.
+        .background(Theme.chassis, ignoresSafeAreaEdges: [])
         .overlay(Rectangle().strokeBorder(
             prominent ? Theme.signal2 : Theme.bezelHi, lineWidth: 1))
     }
