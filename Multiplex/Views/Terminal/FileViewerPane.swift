@@ -87,7 +87,14 @@ struct FileViewerPane: View {
                             .overlay(alignment: .leading) {
                                 Rectangle().fill(Theme.bezelHi).frame(width: 1)
                             }
-                            .shadow(color: .black.opacity(0.35), radius: 18, x: -8, y: 0)
+                            // Two casts, both appearance-dynamic: the soft
+                            // ambient one separates the drawer from the
+                            // screen behind it, the tight contact one draws
+                            // its lifted edge — in the light the ambient
+                            // cast alone vanishes between two near-white
+                            // surfaces.
+                            .shadow(color: Theme.shadowAmbient, radius: 18, x: -8, y: 0)
+                            .shadow(color: Theme.shadowContact, radius: 3, x: -1, y: 0)
                             .transition(.move(edge: .trailing))
                     }
                 }

@@ -75,3 +75,15 @@ strip under every bottom-rail button.
 - iPhone landscape, + TAB ▸ File Viewer: each rail button is a clean square
   with rail ground below it. Same for a ⌗ viewport rail, light and dark.
 - Portrait, and chips elsewhere (deck rail, UMD, sheets), look as before.
+
+FILE VIEWER DRAWER SHADOW IN LIGHT — the tree reads as a lifted panel
+
+In the light appearance the tree drawer's drop shadow was a heavy black
+smudge over the near-white screen. It is now a cooler, weaker cast plus a
+tight edge shadow, so the drawer separates without muddying the ground.
+
+- Light appearance, narrow window (iPhone, or a narrow iPad window),
+  + TAB ▸ File Viewer: the open drawer sits above the content screen with
+  a soft cool shadow, not a grey wash.
+- Slide it open and closed: the shadow follows the animation cleanly.
+- Dark appearance: unchanged.

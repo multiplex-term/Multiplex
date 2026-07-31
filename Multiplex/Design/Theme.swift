@@ -52,6 +52,19 @@ enum Theme {
     /// Dimmed mono text inside miniature screens.
     static let miniText = Color(light: 0x3A434E, dark: 0xC8D2D6)
 
+    // MARK: Elevation (summoned overlays only — depth, never decoration)
+    /// The soft cast under an overlay that stands over the chassis (the file
+    /// viewer's tree drawer). Pure black at the graphite chassis's strength
+    /// turns Frost muddy — a lit chassis casts a *cooler, weaker* shadow, so
+    /// the light rendition is a blue-grey drawn from the platinum ground.
+    static let shadowAmbient = Color(
+        light: 0x2C3644, lightAlpha: 0.16, dark: 0x000000, darkAlpha: 0.34)
+    /// The tight contact darkening right at the overlay's edge. It is what
+    /// reads as a lifted panel in the light, where the ambient cast alone is
+    /// too diffuse to separate one near-white surface from another.
+    static let shadowContact = Color(
+        light: 0x2C3644, lightAlpha: 0.13, dark: 0x000000, darkAlpha: 0.18)
+
     // MARK: Type scale
     /// iOS-on-Mac ("Designed for iPad") paints the iPad point grid at 77%
     /// with no opt-out for non-game apps, so chassis type authored at
@@ -119,6 +132,16 @@ extension Color {
     init(light: UInt32, dark: UInt32) {
         self.init(uiColor: UIColor { traits in
             UIColor(hex: traits.userInterfaceStyle == .dark ? dark : light)
+        })
+    }
+
+    /// Same, with per-appearance alpha — a shadow's *strength* is as
+    /// appearance-dependent as its hue, so both ride one dynamic color.
+    init(light: UInt32, lightAlpha: CGFloat, dark: UInt32, darkAlpha: CGFloat) {
+        self.init(uiColor: UIColor { traits in
+            let isDark = traits.userInterfaceStyle == .dark
+            return UIColor(hex: isDark ? dark : light)
+                .withAlphaComponent(isDark ? darkAlpha : lightAlpha)
         })
     }
 }
