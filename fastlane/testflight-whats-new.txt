@@ -87,3 +87,15 @@ tight edge shadow, so the drawer separates without muddying the ground.
   a soft cool shadow, not a grey wash.
 - Slide it open and closed: the shadow follows the animation cleanly.
 - Dark appearance: unchanged.
+
+SINGLE-COLUMN DECK CENTERS — tiles stop hugging the left edge
+
+When the deck is narrow enough to show one tile per row, the column now sits
+in the middle of the window instead of against the left edge. Two or more
+columns are unchanged.
+
+- Narrow the deck window (visionOS) or watch a lone host connect: the tiles
+  and the + NEW SESSION tile are centered under the host rail.
+- Widen it back until two tiles fit per row: the grid returns to the left,
+  tiles lined up across hosts exactly as before.
+- A single ACQUIRING SIGNAL / NO SIGNAL / DISABLED tile centers at any width.

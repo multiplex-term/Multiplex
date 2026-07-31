@@ -308,13 +308,7 @@ struct FleetWall: View {
     }
 
     private func wall(showHeader: Bool) -> some View {
-        let columns = gridColumns(
-            count: FleetTileGridSizing.columnCount(
-                availableColumns: tileGridColumnCount
-                    ?? (presentation == .standard ? 2 : 1),
-                tileCount: tileCount
-            )
-        )
+        let columns = gridColumns(count: resolvedColumnCount)
 
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -388,6 +382,22 @@ struct FleetWall: View {
         return counts.max() ?? 1
     }
 
+    /// The wall's column count: what the width allows, narrowed to what the
+    /// fullest host has tiles to fill.
+    private var resolvedColumnCount: Int {
+        FleetTileGridSizing.columnCount(
+            availableColumns: tileGridColumnCount
+                ?? (presentation == .standard ? 2 : 1),
+            tileCount: tileCount
+        )
+    }
+
+    /// A single-column wall centers its tiles instead of parking them against
+    /// the leading edge. The leading grid is what keeps tiles lined up with
+    /// each other across a row — a column of one has nothing to line up with,
+    /// and the surplus width a capped tile leaves is then all on one side.
+    private var centersLoneTile: Bool { resolvedColumnCount == 1 }
+
     private func gridColumns(count: Int) -> [GridItem] {
         Array(
             repeating: GridItem(
@@ -405,8 +415,11 @@ struct FleetWall: View {
         )
     }
 
+    /// A `LazyVGrid`'s alignment places the grid inside the width it is given,
+    /// so this is what decides where a short row sits on a wide wall.
     private var gridAlignment: HorizontalAlignment {
-        presentation == .shellCompact ? .center : .leading
+        if presentation == .shellCompact || centersLoneTile { return .center }
+        return .leading
     }
 
     /// While this view exists, keep the wall alive: re-probe each host and
