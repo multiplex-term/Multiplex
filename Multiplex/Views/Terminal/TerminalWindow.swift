@@ -1672,9 +1672,9 @@ private struct TerminalPane: View {
         }
     }
 
-    /// Dictation is app-owned recognition, so the pane says what it is
-    /// hearing: nothing reaches the session until the dictation finishes,
-    /// and the live hypothesis is the only feedback until then.
+    /// Dictation is app-owned recognition, so the pane says that the
+    /// microphone is open — and what it has heard but not handed over yet.
+    /// Everything before that queue is already typed into the session.
     @ViewBuilder
     private func dictationBar(for controller: TerminalSessionController) -> some View {
         #if !os(visionOS)
@@ -1790,7 +1790,7 @@ private struct KeyboardLockedBadge: View {
             .background(isDictating ? Theme.signal2 : Color.clear)
             .chassisHover(2)
             .accessibilityLabel(isDictating ? "Stop dictation" : "Dictate")
-            .accessibilityHint("Types the finished dictation without pressing Return")
+            .accessibilityHint("Types what you say into the session as you speak, never pressing Return")
         }
         .foregroundStyle(Theme.signal2)
         .background(Theme.bezel, in: shape)
@@ -1828,9 +1828,10 @@ private struct TmuxCopyModeBar: View {
 
 #if !os(visionOS)
 /// The dictation counterpart of `TmuxCopyModeBar`: an open microphone is
-/// live state, so it gets a captioned tally lamp and the running hypothesis
-/// beside it. STOP types what was heard; CANCEL throws it away — recognition
-/// also stops itself after a pause, exactly like system dictation.
+/// live state, so it gets a captioned tally lamp. Settled words go into the
+/// session as they land, so what sits beside the lamp is the short queue the
+/// recognizer is still reconsidering — dimmer than typed text, because it is
+/// not in the session yet. STOP types that queue; CANCEL abandons it.
 private struct DictationBar: View {
     let state: TerminalSessionController.DictationState
     var stop: () -> Void
@@ -1839,15 +1840,16 @@ private struct DictationBar: View {
     var body: some View {
         HStack(spacing: 18) {
             switch state {
-            case .listening(let heard):
+            case .listening(let pending):
                 TallyLamp(caption: "LISTENING")
-                if !heard.isEmpty {
-                    Text(heard)
+                if !pending.isEmpty {
+                    Text(pending)
                         .font(.mono(12))
-                        .foregroundStyle(Theme.signal2)
+                        .foregroundStyle(Theme.signal3)
                         .lineLimit(1)
                         .truncationMode(.head)
                         .frame(maxWidth: 320, alignment: .leading)
+                        .accessibilityLabel("Heard, not typed yet: \(pending)")
                 }
                 ChassisChip("CANCEL", action: cancel)
                 ChassisChip("STOP", prominent: true, action: stop)

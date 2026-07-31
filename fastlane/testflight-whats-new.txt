@@ -22,8 +22,8 @@ LOCKED DICTATION — use the mic with the software keyboard closed
 The KEYBOARD LOCKED tip carries a mic, so a phone with no physical keyboard
 can still dictate while the keyboard is locked.
 
-- Tap the mic: LISTENING replaces the tip; STOP types the transcript
-  without pressing Return, CANCEL types nothing.
+- Tap the mic: LISTENING replaces the tip (see CONTINUOUS DICTATION below
+  for what it now types).
 - The mic latches immediately during the permission prompts; tapping it
   again cancels the pending attempt.
 
@@ -99,3 +99,30 @@ columns are unchanged.
 - Widen it back until two tiles fit per row: the grid returns to the left,
   tiles lined up across hosts exactly as before.
 - A single ACQUIRING SIGNAL / NO SIGNAL / DISABLED tile centers at any width.
+
+CONTINUOUS DICTATION — words land while you are still talking
+
+Dictation used to hold everything back and type it in one go at the end. It
+now types each word once the recognizer stops second-guessing it, keeps
+going through pauses (and through the recognizer's own internal restarts),
+and punctuates like the system keyboard. The bar beside LISTENING is no
+longer the transcript — it is only the few words heard but not typed yet.
+
+- Attach a session, open a composer (an agent prompt, or just a shell
+  prompt), press the mic (rail key with a keyboard attached, or the mic in
+  the KEYBOARD LOCKED tip) and talk for a while without stopping: text
+  appears in the composer as you speak, a word or two behind your voice.
+- Pause mid-dictation: the last words land within about a second, then keep
+  talking — the same dictation continues, with a space at the join. Do this
+  several times in one take; it must keep hearing you after every pause.
+- Talk for two or three minutes straight: it must not stop on its own or
+  start a second copy of anything.
+- Nothing is ever submitted: no Return, at any point, including at the end.
+- STOP types the last queued words; CANCEL drops them. Neither can undo
+  what is already in the composer — a terminal has no take-backs, which is
+  why the app holds each word until it is settled.
+- Read back what landed: no duplicated word at a pause, no word typed twice
+  when the recognizer corrects itself mid-sentence.
+- Plug in AirPods (or take a call) mid-dictation: what was heard stays
+  typed, and the take either continues or ends cleanly — no crash, no
+  half-word.

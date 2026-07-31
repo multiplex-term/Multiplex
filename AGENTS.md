@@ -287,13 +287,21 @@ app.multiplexterm.multiplex` covers the mic, but simctl has no
 speech-recognition service — with the device **shut down**, insert
 `kTCCServiceSpeechRecognition` into
 `~/Library/Developer/CoreSimulator/Devices/<UDID>/data/Library/TCC/TCC.db`
-(a write while it is booted is ignored by the running tccd). Point the
-simulator at a real input under Device → Audio Input to transcribe; with
-silence the walk still proves the whole path — LISTENING appears, the 30 s
-silence timeout ends it (or press the hook a second time, which is STOP), and
-`tmux capture-pane` shows nothing typed. The on-device
-verdict is logged (subsystem `app.multiplexterm.multiplex`, category
-`dictation`, debug level — `log stream`, not `log show`), and
+(a write while it is booted is ignored by the running tccd). ⚠ **The
+simulator cannot transcribe at all** (iOS 26.4, verified 2026-07-31): its
+Siri asset is broken, so `SFSpeechRecognizer` fails with `Failed to
+initialize recognizer` within ~20 ms — on device *and* over the server
+(`supportsOnDeviceRecognition` claims true; `localspeechrecognition` logs
+`Failed to create recognizer from …/mini.json`). Device → Audio Input
+changes nothing. So the hook proves the whole app-side path — mic
+permission, audio session, engine + tap, segment rolling, the restart cap
+(3 back-to-back empty segments), the pane's DICTATION failure bar, and
+that nothing is typed — while the streaming rules themselves are covered
+by `DictationStreamTests` and the words landing in a pane need a real
+device. Every start (with the effective on-device verdict), every segment
+end, and the underlying recognizer error are logged (subsystem
+`app.multiplexterm.multiplex`, category `dictation`, debug level —
+`log stream`, not `log show`), and
 `… -p app.multiplexterm.multiplex.keycluster` runs the visionOS ornament
 key cluster's proof — ESC and TAB through its send path plus a latched CTRL
 consumed by a typed `c` (a raw-mode `dd bs=1 count=3 | od -c` in the pane
@@ -715,7 +723,8 @@ views.
   over the view-level one — `SwiftTermView` nils `inputAccessoryView` there
   so the cluster's latch is authoritative; don't remove that.
 - **A physical keyboard or software-keyboard lock exposes app-owned
-  dictation** (`HardwareKeyboardMonitor`, `DictationSession`, `DictationText` —
+  dictation** (`HardwareKeyboardMonitor`, `DictationSession`,
+  `DictationStream`/`DictationText` —
   pure + tested; the pane's `DictationBar`). iOS suppresses the software
   keyboard outright while a hardware keyboard is attached, so the rail's
   toggle has nothing left to toggle; that slot spends itself on the one
@@ -731,20 +740,121 @@ views.
   requesting `requiresOnDeviceRecognition` wherever the locale supports it —
   a terminal's input is the most sensitive text in the app, and the recognizer
   is the one place it would otherwise leave the device outside the user's own
-  SSH connection. Three rules the implementation holds to: **nothing is typed
-  until the dictation finishes** (the recognizer rewrites earlier words as it
-  refines its hypothesis and a terminal cannot take a byte back — the live
-  partial is bar-only); the finished text is typed through `TerminalView.send`
-  → delegate → ordered pump like every other rail key, sanitized to one line
-  with no control bytes (`DictationText`) and **never submitted**, the same
+  SSH connection. **Words are typed as they settle, not in one lump at the
+  end** — the system keyboard's continuous feel, reached the only way a
+  terminal allows: **nothing is ever retracted**, because a byte handed to
+  `TerminalView.send` has left the app and backspaces would be aimed at a
+  remote composer whose contents this app cannot see (one Enter, one user
+  keystroke, or one line of agent output in between and they delete somebody
+  else's text). `DictationStream` (pure + tested) decides what has settled by
+  two ordinal rules that need no clock — the newest `tailHold` (2) words are
+  still in play and are never committed, and a word must additionally hold its
+  own index unchanged across `holdUpdates` (2) hypotheses — plus one rule that
+  belongs to the caller because it is about silence: hypotheses only arrive
+  while there is speech, so ~1 s without one means the recognizer has settled
+  and `flush()` types the held-back tail (that is what lands a spoken phrase
+  at the pause instead of leaving it two words short until the next sentence).
+  ⚠ **The baseline for "already typed" is the typed text, never a position in
+  the hypothesis** (`DictationStream.rebase`). A recognizer endpoints *inside
+  one task* and starts its next hypothesis over, so it comes back shorter
+  than what has gone out — a positional baseline could then never be passed
+  again, and every later word was swallowed in silence while the microphone
+  stayed open and partials kept re-arming the silence timer: LISTENING
+  forever, nothing typed, an empty queue (user-reported, and the failure that
+  survived two rounds of fixing the Speech API instead of this).
+  Comparison ignores case and punctuation, so the re-punctuation
+  auto-punctuation performs on words already typed still counts as covered
+  and nothing goes out twice; a real divergence drops the baseline to where
+  the two agree, so what follows is typed rather than counted as sent.
+  Nothing typed is ever retracted — the worst case is a revised word arriving
+  twice, which is visible, against a stream that went silent forever.
+  `testANewUtteranceInTheSameSegmentKeepsTyping` is that bug's shape.
+  **There are two recognition engines, and the newer one is the point**
+  (`DictationAnalyzer`, iOS 26+; `SFSpeechRecognizer` below that and wherever
+  the dictation model is not installed — the choice is logged on the start
+  line as `engine=analyzer|sfspeech`). `SFSpeechRecognizer` is built around
+  **one utterance per task**: it ends at the speaker's first pause, and the
+  replacement task came back **deaf** on device — microphone open, pane still
+  saying LISTENING, nothing ever heard again (user-reported; the report
+  before it was the same API ending the take outright). iOS 26's
+  `SpeechAnalyzer` + `DictationTranscriber` is the API built for long-form
+  dictation, running the same on-device model the system keyboard uses:
+  **one analyzer for the whole take, no rolling at all**, and it marks each
+  result *volatile* or *final* — the exact line a terminal has to draw,
+  decided by the recognizer instead of guessed at, so `DictationStream`'s
+  hold rules go unused there (`absorb`/`endSegment` only; final text is typed
+  verbatim). Its quiet flush asks the analyzer to `finalize` rather than
+  typing a volatile tail behind its back; STOP is
+  `finalizeAndFinishThroughEndOfInput`, so the last words are typed on the
+  way out; and `AnalyzerFeed` converts the tap's buffers to the analyzer's
+  format, re-deriving its converter whenever the input format changes under
+  it (a route change) — the one moving part with no equivalent on the old
+  path. The analyzer is on **probation**: no result at all within 10 s and
+  the take falls back to `SFSpeechRecognizer` mid-flight (nothing has been
+  typed yet by definition, so the switch costs nothing) — a wrong audio
+  conversion would otherwise mean a take that can never hear anything, which
+  is exactly the failure this path exists to end. A missing dictation model
+  falls back too, and asks for the model in the background so the next take
+  can use it.
+  **The older path rolls, and all of it is scar tissue.** One
+  `SFSpeechRecognitionTask` does not last — it
+  finalizes at an endpoint and the server-backed path gives up after about a
+  minute — so the audio engine keeps running across that and each finished
+  task is replaced by a fresh one whose words append to the same dictation
+  (`AudioSink` is the lock-behind-a-pointer seam between the realtime tap and
+  the request being swapped under it; the stream keeps the typed-so-far state,
+  which is what puts the space in the join). ⚠ **The next task must not start
+  in the same breath the last one ended** — the speech daemon is still tearing
+  the finished one down and a task created into that window comes back dead
+  at once. Rolling instantly is what made the first shipped attempt die about
+  a second after the speaker's first pause (three dead restarts inside 25 ms
+  hit the cap, and because words had already been typed it closed the
+  microphone *silently*; user-reported). So every roll waits
+  `restartDelays` (200 ms, then 500 ms/1 s/2 s while restarts keep coming
+  back dead), and only a task that died **without hearing anything inside
+  2 s** counts toward the cap of six — a task that lived through a silence
+  and ended is the recognizer working, and ending the take on those is what
+  the 30 s silence timeout is for. Exhausting the cap always surfaces the
+  failure bar, never a silent close. **Each task also gets its own capture
+  graph** — tap removed and engine stopped before it is built, re-installed
+  once the request and task are both live — because a task fed by the tap
+  that served the task before it is what came back deaf; that is Apple's own
+  recognition sample's shape, and the reason the analyzer path exists is that
+  even this is not reliably enough. Two more ways a take used to die that
+  now heal in place: a route change re-taps the input at its new format
+  through an ordinary roll (AirPods arriving is not the user finishing, and
+  a failed re-tap rolls again rather than ending), and a task that produces
+  nothing for 12 s is replaced (`deafSegmentTimeout`, re-armed on every
+  result) — from the app a silent room and a recognizer that stopped
+  listening look identical, and only one of them is fixed by a fresh task.
+  Interruptions still end the take with everything heard typed, the way the
+  system keyboard's dictation does; the log names that path. The audio
+  session's deactivation is likewise guarded: it is handed back off the main
+  actor, so it checks that no *other* take has claimed the microphone
+  meanwhile — deactivating under a running take leaves an engine that never
+  hears anything again.
+  Everything else is unchanged and still load-bearing: chunks go through
+  `TerminalView.send` → delegate → ordered pump like every other rail key,
+  sanitized to one line with no control bytes (`DictationText.words` is the
+  one splitter, so a streamed chunk can carry no CR — a submit mid-sentence
+  would run whatever is in the composer) and **never submitted**, the same
   discipline as a dropped file's path; and **LISTENING means the microphone is
   open**, never merely that the key was pressed — the first press waits behind
   two system permission alerts, so the pressed mic control latches while the
-  bar waits for `AVAudioEngine.start()`. Recognition stops itself after 30 s
-  of quiet (5 min hard cap) — deliberately far longer than system dictation's
-  pause, because what gets dictated here is an agent prompt and a mid-sentence
-  think must not end the take. One session holds the
-  mic app-wide: a second tab starting takes it rather than failing. Free rail
+  bar waits for `AVAudioEngine.start()`. The bar's text is now the *queue*
+  (heard, not yet typed) and is drawn dimmer for that reason; STOP types it,
+  CANCEL abandons it, and neither can reach back for what already went out —
+  which is also why a starting history jump cancels dictation outright rather
+  than letting the locked input pump swallow it. Recognition stops itself
+  after 30 s of quiet (5 min hard cap) — deliberately far longer than system
+  dictation's pause, because what gets dictated here is an agent prompt and a
+  mid-sentence think must not end the take. Auto-punctuation is on
+  (`addsPunctuation`, the keyboard's own behavior; commas are otherwise
+  unsayable). One session holds the
+  mic app-wide: a second tab starting takes it rather than failing. iOS 26's
+  `SpeechAnalyzer`/`SpeechTranscriber` marks volatile vs finalized results
+  itself and is the recorded graduation path for the stream model, but the app
+  ships to iOS 17, so the stability rules stay app-side. Free rail
   plumbing, not an agent-helper surface. ⚠ In the simulator DeviceHub always
   bridges the Mac keyboard as *hardware*, so the mic key — not the keyboard
   key — is what every screenshot run captures; the no-hardware-keyboard branch

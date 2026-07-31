@@ -12,9 +12,10 @@ import Foundation
 /// submit the line the user is still dictating into) and the line breaks a
 /// spoken "new line" can produce.
 enum DictationText {
-    /// The bytes to type for one finished dictation, or nil if the
-    /// recognizer heard nothing worth sending.
-    static func typed(_ raw: String) -> String? {
+    /// One hypothesis split into the words a terminal may safely be given.
+    /// This is the granularity `DictationStream` commits at: a word is the
+    /// smallest thing the recognizer stops reconsidering.
+    static func words(_ raw: String) -> [String] {
         var words: [String] = []
         var current = ""
         for scalar in raw.unicodeScalars {
@@ -34,7 +35,14 @@ enum DictationText {
             current.unicodeScalars.append(scalar)
         }
         if !current.isEmpty { words.append(current) }
-        let text = words.joined(separator: " ")
+        return words
+    }
+
+    /// The bytes to type for one whole dictation, or nil if the recognizer
+    /// heard nothing worth sending. Streaming hands the pane
+    /// `DictationStream`'s chunks instead — this stays the one-shot form.
+    static func typed(_ raw: String) -> String? {
+        let text = words(raw).joined(separator: " ")
         return text.isEmpty ? nil : text
     }
 

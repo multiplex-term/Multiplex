@@ -125,7 +125,8 @@ Current product split:
   system-keyboard/IME input, a dedicated RET key immediately after the
   direction keys (always on iPad, and while iPhone's software keyboard is
   locked closed), app-owned terminal dictation from the physical-keyboard rail
-  or software-keyboard-lock tip (on device wherever the locale supports it),
+  or software-keyboard-lock tip (on device wherever the locale supports it,
+  typed into the session as it settles and never submitted),
   and primary-button touch/pointer input for mouse-aware TUIs, all-pane agent
   detection and wall
   telemetry with foreground-aware helpers in tmux panes and plain SSH

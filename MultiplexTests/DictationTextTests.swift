@@ -46,6 +46,18 @@ final class DictationTextTests: XCTestCase {
         XCTAssertEqual(DictationText.typed("rm -rf $HOME/tmp"), "rm -rf $HOME/tmp")
     }
 
+    // MARK: Words
+
+    /// The unit `DictationStream` commits at: the same sanitizing, kept
+    /// unjoined so a settled prefix can go out without its tail.
+    func testWordsSplitOnEverythingThatIsNotSpeech() {
+        XCTAssertEqual(
+            DictationText.words("run the\u{1B}tests\nagain"),
+            ["run", "the", "tests", "again"]
+        )
+        XCTAssertEqual(DictationText.words("  "), [])
+    }
+
     // MARK: Bar preview
 
     func testPreviewKeepsTheTailStillBeingRefined() {

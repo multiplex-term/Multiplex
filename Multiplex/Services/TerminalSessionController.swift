@@ -176,8 +176,9 @@ final class TerminalSessionController {
 
     #if !os(visionOS)
     /// The terminal's app-owned dictation controls, from the pane's side:
-    /// LISTENING while the microphone is open (the bar shows the live
-    /// hypothesis), or a short failure the user can act on.
+    /// LISTENING while the microphone is open, or a short failure the user
+    /// can act on. Settled words are already in the session, so the payload
+    /// is only what has been heard and not yet typed.
     enum DictationState: Equatable {
         case listening(String)
         case failed(String)
@@ -888,10 +889,11 @@ final class TerminalSessionController {
         }
     }
 
-    /// Finish and type what was heard. The recognizer gets a moment to make
-    /// its final pass first, so the tail of a sentence is not lost. A press
-    /// that has not reached the microphone yet has nothing to type, so it
-    /// simply abandons the attempt.
+    /// Finish and type the tail. Most of the dictation is already in the
+    /// session — this is the last words the hold rules were still sitting on,
+    /// and the recognizer gets a moment to make its final pass over them
+    /// first. A press that has not reached the microphone yet has nothing to
+    /// type, so it simply abandons the attempt.
     func stopDictation() {
         guard let dictationSession else { return }
         if dictationSession.isListening {
@@ -901,7 +903,9 @@ final class TerminalSessionController {
         }
     }
 
-    /// Leave without typing anything.
+    /// Leave without typing the rest. Words that already settled are in the
+    /// session and stay there — a terminal has no undo, so this abandons the
+    /// queue, not the dictation's past.
     func cancelDictation() {
         dictationSession?.cancel()
     }
@@ -921,9 +925,12 @@ final class TerminalSessionController {
                 guard let self, dictationRequested else { return }
                 dictation = .listening("")
             },
-            onPartial: { [weak self] partial in
+            onText: { [weak self] settled in
+                self?.typeDictated(settled)
+            },
+            onPending: { [weak self] pending in
                 guard let self, dictationRequested else { return }
-                dictation = .listening(DictationText.preview(partial))
+                dictation = .listening(DictationText.preview(pending))
             },
             onFinish: { [weak self] outcome in
                 self?.finishDictation(outcome)
@@ -931,16 +938,28 @@ final class TerminalSessionController {
         )
     }
 
+    /// One chunk of settled speech, typed exactly like a rail key or a
+    /// dropped file's path — through SwiftTerm and the ordered input pump,
+    /// never submitted. The stream already sanitized it and owns the spacing
+    /// between chunks, so it goes out verbatim.
+    private func typeDictated(_ text: String) {
+        guard dictationRequested else { return }
+        guard status == .live, let terminalView else {
+            // The session being spoken into is gone. Stop rather than aim the
+            // rest of the sentence at whatever takes its place.
+            dictationSession?.cancel()
+            return
+        }
+        terminalView.send(txt: text)
+    }
+
     private func finishDictation(_ outcome: DictationSession.Outcome) {
         dictationRequested = false
         dictation = nil
         switch outcome {
-        case .text(let raw):
-            // Typed exactly like a rail key or a dropped file's path —
-            // through SwiftTerm and the ordered input pump, never submitted.
-            guard let text = DictationText.typed(raw), let terminalView else { return }
-            terminalView.send(txt: text)
-        case .cancelled:
+        case .ended, .cancelled:
+            // Everything that settled was typed as it landed; there is no
+            // trailing text left to deliver here.
             break
         case .failure(let message):
             dictation = .failed(message)
@@ -1117,6 +1136,11 @@ final class TerminalSessionController {
         // state is superseded directly — the find script normalizes to live
         // first, so chaining jumps needs no manual BACK TO LIVE.
         if case .finding = historyJump { return }
+        #if !os(visionOS)
+        // The search is about to lock the input pump, which would swallow
+        // dictated words without a trace. Close the microphone instead.
+        cancelDictation()
+        #endif
         historyJumpSessionID = nil
         let preview = String(message.firstLine.prefix(24))
         historyJump = .finding(preview: preview)
