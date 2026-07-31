@@ -126,3 +126,19 @@ longer the transcript — it is only the few words heard but not typed yet.
 - Plug in AirPods (or take a call) mid-dictation: what was heard stays
   typed, and the take either continues or ends cleanly — no crash, no
   half-word.
+
+SETTINGS RESPONDS INSTANTLY — no third-of-a-second freeze per tap
+
+Every tap in Settings — picking a terminal theme, switching SYSTEM/LIGHT/
+DARK, flipping a switch — blocked the app for about a third of a second on
+iPhone. The App lock section was asking the system which authenticator the
+device has (Face ID / Touch ID / passcode) three times on every redraw, and
+each ask is a slow round trip. It is now asked once per launch.
+
+- Open Settings and tap down the built-in theme list quickly: each row
+  becomes ACTIVE the instant you touch it, and the list scrolls smoothly
+  while you do it. No pause between the tap and the ACTIVE badge moving.
+- Tap SYSTEM / LIGHT / DARK back and forth: the chrome flips immediately.
+- The App lock row still names your device's real method ("Require Face
+  ID" on a Face ID phone, "Require device passcode" without biometry), and
+  the lock itself still prompts correctly when you turn it on.

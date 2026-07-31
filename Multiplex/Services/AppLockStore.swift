@@ -73,6 +73,11 @@ final class AppLockStore {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.lock() }
         }
+        // Resolve the authenticator's name off the main thread. Memoized or
+        // not, the FIRST read is still a ~110 ms XPC round trip, and both of
+        // its readers are view bodies — Settings' app-lock section and the
+        // veil — where it would land on the frame that presents them.
+        Task.detached(priority: .utility) { _ = Self.methodName }
     }
 
     deinit {
@@ -131,7 +136,29 @@ final class AppLockStore {
     /// "Face ID" / "Touch ID" / "Optic ID", or the passcode fallback when
     /// no biometry is enrolled. `biometryType` is only valid after a
     /// `canEvaluatePolicy` call.
-    nonisolated static var methodName: String {
+    ///
+    /// ⚠ **Resolved once per process, and it must stay that way.** This is a
+    /// `canEvaluatePolicy` call, which is a synchronous XPC round trip to the
+    /// biometric subsystem — ~110 ms on an iPhone, every call. It reads as an
+    /// innocent string, so it landed in view bodies: Settings' app-lock
+    /// section interpolates it three times and the veil twice, and a body is
+    /// re-evaluated on every observable change the view touches. That made
+    /// **every tap in Settings — including selecting a terminal theme — cost
+    /// ~335 ms of blocked main thread**, none of it related to what was
+    /// tapped (measured on an iPhone Air, Release build). Memoizing it is
+    /// what makes the sheet interactive; a `static let` is initialized
+    /// exactly once by `swift_once`, so later reads are a plain load.
+    ///
+    /// Caching is also honest here: which authenticator a device offers is a
+    /// capability, changed only from system Settings (which backgrounds the
+    /// app), and this value is *copy* — the authentication itself builds a
+    /// fresh `LAContext` on every attempt (`deviceOwnerCheck`), so nothing
+    /// about the lock's behavior rides on this string. The worst case is a
+    /// noun that says "device passcode" until the next launch after biometry
+    /// is enrolled mid-session.
+    nonisolated static let methodName: String = resolveMethodName()
+
+    private nonisolated static func resolveMethodName() -> String {
         let context = LAContext()
         guard context.canEvaluatePolicy(
             .deviceOwnerAuthenticationWithBiometrics, error: nil
