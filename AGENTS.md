@@ -163,6 +163,15 @@ binary as a standalone macOS executable (deliberately outside
 `MultiplexTests`: the app target has no macOS destination and `Process` is
 unavailable in sim tests).
 
+**herdr path**: `./harness.sh herdr` starts a real herdr server
+(`brew install herdr`) and seeds demo workspaces with deterministic agent
+states via `pane report-agent` (working / blocked / derived done) —
+corralled in `state/herdr-workspaces` so `stop` retires exactly those and
+never the developer's own; seed with `state/seed-herdr.json` (same
+host/UUID, `sessionBackend: "herdr"`). `MULTIPLEX_AUTO_AGENT_GALLERY=1`
+opens the ✳ Agent Gallery through the exact deck-chip path (pair with
+`MULTIPLEX_PRO_LOCKED=1` to prove the paywall gate instead).
+
 Simulator caveat: Xcode 27's DeviceHub always bridges the Mac keyboard as
 *hardware*, so the software keyboard never auto-shows (Device → Keyboard →
 Toggle Software Keyboard).
@@ -707,6 +716,50 @@ logic belongs — keep parsing/command-building out of views.
   sealed key is never rotated, and `save()` skips the probe for a sealed
   key with no passphrase on file. The CLI knows nothing about passphrases
   (a CLI-side variant shipped and was reverted 2026-07-29).
+- **herdr is a per-host session backend beside tmux, adapted — never a
+  fork of the pipeline** (`Host.sessionBackend`, BACKEND bar in Host
+  Settings/Add; `HerdrProbe`, pure + fixture-tested against herdr 0.7.5 /
+  protocol 17, 2026-08-01): the probe is one exec — `status --json`
+  (version gate + no-server classifier; it answers exit-0 even
+  serverless), `api snapshot` (whole topology in one call), then
+  sentinel-framed `pane read --source visible` tails whose pane set is the
+  PREVIOUS tick's front panes baked into the command (a shell can't join
+  JSON; one tick of miniature lag sits inside the wall's staleness
+  budget). The parser maps workspace→`TmuxSession`, tab→window,
+  pane→pane, so FleetWall/snapshots/widgets/attention run untouched;
+  herdr's agent field replaces the ps walk, and its lifecycle states are
+  the attention authority (blocked→NEEDS YOU, working→busy, done arrives
+  as the busy→idle edge — Pi alerts are real here). Load-bearing herdr
+  facts: CLI verbs print JSON envelopes by default and *reject* `--json`;
+  API errors exit nonzero (Citadel throws → every stage `2>/dev/null ||
+  true`); reportable states are idle/working/blocked/unknown with `done`
+  derived server-side; kinds canonicalize (`claude-code`→`claude`); NO
+  API reports attached clients (tiles never claim the lamp,
+  `clientCount` pinned 0) and no creation time exists (`created` is the
+  workspace ordinal near the epoch — ordering only, tiles hide the age);
+  workspace labels can DUPLICATE while `TmuxSession.id` is the name →
+  `uniqueWorkspaceNames` suffixes with the ordinal. Attach = `workspace
+  focus` then `exec herdr session attach default` (no workspace flag on
+  attach; mosh wraps both in `sh -c`) via `.herdrAttach(workspaceID:
+  label:)` — one `Mode.attach(host:session:)` factory picks the backend
+  at every mint site. The mint is two execs (create's JSON envelope
+  carries the root pane id, then script/launch type in); kill closes by
+  workspace id only. tmux-only chrome gates on `route.usesTmux`; the
+  tmux-conf editor hides; widget/Shortcut agent launches refuse honestly
+  (v1.3 fence). The dead-tmux tile offers a one-tap USE HERDR switch only
+  when the tmux probe's `MULTIPLEX_HERDR_PRESENT` line (checked BEFORE
+  the exiting tmux guard) saw it installed — never auto-flips. The
+  ✳ Agent Gallery (`.agentGallery`, Pro via `canUseAgentChat` — no
+  taste, HISTORY's posture) is a third auxiliary pane under the
+  viewport/file-viewer rules: controller-owned own-SSH surface (rail from
+  the probe's records, screen via `pane read`, composer via `agent
+  prompt` with stalled/error verdicts surfaced as pills), summoned from
+  the deck rail's ✳ AGENTS chip, never restored. ⚠ Open at 0.7.5: the
+  blocked `message` surfaces nowhere readable and `agent_session`
+  identity never lands from arbitrary `report-agent-session` sources
+  (likely trusted-integration-only) — re-verify with a real integration
+  before building on either. Plan of record + spike log:
+  `local-plan/herdr-investigation.md`.
 - **A disabled host is one the app never dials on its own**
   (`Host.isEnabled`; deck rail menu / DISABLED tile / Host Settings →
   Monitoring): the wall skips it in `runFeed`, never asks `ConnectionHub`
