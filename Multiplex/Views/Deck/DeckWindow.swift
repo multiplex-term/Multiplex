@@ -47,11 +47,10 @@ enum DeckScene {
         var firstTabID: UUID?
         for entry in list.split(separator: ",") {
             let tabs = entry.split(separator: "+").map { name in
-                // Blind attach: no probe has named workspace ids yet, so a
-                // herdr host takes the empty-id form (attaches the session
-                // wherever it fronts) — the bytes-flow proof stands.
+                // On a herdr host the entry names a herdr session directly
+                // (attach auto-creates, so even a fresh harness works).
                 TerminalRoute(hostID: host.id, mode: host.sessionBackend == .herdr
-                    ? .herdrAttach(workspaceID: "", label: String(name))
+                    ? .herdrAttach(sessionName: String(name))
                     : .attach(sessionName: String(name)))
             }
             guard !tabs.isEmpty else { continue }

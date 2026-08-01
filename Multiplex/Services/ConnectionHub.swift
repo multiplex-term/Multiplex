@@ -171,13 +171,6 @@ final class HostConnectionModel {
     /// herdr is installed on this host (the tmux probe checks presence
     /// every tick). Read only by the dead-tmux tile's switch hint.
     private(set) var herdrPresent = false
-    /// herdr mode: the session's globally focused pane. herdr keeps ONE
-    /// focus per session and every attached client mirrors it, so this —
-    /// never the tab's summoning workspace — is what an attached herdr
-    /// terminal is looking at. Observable on purpose: the helper strip
-    /// re-resolves its agent when the person switches workspaces inside
-    /// the TUI.
-    private(set) var herdrFocusedPaneID: String?
     /// Session name → last visible lines of its active pane; the deck
     /// wall's live miniatures, refreshed by every probe (the probe's single
     /// exec carries the capture tails).
@@ -230,19 +223,18 @@ final class HostConnectionModel {
     /// Deeper, unclipped capture tails (the miniatures' source parse) —
     /// what the question detector reads.
     @ObservationIgnored private var attentionTails: [String: [String]] = [:]
-    /// herdr mode: the pane set the NEXT probe reads miniature tails for —
-    /// each workspace's front pane as of the last snapshot. A shell can't
-    /// join JSON, so the app bakes last tick's answer into this tick's
-    /// command (one tick of miniature lag, inside the wall's staleness
-    /// budget).
-    @ObservationIgnored private var herdrTailPaneIDs: [String] = []
-    /// herdr mode: pane id → lifecycle status from the last snapshot — the
+    /// herdr mode: the two sets the NEXT probe bakes into its command —
+    /// the running sessions to snapshot and the pane each one fronts for
+    /// its miniature read. A shell can't join JSON, so the app bakes last
+    /// tick's answer into this tick's command (one tick of lag, inside
+    /// the wall's staleness budget).
+    @ObservationIgnored private var herdrSessionNames: [String] = []
+    @ObservationIgnored private var herdrTailTargets: [HerdrProbe.TailTarget] = []
+    /// herdr mode: session name → pane id → lifecycle status from the
+    /// last snapshots, EVERY pane included (pane ids collide across
+    /// sessions, so a pane is never keyed without its session) — the
     /// attention authority. Never persisted; NEEDS YOU is re-earned live.
-    @ObservationIgnored private var herdrPaneStatuses: [String: HerdrProbe.AgentStatus] = [:]
-    /// herdr mode: pane id → working directory from the last snapshot —
-    /// + TAB's same-directory inheritance (tmux asks live; herdr already
-    /// answered in the snapshot).
-    @ObservationIgnored private var herdrPaneCWDs: [String: String] = [:]
+    @ObservationIgnored private var herdrPaneStatuses: [String: [String: HerdrProbe.AgentStatus]] = [:]
     /// Last keychain check answer + when it landed. `.notMacOS` is
     /// structural and never re-asked on this connection; other verdicts
     /// refresh after `keychainVerdictTTL` while the symptom persists.
@@ -447,7 +439,10 @@ final class HostConnectionModel {
                     TmuxProbe.parseProbe(output)
                 }.value
             case .herdr:
-                let command = HerdrProbe.probeCommand(tailPaneIDs: herdrTailPaneIDs)
+                let command = HerdrProbe.probeCommand(
+                    sessionNames: herdrSessionNames,
+                    tailTargets: herdrTailTargets
+                )
                 let output = try await deadlined { try await connection.exec(command) }
                 execEnd = ContinuousClock.now
                 outputBytes = output.utf8.count
@@ -455,12 +450,9 @@ final class HostConnectionModel {
                 let herdrParsed = await Task.detached(priority: .userInitiated) {
                     HerdrProbe.parseProbe(output)
                 }.value
-                herdrTailPaneIDs = herdrParsed.tailPaneIDs
+                herdrSessionNames = herdrParsed.sessionNames
+                herdrTailTargets = herdrParsed.tailTargets
                 herdrPaneStatuses = herdrParsed.paneStatuses
-                herdrPaneCWDs = herdrParsed.paneCWDs
-                if herdrFocusedPaneID != herdrParsed.focusedPaneID {
-                    herdrFocusedPaneID = herdrParsed.focusedPaneID
-                }
                 parsed = TmuxProbe.ParsedProbe(
                     state: herdrParsed.state.tmuxState,
                     tails: herdrParsed.tails,
@@ -739,12 +731,21 @@ final class HostConnectionModel {
     private func evaluateHerdrAttention(sessions: [TmuxSession]) {
         var next: [String: PaneAgentState] = [:]
         for session in sessions {
-            let pane = session.activeWindow?.activePane
-            let state = HerdrProbe.paneAgentState(
-                pane.flatMap { herdrPaneStatuses[$0.tmuxID] })
+            let statuses = herdrPaneStatuses[session.name] ?? [:]
+            // The tile folds EVERY pane in the session — background tabs
+            // included: a blocked agent the session isn't fronting still
+            // needs you.
+            let state = HerdrProbe.sessionAgentState(statuses.values)
             if let state {
                 next[session.name] = state
             }
+            // Alert metadata speaks for the fronted pane only when its own
+            // status produced the session's verdict — a blocked background
+            // tab must not borrow the front pane's agent name.
+            let pane = session.activeWindow?.activePane
+            let frontState = HerdrProbe.paneAgentState(
+                pane.flatMap { statuses[$0.tmuxID] })
+            let front = frontState == state ? pane : nil
             let events = attentionTracker.update(
                 session: session.name,
                 state: state,
@@ -754,9 +755,9 @@ final class HostConnectionModel {
                 onAttentionAlert?(AttentionAlert(
                     host: host,
                     sessionName: session.name,
-                    agent: pane?.agent,
+                    agent: front?.agent,
                     event: event,
-                    paneTitle: pane?.title ?? "",
+                    paneTitle: front?.title ?? "",
                     dialogSummary: nil
                 ))
             }
@@ -877,9 +878,11 @@ final class HostConnectionModel {
         do {
             let connection = try await ensureConnection()
             if host.sessionBackend == .herdr {
-                return await createWorkspace(
-                    base: base, inDirectoryOf: sourceSession,
-                    startingIn: directory, running: script, typing: launch,
+                // Sessions have no start directory (herdr owns each
+                // session's world) and no tmux conf — those two riders
+                // apply to the tmux path only.
+                return await createHerdrSession(
+                    base: base, running: script, typing: launch,
                     over: connection
                 )
             }
@@ -904,42 +907,75 @@ final class HostConnectionModel {
         }
     }
 
-    /// The herdr mint: workspace create, then script/launch typed into the
-    /// root pane. Two execs because the pane id lives in the create's JSON
-    /// envelope, which no shell loop can extract (user-initiated, so the
-    /// round trip is free). tmux-conf has no analog here and is dropped by
-    /// the branch above. Same-directory inheritance reads the source
-    /// workspace's front-pane cwd from the last snapshot — herdr already
-    /// answered, no live query needed.
-    private func createWorkspace(
-        base: String, inDirectoryOf sourceSession: String?,
-        startingIn directory: String?, running script: String?,
-        typing launch: String?, over connection: SSHConnection
+    /// The herdr mint: a session is created by attaching to it, so the
+    /// mint IS the attach route — but the client needs a PTY, and setup
+    /// typing needs the fresh session's pane id. `spawnSessionCommand`
+    /// bridges: it brings the session's server up headlessly and prints
+    /// its snapshot, so create-and-type completes over the control
+    /// connection BEFORE the terminal window dials in — the script lands
+    /// first, the tmux mint's own ordering. If the spawn can't confirm a
+    /// pane (a future herdr may die before daemonizing), the route still
+    /// attaches — the PTY client creates the session — and a short poll
+    /// types the setup lines once a pane exists. A name already live on
+    /// the host attaches untouched: typing must only ever aim at a
+    /// session this mint brought into being.
+    private func createHerdrSession(
+        base: String, running script: String?, typing launch: String?,
+        over connection: SSHConnection
     ) async -> TerminalRoute.Mode? {
-        var cwd = directory
-        if let sourceSession,
-           case .sessions(let list) = tmux,
-           let source = list.first(where: { $0.name == sourceSession }),
-           let paneID = source.activeWindow?.activePane?.tmuxID,
-           let sourceCWD = herdrPaneCWDs[paneID] {
-            cwd = sourceCWD
+        let name = HerdrProbe.uniqueSessionName(
+            base: base, existing: tmux.sessions.map(\.name))
+        let lines = [script, launch].compactMap { $0 }
+        // Live existence check — the tile list can be a tick stale, and
+        // another device may have minted the same name seconds ago.
+        let listOutput = try? await deadlined {
+            try await connection.exec(HerdrProbe.sessionListCommand)
         }
-        let command = HerdrProbe.newWorkspaceCommand(
-            label: TmuxProbe.uniqueSessionName(
-                base: base, existing: tmux.sessions.map(\.name)),
-            cwd: cwd
-        )
-        guard let output = try? await deadlined { try await connection.exec(command) },
-              let created = HerdrProbe.parseNewWorkspace(output)
-        else { return nil }
-        if let typing = HerdrProbe.typeCommand(
-            paneID: created.rootPaneID,
-            lines: [script, launch].compactMap { $0 }
-        ) {
-            _ = try? await deadlined { try await connection.exec(typing) }
+        let existing = listOutput.map(HerdrProbe.parseSessionNames) ?? []
+        guard !existing.contains(name) else {
+            refresh()
+            return .herdrAttach(sessionName: name)
+        }
+        let spawn = try? await deadlined {
+            try await connection.exec(HerdrProbe.spawnSessionCommand(sessionName: name))
+        }
+        if !lines.isEmpty {
+            if let pane = spawn.flatMap(HerdrProbe.parseFocusedPane),
+               let typing = HerdrProbe.typeCommand(
+                sessionName: name, paneID: pane, lines: lines) {
+                _ = try? await deadlined { try await connection.exec(typing) }
+            } else {
+                schedulePendingHerdrTyping(session: name, lines: lines)
+            }
         }
         refresh()
-        return .herdrAttach(workspaceID: created.workspaceID, label: created.label)
+        return .herdrAttach(sessionName: name)
+    }
+
+    /// Setup lines waiting for a pane: the PTY attach is creating the
+    /// session, so poll its snapshot over the control connection and type
+    /// once. Bounded — a session that never comes up types nothing, and
+    /// the window's own failure is the visible story. The user can beat
+    /// this to the fresh prompt; the tmux path's stdin-reading-script
+    /// footgun already documents that shape.
+    private func schedulePendingHerdrTyping(session: String, lines: [String]) {
+        Task { [weak self] in
+            for attempt in 1...8 {
+                try? await Task.sleep(for: .milliseconds(attempt == 1 ? 1500 : 1200))
+                guard let self, self.phase == .connected, let connection = self.connection
+                else { return }
+                guard let output = try? await self.deadlined({
+                    try await connection.exec(
+                        HerdrProbe.snapshotCommand(sessionName: session))
+                }), let pane = HerdrProbe.parseFocusedPane(output)
+                else { continue }
+                if let typing = HerdrProbe.typeCommand(
+                    sessionName: session, paneID: pane, lines: lines) {
+                    _ = try? await self.deadlined { try await connection.exec(typing) }
+                }
+                return
+            }
+        }
     }
 
     /// Kill a tmux session on the host over the control connection, then
@@ -1044,13 +1080,14 @@ final class HostConnectionModel {
         case .tmux:
             command = TmuxProbe.killCommand(for: session)
         case .herdr:
-            // Close by the server-minted workspace id only — labels can
-            // duplicate, so there is no safe name fallback. A session the
-            // probe never saw an id for just no-ops and the next probe
-            // stays the truth.
+            // Stop the session's server (everything in it dies —
+            // kill-session's analog), then delete its state dir. herdr
+            // itself refuses deleting the default session; that tile just
+            // parks as stopped. Session names are herdr's own unique
+            // identity, so the name is the target.
             command = session.tmuxID.isEmpty
                 ? nil
-                : HerdrProbe.closeWorkspaceCommand(workspaceID: session.tmuxID)
+                : HerdrProbe.closeSessionCommand(sessionName: session.tmuxID)
         }
         if let command {
             _ = try? await deadlined { try await connection.exec(command) }

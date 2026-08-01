@@ -242,24 +242,34 @@ itself. Genuinely wrapped long paths and URLs still join.
 HERDR MODE — a second session backend beside tmux
 
 A host can now run herdr (herdr.dev) instead of tmux: Host Settings and
-manual Add grow a BACKEND bar (TMUX | HERDR). The deck monitors herdr
-workspaces as tiles — live miniatures, agent names, RUNNING, and the amber
-NEEDS YOU straight from herdr's own agent states (Pi included, for real) —
-and a tile press attaches the full herdr client with that workspace
-focused. Needs herdr 0.7.5+ on the host (brew install herdr).
+manual Add grow a BACKEND bar (TMUX | HERDR). The deck shows one tile per
+herdr SESSION — its workspaces are the tile's window lines — with live
+miniatures, agent names, RUNNING, and the amber NEEDS YOU straight from
+herdr's own agent states (Pi included, for real). A tile press attaches
+the full herdr client for that session; two sessions in two windows are
+truly independent, which is why tiles are sessions and not workspaces.
+Needs herdr 0.7.5+ on the host (brew install herdr).
 
-- Flip a host to HERDR in Host Settings: its tiles become workspaces
-  within a probe tick; flip back to TMUX and the sessions return.
-- Blocked agent (a permission dialog) on the host: the tile wears NEEDS
-  YOU; a working one shows its agent RUNNING.
-- Tile press: the herdr TUI opens with that workspace focused; the helper
-  strip still detects the agent; there is no TMUX button on herdr tabs.
-- A dead-tmux host with herdr installed offers USE HERDR on its tile —
-  one tap, and only ever by your hand.
-- + NEW SESSION creates a herdr workspace (setup script and agent launch
-  still type in); CLOSE closes exactly that workspace.
+- Flip a host to HERDR in Host Settings: its tiles become herdr sessions
+  within a probe tick; flip back to TMUX and the tmux sessions return.
+- The tile's spine lists the session's workspaces; switching workspaces
+  inside the TUI moves the tile's active line and the helper strip's
+  agent within a probe tick.
+- Blocked agent anywhere in the session — background workspace included —
+  wears NEEDS YOU; a working one shows RUNNING.
+- Attach two different sessions in two windows: each keeps its own focus
+  (workspaces inside ONE session mirror each other by design — that is
+  herdr, not a bug).
+- + NEW SESSION creates a herdr session; setup script and agent launch
+  type into its first pane, usually before the window finishes opening.
+  The name becomes a directory on the host, so it is reduced to safe
+  characters.
+- CLOSE stops the session and deletes its state; the default session
+  only stops (herdr refuses deleting it) and stays as a quiet tile that
+  restarts on press. A stopped session is a spine-less tile — press it
+  and it comes back.
 - Widget/Shortcut agent launches on herdr hosts refuse with a clear
-  message for now; attach and focus work.
+  message for now; attach works.
 
 FASTER TAPS — clicks reach tmux immediately
 

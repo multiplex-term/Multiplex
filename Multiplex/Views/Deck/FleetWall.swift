@@ -740,7 +740,9 @@ final class FleetWallViewController: UIViewController {
     }
 
     private func createSession(on host: Host, submission: NewSessionSubmission) {
-        let name = TmuxProbe.sanitizedSessionName(submission.name)
+        let name = host.sessionBackend == .herdr
+            ? HerdrProbe.sessionNameArgument(submission.name)
+            : TmuxProbe.sanitizedSessionName(submission.name)
         let model = configuration.hub.model(for: host)
         Task { [weak self] in
             guard let created = await model.createSession(
@@ -759,9 +761,17 @@ final class FleetWallViewController: UIViewController {
     }
 
     private func confirmDelete(session: TmuxSession, on host: Host) {
+        // herdr: stop + delete — except the default session, which herdr
+        // itself refuses to delete (it parks as a stopped tile instead).
+        // The copy carries both truths because the app deliberately
+        // doesn't know which session is the default.
+        let message = host.sessionBackend == .herdr
+            ? "Stops “\(session.name)” on \(host.name) and everything running in it, "
+                + "and deletes its saved state (herdr keeps its default session on disk, stopped)."
+            : "Kills “\(session.name)” on \(host.name) and everything running in it."
         let alert = UIAlertController(
             title: "Delete Session",
-            message: "Kills “\(session.name)” on \(host.name) and everything running in it.",
+            message: message,
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
@@ -3278,9 +3288,13 @@ final class NewSessionViewController: UIViewController,
             scriptSection = section
             contentStack.addArrangedSubview(section)
         }
-        let directory = makeDirectorySection()
-        directorySection = directory
-        contentStack.addArrangedSubview(directory)
+        // A herdr session has no start directory — herdr owns each
+        // session's world — so the picker would be a lie there.
+        if form.host.sessionBackend == .tmux {
+            let directory = makeDirectorySection()
+            directorySection = directory
+            contentStack.addArrangedSubview(directory)
+        }
 
         let dismissTap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         dismissTap.cancelsTouchesInView = false
@@ -3309,7 +3323,11 @@ final class NewSessionViewController: UIViewController,
     }
 
     private func makeIdentitySection() -> UIView {
-        configureTextField(nameField, placeholder: "main", accessibilityLabel: "Name")
+        configureTextField(
+            nameField,
+            placeholder: form.host.sessionBackend == .herdr ? "session" : "main",
+            accessibilityLabel: "Name"
+        )
         nameField.text = form.name
         nameField.returnKeyType = .next
         nameField.addTarget(self, action: #selector(nameChanged), for: .editingChanged)

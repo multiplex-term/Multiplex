@@ -539,21 +539,11 @@ final class TerminalWindowViewController: UIViewController,
         }
         guard let host = store.host(id: activeTab.hostID) else { return nil }
         let model = hub.model(for: host)
-        // A herdr tab shows the SESSION's focused pane, not its summoning
-        // workspace: herdr keeps one focus per session and the full client
-        // mirrors it, so switching workspaces inside the TUI must move the
-        // helper strip too. Fall back to the tab's workspace record only
-        // while no probe has named a focus yet.
-        if host.sessionBackend == .herdr, let focused = model.herdrFocusedPaneID {
-            for session in model.tmux.sessions {
-                for window in session.windows {
-                    if let pane = window.panes?.first(where: { $0.tmuxID == focused }) {
-                        return pane.agent
-                    }
-                }
-            }
-            return nil
-        }
+        // One expression serves both backends on purpose: a herdr tile IS
+        // a whole session, and the probe writes its live focus into the
+        // record (active window = focused workspace, active pane = the
+        // session's one focus every client mirrors) — so following
+        // `activeAgent` follows a workspace switch inside the TUI too.
         return model.tmux.sessions
             .first { $0.name == sessionName }?
             .activeAgent

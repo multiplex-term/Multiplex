@@ -10,13 +10,13 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         case create(sessionName: String, directory: String?)
         /// Plain login shell, no tmux.
         case shell
-        /// Attach the full herdr client with one workspace pre-focused —
-        /// the tile press on a herdr-backend host. `label` is the mapped
-        /// session name the tile shows (workspace labels can duplicate;
-        /// the id is the target, the label is the identity surfaces match
-        /// on). A real terminal like `.attach`: restores across launches,
-        /// resumes per `SessionResumePolicy`.
-        case herdrAttach(workspaceID: String, label: String)
+        /// Attach the full herdr client to one herdr session — the tile
+        /// press on a herdr-backend host. The session name is both target
+        /// and identity (herdr keeps them unique — they're directories),
+        /// and attach auto-creates/restarts, so a spine-less stopped tile
+        /// presses too. A real terminal like `.attach`: restores across
+        /// launches, resumes per `SessionResumePolicy`.
+        case herdrAttach(sessionName: String)
         /// The viewport — an inline browser tab, docked beside the sessions
         /// that produced its URL and moved with the same merge/split
         /// machinery. Not a terminal: no remote command, no tmux session, no
@@ -43,7 +43,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         static func attach(host: Host, session: TmuxSession) -> Mode {
             switch host.sessionBackend {
             case .tmux: .attach(sessionName: session.name)
-            case .herdr: .herdrAttach(workspaceID: session.tmuxID, label: session.name)
+            case .herdr: .herdrAttach(sessionName: session.name)
             }
         }
     }
@@ -62,8 +62,8 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
                 sessionName: name,
                 directory: directory
             )
-        case .herdrAttach(let workspaceID, _):
-            return HerdrProbe.attachCommand(workspaceID: workspaceID)
+        case .herdrAttach(let sessionName):
+            return HerdrProbe.attachCommand(sessionName: sessionName)
         case .shell, .viewport, .fileViewer:
             return nil
         }
@@ -87,11 +87,10 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
                 command += " -c \(directory.shellQuotedDirectory)"
             }
             return command
-        case .herdrAttach(let workspaceID, _):
-            // Two commands (focus, then attach — verified: `session attach`
-            // has no workspace flag), so a shell must carry them; execvp
-            // gets that shell as its argv.
-            return "sh -c \(HerdrProbe.attachCommand(workspaceID: workspaceID).shellQuoted)"
+        case .herdrAttach(let sessionName):
+            // The attach line needs a shell (PATH export before the exec);
+            // execvp gets that shell as its argv.
+            return "sh -c \(HerdrProbe.attachCommand(sessionName: sessionName).shellQuoted)"
         case .shell, .viewport, .fileViewer:
             return nil
         }
@@ -100,7 +99,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
     var displayName: String {
         switch mode {
         case .attach(let name), .create(let name, _): name
-        case .herdrAttach(_, let label): label
+        case .herdrAttach(let sessionName): sessionName
         case .shell: "shell"
         case .viewport(let urlString): Self.viewportLabel(urlString)
         case .fileViewer(let path): Self.fileViewerLabel(path)
@@ -108,14 +107,14 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
     }
 
     /// The multiplexer session this tab is bound to (a herdr tab answers
-    /// its mapped workspace name — the probe's session records use it, so
+    /// its herdr session name — the probe's session records use it, so
     /// agent detection and focus dedupe match the same way); nil for a
     /// plain shell (which has no probe entry, so no agent detection) and
     /// for the viewport and file viewer.
     var sessionName: String? {
         switch mode {
         case .attach(let name), .create(let name, _): name
-        case .herdrAttach(_, let label): label
+        case .herdrAttach(let sessionName): sessionName
         case .shell, .viewport, .fileViewer: nil
         }
     }

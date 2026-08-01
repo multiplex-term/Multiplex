@@ -10,10 +10,11 @@
 #   ./harness.sh turn    fake agent turn in agent:cc (busy title → idle);
 #                        optional seconds arg, default 8
 #   ./harness.sh ask     fake permission dialog in agent:cc (needs-you state)
-#   ./harness.sh herdr   start a real herdr server (brew install herdr) and
-#                        seed demo workspaces with deterministic agent
-#                        states via `pane report-agent` — the herdr-mode
-#                        analog of `demo`; point the app at
+#   ./harness.sh herdr   seed real herdr SESSIONS (brew install herdr) —
+#                        one deck tile each — with deterministic agent
+#                        states via `pane report-agent`: mpx-demo RUNNING,
+#                        mpx-blocked NEEDS YOU, mpx-done turn-ended; the
+#                        herdr-mode analog of `demo`; point the app at
 #                        state/seed-herdr.json
 #   ./harness.sh bind    run the real `mpx bind` against this sshd with a
 #                        pinned token/PIN, so the app's bind flow can be
@@ -168,24 +169,32 @@ EOF
     echo "agent:cc parked on a permission dialog (NEEDS YOU); run '$0 turn' to clear"
 }
 
-# Seed the herdr-mode analog of `demo`: a real herdr server (the same one
-# the app's probe reaches over SSH — the CLI resolves the default socket,
-# so a scratch socket would be invisible to the app) plus demo workspaces
-# whose agent states are reported through `pane report-agent`, herdr's own
-# integration door — deterministic, unlike OSC-title fakes. Everything the
-# harness creates is recorded in state/herdr-workspaces so `stop` retires
-# exactly those and never the developer's own workspaces.
+# Seed the herdr-mode analog of `demo`: real herdr SESSIONS (the deck's
+# tiles — one tile per session, workspaces as its window lines) whose
+# agent states are reported through `pane report-agent`, herdr's own
+# integration door — deterministic, unlike OSC-title fakes. Everything
+# lives in harness-owned sessions recorded in state/herdr-sessions so
+# `stop` retires exactly those (stop + delete) and never the developer's
+# own sessions — default and friends are never touched, though their
+# tiles will appear on the wall too (that IS the product behavior).
 #
-# Facts this leans on (herdr 0.7.5 / protocol 17, verified 2026-08-01):
-# reportable states are idle|working|blocked|unknown; `done` is derived
-# server-side from a working → idle report; kinds canonicalize
-# (claude-code → claude).
+# Facts this leans on (herdr 0.7.5 / protocol 17, verified 2026-08-02):
+# `session attach <name>` auto-creates and auto-starts; without a TTY the
+# client dies AFTER the session server daemonizes (the same trick the
+# app's mint uses); every socket verb scopes with the global `--session`
+# flag; reportable states are idle|working|blocked|unknown; `done` is
+# derived server-side from a working → idle report; kinds canonicalize
+# (claude-code → claude); a fresh session labels its first workspace
+# after the attach cwd's directory name.
 herdr_demo() {
     command -v herdr >/dev/null 2>&1 || {
         echo "herdr not installed — brew install herdr" >&2; exit 1
     }
     mkdir -p "$STATE"
 
+    # The default session's server isn't required for the demo sessions,
+    # but a live default tile makes the wall honest — start it only if
+    # nothing runs, and remember the pid so stop() only stops our own.
     if ! herdr status --json 2>/dev/null | grep -q '"running":true'; then
         nohup herdr server > "$STATE/herdr-server.log" 2>&1 &
         echo $! > "$STATE/herdr-server.pid"
@@ -200,68 +209,100 @@ herdr_demo() {
         echo "herdr server started (pid $(cat "$STATE/herdr-server.pid"))"
     fi
 
-    # Re-runs recreate the demo topology from scratch.
-    if [ -f "$STATE/herdr-workspaces" ]; then
-        while IFS= read -r ws; do
-            herdr workspace close "$ws" >/dev/null 2>&1 || true
-        done < "$STATE/herdr-workspaces"
-        : > "$STATE/herdr-workspaces"
-    fi
-
-    # workspace create prints a JSON envelope; keep the ids for cleanup and
-    # the root pane ids for the agent reports.
-    python3 - "$STATE" <<'PY'
-import json, pathlib, subprocess, sys
-state = pathlib.Path(sys.argv[1])
-
-def create(label, cwd):
-    out = subprocess.run(
-        ["herdr", "workspace", "create", "--cwd", cwd, "--label", label],
-        capture_output=True, text=True, check=True).stdout
-    result = json.loads(out)["result"]
-    return result["workspace"]["workspace_id"], result["root_pane"]["pane_id"]
-
-def report(pane, agent, status, extra=None):
-    subprocess.run(
-        ["herdr", "pane", "report-agent", pane,
-         "--source", "multiplex-harness", "--agent", agent, "--state", status]
-        + (extra or []),
-        check=True)
-
-ids = []
-web_ws, web_pane = create("web", "/tmp")
-ids.append(web_ws)
-report(web_pane, "claude", "working")
-
-api_ws, api_pane = create("api", "/tmp")
-ids.append(api_ws)
-report(api_pane, "codex", "blocked",
-       ["--message", "Allow command: npm run deploy?"])
-
-scratch_ws, _ = create("scratch", "/tmp")
-ids.append(scratch_ws)  # no agent — a plain shell workspace
-
-# pi rides working -> idle so the server derives `done` (turn ended).
-pi_ws, pi_pane = create("pi-done", "/tmp")
-ids.append(pi_ws)
-report(pi_pane, "pi", "working")
-report(pi_pane, "pi", "idle")
-
-(state / "herdr-workspaces").write_text("\n".join(ids) + "\n")
-print("herdr demo workspaces:", ", ".join(ids))
-PY
-    herdr workspace list
-    echo "point the app at state/seed-herdr.json (run '$0 start' if absent)"
-}
-
-stop() {
-    # Retire only the workspaces this harness created; stop the server only
-    # if this harness started it. A developer's own herdr stays untouched.
+    # Re-runs recreate the demo topology from scratch (legacy runs parked
+    # workspaces in the default session — retire those too).
     if [ -f "$STATE/herdr-workspaces" ]; then
         while IFS= read -r ws; do
             herdr workspace close "$ws" >/dev/null 2>&1 || true
         done < "$STATE/herdr-workspaces"
         rm -f "$STATE/herdr-workspaces"
+    fi
+    if [ -f "$STATE/herdr-sessions" ]; then
+        while IFS= read -r sess; do
+            herdr session stop "$sess" --json >/dev/null 2>&1 || true
+            herdr session delete "$sess" --json >/dev/null 2>&1 || true
+        done < "$STATE/herdr-sessions"
+        : > "$STATE/herdr-sessions"
+    fi
+
+    # Three tiles, three attention states: mpx-demo RUNNING (claude
+    # working + extra workspaces on the spine), mpx-blocked NEEDS YOU
+    # (codex blocked), mpx-done idle after a derived turn-end (pi
+    # working → idle). Ids inside a session are deterministic — a fresh
+    # session's first pane is always w1:p1.
+    python3 - "$STATE" <<'PY'
+import json, pathlib, subprocess, sys, time
+state = pathlib.Path(sys.argv[1])
+
+def herdr(session, *args, check=True, capture=False):
+    return subprocess.run(
+        ["herdr", "--session", session, *args],
+        capture_output=capture, text=True, check=check)
+
+def spawn(session):
+    # No TTY: the client dies after the session server daemonizes.
+    subprocess.run(
+        ["herdr", "session", "attach", session],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, check=False)
+    for _ in range(20):
+        probe = herdr(session, "api", "snapshot", check=False, capture=True)
+        if probe.returncode == 0:
+            return
+        time.sleep(0.3)
+    sys.exit(f"session {session} never answered its socket")
+
+def create(session, label, cwd):
+    out = herdr(session, "workspace", "create",
+                "--cwd", cwd, "--label", label, capture=True).stdout
+    result = json.loads(out)["result"]
+    return result["root_pane"]["pane_id"]
+
+def report(session, pane, agent, status, extra=None):
+    herdr(session, "pane", "report-agent", pane,
+          "--source", "multiplex-harness", "--agent", agent,
+          "--state", status, *(extra or []))
+
+sessions = ["mpx-demo", "mpx-blocked", "mpx-done"]
+# Record BEFORE creating: a failure mid-seed must still be retirable.
+(state / "herdr-sessions").write_text("\n".join(sessions) + "\n")
+for session in sessions:
+    spawn(session)
+
+report("mpx-demo", "w1:p1", "claude", "working")
+create("mpx-demo", "web", "/tmp")
+create("mpx-demo", "scratch", "/tmp")
+
+report("mpx-blocked", "w1:p1", "codex", "blocked",
+       ["--message", "Allow command: npm run deploy?"])
+
+# pi rides working -> idle so the server derives `done` (turn ended).
+report("mpx-done", "w1:p1", "pi", "working")
+report("mpx-done", "w1:p1", "pi", "idle")
+
+print("herdr demo sessions:", ", ".join(sessions))
+PY
+    herdr session list
+    echo "point the app at state/seed-herdr.json (run '$0 start' if absent)"
+}
+
+stop() {
+    # Retire only the sessions/workspaces this harness created; stop the
+    # server only if this harness started it. A developer's own herdr
+    # stays untouched. (herdr-workspaces is the legacy corral — old runs
+    # parked demo workspaces in the default session.)
+    if [ -f "$STATE/herdr-workspaces" ]; then
+        while IFS= read -r ws; do
+            herdr workspace close "$ws" >/dev/null 2>&1 || true
+        done < "$STATE/herdr-workspaces"
+        rm -f "$STATE/herdr-workspaces"
+    fi
+    if [ -f "$STATE/herdr-sessions" ]; then
+        while IFS= read -r sess; do
+            herdr session stop "$sess" --json >/dev/null 2>&1 || true
+            herdr session delete "$sess" --json >/dev/null 2>&1 || true
+        done < "$STATE/herdr-sessions"
+        rm -f "$STATE/herdr-sessions"
     fi
     if [ -f "$STATE/herdr-server.pid" ]; then
         herdr server stop >/dev/null 2>&1 || true
