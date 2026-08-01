@@ -21,6 +21,7 @@ final class ExternalActionUIKitCoordinator: NSObject,
     private weak var ownedPresentation: UIViewController?
     private var pendingPrompt: AgentPromptRequest?
     private var pendingFailure: ExternalActionFailure?
+    private var pendingConfirmation: ExternalActionConfirmation?
     private var appLocked = false
     var presentationDidEnd: (() -> Void)?
 
@@ -53,7 +54,8 @@ final class ExternalActionUIKitCoordinator: NSObject,
             workspace: workspace,
             open: { [terminalOpener] in terminalOpener($0) },
             presentAgentPrompt: { [weak self] in self?.receivePrompt($0) },
-            presentFailure: { [weak self] in self?.receiveFailure($0) }
+            presentFailure: { [weak self] in self?.receiveFailure($0) },
+            presentConfirmation: { [weak self] in self?.receiveConfirmation($0) }
         ))
     }
 
@@ -64,6 +66,7 @@ final class ExternalActionUIKitCoordinator: NSObject,
         }
         pendingPrompt = nil
         pendingFailure = nil
+        pendingConfirmation = nil
         if let ownedPresentation, ownedPresentation.presentingViewController != nil {
             ownedPresentation.dismiss(animated: false)
         }
@@ -78,6 +81,15 @@ final class ExternalActionUIKitCoordinator: NSObject,
 
     func receiveFailure(_ failure: ExternalActionFailure) {
         pendingFailure = failure
+        revealClassicDeck()
+        presentNextIfPossible()
+    }
+
+    /// An external action whose URL did not prove it came from this
+    /// install's widget. Nothing has been dialled yet — approval resubmits
+    /// the same action as trusted.
+    func receiveConfirmation(_ confirmation: ExternalActionConfirmation) {
+        pendingConfirmation = confirmation
         revealClassicDeck()
         presentNextIfPossible()
     }
@@ -120,6 +132,26 @@ final class ExternalActionUIKitCoordinator: NSObject,
         return alert
     }
 
+    /// Kept separate from `present(_:)` for the same reason as the failure
+    /// alert: the contract stays testable where UIKit refuses to present.
+    static func makeConfirmationAlert(
+        _ confirmation: ExternalActionConfirmation,
+        answered: @escaping (_ approved: Bool) -> Void
+    ) -> UIAlertController {
+        let alert = UIAlertController(
+            title: confirmation.title,
+            message: confirmation.message,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
+            answered(false)
+        })
+        alert.addAction(UIAlertAction(title: "Run", style: .default) { _ in
+            answered(true)
+        })
+        return alert
+    }
+
     private func presentNextIfPossible() {
         guard !appLocked,
               ownedPresentation == nil,
@@ -150,6 +182,21 @@ final class ExternalActionUIKitCoordinator: NSObject,
             ownedPresentation = navigation
             presenter.present(navigation, animated: true)
             navigation.presentationController?.delegate = self
+            return
+        }
+
+        if let confirmation = pendingConfirmation {
+            pendingConfirmation = nil
+            let alert = Self.makeConfirmationAlert(confirmation) { [weak self] approved in
+                self?.ownedPresentation = nil
+                if approved {
+                    self?.router.submit(confirmation.action, trusted: true)
+                }
+                self?.presentNextIfPossible()
+                self?.presentationDidEnd?()
+            }
+            ownedPresentation = alert
+            presenter.present(alert, animated: true)
             return
         }
 

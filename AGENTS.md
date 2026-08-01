@@ -130,6 +130,9 @@ vars to drive the real SSH→PTY→tmux→SwiftTerm path headlessly:
   run; idb HID taps died with Xcode 27's SimulatorKit removal). E.g.
   `…open?host=devbox&action=agent&agent=pi&model=x` proves the launch line
   types `pi --model 'x'` — capture-pane the newly minted session host-side.
+  The hook appends this install's widget-link token unless the URL carries a
+  `t=`, so it drives the *trusted* path; a deliberately wrong `&t=` raises the
+  confirmation instead (verified 2026-08-01).
 - `MULTIPLEX_AUTO_BIND=<multiplex://b/…>` / `MULTIPLEX_BIND_AUTOPIN=<6
   digits>` — drive the Bind Host flow headlessly (no camera, no taps). The
   first submits a scanned/pasted payload through the real parse → confirm →
@@ -411,7 +414,9 @@ UIKit scene runtime (`MultiplexSceneDelegate` + `UIKitSceneRootViewController`;
                      launchCommand(model:initialPrompt:). Failures alert on
                      the deck; the widget's ASK mode presents
                      AgentPromptSheet, which resubmits. A scene without a
-                     mounted deck raises the one deck scene to drain.
+                     mounted deck raises the one deck scene to drain. URLs
+                     are trusted only with the install's widget token, and
+                     the app lock holds the whole queue (both below).
   SharedStateStore   secret-free App Group projection (widget-state.json,
                      group.app.multiplexterm.multiplex) for the widget
                      process: hosts + last-known sessions/miniature tails +
@@ -481,7 +486,13 @@ views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5), patched
     to declare the `NIO` product it imports (Xcode 27's module resolution
     rejects the undeclared import). Also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in ten behavior groups
+    Plus three `Multiplex patch` fixes for peer input that crashed or hung the
+    client (host keys are `.acceptAnything()`, so any server can send it): the
+    AES-GCM packet length adds the MAC size with `addingReportingOverflow`, an
+    ECDSA `r`/`s` wider than the curve's point size is rejected instead of
+    slicing negatively, and a channel confirmed with `maximumPacketSize == 0`
+    is refused (it spun the event loop on zero-length writes).
+  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in eleven behavior groups
     (marked `Multiplex patch`; the obscured-tab display guards share the marker
     on their owning state):
     `keyboardType` is settable (upstream is get-only), and Multiplex keeps it
@@ -559,8 +570,21 @@ views.
     `Terminal.visibleLinkMatches` (probe-stride scan, wrapped rows
     reassembled, unit-tested in the fork) with view-space rect mapping in
     `TerminalView.visibleLinkRegions`, the inverse of `calculateTapHit`'s
-    point→grid math — which is what visionOS gaze hover stands on. Sample
-    apps trimmed.
+    point→grid math — which is what visionOS gaze hover stands on. And the
+    eleventh group is **hostile-output hardening**: a pane renders bytes any
+    remote process can print, so escape sequences that crashed or grew the app
+    are fixed at the parser — numeric parameters (CSI/OSC/Sixel/Kitty)
+    accumulate non-trapping and bounded (upstream computed `existing * 10 +
+    digit` and only *then* tested it), `CSI 1 J` at the bottom-right cell and
+    a negative OSC 104 index no longer index out of bounds, Sixel bounds its
+    bitmap and range-checks every plot, and every persistent buffer has a
+    ceiling (OSC/APC payload, CSI parameter count, title stacks, Sixel input,
+    Kitty chunks) so an unterminated sequence can't grow for the session's
+    life. Image budgets are mobile-scale, not desktop: 64 MiB per Kitty image
+    (upstream 400 MiB) / 128 MiB cache, zlib aborts mid-inflate at that limit,
+    and inline images decode through an ImageIO downsample (encoded size
+    bounds no bitmap). `HostileInputTests` feeds each sequence through a real
+    `Terminal`. Sample apps trimmed.
   - When bumping either, re-apply the patches and diff before trusting it.
 - **Citadel pinned to exactly 0.12.0**: 0.12.1 moved its swift-nio-ssh dep to an
   unaudited personal fork. Don't bump without review — this is the transport.
@@ -1267,6 +1291,38 @@ views.
   authorized_keys untouched, still connecting after relaunch; the dev
   seed's `passphrase` key remains for pure connect proofs. Free host
   plumbing, not an agent-helper surface.
+- **A `multiplex://` URL is confirmed unless it proves it came from this
+  install's own widget** (`SharedStateStore.linkToken`, `WidgetLink`'s `t=`,
+  `ExternalActionTrust`, `ExternalActionConfirmation`): the scheme is public
+  and a URL carries no origin, so anything that can open one could have an
+  agent typed at on a configured host — and widget taps arrive on the same
+  `onOpenURL` seam, indistinguishable without a marker. The token is a
+  per-install random value in the App Group, minted in `AppRuntime` and
+  **never rotated** (rendered widget timelines carry it). An untrusted link
+  still runs, but only after an alert naming the resolved host, agent, and the
+  prompt verbatim — hiding the payload would make the confirmation worthless.
+  Host resolution and the `isEnabled` check run first, so it names the machine
+  and never appears for a link that couldn't have run. Not confirmed: App
+  Intents, the prompt sheet's resubmit, and ASK-mode links
+  (`needsOriginConfirmation` — that sheet discards the URL's prompt).
+- **The app lock holds the external-action queue**
+  (`ExternalActionRouter.isHeldByAppLock`, wired to `AppLockStore` in
+  `AppRuntime`): the veil covers every scene, but the router is process-wide
+  and its work — connect, mint a session, run the setup script, type a prompt
+  — ran beneath it. Actions wait rather than fail, and drain on unlock.
+- **The pane's clipboard is write-only to the remote** (`SwiftTermView`):
+  OSC 52 writes stay (`mpx bind --copy`, tmux `set-clipboard`), capped at
+  256 KB; an OSC 52 *query* is answered with nothing. That query is pane
+  output, so any remote process that can print could otherwise have the device
+  pasteboard back over the wire with nothing on screen. Paste stays a user
+  action — key bar, selection menu, and system paste control are unaffected.
+- **Every remote-fed reader is bounded**, the terminal-parser rule applied
+  where a *server* answers: `exec` caps buffered output (16 MiB, enforced
+  incrementally by Citadel), SFTP listings cap entries, remote images decode
+  through an ImageIO downsample, Markdown carries a quote-depth and table
+  budget, bind's CBOR carries a nesting depth (a 64 KiB frame bounds bytes,
+  not depth), and mosh's protobuf skips unknown fields iteratively and
+  range-checks a length varint before it becomes an `Int`.
 - **A disabled host is one the app never dials on its own** (`Host.isEnabled`,
   deck rail menu / DISABLED tile / Host Settings → Monitoring): the wall skips
   it in `runFeed`, never asks `ConnectionHub` for its model (asking is what

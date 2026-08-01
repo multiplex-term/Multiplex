@@ -668,11 +668,9 @@ public class EscapeSequenceParser {
             
             // shortcut for CSI params
             if currentState == .csiParam && (code > 0x2f && code < 0x3a) {
-                let newV = pars [pars.count - 1] * 10 + Int(code) - 48
-                
-                // Prevent attempts at overflowing - crash 
-                let willOverflow =  newV > ((Int.max/10)-10)
-                pars [pars.count - 1] = willOverflow ? 0 : newV
+                // Multiplex patch: the overflow guard runs BEFORE the
+                // arithmetic, not after it.
+                pars [pars.count - 1] = EscapeSequenceParser.appendingDecimalDigit (pars [pars.count - 1], code) ?? 0
                 i += 1
                 continue
             }
@@ -742,14 +740,16 @@ public class EscapeSequenceParser {
                 dispatchCsi(code: code, pars: pars, collect: collect)
             case .param:
                 if code == 0x3b || code == 0x3a {
-                    parsTxt.append(code)
-                    pars.append (0)
+                    // Multiplex patch: `CSI ;;;;…` used to grow these arrays
+                    // for as long as the remote kept sending separators.
+                    if pars.count < EscapeSequenceParser.maxParameters {
+                        parsTxt.append(code)
+                        pars.append (0)
+                    }
                 } else {
-                    let newV = pars [pars.count - 1] * 10 + Int(code) - 48
-
-                    // Prevent attempts at overflowing - crash
-                    let willOverflow =  newV > ((Int.max/10)-10)
-                    pars [pars.count - 1] = willOverflow ? 0 : newV
+                    // Multiplex patch: same guard-before-arithmetic fix as the
+                    // CSI fast path above.
+                    pars [pars.count - 1] = EscapeSequenceParser.appendingDecimalDigit (pars [pars.count - 1], code) ?? 0
                 }
             case .escDispatch:
                 dispatchEsc(collect: collect, code: code)
@@ -810,9 +810,17 @@ public class EscapeSequenceParser {
                     if c == ControlCodes.BEL || c == ControlCodes.CAN || c == ControlCodes.ESC {
                         break
                     } else if c >= 0x20 {
+                        // Multiplex patch: an OSC/APC sequence the remote
+                        // never terminates used to grow these buffers without
+                        // limit, and they survive between feeds. Past the cap
+                        // the rest of the sequence is dropped; every real
+                        // payload (clipboard, inline image, kitty chunk) is
+                        // far below it.
                         if currentState == .apcString {
-                            apc.append (c)
-                        } else {
+                            if apc.count < EscapeSequenceParser.maxApcPayload {
+                                apc.append (c)
+                            }
+                        } else if osc.count < EscapeSequenceParser.maxOscPayload {
                             osc.append (c)
                         }
                     }
@@ -885,14 +893,38 @@ public class EscapeSequenceParser {
             if x < 48 || x > 57 {
                 return result
             }
-            
-            let newV = result * 10 + Int ((x - 48))
-            let willOverflow =  newV > ((Int.max/10)-10)
-            if willOverflow {
+
+            // Multiplex patch: the magnitude test used to run on an already
+            // computed product, so an overlong remote number (an OSC command
+            // prefix here) trapped in checked arithmetic before it.
+            guard let newV = EscapeSequenceParser.appendingDecimalDigit (result, x) else {
                 return 0
             }
             result = newV
         }
         return result
+    }
+
+    /// Multiplex patch: ceilings for the parser's persistent buffers. They
+    /// are held across `parse` calls, so an unterminated sequence is a memory
+    /// leak the remote controls.
+    static let maxOscPayload = 8 << 20
+    static let maxApcPayload = 1 << 20
+    static let maxParameters = 256
+
+    /// Multiplex patch: append one ASCII decimal digit to an accumulator,
+    /// answering nil instead of trapping when the value would overflow (or
+    /// pass the parser's own magnitude ceiling). Remote output controls every
+    /// one of these fields, so the arithmetic itself has to be non-trapping —
+    /// checking the result after computing it is what crashed the app.
+    @inline(__always)
+    static func appendingDecimalDigit (_ existing: Int, _ code: UInt8) -> Int?
+    {
+        let digit = Int (code) - 48
+        let (scaled, scaleOverflow) = existing.multipliedReportingOverflow (by: 10)
+        guard !scaleOverflow else { return nil }
+        let (sum, addOverflow) = scaled.addingReportingOverflow (digit)
+        guard !addOverflow, sum <= ((Int.max/10)-10) else { return nil }
+        return sum
     }
 }

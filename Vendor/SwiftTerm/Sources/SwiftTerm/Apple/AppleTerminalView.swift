@@ -2393,12 +2393,41 @@ extension TerminalView {
    
     public func createImage (source: Terminal, data: Data, width widthRequest: ImageSizeRequest, height heightRequest: ImageSizeRequest, preserveAspectRatio: Bool)
     {
-        guard let img = TTImage(data: data) else {
+        // Multiplex patch: these bytes are remote terminal output (OSC 1337
+        // `File=`), and encoded size says nothing about decoded size — a few
+        // hundred kilobytes of valid PNG can decode to gigabytes of bitmap.
+        // Decode through a bounded downsample; the image is drawn into text
+        // cells either way.
+        guard let img = TerminalView.boundedImage (from: data) else {
             return
         }
         insertImage (img, width: widthRequest, height: heightRequest, preserveAspectRatio: preserveAspectRatio)
     }
     
+    /// Multiplex patch: the longest edge an inline image decodes to.
+    static let maxInlineImagePixelEdge = 4096
+
+    /// Multiplex patch: ImageIO decode with a pixel ceiling — see
+    /// `createImage(source:data:...)`.
+    static func boundedImage (from data: Data) -> TTImage? {
+        guard let source = CGImageSourceCreateWithData (data as CFData, nil),
+              CGImageSourceGetCount (source) > 0 else {
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxInlineImagePixelEdge,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex (
+            source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return TTImage (
+            cgImage: cgImage,
+            size: CGSize (width: cgImage.width, height: cgImage.height))
+    }
+
     // Inserts the specified image at the current buffer position (x, y) using the specified size requests
     // and aspect ratio request.   The insertion is done by adding slices of the image, one per line
     // to the buffer.

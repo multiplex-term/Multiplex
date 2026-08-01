@@ -146,6 +146,10 @@ runcmd:
   - ufw allow out 53                    # DNS
   - ufw allow out 123/udp               # NTP
   - ufw allow out 67:68/udp             # DHCP lease renewal
+  # The review account is a real shell: keep the metadata server (and the
+  # service-account token it hands out) out of reach. Ordered above the web
+  # allowances, below the DNS one — GCP's resolver is this same address.
+  - ufw deny out proto tcp to 169.254.169.254
   - ufw allow out 80/tcp                # apt / unattended-upgrades
   - ufw allow out 443/tcp
   - ufw --force enable

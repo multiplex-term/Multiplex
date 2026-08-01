@@ -1,3 +1,24 @@
+DEEP LINKS ASK FIRST — a widget tap still doesn't
+
+Any app or web page can open a multiplex:// link, so one that didn't come
+from your own widget now raises a confirmation naming the host, the agent,
+and the prompt it wants to run. Widget taps and Shortcuts are unchanged.
+
+- Tap a Host widget's SHELL/AGENT key: opens as before, no alert.
+- Paste multiplex://open?host=<your host>&action=agent&agent=claude&prompt=hi
+  into Safari and open it: the alert appears; Cancel runs nothing.
+- With App lock on, hand a widget tap to a locked app: nothing happens until
+  you authenticate, then it runs.
+
+PASTE STAYS YOURS — the remote can't read your clipboard
+
+A remote program can still put text on your clipboard (tmux copy, mpx bind
+--copy); asking for its contents now gets no answer.
+
+- tmux copy-mode yank with set-clipboard on: the text still lands on the
+  device clipboard.
+- Paste from the key bar, the selection menu, or Cmd-V: unchanged.
+
 CTRL QUICK COMBOS — press CTRL, get C / B
 
 Holding the rail's CTRL latch (or the visionOS cluster's) raises a C / B

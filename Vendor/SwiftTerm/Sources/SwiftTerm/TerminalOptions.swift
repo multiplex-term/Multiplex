@@ -88,7 +88,7 @@ public struct TerminalOptions {
                                                        scrollback: 500,
                                                        tabStopWidth: 8,
                                                        enableSixelReported: true,
-                                                       kittyImageCacheLimitBytes: 320 * 1024 * 1024,
+                                                       kittyImageCacheLimitBytes: 64 * 1024 * 1024,  // Multiplex patch: mobile-scale default (upstream 320 MiB)
                                                        ansi256PaletteStrategy: .base16Lab,
                                                        regionalIndicatorWidth: .wide)
 

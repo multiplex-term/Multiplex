@@ -1,5 +1,6 @@
 import Citadel
 import Foundation
+import ImageIO
 import Observation
 import UIKit
 
@@ -23,6 +24,29 @@ final class FileViewerController: AuxiliaryPaneController {
     /// that highlighting stays interactive.
     static let textByteLimit = 1_500_000
     static let imageByteLimit = 12_000_000
+    /// The longest edge the viewer decodes to. Encoded bytes bound nothing
+    /// about a bitmap's size, and the screen this renders on is smaller than
+    /// this in every dimension.
+    static let imageMaxPixelEdge = 4096
+
+    /// Decode through ImageIO with a pixel ceiling, so a decompression bomb
+    /// from the host costs a downsample instead of the app's memory.
+    /// Falls back to nothing (i.e. "binary") when the bytes aren't an image.
+    static func decodeImage(_ data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0
+        else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: imageMaxPixelEdge,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(
+            source, 0, options as CFDictionary
+        ) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
 
     let tabID: UUID
     private let host: Host
@@ -529,8 +553,12 @@ final class FileViewerController: AuxiliaryPaneController {
                 try await $0.readFile(atPath: path, limit: Self.imageByteLimit)
             }
             // Undecodable "image" bytes are binary content by any honest
-            // reading — same verdict as the NUL sniff below.
-            if let image = UIImage(data: data) {
+            // reading — same verdict as the NUL sniff below. Decoding goes
+            // through a bounded downsample: the byte limit above says nothing
+            // about pixels, and a few hundred kilobytes of valid PNG can
+            // decode into gigabytes of bitmap (the viewer only ever shows it
+            // at screen size anyway).
+            if let image = Self.decodeImage(data) {
                 document.image = image
             } else {
                 document.kind = .binary

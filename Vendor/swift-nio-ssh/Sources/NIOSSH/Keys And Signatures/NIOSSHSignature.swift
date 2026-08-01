@@ -335,11 +335,20 @@ private struct ECDSASignatureHelper {
         UInt64
     ) = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
-    private init(r: ByteBuffer, s: ByteBuffer, pointSize: Int) {
+    private init(r: ByteBuffer, s: ByteBuffer, pointSize: Int) throws {
         precondition(MemoryLayout<ECDSASignatureHelper>.size >= pointSize, "Invalid width for ECDSA signature helper.")
 
         let rByteView = r.mpIntView
         let sByteView = s.mpIntView
+
+        // Multiplex patch: r and s are peer-supplied strings. Wider than the
+        // curve's point size, the offsets below go negative and the slice
+        // traps — a server (or anything in front of one) could crash the
+        // client during key exchange. An oversized component is simply not a
+        // signature for this curve.
+        guard rByteView.count <= pointSize, sByteView.count <= pointSize else {
+            throw NIOSSHError.invalidExchangeHashSignature
+        }
 
         let rByteStartingOffset = pointSize - rByteView.count
         let sByteStartingOffset = pointSize - sByteView.count
@@ -357,7 +366,7 @@ private struct ECDSASignatureHelper {
     }
 
     static func toECDSASignature<Signature: ECDSASignatureProtocol>(r: ByteBuffer, s: ByteBuffer) throws -> Signature {
-        let helper = ECDSASignatureHelper(r: r, s: s, pointSize: Signature.pointSize)
+        let helper = try ECDSASignatureHelper(r: r, s: s, pointSize: Signature.pointSize)
         return try withUnsafeBytes(of: helper.storage) { storagePtr in
             try Signature(rawRepresentation: UnsafeRawBufferPointer(rebasing: storagePtr.prefix(Signature.pointSize * 2)))
         }

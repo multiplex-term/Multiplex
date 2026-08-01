@@ -162,7 +162,7 @@ cat > /etc/cron.d/review-reseed <<'CRON'
 CRON
 
 # Egress lockdown (cloud-init runcmd equivalent; ufw allows are idempotent).
-# The metadata server rides the 80/tcp allowance; mosh replies ride conntrack.
+# mosh replies ride conntrack.
 ufw default deny incoming
 ufw default deny outgoing
 ufw allow in 22/tcp
@@ -170,6 +170,12 @@ ufw allow in 60000:60010/udp
 ufw allow out 53
 ufw allow out 123/udp
 ufw allow out 67:68/udp
+# The review account is a real shell, so the metadata server must not be
+# reachable from it: 169.254.169.254:80 would hand out this VM's
+# service-account token to anyone holding the review password. Rules are
+# ordered, so this deny sits ABOVE the web allowances and below the DNS one
+# (GCP's resolver IS the metadata address — port 53 has to keep working).
+ufw deny out proto tcp to 169.254.169.254
 ufw allow out 80/tcp
 ufw allow out 443/tcp
 ufw --force enable
