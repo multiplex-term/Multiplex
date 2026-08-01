@@ -297,8 +297,8 @@ final class TerminalSessionController {
     #endif
 
     /// Scene became active again: re-assert focus only if this terminal is
-    /// (or nothing is) the app-wide owner — every window's scene activates
-    /// at once on foreground, and they must not steal from each other.
+    /// already the app-wide owner — every window's scene activates at once
+    /// on foreground, and notification order must not elect a new owner.
     func restoreFocusIfOwner(allowed: Bool = true) {
         guard let terminalView else { return }
         TerminalFocusArbiter.restore(terminalView, allowed: allowed)

@@ -24,6 +24,7 @@ private final class ProStoreDouble {
     var loadError: ProStoreDoubleError?
     var loadDelay: Duration?
     var purchaseResult: ProStorePurchaseResult = .userCancelled
+    var purchaseThroughPresenter = false
     var purchaseError: ProStoreDoubleError?
     var purchaseDelay: Duration?
     var finishDelay: Duration?
@@ -35,6 +36,7 @@ private final class ProStoreDouble {
 
     private(set) var loadCount = 0
     private(set) var purchaseCount = 0
+    private(set) var purchasePresenterCount = 0
     private(set) var syncCount = 0
     private(set) var finishCount = 0
     private(set) var currentRequestCount = 0
@@ -57,11 +59,16 @@ private final class ProStoreDouble {
                 if let loadError { throw loadError }
                 return product
             },
-            purchase: { [weak self] _, _ in
+            purchase: { [weak self] product, presenter in
                 guard let self else { return .unknown }
                 purchaseCount += 1
+                if presenter != nil { purchasePresenterCount += 1 }
                 if let purchaseDelay { try await Task.sleep(for: purchaseDelay) }
                 if let purchaseError { throw purchaseError }
+                if purchaseThroughPresenter {
+                    guard let presenter else { throw ProStoreDoubleError.purchase }
+                    return try await presenter(product)
+                }
                 return purchaseResult
             },
             currentEntitlements: { [weak self] in
@@ -501,6 +508,28 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertTrue(store.hasVerifiedStoreEntitlementForTesting)
         XCTAssertEqual(store.commerceState, .purchased)
         XCTAssertEqual(storeDouble.purchaseCount, 1)
+        XCTAssertEqual(storeDouble.finishCount, 1)
+    }
+
+    func testAppOwnedPurchasePresenterIsForwardedToInjectedClient() async {
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let storeDouble = ProStoreDouble()
+        storeDouble.purchaseThroughPresenter = true
+        let transaction = storeDouble.transaction()
+        let presenter = ProPurchasePresenter { product in
+            XCTAssertEqual(product.id, EntitlementStore.proProductID)
+            return .success(.verified(transaction))
+        }
+        let store = lockedStore(defaults: defaults, storeClient: storeDouble.client())
+
+        let purchased = await store.purchasePro(using: presenter)
+
+        XCTAssertTrue(purchased)
+        XCTAssertTrue(store.isPro)
+        XCTAssertEqual(store.commerceState, .purchased)
+        XCTAssertEqual(storeDouble.purchaseCount, 1)
+        XCTAssertEqual(storeDouble.purchasePresenterCount, 1)
         XCTAssertEqual(storeDouble.finishCount, 1)
     }
 

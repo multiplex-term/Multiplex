@@ -107,13 +107,21 @@ targets:
             CFBundleURLSchemes: [multiplex]
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
-          UISceneConfigurations: {}
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Multiplex Window
+                UISceneClassName: UIWindowScene
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).MultiplexSceneDelegate
         # iPhone is single-scene: without this override iOS 27 connects a
         # second (empty) scene on phones, composing two windows into one
         # screen. iPad/visionOS keep multi-scene from the base manifest.
         UIApplicationSceneManifest~iphone:
           UIApplicationSupportsMultipleScenes: false
-          UISceneConfigurations: {}
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Multiplex Window
+                UISceneClassName: UIWindowScene
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).MultiplexSceneDelegate
         UILaunchScreen:
           UIColorName: AppBackground
         # The un-suffixed key applies to iPhone; the ~ipad override wins on iPad.

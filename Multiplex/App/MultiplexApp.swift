@@ -1,300 +1,608 @@
-import AppIntents
-import SwiftUI
+import OSLog
 import UIKit
 
+/// UIKit owns the process and every window scene. SwiftUI remains linked in
+/// the main app only for visionOS's `UIHostingOrnament` API, whose public
+/// surface requires a SwiftUI `View`; no app screen is rooted in SwiftUI.
 @main
-struct MultiplexApp: App {
-    @State private var store: HostStore
-    @State private var hub: ConnectionHub
-    @State private var themes = ThemeStore()
-    @State private var workspace: TerminalWorkspace
-    @State private var entitlements: EntitlementStore
-    @State private var attention: AttentionCenter
-    @State private var localNetworkAccess = LocalNetworkAccessMonitor()
-    @State private var networkChanges = NetworkChangeMonitor()
-    @State private var appLock = AppLockStore()
-    private var externalActions: ExternalActionRouter { .shared }
-    private var bind: BindController { .shared }
+@MainActor
+final class MultiplexApplicationDelegate: UIResponder, UIApplicationDelegate {
+    let runtime = AppRuntime()
+    private let sceneLog = Logger(
+        subsystem: "app.multiplexterm.multiplex",
+        category: "scene"
+    )
 
-    init() {
-        // Attention wiring: every probe's events funnel through one center,
-        // which consults the workspace to skip the session being typed in
-        // and the entitlement store to stay behind the Pro gate.
-        let entitlements = EntitlementStore()
-        let attention = AttentionCenter()
-        let workspace = TerminalWorkspace(attention: attention)
-        attention.workspace = workspace
-        attention.entitlements = entitlements
-        let store = HostStore()
-        _store = State(initialValue: store)
-        _entitlements = State(initialValue: entitlements)
-        _attention = State(initialValue: attention)
-        _workspace = State(initialValue: workspace)
-        _hub = State(initialValue: ConnectionHub(attention: attention))
-        // App Intents run in this process: the router must be resolvable
-        // before any perform() (a cold intent launch performs right after
-        // App init), and the Shortcuts host picker reads the live store.
-        AppDependencyManager.shared.add(dependency: ExternalActionRouter.shared)
-        HostEntityProvider.live = {
-            store.hosts.map {
-                HostEntity(
-                    id: $0.id,
-                    name: $0.name,
-                    address: $0.address,
-                    workingDirs: $0.workingDirs,
-                    sessionScripts: $0.sessionScripts.map {
-                        ShortcutSessionScript(
-                            id: $0.id,
-                            displayName: $0.displayName
-                        )
-                    },
-                    agentModels: $0.agentLaunchModels
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(adoptPersistedSwiftUIScene(_:)),
+            name: UIScene.willConnectNotification,
+            object: nil
+        )
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        configurationForConnecting connectingSceneSession: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(
+            name: "Multiplex Window",
+            sessionRole: connectingSceneSession.role
+        )
+        configuration.sceneClass = UIWindowScene.self
+        configuration.delegateClass = MultiplexSceneDelegate.self
+        return configuration
+    }
+
+    /// SwiftUI's scene configuration is serialized into each UISceneSession.
+    /// An in-place upgrade therefore reconnects the old AppSceneDelegate even
+    /// though this executable now has a UIKit entry point. UIKit exposes the
+    /// live scene delegate as mutable, so adopt that already-restored scene at
+    /// its connection notification instead of destroying the sole foreground
+    /// session (which can terminate the process before a replacement opens).
+    @objc
+    private func adoptPersistedSwiftUIScene(_ notification: Notification) {
+        guard let scene = notification.object as? UIWindowScene else { return }
+        let session = scene.session
+        let configuredName = session.configuration.delegateClass.map {
+            NSStringFromClass($0)
+        }
+        let liveName = scene.delegate.map { NSStringFromClass(type(of: $0)) }
+        guard UIKitLegacySceneMigrationPolicy.requiresAdoption(
+            configuredDelegateClassName: configuredName,
+            liveDelegateClassName: liveName,
+            restorationActivity: session.stateRestorationActivity
+        ) else { return }
+
+        let nativeDelegate = MultiplexSceneDelegate()
+        scene.delegate = nativeDelegate
+        // On current UIKit the notification precedes the delegate callback,
+        // so that callback supplies every connection option normally. Older
+        // runtimes can post it after the serialized delegate's callback; the
+        // next-turn fallback mounts from the session's public restoration
+        // activity only when UIKit did not call the native delegate itself.
+        DispatchQueue.main.async { [weak scene, weak nativeDelegate] in
+            guard let scene, let nativeDelegate else { return }
+            nativeDelegate.connectPersistedLegacySceneIfNeeded(scene)
+        }
+        sceneLog.notice(
+            "Adopted persisted SwiftUI scene \(session.persistentIdentifier, privacy: .public) into UIKit"
+        )
+    }
+}
+
+/// One native owner per connected deck, terminal, or adaptive-shell scene.
+/// The delegate decodes/restores a framework-neutral payload, chooses shell
+/// mode once, builds the corresponding UIKit controller tree, forwards URLs
+/// and foreground state, and writes every terminal route mutation back to
+/// `UISceneSession.stateRestorationActivity`.
+@MainActor
+final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+
+    @MainActor
+    private enum MountedContent {
+        case deck(DeckWindowViewController)
+        case terminal(TerminalWindowViewController)
+        case shell(SingleWindowShellViewController)
+
+        func setSceneActive(_ active: Bool) {
+            switch self {
+            case .deck(let controller): controller.setSceneActive(active)
+            case .terminal: break
+            case .shell(let controller): controller.setSceneActive(active)
+            }
+        }
+
+        func setReduceMotion(_ reduceMotion: Bool) {
+            if case .shell(let controller) = self {
+                controller.setReduceMotion(reduceMotion)
+            }
+        }
+
+        func prepareForRemoval() {
+            switch self {
+            case .deck(let controller): controller.prepareForRemoval()
+            case .terminal(let controller): controller.prepareForRemoval()
+            case .shell(let controller): controller.prepareForRemoval()
+            }
+        }
+    }
+
+    private var sceneRouter: UIKitSceneRouter?
+    private var rootController: UIKitSceneRootViewController?
+    private var mountedContent: MountedContent?
+    private var payload: ScenePayload?
+    private var connectionPhase: UIKitSceneConnectionPhase = .awaitingRestoration
+    private var urlBuffer = UIKitSceneURLBuffer()
+    private var preservesDeckIdentity = true
+    private weak var connectedSession: UISceneSession?
+    private var reduceMotionObserver: NSObjectProtocol?
+
+    private var runtime: AppRuntime {
+        guard let delegate = UIApplication.shared.delegate
+            as? MultiplexApplicationDelegate else {
+            preconditionFailure("Multiplex application runtime is unavailable")
+        }
+        return delegate.runtime
+    }
+
+    func scene(
+        _ scene: UIScene,
+        willConnectTo session: UISceneSession,
+        options connectionOptions: UIScene.ConnectionOptions
+    ) {
+        guard let windowScene = scene as? UIWindowScene else { return }
+        connect(
+            windowScene,
+            session: session,
+            activationActivities: Array(connectionOptions.userActivities),
+            initialURLs: connectionOptions.urlContexts.map(\.url)
+        )
+    }
+
+    func connectPersistedLegacySceneIfNeeded(_ windowScene: UIWindowScene) {
+        connect(
+            windowScene,
+            session: windowScene.session,
+            activationActivities: [],
+            initialURLs: []
+        )
+    }
+
+    private func connect(
+        _ windowScene: UIWindowScene,
+        session: UISceneSession,
+        activationActivities: [NSUserActivity],
+        initialURLs: [URL]
+    ) {
+        guard connectedSession == nil else { return }
+        connectedSession = session
+        let resolution = UIKitScenePayloadResolver.resolution(
+            activationActivities: activationActivities,
+            restorationActivity: session.stateRestorationActivity
+        )
+        connectionPhase = UIKitSceneConnectionPhase.initial(
+            resolution: resolution,
+            restorationActivityWasSupplied: session.stateRestorationActivity != nil
+        )
+
+        let router = UIKitSceneRouter(scene: windowScene)
+        sceneRouter = router
+        let window = UIWindow(windowScene: windowScene)
+        self.window = window
+        if connectionPhase == .awaitingRestoration {
+            mountAwaitingRestoration(in: windowScene)
+        } else {
+            mount(resolution.payload, in: windowScene, routing: router.routing)
+        }
+        window.makeKeyAndVisible()
+        if connectionPhase.persistsImmediately {
+            persist(resolution.payload)
+        }
+        if connectionPhase == .activation,
+           resolution.requestsInitialGeometry {
+            configureGeometry(for: resolution.payload, in: windowScene)
+        }
+        installReduceMotionObserver()
+
+        for url in initialURLs.sorted(by: {
+            $0.absoluteString < $1.absoluteString
+        }) {
+            receiveOrBuffer(url)
+        }
+    }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        if connectionPhase == .awaitingRestoration,
+           let windowScene = scene as? UIWindowScene,
+           let sceneRouter {
+            // UIKit promises restoreInteractionState before activation. If
+            // no callback arrived by this point, this is genuinely the fresh
+            // value-less deck/shell scene rather than protected delayed state.
+            connectionPhase = .freshDefault
+            replaceContent(
+                with: .deck(.main),
+                in: windowScene,
+                routing: sceneRouter.routing
+            )
+            configureGeometry(for: .deck(.main), in: windowScene)
+        }
+        mountedContent?.setSceneActive(true)
+        Task { await runtime.appLock.autoUnlock() }
+    }
+
+    func sceneWillResignActive(_ scene: UIScene) {
+        mountedContent?.setSceneActive(false)
+    }
+
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        mountedContent?.setSceneActive(false)
+    }
+
+    func sceneWillEnterForeground(_ scene: UIScene) {
+        mountedContent?.setSceneActive(false)
+    }
+
+    func sceneDidDisconnect(_ scene: UIScene) {
+        mountedContent?.prepareForRemoval()
+        rootController?.prepareForRemoval()
+        mountedContent = nil
+        rootController = nil
+        sceneRouter = nil
+        if let reduceMotionObserver {
+            NotificationCenter.default.removeObserver(reduceMotionObserver)
+            self.reduceMotionObserver = nil
+        }
+    }
+
+    func scene(
+        _ scene: UIScene,
+        openURLContexts URLContexts: Set<UIOpenURLContext>
+    ) {
+        for context in URLContexts.sorted(by: {
+            $0.url.absoluteString < $1.url.absoluteString
+        }) {
+            receiveOrBuffer(context.url)
+        }
+    }
+
+    func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+        guard let incoming = SceneActivityCodec.payload(from: userActivity),
+              let windowScene = scene as? UIWindowScene,
+              let sceneRouter
+        else { return }
+        connectionPhase = .activation
+        if let current = payload,
+           !UIKitSceneContentReplacementPolicy.requiresReplacement(
+                current: current,
+                incoming: incoming
+           ) {
+            // `openDeck()` intentionally activates the stable existing deck
+            // with the same value. Persist the current envelope but preserve
+            // the mounted controller tree and its live lifecycle state.
+            persist(incoming)
+            return
+        }
+        replaceContent(with: incoming, in: windowScene, routing: sceneRouter.routing)
+    }
+
+    func scene(
+        _ scene: UIScene,
+        restoreInteractionStateWith stateRestorationActivity: NSUserActivity
+    ) {
+        guard connectionPhase.acceptsInitialRestorationCallback,
+              let windowScene = scene as? UIWindowScene,
+              let sceneRouter
+        else { return }
+        let restored: ScenePayload
+        if let decoded = SceneActivityCodec.payload(from: stateRestorationActivity) {
+            restored = decoded
+        } else if connectionPhase == .awaitingRestoration {
+            restored = .deck(.main)
+        } else {
+            return
+        }
+        connectionPhase = .restoration
+        if payload == restored {
+            persist(restored)
+        } else {
+            replaceContent(with: restored, in: windowScene, routing: sceneRouter.routing)
+        }
+    }
+
+    func stateRestorationActivity(for scene: UIScene) -> NSUserActivity? {
+        guard connectionPhase != .awaitingRestoration, let payload else { return nil }
+        return try? SceneActivityCodec.makeActivity(for: payload)
+    }
+
+    private func replaceContent(
+        with payload: ScenePayload,
+        in windowScene: UIWindowScene,
+        routing: SceneWindowRouting
+    ) {
+        mountedContent?.prepareForRemoval()
+        rootController?.prepareForRemoval()
+        mountedContent = nil
+        rootController = nil
+        mount(payload, in: windowScene, routing: routing)
+        persist(payload)
+        releaseBufferedURLs()
+    }
+
+    private func mountAwaitingRestoration(in windowScene: UIWindowScene) {
+        payload = nil
+        mountedContent = nil
+        let placeholder = UIViewController()
+        placeholder.view.backgroundColor = UIKitChassis.chassis
+        let inertRouting = SceneWindowRouting(
+            supportsMultipleWindows: false,
+            perform: { _ in }
+        )
+        let root = UIKitSceneRootViewController(
+            content: placeholder,
+            themes: runtime.themes,
+            appLock: runtime.appLock,
+            externalActions: runtime.externalActions,
+            bind: runtime.bind,
+            sceneWindows: inertRouting,
+            handlesExternalActions: false
+        )
+        rootController = root
+        window?.rootViewController = root
+        windowScene.title = "Multiplex"
+    }
+
+    private func receiveOrBuffer(_ url: URL) {
+        let ready = urlBuffer.accept([url], phase: connectionPhase)
+        for url in ready {
+            _ = rootController?.receive(url)
+        }
+    }
+
+    private func releaseBufferedURLs() {
+        for url in urlBuffer.release(phase: connectionPhase) {
+            _ = rootController?.receive(url)
+        }
+    }
+
+    private func mount(
+        _ payload: ScenePayload,
+        in windowScene: UIWindowScene,
+        routing: SceneWindowRouting
+    ) {
+        self.payload = payload
+        preservesDeckIdentity = {
+            if case .deck = payload { return true }
+            return false
+        }()
+
+        let plan = presentationPlan(for: payload, in: windowScene)
+        let content: UIViewController
+        switch plan {
+        case .deck:
+            let controller = DeckWindowViewController(configuration: deckConfiguration(
+                routing: routing,
+                terminalOpener: TerminalRouteOpener(
+                    destination: .window,
+                    action: routing.openTerminal
+                ),
+                presentation: .standard,
+                selectedTerminal: nil,
+                shellSafeArea: .zero,
+                sceneIsActive: windowScene.activationState == .foregroundActive
+            ))
+            mountedContent = .deck(controller)
+            content = controller
+
+        case .terminal(let route):
+            let controller = TerminalWindowViewController(
+                route: route,
+                dependencies: terminalDependencies,
+                sceneWindows: routing,
+                routeChanged: { [weak self] route in
+                    self?.persist(.terminal(route))
+                }
+            )
+            mountedContent = .terminal(controller)
+            #if os(visionOS)
+            content = controller
+            #else
+            let navigation = UINavigationController(rootViewController: controller)
+            navigation.navigationBar.prefersLargeTitles = false
+            navigation.view.backgroundColor = UIKitChassis.chassis
+            UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
+            content = navigation
+            #endif
+
+        case .shell(let route):
+            let controller = SingleWindowShellViewController(
+                dependencies: shellDependencies(routing: routing),
+                initialRoute: route,
+                sceneIsActive: windowScene.activationState == .foregroundActive,
+                reduceMotion: UIAccessibility.isReduceMotionEnabled,
+                routeChanged: { [weak self] route in
+                    guard let self else { return }
+                    if preservesDeckIdentity {
+                        persist(.deck(.main))
+                    } else {
+                        persist(.terminal(route))
+                    }
+                }
+            )
+            mountedContent = .shell(controller)
+            content = controller
+        }
+
+        let root = UIKitSceneRootViewController(
+            content: content,
+            themes: runtime.themes,
+            appLock: runtime.appLock,
+            externalActions: runtime.externalActions,
+            bind: runtime.bind,
+            sceneWindows: routing
+        )
+        rootController = root
+        window?.rootViewController = root
+        windowScene.title = title(for: payload)
+        log(plan: plan, in: windowScene)
+    }
+
+    private var terminalDependencies: TerminalWindowDependencies {
+        TerminalWindowDependencies(
+            store: runtime.store,
+            hub: runtime.hub,
+            themes: runtime.themes,
+            workspace: runtime.workspace,
+            entitlements: runtime.entitlements
+        )
+    }
+
+    private func shellDependencies(
+        routing: SceneWindowRouting
+    ) -> SingleWindowShellDependencies {
+        SingleWindowShellDependencies(
+            store: runtime.store,
+            hub: runtime.hub,
+            themes: runtime.themes,
+            workspace: runtime.workspace,
+            entitlements: runtime.entitlements,
+            attention: runtime.attention,
+            localNetworkAccess: runtime.localNetworkAccess,
+            networkChanges: runtime.networkChanges,
+            externalActions: runtime.externalActions,
+            appLock: runtime.appLock,
+            bind: runtime.bind,
+            openURL: Self.openSystemURL,
+            sceneWindows: routing
+        )
+    }
+
+    private func deckConfiguration(
+        routing: SceneWindowRouting,
+        terminalOpener: TerminalRouteOpener,
+        presentation: FleetWall.Presentation,
+        selectedTerminal: TerminalRoute?,
+        shellSafeArea: UIEdgeInsets,
+        sceneIsActive: Bool
+    ) -> DeckWindowConfiguration {
+        DeckWindowConfiguration(
+            store: runtime.store,
+            entitlements: runtime.entitlements,
+            hub: runtime.hub,
+            workspace: runtime.workspace,
+            localNetworkAccess: runtime.localNetworkAccess,
+            networkChanges: runtime.networkChanges,
+            bind: runtime.bind,
+            themes: runtime.themes,
+            attention: runtime.attention,
+            appLock: runtime.appLock,
+            externalActions: runtime.externalActions,
+            sceneWindows: routing,
+            openURL: Self.openSystemURL,
+            terminalOpener: terminalOpener,
+            presentation: presentation,
+            selectedTerminal: selectedTerminal,
+            shellSafeArea: shellSafeArea,
+            sceneIsActive: sceneIsActive,
+            reduceMotion: UIAccessibility.isReduceMotionEnabled
+        )
+    }
+
+    private func presentationPlan(
+        for payload: ScenePayload,
+        in scene: UIWindowScene
+    ) -> UIKitScenePresentationPlan {
+        #if os(visionOS)
+        let platform = ShellModeDecision.Platform.visionOS
+        let isFullScreen = false
+        #else
+        let platform = ShellModeDecision.Platform.iOS
+        let isFullScreen = scene.isFullScreen
+        #endif
+        let idiom: ShellModeDecision.Idiom = switch scene.traitCollection
+            .userInterfaceIdiom {
+        case .phone: .phone
+        case .pad: .pad
+        default: .other
+        }
+        #if DEBUG
+        let override = ProcessInfo.processInfo.environment["MULTIPLEX_FORCE_SHELL"]
+        #else
+        let override: String? = nil
+        #endif
+        return UIKitScenePresentationPlan.resolve(
+            payload: payload,
+            platform: platform,
+            idiom: idiom,
+            isFullScreen: isFullScreen,
+            environmentOverride: override
+        )
+    }
+
+    private func persist(_ payload: ScenePayload) {
+        self.payload = payload
+        let activity = try? SceneActivityCodec.makeActivity(for: payload)
+        connectedSession?.stateRestorationActivity = activity
+        window?.windowScene?.title = title(for: payload)
+    }
+
+    private func configureGeometry(
+        for payload: ScenePayload,
+        in scene: UIWindowScene
+    ) {
+        #if os(visionOS)
+        #if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        #else
+        let environment: [String: String] = [:]
+        #endif
+        let size = UIKitSceneGeometryPolicy.preferredSize(
+            for: payload,
+            environment: environment
+        )
+        scene.requestGeometryUpdate(UIWindowScene.GeometryPreferences.Vision(
+            size: size,
+            resizingRestrictions: .freeform
+        )) { error in
+            Self.logger.error(
+                "scene geometry failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+        #endif
+    }
+
+    private func installReduceMotionObserver() {
+        reduceMotionObserver = NotificationCenter.default.addObserver(
+            forName: UIAccessibility.reduceMotionStatusDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.mountedContent?.setReduceMotion(
+                    UIAccessibility.isReduceMotionEnabled
                 )
             }
         }
     }
 
-    var body: some Scene {
-        #if os(visionOS)
-        // A three-tile wall row: 26pt wall padding either side + three tiles
-        // at the grid's 360pt preferred width + two 14pt gutters = 1160.
-        // Wider windows keep that tile size until another full tile fits, so
-        // growing never compresses the existing row. 524 shows the header,
-        // host rail, and two full tile rows (330 one-row height + a 180pt
-        // tile + the 14pt gutter); more rows scroll.
-        deckScene
-            // Keep the system's resize range tied to the stable scene
-            // boundary below, never to FleetWall's changing grid ideal size.
-            .windowResizability(.contentMinSize)
-            .defaultSize(debugSize("MULTIPLEX_DECK_SIZE") ?? CGSize(width: 1160, height: 524))
-        terminalScene
-            .windowStyle(.plain)
-            .defaultSize(debugSize("MULTIPLEX_TERM_SIZE") ?? CGSize(width: 1120, height: 700))
-        #else
-        deckScene
-        terminalScene
-        #endif
+    private func title(for payload: ScenePayload) -> String {
+        switch payload {
+        case .deck:
+            return "Multiplex"
+        case .terminal(let route):
+            return route.activeTab?.displayName ?? "Terminal"
+        }
     }
 
-    /// Headless-capture hook: `MULTIPLEX_DECK_SIZE`/`MULTIPLEX_TERM_SIZE`
-    /// (`<width>x<height>`, DEBUG only) override a scene's default window
-    /// size — the simulator has no way to drag-resize a volume, so doc
-    /// screenshots request the size they need at launch.
-    private func debugSize(_ variable: String) -> CGSize? {
+    private func log(plan: UIKitScenePresentationPlan, in scene: UIWindowScene) {
         #if DEBUG
-        guard let raw = ProcessInfo.processInfo.environment[variable] else { return nil }
-        let parts = raw.lowercased().split(separator: "x").compactMap { Double($0) }
-        guard parts.count == 2 else { return nil }
-        return CGSize(width: parts[0], height: parts[1])
+        let override = ProcessInfo.processInfo.environment["MULTIPLEX_FORCE_SHELL"]
+            ?? "none"
         #else
-        return nil
+        let override = "none"
         #endif
-    }
-
-    private var deckScene: some Scene {
-        // The deck has one stable data identity on every platform. Opening
-        // that value raises the existing scene instead of creating another;
-        // on visionOS this also avoids direct UIKit activation, which can
-        // reapply the scene's default size to a user-resized window.
-        WindowGroup(id: "deck", for: DeckWindowRoute.self) { _ in
-            deckWindow
-        } defaultValue: {
-            .main
-        }
-    }
-
-    @ViewBuilder
-    private var deckWindow: some View {
-        configuredRoot(
-            SceneShellGate {
-                MultiWindowDeckRoot()
-                    .modifier(DeckWindowSizingBoundary())
-            } shell: {
-                SingleWindowShell()
-            }
+        Self.logger.info(
+            "connected plan=\(String(describing: plan), privacy: .public) idiom=\(String(describing: scene.traitCollection.userInterfaceIdiom), privacy: .public) isFullScreen=\(scene.isFullScreen, privacy: .public) override=\(override, privacy: .public)"
         )
     }
 
-    private var terminalScene: some Scene {
-        WindowGroup(id: "terminal", for: TerminalWindowRoute.self) { $route in
-            terminalRoot($route)
-        }
+    private static func openSystemURL(_ url: URL) {
+        UIApplication.shared.open(url)
     }
 
-    @ViewBuilder
-    private func terminalRoot(_ route: Binding<TerminalWindowRoute?>) -> some View {
-        configuredRoot(
-            SceneShellGate {
-                if let binding = Binding(route) {
-                    TerminalWindowRoot(route: binding)
-                } else {
-                    // Classic multi-window mode historically leaves a
-                    // value-less terminal scene empty.
-                    EmptyView()
-                }
-            } shell: {
-                if let binding = Binding(route) {
-                    SingleWindowShell(initialRoute: binding.wrappedValue)
-                } else {
-                    // iOS 27 can connect this value-less group first on a
-                    // phone, so it must still be a complete shell root.
-                    SingleWindowShell()
-                }
-            }
-        )
-    }
-
-    private func configuredRoot<Content: View>(_ content: Content) -> some View {
-        content
-            .environment(store)
-            .environment(hub)
-            .environment(themes)
-            .environment(workspace)
-            .environment(entitlements)
-            .environment(attention)
-            .environment(localNetworkAccess)
-            .environment(networkChanges)
-            .environment(externalActions)
-            .environment(appLock)
-            .environment(bind)
-            .modifier(ExternalActionReceiver(router: externalActions, bind: bind))
-            // The lock veil sits inside PlatformChrome so it follows the
-            // pinned appearance, and outside everything else so it covers
-            // deck and terminal content alike.
-            .modifier(AppLockGate(lock: appLock))
-            .modifier(PlatformChrome(themes: themes))
-    }
+    private static let logger = Logger(
+        subsystem: "app.multiplexterm.multiplex",
+        category: "shell"
+    )
 }
-
-/// Every scene root can receive a `multiplex://` URL and feed the shared
-/// router; the mounted deck executes. When pending work arrives while no
-/// deck is mounted (a terminal-only visionOS/iPad arrangement), raise the
-/// one deck scene — the data-driven `WindowGroup` reuses it, never mints a
-/// second. The iPhone shell is single-scene and always mounts the deck, so
-/// the raise is correctly unavailable there.
-private struct ExternalActionReceiver: ViewModifier {
-    var router: ExternalActionRouter
-    var bind: BindController
-
-    @Environment(\.openWindow) private var openWindow
-    @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
-
-    /// One shot per process, like `MULTIPLEX_AUTO_ATTACH` — the modifier is
-    /// on every scene root, and the hook must not resubmit per scene.
-    @MainActor private static var autoActionFired = false
-
-    func body(content: Content) -> some View {
-        content
-            .onOpenURL { url in
-                // A bind URL is attacker-suppliable (a QR on a poster, a
-                // link in a message), so unlike a widget action it never
-                // executes: `receive` only adds a candidate row and asks the
-                // deck to present the Bind pane, where the user's ENROLL is
-                // the confirmation the URL itself never carries.
-                if let payload = BindPayload(url: url) {
-                    bind.receive(payload: payload)
-                    if !bind.hasContext, supportsMultipleWindows {
-                        openWindow(id: "deck", value: DeckWindowRoute.main)
-                    }
-                    return
-                }
-                guard let action = ExternalActionURL.action(from: url) else { return }
-                router.submit(action)
-            }
-            .onChange(of: router.pendingSignal) {
-                guard !router.hasContext, supportsMultipleWindows else { return }
-                openWindow(id: "deck", value: DeckWindowRoute.main)
-            }
-            .task { submitAutoActionIfNeeded() }
-    }
-
-    /// DEBUG-only headless stand-in for a widget tap:
-    /// `MULTIPLEX_AUTO_ACTION_URL=multiplex://open?…` runs the same
-    /// parse-then-submit seam as `onOpenURL`. It exists because
-    /// `simctl openurl` parks a fresh install's FIRST open on a system
-    /// "Open in Multiplex?" confirmation that a headless run cannot click
-    /// (idb HID taps died with Xcode 27's SimulatorKit removal).
-    @MainActor private func submitAutoActionIfNeeded() {
-        #if DEBUG
-        guard !Self.autoActionFired,
-              let raw = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ACTION_URL"],
-              let url = URL(string: raw),
-              let action = ExternalActionURL.action(from: url)
-        else { return }
-        Self.autoActionFired = true
-        router.submit(action)
-        #endif
-    }
-}
-
-/// Classic deck presentation: the injected opener is exactly the existing
-/// `openWindow(id:value:)` route. Shell mode supplies a different opener from
-/// inside `SingleWindowShell`, leaving this path unchanged for windowed iPad
-/// and visionOS.
-private struct MultiWindowDeckRoot: View {
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        let opener = TerminalRouteOpener(
-            destination: .window,
-            action: { openWindow(id: "terminal", value: $0) }
-        )
-        DeckWindow(terminalOpener: opener)
-            // Classic mode's external-action executor: same opener as the
-            // wall, with the failure/prompt UI anchored at this scene root.
-            .modifier(ExternalActionHost(terminalOpener: opener))
-    }
-}
-
-/// visionOS derives a regular window's minimum resize constraints from its
-/// root content. FleetWall changes its grid shape at column breakpoints, so
-/// exposing that content size to the scene can make the system clamp the
-/// window during the user's resize gesture. A flexible base owns scene sizing;
-/// the wall fills it as an overlay and therefore cannot resize its own window.
-struct DeckWindowSizingBoundary: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        #if os(visionOS)
-        Color.clear
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay { content }
-        #else
-        content
-        #endif
-    }
-}
-
-/// iPad sits on chassis (opaque UI, neutral signal accent — color is spent on
-/// state, not actions); visionOS keeps native glass for system controls
-/// (menus, alerts, popover shells), while form sheets sit on the same opaque
-/// chassis as iPad (`chassisSheetGround` — glass grounds swallowed the
-/// pinned LIGHT appearance, user-reported). The appearance choice
-/// (`ThemeStore.appearance`) resolves here: `.system` follows the device —
-/// chassis tokens are trait-dynamic, so the whole scene flips live — while
-/// LIGHT/DARK pin the scheme.
-private struct PlatformChrome: ViewModifier {
-    var themes: ThemeStore
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        #if os(visionOS)
-        content
-            .background(AppearanceApplicator(appearance: themes.appearance))
-        #else
-        let base = content
-            .background(AppearanceApplicator(appearance: themes.appearance))
-            .tint(Theme.signal)
-        if ProcessInfo.processInfo.isiOSAppOnMac {
-            // The Mac paints the iPad canvas at 77%. Fixed-size chassis type
-            // compensates through Theme.typeScale; semantic text styles
-            // (.footnote, .subheadline …) keep Dynamic Type on iPad and get
-            // the equivalent boost here instead. Fixed-size fonts ignore
-            // Dynamic Type, so the two mechanisms never compound.
-            base.dynamicTypeSize(.xxLarge)
-        } else {
-            base
-        }
-        #endif
-    }
-}
-

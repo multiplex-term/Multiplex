@@ -1,70 +1,23 @@
-import SwiftUI
+import Observation
 import UIKit
 
-/// Add or edit a host. Secrets go straight to the Keychain on save.
-///
-/// Adding is two roads to the same place, so they share one modal behind a
-/// choice bar: BIND (run one command on the machine and confirm it) and
-/// MANUAL (type the destination). Editing an existing host has only the form
-/// — there is nothing to bind — so the bar is absent there entirely.
-struct AddHostSheet: View {
-    @Environment(HostStore.self) private var store
-    @Environment(EntitlementStore.self) private var entitlements
-    @Environment(BindController.self) private var bind
-    @Environment(\.dismiss) private var dismiss
+// MARK: - Framework-neutral form state
 
-    var editing: Host?
-
-    /// Which road this modal is showing. Add opens on BIND: the deck no
-    /// longer carries a BIND chip, so this bar is where the flow lives.
-    enum Mode: Hashable {
-        case bind
-        case manual
-    }
-
-    @State private var mode: Mode = .bind
-    @State private var name = ""
-    @State private var hostname = ""
-    @State private var port = "22"
-    @State private var username = ""
-    @State private var authMethod: Host.AuthMethod = .password
-    @State private var password = ""
-    @State private var privateKey = ""
-    /// Editing an existing host opens with the stored key hidden; a tap on
-    /// the field swaps in the editor. Add mode always shows the editor.
-    @State private var privateKeyConcealed = false
-    @State private var passphrase = ""
-    /// New hosts are added on the air; Host Settings mirrors the deck switch.
-    @State private var isEnabled = true
-    @State private var useMosh = false
-    @State private var moshServerPath = ""
-    @State private var moshPorts = ""
-    @State private var workingDirs: [WorkingDir] = []
-    @State private var newWorkingDir = ""
-    /// Add mode starts on the default so it is visible and editable before
-    /// the first save, not invisible policy.
-    @State private var newSessionTmuxConf = Host.defaultNewSessionTmuxConf
-    @State private var scripts: [ScriptRow] = []
-    /// Launch-model lists as one-id-per-line text, one field per agent —
-    /// the tmux-conf field's compact grammar, not editable rows (model ids
-    /// are short single tokens; row chrome tripled the height).
-    @State private var modelText: [AgentKind: String] = [:]
-    @State private var testState: TestState = .idle
-    @State private var showingPaywall = false
-
-    /// Editable row model — a stable identity (not `id: \.self` on the
-    /// string) so editing a path in place doesn't tear down the row's text
-    /// field. Bindings below resolve through this ID so a late text-system
-    /// write cannot target a stale array index after a move or deletion.
-    private struct WorkingDir: Identifiable, Equatable {
-        let id = UUID()
+/// Durable manual-form state. UIKit controls resolve editable rows through
+/// their stable IDs, and this value also centralizes validation/normalization
+/// so Test Connection and Save can never construct different hosts.
+struct AddHostFormState {
+    struct WorkingDirectory: Identifiable, Equatable {
+        let id: UUID
         var path: String
+
+        init(id: UUID = UUID(), path: String) {
+            self.id = id
+            self.path = path
+        }
     }
 
-    /// Same row discipline for setup scripts, except the identity is the
-    /// script's own persisted id: the remembered-selection memory points at
-    /// it, so editing a script must never remint it.
-    private struct ScriptRow: Identifiable, Equatable {
+    struct ScriptRow: Identifiable, Equatable {
         let id: UUID
         var name: String
         var body: String
@@ -75,10 +28,10 @@ struct AddHostSheet: View {
             body = script.body
         }
 
-        init() {
-            id = UUID()
-            name = ""
-            body = ""
+        init(id: UUID = UUID(), name: String = "", body: String = "") {
+            self.id = id
+            self.name = name
+            self.body = body
         }
 
         var script: SessionScript {
@@ -86,777 +39,70 @@ struct AddHostSheet: View {
         }
     }
 
-    private enum TestState: Equatable {
-        case idle
-        case running
-        case passed(headline: String, warnings: [String])
-        case failed(String)
-    }
+    let editing: Host?
+    var name = ""
+    var hostname = ""
+    var port = "22"
+    var username = ""
+    var authMethod = Host.AuthMethod.password
+    var password = ""
+    var privateKey = ""
+    var privateKeyConcealed = false
+    var passphrase = ""
+    var isEnabled = true
+    var useMosh = false
+    var moshServerPath = ""
+    var moshPorts = ""
+    var workingDirectories: [WorkingDirectory] = []
+    var newWorkingDirectory = ""
+    var newSessionTmuxConf = Host.defaultNewSessionTmuxConf
+    var scripts: [ScriptRow] = []
+    var modelText: [AgentKind: String] = [:]
 
-    var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-            ScrollView {
-                VStack(spacing: 18) {
-                    if showsModeBar {
-                        VStack(alignment: .leading, spacing: 8) {
-                            TallyChoiceBar(
-                                [("Bind", Mode.bind), ("Manual", Mode.manual)],
-                                selection: $mode
-                            )
-                            // Neither word says what it costs you. BIND needs
-                            // something installed on the machine, which is
-                            // the one thing that can make it the wrong road —
-                            // so each caption names that and points at the
-                            // other.
-                            Text(modeDetail)
-                                .font(.ui(10))
-                                .foregroundStyle(Theme.signal2)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.horizontal, 2)
-                        }
-                    }
-                    switch resolvedMode {
-                    case .bind:
-                        BindPane()
-                    case .manual:
-                        manualForm
-                    }
-                }
-                .frame(maxWidth: 680)
-                .padding(18)
-                .frame(maxWidth: .infinity)
-            }
-            .task { await scrollForVerificationIfRequested(proxy) }
-            .task { openBindPaneForVerificationIfRequested() }
-            .chassisSheetGround()
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ChassisSheetTitle(title)
-                ToolbarItem(placement: .cancellationAction) {
-                    // Nothing on the Bind pane is this modal's to save — the
-                    // machine and the controller finish that between them —
-                    // so the bar offers a way out, not a discard.
-                    ChassisBarButton(resolvedMode == .bind ? "Done" : "Cancel") {
-                        clearSecretsAndDismiss()
-                    }
-                }
-                if resolvedMode == .manual {
-                    ToolbarItem(placement: .confirmationAction) {
-                        ChassisBarButton("Save", action: save)
-                            .disabled(!isValid)
-                    }
-                }
-            }
-            }
-        }
-        // The manual form is long and easy to drag while scrolling. Require
-        // the explicit Cancel or Save action there so a swipe cannot discard
-        // edits; both paths also clear secret bindings before the sheet tears
-        // down. The Bind pane holds no unsaved edits, so a swipe is allowed —
-        // except mid-enrollment, where it would look like a cancel and isn't.
-        .interactiveDismissDisabled(
-            resolvedMode == .manual || bind.enrollmentInFlight
+    init(
+        editing: Host?,
+        secrets: HostSecrets = HostSecrets(
+            password: nil,
+            privateKey: nil,
+            passphrase: nil
         )
-        .onAppear(perform: populate)
-        .sheet(isPresented: $showingPaywall) { ProPaywallView() }
-        // Binding creates a host, so it meets the same free-tier limit the
-        // manual form does — refused before anything is enrolled on the
-        // machine, never after.
-        .onChange(of: bind.needsProForHostLimit) { _, needsPro in
-            guard needsPro else { return }
-            bind.needsProForHostLimit = false
-            showingPaywall = true
-        }
-        // Any edit that could change the outcome retires the shown result —
-        // a stale PASSED next to a new address would vouch for the wrong host.
-        .onChange(of: testFingerprint) { testState = .idle }
-    }
-
-    private var title: String { editing == nil ? "Add Host" : "Host Settings" }
-
-    private var modeDetail: String {
-        switch resolvedMode {
-        case .bind:
-            "Run the mpx CLI on the machine you're adding and it offers "
-                + "itself — no address, user, or key to type here. Can't "
-                + "install it? Switch to MANUAL."
-        case .manual:
-            "Type the SSH destination yourself. Nothing to install on the "
-                + "machine."
-        }
-    }
-
-    /// Editing an existing host is form-only; there is no machine to bind.
-    private var showsModeBar: Bool { editing == nil }
-
-    private var resolvedMode: Mode { showsModeBar ? mode : .manual }
-
-    private var manualForm: some View {
-        VStack(spacing: 18) {
-            hostSection
-            monitoringSection
-            credentialsSection
-            testSection
-            workingDirsSection
-            tmuxConfSection
-            scriptsSection
-            agentModelsSection
-                .id("agent-models")
-            transportSection
-        }
-        // A tap on the chassis outside any field drops keyboard focus.
-        // SwiftUI fields, chips, and switches claim their own taps, so this
-        // only fires on inert ground.
-        //
-        // Scoped to this form on purpose — it used to sit on the whole scroll
-        // view, which put a `UITapGestureRecognizer` above the Bind pane's
-        // `PasteButton`. That is UIKit's `UIPasteControl`, a plain `UIControl`
-        // whose touch tracking an ancestor recognizer cancels, so the button
-        // rendered enabled and did nothing when pressed (user-reported).
-        // SwiftUI's own controls are unaffected because SwiftUI arbitrates
-        // its gestures internally; a hosted UIKit control is the odd one out.
-        // The Bind pane wants no such gesture anyway: its only input is the
-        // PIN field.
-        .contentShape(Rectangle())
-        .onTapGesture(perform: unfocusInputs)
-    }
-
-    // MARK: Form sections
-
-    private var hostSection: some View {
-        TallyFormSection(
-            "Host identity",
-            detail: "The name labels this host on the deck. Address, port, and user form the SSH destination."
-        ) {
-            TallyFormField("Name") {
-                TextField("devbox", text: $name)
-            }
-            TallyFormField("Address") {
-                TextField("host.example.com", text: $hostname)
-                    .keyboardType(.URL)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-            }
-            TallyFormField("Port") {
-                TextField("22", text: $port)
-                    .keyboardType(.numberPad)
-            }
-            TallyFormField("User") {
-                TextField("root", text: $username)
-                    .keyboardType(.asciiCapable)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    // The empty content type neutralizes the username half of
-                    // AutoFill's login-form pairing — without it, User plus
-                    // any secret field below reads as a savable credential.
-                    .textContentType(.init(rawValue: ""))
-            }
-        }
-    }
-
-    /// Sits directly under the identity fields because it answers the first
-    /// question someone opens this sheet with when a host shows nothing:
-    /// whether anything is dialling it at all. The deck's host menu is the
-    /// quick way to flip it; this is the same switch, saved with the form.
-    private var monitoringSection: some View {
-        TallyFormSection("Monitoring", detail: monitoringDetail) {
-            TallyFormBoolField(
-                "Connect on the deck",
-                isOn: $isEnabled,
-                accessibilityHint: "Off keeps the host in the fleet without connecting to it"
-            )
-        }
-    }
-
-    private var monitoringDetail: String {
-        if isEnabled {
-            "The deck probes this host about every five seconds while it's in front, and its sessions appear as live tiles."
-        } else {
-            "Off parks the host on the deck without dialling it: no probing, no tiles, and widgets or Shortcuts report it as disabled. Terminal windows already open keep running, and Signal check below still connects on demand."
-        }
-    }
-
-    private var credentialsSection: some View {
-        TallyFormSection("Credentials", detail: credentialsDetail) {
-            TallyFormRow {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Sign in with")
-                        .font(.ui(10, weight: .semibold))
-                        .foregroundStyle(Theme.signal2)
-                    TallyChoiceBar(
-                        Host.AuthMethod.allCases.map { ($0.label, $0) },
-                        selection: $authMethod
-                    )
-                }
-            }
-
-            switch authMethod {
-            case .password:
-                TallyFormField("Password") {
-                    // Neutral placeholder on purpose: AutoFill's login-form
-                    // heuristics read field placeholders, and the caption row
-                    // above already names the field for humans.
-                    RevealableSecureField("Password", prompt: "Required", text: $password)
-                }
-            case .privateKey:
-                TallyFormField("Private key") {
-                    if privateKeyConcealed {
-                        // The stored key must not paint on screen just for
-                        // opening Host Settings. Fixed-count bullets so the
-                        // mask leaks nothing, not even the key's size; the
-                        // binding still holds the key, so Save and Test work
-                        // without ever revealing it.
-                        Button {
-                            privateKeyConcealed = false
-                        } label: {
-                            HStack(spacing: 12) {
-                                Text(String(repeating: "\u{2022}", count: 8))
-                                Spacer(minLength: 12)
-                                ChassisLabel("EDIT", size: 8, color: Theme.signal2)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .chassisHover(2)
-                        .accessibilityLabel("Edit private key")
-                        .accessibilityHint("Shows the saved key")
-                    } else {
-                        TextField(
-                            "BEGIN OPENSSH PRIVATE KEY",
-                            text: $privateKey,
-                            axis: .vertical
-                        )
-                        .lineLimit(4...8)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .textContentType(.init(rawValue: ""))
-                    }
-                }
-                TallyFormField("Passphrase") {
-                    RevealableSecureField("Passphrase", prompt: "Optional", text: $passphrase)
-                }
-            }
-        }
-    }
-
-    private var credentialsDetail: String {
-        switch authMethod {
-        case .password:
-            "Stored in iCloud Keychain, never in the host record."
-        case .privateKey:
-            "The OpenSSH key is stored in iCloud Keychain. Leave its passphrase blank to enter it when connecting, or save the passphrase there too."
-        }
-    }
-
-    private var transportSection: some View {
-        TallyFormSection("Transport", detail: transportDetail) {
-            TallyFormBoolField(
-                "Connect with mosh",
-                isOn: moshToggle,
-                status: moshRequiresPro ? "PRO" : nil,
-                statusIsProminent: true,
-                accessibilityHint: moshRequiresPro
-                    ? "Requires Multiplex Pro"
-                    : nil
-            )
-
-            if useMosh {
-                TallyFormField("mosh-server") {
-                    TextField("mosh-server", text: $moshServerPath)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                }
-                TallyFormField("UDP port or range") {
-                    TextField("60000:61000", text: $moshPorts)
-                        .keyboardType(.numbersAndPunctuation)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                }
-                if !moshPortsValid {
-                    TallyFormRow {
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            TallyLamp(caption: "INVALID", color: Theme.caution)
-                            Text("Use one port or a range from 1 to 65535.")
-                                .font(.ui(10))
-                                .foregroundStyle(Theme.signal2)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var transportDetail: String {
-        if useMosh {
-            "Terminals attach over UDP and survive roaming or sleep. SSH still signs in, starts mosh-server, and probes the deck."
-        } else {
-            "SSH carries both the control connection and attached terminals."
-        }
-    }
-
-    // MARK: Test connection
-
-    private var testSection: some View {
-        TallyFormSection("Signal check", detail: testDetail) {
-            TallyFormRow {
-                HStack(spacing: 12) {
-                    ChassisChip("TEST CONNECTION", action: runTest)
-                        .disabled(!isValid || testState == .running)
-                        .opacity(!isValid || testState == .running ? 0.45 : 1)
-                    Spacer()
-                    if testState == .running {
-                        TallyLamp(caption: "TESTING", color: Theme.caution)
-                    }
-                }
-            }
-
-            switch testState {
-            case .idle, .running:
-                EmptyView()
-            case .passed(let headline, let warnings):
-                TallyFormRow {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 10) {
-                            TallyLamp(caption: "CONNECTED", color: Theme.ok)
-                            Text(headline)
-                                .font(.ui(11, weight: .medium))
-                                .foregroundStyle(Theme.signal)
-                        }
-                        ForEach(warnings, id: \.self) { warning in
-                            HStack(alignment: .top, spacing: 10) {
-                                TallyLamp(caption: "CHECK", color: Theme.caution)
-                                Text(warning)
-                                    .font(.ui(10))
-                                    .foregroundStyle(Theme.signal2)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
-                }
-            case .failed(let message):
-                TallyFormRow {
-                    HStack(alignment: .top, spacing: 10) {
-                        TallyLamp(caption: "NO SIGNAL", color: Theme.caution)
-                        Text(message)
-                            .font(.ui(11))
-                            .foregroundStyle(Theme.signal)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-        }
-    }
-
-    private var testDetail: String {
-        useMosh
-            ? "Signs in over SSH with the settings above, then looks for tmux and mosh-server on the host."
-            : "Signs in over SSH with the settings above, then looks for tmux on the host."
-    }
-
-    /// Everything a test's outcome depends on. Edits reset the shown result,
-    /// and a test that finishes after further edits discards itself.
-    private var testFingerprint: [String] {
-        [hostname, port, username, authMethod.rawValue,
-         password, privateKey, passphrase,
-         useMosh ? "mosh" : "ssh", moshServerPath]
-    }
-
-    private func runTest() {
-        testState = .running
-        let host = formHost()
-        let secrets = HostSecrets(
-            password: authMethod == .password ? password : nil,
-            privateKey: authMethod == .privateKey ? privateKey : nil,
-            passphrase: authMethod == .privateKey && !passphrase.isEmpty ? passphrase : nil
-        )
-        let fingerprint = testFingerprint
-        Task {
-            let outcome = await HostTest.run(host: host, secrets: secrets)
-            guard fingerprint == testFingerprint else { return }
-            switch outcome {
-            case .connected(let report):
-                var warnings: [String] = []
-                if !report.tmuxFound {
-                    warnings.append("tmux wasn't found on the host — the deck can't list sessions there. Plain shells still work.")
-                }
-                if report.moshServerFound == false {
-                    warnings.append("mosh-server wasn't found — mosh attaches will fail. Install it on the host or set its path below.")
-                }
-                testState = .passed(
-                    headline: "Connected to \(host.hostname) as \(host.username).",
-                    warnings: warnings
-                )
-            case .failed(let message):
-                testState = .failed(message)
-            }
-        }
-    }
-
-    // MARK: Working directories
-
-    private var workingDirsSection: some View {
-        TallyFormSection("New session defaults", detail: workingDirsDetail) {
-            ForEach(workingDirs) { dir in
-                TallyFormRow {
-                    HStack(spacing: 8) {
-                        ChassisLabel(
-                            dir.id == workingDirs.first?.id ? "DEFAULT" : "PATH",
-                            size: 8,
-                            color: dir.id == workingDirs.first?.id
-                                ? Theme.signal2
-                                : Theme.signal3
-                        )
-                        .frame(width: 54, alignment: .leading)
-
-                        TextField("Directory", text: workingDirBinding(for: dir))
-                            .font(.mono(11))
-                            .foregroundStyle(Theme.signal)
-                            .textFieldStyle(.plain)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 8)
-                            .background(Theme.screen)
-                            .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-
-                        let index = workingDirs.firstIndex(where: { $0.id == dir.id }) ?? 0
-                        workingDirButton(
-                            "arrow.up",
-                            label: "Move directory up",
-                            disabled: index == 0
-                        ) { moveWorkingDir(id: dir.id, offset: -1) }
-                        workingDirButton(
-                            "arrow.down",
-                            label: "Move directory down",
-                            disabled: index >= workingDirs.count - 1
-                        ) { moveWorkingDir(id: dir.id, offset: 1) }
-                        workingDirButton("trash", label: "Delete directory") {
-                            removeWorkingDir(id: dir.id)
-                        }
-                    }
-                }
-            }
-
-            TallyFormRow {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("Add directory")
-                        .font(.ui(10, weight: .semibold))
-                        .foregroundStyle(Theme.signal2)
-                    HStack(spacing: 8) {
-                        TextField("~/projects/app", text: $newWorkingDir)
-                            .font(.mono(11))
-                            .foregroundStyle(Theme.signal)
-                            .textFieldStyle(.plain)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 8)
-                            .background(Theme.screen)
-                            .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .onSubmit(addWorkingDir)
-                        ChassisChip("ADD", systemImage: "plus", action: addWorkingDir)
-                            .disabled(newWorkingDir.trimmingCharacters(in: .whitespaces).isEmpty)
-                            .opacity(newWorkingDir.trimmingCharacters(in: .whitespaces).isEmpty ? 0.45 : 1)
-                    }
-                }
-            }
-        }
-    }
-
-    private var workingDirsDetail: String {
-        workingDirs.isEmpty
-            ? "New sessions start in the host's home directory. Add paths to make them available in New Session."
-            : "The first path is the default. New Session can choose another path or the host's home directory."
-    }
-
-    private func workingDirBinding(for snapshot: WorkingDir) -> Binding<String> {
-        Binding(
-            get: {
-                workingDirs.first(where: { $0.id == snapshot.id })?.path
-                    ?? snapshot.path
-            },
-            set: { value in
-                guard let index = workingDirs.firstIndex(where: { $0.id == snapshot.id }) else {
-                    return
-                }
-                workingDirs[index].path = value
-            }
-        )
-    }
-
-    private func moveWorkingDir(id: UUID, offset: Int) {
-        guard let source = workingDirs.firstIndex(where: { $0.id == id }) else { return }
-        let destination = source + offset
-        guard workingDirs.indices.contains(destination) else { return }
-        workingDirs.swapAt(source, destination)
-    }
-
-    private func removeWorkingDir(id: UUID) {
-        workingDirs.removeAll { $0.id == id }
-    }
-
-    private func workingDirButton(
-        _ systemImage: String,
-        label: String,
-        disabled: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.ui(9, weight: .semibold))
-                .foregroundStyle(disabled ? Theme.signal3 : Theme.signal2)
-                .frame(width: 25, height: 25)
-                .background(Theme.chassis)
-                .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .chassisHover(2)
-        .disabled(disabled)
-        .accessibilityLabel(label)
-    }
-
-    private func addWorkingDir() {
-        let dir = newWorkingDir.trimmingCharacters(in: .whitespaces)
-        guard !dir.isEmpty, !workingDirs.contains(where: { $0.path == dir }) else { return }
-        workingDirs.append(WorkingDir(path: dir))
-        newWorkingDir = ""
-    }
-
-    // MARK: New session tmux conf
-
-    private var tmuxConfSection: some View {
-        TallyFormSection(
-            "New session tmux conf",
-            detail: "One option per line, like a .tmux.conf (mouse on, "
-                + "history-limit 50000). Each line is applied when Multiplex "
-                + "creates a session with tmux set-option -t that session. "
-                + "Attaching never applies anything, and session-scoped "
-                + "options do not change sessions made on the host. Hosts "
-                + "start with mouse on and focus-events on; clear the field "
-                + "to apply nothing. "
-                + "Focus events and other server-scoped options still reach "
-                + "the whole tmux server."
-        ) {
-            TallyFormField("Options") {
-                TextField("cleared — nothing applied", text: $newSessionTmuxConf, axis: .vertical)
-                    .lineLimit(2...6)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-            }
-        }
-    }
-
-    // MARK: Session setup scripts
-
-    private var scriptsSection: some View {
-        TallyFormSection("Session setup scripts", detail: scriptsDetail) {
-            ForEach(scripts) { row in
-                TallyFormRow {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            TextField("Name", text: scriptBinding(for: row, \.name))
-                                .font(.ui(11, weight: .medium))
-                                .foregroundStyle(Theme.signal)
-                                .textFieldStyle(.plain)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 8)
-                                .background(Theme.screen)
-                                .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-
-                            let index = scripts.firstIndex(where: { $0.id == row.id }) ?? 0
-                            workingDirButton(
-                                "arrow.up",
-                                label: "Move script up",
-                                disabled: index == 0
-                            ) { moveScript(id: row.id, offset: -1) }
-                            workingDirButton(
-                                "arrow.down",
-                                label: "Move script down",
-                                disabled: index >= scripts.count - 1
-                            ) { moveScript(id: row.id, offset: 1) }
-                            workingDirButton("trash", label: "Delete script") {
-                                scripts.removeAll { $0.id == row.id }
-                            }
-                        }
-
-                        TextField(
-                            "source ~/.venv/bin/activate",
-                            text: scriptBinding(for: row, \.body),
-                            axis: .vertical
-                        )
-                        .lineLimit(2...6)
-                        .font(.mono(11))
-                        .foregroundStyle(Theme.signal)
-                        .textFieldStyle(.plain)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 8)
-                        .background(Theme.screen)
-                        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .accessibilityLabel("Script commands")
-                    }
-                }
-            }
-
-            TallyFormRow {
-                ChassisChip("ADD SCRIPT", systemImage: "plus") {
-                    scripts.append(ScriptRow())
-                }
-            }
-        }
-    }
-
-    private var scriptsDetail: String {
-        scripts.isEmpty
-            ? "New Session can type a chosen script into the fresh shell before anything launches. Add one to make it available."
-            : "New Session offers these by name; the chosen one is typed into the fresh shell before the launch command."
-    }
-
-    // MARK: Agent launch models
-
-    /// One compact field per agent, one model id per line — the tmux-conf
-    /// field's grammar. Model ids are short single tokens, so editable rows
-    /// with move/delete chrome only added height; line order IS the picker
-    /// order, and deleting a line deletes the model.
-    private var agentModelsSection: some View {
-        TallyFormSection("Agent launch models", detail: modelsDetail) {
-            ForEach(AgentKind.allCases, id: \.self) { agent in
-                TallyFormField(agent.displayName) {
-                    TextField(
-                        modelPlaceholder(for: agent),
-                        text: modelTextBinding(for: agent),
-                        axis: .vertical
-                    )
-                    .lineLimit(1...5)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .accessibilityLabel("\(agent.displayName) models, one per line")
-                }
-            }
-        }
-    }
-
-    private var modelsDetail: String {
-        "One model id per line, in picker order. New Session, the Open "
-            + "Agent shortcut, and the host widget offer them as choices, "
-            + "passed as --model; nothing is applied unless chosen at launch."
-    }
-
-    /// A hint only where the alias grammar is stable; Codex and Pi ids are
-    /// exactly what this feature saves the user from retyping, so those
-    /// fields never suggest one that would go stale.
-    private func modelPlaceholder(for agent: AgentKind) -> String {
-        switch agent {
-        case .claudeCode: "opus, sonnet, or a full model id"
-        case .codex: "model id per line"
-        case .pi: "provider/model-id per line"
-        }
-    }
-
-    private func modelTextBinding(for agent: AgentKind) -> Binding<String> {
-        Binding(
-            get: { modelText[agent] ?? "" },
-            set: { modelText[agent] = $0 }
-        )
-    }
-
-    /// Fields split back into lists, in editor order; the token gate and
-    /// dedupe happen in `Host.normalizedLaunchModels` at save.
-    private var resolvedLaunchModels: [String: [String]] {
-        var models: [String: [String]] = [:]
+    ) {
+        self.editing = editing
+        guard let host = editing else { return }
+        name = host.name
+        hostname = host.hostname
+        port = String(host.port)
+        username = host.username
+        authMethod = host.authMethod
+        password = secrets.password ?? ""
+        privateKey = secrets.privateKey ?? ""
+        privateKeyConcealed = !privateKey.isEmpty
+        passphrase = secrets.passphrase ?? ""
+        isEnabled = host.isEnabled
+        useMosh = host.useMosh
+        moshServerPath = host.moshServerPath ?? ""
+        moshPorts = host.moshPorts ?? ""
+        workingDirectories = host.workingDirs.map { WorkingDirectory(path: $0) }
+        newSessionTmuxConf = host.newSessionTmuxConf
+        scripts = host.sessionScripts.map(ScriptRow.init)
         for agent in AgentKind.allCases {
-            models[agent.rawValue] = (modelText[agent] ?? "")
-                .split(separator: "\n", omittingEmptySubsequences: true)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        return models
-    }
-
-    /// Same late-write discipline as the working-dir rows: resolve through
-    /// the row id, never a captured array index.
-    private func scriptBinding(
-        for snapshot: ScriptRow, _ keyPath: WritableKeyPath<ScriptRow, String>
-    ) -> Binding<String> {
-        Binding(
-            get: {
-                (scripts.first(where: { $0.id == snapshot.id }) ?? snapshot)[keyPath: keyPath]
-            },
-            set: { value in
-                guard let index = scripts.firstIndex(where: { $0.id == snapshot.id }) else {
-                    return
-                }
-                scripts[index][keyPath: keyPath] = value
+            let models = host.launchModels(for: agent)
+            if !models.isEmpty {
+                modelText[agent] = models.joined(separator: "\n")
             }
-        )
-    }
-
-    private func moveScript(id: UUID, offset: Int) {
-        guard let source = scripts.firstIndex(where: { $0.id == id }) else { return }
-        let destination = source + offset
-        guard scripts.indices.contains(destination) else { return }
-        scripts.swapAt(source, destination)
-    }
-
-    /// What gets saved: rows trimmed, emptied rows dropped, duplicates
-    /// (possible now that rows are editable) collapsed to the first, and a
-    /// directory typed but not yet added folded in — losing text sitting
-    /// visibly in the field would read as a bug.
-    private var resolvedWorkingDirs: [String] {
-        var seen = Set<String>()
-        var dirs: [String] = []
-        let pending = newWorkingDir.trimmingCharacters(in: .whitespaces)
-        for path in workingDirs.map(\.path) + [pending] {
-            let dir = path.trimmingCharacters(in: .whitespaces)
-            if !dir.isEmpty, seen.insert(dir).inserted { dirs.append(dir) }
         }
-        return dirs
     }
 
-    // MARK: Validation / persistence
-
-    /// Mosh is gated only when a free user tries to turn it on. A host that
-    /// already uses mosh (for example, one synced from a Pro device) remains
-    /// editable and keeps connecting; free users can always turn it off.
-    /// The saved record's value participates so that reverting your own
-    /// toggle-off within one edit session restores what the record already
-    /// has — that is not new Pro intent. The row's PRO badge mirrors this
-    /// same predicate so it appears exactly when enabling would paywall.
-    private var moshRequiresPro: Bool {
-        !entitlements.canEnableMosh(
-            currentlyEnabled: useMosh || editing?.useMosh == true
-        )
-    }
-
-    private var moshToggle: Binding<Bool> {
-        Binding(
-            get: { useMosh },
-            set: { enabled in
-                if enabled, moshRequiresPro {
-                    showingPaywall = true
-                    return
-                }
-                useMosh = enabled
-            }
-        )
-    }
-
-    private var isValid: Bool {
+    var isValid: Bool {
         !hostname.trimmingCharacters(in: .whitespaces).isEmpty
             && !username.trimmingCharacters(in: .whitespaces).isEmpty
             && Int(port) != nil
-            && moshPortsValid
+            && moshPortsAreValid
     }
 
-    /// Empty, one port, or a low:high range — mirrors what mosh-server -p
-    /// accepts. The string lands in a remote shell line, so reject anything
-    /// beyond digits and a colon outright.
-    private var moshPortsValid: Bool {
+    /// Empty, one port, or a low:high range. Rejecting every character except
+    /// digits and one colon also keeps this remote command argument inert.
+    var moshPortsAreValid: Bool {
         guard useMosh else { return true }
         let trimmed = moshPorts.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty { return true }
@@ -868,80 +114,39 @@ struct AddHostSheet: View {
         }
     }
 
-    /// `MULTIPLEX_AUTO_HOST_SETTINGS=models` scrolls to the Agent launch
-    /// models section once the sheet settles — the form is taller than one
-    /// headless frame and the simulator cannot scroll (DEBUG capture only).
-    private func scrollForVerificationIfRequested(_ proxy: ScrollViewProxy) async {
-        #if DEBUG
-        let environment = ProcessInfo.processInfo.environment
-        let target: String
-        if environment["MULTIPLEX_AUTO_HOST_SETTINGS"] == "models" {
-            target = "agent-models"
-        } else if AddHostAutoOpen.requested == .bindElsewhere {
-            target = BindPane.elsewhereID
-        } else {
-            return
-        }
-        try? await Task.sleep(for: .milliseconds(700))
-        withAnimation(nil) { proxy.scrollTo(target, anchor: .top) }
-        #endif
+    var testFingerprint: [String] {
+        [
+            hostname, port, username, authMethod.rawValue,
+            password, privateKey, passphrase,
+            useMosh ? "mosh" : "ssh", moshServerPath,
+        ]
     }
 
-    /// `MULTIPLEX_AUTO_ADD_HOST=bind|manual` picks which road this modal
-    /// opens on, so both panes can be captured headlessly (the simulator
-    /// cannot tap the choice bar). Adding always defaults to Bind.
-    private func openBindPaneForVerificationIfRequested() {
-        #if DEBUG
-        guard showsModeBar, let request = AddHostAutoOpen.requested else { return }
-        mode = request == .manual ? .manual : .bind
-        #endif
-    }
-
-    /// Resigns whichever field currently holds the keyboard. Routed through
-    /// the responder chain so it covers the SwiftUI fields and the
-    /// UIKit-backed secret fields alike, without threading FocusState
-    /// through every row.
-    private func unfocusInputs() {
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil, from: nil, for: nil
-        )
-    }
-
-    private func populate() {
-        guard let host = editing else { return }
-        name = host.name
-        hostname = host.hostname
-        port = String(host.port)
-        username = host.username
-        authMethod = host.authMethod
-        isEnabled = host.isEnabled
-        useMosh = host.useMosh
-        moshServerPath = host.moshServerPath ?? ""
-        moshPorts = host.moshPorts ?? ""
-        workingDirs = host.workingDirs.map { WorkingDir(path: $0) }
-        newSessionTmuxConf = host.newSessionTmuxConf
-        scripts = host.sessionScripts.map(ScriptRow.init)
-        modelText = [:]
-        for agent in AgentKind.allCases {
-            let models = host.launchModels(for: agent)
-            if !models.isEmpty {
-                modelText[agent] = models.joined(separator: "\n")
+    var resolvedWorkingDirectories: [String] {
+        var seen = Set<String>()
+        var directories: [String] = []
+        let pending = newWorkingDirectory.trimmingCharacters(in: .whitespaces)
+        for path in workingDirectories.map(\.path) + [pending] {
+            let directory = path.trimmingCharacters(in: .whitespaces)
+            if !directory.isEmpty, seen.insert(directory).inserted {
+                directories.append(directory)
             }
         }
-        password = KeychainStore.get(for: host.id, kind: .password) ?? ""
-        privateKey = KeychainStore.get(for: host.id, kind: .privateKey) ?? ""
-        passphrase = KeychainStore.get(for: host.id, kind: .keyPassphrase) ?? ""
-        privateKeyConcealed = !privateKey.isEmpty
+        return directories
     }
 
-    /// The form's current values as a Host record — what Save persists and
-    /// what Test Connection dials, so the two can never disagree.
-    private func formHost() -> Host {
-        // Start from the live record, not the snapshot that opened the sheet:
-        // another scene or iCloud may have updated its synced command setup
-        // while this form was open, and saving connection fields must retain it.
-        var host = editing.flatMap { store.host(id: $0.id) }
+    var resolvedLaunchModels: [String: [String]] {
+        var models: [String: [String]] = [:]
+        for agent in AgentKind.allCases {
+            models[agent.rawValue] = (modelText[agent] ?? "")
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+        return models
+    }
+
+    func host(liveHost: Host?) -> Host {
+        var host = liveHost
             ?? editing
             ?? Host(name: "", hostname: "", username: "")
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
@@ -956,18 +161,10 @@ struct AddHostSheet: View {
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
         let ports = moshPorts.trimmingCharacters(in: .whitespaces)
         host.moshPorts = ports.isEmpty ? nil : ports
-        host.workingDirs = resolvedWorkingDirs
-        // Same scrub the command builder applies as its last-line defense —
-        // what's stored is what the parser will see. A cleared field
-        // persists as empty: "apply nothing" is a choice that must survive
-        // saves and sync, never bounce back to the default.
+        host.workingDirs = resolvedWorkingDirectories
         host.newSessionTmuxConf = TmuxProbe.normalizedTmuxConf(newSessionTmuxConf) ?? ""
-        // Rows with nothing to type drop out; ids survive edits so the
-        // remembered-selection memory keeps pointing at the same script.
         host.sessionScripts = SessionScript.normalized(scripts.map(\.script))
-        // Known agents' lists come from the editor; a newer schema's agent
-        // keys pass through from the live record so this save can't drop
-        // them. The normalizer applies the launch grammar's token gate.
+
         var launchModels = host.agentLaunchModels.filter {
             AgentKind(rawValue: $0.key) == nil
         }
@@ -978,17 +175,1366 @@ struct AddHostSheet: View {
         return host
     }
 
-    private func save() {
-        let host = formHost()
+    mutating func addWorkingDirectory() {
+        let directory = newWorkingDirectory.trimmingCharacters(in: .whitespaces)
+        guard !directory.isEmpty,
+              !workingDirectories.contains(where: { $0.path == directory })
+        else { return }
+        workingDirectories.append(WorkingDirectory(path: directory))
+        newWorkingDirectory = ""
+    }
 
-        switch authMethod {
+    mutating func moveWorkingDirectory(id: UUID, offset: Int) {
+        guard let source = workingDirectories.firstIndex(where: { $0.id == id })
+        else { return }
+        let destination = source + offset
+        guard workingDirectories.indices.contains(destination) else { return }
+        workingDirectories.swapAt(source, destination)
+    }
+
+    mutating func removeWorkingDirectory(id: UUID) {
+        workingDirectories.removeAll { $0.id == id }
+    }
+
+    mutating func moveScript(id: UUID, offset: Int) {
+        guard let source = scripts.firstIndex(where: { $0.id == id }) else { return }
+        let destination = source + offset
+        guard scripts.indices.contains(destination) else { return }
+        scripts.swapAt(source, destination)
+    }
+}
+
+// MARK: - Native controller
+
+/// Native Add Host / Host Settings sheet. BIND and MANUAL are two durable
+/// roads within one controller; editing an existing host is manual-only.
+@MainActor
+final class AddHostViewController: UIViewController, UITextFieldDelegate,
+    UIGestureRecognizerDelegate, UIAdaptivePresentationControllerDelegate {
+    enum Mode: Hashable {
+        case bind
+        case manual
+    }
+
+    enum TestState: Equatable {
+        case idle
+        case running
+        case passed(headline: String, warnings: [String])
+        case failed(String)
+    }
+
+    enum Metrics {
+        static let contentMaximumWidth: CGFloat = 680
+        static let outerInset: CGFloat = 18
+        static let sectionSpacing: CGFloat = 18
+    }
+
+    typealias SecretWriter = (Host.AuthMethod, HostSecrets, UUID) -> Void
+    typealias HostWriter = (Host, Bool) -> Void
+    typealias TestRunner = (Host, HostSecrets) async -> HostTest.Outcome
+
+    let store: HostStore
+    let entitlements: EntitlementStore
+    let bind: BindController
+    private(set) var form: AddHostFormState
+    private(set) var mode: Mode = .bind
+    private(set) var testState = TestState.idle
+
+    var onDismiss: (() -> Void)?
+    /// Native DeckWindow owns the presentation queue. Interactive sheet
+    /// dismissal still belongs to this controller because it enforces the
+    /// bind-in-flight veto; this callback lets the owner release its slot
+    /// after that dismissal completes.
+    var onPresentationDismissed: (() -> Void)?
+    var presentPaywallOverride: (() -> Void)?
+    var appAppearance = AppAppearance.system {
+        didSet { applyAppearance() }
+    }
+
+    private(set) var contentStack = UIStackView()
+    private(set) var manualStack = UIStackView()
+    private(set) var bindPaneController: BindPaneViewController?
+    private(set) var modeChoiceBar: AddHostChoiceBar<Mode>?
+    private(set) var saveItem: UIBarButtonItem?
+    private(set) var cancellationItem: UIBarButtonItem!
+
+    private(set) var nameField = UITextField()
+    private(set) var hostnameField = UITextField()
+    private(set) var portField = UITextField()
+    private(set) var usernameField = UITextField()
+    private(set) var passwordField: AddHostRevealableSecretField?
+    private(set) var privateKeyView: AddHostGrowingTextView?
+    private(set) var passphraseField: AddHostRevealableSecretField?
+    private(set) var monitoringControl: SettingsBooleanRow?
+    private(set) var moshControl: SettingsBooleanRow?
+    private(set) var testChip: UIKitChassisChip?
+    private(set) var newWorkingDirectoryField = UITextField()
+    private(set) var newSessionTmuxConfView: AddHostGrowingTextView!
+    private(set) var agentModelViews: [AgentKind: AddHostGrowingTextView] = [:]
+
+    private let scrollView = UIScrollView()
+    private let activeBodyContainer = UIView()
+    private let modeDetailLabel = UILabel()
+    private var modeHeader: UIStackView?
+    private var bindContainer: UIView?
+    private var bindHeightConstraint: NSLayoutConstraint?
+    private var bindElsewhereOffset: CGFloat = 0
+
+    private var hostSection: AddHostSectionView!
+    private var monitoringSection: AddHostSectionView!
+    private var credentialsSection: AddHostSectionView!
+    private var testSection: AddHostSectionView!
+    private var workingDirectoriesSection: AddHostSectionView!
+    private var tmuxConfSection: AddHostSectionView!
+    private var scriptsSection: AddHostSectionView!
+    private var agentModelsSection: AddHostSectionView!
+    private var transportSection: AddHostSectionView!
+
+    private var workingDirectoryFields: [UUID: UITextField] = [:]
+    private var scriptNameFields: [UUID: UITextField] = [:]
+    private var scriptBodyViews: [UUID: AddHostGrowingTextView] = [:]
+    private var moshServerField: UITextField?
+    private var moshPortsField: UITextField?
+    private var moshPortsInvalidRow: UIView?
+    private var addDirectoryChip: UIKitChassisChip?
+
+    private let secretWriter: SecretWriter?
+    private let hostWriter: HostWriter?
+    private let testRunner: TestRunner?
+    private var testTask: Task<Void, Never>?
+    private var debugScrollTask: Task<Void, Never>?
+    private var observesStores = true
+    private var observationGeneration = 0
+    private var dismissalRequested = false
+    private var pendingPaywallPresentation = false
+    private var didScheduleDebugScroll = false
+
+    init(
+        store: HostStore,
+        entitlements: EntitlementStore,
+        bind: BindController,
+        editing: Host? = nil,
+        secretLoader: ((Host) -> HostSecrets)? = nil,
+        secretWriter: SecretWriter? = nil,
+        hostWriter: HostWriter? = nil,
+        testRunner: TestRunner? = nil
+    ) {
+        self.store = store
+        self.entitlements = entitlements
+        self.bind = bind
+        self.secretWriter = secretWriter
+        self.hostWriter = hostWriter
+        self.testRunner = testRunner
+        let secrets = editing.map { host in
+            secretLoader?(host) ?? HostSecrets(
+                password: KeychainStore.get(for: host.id, kind: .password),
+                privateKey: KeychainStore.get(for: host.id, kind: .privateKey),
+                passphrase: KeychainStore.get(for: host.id, kind: .keyPassphrase)
+            )
+        } ?? HostSecrets(password: nil, privateKey: nil, passphrase: nil)
+        form = AddHostFormState(editing: editing, secrets: secrets)
+        if editing != nil { mode = .manual }
+        #if DEBUG
+        if editing == nil, let request = AddHostAutoOpen.requested {
+            mode = request == .manual ? .manual : .bind
+        }
+        #endif
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    deinit {
+        observesStores = false
+        testTask?.cancel()
+        debugScrollTask?.cancel()
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = form.editing == nil ? "Add Host" : "Host Settings"
+        view.backgroundColor = UIKitChassis.chassis
+        configureNavigation()
+        configureScrollView()
+        buildManualForm()
+        if form.editing == nil { configureModeHeader() }
+        showResolvedMode()
+        observeStoresState()
+        applyAppearance()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        applyAppearance()
+        updateDismissPolicy()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        navigationController?.presentationController?.delegate = self
+        if pendingPaywallPresentation {
+            pendingPaywallPresentation = false
+            presentPaywall()
+        }
+        scheduleDebugScrollIfNeeded()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateBindHeight()
+    }
+
+    func presentationControllerShouldDismiss(
+        _ presentationController: UIPresentationController
+    ) -> Bool {
+        resolvedMode == .bind && !bind.enrollmentInFlight
+    }
+
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        clearSecrets()
+        prepareForRemoval()
+        onPresentationDismissed?()
+    }
+
+    func prepareForRemoval() {
+        observesStores = false
+        testTask?.cancel()
+        debugScrollTask?.cancel()
+        pendingPaywallPresentation = false
+        bindPaneController?.prepareForRemoval()
+        clearSecrets()
+    }
+
+    func setMode(_ mode: Mode) {
+        guard form.editing == nil, self.mode != mode else { return }
+        view.endEditing(true)
+        self.mode = mode
+        modeChoiceBar?.setSelection(mode)
+        modeDetailLabel.text = modeDetail
+        showResolvedMode()
+    }
+
+    // MARK: Root layout and navigation
+
+    private var resolvedMode: Mode {
+        form.editing == nil ? mode : .manual
+    }
+
+    private var modeDetail: String {
+        switch resolvedMode {
+        case .bind:
+            return "Run the mpx CLI on the machine you're adding and it offers "
+                + "itself — no address, user, or key to type here. Can't "
+                + "install it? Switch to MANUAL."
+        case .manual:
+            return "Type the SSH destination yourself. Nothing to install on the machine."
+        }
+    }
+
+    private func configureNavigation() {
+        navigationItem.largeTitleDisplayMode = .never
+        #if os(visionOS)
+        navigationItem.titleView = UIKitChassisLabel(title ?? "", size: 12)
+        #endif
+        cancellationItem = UIBarButtonItem(
+            title: "Cancel",
+            style: .plain,
+            target: self,
+            action: #selector(cancelPressed)
+        )
+        cancellationItem.tintColor = UIKitChassis.signal
+        navigationItem.leftBarButtonItem = cancellationItem
+
+        let save = UIBarButtonItem(
+            title: "Save",
+            style: .plain,
+            target: self,
+            action: #selector(savePressed)
+        )
+        save.accessibilityLabel = "Save"
+        saveItem = save
+    }
+
+    private func configureScrollView() {
+        scrollView.alwaysBounceVertical = true
+        #if !os(visionOS)
+        scrollView.keyboardDismissMode = .interactive
+        #endif
+        scrollView.backgroundColor = UIKitChassis.chassis
+        view.addSubview(scrollView)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            scrollView.contentLayoutGuide.widthAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.widthAnchor
+            ),
+        ])
+
+        contentStack.axis = .vertical
+        contentStack.alignment = .fill
+        contentStack.spacing = Metrics.sectionSpacing
+        scrollView.addSubview(contentStack)
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        let fillWidth = contentStack.widthAnchor.constraint(
+            equalTo: scrollView.frameLayoutGuide.widthAnchor,
+            constant: -(Metrics.outerInset * 2)
+        )
+        fillWidth.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            contentStack.topAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.topAnchor,
+                constant: Metrics.outerInset
+            ),
+            contentStack.bottomAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.bottomAnchor,
+                constant: -Metrics.outerInset
+            ),
+            contentStack.centerXAnchor.constraint(equalTo: scrollView.frameLayoutGuide.centerXAnchor),
+            contentStack.leadingAnchor.constraint(
+                greaterThanOrEqualTo: scrollView.contentLayoutGuide.leadingAnchor,
+                constant: Metrics.outerInset
+            ),
+            contentStack.trailingAnchor.constraint(
+                lessThanOrEqualTo: scrollView.contentLayoutGuide.trailingAnchor,
+                constant: -Metrics.outerInset
+            ),
+            contentStack.widthAnchor.constraint(
+                lessThanOrEqualToConstant: Metrics.contentMaximumWidth
+            ),
+            fillWidth,
+        ])
+    }
+
+    private func configureModeHeader() {
+        let bar = AddHostChoiceBar(
+            choices: [("Bind", Mode.bind), ("Manual", Mode.manual)],
+            selection: mode
+        ) { [weak self] mode in
+            self?.setMode(mode)
+        }
+        modeChoiceBar = bar
+        modeDetailLabel.font = UIKitChassis.uiFont(10)
+        modeDetailLabel.textColor = UIKitChassis.signal2
+        modeDetailLabel.numberOfLines = 0
+        modeDetailLabel.text = modeDetail
+
+        let detailHolder = UIView()
+        detailHolder.addSubview(modeDetailLabel)
+        modeDetailLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            modeDetailLabel.leadingAnchor.constraint(equalTo: detailHolder.leadingAnchor, constant: 2),
+            modeDetailLabel.trailingAnchor.constraint(equalTo: detailHolder.trailingAnchor, constant: -2),
+            modeDetailLabel.topAnchor.constraint(equalTo: detailHolder.topAnchor),
+            modeDetailLabel.bottomAnchor.constraint(equalTo: detailHolder.bottomAnchor),
+        ])
+        let header = UIStackView(arrangedSubviews: [bar, detailHolder])
+        header.axis = .vertical
+        header.alignment = .fill
+        header.spacing = 8
+        header.accessibilityIdentifier = "addhost.mode"
+        modeHeader = header
+        contentStack.addArrangedSubview(header)
+    }
+
+    private func showResolvedMode() {
+        if activeBodyContainer.superview == nil {
+            contentStack.addArrangedSubview(activeBodyContainer)
+        }
+        activeBodyContainer.subviews.forEach { $0.removeFromSuperview() }
+        let body: UIView
+        switch resolvedMode {
+        case .bind:
+            body = bindBody()
+        case .manual:
+            body = manualStack
+        }
+        activeBodyContainer.addSubview(body)
+        body.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            body.leadingAnchor.constraint(equalTo: activeBodyContainer.leadingAnchor),
+            body.trailingAnchor.constraint(equalTo: activeBodyContainer.trailingAnchor),
+            body.topAnchor.constraint(equalTo: activeBodyContainer.topAnchor),
+            body.bottomAnchor.constraint(equalTo: activeBodyContainer.bottomAnchor),
+        ])
+        updateNavigationItems()
+        updateDismissPolicy()
+        view.setNeedsLayout()
+    }
+
+    private func bindBody() -> UIView {
+        if let bindContainer { return bindContainer }
+        let controller = BindPaneViewController(bind: bind)
+        bindPaneController = controller
+        addChild(controller)
+        controller.loadViewIfNeeded()
+        let container = UIView()
+        container.addSubview(controller.view)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        let height = container.heightAnchor.constraint(equalToConstant: 1)
+        bindHeightConstraint = height
+        NSLayoutConstraint.activate([
+            controller.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            controller.view.topAnchor.constraint(equalTo: container.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            height,
+        ])
+        controller.didMove(toParent: self)
+        controller.contentSizeDidChange = { [weak self] in
+            self?.updateBindHeight()
+        }
+        controller.elsewhereOffsetDidChange = { [weak self] offset in
+            self?.bindElsewhereOffset = offset
+        }
+        bindContainer = container
+        return container
+    }
+
+    private func updateBindHeight() {
+        guard resolvedMode == .bind,
+              let controller = bindPaneController,
+              let container = bindContainer,
+              container.bounds.width > 0
+        else { return }
+        let height = controller.fittingSize(for: container.bounds.width).height
+        guard height.isFinite,
+              height > 0,
+              abs((bindHeightConstraint?.constant ?? 0) - height) > 0.5
+        else { return }
+        bindHeightConstraint?.constant = height
+        scrollView.setNeedsLayout()
+    }
+
+    private func updateNavigationItems() {
+        cancellationItem.title = resolvedMode == .bind ? "Done" : "Cancel"
+        cancellationItem.accessibilityLabel = cancellationItem.title
+        navigationItem.rightBarButtonItem = resolvedMode == .manual ? saveItem : nil
+        updateSaveAvailability()
+    }
+
+    private func updateSaveAvailability() {
+        let enabled = form.isValid
+        saveItem?.isEnabled = enabled
+        saveItem?.tintColor = enabled ? UIKitChassis.signal : UIKitChassis.signal3
+    }
+
+    private func updateDismissPolicy() {
+        let blocked = resolvedMode == .manual || bind.enrollmentInFlight
+        isModalInPresentation = blocked
+        navigationController?.isModalInPresentation = blocked
+    }
+
+    private func applyAppearance() {
+        let style: UIUserInterfaceStyle
+        switch appAppearance.resolvedOverride {
+        case nil: style = .unspecified
+        case .light: style = .light
+        case .dark: style = .dark
+        }
+        overrideUserInterfaceStyle = style
+        navigationController?.overrideUserInterfaceStyle = style
+        viewIfLoaded?.window?.overrideUserInterfaceStyle = style
+        if let navigationBar = navigationController?.navigationBar {
+            UIKitChassis.configureSheetNavigationBar(navigationBar)
+        }
+    }
+
+    // MARK: Manual form construction
+
+    private func buildManualForm() {
+        manualStack.axis = .vertical
+        manualStack.alignment = .fill
+        manualStack.spacing = Metrics.sectionSpacing
+        manualStack.accessibilityIdentifier = "addhost.manual"
+        let dismissKeyboard = UITapGestureRecognizer(
+            target: self,
+            action: #selector(manualGroundTapped)
+        )
+        dismissKeyboard.cancelsTouchesInView = false
+        dismissKeyboard.delegate = self
+        manualStack.addGestureRecognizer(dismissKeyboard)
+
+        hostSection = makeHostSection()
+        monitoringSection = makeMonitoringSection()
+        credentialsSection = AddHostSectionView(title: "Credentials", detail: nil, rows: [])
+        credentialsSection.accessibilityIdentifier = "addhost.section.credentials"
+        testSection = AddHostSectionView(title: "Signal check", detail: nil, rows: [])
+        testSection.accessibilityIdentifier = "addhost.section.signal"
+        workingDirectoriesSection = AddHostSectionView(
+            title: "New session defaults",
+            detail: nil,
+            rows: []
+        )
+        workingDirectoriesSection.accessibilityIdentifier = "addhost.section.directories"
+        tmuxConfSection = makeTmuxConfSection()
+        scriptsSection = AddHostSectionView(
+            title: "Session setup scripts",
+            detail: nil,
+            rows: []
+        )
+        scriptsSection.accessibilityIdentifier = "addhost.section.scripts"
+        agentModelsSection = makeAgentModelsSection()
+        transportSection = AddHostSectionView(title: "Transport", detail: nil, rows: [])
+        transportSection.accessibilityIdentifier = "addhost.section.transport"
+
+        [
+            hostSection,
+            monitoringSection,
+            credentialsSection,
+            testSection,
+            workingDirectoriesSection,
+            tmuxConfSection,
+            scriptsSection,
+            agentModelsSection,
+            transportSection,
+        ].forEach { manualStack.addArrangedSubview($0) }
+
+        renderCredentials()
+        renderTestSection()
+        renderWorkingDirectories()
+        renderScripts()
+        renderTransport()
+    }
+
+    private func makeHostSection() -> AddHostSectionView {
+        configureTextField(nameField, placeholder: "devbox", identifier: "addhost.name")
+        nameField.accessibilityLabel = "Name"
+        nameField.text = form.name
+        nameField.addTarget(self, action: #selector(identityFieldChanged(_:)), for: .editingChanged)
+
+        configureTextField(
+            hostnameField,
+            placeholder: "host.example.com",
+            identifier: "addhost.hostname"
+        )
+        hostnameField.text = form.hostname
+        hostnameField.accessibilityLabel = "Address"
+        hostnameField.keyboardType = .URL
+        hostnameField.autocorrectionType = .no
+        hostnameField.autocapitalizationType = .none
+        hostnameField.addTarget(self, action: #selector(identityFieldChanged(_:)), for: .editingChanged)
+
+        configureTextField(portField, placeholder: "22", identifier: "addhost.port")
+        portField.text = form.port
+        portField.accessibilityLabel = "Port"
+        portField.keyboardType = .numberPad
+        portField.addTarget(self, action: #selector(identityFieldChanged(_:)), for: .editingChanged)
+
+        configureTextField(usernameField, placeholder: "root", identifier: "addhost.username")
+        usernameField.text = form.username
+        usernameField.accessibilityLabel = "User"
+        usernameField.keyboardType = .asciiCapable
+        usernameField.autocorrectionType = .no
+        usernameField.autocapitalizationType = .none
+        usernameField.textContentType = UITextContentType(rawValue: "")
+        usernameField.addTarget(self, action: #selector(identityFieldChanged(_:)), for: .editingChanged)
+
+        let section = AddHostSectionView(
+            title: "Host identity",
+            detail: "The name labels this host on the deck. Address, port, and user "
+                + "form the SSH destination.",
+            rows: [
+                AddHostFieldRow(label: "Name", inputView: nameField),
+                AddHostFieldRow(label: "Address", inputView: hostnameField),
+                AddHostFieldRow(label: "Port", inputView: portField),
+                AddHostFieldRow(label: "User", inputView: usernameField),
+            ]
+        )
+        section.accessibilityIdentifier = "addhost.section.host"
+        return section
+    }
+
+    private func makeMonitoringSection() -> AddHostSectionView {
+        let control = SettingsBooleanRow(
+            title: "Connect on the deck",
+            isOn: form.isEnabled,
+            accessibilityHint: "Off keeps the host in the fleet without connecting to it"
+        ) { [weak self] enabled in
+            guard let self else { return }
+            self.form.isEnabled = enabled
+            self.monitoringSection.setDetail(self.monitoringDetail)
+        }
+        monitoringControl = control
+        let section = AddHostSectionView(
+            title: "Monitoring",
+            detail: monitoringDetail,
+            rows: [control]
+        )
+        section.accessibilityIdentifier = "addhost.section.monitoring"
+        return section
+    }
+
+    private var monitoringDetail: String {
+        if form.isEnabled {
+            return "The deck probes this host about every five seconds while it's in "
+                + "front, and its sessions appear as live tiles."
+        }
+        return "Off parks the host on the deck without dialling it: no probing, no tiles, "
+            + "and widgets or Shortcuts report it as disabled. Terminal windows already "
+            + "open keep running, and Signal check below still connects on demand."
+    }
+
+    private func renderCredentials() {
+        let authLabel = addHostLabel(
+            "Sign in with",
+            font: UIKitChassis.uiFont(10, weight: .semibold),
+            color: UIKitChassis.signal2
+        )
+        let choices = AddHostChoiceBar(
+            choices: Host.AuthMethod.allCases.map { ($0.label, $0) },
+            selection: form.authMethod
+        ) { [weak self] method in
+            guard let self else { return }
+            self.updateTestSensitive { $0.authMethod = method }
+            self.renderCredentials()
+        }
+        let authStack = UIStackView(arrangedSubviews: [authLabel, choices])
+        authStack.axis = .vertical
+        authStack.alignment = .fill
+        authStack.spacing = 8
+        var rows: [UIView] = [AddHostInsetRow(contentView: authStack)]
+
+        switch form.authMethod {
         case .password:
-            KeychainStore.set(password, for: host.id, kind: .password)
+            let secret = AddHostRevealableSecretField(
+                title: "Password",
+                prompt: "Required",
+                text: form.password
+            ) { [weak self] text in
+                self?.updateTestSensitive { $0.password = text }
+            }
+            secret.textField.accessibilityIdentifier = "addhost.password"
+            passwordField = secret
+            rows.append(AddHostFieldRow(label: "Password", inputView: secret))
+            credentialsSection.setDetail(
+                "Stored in iCloud Keychain, never in the host record."
+            )
         case .privateKey:
-            KeychainStore.set(privateKey, for: host.id, kind: .privateKey)
-            if !passphrase.isEmpty {
+            if form.privateKeyConcealed {
+                let reveal = makeConcealedPrivateKeyButton()
+                rows.append(AddHostFieldRow(label: "Private key", inputView: reveal))
+            } else {
+                let keyView = AddHostGrowingTextView(
+                    text: form.privateKey,
+                    placeholder: "BEGIN OPENSSH PRIVATE KEY",
+                    font: UIKitChassis.monoFont(12),
+                    minimumLines: 4,
+                    maximumLines: 8
+                )
+                keyView.accessibilityLabel = "Private key"
+                keyView.accessibilityIdentifier = "addhost.privateKey"
+                keyView.autocorrectionType = .no
+                keyView.autocapitalizationType = .none
+                keyView.textContentType = UITextContentType(rawValue: "")
+                keyView.onTextChange = { [weak self] text in
+                    self?.updateTestSensitive { $0.privateKey = text }
+                }
+                privateKeyView = keyView
+                rows.append(AddHostFieldRow(label: "Private key", inputView: keyView))
+            }
+            let secret = AddHostRevealableSecretField(
+                title: "Passphrase",
+                prompt: "Optional",
+                text: form.passphrase
+            ) { [weak self] text in
+                self?.updateTestSensitive { $0.passphrase = text }
+            }
+            secret.textField.accessibilityIdentifier = "addhost.passphrase"
+            passphraseField = secret
+            rows.append(AddHostFieldRow(label: "Passphrase", inputView: secret))
+            credentialsSection.setDetail(
+                "The OpenSSH key is stored in iCloud Keychain. Leave its passphrase "
+                    + "blank to enter it when connecting, or save the passphrase there too."
+            )
+        }
+        credentialsSection.setRows(rows)
+    }
+
+    private func makeConcealedPrivateKeyButton() -> UIView {
+        let button = UIButton(type: .custom)
+        button.backgroundColor = .clear
+        button.hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        button.accessibilityLabel = "Edit private key"
+        button.accessibilityHint = "Shows the saved key"
+        button.accessibilityIdentifier = "addhost.privateKeyConcealed"
+        let bullets = addHostLabel(
+            String(repeating: "•", count: 8),
+            font: UIKitChassis.monoFont(12),
+            color: UIKitChassis.signal
+        )
+        let content = UIStackView(arrangedSubviews: [
+            bullets,
+            addHostFlexibleSpacer(minimumWidth: 12),
+            UIKitChassisLabel("EDIT", size: 8, color: UIKitChassis.signal2),
+        ])
+        content.axis = .horizontal
+        content.alignment = .center
+        content.spacing = 12
+        content.isUserInteractionEnabled = false
+        button.addSubview(content)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: button.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: button.trailingAnchor),
+            content.topAnchor.constraint(equalTo: button.topAnchor),
+            content.bottomAnchor.constraint(equalTo: button.bottomAnchor),
+        ])
+        button.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            self.form.privateKeyConcealed = false
+            self.renderCredentials()
+        }, for: .touchUpInside)
+        return button
+    }
+
+    private func makeTmuxConfSection() -> AddHostSectionView {
+        let textView = AddHostGrowingTextView(
+            text: form.newSessionTmuxConf,
+            placeholder: "cleared — nothing applied",
+            font: UIKitChassis.monoFont(12),
+            minimumLines: 2,
+            maximumLines: 6
+        )
+        textView.autocorrectionType = .no
+        textView.autocapitalizationType = .none
+        textView.accessibilityLabel = "Options"
+        textView.accessibilityIdentifier = "addhost.tmuxConf"
+        textView.onTextChange = { [weak self] text in
+            self?.form.newSessionTmuxConf = text
+        }
+        newSessionTmuxConfView = textView
+        let section = AddHostSectionView(
+            title: "New session tmux conf",
+            detail: "One option per line, like a .tmux.conf (mouse on, history-limit "
+                + "50000). Each line is applied when Multiplex creates a session with "
+                + "tmux set-option -t that session. Attaching never applies anything, "
+                + "and session-scoped options do not change sessions made on the host. "
+                + "Hosts start with mouse on and focus-events on; clear the field to "
+                + "apply nothing. Focus events and other server-scoped options still "
+                + "reach the whole tmux server.",
+            rows: [AddHostFieldRow(label: "Options", inputView: textView)]
+        )
+        section.accessibilityIdentifier = "addhost.section.tmuxConf"
+        return section
+    }
+
+    private func makeAgentModelsSection() -> AddHostSectionView {
+        var rows: [UIView] = []
+        for agent in AgentKind.allCases {
+            let textView = AddHostGrowingTextView(
+                text: form.modelText[agent] ?? "",
+                placeholder: modelPlaceholder(for: agent),
+                font: UIKitChassis.monoFont(12),
+                minimumLines: 1,
+                maximumLines: 5
+            )
+            textView.autocorrectionType = .no
+            textView.autocapitalizationType = .none
+            textView.accessibilityLabel = "\(agent.displayName) models, one per line"
+            textView.accessibilityIdentifier = "addhost.models.\(agent.rawValue)"
+            textView.onTextChange = { [weak self] text in
+                self?.form.modelText[agent] = text
+            }
+            agentModelViews[agent] = textView
+            rows.append(AddHostFieldRow(label: agent.displayName, inputView: textView))
+        }
+        let section = AddHostSectionView(
+            title: "Agent launch models",
+            detail: "One model id per line, in picker order. New Session, the Open Agent "
+                + "shortcut, and the host widget offer them as choices, passed as "
+                + "--model; nothing is applied unless chosen at launch.",
+            rows: rows
+        )
+        section.accessibilityIdentifier = "addhost.section.agentModels"
+        return section
+    }
+
+    private func modelPlaceholder(for agent: AgentKind) -> String {
+        switch agent {
+        case .claudeCode: return "opus, sonnet, or a full model id"
+        case .codex: return "model id per line"
+        case .pi: return "provider/model-id per line"
+        }
+    }
+
+    // MARK: Signal check
+
+    private var testDetail: String {
+        form.useMosh
+            ? "Signs in over SSH with the settings above, then looks for tmux and "
+                + "mosh-server on the host."
+            : "Signs in over SSH with the settings above, then looks for tmux on the host."
+    }
+
+    private func renderTestSection() {
+        let chip = UIKitChassisChip(
+            "TEST CONNECTION",
+            accessibilityLabel: "Test connection"
+        ) { [weak self] in
+            self?.runTest()
+        }
+        testChip = chip
+        let canTest = form.isValid && testState != .running
+        setChip(chip, enabled: canTest)
+        let testRowStack = UIStackView(arrangedSubviews: [chip, addHostFlexibleSpacer()])
+        testRowStack.axis = .horizontal
+        testRowStack.alignment = .center
+        testRowStack.spacing = 12
+        if testState == .running {
+            testRowStack.addArrangedSubview(AddHostTallyLamp(
+                caption: "TESTING",
+                color: TallyPalette.caution
+            ))
+        }
+        var rows: [UIView] = [AddHostInsetRow(contentView: testRowStack)]
+        switch testState {
+        case .idle, .running:
+            break
+        case .passed(let headline, let warnings):
+            let connected = UIStackView(arrangedSubviews: [
+                AddHostTallyLamp(caption: "CONNECTED", color: TallyPalette.ok),
+                addHostLabel(
+                    headline,
+                    font: UIKitChassis.uiFont(11, weight: .medium),
+                    color: UIKitChassis.signal
+                ),
+            ])
+            connected.axis = .horizontal
+            connected.alignment = .center
+            connected.spacing = 10
+            let result = UIStackView(arrangedSubviews: [connected])
+            result.axis = .vertical
+            result.alignment = .fill
+            result.spacing = 10
+            for warning in warnings {
+                let warningLabel = addHostLabel(
+                    warning,
+                    font: UIKitChassis.uiFont(10),
+                    color: UIKitChassis.signal2
+                )
+                let row = UIStackView(arrangedSubviews: [
+                    AddHostTallyLamp(caption: "CHECK", color: TallyPalette.caution),
+                    warningLabel,
+                ])
+                row.axis = .horizontal
+                row.alignment = .top
+                row.spacing = 10
+                result.addArrangedSubview(row)
+            }
+            rows.append(AddHostInsetRow(contentView: result))
+        case .failed(let message):
+            let failure = UIStackView(arrangedSubviews: [
+                AddHostTallyLamp(caption: "NO SIGNAL", color: TallyPalette.caution),
+                addHostLabel(
+                    message,
+                    font: UIKitChassis.uiFont(11),
+                    color: UIKitChassis.signal
+                ),
+            ])
+            failure.axis = .horizontal
+            failure.alignment = .top
+            failure.spacing = 10
+            rows.append(AddHostInsetRow(contentView: failure))
+        }
+        testSection.setDetail(testDetail)
+        testSection.setRows(rows)
+    }
+
+    private func runTest() {
+        guard form.isValid, testState != .running else { return }
+        testTask?.cancel()
+        testState = .running
+        renderTestSection()
+        let host = formHost()
+        let secrets = currentSecrets
+        let fingerprint = form.testFingerprint
+        let runner = testRunner
+        testTask = Task { [weak self] in
+            let outcome: HostTest.Outcome
+            if let runner {
+                outcome = await runner(host, secrets)
+            } else {
+                outcome = await HostTest.run(host: host, secrets: secrets)
+            }
+            guard let self,
+                  !Task.isCancelled,
+                  fingerprint == self.form.testFingerprint
+            else { return }
+            switch outcome {
+            case .connected(let report):
+                var warnings: [String] = []
+                if !report.tmuxFound {
+                    warnings.append(
+                        "tmux wasn't found on the host — the deck can't list sessions "
+                            + "there. Plain shells still work."
+                    )
+                }
+                if report.moshServerFound == false {
+                    warnings.append(
+                        "mosh-server wasn't found — mosh attaches will fail. Install it "
+                            + "on the host or set its path below."
+                    )
+                }
+                self.testState = .passed(
+                    headline: "Connected to \(host.hostname) as \(host.username).",
+                    warnings: warnings
+                )
+            case .failed(let message):
+                self.testState = .failed(message)
+            }
+            self.renderTestSection()
+        }
+    }
+
+    private func updateTestSensitive(_ mutation: (inout AddHostFormState) -> Void) {
+        let fingerprint = form.testFingerprint
+        mutation(&form)
+        if fingerprint != form.testFingerprint, testState != .idle {
+            testTask?.cancel()
+            testState = .idle
+            renderTestSection()
+        }
+        updateSaveAvailability()
+    }
+
+    // MARK: Working directories
+
+    private var workingDirectoriesDetail: String {
+        form.workingDirectories.isEmpty
+            ? "New sessions start in the host's home directory. Add paths to make them "
+                + "available in New Session."
+            : "The first path is the default. New Session can choose another path or "
+                + "the host's home directory."
+    }
+
+    private func renderWorkingDirectories() {
+        workingDirectoryFields.removeAll()
+        var rows: [UIView] = []
+        for directory in form.workingDirectories {
+            let field = UITextField()
+            configureInlineField(
+                field,
+                text: directory.path,
+                placeholder: "Directory",
+                font: UIKitChassis.monoFont(11)
+            )
+            field.accessibilityLabel = "Directory"
+            field.accessibilityIdentifier = "addhost.directory.\(directory.id.uuidString)"
+            field.autocorrectionType = .no
+            field.autocapitalizationType = .none
+            field.addAction(UIAction { [weak self, weak field] _ in
+                guard let self,
+                      let field,
+                      let index = self.form.workingDirectories.firstIndex(
+                        where: { $0.id == directory.id }
+                      )
+                else { return }
+                self.form.workingDirectories[index].path = field.text ?? ""
+            }, for: .editingChanged)
+            workingDirectoryFields[directory.id] = field
+
+            let index = form.workingDirectories.firstIndex(where: { $0.id == directory.id }) ?? 0
+            let label = UIKitChassisLabel(
+                directory.id == form.workingDirectories.first?.id ? "DEFAULT" : "PATH",
+                size: 8,
+                color: directory.id == form.workingDirectories.first?.id
+                    ? UIKitChassis.signal2
+                    : UIKitChassis.signal3
+            )
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.widthAnchor.constraint(equalToConstant: 54).isActive = true
+            let row = UIStackView(arrangedSubviews: [
+                label,
+                AddHostInlineWell(contentView: field),
+                AddHostIconButton(
+                    systemImage: "arrow.up",
+                    accessibilityLabel: "Move directory up",
+                    enabled: index > 0
+                ) { [weak self] in
+                    self?.form.moveWorkingDirectory(id: directory.id, offset: -1)
+                    self?.renderWorkingDirectories()
+                },
+                AddHostIconButton(
+                    systemImage: "arrow.down",
+                    accessibilityLabel: "Move directory down",
+                    enabled: index < form.workingDirectories.count - 1
+                ) { [weak self] in
+                    self?.form.moveWorkingDirectory(id: directory.id, offset: 1)
+                    self?.renderWorkingDirectories()
+                },
+                AddHostIconButton(
+                    systemImage: "trash",
+                    accessibilityLabel: "Delete directory"
+                ) { [weak self] in
+                    self?.form.removeWorkingDirectory(id: directory.id)
+                    self?.renderWorkingDirectories()
+                },
+            ])
+            row.axis = .horizontal
+            row.alignment = .center
+            row.spacing = 8
+            rows.append(AddHostInsetRow(contentView: row))
+        }
+
+        configureInlineField(
+            newWorkingDirectoryField,
+            text: form.newWorkingDirectory,
+            placeholder: "~/projects/app",
+            font: UIKitChassis.monoFont(11)
+        )
+        newWorkingDirectoryField.accessibilityLabel = "Add directory"
+        newWorkingDirectoryField.accessibilityIdentifier = "addhost.newDirectory"
+        newWorkingDirectoryField.autocorrectionType = .no
+        newWorkingDirectoryField.autocapitalizationType = .none
+        newWorkingDirectoryField.returnKeyType = .done
+        newWorkingDirectoryField.delegate = self
+        newWorkingDirectoryField.removeTarget(
+            self,
+            action: #selector(newDirectoryChanged),
+            for: .editingChanged
+        )
+        newWorkingDirectoryField.addTarget(
+            self,
+            action: #selector(newDirectoryChanged),
+            for: .editingChanged
+        )
+        let add = UIKitChassisChip(
+            "ADD",
+            systemImage: "plus",
+            accessibilityLabel: "Add directory"
+        ) { [weak self] in self?.addWorkingDirectory() }
+        addDirectoryChip = add
+        updateAddDirectoryAvailability()
+        let addRow = UIStackView(arrangedSubviews: [
+            AddHostInlineWell(contentView: newWorkingDirectoryField),
+            add,
+        ])
+        addRow.axis = .horizontal
+        addRow.alignment = .center
+        addRow.spacing = 8
+        let addLabel = addHostLabel(
+            "Add directory",
+            font: UIKitChassis.uiFont(10, weight: .semibold),
+            color: UIKitChassis.signal2
+        )
+        let addStack = UIStackView(arrangedSubviews: [addLabel, addRow])
+        addStack.axis = .vertical
+        addStack.alignment = .fill
+        addStack.spacing = 7
+        rows.append(AddHostInsetRow(contentView: addStack))
+        workingDirectoriesSection.setDetail(workingDirectoriesDetail)
+        workingDirectoriesSection.setRows(rows)
+    }
+
+    private func addWorkingDirectory() {
+        let before = form.workingDirectories.count
+        form.addWorkingDirectory()
+        guard form.workingDirectories.count != before else { return }
+        renderWorkingDirectories()
+    }
+
+    private func updateAddDirectoryAvailability() {
+        let enabled = !form.newWorkingDirectory
+            .trimmingCharacters(in: .whitespaces).isEmpty
+        if let addDirectoryChip { setChip(addDirectoryChip, enabled: enabled) }
+    }
+
+    // MARK: Setup scripts
+
+    private var scriptsDetail: String {
+        form.scripts.isEmpty
+            ? "New Session can type a chosen script into the fresh shell before anything "
+                + "launches. Add one to make it available."
+            : "New Session offers these by name; the chosen one is typed into the fresh "
+                + "shell before the launch command."
+    }
+
+    private func renderScripts() {
+        scriptNameFields.removeAll()
+        scriptBodyViews.removeAll()
+        var rows: [UIView] = []
+        for script in form.scripts {
+            let name = UITextField()
+            configureInlineField(
+                name,
+                text: script.name,
+                placeholder: "Name",
+                font: UIKitChassis.uiFont(11, weight: .medium)
+            )
+            name.autocorrectionType = .no
+            name.autocapitalizationType = .none
+            name.accessibilityLabel = "Script name"
+            name.accessibilityIdentifier = "addhost.scriptName.\(script.id.uuidString)"
+            name.addAction(UIAction { [weak self, weak name] _ in
+                guard let self,
+                      let name,
+                      let index = self.form.scripts.firstIndex(where: { $0.id == script.id })
+                else { return }
+                self.form.scripts[index].name = name.text ?? ""
+            }, for: .editingChanged)
+            scriptNameFields[script.id] = name
+
+            let index = form.scripts.firstIndex(where: { $0.id == script.id }) ?? 0
+            let header = UIStackView(arrangedSubviews: [
+                AddHostInlineWell(contentView: name),
+                AddHostIconButton(
+                    systemImage: "arrow.up",
+                    accessibilityLabel: "Move script up",
+                    enabled: index > 0
+                ) { [weak self] in
+                    self?.form.moveScript(id: script.id, offset: -1)
+                    self?.renderScripts()
+                },
+                AddHostIconButton(
+                    systemImage: "arrow.down",
+                    accessibilityLabel: "Move script down",
+                    enabled: index < form.scripts.count - 1
+                ) { [weak self] in
+                    self?.form.moveScript(id: script.id, offset: 1)
+                    self?.renderScripts()
+                },
+                AddHostIconButton(
+                    systemImage: "trash",
+                    accessibilityLabel: "Delete script"
+                ) { [weak self] in
+                    self?.form.scripts.removeAll { $0.id == script.id }
+                    self?.renderScripts()
+                },
+            ])
+            header.axis = .horizontal
+            header.alignment = .center
+            header.spacing = 8
+
+            let body = AddHostGrowingTextView(
+                text: script.body,
+                placeholder: "source ~/.venv/bin/activate",
+                font: UIKitChassis.monoFont(11),
+                minimumLines: 2,
+                maximumLines: 6
+            )
+            body.autocorrectionType = .no
+            body.autocapitalizationType = .none
+            body.accessibilityLabel = "Script commands"
+            body.accessibilityIdentifier = "addhost.scriptBody.\(script.id.uuidString)"
+            body.onTextChange = { [weak self] text in
+                guard let self,
+                      let index = self.form.scripts.firstIndex(where: { $0.id == script.id })
+                else { return }
+                self.form.scripts[index].body = text
+            }
+            scriptBodyViews[script.id] = body
+            let bodyWell = AddHostInlineWell(contentView: body)
+            let content = UIStackView(arrangedSubviews: [header, bodyWell])
+            content.axis = .vertical
+            content.alignment = .fill
+            content.spacing = 8
+            rows.append(AddHostInsetRow(contentView: content))
+        }
+
+        let add = UIKitChassisChip(
+            "ADD SCRIPT",
+            systemImage: "plus",
+            accessibilityLabel: "Add script"
+        ) { [weak self] in
+            self?.form.scripts.append(AddHostFormState.ScriptRow())
+            self?.renderScripts()
+        }
+        rows.append(AddHostInsetRow(contentView: addHostLeadingView(add)))
+        scriptsSection.setDetail(scriptsDetail)
+        scriptsSection.setRows(rows)
+    }
+
+    // MARK: Transport
+
+    private var moshRequiresPro: Bool {
+        !entitlements.canEnableMosh(
+            currentlyEnabled: form.useMosh || form.editing?.useMosh == true
+        )
+    }
+
+    private var transportDetail: String {
+        if form.useMosh {
+            return "Terminals attach over UDP and survive roaming or sleep. SSH still "
+                + "signs in, starts mosh-server, and probes the deck."
+        }
+        return "SSH carries both the control connection and attached terminals."
+    }
+
+    private func renderTransport() {
+        moshPortsInvalidRow = nil
+        let requiresPro = moshRequiresPro
+        let control = SettingsBooleanRow(
+            title: "Connect with mosh",
+            isOn: form.useMosh,
+            status: requiresPro ? "PRO" : nil,
+            statusIsProminent: true,
+            optimisticallyUpdates: !requiresPro,
+            accessibilityHint: requiresPro ? "Requires Multiplex Pro" : nil
+        ) { [weak self] enabled in
+            guard let self else { return }
+            if enabled && self.moshRequiresPro {
+                self.presentPaywall()
+                Task { @MainActor [weak self] in self?.renderTransport() }
+                return
+            }
+            self.updateTestSensitive { $0.useMosh = enabled }
+            self.renderTransport()
+            self.renderTestSection()
+        }
+        moshControl = control
+        var rows: [UIView] = [control]
+        if form.useMosh {
+            let server = UITextField()
+            configureTextField(
+                server,
+                placeholder: "mosh-server",
+                identifier: "addhost.moshServer"
+            )
+            server.text = form.moshServerPath
+            server.accessibilityLabel = "mosh-server"
+            server.autocorrectionType = .no
+            server.autocapitalizationType = .none
+            server.addTarget(self, action: #selector(moshFieldChanged(_:)), for: .editingChanged)
+            moshServerField = server
+            rows.append(AddHostFieldRow(label: "mosh-server", inputView: server))
+
+            let ports = UITextField()
+            configureTextField(
+                ports,
+                placeholder: "60000:61000",
+                identifier: "addhost.moshPorts"
+            )
+            ports.text = form.moshPorts
+            ports.accessibilityLabel = "UDP port or range"
+            ports.keyboardType = .numbersAndPunctuation
+            ports.autocorrectionType = .no
+            ports.autocapitalizationType = .none
+            ports.addTarget(self, action: #selector(moshFieldChanged(_:)), for: .editingChanged)
+            moshPortsField = ports
+            rows.append(AddHostFieldRow(label: "UDP port or range", inputView: ports))
+
+            let invalid = UIStackView(arrangedSubviews: [
+                AddHostTallyLamp(caption: "INVALID", color: TallyPalette.caution),
+                addHostLabel(
+                    "Use one port or a range from 1 to 65535.",
+                    font: UIKitChassis.uiFont(10),
+                    color: UIKitChassis.signal2
+                ),
+            ])
+            invalid.axis = .horizontal
+            invalid.alignment = .firstBaseline
+            invalid.spacing = 10
+            let invalidRow = AddHostInsetRow(contentView: invalid)
+            invalidRow.isHidden = form.moshPortsAreValid
+            moshPortsInvalidRow = invalidRow
+            rows.append(invalidRow)
+        } else {
+            moshServerField = nil
+            moshPortsField = nil
+            moshPortsInvalidRow = nil
+        }
+        transportSection.setDetail(transportDetail)
+        transportSection.setRows(rows)
+        updateSaveAvailability()
+    }
+
+    // MARK: Observation / entitlement gates
+
+    private func observeStoresState() {
+        guard observesStores, isViewLoaded else { return }
+        observationGeneration += 1
+        let generation = observationGeneration
+        let snapshot = withObservationTracking {
+            (
+                entitlements.isPro,
+                bind.needsProForHostLimit,
+                bind.enrollmentInFlight
+            )
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      self.observesStores,
+                      self.observationGeneration == generation
+                else { return }
+                self.observeStoresState()
+            }
+        }
+        renderStoresState(
+            isPro: snapshot.0,
+            needsPro: snapshot.1,
+            enrollmentInFlight: snapshot.2
+        )
+    }
+
+    private func renderStoresState(
+        isPro: Bool,
+        needsPro: Bool,
+        enrollmentInFlight: Bool
+    ) {
+        _ = isPro
+        updateDismissPolicy()
+        if resolvedMode == .manual { renderTransport() }
+        guard needsPro else { return }
+        bind.needsProForHostLimit = false
+        presentPaywall()
+    }
+
+    private func presentPaywall() {
+        if let presentPaywallOverride {
+            presentPaywallOverride()
+            return
+        }
+        guard isViewLoaded, view.window != nil else {
+            pendingPaywallPresentation = true
+            return
+        }
+        guard presentedViewController == nil else { return }
+        let controller = ProPaywallViewController(entitlements: entitlements)
+        controller.appAppearance = appAppearance
+        let navigation = UINavigationController(rootViewController: controller)
+        controller.onDone = { [weak navigation] in navigation?.dismiss(animated: true) }
+        present(navigation, animated: true)
+    }
+
+    // MARK: Save / cancel
+
+    private var currentSecrets: HostSecrets {
+        HostSecrets(
+            password: form.authMethod == .password ? form.password : nil,
+            privateKey: form.authMethod == .privateKey ? form.privateKey : nil,
+            passphrase: form.authMethod == .privateKey && !form.passphrase.isEmpty
+                ? form.passphrase
+                : nil
+        )
+    }
+
+    func formHost() -> Host {
+        let live = form.editing.flatMap { store.host(id: $0.id) }
+        return form.host(liveHost: live)
+    }
+
+    private func persistSecrets(for host: Host) {
+        let secrets = HostSecrets(
+            password: form.password,
+            privateKey: form.privateKey,
+            passphrase: form.passphrase.isEmpty ? nil : form.passphrase
+        )
+        if let secretWriter {
+            secretWriter(form.authMethod, secrets, host.id)
+            return
+        }
+        switch form.authMethod {
+        case .password:
+            KeychainStore.set(form.password, for: host.id, kind: .password)
+        case .privateKey:
+            KeychainStore.set(form.privateKey, for: host.id, kind: .privateKey)
+            if !form.passphrase.isEmpty {
                 SSHKeyPassphraseSession.accept(
-                    passphrase,
+                    form.passphrase,
                     for: host.id,
                     saveToICloud: true
                 )
@@ -996,8 +1542,16 @@ struct AddHostSheet: View {
                 SSHKeyPassphraseSession.clear(for: host.id)
             }
         }
+    }
 
-        if editing == nil {
+    private func save() {
+        guard form.isValid else { return }
+        let host = formHost()
+        persistSecrets(for: host)
+        let isNew = form.editing == nil
+        if let hostWriter {
+            hostWriter(host, isNew)
+        } else if isNew {
             store.add(host)
         } else {
             store.update(host)
@@ -1005,179 +1559,707 @@ struct AddHostSheet: View {
         clearSecretsAndDismiss()
     }
 
-    /// AutoFill offers "Save to Passwords" from whatever text still sits in
-    /// a secure field when the hosting view controller closes — so the sheet
-    /// must close with every secret field empty (the Keychain already holds
-    /// the secrets). Dismissal waits one runloop turn: it must not start
-    /// until SwiftUI has pushed the emptied strings into the UIKit fields,
-    /// or teardown snapshots the old text and the prompt fires anyway.
+    private func clearSecrets() {
+        form.password = ""
+        form.privateKey = ""
+        form.passphrase = ""
+        passwordField?.setText("")
+        privateKeyView?.setText("", notify: false)
+        passphraseField?.setText("")
+    }
+
     private func clearSecretsAndDismiss() {
-        password = ""
-        privateKey = ""
-        passphrase = ""
-        DispatchQueue.main.async { dismiss() }
-    }
-}
-
-/// A secret field with an eye toggle: bullets normally, the plain string
-/// while revealed. One binding backs both, so toggling never loses what was
-/// typed. The masking is drawn app-side (`MaskedSecretField`) instead of
-/// `isSecureTextEntry`: modern iOS hard-wires the Passwords QuickType bar
-/// and the save-to-Passwords prompt to secure entry — every content-type
-/// opt-out is ignored — and one secure field marks the whole sheet as a
-/// login form, dragging User and Private key into the same treatment.
-/// Internal (not file-private) because BindPane's KEY PASSPHRASE field is
-/// the same control under the same rules.
-struct RevealableSecureField: View {
-    let title: String
-    let prompt: String
-    @Binding var text: String
-
-    @State private var revealed = false
-
-    init(_ title: String, prompt: String? = nil, text: Binding<String>) {
-        self.title = title
-        self.prompt = prompt ?? title
-        _text = text
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            MaskedSecretField(
-                title: title,
-                prompt: prompt,
-                text: $text,
-                revealed: revealed
-            )
-            .frame(maxWidth: .infinity)
-            Button {
-                revealed.toggle()
-            } label: {
-                Image(systemName: revealed ? "eye.slash" : "eye")
-                    .font(.ui(10, weight: .semibold))
-                    .frame(width: 24, height: 24)
+        guard !dismissalRequested else { return }
+        dismissalRequested = true
+        clearSecrets()
+        bindPaneController?.prepareForRemoval()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if let onDismiss {
+                onDismiss()
+            } else {
+                navigationController?.dismiss(animated: true)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.signal2)
-            .chassisHover(2)
-            .accessibilityLabel(revealed ? "Hide \(title)" : "Show \(title)")
         }
     }
-}
 
-/// UIKit-backed secret entry that never sets `isSecureTextEntry`. The field's
-/// UIKit text is only ever bullets (or the revealed plain string); the real
-/// secret lives in the SwiftUI binding, edited by mapping the change range
-/// onto it — one bullet per Character keeps UIKit's UTF-16 ranges aligned
-/// with Character indices. Copy/cut/select are refused while masked, so the
-/// bullets can't be round-tripped out through the edit menu.
-private struct MaskedSecretField: UIViewRepresentable {
-    let title: String
-    let prompt: String
-    @Binding var text: String
-    var revealed: Bool
+    @objc private func cancelPressed() {
+        clearSecretsAndDismiss()
+    }
 
-    func makeUIView(context: Context) -> SecretTextField {
-        let field = SecretTextField()
-        field.font = .monospacedSystemFont(
-            ofSize: 12 * Theme.typeScale,
-            weight: .regular
-        )
-        field.textColor = UIColor(Theme.signal)
+    @objc private func savePressed() {
+        save()
+    }
+
+    // MARK: Field actions
+
+    @objc private func identityFieldChanged(_ sender: UITextField) {
+        if sender === nameField {
+            form.name = sender.text ?? ""
+        } else if sender === hostnameField {
+            updateTestSensitive { $0.hostname = sender.text ?? "" }
+        } else if sender === portField {
+            updateTestSensitive { $0.port = sender.text ?? "" }
+        } else if sender === usernameField {
+            updateTestSensitive { $0.username = sender.text ?? "" }
+        }
+        updateSaveAvailability()
+        if testState != .idle { renderTestSection() }
+    }
+
+    @objc private func moshFieldChanged(_ sender: UITextField) {
+        if sender === moshServerField {
+            updateTestSensitive { $0.moshServerPath = sender.text ?? "" }
+        } else if sender === moshPortsField {
+            form.moshPorts = sender.text ?? ""
+            moshPortsInvalidRow?.isHidden = form.moshPortsAreValid
+        }
+        updateSaveAvailability()
+    }
+
+    @objc private func newDirectoryChanged() {
+        form.newWorkingDirectory = newWorkingDirectoryField.text ?? ""
+        updateAddDirectoryAvailability()
+    }
+
+    @objc private func manualGroundTapped() {
+        view.endEditing(true)
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        if textField === newWorkingDirectoryField {
+            addWorkingDirectory()
+        } else {
+            textField.resignFirstResponder()
+        }
+        return true
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldReceive touch: UITouch
+    ) -> Bool {
+        var candidate = touch.view
+        while let view = candidate, view !== manualStack {
+            if view is UIControl || view is UITextView || view is UIKitChassisChip {
+                return false
+            }
+            candidate = view.superview
+        }
+        return true
+    }
+
+    // MARK: Helpers
+
+    private func configureTextField(
+        _ field: UITextField,
+        placeholder: String,
+        identifier: String
+    ) {
+        field.font = UIKitChassis.monoFont(12)
+        field.textColor = UIKitChassis.signal
+        field.tintColor = UIKitChassis.signal
         field.attributedPlaceholder = NSAttributedString(
-            string: prompt,
-            attributes: [.foregroundColor: UIColor(Theme.signal3)]
+            string: placeholder,
+            attributes: [.foregroundColor: UIKitChassis.signal3]
         )
-        field.autocorrectionType = .no
-        field.spellCheckingType = .no
-        field.smartQuotesType = .no
-        field.smartDashesType = .no
-        field.smartInsertDeleteType = .no
-        field.autocapitalizationType = .none
-        field.keyboardType = .asciiCapable
-        field.textContentType = UITextContentType(rawValue: "")
-        field.accessibilityLabel = title
-        field.delegate = context.coordinator
-        field.addTarget(
-            context.coordinator,
-            action: #selector(Coordinator.editingChanged),
-            for: .editingChanged
-        )
+        field.borderStyle = .none
+        field.accessibilityIdentifier = identifier
+        field.delegate = self
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return field
     }
 
-    func updateUIView(_ field: SecretTextField, context: Context) {
-        context.coordinator.text = $text
-        context.coordinator.revealed = revealed
-        field.masksEditActions = !revealed
-        let desired = revealed ? text : Self.bullets(text.count)
-        // No-op while the coordinator itself just wrote this value, so the
-        // caret survives ordinary typing; external writes (populate, clears,
-        // the reveal toggle) repaint and drop the caret to the end.
-        if field.text != desired {
-            field.text = desired
-        }
+    private func configureInlineField(
+        _ field: UITextField,
+        text: String,
+        placeholder: String,
+        font: UIFont
+    ) {
+        field.text = text
+        field.font = font
+        field.textColor = UIKitChassis.signal
+        field.tintColor = UIKitChassis.signal
+        field.attributedPlaceholder = NSAttributedString(
+            string: placeholder,
+            attributes: [.foregroundColor: UIKitChassis.signal3]
+        )
+        field.borderStyle = .none
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, revealed: revealed)
+    private func setChip(_ chip: UIKitChassisChip, enabled: Bool) {
+        chip.isUserInteractionEnabled = enabled
+        chip.alpha = enabled ? 1 : 0.45
+        chip.accessibilityTraits = .button
+        if !enabled { chip.accessibilityTraits.insert(.notEnabled) }
     }
 
-    static func bullets(_ count: Int) -> String {
-        String(repeating: "\u{2022}", count: count)
-    }
+    // MARK: DEBUG scrolling
 
-    final class Coordinator: NSObject, UITextFieldDelegate {
-        var text: Binding<String>
-        var revealed: Bool
-
-        init(text: Binding<String>, revealed: Bool) {
-            self.text = text
-            self.revealed = revealed
-        }
-
-        func textField(
-            _ field: UITextField,
-            shouldChangeCharactersIn range: NSRange,
-            replacementString string: String
-        ) -> Bool {
-            guard !revealed else { return true }
-            var chars = Array(text.wrappedValue)
-            let lower = min(range.location, chars.count)
-            let upper = min(range.location + range.length, chars.count)
-            chars.replaceSubrange(lower..<upper, with: Array(string))
-            text.wrappedValue = String(chars)
-            field.text = MaskedSecretField.bullets(chars.count)
-            let caret = lower + string.count
-            if let position = field.position(
-                from: field.beginningOfDocument,
-                offset: caret
-            ) {
-                field.selectedTextRange = field.textRange(
-                    from: position,
-                    to: position
-                )
+    private func scheduleDebugScrollIfNeeded() {
+        #if DEBUG
+        guard !didScheduleDebugScroll else { return }
+        let shouldScrollModels = ProcessInfo.processInfo.environment[
+            "MULTIPLEX_AUTO_HOST_SETTINGS"
+        ] == "models"
+        let shouldScrollElsewhere = AddHostAutoOpen.requested == .bindElsewhere
+        guard shouldScrollModels || shouldScrollElsewhere else { return }
+        didScheduleDebugScroll = true
+        debugScrollTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard let self, !Task.isCancelled else { return }
+            let targetY: CGFloat
+            if shouldScrollModels {
+                targetY = self.agentModelsSection.convert(.zero, to: self.scrollView).y
+            } else if let bindContainer = self.bindContainer {
+                targetY = bindContainer.convert(
+                    CGPoint(x: 0, y: self.bindElsewhereOffset),
+                    to: self.scrollView
+                ).y
+            } else {
+                return
             }
-            return false
+            let maximum = max(
+                -self.scrollView.adjustedContentInset.top,
+                self.scrollView.contentSize.height - self.scrollView.bounds.height
+                    + self.scrollView.adjustedContentInset.bottom
+            )
+            self.scrollView.setContentOffset(
+                CGPoint(x: 0, y: min(maximum, max(0, targetY))),
+                animated: false
+            )
         }
+        #endif
+    }
+}
 
-        @objc func editingChanged(_ field: UITextField) {
-            guard revealed else { return }
-            text.wrappedValue = field.text ?? ""
+// MARK: - Native TALLY form components
+
+@MainActor
+final class AddHostSectionView: UIView {
+    private let detailLabel = UILabel()
+    private let detailContainer = UIView()
+    private let rowsStack = UIStackView()
+
+    init(title: String, detail: String?, rows: [UIView]) {
+        super.init(frame: .zero)
+        let titleLabel = UIKitChassisLabel(title, size: 10)
+        titleLabel.accessibilityTraits.insert(.header)
+        let header = UIView()
+        header.backgroundColor = UIKitChassis.bezel
+        header.addSubview(titleLabel)
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 12),
+            titleLabel.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -12),
+            titleLabel.topAnchor.constraint(equalTo: header.topAnchor, constant: 10),
+            titleLabel.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -10),
+        ])
+
+        let divider = UIView()
+        divider.backgroundColor = UIKitChassis.bezelHi
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        rowsStack.axis = .vertical
+        rowsStack.alignment = .fill
+        rowsStack.spacing = 1
+        rowsStack.backgroundColor = UIKitChassis.bezelHi
+        let cardStack = UIStackView(arrangedSubviews: [header, divider, rowsStack])
+        cardStack.axis = .vertical
+        cardStack.spacing = 0
+        let card = UIKitTallyBorderedView()
+        card.addSubview(cardStack)
+        cardStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            cardStack.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            cardStack.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            cardStack.topAnchor.constraint(equalTo: card.topAnchor),
+            cardStack.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+        ])
+
+        detailLabel.font = UIKitChassis.uiFont(10)
+        detailLabel.textColor = UIKitChassis.signal2
+        detailLabel.numberOfLines = 0
+        detailContainer.addSubview(detailLabel)
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            detailLabel.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor, constant: 2),
+            detailLabel.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor, constant: -2),
+            detailLabel.topAnchor.constraint(equalTo: detailContainer.topAnchor),
+            detailLabel.bottomAnchor.constraint(equalTo: detailContainer.bottomAnchor),
+        ])
+        let section = UIStackView(arrangedSubviews: [card, detailContainer])
+        section.axis = .vertical
+        section.alignment = .fill
+        section.spacing = 8
+        addSubview(section)
+        section.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            section.leadingAnchor.constraint(equalTo: leadingAnchor),
+            section.trailingAnchor.constraint(equalTo: trailingAnchor),
+            section.topAnchor.constraint(equalTo: topAnchor),
+            section.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        setRows(rows)
+        setDetail(detail)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func setRows(_ rows: [UIView]) {
+        rowsStack.arrangedSubviews.forEach {
+            rowsStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
         }
+        rows.forEach { rowsStack.addArrangedSubview($0) }
+    }
 
-        func textFieldShouldReturn(_ field: UITextField) -> Bool {
-            field.resignFirstResponder()
-            return true
+    func setDetail(_ detail: String?) {
+        detailLabel.text = detail
+        detailContainer.isHidden = detail == nil
+    }
+}
+
+@MainActor
+final class AddHostInsetRow: UIView {
+    init(contentView: UIView) {
+        super.init(frame: .zero)
+        backgroundColor = UIKitChassis.chassis
+        addSubview(contentView)
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            contentView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            contentView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            contentView.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            contentView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+}
+
+@MainActor
+final class AddHostFieldRow: UIView {
+    init(label: String, inputView: UIView) {
+        super.init(frame: .zero)
+        backgroundColor = UIKitChassis.chassis
+        let caption = addHostLabel(
+            label,
+            font: UIKitChassis.uiFont(10, weight: .semibold),
+            color: UIKitChassis.signal2
+        )
+        let well = UIKitTallyBorderedView()
+        well.backgroundColor = UIKitChassis.screen
+        well.addSubview(inputView)
+        inputView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            inputView.leadingAnchor.constraint(equalTo: well.leadingAnchor, constant: 10),
+            inputView.trailingAnchor.constraint(equalTo: well.trailingAnchor, constant: -10),
+            inputView.topAnchor.constraint(equalTo: well.topAnchor, constant: 9),
+            inputView.bottomAnchor.constraint(equalTo: well.bottomAnchor, constant: -9),
+        ])
+        let stack = UIStackView(arrangedSubviews: [caption, well])
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 7
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+}
+
+@MainActor
+final class AddHostInlineWell: UIKitTallyBorderedView {
+    init(contentView: UIView) {
+        super.init(frame: .zero)
+        backgroundColor = UIKitChassis.screen
+        addSubview(contentView)
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            contentView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
+            contentView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+            contentView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            contentView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+        ])
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+}
+
+enum AddHostChoiceMetrics {
+    static let height: CGFloat = 34
+    static let seam: CGFloat = 1
+    static let selectionAnimationDuration: TimeInterval = 0.14
+}
+
+@MainActor
+final class AddHostChoiceBar<Value: Hashable>: UIStackView {
+    private(set) var selection: Value
+    private let choices: [(String, Value)]
+    private let changed: (Value) -> Void
+    private var buttons: [AddHostChoiceButton] = []
+
+    init(
+        choices: [(String, Value)],
+        selection: Value,
+        changed: @escaping (Value) -> Void
+    ) {
+        self.choices = choices
+        self.selection = selection
+        self.changed = changed
+        super.init(frame: .zero)
+        axis = .horizontal
+        alignment = .fill
+        distribution = .fillEqually
+        spacing = AddHostChoiceMetrics.seam
+        backgroundColor = UIKitChassis.bezelHi
+        for (index, choice) in choices.enumerated() {
+            let button = AddHostChoiceButton(title: choice.0, index: index)
+            button.addTarget(self, action: #selector(pressed(_:)), for: .touchUpInside)
+            buttons.append(button)
+            addArrangedSubview(button)
+        }
+        refresh()
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("unused") }
+
+    func setSelection(_ selection: Value) {
+        guard self.selection != selection else { return }
+        self.selection = selection
+        refresh(animated: true)
+    }
+
+    @objc private func pressed(_ sender: AddHostChoiceButton) {
+        guard choices.indices.contains(sender.choiceIndex) else { return }
+        let nextSelection = choices[sender.choiceIndex].1
+        guard nextSelection != selection else { return }
+        selection = nextSelection
+        refresh(animated: true)
+        changed(selection)
+    }
+
+    private func refresh(animated: Bool = false) {
+        let changes = { [self] in
+            for (index, button) in buttons.enumerated() {
+                button.setSelected(choices[index].1 == selection)
+            }
+        }
+        guard animated, !UIAccessibility.isReduceMotionEnabled else {
+            changes()
+            return
+        }
+        UIView.animate(
+            withDuration: AddHostChoiceMetrics.selectionAnimationDuration,
+            delay: 0,
+            options: [.curveEaseOut, .beginFromCurrentState, .allowUserInteraction],
+            animations: changes
+        )
+    }
+}
+
+@MainActor
+private final class AddHostChoiceButton: UIButton {
+    let choiceIndex: Int
+    private let sourceTitle: String
+    private let visualLabel = UILabel()
+
+    init(title: String, index: Int) {
+        sourceTitle = title
+        choiceIndex = index
+        super.init(frame: .zero)
+        // The SwiftUI source used `.buttonStyle(.plain)`. Keep this a custom
+        // button with no configuration so UIKit cannot supply a capsule or
+        // tinted system background on newer OS releases.
+        configuration = nil
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        accessibilityLabel = title
+        accessibilityTraits = .button
+        visualLabel.isUserInteractionEnabled = false
+        visualLabel.isAccessibilityElement = false
+        addSubview(visualLabel)
+        visualLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            visualLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            visualLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(equalToConstant: AddHostChoiceMetrics.height),
+        ])
+        layer.borderWidth = 1
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func setSelected(_ selected: Bool) {
+        backgroundColor = selected ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        visualLabel.attributedText = NSAttributedString(
+            string: sourceTitle.uppercased(),
+            attributes: [
+                .font: UIKitChassis.compressedLabelFont(9),
+                .kern: CGFloat(9 * Theme.typeScale * 0.09),
+            ]
+        )
+        visualLabel.textColor = selected ? UIKitChassis.signal : UIKitChassis.signal2
+        layer.borderColor = (selected ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
+            .resolvedColor(with: traitCollection)
+            .cgColor
+        accessibilityValue = selected ? "Selected" : "Not selected"
+        if selected {
+            accessibilityTraits.insert(.selected)
+        } else {
+            accessibilityTraits.remove(.selected)
+        }
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        setSelected(accessibilityTraits.contains(.selected))
+    }
+}
+
+/// Multiline text input with TextField(axis: .vertical)-style growth between
+/// explicit line limits and an in-well placeholder.
+@MainActor
+final class AddHostGrowingTextView: UITextView, UITextViewDelegate {
+    var onTextChange: ((String) -> Void)?
+    private let placeholderLabel = UILabel()
+    private let minimumLines: Int
+    private let maximumLines: Int
+    private var measuredWidth: CGFloat = 0
+
+    init(
+        text: String,
+        placeholder: String,
+        font: UIFont,
+        minimumLines: Int,
+        maximumLines: Int
+    ) {
+        self.minimumLines = minimumLines
+        self.maximumLines = maximumLines
+        super.init(frame: .zero, textContainer: nil)
+        self.text = text
+        self.font = font
+        textColor = UIKitChassis.signal
+        tintColor = UIKitChassis.signal
+        backgroundColor = .clear
+        textContainerInset = .zero
+        textContainer.lineFragmentPadding = 0
+        isScrollEnabled = false
+        delegate = self
+        placeholderLabel.text = placeholder
+        placeholderLabel.font = font
+        placeholderLabel.textColor = UIKitChassis.signal3
+        placeholderLabel.numberOfLines = 0
+        placeholderLabel.isUserInteractionEnabled = false
+        addSubview(placeholderLabel)
+        placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            placeholderLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            placeholderLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            placeholderLabel.topAnchor.constraint(equalTo: topAnchor),
+        ])
+        refresh()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override var intrinsicContentSize: CGSize {
+        let lineHeight = font?.lineHeight ?? 14
+        let minimum = lineHeight * CGFloat(minimumLines)
+        let maximum = lineHeight * CGFloat(maximumLines)
+        guard bounds.width > 0 else {
+            return CGSize(width: UIView.noIntrinsicMetric, height: minimum)
+        }
+        let fitting = sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude))
+        return CGSize(
+            width: UIView.noIntrinsicMetric,
+            height: min(maximum, max(minimum, fitting.height))
+        )
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard abs(bounds.width - measuredWidth) > 0.5 else { return }
+        measuredWidth = bounds.width
+        refresh()
+    }
+
+    func setText(_ text: String, notify: Bool) {
+        self.text = text
+        refresh()
+        if notify { onTextChange?(text) }
+    }
+
+    func textViewDidChange(_ textView: UITextView) {
+        refresh()
+        onTextChange?(textView.text)
+    }
+
+    private func refresh() {
+        placeholderLabel.isHidden = !text.isEmpty
+        invalidateIntrinsicContentSize()
+        let maximum = (font?.lineHeight ?? 14) * CGFloat(maximumLines)
+        if bounds.width > 0 {
+            isScrollEnabled = sizeThatFits(
+                CGSize(width: bounds.width, height: .greatestFiniteMagnitude)
+            ).height > maximum
         }
     }
 }
 
-/// The masked half of `MaskedSecretField`: refuses selection and clipboard
-/// actions while bullets are shown, since the underlying UIKit text is not
-/// the secret but leaking even its shape through the edit menu is wrong.
+/// App-drawn masking avoids Passwords QuickType/save prompts while retaining
+/// a reveal button and refusing clipboard/selection actions when concealed.
+@MainActor
+final class AddHostRevealableSecretField: UIView, UITextFieldDelegate {
+    let title: String
+    private(set) var text: String
+    private(set) var revealed = false
+    private(set) var textField = SecretTextField()
+    private(set) var revealButton = UIButton(type: .custom)
+    var onTextChange: ((String) -> Void)?
+
+    init(
+        title: String,
+        prompt: String,
+        text: String,
+        onTextChange: @escaping (String) -> Void
+    ) {
+        self.title = title
+        self.text = text
+        self.onTextChange = onTextChange
+        super.init(frame: .zero)
+        textField.font = UIKitChassis.monoFont(12)
+        textField.textColor = UIKitChassis.signal
+        textField.tintColor = UIKitChassis.signal
+        textField.attributedPlaceholder = NSAttributedString(
+            string: prompt,
+            attributes: [.foregroundColor: UIKitChassis.signal3]
+        )
+        textField.autocorrectionType = .no
+        textField.spellCheckingType = .no
+        textField.smartQuotesType = .no
+        textField.smartDashesType = .no
+        textField.smartInsertDeleteType = .no
+        textField.autocapitalizationType = .none
+        textField.keyboardType = .asciiCapable
+        textField.textContentType = UITextContentType(rawValue: "")
+        textField.accessibilityLabel = title
+        textField.delegate = self
+        textField.addTarget(self, action: #selector(revealedTextChanged), for: .editingChanged)
+        textField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        revealButton.tintColor = UIKitChassis.signal2
+        revealButton.hoverStyle = UIHoverStyle(
+            effect: .highlight,
+            shape: .rect(cornerRadius: 2)
+        )
+        revealButton.addTarget(self, action: #selector(toggleReveal), for: .primaryActionTriggered)
+        revealButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            revealButton.widthAnchor.constraint(equalToConstant: 24),
+            revealButton.heightAnchor.constraint(equalToConstant: 24),
+        ])
+        let row = UIStackView(arrangedSubviews: [textField, revealButton])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 10
+        addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        refreshPresentation()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func setText(_ text: String) {
+        self.text = text
+        let desired = revealed ? text : Self.bullets(text.count)
+        if textField.text != desired { textField.text = desired }
+    }
+
+    func textField(
+        _ textField: UITextField,
+        shouldChangeCharactersIn range: NSRange,
+        replacementString string: String
+    ) -> Bool {
+        guard !revealed else { return true }
+        var characters = Array(text)
+        let lower = min(range.location, characters.count)
+        let upper = min(range.location + range.length, characters.count)
+        characters.replaceSubrange(lower..<upper, with: Array(string))
+        text = String(characters)
+        textField.text = Self.bullets(characters.count)
+        let caret = lower + string.count
+        if let position = textField.position(from: textField.beginningOfDocument, offset: caret) {
+            textField.selectedTextRange = textField.textRange(from: position, to: position)
+        }
+        onTextChange?(text)
+        return false
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
+    }
+
+    @objc private func revealedTextChanged() {
+        guard revealed else { return }
+        text = textField.text ?? ""
+        onTextChange?(text)
+    }
+
+    @objc private func toggleReveal() {
+        revealed.toggle()
+        refreshPresentation()
+    }
+
+    private func refreshPresentation() {
+        textField.masksEditActions = !revealed
+        textField.text = revealed ? text : Self.bullets(text.count)
+        let image = UIImage(
+            systemName: revealed ? "eye.slash" : "eye",
+            withConfiguration: UIImage.SymbolConfiguration(
+                pointSize: 10 * Theme.typeScale,
+                weight: .semibold
+            )
+        )
+        revealButton.setImage(image, for: .normal)
+        revealButton.accessibilityLabel = revealed ? "Hide \(title)" : "Show \(title)"
+    }
+
+    private static func bullets(_ count: Int) -> String {
+        String(repeating: "•", count: count)
+    }
+}
+
+/// Refuses selection and clipboard actions while the app-drawn bullet mask is
+/// visible. Bind Host and Manual Host share this native field.
 final class SecretTextField: UITextField {
     var masksEditActions = true
 
@@ -1200,25 +2282,163 @@ final class SecretTextField: UITextField {
     }
 }
 
-#if DEBUG
-#Preview("Revealable secure field") {
-    TallyFormField("Password") {
-        RevealableSecureField(
-            "Password",
-            text: .constant("correct horse battery staple")
+@MainActor
+private final class AddHostIconButton: UIButton {
+    private let actionHandler: () -> Void
+    private let dynamicBorder = UIKitChassis.bezelHi
+
+    init(
+        systemImage: String,
+        accessibilityLabel: String,
+        enabled: Bool = true,
+        action: @escaping () -> Void
+    ) {
+        actionHandler = action
+        super.init(frame: .zero)
+        setImage(UIImage(
+            systemName: systemImage,
+            withConfiguration: UIImage.SymbolConfiguration(
+                pointSize: 9 * Theme.typeScale,
+                weight: .semibold
+            )
+        ), for: .normal)
+        tintColor = enabled ? UIKitChassis.signal2 : UIKitChassis.signal3
+        backgroundColor = UIKitChassis.chassis
+        layer.borderWidth = 1
+        layer.borderColor = dynamicBorder.resolvedColor(with: traitCollection).cgColor
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        self.accessibilityLabel = accessibilityLabel
+        isEnabled = enabled
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 25),
+            heightAnchor.constraint(equalToConstant: 25),
+        ])
+        addTarget(self, action: #selector(pressed), for: .touchUpInside)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        layer.borderColor = dynamicBorder.resolvedColor(with: traitCollection).cgColor
+    }
+
+    @objc private func pressed() {
+        actionHandler()
+    }
+}
+
+@MainActor
+private final class AddHostTallyLamp: UIView {
+    private let caption: String
+    private let color: UIColor
+    private let dot = UIView()
+    private let captionLabel = UILabel()
+
+    init(caption: String, color: UIColor) {
+        self.caption = caption
+        self.color = color
+        super.init(frame: .zero)
+        isAccessibilityElement = true
+        accessibilityLabel = caption.lowercased()
+        let scale = Theme.typeScale
+        dot.backgroundColor = color
+        dot.layer.cornerRadius = 3.5 * scale
+        dot.layer.shadowOpacity = 0.7
+        dot.layer.shadowRadius = 4
+        dot.layer.shadowOffset = .zero
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            dot.widthAnchor.constraint(equalToConstant: 7 * scale),
+            dot.heightAnchor.constraint(equalToConstant: 7 * scale),
+        ])
+        captionLabel.isAccessibilityElement = false
+        captionLabel.setContentHuggingPriority(.required, for: .horizontal)
+        let row = UIStackView(arrangedSubviews: [dot, captionLabel])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 5
+        row.isUserInteractionEnabled = false
+        addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        refreshInk()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override var forFirstBaselineLayout: UIView { captionLabel }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        refreshInk()
+    }
+
+    private func refreshInk() {
+        let resolved = color.resolvedColor(with: traitCollection)
+        dot.layer.shadowColor = resolved.cgColor
+        captionLabel.attributedText = NSAttributedString(
+            string: caption,
+            attributes: [
+                .font: UIKitChassis.monoFont(9, weight: .bold),
+                .kern: CGFloat(1.2),
+                .foregroundColor: resolved,
+            ]
         )
     }
-    .padding()
-    .frame(width: 420)
-    .background(Theme.chassis)
 }
-#endif
+
+@MainActor
+private func addHostLabel(_ text: String, font: UIFont, color: UIColor) -> UILabel {
+    let label = UILabel()
+    label.text = text
+    label.font = font
+    label.textColor = color
+    label.numberOfLines = 0
+    return label
+}
+
+@MainActor
+private func addHostFlexibleSpacer(minimumWidth: CGFloat = 0) -> UIView {
+    let spacer = UIView()
+    spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    if minimumWidth > 0 {
+        spacer.widthAnchor.constraint(greaterThanOrEqualToConstant: minimumWidth).isActive = true
+    }
+    return spacer
+}
+
+@MainActor
+private func addHostLeadingView(_ content: UIView) -> UIView {
+    let holder = UIView()
+    holder.addSubview(content)
+    content.translatesAutoresizingMaskIntoConstraints = false
+    NSLayoutConstraint.activate([
+        content.leadingAnchor.constraint(equalTo: holder.leadingAnchor),
+        content.topAnchor.constraint(equalTo: holder.topAnchor),
+        content.bottomAnchor.constraint(equalTo: holder.bottomAnchor),
+        content.trailingAnchor.constraint(lessThanOrEqualTo: holder.trailingAnchor),
+    ])
+    return holder
+}
 
 #if DEBUG
-/// `MULTIPLEX_AUTO_ADD_HOST`'s grammar, parsed in one place: DeckWindow
-/// opens the modal for any recognized value, this sheet picks the pane, and
-/// the scroll hook aims at the elsewhere section. Matching the raw strings
-/// at each site let them drift.
+/// Headless Add Host routing grammar shared with DeckWindow. The sheet selects
+/// the requested road and can scroll directly to the native Somewhere Else
+/// bind section or launch-model editor after layout settles.
 enum AddHostAutoOpen: String {
     case bind
     case bindElsewhere = "bind-elsewhere"

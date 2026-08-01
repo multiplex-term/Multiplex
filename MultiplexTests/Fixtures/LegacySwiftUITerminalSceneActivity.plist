@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>activityType</key>
+    <string>com.apple.SwiftUI.stateRestoration</string>
+    <key>userInfo</key>
+    <dict>
+        <key>com.apple.SwiftUI.sceneID</key>
+        <string>terminal</string>
+        <key>com.apple.SwiftUI.sceneType</key>
+        <string>#6acb61dba16a5d992763cfd674950485f768f585</string>
+        <key>com.apple.SwiftUI.presentedSceneValue</key>
+        <data>eyJ0YWJzIjpbeyJob3N0SUQiOiIyQ0IyRjA1Qy1DRTg1LTQwNEQtQjA4NS1COTAxRDQ0MjZBNUQiLCJpZCI6IjNBRTZENDIxLTY0MTMtNDY3My1CMkZDLTU5OEJBRjVBNEEyRSIsIm1vZGUiOnsiYXR0YWNoIjp7InNlc3Npb25OYW1lIjoibWFpbiJ9fX1dLCJpZCI6IjA3NzYzRDYzLUYzMEEtNEFFMC1CRjY2LTUyN0Q2OEMzREZDNCIsImFjdGl2ZVRhYklEIjoiM0FFNkQ0MjEtNjQxMy00NjczLUIyRkMtNTk4QkFGNUE0QTJFIn0=</data>
+        <key>com.apple.SwiftUI.sceneValue</key>
+        <data>eyJ0YWJzIjpbeyJob3N0SUQiOiIyQ0IyRjA1Qy1DRTg1LTQwNEQtQjA4NS1COTAxRDQ0MjZBNUQiLCJpZCI6IjNBRTZENDIxLTY0MTMtNDY3My1CMkZDLTU5OEJBRjVBNEEyRSIsIm1vZGUiOnsiYXR0YWNoIjp7InNlc3Npb25OYW1lIjoibWFpbiJ9fX1dLCJpZCI6IjA3NzYzRDYzLUYzMEEtNEFFMC1CRjY2LTUyN0Q2OEMzREZDNCIsImFjdGl2ZVRhYklEIjoiM0FFNkQ0MjEtNjQxMy00NjczLUIyRkMtNTk4QkFGNUE0QTJFIn0=</data>
+    </dict>
+</dict>
+</plist>

@@ -70,6 +70,17 @@ enum SingleWindowShellBackSwipe {
     private static let minimumFlickDistance: CGFloat = 16
     private static let decisiveReverseVelocity: CGFloat = -100
 
+    /// The compact phone keeps edge-back as a navigation shortcut even when
+    /// Reduce Motion is enabled. Motion preference changes the interactive
+    /// travel, not whether the route back to the deck exists.
+    static func isAvailable(
+        idiom: ShellModeDecision.Idiom,
+        expanded: Bool,
+        compactShowsTerminal: Bool
+    ) -> Bool {
+        idiom == .phone && !expanded && compactShowsTerminal
+    }
+
     /// Local text-selection drags always stay with the terminal. Otherwise,
     /// only unambiguously rightward horizontal intent starts navigation.
     static func shouldBegin(

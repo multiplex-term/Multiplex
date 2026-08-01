@@ -40,7 +40,8 @@ enum TerminalFocusArbiter {
     /// hardware keystrokes from reaching a first responder, and
     /// foregrounding restoration would otherwise re-summon one behind the
     /// veil. Setting this releases the current owner; `claim`/`restore`
-    /// refuse while it holds. `AppLockGate` is the only writer.
+    /// refuse while it holds. The native `AppLockViewController` is the only
+    /// writer; its SwiftUI gate is merely a transitional mounting adapter.
     static var inputSuppressed = false {
         didSet {
             guard inputSuppressed, let owner = current else { return }
@@ -199,7 +200,12 @@ enum TerminalFocusArbiter {
             }
             return
         }
-        guard current === view || current == nil else { return }
+        // Foregrounding is not an ownership election. On iPadOS and
+        // visionOS several scenes activate together; allowing a nil owner to
+        // be claimed here makes notification order choose an arbitrary
+        // window. Fresh/live panes and explicit tab/window interactions use
+        // `claim` directly.
+        guard current === view else { return }
         claim(view)
     }
 

@@ -1,41 +1,177 @@
-import SwiftUI
+import UIKit
 
-/// Confirmation for a link activated in a terminal pane.
-///
-/// The pane never opens a link straight from the gesture, and this sheet is
-/// why: the target is remote output. An OSC 8 hyperlink's label is chosen
-/// independently of its destination, so the text the user pressed proves
-/// nothing — this surface renders the *resolved target* and names the host on
-/// its own line, which is what defeats both a mislabelled hyperlink and a
-/// userinfo-padded authority (`https://github.com@evil.example/x`).
-///
-/// Blocked and malformed targets still get here. Saying "Multiplex won't open
-/// a `file:` link" and offering COPY is a better answer than a press that
-/// appears to do nothing.
-///
-/// Web links additionally carry a REACH row and the viewport action — the
-/// inline browser. The reach verdict says which world the address lives in
-/// (a pane runs on the host, so `localhost` there is the *host's* loopback),
-/// and the loopback chip performs its rewrite in the open: `⌗ VIA DEVBOX`
-/// says exactly what will be dialled.
-struct TerminalLinkSheet: View {
-    let link: TerminalLink
-    /// The inline-browser offer for whatever address the sheet currently
-    /// holds — asked per edit, because the target is editable and a typed
-    /// change moves which world it reaches. nil keeps the sheet exactly as
-    /// it always was (no viewport row, no chip).
-    var viewportOffer: (TerminalLink) -> ViewportOffer? = { _ in nil }
-    let onOpen: (TerminalLink) -> Void
-    let onCopy: (String) -> Void
+// MARK: - Shared native target field
+
+/// The confirmation sheets' editable target well. Terminal output is machine
+/// text, so the editor deliberately disables every smart-text transformation
+/// and expands from one through five lines before it scrolls.
+@MainActor
+final class UIKitTerminalEditableValueBox: UIKitTallyBorderedView, UITextViewDelegate {
+    private static let contentInset: CGFloat = 10
+
+    let textView = UITextView()
+    var onTextChange: ((String) -> Void)?
+
+    private let noteLabel = UIKitChassisLabel("", size: 9, color: TallyPalette.caution)
+    private var textHeight: NSLayoutConstraint!
+
+    var text: String { textView.text }
+
+    init(label: String, text: String) {
+        super.init(frame: .zero)
+        backgroundColor = UIKitChassis.screen
+
+        let labelView = UIKitChassisLabel(label, size: 9, color: UIKitChassis.signal3)
+
+        textView.text = text
+        textView.font = UIKitChassis.monoFont(11)
+        textView.textColor = UIKitChassis.signal
+        textView.tintColor = UIKitChassis.signal
+        textView.backgroundColor = .clear
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.autocorrectionType = .no
+        textView.autocapitalizationType = .none
+        textView.smartQuotesType = .no
+        textView.smartDashesType = .no
+        textView.smartInsertDeleteType = .no
+        textView.spellCheckingType = .no
+        textView.keyboardType = .URL
+        textView.returnKeyType = .done
+        textView.isScrollEnabled = false
+        textView.delegate = self
+        textView.accessibilityLabel = label.capitalized
+
+        noteLabel.isHidden = true
+
+        let stack = UIStackView(arrangedSubviews: [labelView, textView, noteLabel])
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 6
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        textHeight = textView.heightAnchor.constraint(equalToConstant: lineHeight)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: Self.contentInset
+            ),
+            stack.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -Self.contentInset
+            ),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: Self.contentInset),
+            stack.bottomAnchor.constraint(
+                equalTo: bottomAnchor,
+                constant: -Self.contentInset
+            ),
+            textHeight,
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        updateEditorHeight()
+    }
+
+    func setText(_ text: String, notify: Bool = true) {
+        guard textView.text != text else { return }
+        textView.text = text
+        updateEditorHeight()
+        if notify { onTextChange?(text) }
+    }
+
+    func setNote(_ note: String?) {
+        noteLabel.setText(note ?? "")
+        noteLabel.isHidden = note == nil
+    }
+
+    func textViewDidChange(_ textView: UITextView) {
+        updateEditorHeight()
+        onTextChange?(textView.text)
+    }
+
+    func textView(
+        _ textView: UITextView,
+        shouldChangeTextIn range: NSRange,
+        replacementText text: String
+    ) -> Bool {
+        guard text != "\n" else {
+            textView.resignFirstResponder()
+            return false
+        }
+        return true
+    }
+
+    private var lineHeight: CGFloat {
+        ceil(textView.font?.lineHeight ?? UIKitChassis.monoFont(11).lineHeight)
+    }
+
+    private func updateEditorHeight() {
+        // `UIStackView` lays out its arranged subviews after this box's own
+        // `layoutSubviews`. On the first presentation `textView.bounds.width`
+        // is therefore still zero here, and no later pass is guaranteed. A
+        // URL then stays at the seed one-line height: UIKit wraps at a hyphen
+        // and everything after that break is present but clipped. Measure
+        // from this box's resolved width instead — the stack's horizontal
+        // insets are fixed, so this is the exact eventual editor width.
+        let availableWidth = bounds.width - Self.contentInset * 2
+        guard availableWidth > 0 else { return }
+        let fitting = textView.sizeThatFits(
+            CGSize(width: availableWidth, height: .greatestFiniteMagnitude)
+        ).height
+        let capped = min(max(ceil(fitting), lineHeight), lineHeight * 5)
+        guard abs(textHeight.constant - capped) > 0.5 else { return }
+        textHeight.constant = capped
+        textView.isScrollEnabled = fitting > capped + 0.5
+        invalidateIntrinsicContentSize()
+    }
+}
+
+// MARK: - Native link confirmation
+
+/// UIKit confirmation for a link activated in a terminal pane. The target is
+/// remote-controlled content: this controller always exposes the resolved
+/// address, names its actual host, and re-runs the allowlist after every edit
+/// before enabling OPEN or VIEWPORT.
+@MainActor
+final class TerminalLinkSheetViewController: UIViewController {
+    enum Metrics {
+        static let contentMaximumWidth: CGFloat = 560
+        static let outerInset: CGFloat = 18
+        static let rowSpacing: CGFloat = 12
+        static let actionSpacing: CGFloat = 10
+    }
+
+    private(set) var sourceLink: TerminalLink
+    var viewportOffer: (TerminalLink) -> ViewportOffer?
+    var onOpen: (TerminalLink) -> Void
+    var onCopy: (String) -> Void
     var onOpenViewport: ((ViewportOffer) -> Void)?
+    var onDismiss: (() -> Void)?
 
-    @Environment(\.dismiss) private var dismiss
-    /// The target as the sheet shows it. Detection is a guess made from
-    /// rendered rows — a wrapped line can glue a sentence's tail to the
-    /// address below it — so the person gets the last word before anything
-    /// opens. Everything below re-resolves from this, which keeps the
-    /// allowlist and the host line honest about what an edit produced.
-    @State private var text: String
+    private let scrollView = UIScrollView()
+    private let rowStack = UIStackView()
+    private let hostStack = UIStackView()
+    private let hostNameLabel = UILabel()
+    private let reachStack = UIStackView()
+    private let reachLabel = UILabel()
+    private let actionStack = UIStackView()
+    private let actionSpacer = UIView()
+    private let navigationTitleLabel = UIKitChassisLabel("Open link", size: 12)
+    private let editor: UIKitTerminalEditableValueBox
+    private var sectionView: UIKitTallyFormSectionView!
+    private var viewportChip: UIKitChassisChip!
+    private var openChip: UIKitChassisChip!
+    private var copyChip: UIKitChassisChip!
+
+    var editedText: String { editor.text }
+    var editedLink: TerminalLink? { TerminalLink.resolve(editor.text) }
+    var editedViewport: ViewportOffer? { editedLink.flatMap(viewportOffer) }
 
     init(
         link: TerminalLink,
@@ -44,104 +180,245 @@ struct TerminalLinkSheet: View {
         onCopy: @escaping (String) -> Void,
         onOpenViewport: ((ViewportOffer) -> Void)? = nil
     ) {
-        self.link = link
+        sourceLink = link
         self.viewportOffer = viewportOffer
         self.onOpen = onOpen
         self.onCopy = onCopy
         self.onOpenViewport = onOpenViewport
-        _text = State(initialValue: link.raw)
+        editor = UIKitTerminalEditableValueBox(label: "TARGET", text: link.raw)
+        super.init(nibName: nil, bundle: nil)
     }
 
-    /// The edited target, or nil while the field holds nothing Multiplex can
-    /// classify — the actions that need a link go quiet rather than acting
-    /// on the pressed one behind the person's back.
-    private var edited: TerminalLink? { TerminalLink.resolve(text) }
-    private var viewport: ViewportOffer? { edited.flatMap(viewportOffer) }
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
 
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    TallyFormSection(sectionTitle, detail: detail) {
-                        TallyFormRow {
-                            VStack(alignment: .leading, spacing: 12) {
-                                if let host = edited?.host {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        ChassisLabel("HOST", size: 9, color: Theme.signal3)
-                                        Text(host)
-                                            .font(.mono(13, weight: .semibold))
-                                            .foregroundStyle(Theme.signal)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                }
-                                TerminalSheetEditableValueBox(
-                                    label: "TARGET",
-                                    value: $text,
-                                    note: edited == nil
-                                        ? "NOT AN ADDRESS MULTIPLEX CAN READ"
-                                        : nil
-                                )
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIKitChassis.chassis
+        configureNavigation()
+        configureContent()
+        editor.onTextChange = { [weak self] _ in self?.refreshState() }
+        refreshState()
+    }
 
-                                if let viewport {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        ChassisLabel("REACH", size: 9, color: Theme.signal3)
-                                        Text(reachDescription(viewport))
-                                            .font(.mono(10))
-                                            .foregroundStyle(Theme.signal2)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                }
-
-                                HStack(spacing: 10) {
-                                    if let viewport, let onOpenViewport {
-                                        ChassisChip(
-                                            viewportChipLabel(viewport),
-                                            prominent: true
-                                        ) {
-                                            onOpenViewport(viewport)
-                                            dismiss()
-                                        }
-                                    }
-                                    if let openable = edited, openable.openableURL != nil {
-                                        ChassisChip(
-                                            "OPEN",
-                                            systemImage: "arrow.up.forward.app",
-                                            prominent: viewport == nil || onOpenViewport == nil
-                                        ) {
-                                            onOpen(openable)
-                                            dismiss()
-                                        }
-                                    }
-                                    ChassisChip("COPY", systemImage: "doc.on.doc") {
-                                        onCopy(text)
-                                        dismiss()
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: 560)
-                .padding(18)
-                .frame(maxWidth: .infinity)
-            }
-            .chassisSheetGround()
-            .navigationTitle(navigationTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ChassisSheetTitle(navigationTitle)
-                ToolbarItem(placement: .cancellationAction) {
-                    ChassisBarButton("Cancel") { dismiss() }
-                }
-            }
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if let navigationBar = navigationController?.navigationBar {
+            UIKitChassis.configureSheetNavigationBar(navigationBar)
         }
     }
 
-    private var navigationTitle: String {
-        edited?.openableURL == nil ? "Can't open link" : "Open link"
+    func updateSourceLink(_ link: TerminalLink) {
+        guard link != sourceLink else { return }
+        sourceLink = link
+        editor.setText(link.raw, notify: false)
+        refreshState()
     }
 
-    private var sectionTitle: String {
+    func setEditedText(_ text: String) {
+        editor.setText(text)
+    }
+
+    func refreshActions(
+        viewportOffer: @escaping (TerminalLink) -> ViewportOffer?,
+        onOpen: @escaping (TerminalLink) -> Void,
+        onCopy: @escaping (String) -> Void,
+        onOpenViewport: ((ViewportOffer) -> Void)?
+    ) {
+        self.viewportOffer = viewportOffer
+        self.onOpen = onOpen
+        self.onCopy = onCopy
+        self.onOpenViewport = onOpenViewport
+        if isViewLoaded { refreshState() }
+    }
+
+    private func configureNavigation() {
+        navigationItem.largeTitleDisplayMode = .never
+        #if os(visionOS)
+        navigationItem.titleView = navigationTitleLabel
+        #endif
+        let cancel = UIBarButtonItem(
+            title: "Cancel",
+            style: .plain,
+            target: self,
+            action: #selector(cancelPressed)
+        )
+        cancel.tintColor = UIKitChassis.signal
+        navigationItem.leftBarButtonItem = cancel
+    }
+
+    private func configureContent() {
+        scrollView.alwaysBounceVertical = true
+        scrollView.backgroundColor = UIKitChassis.chassis
+        view.addSubview(scrollView)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            scrollView.contentLayoutGuide.widthAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.widthAnchor
+            ),
+        ])
+
+        configureHostStack()
+        configureReachStack()
+        configureActionStack()
+
+        rowStack.axis = .vertical
+        rowStack.alignment = .fill
+        rowStack.spacing = Metrics.rowSpacing
+        rowStack.addArrangedSubview(hostStack)
+        rowStack.addArrangedSubview(editor)
+        rowStack.addArrangedSubview(reachStack)
+        rowStack.addArrangedSubview(actionStack)
+
+        sectionView = UIKitTallyFormSectionView(
+            title: "",
+            detail: nil,
+            contentView: rowStack
+        )
+        scrollView.addSubview(sectionView)
+        sectionView.translatesAutoresizingMaskIntoConstraints = false
+
+        let fillWidth = sectionView.widthAnchor.constraint(
+            equalTo: scrollView.frameLayoutGuide.widthAnchor,
+            constant: -(Metrics.outerInset * 2)
+        )
+        // The 560-point cap must win on a wide sheet, but on a phone the
+        // section follows SwiftUI's `.padding(18)` proposal exactly. A lower
+        // priority let the row's required-size chips collapse the whole card
+        // to their intrinsic action width.
+        fillWidth.priority = UILayoutPriority(rawValue: 999)
+        NSLayoutConstraint.activate([
+            sectionView.topAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.topAnchor,
+                constant: Metrics.outerInset
+            ),
+            sectionView.bottomAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.bottomAnchor,
+                constant: -Metrics.outerInset
+            ),
+            sectionView.centerXAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.centerXAnchor
+            ),
+            sectionView.leadingAnchor.constraint(
+                greaterThanOrEqualTo: scrollView.contentLayoutGuide.leadingAnchor,
+                constant: Metrics.outerInset
+            ),
+            sectionView.trailingAnchor.constraint(
+                lessThanOrEqualTo: scrollView.contentLayoutGuide.trailingAnchor,
+                constant: -Metrics.outerInset
+            ),
+            sectionView.widthAnchor.constraint(
+                lessThanOrEqualToConstant: Metrics.contentMaximumWidth
+            ),
+            fillWidth,
+        ])
+    }
+
+    private func configureHostStack() {
+        let label = UIKitChassisLabel("HOST", size: 9, color: UIKitChassis.signal3)
+        hostNameLabel.font = UIKitChassis.monoFont(13, weight: .semibold)
+        hostNameLabel.textColor = UIKitChassis.signal
+        hostNameLabel.numberOfLines = 0
+        hostNameLabel.accessibilityIdentifier = "terminal.link.hostValue"
+        hostStack.axis = .vertical
+        hostStack.alignment = .fill
+        hostStack.spacing = 4
+        hostStack.addArrangedSubview(label)
+        hostStack.addArrangedSubview(hostNameLabel)
+    }
+
+    private func configureReachStack() {
+        let label = UIKitChassisLabel("REACH", size: 9, color: UIKitChassis.signal3)
+        reachLabel.font = UIKitChassis.monoFont(10)
+        reachLabel.textColor = UIKitChassis.signal2
+        reachLabel.numberOfLines = 0
+        reachLabel.accessibilityIdentifier = "terminal.link.reachValue"
+        reachStack.axis = .vertical
+        reachStack.alignment = .fill
+        reachStack.spacing = 4
+        reachStack.addArrangedSubview(label)
+        reachStack.addArrangedSubview(reachLabel)
+    }
+
+    private func configureActionStack() {
+        actionStack.axis = .horizontal
+        actionStack.alignment = .center
+        actionStack.spacing = Metrics.actionSpacing
+
+        viewportChip = UIKitChassisChip(
+            "⌗ VIEWPORT",
+            prominent: true,
+            accessibilityLabel: "Viewport"
+        ) { [weak self] in self?.viewportPressed() }
+        openChip = UIKitChassisChip(
+            "OPEN",
+            systemImage: "arrow.up.forward.app",
+            prominent: true,
+            accessibilityLabel: "Open"
+        ) { [weak self] in self?.openPressed() }
+        copyChip = UIKitChassisChip(
+            "COPY",
+            systemImage: "doc.on.doc",
+            accessibilityLabel: "Copy"
+        ) { [weak self] in self?.copyPressed() }
+
+        for chip in [viewportChip, openChip, copyChip] {
+            chip?.setContentHuggingPriority(.required, for: .horizontal)
+            actionStack.addArrangedSubview(chip!)
+        }
+        // SwiftUI's form row fills the card while its HStack content remains
+        // leading-aligned. Give UIKit's stack the same flexible trailing
+        // space so the chips keep their exact intrinsic widths without
+        // forcing the section itself to compress.
+        actionSpacer.isAccessibilityElement = false
+        actionSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        actionSpacer.setContentCompressionResistancePriority(
+            .defaultLow,
+            for: .horizontal
+        )
+        actionStack.addArrangedSubview(actionSpacer)
+        actionStack.setCustomSpacing(0, after: copyChip)
+    }
+
+    private func refreshState() {
+        guard isViewLoaded else { return }
+        let link = editedLink
+        let viewport = editedViewport
+
+        title = link?.openableURL == nil ? "Can't open link" : "Open link"
+        #if os(visionOS)
+        navigationTitleLabel.setText(title ?? "Open link")
+        #endif
+
+        hostNameLabel.text = link?.host
+        hostNameLabel.accessibilityLabel = link?.host
+        hostStack.isHidden = link?.host == nil
+        editor.setNote(link == nil ? "NOT AN ADDRESS MULTIPLEX CAN READ" : nil)
+
+        reachLabel.text = viewport.map(reachDescription)
+        reachLabel.accessibilityLabel = viewport.map(reachDescription)
+        reachStack.isHidden = viewport == nil
+
+        viewportChip.isHidden = viewport == nil || onOpenViewport == nil
+        if let viewport {
+            viewportChip.setContent(caption: viewportChipLabel(viewport), systemImage: nil)
+            viewportChip.accessibilityLabel = viewportChipLabel(viewport).capitalized
+        }
+        openChip.isHidden = link?.openableURL == nil
+        openChip.isProminent = viewport == nil || onOpenViewport == nil
+
+        sectionView.setTitle(sectionTitle(link: link, viewport: viewport))
+        sectionView.setDetail(detail(link: link, viewport: viewport))
+    }
+
+    private func sectionTitle(
+        link: TerminalLink?,
+        viewport: ViewportOffer?
+    ) -> String {
         if let viewport, onOpenViewport != nil {
             return switch viewport.reach {
             case .internet: "A public address"
@@ -150,15 +427,18 @@ struct TerminalLinkSheet: View {
                 "Lives on \(viewport.viaHostName ?? "the host"), not this device"
             }
         }
-        guard let edited else { return "Not a usable address" }
-        return switch edited.kind {
+        guard let link else { return "Not a usable address" }
+        return switch link.kind {
         case .openable: "Leaves Multiplex"
         case .blockedScheme(let scheme): "\(scheme.uppercased()) links stay here"
         case .malformed: "Not a usable address"
         }
     }
 
-    private var detail: String {
+    private func detail(
+        link: TerminalLink?,
+        viewport: ViewportOffer?
+    ) -> String {
         if let viewport, onOpenViewport != nil {
             return switch viewport.reach {
             case .internet, .lan:
@@ -169,16 +449,15 @@ struct TerminalLinkSheet: View {
                 "localhost in a remote pane is the host's own loopback — an "
                     + "address this device can't dial. VIA aims the viewport "
                     + "at the address that already reaches the host; the "
-                    + "server must listen beyond loopback (vite --host) to "
-                    + "answer."
+                    + "server must listen beyond loopback (vite --host) to answer."
             }
         }
-        guard let edited else {
+        guard let link else {
             return "The field holds nothing Multiplex can open — a target "
                 + "needs a web or mail address. Edit it, or copy the text "
                 + "if it's still useful."
         }
-        return switch edited.kind {
+        return switch link.kind {
         case .openable:
             "This address came from the host, and a hyperlink's visible text "
                 + "can differ from where it points — check the host above "
@@ -196,8 +475,7 @@ struct TerminalLinkSheet: View {
 
     private func viewportChipLabel(_ viewport: ViewportOffer) -> String {
         switch viewport.reach {
-        case .internet, .lan:
-            "⌗ VIEWPORT"
+        case .internet, .lan: "⌗ VIEWPORT"
         case .remoteLoopback:
             "⌗ VIA \((viewport.viaHostName ?? "HOST").uppercased())"
         }
@@ -215,169 +493,33 @@ struct TerminalLinkSheet: View {
             return "REMOTE LOOPBACK → REWRITES TO \(rewritten)"
         }
     }
-}
 
-/// The confirm sheets' boxed value — the resolved target in the mono data
-/// voice on a screen inset. One spelling for the link sheet's TARGET and
-/// the path sheet's PATH, so the two deliberate twins can't drift.
-struct TerminalSheetValueBox: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ChassisLabel(label, size: 9, color: Theme.signal3)
-            Text(value)
-                .font(.mono(11))
-                .foregroundStyle(Theme.signal2)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.screen)
-        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-    }
-}
-
-/// The confirm sheets' editable target — the same screen well as
-/// `TerminalSheetValueBox`, with the value as a real field.
-///
-/// Detection is a guess made from *rendered rows*, and a hard wrap leaves no
-/// space at the seam: a sentence ending in `.` above a path or URL reaches
-/// the matcher glued to it. The model trims what it can prove
-/// (`TerminalPathTarget.strippingWrappedProseHead`); the rest is the
-/// person's to fix here, before anything opens. Keyboard behavior is the
-/// address kind: no autocorrection, no autocapitalization, no smart quotes —
-/// a target is machine text.
-struct TerminalSheetEditableValueBox: View {
-    let label: String
-    @Binding var value: String
-    /// Caps note under the field when what it holds resolves to nothing —
-    /// the actions go quiet, and this says why.
-    var note: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ChassisLabel(label, size: 9, color: Theme.signal3)
-            TextField("", text: $value, axis: .vertical)
-                .font(.mono(11))
-                .foregroundStyle(Theme.signal)
-                .textFieldStyle(.plain)
-                .lineLimit(1...5)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .keyboardType(.URL)
-                .submitLabel(.done)
-            if let note {
-                ChassisLabel(note, size: 9, color: Theme.caution)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.screen)
-        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-    }
-}
-
-extension View {
-    /// Presents `controller`'s pending link confirmation. Packaged as one
-    /// modifier because `TerminalWindowRoot`'s body is already at the Swift
-    /// type-checker's ceiling — an inline `.sheet(item:)` with its binding and
-    /// action closures tips the whole chain over.
-    ///
-    /// `viewportHost` is the active tab's host record — it names the rewrite
-    /// target for a remote-loopback address, so the offer is computed against
-    /// the machine whose pane printed the URL. `openViewport` docks the
-    /// confirmed page as a tab beside that pane.
-    func terminalLinkConfirmation(
-        for controller: TerminalSessionController?,
-        viewportHost: Host? = nil,
-        openViewport: ((ViewportOffer) -> Void)? = nil
-    ) -> some View {
-        let binding = Binding<TerminalLink?>(
-            get: { controller?.pendingLink },
-            set: { if $0 == nil { controller?.dismissPendingLink() } }
-        )
-        return sheet(item: binding) { link in
-            TerminalLinkSheet(
-                link: link,
-                viewportOffer: { ViewportOffer.make(for: $0, host: viewportHost) },
-                onOpen: { controller?.openConfirmedLink($0) },
-                onCopy: { controller?.copyConfirmedTarget($0) },
-                onOpenViewport: openViewport
-            )
-        }
+    @objc private func cancelPressed() {
+        dismissSheet()
     }
 
-    /// The binding-backed spelling, for panes that confirm a link without a
-    /// session controller (a viewport's refused navigation, a markdown
-    /// link) — same sheet, same open/copy actions, no viewport row.
-    func terminalLinkConfirmation(item: Binding<TerminalLink?>) -> some View {
-        sheet(item: item) { link in
-            TerminalLinkSheet(
-                link: link,
-                onOpen: { confirmed in
-                    if let url = confirmed.openableURL { UIApplication.shared.open(url) }
-                },
-                onCopy: { UIPasteboard.general.string = $0 }
-            )
+    private func viewportPressed() {
+        guard let viewport = editedViewport, let onOpenViewport else { return }
+        onOpenViewport(viewport)
+        dismissSheet()
+    }
+
+    private func openPressed() {
+        guard let link = editedLink, link.openableURL != nil else { return }
+        onOpen(link)
+        dismissSheet()
+    }
+
+    private func copyPressed() {
+        onCopy(editor.text)
+        dismissSheet()
+    }
+
+    private func dismissSheet() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            navigationController?.dismiss(animated: true)
         }
     }
 }
-
-#if DEBUG
-#Preview("Openable") {
-    TerminalLinkSheet(
-        link: TerminalLink.resolve("https://multiplexterm.dev/docs/tmux")!,
-        onOpen: { _ in },
-        onCopy: { _ in }
-    )
-    .frame(width: 720, height: 640)
-    .preferredColorScheme(.dark)
-}
-
-#Preview("Viewport LAN") {
-    TerminalLinkSheet(
-        link: TerminalLink.resolve("http://192.168.1.68:5173/")!,
-        viewportOffer: { link in
-            link.openableURL.map {
-                ViewportOffer(url: $0, reach: .lan, viaHostName: nil)
-            }
-        },
-        onOpen: { _ in },
-        onCopy: { _ in },
-        onOpenViewport: { _ in }
-    )
-    .frame(width: 720, height: 700)
-    .preferredColorScheme(.dark)
-}
-
-#Preview("Viewport loopback") {
-    TerminalLinkSheet(
-        link: TerminalLink.resolve("http://localhost:5173/")!,
-        viewportOffer: { _ in
-            ViewportOffer(
-                url: URL(string: "http://100.84.2.19:5173/")!,
-                reach: .remoteLoopback,
-                viaHostName: "devbox"
-            )
-        },
-        onOpen: { _ in },
-        onCopy: { _ in },
-        onOpenViewport: { _ in }
-    )
-    .frame(width: 720, height: 700)
-    .preferredColorScheme(.dark)
-}
-
-#Preview("Blocked") {
-    TerminalLinkSheet(
-        link: TerminalLink.resolve("file:///etc/shadow")!,
-        onOpen: { _ in },
-        onCopy: { _ in }
-    )
-    .frame(width: 720, height: 640)
-    .preferredColorScheme(.dark)
-}
-#endif

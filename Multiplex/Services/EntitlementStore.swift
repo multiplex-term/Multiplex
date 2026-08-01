@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 import StoreKit
-import SwiftUI
+import UIKit
 
 /// App-owned StoreKit values. Keeping this boundary smaller than StoreKit's
 /// concrete types lets the entitlement policy be exhaustively exercised even
@@ -76,7 +76,7 @@ private enum ProStoreClientError: LocalizedError {
 @MainActor
 struct ProStoreClient {
     var loadProduct: () async throws -> ProStoreProduct?
-    var purchase: (ProStoreProduct, PurchaseAction?) async throws -> ProStorePurchaseResult
+    var purchase: (ProStoreProduct, ProPurchasePresenter?) async throws -> ProStorePurchaseResult
     var currentEntitlements: () -> AsyncStream<ProStoreVerification>
     var updates: () -> AsyncStream<ProStoreVerification>
     var sync: () async throws -> Void
@@ -93,19 +93,8 @@ struct ProStoreClient {
             )
         },
         purchase: { product, presenter in
-            guard let product = product.product else { throw ProStoreClientError.missingProduct }
             guard let presenter else { throw ProStoreClientError.missingPurchasePresenter }
-            let result = try await presenter(product)
-            switch result {
-            case .success(let verification):
-                return .success(map(verification))
-            case .pending:
-                return .pending
-            case .userCancelled:
-                return .userCancelled
-            @unknown default:
-                return .unknown
-            }
+            return try await presenter(product)
         },
         currentEntitlements: {
             currentEntitlementStream()
@@ -118,7 +107,7 @@ struct ProStoreClient {
         }
     )
 
-    private static func map(
+    fileprivate static func map(
         _ result: VerificationResult<StoreKit.Transaction>
     ) -> ProStoreVerification {
         switch result {
@@ -158,6 +147,61 @@ struct ProStoreClient {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+}
+
+/// The app-owned purchase presentation seam. `EntitlementStore` and its test
+/// client deal only in app-owned product/result values; the live presenter is
+/// the one place that unwraps StoreKit's product and anchors its confirmation
+/// UI to the UIKit scene containing the paywall.
+///
+/// Capturing the scene weakly matters for multiwindow Multiplex: a presenter
+/// resolved in one terminal/deck window must never keep that scene alive or
+/// silently move a later purchase prompt to a different active window.
+@MainActor
+struct ProPurchasePresenter {
+    typealias Purchase = @MainActor (
+        ProStoreProduct
+    ) async throws -> ProStorePurchaseResult
+
+    private let purchase: Purchase
+
+    /// Injectable app-owned boundary used by StoreKit-independent tests.
+    init(purchase: @escaping Purchase) {
+        self.purchase = purchase
+    }
+
+    /// Production presenter for the paywall's actual hosting controller.
+    /// `confirmIn: UIScene` is available at the app's iOS 17 / visionOS 1
+    /// deployment floors, including visionOS where unanchored purchase is
+    /// unavailable.
+    init?(presenting viewController: UIViewController) {
+        guard let scene = viewController.viewIfLoaded?.window?.windowScene else {
+            return nil
+        }
+        self.init { [weak scene] product in
+            guard let product = product.product else {
+                throw ProStoreClientError.missingProduct
+            }
+            guard let scene else {
+                throw ProStoreClientError.missingPurchasePresenter
+            }
+            let result = try await product.purchase(confirmIn: scene)
+            switch result {
+            case .success(let verification):
+                return .success(ProStoreClient.map(verification))
+            case .pending:
+                return .pending
+            case .userCancelled:
+                return .userCancelled
+            @unknown default:
+                return .unknown
+            }
+        }
+    }
+
+    func callAsFunction(_ product: ProStoreProduct) async throws -> ProStorePurchaseResult {
+        try await purchase(product)
     }
 }
 
@@ -390,12 +434,13 @@ final class EntitlementStore {
     }
 
     /// Purchases the non-consumable. Returns true only when Pro is owned after
-    /// verified transaction processing (or was already owned). The scene's
-    /// PurchaseAction is injected because visionOS must anchor confirmation
-    /// to an active window; the product and result stay inside this service.
+    /// verified transaction processing (or was already owned). The app-owned
+    /// presenter is resolved from the paywall's hosting controller because
+    /// visionOS must anchor confirmation to that active window; StoreKit's
+    /// product and result stay behind this service boundary.
     @discardableResult
-    func purchasePro(using purchaseAction: PurchaseAction) async -> Bool {
-        await performPurchase(using: purchaseAction)
+    func purchasePro(using purchasePresenter: ProPurchasePresenter?) async -> Bool {
+        await performPurchase(using: purchasePresenter)
     }
 
     #if DEBUG
@@ -408,7 +453,7 @@ final class EntitlementStore {
     }
     #endif
 
-    private func performPurchase(using purchaseAction: PurchaseAction?) async -> Bool {
+    private func performPurchase(using purchasePresenter: ProPurchasePresenter?) async -> Bool {
         if isPro {
             commerceState = .purchased
             return true
@@ -428,7 +473,7 @@ final class EntitlementStore {
         }
 
         do {
-            let result = try await storeClient.purchase(product, purchaseAction)
+            let result = try await storeClient.purchase(product, purchasePresenter)
 
             switch result {
             case .success(.unverified):

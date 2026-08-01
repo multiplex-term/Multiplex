@@ -1,4 +1,3 @@
-import SwiftUI
 import XCTest
 @testable import Multiplex
 
@@ -37,10 +36,10 @@ final class ThemeStoreTests: XCTestCase {
         XCTAssertEqual(makeStore().appearance, .light, "appearance survives relaunch")
     }
 
-    func testColorSchemeOverrideMapping() {
-        XCTAssertNil(AppAppearance.system.colorSchemeOverride, "system follows the device")
-        XCTAssertEqual(AppAppearance.light.colorSchemeOverride, .light)
-        XCTAssertEqual(AppAppearance.dark.colorSchemeOverride, .dark)
+    func testResolvedOverrideMapping() {
+        XCTAssertNil(AppAppearance.system.resolvedOverride, "system follows the device")
+        XCTAssertEqual(AppAppearance.light.resolvedOverride, .light)
+        XCTAssertEqual(AppAppearance.dark.resolvedOverride, .dark)
     }
 
     // MARK: Per-appearance selection

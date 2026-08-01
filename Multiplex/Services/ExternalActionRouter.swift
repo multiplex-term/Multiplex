@@ -36,6 +36,12 @@ final class ExternalActionRouter {
     @ObservationIgnored private var contextToken: UUID?
     @ObservationIgnored private var drainTask: Task<Void, Never>?
 
+    /// A newly resolved terminal-only scene uses this to recover work that
+    /// arrived while UIKit was still withholding its restoration payload.
+    /// `pendingSignal` alone is historical and cannot distinguish queued work
+    /// from an action a Deck already drained.
+    var hasPendingActions: Bool { !queue.isEmpty }
+
     func submit(_ action: ExternalAction) {
         queue.append(action)
         pendingSignal &+= 1

@@ -1,1133 +1,1248 @@
-import SwiftUI
+import Observation
+import UIKit
 
-/// Breakpoint sizing for the wall's session-tile grid, in two stages: how many
-/// columns the width *allows*, then how many the wall has tiles to *fill*.
-///
-/// Width first. Tiles expand toward the preferred width, but a new column
-/// enters as soon as every tile can retain the compact minimum. This keeps an
-/// iPad mini's two-tile portrait row and three-tile landscape row intact
-/// instead of orphaning the last tile.
-///
-/// Then the tiles. A wall can be wider than the fullest host has tiles for, and
-/// an unfillable column is not free — every tile in the row gives up width to
-/// make room for it, so a three-tile host on a four-column wall would show
-/// three compressed tiles beside an empty slot, and compress further the wider
-/// the wall got. The count therefore stops at the tiles that exist: surplus
-/// width goes to those tiles until they reach the preferred width and then
-/// simply stays empty, which is the honest answer when a viewport is larger
-/// than the fleet in it.
-///
-/// Only the width stage may cross into SwiftUI state. The continuously changing
-/// window width is reduced to that count by `onGeometryChange`, so ordinary
-/// resize frames do not rebuild the FleetWall view hierarchy; the tile stage is
-/// then folded in where the grid is built, since sessions arrive on the probe's
-/// cadence rather than the window's.
-enum FleetTileGridSizing {
-    static let minimumTileWidth: CGFloat = 290
-    static let preferredTileWidth: CGFloat = 360
-    static let gutter: CGFloat = 14
-
-    /// The wall's final column count: never more columns than there are tiles
-    /// to put in them.
-    static func columnCount(availableColumns: Int, tileCount: Int) -> Int {
-        max(1, min(availableColumns, tileCount))
-    }
-
-    static func initialColumnCount(availableWidth rawWidth: CGFloat) -> Int {
-        let width = Self.normalized(rawWidth)
-        return Self.maximumColumnCount(
-            tileWidth: Self.minimumTileWidth,
-            availableWidth: width
-        )
-    }
-
-    static func columnCount(current: Int?, availableWidth rawWidth: CGFloat) -> Int {
-        let width = Self.normalized(rawWidth)
-        var count = max(1, current ?? initialColumnCount(availableWidth: width))
-
-        // Growing: use the same compact threshold as shrinking. This also
-        // lets the real viewport recover after SwiftUI reports a transient
-        // narrow width during presentation.
-        while Self.requiredWidth(
-            columnCount: count + 1,
-            tileWidth: Self.minimumTileWidth
-        ) <= width {
-            count += 1
-        }
-
-        // Shrinking: keep the row intact while every tile remains at least
-        // 290 points, then wrap one or more columns as necessary.
-        while count > 1,
-              Self.requiredWidth(
-                columnCount: count,
-                tileWidth: Self.minimumTileWidth
-              ) > width {
-            count -= 1
-        }
-
-        return count
-    }
-
-    static func requiredWidth(columnCount: Int, tileWidth: CGFloat) -> CGFloat {
-        guard columnCount > 0 else { return 0 }
-        return CGFloat(columnCount) * tileWidth + CGFloat(columnCount - 1) * gutter
-    }
-
-    private static func maximumColumnCount(
-        tileWidth: CGFloat,
-        availableWidth: CGFloat
-    ) -> Int {
-        max(1, Int((availableWidth + gutter) / (tileWidth + gutter)))
-    }
-
-    private static func normalized(_ width: CGFloat) -> CGFloat {
-        width.isFinite ? max(0, width) : 0
-    }
-}
-
-/// Identity of the long-lived wall feed. It uses the same normalized host
-/// configuration as `ConnectionHub`: whenever the hub replaces a stale model,
-/// this changes too, cancelling the old feed and starting one for the new
-/// model. Helper-command-only edits intentionally keep the existing feed.
-struct FleetFeedID: Hashable {
-    private let hostConfigurations: [Host]
-    private let active: Bool
-
-    init(hosts: [Host], active: Bool) {
-        hostConfigurations = hosts.map(\.connectionModelConfiguration)
-        self.active = active
-    }
-}
-
-/// Narrow Observation boundary for one host. Capture-pane text and attention
-/// changes now invalidate only that host section; the parent wall observes
-/// the lightweight fleet/session summaries used for global layout.
-private struct HostSectionObservation<Content: View>: View {
-    let model: HostConnectionModel
-    let content: (HostConnectionModel) -> Content
-
-    init(
-        model: HostConnectionModel,
-        @ViewBuilder content: @escaping (HostConnectionModel) -> Content
-    ) {
-        self.model = model
-        self.content = content
-    }
-
-    var body: some View {
-        content(model)
-    }
-}
-
-/// The deck: the whole fleet as one broadcast monitor wall. Every host
-/// probes concurrently under a thin rail; every session is a live tile
-/// showing its actual last lines (capture-pane over the host's control
-/// connection, ~5 s cadence while the deck is frontmost). Unreachable
-/// hosts render in the composition as NO SIGNAL tiles instead of hiding
-/// behind a selection — there is no sidebar on purpose.
-struct FleetWall: View {
+/// Namespace for the wall's three UIKit presentation modes.
+enum FleetWall {
     enum Presentation: Equatable {
         case standard
         case shellCompact
         case shellRail
     }
+}
 
-    @Environment(HostStore.self) private var store
-    @Environment(ConnectionHub.self) private var hub
-    @Environment(NetworkChangeMonitor.self) private var networkChanges
-    @Environment(TerminalWorkspace.self) private var workspace
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-
+@MainActor
+struct FleetWallConfiguration {
+    let store: HostStore
+    let hub: ConnectionHub
+    let networkChanges: NetworkChangeMonitor
+    let workspace: TerminalWorkspace
     var terminalOpener: TerminalRouteOpener
-    var presentation: Presentation = .standard
+    var presentation: FleetWall.Presentation
     var selectedTerminal: TerminalRoute?
-    /// Safe-area insets the shell spends on the wall instead of reserving
-    /// them: chassis, rules, and the scroll viewport reach the window's
-    /// physical edges, and the wall restores these as content padding — so
-    /// tiles pass beneath the home indicator while staying clear of the
-    /// Dynamic Island. Classic deck scenes leave this zero and retain their
-    /// existing layout.
-    var shellSafeArea = EdgeInsets()
+    var shellSafeArea: UIEdgeInsets
+    var reduceMotion: Bool
+    var sceneIsActive: Bool
     var addHost: () -> Void
     var editHost: (Host) -> Void
     var openSettings: () -> Void
     var openFAQ: () -> Void
+    var usesSystemNavigation = false
+}
 
-    @State private var namingHost: Host?
-    @State private var deleteTarget: DeleteTarget?
-    @State private var removingHost: Host?
-    @State private var unreachableNotice: UnreachableNotice?
-    /// Background probes surface that credentials are needed but never present
-    /// the prompt themselves. Only an explicit press on that host opts in.
-    @State private var keyPassphraseHostID: UUID?
-    @State private var legacyDropTarget: SessionDropTarget?
-    @State private var tileGridColumnCount: Int?
-    /// The NO TMUX tile's install-guide dialog target.
-    @State private var tmuxGuideHost: Host?
-    /// The rail's KEYCHAIN LOCKED tip, captured at press time.
-    @State private var keychainTip: KeychainTipRequest?
+// MARK: - Native wall container / navigation chrome
 
-    /// Pending delete confirmation — which session on which host.
-    private struct DeleteTarget {
-        let host: Host
-        let session: TmuxSession
+/// Owns the iPad 26+ navigation bar used by classic deck scenes. Shell and
+/// visionOS presentations embed the same wall controller directly.
+@MainActor
+final class FleetWallContainerViewController: UIViewController {
+    private var configuration: FleetWallConfiguration
+    private let wallController: FleetWallViewController
+    private var embeddedController: UIViewController?
+    private var navigationControllerHost: UINavigationController?
+    private var navigationTitleView: FleetNavigationTitleView?
+
+    init(configuration: FleetWallConfiguration) {
+        self.configuration = configuration
+        wallController = FleetWallViewController(configuration: configuration)
+        super.init(nibName: nil, bundle: nil)
     }
 
-    /// Failure detail captured when the rail's UNREACHABLE status is
-    /// pressed. Capture the text so a background retry cannot replace it
-    /// while the explanation is onscreen.
-    private struct UnreachableNotice: Identifiable {
-        let host: Host
-        let reason: String
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
 
-        var id: UUID { host.id }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIKitChassis.chassis
+        installChildIfNeeded()
     }
 
-    private var wallPadding: CGFloat {
-        presentation == .shellRail ? 12 : 26
+    func update(configuration: FleetWallConfiguration) {
+        let navigationChanged = wantsSystemNavigation(for: self.configuration)
+            != wantsSystemNavigation(for: configuration)
+        self.configuration = configuration
+        if isViewLoaded, navigationChanged {
+            uninstallChild()
+            installChildIfNeeded()
+        }
+        var wallConfiguration = configuration
+        wallConfiguration.usesSystemNavigation = wantsSystemNavigation(for: configuration)
+        wallController.update(configuration: wallConfiguration)
+        configureNavigationChrome()
     }
-    /// Wall cadence: one concurrent probe round-trip per host per tick.
+
+    private func installChildIfNeeded() {
+        var wallConfiguration = configuration
+        wallConfiguration.usesSystemNavigation = wantsSystemNavigation(for: configuration)
+        wallController.update(configuration: wallConfiguration)
+
+        let child: UIViewController
+        if wallConfiguration.usesSystemNavigation {
+            let navigation = UINavigationController(rootViewController: wallController)
+            navigationControllerHost = navigation
+            child = navigation
+        } else {
+            navigationControllerHost = nil
+            child = wallController
+        }
+        embeddedController = child
+        addChild(child)
+        view.addSubview(child.view)
+        child.view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            child.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            child.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            child.view.topAnchor.constraint(equalTo: view.topAnchor),
+            child.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        child.didMove(toParent: self)
+        configureNavigationChrome()
+    }
+
+    private func uninstallChild() {
+        guard let child = embeddedController else { return }
+        child.willMove(toParent: nil)
+        child.view.removeFromSuperview()
+        child.removeFromParent()
+        embeddedController = nil
+        navigationControllerHost = nil
+        navigationTitleView = nil
+    }
+
+    private func wantsSystemNavigation(for configuration: FleetWallConfiguration) -> Bool {
+        #if os(visionOS)
+        return false
+        #else
+        if #available(iOS 26.0, *) {
+            return configuration.presentation == .standard
+        }
+        return false
+        #endif
+    }
+
+    private func configureNavigationChrome() {
+        guard let navigationControllerHost else { return }
+        UIKitChassis.configureSheetNavigationBar(navigationControllerHost.navigationBar)
+        navigationControllerHost.navigationBar.prefersLargeTitles = false
+
+        let titleView = navigationTitleView ?? FleetNavigationTitleView()
+        navigationTitleView = titleView
+        titleView.setSummary(wallController.fleetSummary)
+        wallController.onFleetSummaryChange = { [weak titleView] summary in
+            titleView?.setSummary(summary)
+        }
+        wallController.navigationItem.titleView = titleView
+        wallController.navigationItem.largeTitleDisplayMode = .never
+
+        // One custom view intentionally owns all three chips. iOS-app-on-Mac
+        // otherwise reduces single custom toolbar controls to bare glyphs.
+        let actions = UIStackView(arrangedSubviews: [
+            UIKitChassisChip(
+                "HOST",
+                systemImage: "plus",
+                accessibilityLabel: "Add host",
+                action: configuration.addHost
+            ),
+            UIKitChassisChip(
+                "FAQ",
+                systemImage: "questionmark",
+                accessibilityLabel: "Frequently asked questions",
+                action: configuration.openFAQ
+            ),
+            UIKitChassisChip(
+                "SETTINGS",
+                systemImage: "gearshape",
+                accessibilityLabel: "Settings",
+                action: configuration.openSettings
+            ),
+        ])
+        actions.axis = .horizontal
+        actions.alignment = .center
+        actions.spacing = 8
+        actions.directionalLayoutMargins = NSDirectionalEdgeInsets(
+            top: 0, leading: 0, bottom: 0, trailing: 12
+        )
+        actions.isLayoutMarginsRelativeArrangement = true
+        let item = UIBarButtonItem(customView: actions)
+        #if !os(visionOS)
+        // The stack already draws three complete TALLY faces. iPadOS must not
+        // wrap that custom group in an additional shared Glass capsule or add
+        // bar-item padding around its exact intrinsic geometry.
+        if #available(iOS 26.0, *) {
+            item.hidesSharedBackground = true
+        }
+        if #available(iOS 27.0, *) {
+            item.isPaddingRemoved = true
+        }
+        #endif
+        wallController.navigationItem.rightBarButtonItem = item
+    }
+}
+
+@MainActor
+private final class FleetNavigationTitleView: UIView {
+    private let titleLabel = UIKitChassisLabel("Multiplex", size: 15)
+    private let summaryLabel = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        summaryLabel.font = UIKitChassis.monoFont(11)
+        summaryLabel.textColor = UIKitChassis.signal2
+        summaryLabel.numberOfLines = 1
+        summaryLabel.lineBreakMode = .byTruncatingTail
+        summaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let stack = UIStackView(arrangedSubviews: [titleLabel, summaryLabel])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 14
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func setSummary(_ summary: String) {
+        summaryLabel.text = summary
+        accessibilityLabel = "Multiplex, \(summary)"
+    }
+}
+
+// MARK: - Wall controller
+
+@MainActor
+final class FleetWallViewController: UIViewController {
+    private struct WallSnapshot: Equatable {
+        let hosts: [Host]
+        let sessionCounts: [UUID: Int]
+        let offline: Bool
+        let passphraseChallenge: SSHKeyPassphraseChallenge?
+    }
+
+    private struct FeedIdentity: Equatable {
+        let hosts: [Host]
+        let active: Bool
+    }
+
     private static let feedInterval: Duration = .seconds(5)
 
-    var body: some View {
-        platformWall
-        .background(Theme.chassis.ignoresSafeArea())
-        .task(
-            id: FleetFeedID(hosts: store.hosts, active: scenePhase == .active)
-        ) { await runFeed() }
-        .sheet(item: $namingHost) { host in
-            NewSessionSheet(
-                host: host,
-                existingNames: hub.model(for: host).tmux.sessions.map(\.name),
-                create: { name, agent, model, initialPrompt, directory, script in
-                    createSession(
-                        on: host,
-                        named: name,
-                        launching: agent,
-                        model: model,
-                        initialPrompt: initialPrompt,
-                        startingIn: directory,
-                        running: script
-                    )
-                }
-            )
+    private var configuration: FleetWallConfiguration
+    private let rootStack = UIStackView()
+    private let fixedHeaderContainer = UIView()
+    private let fixedHeader = FleetHeaderView()
+    private let fixedHeaderRule = UIView()
+    private let scrollView = UIScrollView()
+    private let contentStack = UIStackView()
+    private let passphrasePresenter = SSHKeyPassphrasePromptPresenterViewController()
+    private var contentLeadingConstraint: NSLayoutConstraint?
+    private var contentTrailingConstraint: NSLayoutConstraint?
+    private var contentTopConstraint: NSLayoutConstraint?
+    private var contentBottomConstraint: NSLayoutConstraint?
+    private var fixedHeaderLeadingConstraint: NSLayoutConstraint?
+    private var fixedHeaderTrailingConstraint: NSLayoutConstraint?
+    private var sections: [UUID: FleetHostSectionView] = [:]
+    private var awaitingSignalView: FleetAwaitingSignalView?
+    private var inlineHeader: FleetHeaderView?
+    private var latestSnapshot: WallSnapshot?
+    private var observationGeneration = 0
+    private var feedTask: Task<Void, Never>?
+    private var feedIdentity: FeedIdentity?
+    private var availableColumnCount: Int?
+    private var resolvedColumnCount = 1
+    private var keyPassphraseHostID: UUID?
+    private var isOnScreen = false
+
+    var onFleetSummaryChange: ((String) -> Void)?
+    private(set) var fleetSummary = "0 HOSTS · 0 SESSIONS"
+
+    init(configuration: FleetWallConfiguration) {
+        self.configuration = configuration
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIKitChassis.chassis
+        configureHierarchy()
+        observeWall()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        isOnScreen = true
+        restartFeedIfNeeded(force: true)
+        synchronizePassphrasePrompt()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        isOnScreen = false
+        feedTask?.cancel()
+        feedTask = nil
+        feedIdentity = nil
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateColumnCount()
+    }
+
+    deinit {
+        feedTask?.cancel()
+    }
+
+    func update(configuration: FleetWallConfiguration) {
+        let dependenciesChanged = self.configuration.store !== configuration.store
+            || self.configuration.hub !== configuration.hub
+            || self.configuration.networkChanges !== configuration.networkChanges
+            || self.configuration.workspace !== configuration.workspace
+        let layoutChanged = self.configuration.presentation != configuration.presentation
+            || self.configuration.shellSafeArea != configuration.shellSafeArea
+            || self.configuration.usesSystemNavigation != configuration.usesSystemNavigation
+        let activeChanged = self.configuration.sceneIsActive != configuration.sceneIsActive
+        self.configuration = configuration
+
+        if isViewLoaded {
+            if layoutChanged { configurePresentationLayout() }
+            if dependenciesChanged { observeWall() }
+            propagateConfiguration()
+            if activeChanged { restartFeedIfNeeded(force: true) }
+            updateColumnCount()
         }
-        .alert(
-            "Delete Session",
-            isPresented: Binding(
-                get: { deleteTarget != nil },
-                set: { if !$0 { deleteTarget = nil } }
+    }
+
+    private func configureHierarchy() {
+        rootStack.axis = .vertical
+        rootStack.alignment = .fill
+        rootStack.spacing = 0
+        view.addSubview(rootStack)
+        rootStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            rootStack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            rootStack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            rootStack.topAnchor.constraint(equalTo: view.topAnchor),
+            rootStack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+
+        fixedHeaderContainer.backgroundColor = UIKitChassis.chassis
+        fixedHeaderContainer.addSubview(fixedHeader)
+        fixedHeaderContainer.addSubview(fixedHeaderRule)
+        fixedHeader.translatesAutoresizingMaskIntoConstraints = false
+        fixedHeaderRule.translatesAutoresizingMaskIntoConstraints = false
+        fixedHeaderRule.backgroundColor = UIKitChassis.bezelHi
+        fixedHeaderLeadingConstraint = fixedHeader.leadingAnchor.constraint(
+            equalTo: fixedHeaderContainer.leadingAnchor
+        )
+        fixedHeaderTrailingConstraint = fixedHeader.trailingAnchor.constraint(
+            equalTo: fixedHeaderContainer.trailingAnchor
+        )
+        NSLayoutConstraint.activate([
+            fixedHeaderLeadingConstraint!,
+            fixedHeaderTrailingConstraint!,
+            fixedHeader.topAnchor.constraint(equalTo: fixedHeaderContainer.topAnchor),
+            fixedHeader.bottomAnchor.constraint(equalTo: fixedHeaderRule.topAnchor),
+            fixedHeaderRule.leadingAnchor.constraint(equalTo: fixedHeaderContainer.leadingAnchor),
+            fixedHeaderRule.trailingAnchor.constraint(equalTo: fixedHeaderContainer.trailingAnchor),
+            fixedHeaderRule.bottomAnchor.constraint(equalTo: fixedHeaderContainer.bottomAnchor),
+            fixedHeaderRule.heightAnchor.constraint(equalToConstant: 1),
+        ])
+        rootStack.addArrangedSubview(fixedHeaderContainer)
+
+        scrollView.alwaysBounceVertical = true
+        scrollView.backgroundColor = UIKitChassis.chassis
+        rootStack.addArrangedSubview(scrollView)
+
+        contentStack.axis = .vertical
+        contentStack.alignment = .fill
+        contentStack.spacing = 0
+        scrollView.addSubview(contentStack)
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        contentLeadingConstraint = contentStack.leadingAnchor.constraint(
+            equalTo: scrollView.contentLayoutGuide.leadingAnchor
+        )
+        contentTrailingConstraint = contentStack.trailingAnchor.constraint(
+            equalTo: scrollView.contentLayoutGuide.trailingAnchor
+        )
+        contentTopConstraint = contentStack.topAnchor.constraint(
+            equalTo: scrollView.contentLayoutGuide.topAnchor
+        )
+        contentBottomConstraint = contentStack.bottomAnchor.constraint(
+            equalTo: scrollView.contentLayoutGuide.bottomAnchor
+        )
+        NSLayoutConstraint.activate([
+            contentLeadingConstraint!,
+            contentTrailingConstraint!,
+            contentTopConstraint!,
+            contentBottomConstraint!,
+            scrollView.contentLayoutGuide.widthAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.widthAnchor
             ),
-            presenting: deleteTarget
-        ) { target in
-            Button("Delete", role: .destructive) { kill(target) }
-            Button("Cancel", role: .cancel) {}
-        } message: { target in
-            Text("Kills “\(target.session.name)” on \(target.host.name) and everything running in it.")
-        }
-        .alert(
-            "Remove Host",
-            isPresented: Binding(
-                get: { removingHost != nil },
-                set: { if !$0 { removingHost = nil } }
-            ),
-            presenting: removingHost
-        ) { host in
-            Button("Remove", role: .destructive) { remove(host) }
-            Button("Cancel", role: .cancel) {}
-        } message: { host in
-            Text("Removes “\(host.name)” and its saved secret from this device and your synced devices. tmux sessions on the host keep running.")
-        }
-        .alert(item: $unreachableNotice) { notice in
-            Alert(
-                title: Text("\(notice.host.name) Unreachable"),
-                message: Text(notice.reason),
-                dismissButton: .cancel(Text("OK"))
-            )
-        }
-        .sheet(item: $tmuxGuideHost) { host in
-            TmuxInstallSheet(host: host)
-        }
-        .sheet(item: $keychainTip) { tip in
-            KeychainUnlockSheet(host: tip.host, sessionNames: tip.sessionNames)
-        }
-        .sshKeyPassphrasePrompt(
-            challenge: presentedKeyPassphraseChallenge,
-            onSubmit: acceptKeyPassphrase,
-            onCancel: { _ in keyPassphraseHostID = nil }
+        ])
+
+        addChild(passphrasePresenter)
+        view.addSubview(passphrasePresenter.view)
+        passphrasePresenter.view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            passphrasePresenter.view.widthAnchor.constraint(equalToConstant: 0),
+            passphrasePresenter.view.heightAnchor.constraint(equalToConstant: 0),
+            passphrasePresenter.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            passphrasePresenter.view.topAnchor.constraint(equalTo: view.topAnchor),
+        ])
+        passphrasePresenter.didMove(toParent: self)
+
+        configurePresentationLayout()
+    }
+
+    private func configurePresentationLayout() {
+        let presentation = configuration.presentation
+        let shell = presentation != .standard
+        fixedHeaderContainer.isHidden = !shell
+        fixedHeader.configure(
+            presentation: presentation,
+            summary: fleetSummary,
+            actions: headerActions
+        )
+
+        let wallPadding: CGFloat = presentation == .shellRail ? 12 : 26
+        let safe = configuration.shellSafeArea
+        fixedHeaderLeadingConstraint?.constant = wallPadding + safe.left
+        fixedHeaderTrailingConstraint?.constant = -(wallPadding + safe.right)
+        fixedHeader.setTopInset(min(wallPadding, 16))
+
+        let leading = wallPadding + safe.left
+        let trailing = wallPadding + safe.right
+        contentLeadingConstraint?.constant = leading
+        contentTrailingConstraint?.constant = -trailing
+        contentTopConstraint?.constant = presentation == .standard ? wallPadding : 0
+        contentBottomConstraint?.constant = -(wallPadding + safe.bottom)
+
+        renderWall(latestSnapshot)
+    }
+
+    private var headerActions: FleetHeaderActions {
+        FleetHeaderActions(
+            addHost: configuration.addHost,
+            openFAQ: configuration.openFAQ,
+            openSettings: configuration.openSettings
         )
     }
 
-    @ViewBuilder
-    private var platformWall: some View {
-        if presentation != .standard {
-            shellWall
-        } else {
-            #if os(visionOS)
-            wall(showHeader: true)
-            #else
-            if #available(iOS 26.0, *) {
-                // iPadOS window controls occupy the leading edge of the title
-                // bar, but don't contribute a safe-area inset to arbitrary
-                // content. Put the classic deck rail in the system toolbar
-                // so MULTIPLEX is laid out around those controls instead of
-                // underneath them. The in-scene shell has no window controls
-                // and keeps its TALLY header full-bleed in the wall itself.
-                NavigationStack {
-                    wall(showHeader: false)
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbarBackground(Theme.chassis, for: .navigationBar)
-                        .toolbar { deckToolbar }
-                }
+    // MARK: Observation
+
+    private func observeWall() {
+        guard isViewLoaded else { return }
+        observationGeneration += 1
+        let generation = observationGeneration
+        let snapshot = withObservationTracking {
+            let hosts = configuration.store.hosts
+            var counts: [UUID: Int] = [:]
+            for host in hosts where host.isEnabled {
+                counts[host.id] = configuration.hub.model(for: host).sessionCount
+            }
+            let challenge: SSHKeyPassphraseChallenge?
+            if let keyPassphraseHostID,
+               let host = configuration.store.host(id: keyPassphraseHostID) {
+                challenge = configuration.hub.model(for: host).keyPassphraseChallenge
             } else {
-                wall(showHeader: true)
+                challenge = nil
             }
-            #endif
-        }
-    }
-
-    /// Shell decks use a fixed TALLY header. Only the host sections scroll,
-    /// and their viewport extends beneath the bottom safe area while content
-    /// receives the equivalent inset as trailing breathing room.
-    private var shellWall: some View {
-        VStack(spacing: 0) {
-            header
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, wallPadding + shellSafeArea.leading)
-                .padding(.trailing, wallPadding + shellSafeArea.trailing)
-                .padding(.top, min(wallPadding, 16))
-                .background(Theme.chassis)
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(Theme.bezelHi).frame(height: 1)
-                }
-
-            wall(showHeader: false)
-                .ignoresSafeArea(.container, edges: .bottom)
-        }
-    }
-
-    private func wall(showHeader: Bool) -> some View {
-        let columns = gridColumns(count: resolvedColumnCount)
-
-        return ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if showHeader { header }
-                if store.hosts.isEmpty {
-                    awaitingSignal
-                } else {
-                    ForEach(store.hosts) { host in
-                        // A switched-off host never gets a connection model:
-                        // asking the hub for one is what would put it back on
-                        // the air.
-                        if host.isEnabled {
-                            let model = hub.model(for: host)
-                            HostSectionObservation(model: model) { observed in
-                                hostSection(host, model: observed, columns: columns)
-                            }
-                        } else {
-                            disabledHostSection(host, columns: columns)
-                        }
-                    }
-                }
-            }
-            .frame(
-                maxWidth: .infinity,
-                alignment: presentation == .shellCompact ? .center : .leading
+            return WallSnapshot(
+                hosts: hosts,
+                sessionCounts: counts,
+                offline: configuration.networkChanges.isOffline,
+                passphraseChallenge: challenge
             )
-            .padding(.leading, wallPadding + shellSafeArea.leading)
-            .padding(.trailing, wallPadding + shellSafeArea.trailing)
-            .padding(.top, presentation == .standard ? wallPadding : 0)
-            .padding(.bottom, wallPadding + shellSafeArea.bottom)
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.observationGeneration == generation else { return }
+                self.observeWall()
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay {
-            // Measure a viewport-sized, content-independent surface. If the
-            // grid is between breakpoint updates, its temporary ideal width
-            // must never feed back into the width used to choose columns.
-            Color.clear
-                .allowsHitTesting(false)
-                .onGeometryChange(for: Int.self) { geometry in
-                    FleetTileGridSizing.columnCount(
-                        current: tileGridColumnCount,
-                        availableWidth: max(
-                            0,
-                            geometry.size.width - wallPadding * 2
-                                - shellSafeArea.leading - shellSafeArea.trailing
-                        )
+        latestSnapshot = snapshot
+        renderWall(snapshot)
+        synchronizePassphrasePrompt(challenge: snapshot.passphraseChallenge)
+        restartFeedIfNeeded(force: false)
+    }
+
+    private func renderWall(_ snapshot: WallSnapshot?) {
+        guard isViewLoaded, let snapshot else { return }
+        let hostCount = snapshot.hosts.count
+        let sessionCount = snapshot.sessionCounts.values.reduce(0, +)
+        fleetSummary = "\(hostCount) HOST\(hostCount == 1 ? "" : "S") · "
+            + "\(sessionCount) SESSION\(sessionCount == 1 ? "" : "S")"
+        fixedHeader.setSummary(fleetSummary)
+        inlineHeader?.setSummary(fleetSummary)
+        onFleetSummaryChange?(fleetSummary)
+
+        var desiredViews: [UIView] = []
+        if shouldShowInlineHeader {
+            let header = inlineHeader ?? FleetHeaderView()
+            inlineHeader = header
+            header.configure(
+                presentation: configuration.presentation,
+                summary: fleetSummary,
+                actions: headerActions
+            )
+            desiredViews.append(header)
+        } else {
+            inlineHeader = nil
+        }
+
+        if snapshot.hosts.isEmpty {
+            sections.values.forEach { $0.stopObserving() }
+            sections.removeAll()
+            let awaiting = awaitingSignalView ?? FleetAwaitingSignalView()
+            awaitingSignalView = awaiting
+            awaiting.configure(addHost: configuration.addHost)
+            desiredViews.append(awaiting)
+        } else {
+            awaitingSignalView = nil
+            let liveIDs = Set(snapshot.hosts.map(\.id))
+            for id in Array(sections.keys) where !liveIDs.contains(id) {
+                sections.removeValue(forKey: id)?.stopObserving()
+            }
+            for host in snapshot.hosts {
+                let section = sections[host.id] ?? FleetHostSectionView(
+                    host: host,
+                    model: host.isEnabled ? configuration.hub.model(for: host) : nil,
+                    configuration: hostSectionConfiguration(for: host)
+                )
+                sections[host.id] = section
+                section.update(
+                    host: host,
+                    model: host.isEnabled ? configuration.hub.model(for: host) : nil,
+                    configuration: hostSectionConfiguration(for: host)
+                )
+                desiredViews.append(section)
+            }
+        }
+
+        // An attached UIMenu belongs to its source view. Detaching an
+        // otherwise unchanged host section dismisses that menu immediately,
+        // so leave the hierarchy alone when the semantic wall order is the
+        // same. Probe observations commonly repaint with these exact views.
+        let alreadyArranged = contentStack.arrangedSubviews.count == desiredViews.count
+            && zip(contentStack.arrangedSubviews, desiredViews).allSatisfy { current, desired in
+                current === desired
+            }
+        if !alreadyArranged {
+            contentStack.arrangedSubviews.forEach {
+                contentStack.removeArrangedSubview($0)
+                $0.removeFromSuperview()
+            }
+            desiredViews.forEach(contentStack.addArrangedSubview)
+        }
+        updateColumnCount()
+    }
+
+    private var shouldShowInlineHeader: Bool {
+        configuration.presentation == .standard && !configuration.usesSystemNavigation
+    }
+
+    private func propagateConfiguration() {
+        fixedHeader.configure(
+            presentation: configuration.presentation,
+            summary: fleetSummary,
+            actions: headerActions
+        )
+        inlineHeader?.configure(
+            presentation: configuration.presentation,
+            summary: fleetSummary,
+            actions: headerActions
+        )
+        guard let hosts = latestSnapshot?.hosts else { return }
+        for host in hosts {
+            sections[host.id]?.update(
+                host: host,
+                model: host.isEnabled ? configuration.hub.model(for: host) : nil,
+                configuration: hostSectionConfiguration(for: host)
+            )
+        }
+    }
+
+    private func hostSectionConfiguration(for host: Host) -> FleetHostSectionConfiguration {
+        FleetHostSectionConfiguration(
+            store: configuration.store,
+            workspace: configuration.workspace,
+            presentation: configuration.presentation,
+            selectedTerminal: configuration.selectedTerminal,
+            networkOffline: latestSnapshot?.offline ?? false,
+            reduceMotion: configuration.reduceMotion,
+            columnCount: resolvedColumnCount,
+            duplicateAttachTitle: configuration.terminalOpener.duplicateAttachTitle,
+            openTabAccessibilityText: configuration.terminalOpener.openTabAccessibilityText,
+            openShell: { [weak self] in
+                self?.open(TerminalRoute(hostID: host.id, mode: .shell))
+            },
+            openSession: { [weak self] session in
+                self?.focusOrAttach(host, session: session)
+            },
+            openDuplicateSession: { [weak self] session in
+                self?.open(TerminalRoute(
+                    hostID: host.id,
+                    mode: .attach(sessionName: session.name)
+                ))
+            },
+            requestNewSession: { [weak self] in self?.presentNewSession(on: host) },
+            requestDeleteSession: { [weak self] session in
+                self?.confirmDelete(session: session, on: host)
+            },
+            reconnect: { [weak self] model in
+                guard let self else { return }
+                if !self.requestKeyPassphraseIfNeeded(model) { model.refresh() }
+            },
+            requestPassphrase: { [weak self] model in
+                _ = self?.requestKeyPassphraseIfNeeded(model)
+            },
+            showUnreachable: { [weak self] reason in
+                self?.presentUnreachable(host: host, reason: reason)
+            },
+            showTmuxGuide: { [weak self] in self?.presentTmuxGuide(for: host) },
+            showKeychainGuide: { [weak self] names in
+                self?.presentKeychainGuide(for: host, sessionNames: names)
+            },
+            moveUp: { [weak self] in self?.configuration.store.moveUp(host) },
+            moveDown: { [weak self] in self?.configuration.store.moveDown(host) },
+            setEnabled: { [weak self] enabled in self?.setEnabled(enabled, for: host) },
+            editHost: { [weak self] in self?.configuration.editHost(host) },
+            removeHost: { [weak self] in self?.confirmRemove(host) },
+            reorderSession: { [weak self] source, target, sessions in
+                guard let self else { return }
+                let move = {
+                    self.configuration.store.moveSession(
+                        source,
+                        to: target,
+                        for: host.id,
+                        available: sessions
                     )
-                } action: { count in
-                    guard tileGridColumnCount != count else { return }
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        tileGridColumnCount = count
-                    }
                 }
-        }
-    }
-
-    /// How many tiles the fullest host section has to show: its sessions plus
-    /// the new-session tile, or the lone tile a probing, unreachable, or
-    /// tmux-less host renders.
-    ///
-    /// One count for the whole wall, taken from the fullest section, so tiles
-    /// stay the same size across hosts — a shorter section leaves its trailing
-    /// slots empty rather than widening its own tiles out of step with the
-    /// sections above and below it.
-    private var tileCount: Int {
-        let counts = store.hosts.filter(\.isEnabled).map { host -> Int in
-            max(1, hub.model(for: host).sessionCount + 1)
-        }
-        return counts.max() ?? 1
-    }
-
-    /// The wall's column count: what the width allows, narrowed to what the
-    /// fullest host has tiles to fill.
-    private var resolvedColumnCount: Int {
-        FleetTileGridSizing.columnCount(
-            availableColumns: tileGridColumnCount
-                ?? (presentation == .standard ? 2 : 1),
-            tileCount: tileCount
+                if self.configuration.reduceMotion {
+                    move()
+                } else {
+                    UIView.animate(
+                        withDuration: 0.32,
+                        delay: 0,
+                        usingSpringWithDamping: 1,
+                        initialSpringVelocity: 0,
+                        options: [.beginFromCurrentState],
+                        animations: move
+                    )
+                }
+            },
+            modelDidChange: { [weak self] in
+                self?.synchronizePassphrasePrompt()
+            }
         )
     }
 
-    /// A single-column wall centers its tiles instead of parking them against
-    /// the leading edge. The leading grid is what keeps tiles lined up with
-    /// each other across a row — a column of one has nothing to line up with,
-    /// and the surplus width a capped tile leaves is then all on one side.
-    private var centersLoneTile: Bool { resolvedColumnCount == 1 }
+    // MARK: Responsive grid
 
-    private func gridColumns(count: Int) -> [GridItem] {
-        Array(
-            repeating: GridItem(
-                .flexible(
-                    // The breakpoint policy enforces the 290pt minimum. A
-                    // zero layout minimum lets a stale count compress for the
-                    // single observation pass instead of widening and
-                    // recentering the entire vertical scroll view.
-                    minimum: 0,
-                    maximum: FleetTileGridSizing.preferredTileWidth
-                ),
-                spacing: FleetTileGridSizing.gutter
-            ),
-            count: count
+    private func updateColumnCount() {
+        guard isViewLoaded else { return }
+        let wallPadding: CGFloat = configuration.presentation == .shellRail ? 12 : 26
+        let safe = configuration.shellSafeArea
+        let availableWidth = max(
+            0,
+            view.bounds.width - wallPadding * 2 - safe.left - safe.right
         )
+        availableColumnCount = FleetTileGridSizing.columnCount(
+            current: availableColumnCount,
+            availableWidth: availableWidth
+        )
+        let fullest = latestSnapshot?.hosts.filter(\.isEnabled).map { host in
+            max(1, (latestSnapshot?.sessionCounts[host.id] ?? 0) + 1)
+        }.max() ?? 1
+        let resolved = FleetTileGridSizing.columnCount(
+            availableColumns: availableColumnCount
+                ?? FleetTileGridSizing.initialColumnCount(availableWidth: availableWidth),
+            tileCount: fullest
+        )
+        guard resolvedColumnCount != resolved else { return }
+        resolvedColumnCount = resolved
+        propagateConfiguration()
     }
 
-    /// A `LazyVGrid`'s alignment places the grid inside the width it is given,
-    /// so this is what decides where a short row sits on a wide wall.
-    private var gridAlignment: HorizontalAlignment {
-        if presentation == .shellCompact || centersLoneTile { return .center }
-        return .leading
+    // MARK: Feed cadence
+
+    private func restartFeedIfNeeded(force: Bool) {
+        guard isViewLoaded else { return }
+        let hosts = latestSnapshot?.hosts ?? configuration.store.hosts
+        let identity = FeedIdentity(
+            hosts: hosts,
+            active: configuration.sceneIsActive && isOnScreen
+        )
+        guard force || feedIdentity != identity else { return }
+        feedTask?.cancel()
+        feedTask = nil
+        feedIdentity = identity
+        guard identity.active else { return }
+        feedTask = Task { [weak self] in await self?.runFeed(hosts: hosts) }
     }
 
-    /// While this view exists, keep the wall alive: re-probe each host and
-    /// refresh its miniatures. Skips work while the app is backgrounded;
-    /// `.task(id:)` restarts the loop when the fleet changes.
-    ///
-    /// Hosts the user switched off are the one thing the wall never dials.
-    /// Their live model is dropped here rather than only in the disable
-    /// action: `isEnabled` is part of the feed identity, so this also runs
-    /// when a peer device is what switched the host off.
-    private func runFeed() async {
-        for host in store.hosts where !host.isEnabled {
-            hub.suspendModel(for: host.id)
+    private func runFeed(hosts: [Host]) async {
+        for host in hosts where !host.isEnabled {
+            configuration.hub.suspendModel(for: host.id)
         }
-        let models = store.hosts.filter(\.isEnabled).map { hub.model(for: $0) }
+        let models = hosts.filter(\.isEnabled).map { configuration.hub.model(for: $0) }
         await withTaskGroup(of: Void.self) { group in
             for model in models {
-                group.addTask { await runFeed(for: model) }
+                group.addTask { await Self.runFeed(for: model) }
             }
         }
     }
 
-    /// Each host owns its cadence. A black-holed SSH link can consume its
-    /// ten-second deadline without stretching healthy hosts from five to
-    /// fifteen seconds between live captures.
-    private func runFeed(for model: HostConnectionModel) async {
-        await model.resetConnectRetryBackoff()
+    private static func runFeed(for model: HostConnectionModel) async {
+        model.resetConnectRetryBackoff()
         while !Task.isCancelled {
             guard UIApplication.shared.applicationState == .active else {
-                // Not active YET: a cold launch runs the first tick before
-                // the scene activates, and burning a whole feed interval
-                // here read as "~6 s to connect" on a real iPad. Poll
-                // briefly instead — the task id also restarts this loop the
-                // moment the scene turns active, and iOS suspends the
-                // process outright in the background, so this never spins.
                 do { try await Task.sleep(for: .milliseconds(200)) }
                 catch { return }
                 continue
             }
             await model.refreshAndWait(ifStaleFor: 4)
-            do { try await Task.sleep(for: Self.feedInterval) }
+            do { try await Task.sleep(for: feedInterval) }
             catch { return }
         }
     }
 
-    // MARK: Wall chrome
+    // MARK: Actions and presentations
 
-    #if !os(visionOS)
-    @available(iOS 26.0, *)
-    @ToolbarContentBuilder
-    private var deckToolbar: some ToolbarContent {
-        ToolbarItem(placement: .principal) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 14) {
-                    ChassisLabel("Multiplex", size: 15)
-                    Text(fleetSummary)
-                        .font(.mono(11))
-                        .foregroundStyle(Theme.signal2)
-                        .lineLimit(1)
-                }
-                ChassisLabel("Multiplex", size: 15)
-            }
-        }
-        // ⚠ ONE item holding all three chips, not a `ToolbarItemGroup` of
-        // three. On iOS-app-on-Mac UIKit rebuilds a toolbar item natively
-        // whenever it resolves to a single control, extracting a title/image
-        // and dropping the chip's border, background, and padding — which is
-        // why HOST, FAQ, and SETTINGS rendered as bare glyphs there. An item
-        // holding several controls cannot be reduced that way, so UIKit hosts
-        // the real views and the TALLY faces survive. (The terminal window's
-        // `A− A+` was always correct on Mac for exactly this reason: it is an
-        // `HStack` of two chips.) Verified 2026-07-31 on macOS 27 / iOS 27;
-        // iPad and visionOS render identically either way.
-        ToolbarItem(placement: .primaryAction) {
-            HStack(spacing: 8) {
-                ChassisChip("HOST", systemImage: "plus", action: addHost)
-                    .fixedSize()
-                    .accessibilityLabel("Add host")
-                ChassisChip("FAQ", systemImage: "questionmark", action: openFAQ)
-                    .fixedSize()
-                    .accessibilityLabel("Frequently asked questions")
-                ChassisChip("SETTINGS", systemImage: "gearshape", action: openSettings)
-                    .fixedSize()
-                    // The system's compact trailing margin looks crowded
-                    // against the rounded corner when the deck is an iPad
-                    // window.
-                    .padding(.trailing, 12)
-            }
-        }
-        .sharedBackgroundVisibility(.hidden)
+    private func open(_ route: TerminalRoute) {
+        configuration.terminalOpener(TerminalWindowRoute(tab: route))
     }
-    #endif
 
-    @ViewBuilder
-    private var header: some View {
-        if presentation == .shellRail {
-            HStack(alignment: .center, spacing: 8) {
-                ChassisLabel("Multiplex", size: 13)
-                Spacer(minLength: 4)
-                Text(fleetSummary)
-                    .font(.mono(8.5))
-                    .foregroundStyle(Theme.signal2)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                ChassisChip("", systemImage: "plus", action: addHost)
-                    .accessibilityLabel("Add host")
-                ChassisChip("", systemImage: "questionmark", action: openFAQ)
-                    .accessibilityLabel("Frequently asked questions")
-                ChassisChip("", systemImage: "gearshape", action: openSettings)
-                    .accessibilityLabel("Settings")
-            }
-            .padding(.bottom, 12)
-        } else if presentation == .shellCompact {
-            ViewThatFits(in: .horizontal) {
-                shellCompactHeader(showsSummary: true, iconOnly: false)
-                shellCompactHeader(showsSummary: false, iconOnly: false)
-                shellCompactHeader(showsSummary: false, iconOnly: true)
-            }
-            .padding(.bottom, 16)
+    private func focusOrAttach(_ host: Host, session: TmuxSession) {
+        if configuration.workspace.focusTab(hostID: host.id, sessionName: session.name) {
+            return
+        }
+        open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: session.name)))
+    }
+
+    private func presentNewSession(on host: Host) {
+        let sessions = configuration.hub.model(for: host).tmux.sessions
+        let controller = NewSessionViewController(
+            host: host,
+            existingNames: sessions.map(\.name)
+        ) { [weak self] submission in
+            self?.createSession(on: host, submission: submission)
+        }
+        let navigation = UINavigationController(rootViewController: controller)
+        UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
+        navigation.modalPresentationStyle = .formSheet
+        controller.onDismiss = { [weak navigation] in navigation?.dismiss(animated: true) }
+        present(navigation, animated: true)
+    }
+
+    private func createSession(on host: Host, submission: NewSessionSubmission) {
+        let name = TmuxProbe.sanitizedSessionName(submission.name)
+        let model = configuration.hub.model(for: host)
+        Task { [weak self] in
+            guard let created = await model.createSession(
+                base: name,
+                inDirectoryOf: nil,
+                startingIn: submission.directory,
+                applying: host.newSessionTmuxConf,
+                running: submission.script?.normalizedBody,
+                typing: submission.agent?.launchCommand(
+                    model: submission.model,
+                    initialPrompt: submission.initialPrompt
+                )
+            ) else { return }
+            self?.open(TerminalRoute(
+                hostID: host.id,
+                mode: .attach(sessionName: created)
+            ))
+        }
+    }
+
+    private func confirmDelete(session: TmuxSession, on host: Host) {
+        let alert = UIAlertController(
+            title: "Delete Session",
+            message: "Kills “\(session.name)” on \(host.name) and everything running in it.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+            guard let self else { return }
+            let model = self.configuration.hub.model(for: host)
+            Task { await model.killSession(session) }
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func confirmRemove(_ host: Host) {
+        let alert = UIAlertController(
+            title: "Remove Host",
+            message: "Removes “\(host.name)” and its saved secret from this device and your synced devices. tmux sessions on the host keep running.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Remove", style: .destructive) { [weak self] _ in
+            guard let self else { return }
+            self.configuration.hub.dropModel(for: host.id)
+            self.configuration.store.remove(host)
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func presentUnreachable(host: Host, reason: String) {
+        let alert = UIAlertController(
+            title: "\(host.name) Unreachable",
+            message: reason,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func presentTmuxGuide(for host: Host) {
+        let controller = TmuxInstallViewController(host: host)
+        let navigation = UINavigationController(rootViewController: controller)
+        UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
+        navigation.modalPresentationStyle = .formSheet
+        controller.onDone = { [weak navigation] in navigation?.dismiss(animated: true) }
+        present(navigation, animated: true)
+    }
+
+    private func presentKeychainGuide(for host: Host, sessionNames: [String]) {
+        let controller = KeychainUnlockViewController(host: host, sessionNames: sessionNames)
+        let navigation = UINavigationController(rootViewController: controller)
+        UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
+        navigation.modalPresentationStyle = .formSheet
+        controller.onDone = { [weak navigation] in navigation?.dismiss(animated: true) }
+        present(navigation, animated: true)
+    }
+
+    private func setEnabled(_ enabled: Bool, for host: Host) {
+        configuration.store.setEnabled(enabled, for: host.id)
+        if !enabled { configuration.hub.suspendModel(for: host.id) }
+    }
+
+    @discardableResult
+    private func requestKeyPassphraseIfNeeded(_ model: HostConnectionModel) -> Bool {
+        guard model.keyPassphraseChallenge != nil else { return false }
+        if model.requestKeyPassphrase() != nil {
+            keyPassphraseHostID = model.host.id
+            observeWall()
+        }
+        return true
+    }
+
+    private func synchronizePassphrasePrompt(
+        challenge explicitChallenge: SSHKeyPassphraseChallenge? = nil
+    ) {
+        let challenge: SSHKeyPassphraseChallenge?
+        if let explicitChallenge {
+            challenge = explicitChallenge
+        } else if let keyPassphraseHostID,
+                  let host = configuration.store.host(id: keyPassphraseHostID) {
+            challenge = configuration.hub.model(for: host).keyPassphraseChallenge
         } else {
-            HStack(alignment: .center, spacing: 10) {
-                ChassisLabel("Multiplex", size: 15)
-                Spacer()
-                Text(fleetSummary)
-                    .font(.mono(11))
-                    .foregroundStyle(Theme.signal2)
-                ChassisChip("HOST", systemImage: "plus", action: addHost)
-                ChassisChip("FAQ", systemImage: "questionmark", action: openFAQ)
-                    .accessibilityLabel("Frequently asked questions")
-                ChassisChip("SETTINGS", systemImage: "gearshape", action: openSettings)
-            }
-            .padding(.bottom, 16)
+            challenge = nil
         }
-    }
-
-    private func shellCompactHeader(
-        showsSummary: Bool,
-        iconOnly: Bool
-    ) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            ChassisLabel("Multiplex", size: 15)
-                .fixedSize()
-            Spacer(minLength: 4)
-            if showsSummary {
-                Text(fleetSummary)
-                    .font(.mono(11))
-                    .foregroundStyle(Theme.signal2)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-            ChassisChip(iconOnly ? "" : "HOST", systemImage: "plus", action: addHost)
-                .fixedSize()
-                .accessibilityLabel("Add host")
-            ChassisChip(
-                iconOnly ? "" : "FAQ",
-                systemImage: "questionmark",
-                action: openFAQ
-            )
-            .fixedSize()
-            .accessibilityLabel("Frequently asked questions")
-            ChassisChip(
-                iconOnly ? "" : "SETTINGS",
-                systemImage: "gearshape",
-                action: openSettings
-            )
-            .fixedSize()
-            .accessibilityLabel("Settings")
-        }
-    }
-
-    private var fleetSummary: String {
-        // Switched-off hosts still count in the fleet — they are configured,
-        // just not on the air — but asking the hub about them would mint the
-        // very model the wall is avoiding, and they have no sessions to add.
-        let sessions = store.hosts.filter(\.isEnabled).reduce(0) { count, host in
-            count + hub.model(for: host).sessionCount
-        }
-        let hosts = store.hosts.count
-        return "\(hosts) HOST\(hosts == 1 ? "" : "S") · \(sessions) SESSION\(sessions == 1 ? "" : "S")"
-    }
-
-    /// First run: one dark monitor waiting for a source.
-    private var awaitingSignal: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                HatchedScreen()
-                VStack(spacing: 12) {
-                    ChassisLabel("Awaiting signal", size: 13, color: Theme.signal3)
-                    Text("Every tmux session, its own window in space.")
-                        .font(.footnote)
-                        .foregroundStyle(Theme.signal2)
-                    // Not "run mpx bind" any more: the wall no longer hears
-                    // anything on its own, so pointing at the command here
-                    // would promise a tile that never arrives. Point at the
-                    // door the command is behind instead.
-                    Text(verbatim: "add host  ▸  bind  or  manual")
-                        .font(.mono(10))
-                        .foregroundStyle(Theme.signal3)
-                }
-            }
-            .frame(maxWidth: 420, minHeight: 150)
-            HStack(spacing: 8) {
-                ChassisLabel("No hosts", size: 12, color: Theme.signal3)
-                Spacer(minLength: 4)
-                ChassisChip("ADD HOST", systemImage: "plus", prominent: true, action: addHost)
-            }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 8)
-        }
-        .padding(5)
-        .background(Theme.bezel)
-        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-        .frame(maxWidth: 430)
-        .padding(.top, 40)
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: Host rail + tiles
-
-    @ViewBuilder
-    private func hostSection(
-        _ host: Host,
-        model: HostConnectionModel,
-        columns: [GridItem]
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            rail(host, model: model)
-            tiles(host, model: model, columns: columns)
-        }
-        .padding(.bottom, 22)
-    }
-
-    /// A host the user switched off keeps its rail — it is still part of the
-    /// fleet — but there is no connection model behind it and nothing live to
-    /// show, so the whole section is one tile that switches it back on.
-    private func disabledHostSection(_ host: Host, columns: [GridItem]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            rail(host, model: nil)
-            LazyVGrid(
-                columns: columns,
-                alignment: gridAlignment,
-                spacing: FleetTileGridSizing.gutter
-            ) {
-                disabledTile(host)
-            }
-        }
-        .padding(.bottom, 22)
-    }
-
-    /// `model` is nil for a switched-off host: the wall shows its rail
-    /// without ever asking the hub to build (and so revive) a connection.
-    private func rail(_ host: Host, model: HostConnectionModel?) -> some View {
-        let connected = model?.phase == .connected
-        return Group {
-            if presentation == .shellRail {
-                VStack(alignment: .leading, spacing: 8) {
-                    Rectangle().fill(Theme.bezel).frame(height: 1)
-                    HStack(spacing: 8) {
-                        ChassisLabel(host.name, size: 11, color: railNameColor(host))
-                        Spacer(minLength: 4)
-                        railStatus(host, model: model)
-                        hostMenu(host)
-                    }
-                    HStack(spacing: 8) {
-                        Text(host.address)
-                            .font(.mono(9.5))
-                            .foregroundStyle(Theme.signal2)
-                            .lineLimit(1)
-                        if host.useMosh {
-                            ChassisBadge("MOSH")
-                                .accessibilityLabel("Connects over mosh")
-                        }
-                        Spacer(minLength: 4)
-                        shellChip(host, connected: connected)
-                    }
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    Rectangle().fill(Theme.bezel).frame(height: 1)
-                    HStack(alignment: .firstTextBaseline, spacing: 14) {
-                        ChassisLabel(host.name, size: 12, color: railNameColor(host))
-                        Text(host.address)
-                            .font(.mono(11))
-                            .foregroundStyle(Theme.signal2)
-                            .lineLimit(2)
-                        if host.useMosh {
-                            ChassisBadge("MOSH")
-                                .accessibilityLabel("Connects over mosh")
-                        }
-                        Spacer()
-                        railStatus(host, model: model)
-                        // The SHELL chip is the row's tallest element —
-                        // inserting/removing it with the phase resizes the
-                        // whole rail. Keep its slot and fade it instead.
-                        shellChip(host, connected: connected)
-                        hostMenu(host)
-                    }
-                }
-            }
-        }
-        .contentShape(Rectangle())
-        .contextMenu {
-            hostMenuActions(host)
-        }
-    }
-
-    private func shellChip(_ host: Host, connected: Bool) -> some View {
-        ChassisChip("SHELL") {
-            open(TerminalRoute(hostID: host.id, mode: .shell))
-        }
-        .opacity(connected ? 1 : 0)
-        .allowsHitTesting(connected)
-        .disabled(!connected)
-        .accessibilityHidden(!connected)
-    }
-
-    /// Visible host controls. Edit is most needed when a host is
-    /// UNREACHABLE (fixing a bad address), so unlike SHELL this menu shows
-    /// in every connection phase; the rail's long-press menu mirrors it.
-    private func hostMenu(_ host: Host) -> some View {
-        Menu {
-            hostMenuActions(host)
-        } label: {
-            ChassisBadge("", systemImage: "ellipsis")
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .chassisHover(2)
-        .accessibilityLabel("Host options for \(host.name)")
-    }
-
-    @ViewBuilder
-    private func hostMenuActions(_ host: Host) -> some View {
-        Button {
-            store.moveUp(host)
-        } label: {
-            Label("Move Up", systemImage: "arrow.up")
-        }
-        .disabled(!store.canMoveUp(host))
-
-        Button {
-            store.moveDown(host)
-        } label: {
-            Label("Move Down", systemImage: "arrow.down")
-        }
-        .disabled(!store.canMoveDown(host))
-
-        Divider()
-        // Switching a host off is the reversible half of Remove: the record,
-        // its secrets, and its order all stay, the wall just stops dialling
-        // it. Non-destructive on purpose, so it takes no confirmation.
-        if host.isEnabled {
-            Button {
-                setEnabled(false, for: host)
-            } label: {
-                Label("Disable Host", systemImage: "pause.circle")
-            }
-        } else {
-            Button {
-                setEnabled(true, for: host)
-            } label: {
-                Label("Enable Host", systemImage: "play.circle")
-            }
-        }
-        Button("Edit Host…") { editHost(host) }
-        Button("Remove Host…", role: .destructive) { removingHost = host }
-    }
-
-    /// The switched-off host's name is dimmed to the same rank as its status:
-    /// the rail still names it, but nothing on this row is live.
-    private func railNameColor(_ host: Host) -> Color {
-        host.isEnabled ? Theme.signal : Theme.signal3
-    }
-
-    @ViewBuilder
-    private func railStatus(_ host: Host, model: HostConnectionModel?) -> some View {
-        Group {
-            // The user's own switch outranks everything below it: a host
-            // nobody is dialling is neither the device's network fault nor
-            // the host's.
-            if !host.isEnabled {
-                railLabel("DISABLED", dot: Theme.signal3, text: Theme.signal3)
-                    .accessibilityLabel("\(host.name) is disabled and is not being connected")
-            } else if networkChanges.isOffline {
-                // Device-side condition beats every per-host phase: with no
-                // usable route, a lingering CONNECTED is stale (the socket
-                // just hasn't timed out yet) and UNREACHABLE blames the host
-                // for the device's state.
-                railLabel("OFFLINE", dot: Theme.signal3, text: Theme.signal3)
-                    .accessibilityLabel("This device has no network connection")
-            } else if let model {
-                phaseRailStatus(model)
-            }
-        }
-        // Every phase shares one fixed-height slot so no phase change can
-        // move the rail.
-        .frame(height: 12)
-    }
-
-    @ViewBuilder
-    private func phaseRailStatus(_ model: HostConnectionModel) -> some View {
-        switch model.phase {
-        case .connected:
-            // The keychain tip outranks the plain CONNECTED word while it
-            // stands (the probe just succeeded, so connectedness is implied)
-            // — same "most actionable status wins the slot" rule that lets
-            // NEEDS PASSPHRASE replace UNREACHABLE detail.
-            if let notice = model.keychainNotice {
-                Button {
-                    keychainTip = KeychainTipRequest(
-                        host: model.host,
-                        sessionNames: notice.sessionNames
-                    )
-                } label: {
-                    railLabel(
-                        "KEYCHAIN LOCKED",
-                        dot: Theme.caution,
-                        text: Theme.caution
-                    )
-                }
-                .buttonStyle(.plain)
-                .chassisHover(2)
-                .accessibilityLabel(
-                    "\(model.host.name): the Mac's keychain is locked, so Claude Code shows signed out"
+        passphrasePresenter.update(
+            challenge: challenge,
+            onSubmit: { [weak self] challenge, passphrase, saveToICloud in
+                guard let self else { return }
+                SSHKeyPassphraseSession.accept(
+                    passphrase,
+                    for: challenge.hostID,
+                    saveToICloud: saveToICloud
                 )
-                .accessibilityHint("Shows how to unlock the keychain")
-            } else {
-                railLabel("CONNECTED", dot: Theme.ok)
-            }
-        case .connecting:
-            // Same dot anatomy as every other phase — a ProgressView is
-            // intrinsically taller and its spinner draws outside the
-            // slot. The pulse carries the "in flight" signal instead.
-            railLabel("LINKING", dot: Theme.signal2, pulsing: true)
-        case .failed(let reason):
-            if model.keyPassphraseChallenge != nil {
-                Button {
-                    _ = requestKeyPassphraseIfNeeded(model)
-                } label: {
-                    railLabel(
-                        "NEEDS PASSPHRASE",
-                        dot: Theme.caution,
-                        text: Theme.caution
-                    )
-                }
-                .buttonStyle(.plain)
-                .chassisHover(2)
-                .accessibilityLabel("\(model.host.name) needs its SSH key passphrase")
-                .accessibilityHint("Opens the SSH key passphrase prompt")
-            } else {
-                Button {
-                    unreachableNotice = UnreachableNotice(host: model.host, reason: reason)
-                } label: {
-                    railLabel("UNREACHABLE", dot: Theme.signal3, text: Theme.signal3)
-                }
-                .buttonStyle(.plain)
-                .chassisHover(2)
-                .accessibilityLabel("\(model.host.name) unreachable")
-                .accessibilityHint("Shows why the host could not be reached")
-            }
-        case .idle:
-            Text("STANDBY").font(.mono(9)).kerning(1).foregroundStyle(Theme.signal3)
-        }
-    }
-
-    private func railLabel(
-        _ text: String, dot: Color, text textColor: Color = Theme.signal2, pulsing: Bool = false
-    ) -> some View {
-        HStack(spacing: 6) {
-            Circle().fill(dot).frame(width: 6, height: 6)
-                .modifier(DotPulse(active: pulsing))
-            Text(text).font(.mono(9)).kerning(1).foregroundStyle(textColor)
-        }
-    }
-
-    @ViewBuilder
-    private func tiles(
-        _ host: Host,
-        model: HostConnectionModel,
-        columns: [GridItem]
-    ) -> some View {
-        switch model.tmux {
-        case .sessions(let sessions):
-            // Xcode 26 cannot type-check OS 27 SDK-only modifiers, even
-            // behind a runtime availability check.
-#if compiler(>=6.4)
-            if #available(iOS 27.0, visionOS 27.0, *) {
-                animatedGrid(
-                    reorderableSessionGrid(
-                        host,
-                        model: model,
-                        sessions: sessions,
-                        columns: columns
-                    ),
-                    state: model.tmux
+                self.configuration.hub.resumeConnectionsWaitingForKeyPassphrase(
+                    hostID: challenge.hostID
                 )
-            } else {
-                animatedGrid(
-                    legacySessionGrid(
-                        host,
-                        model: model,
-                        sessions: sessions,
-                        columns: columns
-                    ),
-                    state: model.tmux
+                self.configuration.workspace.resumeConnectionsWaitingForKeyPassphrase(
+                    hostID: challenge.hostID
                 )
-            }
-#else
-            animatedGrid(
-                legacySessionGrid(
-                    host,
-                    model: model,
-                    sessions: sessions,
-                    columns: columns
-                ),
-                state: model.tmux
-            )
-#endif
-        case .noServer:
-            animatedGrid(
-                LazyVGrid(
-                    columns: columns,
-                    alignment: gridAlignment,
-                    spacing: FleetTileGridSizing.gutter
-                ) {
-                    newSessionTile(host)
-                },
-                state: model.tmux
-            )
-        case .tmuxMissing:
-            animatedGrid(
-                LazyVGrid(
-                    columns: columns,
-                    alignment: gridAlignment,
-                    spacing: FleetTileGridSizing.gutter
-                ) {
-                    tmuxMissingTile(host)
-                },
-                state: model.tmux
-            )
-        case .failed:
-            animatedGrid(
-                LazyVGrid(
-                    columns: columns,
-                    alignment: gridAlignment,
-                    spacing: FleetTileGridSizing.gutter
-                ) {
-                    noSignalTile(host, model: model)
-                },
-                state: model.tmux
-            )
-        case .unknown, .probing:
-            animatedGrid(
-                LazyVGrid(
-                    columns: columns,
-                    alignment: gridAlignment,
-                    spacing: FleetTileGridSizing.gutter
-                ) {
-                    acquiringTile
-                },
-                state: model.tmux
-            )
-        }
-    }
-
-#if compiler(>=6.4)
-    /// OS 27's reorder container is purpose-built for this interaction: a
-    /// long press lifts one tile, leaves a placeholder, and makes the other
-    /// tiles move out of the way as the drag crosses the responsive grid.
-    @available(iOS 27.0, visionOS 27.0, *)
-    private func reorderableSessionGrid(
-        _ host: Host,
-        model: HostConnectionModel,
-        sessions: [TmuxSession],
-        columns: [GridItem]
-    ) -> some View {
-        LazyVGrid(
-            columns: columns,
-            alignment: gridAlignment,
-            spacing: FleetTileGridSizing.gutter
-        ) {
-            newSessionTile(host)
-            ForEach(store.orderedSessions(sessions, for: host.id)) { session in
-                sessionTile(host, model: model, session: session)
-                    .equatable()
-            }
-            .reorderable()
-        }
-        .reorderContainer(for: TmuxSession.self) { difference in
-            let destination: String?
-            switch difference.destination.position {
-            case .before(let sessionName): destination = sessionName
-            case .end: destination = nil
-            }
-            store.moveSessions(
-                difference.sources,
-                before: destination,
-                for: host.id,
-                available: sessions
-            )
-        }
-    }
-#endif
-
-    /// iOS/visionOS 16–26 fallback using the original Transferable drag/drop
-    /// API. Dropping on a session moves the dragged tile into that tile's
-    /// slot; the neutral outline makes the pending destination explicit.
-    private func legacySessionGrid(
-        _ host: Host,
-        model: HostConnectionModel,
-        sessions: [TmuxSession],
-        columns: [GridItem]
-    ) -> some View {
-        LazyVGrid(
-            columns: columns,
-            alignment: gridAlignment,
-            spacing: FleetTileGridSizing.gutter
-        ) {
-            newSessionTile(host)
-            ForEach(store.orderedSessions(sessions, for: host.id)) { session in
-                let target = SessionDropTarget(hostID: host.id, sessionName: session.name)
-                sessionTile(host, model: model, session: session)
-                    .equatable()
-                    .draggable(sessionDragPayload(hostID: host.id, sessionName: session.name))
-                    .overlay {
-                        Rectangle()
-                            .strokeBorder(Theme.signal2, lineWidth: 2)
-                            .opacity(legacyDropTarget == target ? 1 : 0)
-                            .allowsHitTesting(false)
-                    }
-                    .dropDestination(for: String.self) { payloads, _ in
-                        defer { legacyDropTarget = nil }
-                        guard let payload = payloads.first,
-                              let source = SessionDropTarget(payload: payload),
-                              source.hostID == host.id
-                        else { return false }
-
-                        let move = {
-                            store.moveSession(
-                                source.sessionName,
-                                to: session.name,
-                                for: host.id,
-                                available: sessions
-                            )
-                        }
-                        if reduceMotion {
-                            move()
-                        } else {
-                            withAnimation(.spring(response: 0.32, dampingFraction: 1), move)
-                        }
-                        return true
-                    } isTargeted: { targeted in
-                        if targeted {
-                            legacyDropTarget = target
-                        } else if legacyDropTarget == target {
-                            legacyDropTarget = nil
-                        }
-                    }
-            }
-        }
-    }
-
-    private func sessionTile(
-        _ host: Host, model: HostConnectionModel, session: TmuxSession
-    ) -> SessionTile {
-        SessionTile(
-            session: session,
-            lines: model.miniatures[session.name] ?? [],
-            attention: model.attention[session.name],
-            hasLiveAgentState: model.hasLiveProbe,
-            hasOpenTab: workspace.hasTab(hostID: host.id, sessionName: session.name),
-            compact: presentation == .shellRail,
-            selected: selectedTerminal?.hostID == host.id
-                && selectedTerminal?.sessionName == session.name,
-            duplicateAttachTitle: terminalOpener.duplicateAttachTitle,
-            openTabAccessibilityText: terminalOpener.openTabAccessibilityText,
-            attach: {
-                focusOrAttach(host, session: session)
+                self.keyPassphraseHostID = nil
+                self.observeWall()
             },
-            attachNewWindow: {
-                open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: session.name)))
-            },
-            delete: {
-                deleteTarget = DeleteTarget(host: host, session: session)
+            onCancel: { [weak self] _ in
+                self?.keyPassphraseHostID = nil
+                self?.observeWall()
             }
         )
     }
+}
 
-    private func sessionDragPayload(hostID: UUID, sessionName: String) -> String {
-        "multiplex-session\n\(hostID.uuidString)\n\(sessionName)"
+// MARK: - Header
+
+private struct FleetHeaderActions {
+    let addHost: () -> Void
+    let openFAQ: () -> Void
+    let openSettings: () -> Void
+}
+
+@MainActor
+private final class FleetHeaderView: UIView {
+    private enum CompactLayout: Equatable {
+        case summaryAndCaptions
+        case captions
+        case icons
     }
 
-    @ViewBuilder
-    private func animatedGrid<Content: View>(_ grid: Content, state: TmuxState) -> some View {
-        if reduceMotion {
-            grid
-        } else {
-            grid.animation(.easeOut(duration: 0.3), value: gridIdentity(for: state))
+    private let standardTitleLabel = UIKitChassisLabel("Multiplex", size: 15)
+    private let railTitleLabel = UIKitChassisLabel("Multiplex", size: 13)
+    private let summaryLabel = UILabel()
+    private var addChip: UIKitChassisChip!
+    private var faqChip: UIKitChassisChip!
+    private var settingsChip: UIKitChassisChip!
+    private let stack = UIStackView()
+    private var presentation: FleetWall.Presentation = .standard
+    private var actions = FleetHeaderActions(addHost: {}, openFAQ: {}, openSettings: {})
+    private var topConstraint: NSLayoutConstraint?
+    private var bottomConstraint: NSLayoutConstraint?
+    private var compactLayout = CompactLayout.captions
+    private var compactLabeledMinimumWidth: CGFloat?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        addChip = UIKitChassisChip(
+            "HOST",
+            systemImage: "plus",
+            accessibilityLabel: "Add host"
+        ) { [weak self] in self?.actions.addHost() }
+        faqChip = UIKitChassisChip(
+            "FAQ",
+            systemImage: "questionmark",
+            accessibilityLabel: "Frequently asked questions"
+        ) { [weak self] in self?.actions.openFAQ() }
+        settingsChip = UIKitChassisChip(
+            "SETTINGS",
+            systemImage: "gearshape",
+            accessibilityLabel: "Settings"
+        ) { [weak self] in self?.actions.openSettings() }
+        summaryLabel.font = UIKitChassis.monoFont(11)
+        summaryLabel.textColor = UIKitChassis.signal2
+        summaryLabel.numberOfLines = 1
+        summaryLabel.adjustsFontSizeToFitWidth = true
+        summaryLabel.minimumScaleFactor = 0.75
+        summaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        standardTitleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        railTitleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 10
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        topConstraint = stack.topAnchor.constraint(equalTo: topAnchor)
+        bottomConstraint = stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            topConstraint!,
+            bottomConstraint!,
+        ])
+        rebuild()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func configure(
+        presentation: FleetWall.Presentation,
+        summary: String,
+        actions: FleetHeaderActions
+    ) {
+        self.presentation = presentation
+        self.actions = actions
+        setSummary(summary)
+        standardTitleLabel.setText("Multiplex")
+        railTitleLabel.setText("Multiplex")
+        rebuild()
+        setNeedsLayout()
+    }
+
+    func setSummary(_ summary: String) {
+        summaryLabel.text = summary
+        summaryLabel.accessibilityLabel = summary
+        if presentation == .shellCompact {
+            setNeedsLayout()
         }
     }
 
-    private enum GridIdentity: Hashable {
+    func setTopInset(_ inset: CGFloat) {
+        topConstraint?.constant = inset
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard presentation == .shellCompact else { return }
+        let labeledWidth = compactLabeledMinimumWidth ?? measureCompactLabeledWidth()
+        compactLabeledMinimumWidth = labeledWidth
+        let summaryWidth = summaryLabel.intrinsicContentSize.width + stack.spacing
+        let resolved: CompactLayout
+        if labeledWidth + summaryWidth <= bounds.width {
+            resolved = .summaryAndCaptions
+        } else if labeledWidth <= bounds.width {
+            resolved = .captions
+        } else {
+            resolved = .icons
+        }
+        applyCompactLayout(resolved)
+    }
+
+    /// Mirrors the old SwiftUI `ViewThatFits` candidates. The flexible spacer
+    /// has no intrinsic width, while every visible arranged view contributes
+    /// one stack gap. Measuring the actual native labels and chips keeps the
+    /// phone on the captioned candidate for as long as it genuinely fits.
+    private func measureCompactLabeledWidth() -> CGFloat {
+        applyCompactLayout(.captions)
+        return standardTitleLabel.intrinsicContentSize.width
+            + addChip.intrinsicContentSize.width
+            + faqChip.intrinsicContentSize.width
+            + settingsChip.intrinsicContentSize.width
+            + stack.spacing * 4
+    }
+
+    private func applyCompactLayout(_ layout: CompactLayout) {
+        guard compactLayout != layout || compactLabeledMinimumWidth == nil else { return }
+        compactLayout = layout
+        let iconsOnly = layout == .icons
+        summaryLabel.isHidden = layout != .summaryAndCaptions
+        addChip.setContent(caption: iconsOnly ? "" : "HOST", systemImage: "plus")
+        faqChip.setContent(caption: iconsOnly ? "" : "FAQ", systemImage: "questionmark")
+        settingsChip.setContent(
+            caption: iconsOnly ? "" : "SETTINGS",
+            systemImage: "gearshape"
+        )
+    }
+
+    private func rebuild() {
+        compactLabeledMinimumWidth = nil
+        stack.arrangedSubviews.forEach {
+            stack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        switch presentation {
+        case .shellRail:
+            summaryLabel.font = UIKitChassis.monoFont(8.5)
+            summaryLabel.isHidden = false
+            stack.spacing = 8
+            addChip.setContent(caption: "", systemImage: "plus")
+            faqChip.setContent(caption: "", systemImage: "questionmark")
+            settingsChip.setContent(caption: "", systemImage: "gearshape")
+            bottomConstraint?.constant = -12
+        case .shellCompact, .standard:
+            summaryLabel.font = UIKitChassis.monoFont(11)
+            stack.spacing = 10
+            addChip.setContent(caption: "HOST", systemImage: "plus")
+            faqChip.setContent(caption: "FAQ", systemImage: "questionmark")
+            settingsChip.setContent(caption: "SETTINGS", systemImage: "gearshape")
+            summaryLabel.isHidden = presentation == .shellCompact
+            compactLayout = .captions
+            bottomConstraint?.constant = -16
+        }
+        stack.addArrangedSubview(
+            presentation == .shellRail ? railTitleLabel : standardTitleLabel
+        )
+        stack.addArrangedSubview(UIView())
+        stack.addArrangedSubview(summaryLabel)
+        stack.addArrangedSubview(addChip)
+        stack.addArrangedSubview(faqChip)
+        stack.addArrangedSubview(settingsChip)
+    }
+}
+
+// MARK: - Host section
+
+@MainActor
+private struct FleetHostSectionConfiguration {
+    let store: HostStore
+    let workspace: TerminalWorkspace
+    var presentation: FleetWall.Presentation
+    var selectedTerminal: TerminalRoute?
+    var networkOffline: Bool
+    var reduceMotion: Bool
+    var columnCount: Int
+    var duplicateAttachTitle: String
+    var openTabAccessibilityText: String
+    var openShell: () -> Void
+    var openSession: (TmuxSession) -> Void
+    var openDuplicateSession: (TmuxSession) -> Void
+    var requestNewSession: () -> Void
+    var requestDeleteSession: (TmuxSession) -> Void
+    var reconnect: (HostConnectionModel) -> Void
+    var requestPassphrase: (HostConnectionModel) -> Void
+    var showUnreachable: (String) -> Void
+    var showTmuxGuide: () -> Void
+    var showKeychainGuide: ([String]) -> Void
+    var moveUp: () -> Void
+    var moveDown: () -> Void
+    var setEnabled: (Bool) -> Void
+    var editHost: () -> Void
+    var removeHost: () -> Void
+    var reorderSession: (String, String, [TmuxSession]) -> Void
+    var modelDidChange: () -> Void
+}
+
+@MainActor
+private final class FleetHostSectionView: UIView {
+    private struct Snapshot: Equatable {
+        let phase: HostConnectionModel.Phase
+        let tmux: TmuxState
+        let keyPassphraseChallenge: SSHKeyPassphraseChallenge?
+        let hasLiveProbe: Bool
+        let miniatures: [String: [String]]
+        let attention: [String: PaneAgentState]
+        let keychainNotice: KeychainLockNotice?
+        let openSessionNames: Set<String>
+        let orderedSessions: [TmuxSession]
+    }
+
+    private enum GridIdentity: Equatable {
         case unknown
         case probing
         case sessions([String])
         case noServer
         case tmuxMissing
         case failed
+    }
+
+    private struct RailIdentity: Equatable {
+        let hostID: UUID
+        let hostName: String
+        let hostAddress: String
+        let hostUsesMosh: Bool
+        let hostIsEnabled: Bool
+        let phase: HostConnectionModel.Phase?
+        let keyPassphraseRequired: Bool
+        let keychainNotice: KeychainLockNotice?
+        let networkOffline: Bool
+        let presentation: FleetWall.Presentation
+        let reduceMotion: Bool
+        let canMoveUp: Bool
+        let canMoveDown: Bool
+    }
+
+    private let stack = UIStackView()
+    private let rail = FleetHostRailView()
+    private let grid = FleetTileGridView()
+    private var host: Host
+    private var model: HostConnectionModel?
+    private var configuration: FleetHostSectionConfiguration
+    private var observationGeneration = 0
+    private var currentSnapshot: Snapshot?
+    private var renderedRailIdentity: RailIdentity?
+    private var tileViews: [String: UIView] = [:]
+
+    init(
+        host: Host,
+        model: HostConnectionModel?,
+        configuration: FleetHostSectionConfiguration
+    ) {
+        self.host = host
+        self.model = model
+        self.configuration = configuration
+        super.init(frame: .zero)
+
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 12
+        stack.addArrangedSubview(rail)
+        stack.addArrangedSubview(grid)
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -22),
+        ])
+        observeModel()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func update(
+        host: Host,
+        model: HostConnectionModel?,
+        configuration: FleetHostSectionConfiguration
+    ) {
+        let modelChanged = self.model !== model
+        self.host = host
+        self.model = model
+        self.configuration = configuration
+        grid.columnCount = configuration.columnCount
+        grid.centersGrid = configuration.presentation == .shellCompact
+            || configuration.columnCount == 1
+        if modelChanged {
+            observeModel()
+        } else {
+            render(currentSnapshot)
+        }
+    }
+
+    func stopObserving() {
+        observationGeneration += 1
+    }
+
+    private func observeModel() {
+        observationGeneration += 1
+        let generation = observationGeneration
+        guard let model else {
+            currentSnapshot = nil
+            render(nil)
+            return
+        }
+        let snapshot = withObservationTracking {
+            let sessions = model.tmux.sessions
+            return Snapshot(
+                phase: model.phase,
+                tmux: model.tmux,
+                keyPassphraseChallenge: model.keyPassphraseChallenge,
+                hasLiveProbe: model.hasLiveProbe,
+                miniatures: model.miniatures,
+                attention: model.attention,
+                keychainNotice: model.keychainNotice,
+                openSessionNames: Set(sessions.compactMap { session in
+                    configuration.workspace.hasTab(
+                        hostID: host.id,
+                        sessionName: session.name
+                    ) ? session.name : nil
+                }),
+                orderedSessions: configuration.store.orderedSessions(
+                    sessions,
+                    for: host.id
+                )
+            )
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.observationGeneration == generation else { return }
+                self.observeModel()
+            }
+        }
+        let previousIdentity = currentSnapshot.map { gridIdentity(for: $0.tmux) }
+        currentSnapshot = snapshot
+        let identity = gridIdentity(for: snapshot.tmux)
+        if !configuration.reduceMotion,
+           let previousIdentity,
+           previousIdentity != identity {
+            UIView.transition(
+                with: grid,
+                duration: 0.3,
+                options: [.transitionCrossDissolve, .beginFromCurrentState],
+                animations: { [weak self] in
+                self?.render(snapshot)
+                self?.grid.layoutIfNeeded()
+                }
+            )
+        } else {
+            render(snapshot)
+        }
+        configuration.modelDidChange()
     }
 
     private func gridIdentity(for state: TmuxState) -> GridIdentity {
@@ -1141,728 +1256,957 @@ struct FleetWall: View {
         }
     }
 
-    // MARK: Special tiles
-
-    private func newSessionTile(_ host: Host) -> some View {
-        Button {
-            namingHost = host
-        } label: {
-            VStack {
-                ChassisLabel("+ New Session", size: 11, color: Theme.signal2)
+    private func render(_ snapshot: Snapshot?) {
+        let connected = snapshot?.phase == .connected
+        let canMoveUp = configuration.store.canMoveUp(host)
+        let canMoveDown = configuration.store.canMoveDown(host)
+        let railIdentity = RailIdentity(
+            hostID: host.id,
+            hostName: host.name,
+            hostAddress: host.address,
+            hostUsesMosh: host.useMosh,
+            hostIsEnabled: host.isEnabled,
+            phase: snapshot?.phase,
+            keyPassphraseRequired: snapshot?.keyPassphraseChallenge != nil,
+            keychainNotice: snapshot?.keychainNotice,
+            networkOffline: configuration.networkOffline,
+            presentation: configuration.presentation,
+            reduceMotion: configuration.reduceMotion,
+            canMoveUp: canMoveUp,
+            canMoveDown: canMoveDown
+        )
+        rail.updateActions(
+            openShell: { [weak self] in self?.configuration.openShell() },
+            requestPassphrase: { [weak self] in
+                guard let self, let model = self.model else { return }
+                self.configuration.requestPassphrase(model)
+            },
+            showUnreachable: { [weak self] reason in
+                self?.configuration.showUnreachable(reason)
+            },
+            showKeychainGuide: { [weak self] names in
+                self?.configuration.showKeychainGuide(names)
             }
-            .frame(
-                maxWidth: .infinity,
-                minHeight: presentation == .shellRail ? 92 : 138
+        )
+        if renderedRailIdentity != railIdentity {
+            renderedRailIdentity = railIdentity
+            rail.configure(
+                host: host,
+                phase: snapshot?.phase,
+                keyPassphraseRequired: snapshot?.keyPassphraseChallenge != nil,
+                keychainNotice: snapshot?.keychainNotice,
+                connected: connected,
+                networkOffline: configuration.networkOffline,
+                presentation: configuration.presentation,
+                reduceMotion: configuration.reduceMotion,
+                canMoveUp: canMoveUp,
+                canMoveDown: canMoveDown,
+                menu: hostMenu,
+                openShell: { [weak self] in self?.configuration.openShell() },
+                requestPassphrase: { [weak self] in
+                    guard let self, let model = self.model else { return }
+                    self.configuration.requestPassphrase(model)
+                },
+                showUnreachable: { [weak self] reason in
+                    self?.configuration.showUnreachable(reason)
+                },
+                showKeychainGuide: { [weak self] names in
+                    self?.configuration.showKeychainGuide(names)
+                }
             )
-            .overlay(
-                Rectangle().strokeBorder(
-                    Theme.bezelHi,
-                    style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .chassisHover(4)
-        .accessibilityLabel("New session on \(host.name)")
-    }
 
-    private func noSignalTile(_ host: Host, model: HostConnectionModel) -> some View {
-        let needsPassphrase = model.keyPassphraseChallenge != nil
+        grid.columnCount = configuration.columnCount
+        grid.centersGrid = configuration.presentation == .shellCompact
+            || configuration.columnCount == 1
 
-        return Button {
-            if !requestKeyPassphraseIfNeeded(model) {
-                model.refresh()
-            }
-        } label: {
-            VStack(spacing: 0) {
-                ZStack {
-                    HatchedScreen()
-                    ChassisLabel(
-                        needsPassphrase ? "Passphrase Required" : "No Signal",
-                        size: 13,
-                        color: needsPassphrase ? Theme.caution : Theme.signal3
-                    )
+        guard host.isEnabled, let model, let snapshot else {
+            let tile = reusableSpecialTile(key: "disabled") { FleetNoSignalTileView() }
+                as! FleetNoSignalTileView
+            tile.configure(
+                host: host,
+                mode: .disabled,
+                compact: configuration.presentation == .shellRail,
+                action: { [weak self] in self?.configuration.setEnabled(true) }
+            )
+            grid.setItems([FleetGridItem(id: "disabled", view: tile)])
+            pruneTiles(keeping: ["disabled"])
+            return
+        }
+
+        switch snapshot.tmux {
+        case .sessions(let sessions):
+            let ordered = snapshot.orderedSessions
+            var items: [FleetGridItem] = []
+            let newTile = reusableSpecialTile(key: "new") { FleetNewSessionTileView() }
+                as! FleetNewSessionTileView
+            newTile.configure(
+                hostName: host.name,
+                compact: configuration.presentation == .shellRail,
+                action: configuration.requestNewSession
+            )
+            items.append(FleetGridItem(id: "new", view: newTile))
+            for session in ordered {
+                let key = "session:\(session.name)"
+                let tile: FleetSessionTileView
+                if let existing = tileViews[key] as? FleetSessionTileView {
+                    tile = existing
+                } else {
+                    tile = FleetSessionTileView()
+                    tileViews[key] = tile
                 }
-                .frame(
-                    maxWidth: .infinity,
-                    minHeight: presentation == .shellRail ? 64 : 96
-                )
-                HStack {
-                    ChassisLabel(host.name, size: 12, color: Theme.signal3)
-                    Spacer()
-                    ChassisBadge(needsPassphrase ? "UNLOCK" : "RECONNECT")
-                }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 8)
+                tile.configure(FleetSessionTileConfiguration(
+                    hostID: host.id,
+                    session: session,
+                    lines: snapshot.miniatures[session.name] ?? [],
+                    attention: snapshot.attention[session.name],
+                    hasLiveAgentState: snapshot.hasLiveProbe,
+                    hasOpenTab: snapshot.openSessionNames.contains(session.name),
+                    compact: configuration.presentation == .shellRail,
+                    selected: configuration.selectedTerminal?.hostID == host.id
+                        && configuration.selectedTerminal?.sessionName == session.name,
+                    duplicateAttachTitle: configuration.duplicateAttachTitle,
+                    openTabAccessibilityText: configuration.openTabAccessibilityText,
+                    attach: { [weak self] in self?.configuration.openSession(session) },
+                    attachNewWindow: { [weak self] in
+                        self?.configuration.openDuplicateSession(session)
+                    },
+                    delete: { [weak self] in
+                        self?.configuration.requestDeleteSession(session)
+                    },
+                    droppedSession: { [weak self] source in
+                        guard let self else { return }
+                        self.configuration.reorderSession(source, session.name, sessions)
+                        // Session order is device-local HostStore state, not a
+                        // probe change. Re-arm its Observation read now so the
+                        // native grid settles immediately after the drop.
+                        self.observeModel()
+                    }
+                ))
+                items.append(FleetGridItem(id: key, view: tile))
             }
-            .padding(5)
-            .background(Theme.bezel)
-            .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .chassisHover(4)
-        .accessibilityLabel(
-            needsPassphrase
-                ? "\(host.name) needs its SSH key passphrase. Unlock"
-                : "\(host.name) unreachable. Reconnect"
-        )
-    }
-
-    /// The whole section of a switched-off host: no probe ran, so there is
-    /// nothing to report — the tile's only job is to be the switch back on.
-    private func disabledTile(_ host: Host) -> some View {
-        Button {
-            setEnabled(true, for: host)
-        } label: {
-            VStack(spacing: 0) {
-                ZStack {
-                    HatchedScreen()
-                    ChassisLabel("Disabled", size: 13, color: Theme.signal3)
+            grid.setItems(items)
+            pruneTiles(keeping: Set(items.map(\.id)))
+        case .noServer:
+            let tile = reusableSpecialTile(key: "new") { FleetNewSessionTileView() }
+                as! FleetNewSessionTileView
+            tile.configure(
+                hostName: host.name,
+                compact: configuration.presentation == .shellRail,
+                action: configuration.requestNewSession
+            )
+            grid.setItems([FleetGridItem(id: "new", view: tile)])
+            pruneTiles(keeping: ["new"])
+        case .tmuxMissing:
+            let tile = reusableSpecialTile(key: "tmux") { FleetTmuxMissingTileView() }
+                as! FleetTmuxMissingTileView
+            tile.configure(
+                compact: configuration.presentation == .shellRail,
+                action: configuration.showTmuxGuide
+            )
+            grid.setItems([FleetGridItem(id: "tmux", view: tile)])
+            pruneTiles(keeping: ["tmux"])
+        case .failed:
+            let tile = reusableSpecialTile(key: "failed") { FleetNoSignalTileView() }
+                as! FleetNoSignalTileView
+            tile.configure(
+                host: host,
+                mode: snapshot.keyPassphraseChallenge == nil ? .unreachable : .passphrase,
+                compact: configuration.presentation == .shellRail,
+                action: { [weak self, weak model] in
+                    guard let self, let model else { return }
+                    self.configuration.reconnect(model)
                 }
-                .frame(
-                    maxWidth: .infinity,
-                    minHeight: presentation == .shellRail ? 64 : 96
-                )
-                HStack {
-                    ChassisLabel(host.name, size: 12, color: Theme.signal3)
-                    Spacer()
-                    ChassisBadge("ENABLE")
-                }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 8)
-            }
-            .padding(5)
-            .background(Theme.bezel)
-            .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .chassisHover(4)
-        .accessibilityLabel("\(host.name) is disabled. Enable")
-        .accessibilityHint("Starts monitoring this host on the deck again")
-    }
-
-    private var presentedKeyPassphraseChallenge: SSHKeyPassphraseChallenge? {
-        guard let keyPassphraseHostID,
-              let host = store.host(id: keyPassphraseHostID)
-        else { return nil }
-        return hub.model(for: host).keyPassphraseChallenge
-    }
-
-    /// True means this failure was a credential challenge and the generic
-    /// reconnect/unreachable action has been handled here.
-    private func requestKeyPassphraseIfNeeded(_ model: HostConnectionModel) -> Bool {
-        guard model.keyPassphraseChallenge != nil else { return false }
-        if model.requestKeyPassphrase() != nil {
-            keyPassphraseHostID = model.host.id
-        }
-        return true
-    }
-
-    private func acceptKeyPassphrase(
-        _ challenge: SSHKeyPassphraseChallenge,
-        passphrase: String,
-        saveToICloud: Bool
-    ) {
-        SSHKeyPassphraseSession.accept(
-            passphrase,
-            for: challenge.hostID,
-            saveToICloud: saveToICloud
-        )
-        hub.resumeConnectionsWaitingForKeyPassphrase(hostID: challenge.hostID)
-        workspace.resumeConnectionsWaitingForKeyPassphrase(hostID: challenge.hostID)
-        keyPassphraseHostID = nil
-    }
-
-    private var acquiringTile: some View {
-        VStack(spacing: 8) {
-            ProgressView().controlSize(.small)
-            ChassisLabel("Acquiring signal", size: 10, color: Theme.signal3)
-        }
-        .frame(
-            maxWidth: .infinity,
-            minHeight: presentation == .shellRail ? 92 : 138
-        )
-        .background(Theme.screen)
-        .padding(5)
-        .background(Theme.bezel)
-        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-    }
-
-    /// The host is reachable but tmux — the wall's core dependency — isn't
-    /// on its PATH. Plain shells still work (the rail's SHELL chip), and
-    /// the chip opens the per-OS install guide.
-    private func tmuxMissingTile(_ host: Host) -> some View {
-        VStack(spacing: 8) {
-            ChassisLabel("No tmux on host", size: 11, color: Theme.signal3)
-            Text("You can still use a plain shell — press SHELL.")
-                .font(.footnote)
-                .foregroundStyle(Theme.signal2)
-                .multilineTextAlignment(.center)
-            ChassisChip("INSTALL GUIDE") {
-                tmuxGuideHost = host
-            }
-            .padding(.top, 2)
-        }
-        .padding(10)
-        .frame(
-            maxWidth: .infinity,
-            minHeight: presentation == .shellRail ? 92 : 138
-        )
-        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-    }
-
-    // MARK: Actions
-
-    private func remove(_ host: Host) {
-        hub.dropModel(for: host.id)
-        store.remove(host)
-    }
-
-    /// Switching off drops the live probe here as well as in the feed: the
-    /// record change restarts the feed anyway, but the connection should go
-    /// with the press, not with the next scheduling turn. Switching on needs
-    /// nothing extra — the restarted feed builds a fresh model and dials.
-    private func setEnabled(_ enabled: Bool, for host: Host) {
-        store.setEnabled(enabled, for: host.id)
-        if !enabled { hub.suspendModel(for: host.id) }
-    }
-
-    private func kill(_ target: DeleteTarget) {
-        let model = hub.model(for: target.host)
-        Task { await model.killSession(target.session) }
-    }
-
-    /// The prompt's Create & Attach. Mint the detached session over the
-    /// control connection first, then attach the terminal window. Besides
-    /// keeping agent `send-keys` ahead of the attach, creation can place a
-    /// first Linux tmux server outside the SSH login scope so closing the
-    /// terminal does not reap it. Creation failures surface on the rail —
-    /// `createSession` marks the host failed when the control connection is
-    /// the problem.
-    private func createSession(
-        on host: Host, named rawName: String, launching agent: AgentKind?,
-        model launchModel: String?, initialPrompt: String,
-        startingIn directory: String?, running script: SessionScript?
-    ) {
-        let name = TmuxProbe.sanitizedSessionName(rawName)
-        let model = hub.model(for: host)
-        Task {
-            guard let created = await model.createSession(
-                base: name,
-                inDirectoryOf: nil,
-                startingIn: directory,
-                applying: host.newSessionTmuxConf,
-                running: script?.normalizedBody,
-                typing: agent?.launchCommand(model: launchModel, initialPrompt: initialPrompt)
-            ) else { return }
-            open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: created)))
+            )
+            grid.setItems([FleetGridItem(id: "failed", view: tile)])
+            pruneTiles(keeping: ["failed"])
+        case .unknown, .probing:
+            let tile = reusableSpecialTile(key: "acquiring") { FleetAcquiringTileView() }
+                as! FleetAcquiringTileView
+            tile.configure(compact: configuration.presentation == .shellRail)
+            grid.setItems([FleetGridItem(id: "acquiring", view: tile)])
+            pruneTiles(keeping: ["acquiring"])
         }
     }
 
-    /// A tile press: if some open terminal window already shows this
-    /// session, bring that window (and its tab) forward instead of
-    /// attaching a duplicate client; only otherwise attach in a new window.
-    /// The tile's long-press menu keeps an explicit new-window attach.
-    private func focusOrAttach(_ host: Host, session: TmuxSession) {
-        if workspace.focusTab(hostID: host.id, sessionName: session.name) { return }
-        open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: session.name)))
+    private var hostMenu: UIMenu {
+        let moveUp = UIAction(
+            title: "Move Up",
+            image: UIImage(systemName: "arrow.up"),
+            attributes: configuration.store.canMoveUp(host) ? [] : [.disabled]
+        ) { [weak self] _ in self?.configuration.moveUp() }
+        let moveDown = UIAction(
+            title: "Move Down",
+            image: UIImage(systemName: "arrow.down"),
+            attributes: configuration.store.canMoveDown(host) ? [] : [.disabled]
+        ) { [weak self] _ in self?.configuration.moveDown() }
+        let enabled = UIAction(
+            title: host.isEnabled ? "Disable Host" : "Enable Host",
+            image: UIImage(systemName: host.isEnabled ? "pause.circle" : "play.circle")
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.configuration.setEnabled(!self.host.isEnabled)
+        }
+        let edit = UIAction(title: "Edit Host…") { [weak self] _ in
+            self?.configuration.editHost()
+        }
+        let remove = UIAction(title: "Remove Host…", attributes: .destructive) {
+            [weak self] _ in self?.configuration.removeHost()
+        }
+        return UIMenu(children: [
+            moveUp,
+            moveDown,
+            UIMenu(options: .displayInline, children: [enabled, edit, remove]),
+        ])
     }
 
-    private func open(_ route: TerminalRoute) {
-        terminalOpener(TerminalWindowRoute(tab: route))
+    private func reusableSpecialTile(
+        key: String,
+        make: () -> UIView
+    ) -> UIView {
+        if let existing = tileViews[key] { return existing }
+        let view = make()
+        tileViews[key] = view
+        return view
+    }
+
+    private func pruneTiles(keeping ids: Set<String>) {
+        for key in Array(tileViews.keys) where !ids.contains(key) {
+            tileViews.removeValue(forKey: key)
+        }
     }
 }
 
-/// String-backed identity for the pre-27 Transferable fallback. Session names
-/// occupy the final component verbatim, so spaces and Unicode survive.
-private struct SessionDropTarget: Equatable {
-    let hostID: UUID
-    let sessionName: String
+// MARK: - Host rail
 
-    init(hostID: UUID, sessionName: String) {
-        self.hostID = hostID
-        self.sessionName = sessionName
+@MainActor
+private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate {
+    private struct PresentationIdentity: Equatable {
+        let hostID: UUID
+        let hostName: String
+        let hostAddress: String
+        let hostUsesMosh: Bool
+        let hostIsEnabled: Bool
+        let phase: HostConnectionModel.Phase?
+        let keyPassphraseRequired: Bool
+        let keychainNotice: KeychainLockNotice?
+        let connected: Bool
+        let networkOffline: Bool
+        let presentation: FleetWall.Presentation
+        let reduceMotion: Bool
+        let canMoveUp: Bool
+        let canMoveDown: Bool
     }
 
-    init?(payload: String) {
-        let parts = payload.split(
-            separator: "\n",
-            maxSplits: 2,
-            omittingEmptySubsequences: false
-        )
-        guard parts.count == 3,
-              parts[0] == "multiplex-session",
-              let hostID = UUID(uuidString: String(parts[1]))
-        else { return nil }
+    private let stack = UIStackView()
+    private var menu = UIMenu()
+    private var renderedIdentity: PresentationIdentity?
+    private var openShell: () -> Void = {}
+    private var requestPassphrase: () -> Void = {}
+    private var showUnreachable: (String) -> Void = { _ in }
+    private var showKeychainGuide: ([String]) -> Void = { _ in }
 
-        self.hostID = hostID
-        sessionName = String(parts[2])
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        addInteraction(UIContextMenuInteraction(delegate: self))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func configure(
+        host: Host,
+        phase: HostConnectionModel.Phase?,
+        keyPassphraseRequired: Bool,
+        keychainNotice: KeychainLockNotice?,
+        connected: Bool,
+        networkOffline: Bool,
+        presentation: FleetWall.Presentation,
+        reduceMotion: Bool,
+        canMoveUp: Bool,
+        canMoveDown: Bool,
+        menu: UIMenu,
+        openShell: @escaping () -> Void,
+        requestPassphrase: @escaping () -> Void,
+        showUnreachable: @escaping (String) -> Void,
+        showKeychainGuide: @escaping ([String]) -> Void
+    ) {
+        updateActions(
+            openShell: openShell,
+            requestPassphrase: requestPassphrase,
+            showUnreachable: showUnreachable,
+            showKeychainGuide: showKeychainGuide
+        )
+        let identity = PresentationIdentity(
+            hostID: host.id,
+            hostName: host.name,
+            hostAddress: host.address,
+            hostUsesMosh: host.useMosh,
+            hostIsEnabled: host.isEnabled,
+            phase: phase,
+            keyPassphraseRequired: keyPassphraseRequired,
+            keychainNotice: keychainNotice,
+            connected: connected,
+            networkOffline: networkOffline,
+            presentation: presentation,
+            reduceMotion: reduceMotion,
+            canMoveUp: canMoveUp,
+            canMoveDown: canMoveDown
+        )
+        guard renderedIdentity != identity else { return }
+        renderedIdentity = identity
+        self.menu = menu
+        stack.arrangedSubviews.forEach {
+            stack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = presentation == .shellRail ? 8 : 10
+
+        let rule = UIView()
+        rule.backgroundColor = UIKitChassis.bezel
+        rule.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        stack.addArrangedSubview(rule)
+
+        let name = UIKitChassisLabel(
+            host.name,
+            size: presentation == .shellRail ? 11 : 12,
+            color: host.isEnabled ? UIKitChassis.signal : UIKitChassis.signal3
+        )
+        let address = UILabel()
+        address.font = UIKitChassis.monoFont(presentation == .shellRail ? 9.5 : 11)
+        address.textColor = UIKitChassis.signal2
+        address.text = host.address
+        address.numberOfLines = presentation == .shellRail ? 1 : 2
+        address.lineBreakMode = .byTruncatingTail
+        address.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let mosh = FleetBadgeView(caption: "MOSH")
+        mosh.accessibilityLabel = "Connects over mosh"
+        mosh.isHidden = !host.useMosh
+        let status = makeStatus(
+            host: host,
+            phase: phase,
+            keyPassphraseRequired: keyPassphraseRequired,
+            keychainNotice: keychainNotice,
+            networkOffline: networkOffline,
+            reduceMotion: reduceMotion,
+            requestPassphrase: { [weak self] in self?.requestPassphrase() },
+            showUnreachable: { [weak self] reason in self?.showUnreachable(reason) },
+            showKeychainGuide: { [weak self] names in self?.showKeychainGuide(names) }
+        )
+        let shell = UIKitChassisChip(
+            "SHELL",
+            accessibilityLabel: "Open shell on \(host.name)",
+            action: { [weak self] in self?.openShell() }
+        )
+        shell.alpha = connected ? 1 : 0
+        shell.isUserInteractionEnabled = connected
+        shell.accessibilityElementsHidden = !connected
+        let menuButton = FleetMenuBadgeButton()
+        menuButton.menu = menu
+        menuButton.showsMenuAsPrimaryAction = true
+        menuButton.accessibilityLabel = "Host options for \(host.name)"
+
+        if presentation == .shellRail {
+            let first = UIStackView(arrangedSubviews: [name, UIView(), status, menuButton])
+            first.axis = .horizontal
+            first.alignment = .center
+            first.spacing = 8
+            let second = UIStackView(arrangedSubviews: [address, mosh, UIView(), shell])
+            second.axis = .horizontal
+            second.alignment = .center
+            second.spacing = 8
+            stack.addArrangedSubview(first)
+            stack.addArrangedSubview(second)
+        } else {
+            let controls = FleetHostControlsRow(
+                status: status,
+                shell: shell,
+                menuButton: menuButton
+            )
+            let row = UIStackView(arrangedSubviews: [
+                name, address, mosh, UIView(), controls,
+            ])
+            row.axis = .horizontal
+            row.alignment = .firstBaseline
+            row.spacing = 14
+            stack.addArrangedSubview(row)
+        }
+        accessibilityLabel = "\(host.name), \(host.address)"
+    }
+
+    func updateActions(
+        openShell: @escaping () -> Void,
+        requestPassphrase: @escaping () -> Void,
+        showUnreachable: @escaping (String) -> Void,
+        showKeychainGuide: @escaping ([String]) -> Void
+    ) {
+        self.openShell = openShell
+        self.requestPassphrase = requestPassphrase
+        self.showUnreachable = showUnreachable
+        self.showKeychainGuide = showKeychainGuide
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            self?.menu
+        }
+    }
+
+    private func makeStatus(
+        host: Host,
+        phase: HostConnectionModel.Phase?,
+        keyPassphraseRequired: Bool,
+        keychainNotice: KeychainLockNotice?,
+        networkOffline: Bool,
+        reduceMotion: Bool,
+        requestPassphrase: @escaping () -> Void,
+        showUnreachable: @escaping (String) -> Void,
+        showKeychainGuide: @escaping ([String]) -> Void
+    ) -> UIView {
+        if !host.isEnabled {
+            return FleetRailStatusView(
+                text: "DISABLED",
+                dotColor: TallyPalette.signal3,
+                textColor: UIKitChassis.signal3,
+                accessibilityLabel: "\(host.name) is disabled and is not being connected"
+            )
+        }
+        if networkOffline {
+            return FleetRailStatusView(
+                text: "OFFLINE",
+                dotColor: TallyPalette.signal3,
+                textColor: UIKitChassis.signal3,
+                accessibilityLabel: "This device has no network connection"
+            )
+        }
+        guard let phase else {
+            return FleetRailStatusView(
+                text: "STANDBY",
+                dotColor: nil,
+                textColor: UIKitChassis.signal3,
+                accessibilityLabel: "Standby"
+            )
+        }
+        switch phase {
+        case .connected:
+            if let keychainNotice {
+                return FleetRailStatusView(
+                    text: "KEYCHAIN LOCKED",
+                    dotColor: TallyPalette.caution,
+                    textColor: TallyPalette.caution,
+                    accessibilityLabel: "\(host.name): the Mac's keychain is locked, so Claude Code shows signed out",
+                    accessibilityHint: "Shows how to unlock the keychain",
+                    action: { showKeychainGuide(keychainNotice.sessionNames) }
+                )
+            }
+            return FleetRailStatusView(
+                text: "CONNECTED",
+                dotColor: TallyPalette.ok,
+                textColor: UIKitChassis.signal2,
+                accessibilityLabel: "\(host.name) connected"
+            )
+        case .connecting:
+            return FleetRailStatusView(
+                text: "LINKING",
+                dotColor: UIKitChassis.signal2,
+                textColor: UIKitChassis.signal2,
+                accessibilityLabel: "\(host.name) linking",
+                pulsing: !reduceMotion
+            )
+        case .failed(let reason):
+            if keyPassphraseRequired {
+                return FleetRailStatusView(
+                    text: "NEEDS PASSPHRASE",
+                    dotColor: TallyPalette.caution,
+                    textColor: TallyPalette.caution,
+                    accessibilityLabel: "\(host.name) needs its SSH key passphrase",
+                    accessibilityHint: "Opens the SSH key passphrase prompt",
+                    action: requestPassphrase
+                )
+            }
+            return FleetRailStatusView(
+                text: "UNREACHABLE",
+                dotColor: TallyPalette.signal3,
+                textColor: UIKitChassis.signal3,
+                accessibilityLabel: "\(host.name) unreachable",
+                accessibilityHint: "Shows why the host could not be reached",
+                action: { showUnreachable(reason) }
+            )
+        case .idle:
+            return FleetRailStatusView(
+                text: "STANDBY",
+                dotColor: nil,
+                textColor: UIKitChassis.signal3,
+                accessibilityLabel: "\(host.name) standby"
+            )
+        }
     }
 }
 
-/// The wall's New Session prompt: a name plus what launches in the fresh
-/// shell. SHELL / AGENTS stays a clear top-level choice while the selected
-/// agent lives in a dropdown. The name prefills the first free conventional
-/// name for the selection (main / claude / codex / pi, then
-/// -2, -3…) so Create is one tap; picking an agent re-prefills it unless
-/// the user already typed their own. Each agent can receive a one-shot first
-/// prompt as its CLI argument and an optional model override (free text —
-/// model names churn faster than app releases; the Command preview shows the
-/// exact line, and a value the launch grammar rejects reads as the agent
-/// default). An opt-in remembers only the submitted launch, model, and
-/// setup-script choices for the next sheet. Hosts with working
-/// directories also get a "Starts in" picker, defaulting to the first (the
-/// host's own default); hosts with setup scripts get a "Runs first" picker,
-/// defaulting to NONE unless one is remembered.
-private struct NewSessionSheet: View {
-    let host: Host
-    let existingNames: [String]
-    let create: (String, AgentKind?, String?, String, String?, SessionScript?) -> Void
+@MainActor
+private final class FleetHostControlsRow: UIStackView {
+    private let baselineSource: UIView
 
-    private let preferences: NewSessionPreferences
-
-    @Environment(\.dismiss) private var dismiss
-
-    private enum LaunchMode: Hashable {
-        case shell
-        case agents
+    init(status: UIView, shell: UIView, menuButton: UIView) {
+        baselineSource = status
+        super.init(frame: .zero)
+        axis = .horizontal
+        alignment = .center
+        spacing = 14
+        addArrangedSubview(status)
+        addArrangedSubview(shell)
+        addArrangedSubview(menuButton)
     }
 
-    @State private var name: String
-    @State private var launchMode: LaunchMode
-    @State private var selectedAgent: AgentKind
-    @State private var model: String
-    @State private var initialPrompt: String
-    @State private var directory: String?
-    @State private var script: SessionScript?
-    @State private var remembersLastLaunch: Bool
-    @FocusState private var focusedField: InputField?
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("unused") }
 
-    private enum InputField: Hashable {
-        case name
-        case model
-        case initialPrompt
-    }
+    /// The legacy first-text-baseline row aligned its labels while centering
+    /// the three trailing faces. Forward the status baseline to the outer row
+    /// without asking the differently sized faces to invent matching baselines.
+    override var forFirstBaselineLayout: UIView { baselineSource }
+    override var forLastBaselineLayout: UIView { baselineSource }
+}
+
+@MainActor
+private final class FleetRailStatusView: UIView {
+    private var action: (() -> Void)?
+    private let label = UILabel()
 
     init(
-        host: Host,
-        existingNames: [String],
-        create: @escaping (String, AgentKind?, String?, String, String?, SessionScript?) -> Void,
-        preferences: NewSessionPreferences = NewSessionPreferences()
+        text: String,
+        dotColor: UIColor?,
+        textColor: UIColor,
+        accessibilityLabel: String,
+        accessibilityHint: String? = nil,
+        pulsing: Bool = false,
+        action: (() -> Void)? = nil
     ) {
-        self.host = host
-        self.existingNames = existingNames
-        self.create = create
-        self.preferences = preferences
-
-        let remembersLastLaunch = preferences.remembersLastLaunch
-        let agent = preferences.rememberedAgent
-        _launchMode = State(initialValue: agent == nil ? .shell : .agents)
-        _selectedAgent = State(initialValue: agent ?? .claudeCode)
-        _model = State(initialValue: agent.flatMap(preferences.rememberedModel) ?? "")
-        _initialPrompt = State(initialValue: "")
-        _directory = State(initialValue: host.workingDirs.first)
-        _script = State(initialValue: preferences.rememberedScript(for: host))
-        _remembersLastLaunch = State(initialValue: remembersLastLaunch)
-        _name = State(initialValue: TmuxProbe.uniqueSessionName(
-            base: agent?.launchCommand ?? "main", existing: existingNames))
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    TallyFormSection("Target host") {
-                        TallyFormRow {
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    ChassisLabel(host.name, size: 12)
-                                    Text(host.address)
-                                        .font(.mono(10))
-                                        .foregroundStyle(Theme.signal2)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                                ChassisBadge(host.useMosh ? "MOSH" : "SSH")
-                            }
-                        }
-                    }
-
-                    TallyFormSection(
-                        "Session identity",
-                        detail: "Shown on the deck and in the terminal window's source label."
-                    ) {
-                        TallyFormField("Name") {
-                            TextField("main", text: $name)
-                                .focused($focusedField, equals: .name)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                        }
-                    }
-
-                    TallyFormSection("Launch", detail: launchDetail) {
-                        TallyFormRow {
-                            launchPicker
-                        }
-                        if let agent = agentToLaunch {
-                            TallyFormField("Model (optional)") {
-                                HStack(spacing: 8) {
-                                    TextField("Agent default", text: $model)
-                                        .focused($focusedField, equals: .model)
-                                        .autocorrectionDisabled()
-                                        .textInputAutocapitalization(.never)
-                                        .accessibilityLabel(
-                                            "Optional model for \(agent.displayName)"
-                                        )
-                                    // Host Settings' pre-configured list —
-                                    // the picker that spares retyping full
-                                    // Codex/Pi ids; the field stays the
-                                    // free-text escape hatch.
-                                    let configured = host.launchModels(for: agent)
-                                    if !configured.isEmpty {
-                                        Menu {
-                                            ForEach(configured, id: \.self) { candidate in
-                                                Button(candidate) { model = candidate }
-                                            }
-                                            Divider()
-                                            Button("Agent default") { model = "" }
-                                        } label: {
-                                            Image(systemName: "chevron.down")
-                                                .font(.ui(9, weight: .semibold))
-                                                .foregroundStyle(Theme.signal2)
-                                                .frame(width: 25, height: 25)
-                                                .background(Theme.chassis)
-                                                .overlay(Rectangle().strokeBorder(
-                                                    Theme.bezelHi, lineWidth: 1))
-                                        }
-                                        .buttonStyle(.plain)
-                                        .chassisHover(2)
-                                        .accessibilityLabel(
-                                            "Configured models for \(agent.displayName)"
-                                        )
-                                    }
-                                }
-                            }
-                            TallyFormField("Initial prompt (optional)") {
-                                TextField(
-                                    "What should \(agent.displayName) do?",
-                                    text: $initialPrompt,
-                                    axis: .vertical
-                                )
-                                .lineLimit(2...5)
-                                .focused($focusedField, equals: .initialPrompt)
-                                .textInputAutocapitalization(.sentences)
-                                .accessibilityLabel(
-                                    "Optional initial prompt for \(agent.displayName)"
-                                )
-                            }
-                        }
-                        TallyFormRow {
-                            HStack(spacing: 12) {
-                                ChassisSwitch(
-                                    "REMEMBER",
-                                    isOn: $remembersLastLaunch,
-                                    accessibilityLabel: "Remember launch choice"
-                                )
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 3) {
-                                    ChassisLabel("Command", size: 7, color: Theme.signal3)
-                                    // The live line minus the prompt — the
-                                    // honest surface for the model field: a
-                                    // rejected value visibly falls out.
-                                    Text(commandPreview)
-                                        .font(.mono(9, weight: .medium))
-                                        .foregroundStyle(Theme.signal2)
-                                        .lineLimit(1)
-                                        .truncationMode(.head)
-                                }
-                            }
-                        }
-                    }
-
-                    if !host.sessionScripts.isEmpty {
-                        TallyFormSection("Setup script", detail: scriptDetail) {
-                            TallyFormField("Runs first") {
-                                Menu {
-                                    ForEach(host.sessionScripts) { candidate in
-                                        Button(candidate.displayName) { script = candidate }
-                                    }
-                                    Divider()
-                                    Button("None") { script = nil }
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Text(script?.displayName ?? "None")
-                                            .foregroundStyle(Theme.signal)
-                                            .lineLimit(1)
-                                        Spacer()
-                                        Image(systemName: "chevron.down")
-                                            .font(.ui(9, weight: .semibold))
-                                            .foregroundStyle(Theme.signal2)
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .chassisHover(2)
-                                .accessibilityLabel("Setup script")
-                            }
-                        }
-                    }
-
-                    TallyFormSection("Directory", detail: directoryDetail) {
-                        if host.workingDirs.isEmpty {
-                            TallyFormRow {
-                                HStack(spacing: 12) {
-                                    Text("Starts in")
-                                        .font(.ui(10, weight: .semibold))
-                                        .foregroundStyle(Theme.signal2)
-                                    Spacer()
-                                    Text("HOME")
-                                        .font(.mono(10, weight: .medium))
-                                        .foregroundStyle(Theme.signal)
-                                }
-                            }
-                        } else {
-                            TallyFormField("Starts in") {
-                                Menu {
-                                    ForEach(host.workingDirs, id: \.self) { dir in
-                                        Button(dir) { directory = dir }
-                                    }
-                                    Divider()
-                                    Button("Home") { directory = nil }
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Text(directory ?? "Home")
-                                            .foregroundStyle(Theme.signal)
-                                            .lineLimit(1)
-                                        Spacer()
-                                        Image(systemName: "chevron.down")
-                                            .font(.ui(9, weight: .semibold))
-                                            .foregroundStyle(Theme.signal2)
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .chassisHover(2)
-                                .accessibilityLabel("Starting directory")
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: 600)
-                .padding(18)
-                .frame(maxWidth: .infinity)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture { focusedField = nil }
-            .chassisSheetGround()
-            .navigationTitle("New Session")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ChassisSheetTitle("New Session")
-                ToolbarItem(placement: .cancellationAction) {
-                    ChassisBarButton("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    ChassisBarButton("Create & Attach") {
-                        preferences.save(
-                            remembersLastLaunch: remembersLastLaunch,
-                            agent: agentToLaunch,
-                            model: agentToLaunch == nil ? nil : model,
-                            script: script,
-                            hostID: host.id
-                        )
-                        create(name, agentToLaunch, modelToLaunch, initialPrompt, directory, script)
-                        dismiss()
-                    }
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
+        self.action = action
+        super.init(frame: .zero)
+        label.font = UIKitChassis.monoFont(9)
+        label.textColor = textColor
+        label.attributedText = NSAttributedString(
+            string: text,
+            attributes: [.kern: 1.0, .foregroundColor: textColor]
+        )
+        var views: [UIView] = []
+        if let dotColor {
+            let dot = FleetColorDotView(color: dotColor, diameter: 6)
+            views.append(dot)
+            if pulsing {
+                let animation = CABasicAnimation(keyPath: "opacity")
+                animation.fromValue = 1
+                animation.toValue = 0.25
+                animation.duration = 0.7
+                animation.autoreverses = true
+                animation.repeatCount = .infinity
+                dot.layer.add(animation, forKey: "fleet-pulse")
             }
         }
-        .onChange(of: agentToLaunch) { previous, selected in
-            let untouched = name == prefill(for: previous)
-            if untouched { name = prefill(for: selected) }
-            // Same prefill contract for the model: an untouched field swaps
-            // to the newly selected agent's remembered model, a hand-typed
-            // one stays (its Command preview says what it will do).
-            let modelUntouched = model == modelPrefill(for: previous)
-            if modelUntouched { model = modelPrefill(for: selected) }
+        views.append(label)
+        let stack = UIStackView(arrangedSubviews: views)
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 6
+        stack.isUserInteractionEnabled = false
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(equalToConstant: 12 * Theme.typeScale),
+        ])
+        isAccessibilityElement = true
+        accessibilityTraits = action == nil ? [.staticText] : [.button]
+        self.accessibilityLabel = accessibilityLabel
+        self.accessibilityHint = accessibilityHint
+        if action != nil {
+            hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+            addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(pressed)))
         }
     }
 
-    private var agentToLaunch: AgentKind? {
-        launchMode == .agents ? selectedAgent : nil
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override var forFirstBaselineLayout: UIView { label }
+    override var forLastBaselineLayout: UIView { label }
+
+    override func accessibilityActivate() -> Bool {
+        action?()
+        return action != nil
     }
 
-    private var modelToLaunch: String? {
-        guard agentToLaunch != nil else { return nil }
-        let trimmed = model.trimmingCharacters(in: .whitespaces)
-        return trimmed.isEmpty ? nil : trimmed
+    @objc private func pressed() { action?() }
+}
+
+@MainActor
+private final class FleetMenuBadgeButton: UIButton {
+    private static var iconSlot: CGFloat { 10 * Theme.typeScale }
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(
+            width: ceil(Self.iconSlot + 18),
+            height: ceil(Self.iconSlot + 10)
+        )
     }
 
-    private var commandPreview: String {
-        guard let agent = agentToLaunch else { return "login shell" }
-        return agent.launchCommand(model: modelToLaunch, initialPrompt: "")
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setImage(
+            UIImage(
+                systemName: "ellipsis",
+                withConfiguration: UIImage.SymbolConfiguration(
+                    pointSize: 9 * Theme.typeScale,
+                    weight: .semibold
+                )
+            ),
+            for: .normal
+        )
+        tintColor = UIKitChassis.signal2
+        backgroundColor = UIKitChassis.chassis
+        layer.borderWidth = 1
+        refreshBorder()
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (button: FleetMenuBadgeButton, _: UITraitCollection) in
+            button.refreshBorder()
+        }
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        imageView?.contentMode = .scaleAspectFit
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .vertical)
     }
 
-    private var launchPicker: some View {
-        HStack(spacing: 1) {
-            Button { launchMode = .shell } label: {
-                launchChoiceFace("Shell", selected: launchMode == .shell)
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        imageView?.frame = CGRect(
+            x: (bounds.width - Self.iconSlot) / 2,
+            y: (bounds.height - Self.iconSlot) / 2,
+            width: Self.iconSlot,
+            height: Self.iconSlot
+        ).integral
+    }
+
+    private func refreshBorder() {
+        layer.borderColor = UIKitChassis.bezelHi.resolvedColor(with: traitCollection).cgColor
+    }
+}
+
+// MARK: - Responsive tile grid
+
+private struct FleetGridItem {
+    let id: String
+    let view: UIView
+}
+
+@MainActor
+private final class FleetTileGridView: UIView {
+    var columnCount = 1 {
+        didSet {
+            columnCount = max(1, columnCount)
+            if oldValue != columnCount { invalidateLayout() }
+        }
+    }
+    var centersGrid = true {
+        didSet { if oldValue != centersGrid { invalidateLayout() } }
+    }
+
+    private var items: [FleetGridItem] = []
+    private var cachedHeight: CGFloat = 150
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: cachedHeight)
+    }
+
+    func setItems(_ items: [FleetGridItem]) {
+        let keep = Set(items.map(\.id))
+        for old in self.items where !keep.contains(old.id) {
+            old.view.removeFromSuperview()
+        }
+        self.items = items
+        for item in items where item.view.superview !== self {
+            addSubview(item.view)
+        }
+        invalidateLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.width > 0, !items.isEmpty else {
+            updateHeight(0)
+            return
+        }
+        let columns = max(1, columnCount)
+        let gutter = FleetTileGridSizing.gutter
+        let preferredGridWidth = FleetTileGridSizing.requiredWidth(
+            columnCount: columns,
+            tileWidth: FleetTileGridSizing.preferredTileWidth
+        )
+        let gridWidth = min(bounds.width, preferredGridWidth)
+        let tileWidth = max(0, (gridWidth - CGFloat(columns - 1) * gutter) / CGFloat(columns))
+        let originX = (centersGrid || columns == 1) ? max(0, (bounds.width - gridWidth) / 2) : 0
+        var y: CGFloat = 0
+        var index = 0
+        while index < items.count {
+            let end = min(index + columns, items.count)
+            let row = items[index..<end]
+            var heights: [CGFloat] = []
+            for item in row {
+                let size = item.view.systemLayoutSizeFitting(
+                    CGSize(width: tileWidth, height: UIView.layoutFittingCompressedSize.height),
+                    withHorizontalFittingPriority: .required,
+                    verticalFittingPriority: .fittingSizeLevel
+                )
+                heights.append(max(1, ceil(size.height)))
             }
-            .buttonStyle(.plain)
-            .chassisHover(2)
-            .accessibilityAddTraits(launchMode == .shell ? .isSelected : [])
-
-            Menu {
-                ForEach(AgentKind.allCases, id: \.self) { candidate in
-                    Button(candidate.displayName) {
-                        selectedAgent = candidate
-                        launchMode = .agents
-                    }
-                }
-            } label: {
-                launchChoiceFace(
-                    launchMode == .agents ? selectedAgent.displayName : "Agents",
-                    selected: launchMode == .agents,
-                    showsMenuIndicator: true
+            let rowHeight = heights.max() ?? 1
+            for (offset, item) in row.enumerated() {
+                item.view.frame = CGRect(
+                    x: originX + CGFloat(offset) * (tileWidth + gutter),
+                    y: y,
+                    width: tileWidth,
+                    height: rowHeight
                 )
             }
-            .buttonStyle(.plain)
-            .chassisHover(2)
-            .accessibilityLabel("Agents")
-            .accessibilityValue(
-                launchMode == .agents ? selectedAgent.displayName : "Not selected"
+            y += rowHeight
+            index = end
+            if index < items.count { y += gutter }
+        }
+        updateHeight(y)
+    }
+
+    private func invalidateLayout() {
+        setNeedsLayout()
+        invalidateIntrinsicContentSize()
+    }
+
+    private func updateHeight(_ height: CGFloat) {
+        guard abs(cachedHeight - height) > 0.5 else { return }
+        cachedHeight = height
+        invalidateIntrinsicContentSize()
+    }
+}
+
+// MARK: - Shared tile primitives
+
+@MainActor
+class FleetPressView: UIKitTallyBorderedView, UIContextMenuInteractionDelegate {
+    var pressAction: (() -> Void)?
+    var menuProvider: (() -> UIMenu?)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 4))
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(pressed)))
+        addInteraction(UIContextMenuInteraction(delegate: self))
+    }
+
+    override func accessibilityActivate() -> Bool {
+        pressAction?()
+        return pressAction != nil
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard menuProvider?() != nil else { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) {
+            [weak self] _ in self?.menuProvider?()
+        }
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
+    ) -> UITargetedPreview? {
+        let parameters = UIPreviewParameters()
+        parameters.visiblePath = UIBezierPath(rect: bounds)
+        return UITargetedPreview(view: self, parameters: parameters)
+    }
+
+    @objc private func pressed() { pressAction?() }
+}
+
+@MainActor
+private final class FleetBadgeView: UIKitTallyBorderedView {
+    private let label = UILabel()
+    private let imageView = UIImageView()
+
+    init(caption: String = "", systemImage: String? = nil, prominent: Bool = false) {
+        super.init(frame: .zero)
+        backgroundColor = UIKitChassis.chassis
+        let stack = UIStackView(arrangedSubviews: [imageView, label])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 5
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+        ])
+        imageView.contentMode = .scaleAspectFit
+        imageView.tintColor = prominent ? UIKitChassis.signal : UIKitChassis.signal2
+        imageView.setContentHuggingPriority(.required, for: .horizontal)
+        label.font = UIKitChassis.monoFont(8, weight: .semibold)
+        label.textColor = prominent ? UIKitChassis.signal : UIKitChassis.signal2
+        label.numberOfLines = 1
+        configure(caption: caption, systemImage: systemImage, prominent: prominent)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func configure(caption: String, systemImage: String? = nil, prominent: Bool = false) {
+        label.text = caption
+        imageView.isHidden = systemImage == nil
+        imageView.image = systemImage.flatMap {
+            UIImage(
+                systemName: $0,
+                withConfiguration: UIImage.SymbolConfiguration(
+                    pointSize: 8 * Theme.typeScale,
+                    weight: .semibold
+                )
             )
-            .accessibilityHint("Choose Claude Code, Codex, or Pi")
-            .accessibilityAddTraits(launchMode == .agents ? .isSelected : [])
         }
-        .background(Theme.bezelHi)
-        .animation(.easeOut(duration: 0.14), value: launchMode)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("What to launch")
-    }
-
-    private func launchChoiceFace(
-        _ label: String,
-        selected: Bool,
-        showsMenuIndicator: Bool = false
-    ) -> some View {
-        HStack(spacing: 6) {
-            ChassisLabel(
-                label,
-                size: 9,
-                color: selected ? Theme.signal : Theme.signal2
-            )
-            if showsMenuIndicator {
-                Image(systemName: "chevron.down")
-                    .font(.ui(8, weight: .semibold))
-                    .foregroundStyle(selected ? Theme.signal : Theme.signal2)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 34)
-        .background(selected ? Theme.bezelHi : Theme.chassis)
-        .overlay(Rectangle().strokeBorder(
-            selected ? Theme.signal2 : Theme.bezelHi,
-            lineWidth: 1
-        ))
-    }
-
-    private func prefill(for agent: AgentKind?) -> String {
-        TmuxProbe.uniqueSessionName(
-            base: agent?.launchCommand ?? "main", existing: existingNames)
-    }
-
-    private func modelPrefill(for agent: AgentKind?) -> String {
-        agent.flatMap(preferences.rememberedModel) ?? ""
-    }
-
-    private var launchDetail: String {
-        let remembers = host.sessionScripts.isEmpty
-            ? "REMEMBER saves only the launch choice."
-            : "REMEMBER saves the launch and setup-script choices."
-        guard let agent = agentToLaunch else {
-            return "Creates the tmux session, then attaches to its login shell. \(remembers)"
-        }
-        return "Starts \(agent.displayName) in the fresh shell. The optional prompt becomes its first message; \(remembers)"
-    }
-
-    private var scriptDetail: String {
-        guard let script else {
-            return "Nothing extra runs. A setup script is typed into the fresh shell before the launch."
-        }
-        return "Types \(script.displayName) into the fresh shell first, so the launch inherits what it sets up."
-    }
-
-    private var directoryDetail: String {
-        guard !host.workingDirs.isEmpty else {
-            return "Uses the host's login-shell home directory."
-        }
-        if let directory {
-            return "Starts in \(directory). Choose Home to use the login shell's default."
-        }
-        return "Uses the host's login-shell home directory."
+        tallyBorderColor = prominent ? UIKitChassis.signal2 : UIKitChassis.bezelHi
+        label.textColor = prominent ? UIKitChassis.signal : UIKitChassis.signal2
+        imageView.tintColor = prominent ? UIKitChassis.signal : UIKitChassis.signal2
+        accessibilityLabel = caption
     }
 }
 
-/// The broadcast no-signal texture: diagonal hatching on screen ground.
-struct HatchedScreen: View {
-    var body: some View {
-        Canvas { context, size in
-            var path = Path()
-            var x: CGFloat = -size.height
-            while x < size.width {
-                path.move(to: CGPoint(x: x, y: size.height))
-                path.addLine(to: CGPoint(x: x + size.height, y: 0))
-                x += 14
-            }
-            context.stroke(path, with: .color(Theme.screenHatch), lineWidth: 5)
+@MainActor
+private final class FleetColorDotView: UIView {
+    private let dynamicColor: UIColor
+
+    init(color: UIColor, diameter: CGFloat) {
+        dynamicColor = color
+        super.init(frame: .zero)
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: diameter * Theme.typeScale),
+            heightAnchor.constraint(equalToConstant: diameter * Theme.typeScale),
+        ])
+        layer.cornerRadius = diameter * Theme.typeScale / 2
+        refresh()
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (dot: FleetColorDotView, _: UITraitCollection) in
+            dot.refresh()
         }
-        .background(Theme.screen)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    private func refresh() {
+        backgroundColor = dynamicColor
+        layer.shadowColor = dynamicColor.resolvedColor(with: traitCollection).cgColor
+        layer.shadowOpacity = 0.7
+        layer.shadowRadius = 4
+        layer.shadowOffset = .zero
     }
 }
 
-/// One monitor on the wall: live miniature, UMD row (name, lamp or attach
-/// badge, telemetry), and the session's windows as its segmented lower
-/// bezel — the spine. The whole tile is one button: press focuses the
-/// window already attached to this session, or attaches in a new one;
-/// long press offers an explicit new-window attach (a second synced
-/// tmux client) alongside delete.
-/// Slow opacity pulse for a status dot — activity without geometry, so the
-/// rail can signal "in flight" from inside a fixed-height slot. Static under
-/// Reduce Motion.
-private struct DotPulse: ViewModifier {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var active: Bool
-
-    func body(content: Content) -> some View {
-        if active && !reduceMotion {
-            content.phaseAnimator([1.0, 0.25]) { dot, opacity in
-                dot.opacity(opacity)
-            } animation: { _ in
-                .easeInOut(duration: 0.7)
-            }
-        } else {
-            content
-        }
+@MainActor
+private final class FleetTallyLampView: UIView {
+    init(caption: String = "LIVE", color: UIColor = TallyPalette.tally) {
+        super.init(frame: .zero)
+        let dot = FleetColorDotView(color: color, diameter: 7)
+        let label = UILabel()
+        label.font = UIKitChassis.monoFont(9, weight: .bold)
+        label.textColor = color
+        label.attributedText = NSAttributedString(
+            string: caption,
+            attributes: [.kern: 1.2, .foregroundColor: color]
+        )
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let stack = UIStackView(arrangedSubviews: [dot, label])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 5
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        isAccessibilityElement = true
+        accessibilityLabel = caption.lowercased()
     }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
 }
 
-private struct SessionTile: View, Equatable {
+@MainActor
+private final class FleetHatchedView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = TallyPalette.screen
+        isOpaque = true
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (view: FleetHatchedView, _: UITraitCollection) in
+            view.setNeedsDisplay()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        context.setStrokeColor(
+            TallyPalette.screenHatch.resolvedColor(with: traitCollection).cgColor
+        )
+        context.setLineWidth(5)
+        var x = -bounds.height
+        while x < bounds.width {
+            context.move(to: CGPoint(x: x, y: bounds.height))
+            context.addLine(to: CGPoint(x: x + bounds.height, y: 0))
+            x += 14
+        }
+        context.strokePath()
+    }
+
+}
+
+// MARK: - Session tile
+
+@MainActor
+struct FleetSessionTileConfiguration {
+    let hostID: UUID
     let session: TmuxSession
     let lines: [String]
-    /// Agent state from the latest probe/capture pass for the active pane.
-    /// Background pane title state is folded into the visible tile below.
     let attention: PaneAgentState?
-    /// Pane titles survive in cold-launch snapshots so agent telemetry paints
-    /// immediately, but activity/attention must be re-earned by a live probe.
     let hasLiveAgentState: Bool
-    /// Whether some open terminal window already has this session as a tab
-    /// — pressing then focuses that window instead of attaching again.
     let hasOpenTab: Bool
-    /// Expanded shell rails use the approved mini-tile anatomy while keeping
-    /// the same live capture, state, actions, and reorder behavior.
     let compact: Bool
     let selected: Bool
     let duplicateAttachTitle: String
@@ -1870,160 +2214,253 @@ private struct SessionTile: View, Equatable {
     let attach: () -> Void
     let attachNewWindow: () -> Void
     let delete: () -> Void
+    let droppedSession: (String) -> Void
+}
 
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        // Every data field read by the tile participates. `attach`,
-        // `attachNewWindow`, and `delete` are the only exclusions: equal data
-        // means their captured host/session inputs are equivalent, while the
-        // closures themselves receive a fresh identity on every parent pass.
-        lhs.session == rhs.session
-            && lhs.lines == rhs.lines
-            && lhs.attention == rhs.attention
-            && lhs.hasLiveAgentState == rhs.hasLiveAgentState
-            && lhs.hasOpenTab == rhs.hasOpenTab
-            && lhs.compact == rhs.compact
-            && lhs.selected == rhs.selected
-            && lhs.duplicateAttachTitle == rhs.duplicateAttachTitle
-            && lhs.openTabAccessibilityText == rhs.openTabAccessibilityText
+@MainActor
+final class FleetSessionTileView: FleetPressView,
+    UIDragInteractionDelegate, UIDropInteractionDelegate
+{
+    private struct DragPayload {
+        let hostID: UUID
+        let sessionName: String
     }
 
-    var body: some View {
-        let isAgentRunning = agentRunning
-        let agentNeedsInput = agentNeedsYou
+    private let contentStack = UIStackView()
+    private var configuration: FleetSessionTileConfiguration?
 
-        Button(action: attach) {
-            VStack(spacing: 0) {
-                screen
-                umd(
-                    agentRunning: isAgentRunning,
-                    agentNeedsYou: agentNeedsInput
-                )
-                if !compact { segmentStrip }
-            }
-            .padding(compact ? 4 : 5)
-            .background(Theme.bezel)
-            .overlay(Rectangle().strokeBorder(
-                selected ? Theme.signal2 : Theme.bezelHi,
-                lineWidth: selected ? 1.5 : 1
-            ))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .chassisHover(4)
-        // Keep the lifted reorder preview on the tile's full rectangular
-        // chassis bounds; the default inferred shape can inset/round it and
-        // make the card read as if it shrank under the finger.
-        .contentShape(.dragPreview, Rectangle())
-        .contextMenu {
-            Button(duplicateAttachTitle, action: attachNewWindow)
-            Button("Delete Session…", role: .destructive, action: delete)
-        }
-        .accessibilityLabel(accessibilitySummary(
-            agentRunning: isAgentRunning,
-            agentNeedsYou: agentNeedsInput
-        ))
-        .accessibilityHint("Long press and drag to reorder within this host")
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIKitChassis.bezel
+        contentStack.axis = .vertical
+        contentStack.alignment = .fill
+        contentStack.spacing = 0
+        contentStack.isUserInteractionEnabled = false
+        addSubview(contentStack)
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
+            contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
+            contentStack.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+        ])
+        let drag = UIDragInteraction(delegate: self)
+        drag.isEnabled = true
+        addInteraction(drag)
+        addInteraction(UIDropInteraction(delegate: self))
+        accessibilityIdentifier = "fleet.sessionTile"
     }
 
-    private var screen: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if lines.isEmpty {
-                Text("—")
-                    .font(.mono(11))
-                    .foregroundStyle(Theme.signal3)
-            } else {
-                ForEach(
-                    Array(lines.prefix(compact ? 3 : lines.count).enumerated()),
-                    id: \.offset
-                ) { _, line in
-                    Text(line.isEmpty ? " " : line)
-                        .font(.mono(11))
-                        .foregroundStyle(Theme.miniText.opacity(0.78))
-                        .lineLimit(1)
-                }
-            }
+    func configure(_ configuration: FleetSessionTileConfiguration) {
+        self.configuration = configuration
+        pressAction = configuration.attach
+        tallyBorderColor = configuration.selected ? UIKitChassis.signal2 : UIKitChassis.bezelHi
+        layer.borderWidth = configuration.selected ? 1.5 : 1
+        menuProvider = { [weak self] in
+            guard let configuration = self?.configuration else { return nil }
+            return UIMenu(children: [
+                UIAction(title: configuration.duplicateAttachTitle) { _ in
+                    configuration.attachNewWindow()
+                },
+                UIAction(title: "Delete Session…", attributes: .destructive) { _ in
+                    configuration.delete()
+                },
+            ])
         }
-        .frame(
-            maxWidth: .infinity,
-            minHeight: compact ? 56 : 76,
-            alignment: .topLeading
+        rebuildContent()
+        let running = agentRunning(configuration)
+        let needsYou = agentNeedsYou(configuration)
+        accessibilityLabel = accessibilitySummary(
+            configuration,
+            agentRunning: running,
+            agentNeedsYou: needsYou
         )
-        .padding(compact ? 8 : 10)
-        .background(Theme.screen)
+        accessibilityHint = "Long press and drag to reorder within this host"
+        invalidateIntrinsicContentSize()
     }
 
-    private func umd(agentRunning: Bool, agentNeedsYou: Bool) -> some View {
-        HStack(spacing: 9) {
-            ChassisLabel(session.name, size: compact ? 10 : 12)
-            // The badge is taller than the lamp, so swapping them resizes
-            // the tile on every attach/detach. The badge keeps its slot in
-            // both states (hidden under the lamp) to pin the row's height.
-            ZStack(alignment: .leading) {
-                ChassisBadge("ATTACH")
-                    .opacity(session.isAttached ? 0 : 1)
-                    .accessibilityHidden(session.isAttached)
-                if session.isAttached {
-                    TallyLamp()
-                }
-            }
-            // An agent blocked on the user outranks everything else the
-            // tile could say — caution, captioned, never tally red.
-            if agentNeedsYou {
-                TallyLamp(caption: "NEEDS YOU", color: Theme.caution)
-            }
-            Spacer(minLength: 6)
-            if !compact {
-                Text(telemetry(agentRunning: agentRunning))
-                    .font(.mono(9.5))
-                    .foregroundStyle(Theme.signal2)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-        }
-        .padding(.horizontal, compact ? 6 : 7)
-        .padding(.top, compact ? 6 : 8)
-        .padding(.bottom, 5)
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        itemsForBeginning session: UIDragSession
+    ) -> [UIDragItem] {
+        guard let configuration else { return [] }
+        let provider = NSItemProvider(object: configuration.session.name as NSString)
+        let item = UIDragItem(itemProvider: provider)
+        item.localObject = DragPayload(
+            hostID: configuration.hostID,
+            sessionName: configuration.session.name
+        )
+        return [item]
     }
 
-    private func telemetry(agentRunning: Bool) -> String {
-        let hasSplitPanes = session.paneCount > session.windowCount
-        var parts = [hasSplitPanes ? "\(session.windowCount)W" : "\(session.windowCount) WIN"]
-        if hasSplitPanes {
-            parts.append("\(session.paneCount)P")
-        }
-        if session.clientCount > 0 {
-            parts.append(hasSplitPanes
-                ? "\(session.clientCount)C"
-                : "\(session.clientCount) CLIENT\(session.clientCount == 1 ? "" : "S")")
-        }
-        // Free-tier telemetry sees every split. Keep the active kind first,
-        // then stable pane order; repeated kinds get a compact count.
-        for agent in orderedAgentKinds {
-            let count = session.detectedAgents.count { $0 == agent }
-            parts.append(count > 1
-                ? "\(count)×\(agent.telemetryLabel)"
-                : agent.telemetryLabel)
-        }
-        if agentRunning {
-            parts.append("RUNNING")
-        }
-        parts.append(sessionAge)
-        return parts.joined(separator: " · ")
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        sessionDidUpdate session: UIDropSession
+    ) -> UIDropProposal {
+        guard let configuration,
+              session.items.contains(where: {
+                  ($0.localObject as? DragPayload)?.hostID == configuration.hostID
+              })
+        else { return UIDropProposal(operation: .forbidden) }
+        return UIDropProposal(operation: .move)
     }
 
-    private var orderedAgentKinds: [AgentKind] {
-        var result: [AgentKind] = []
-        if let active = session.activeAgent { result.append(active) }
-        for agent in session.detectedAgents where !result.contains(agent) {
-            result.append(agent)
-        }
-        return result
+    func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
+        guard let configuration,
+              let item = session.items.first,
+              let payload = item.localObject as? DragPayload,
+              payload.hostID == configuration.hostID
+        else { return }
+        configuration.droppedSession(payload.sessionName)
     }
 
-    private var agentRunning: Bool {
-        if attention == .busy { return true }
-        guard hasLiveAgentState else { return false }
-        return session.agentPanes.contains {
+    private func rebuildContent() {
+        guard let configuration else { return }
+        contentStack.arrangedSubviews.forEach {
+            contentStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        let running = agentRunning(configuration)
+        let needsYou = agentNeedsYou(configuration)
+        contentStack.addArrangedSubview(makeScreen(configuration))
+        contentStack.addArrangedSubview(makeUMD(
+            configuration,
+            agentRunning: running,
+            agentNeedsYou: needsYou
+        ))
+        if !configuration.compact {
+            contentStack.addArrangedSubview(makeSegmentStrip(configuration.session))
+        }
+    }
+
+    private func makeScreen(_ configuration: FleetSessionTileConfiguration) -> UIView {
+        let screen = UIView()
+        screen.backgroundColor = TallyPalette.screen
+        let lines = UIStackView()
+        lines.axis = .vertical
+        lines.alignment = .fill
+        lines.spacing = 2
+        let visible = configuration.lines.isEmpty
+            ? ["—"]
+            : Array(configuration.lines.prefix(
+                configuration.compact ? 3 : configuration.lines.count
+            ))
+        for line in visible {
+            let label = UILabel()
+            label.font = UIKitChassis.monoFont(11)
+            label.textColor = configuration.lines.isEmpty
+                ? UIKitChassis.signal3
+                : TallyPalette.miniText.withAlphaComponent(0.78)
+            label.text = line.isEmpty ? " " : line
+            label.numberOfLines = 1
+            label.lineBreakMode = .byTruncatingTail
+            lines.addArrangedSubview(label)
+        }
+        screen.addSubview(lines)
+        lines.translatesAutoresizingMaskIntoConstraints = false
+        let minimum = screen.heightAnchor.constraint(
+            greaterThanOrEqualToConstant: configuration.compact ? 56 : 76
+        )
+        NSLayoutConstraint.activate([
+            lines.leadingAnchor.constraint(equalTo: screen.leadingAnchor, constant: configuration.compact ? 8 : 10),
+            lines.trailingAnchor.constraint(equalTo: screen.trailingAnchor, constant: configuration.compact ? -8 : -10),
+            lines.topAnchor.constraint(equalTo: screen.topAnchor, constant: configuration.compact ? 8 : 10),
+            lines.bottomAnchor.constraint(lessThanOrEqualTo: screen.bottomAnchor, constant: configuration.compact ? -8 : -10),
+            minimum,
+        ])
+        return screen
+    }
+
+    private func makeUMD(
+        _ configuration: FleetSessionTileConfiguration,
+        agentRunning: Bool,
+        agentNeedsYou: Bool
+    ) -> UIView {
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 9
+        let name = UIKitChassisLabel(
+            configuration.session.name,
+            size: configuration.compact ? 10 : 12
+        )
+        row.addArrangedSubview(name)
+
+        let attachSlot = UIView()
+        let attach = FleetBadgeView(caption: "ATTACH")
+        attach.alpha = configuration.session.isAttached ? 0 : 1
+        let live = FleetTallyLampView()
+        live.isHidden = !configuration.session.isAttached
+        attachSlot.addSubview(attach)
+        attachSlot.addSubview(live)
+        attach.translatesAutoresizingMaskIntoConstraints = false
+        live.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            attach.leadingAnchor.constraint(equalTo: attachSlot.leadingAnchor),
+            attach.trailingAnchor.constraint(equalTo: attachSlot.trailingAnchor),
+            attach.topAnchor.constraint(equalTo: attachSlot.topAnchor),
+            attach.bottomAnchor.constraint(equalTo: attachSlot.bottomAnchor),
+            live.leadingAnchor.constraint(equalTo: attachSlot.leadingAnchor),
+            live.centerYAnchor.constraint(equalTo: attachSlot.centerYAnchor),
+        ])
+        row.addArrangedSubview(attachSlot)
+        if agentNeedsYou {
+            row.addArrangedSubview(FleetTallyLampView(
+                caption: "NEEDS YOU",
+                color: TallyPalette.caution
+            ))
+        }
+        row.addArrangedSubview(UIView())
+        if !configuration.compact {
+            let telemetry = UILabel()
+            telemetry.font = UIKitChassis.monoFont(9.5)
+            telemetry.textColor = UIKitChassis.signal2
+            telemetry.text = telemetryText(configuration.session, agentRunning: agentRunning)
+            telemetry.numberOfLines = 1
+            telemetry.adjustsFontSizeToFitWidth = true
+            telemetry.minimumScaleFactor = 0.8
+            telemetry.textAlignment = .right
+            row.addArrangedSubview(telemetry)
+        }
+        let wrapper = UIView()
+        wrapper.addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: configuration.compact ? 6 : 7),
+            row.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor, constant: configuration.compact ? -6 : -7),
+            row.topAnchor.constraint(equalTo: wrapper.topAnchor, constant: configuration.compact ? 6 : 8),
+            row.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor, constant: -5),
+        ])
+        return wrapper
+    }
+
+    private func makeSegmentStrip(_ session: TmuxSession) -> UIView {
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.alignment = .fill
+        row.distribution = .fillEqually
+        row.spacing = 3
+        for window in session.windows {
+            row.addArrangedSubview(FleetWindowSegmentView(window: window, serverHost: session.serverHost))
+        }
+        let wrapper = UIView()
+        wrapper.addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 3),
+            row.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor, constant: -3),
+            row.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            row.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor, constant: -3),
+        ])
+        wrapper.isAccessibilityElement = true
+        wrapper.accessibilityLabel = spineSummary(session)
+        return wrapper
+    }
+
+    private func agentRunning(_ configuration: FleetSessionTileConfiguration) -> Bool {
+        if configuration.attention == .busy { return true }
+        guard configuration.hasLiveAgentState else { return false }
+        return configuration.session.agentPanes.contains {
             AgentAttention.classifyVerified(
                 title: $0.title,
                 tail: [],
@@ -2032,79 +2469,48 @@ private struct SessionTile: View, Equatable {
         }
     }
 
-    private var agentNeedsYou: Bool {
-        if case .needsYou = attention { return true }
-        guard hasLiveAgentState else { return false }
-        return session.agentPanes.contains {
+    private func agentNeedsYou(_ configuration: FleetSessionTileConfiguration) -> Bool {
+        if case .needsYou = configuration.attention { return true }
+        guard configuration.hasLiveAgentState else { return false }
+        return configuration.session.agentPanes.contains {
             if case .some(.needsYou) = AgentAttention.classifyVerified(
                 title: $0.title,
                 tail: [],
                 agent: $0.agent
-            ) {
-                return true
-            }
+            ) { return true }
             return false
         }
     }
 
-    private var sessionAge: String {
+    private func telemetryText(_ session: TmuxSession, agentRunning: Bool) -> String {
+        let splits = session.paneCount > session.windowCount
+        var parts = [splits ? "\(session.windowCount)W" : "\(session.windowCount) WIN"]
+        if splits { parts.append("\(session.paneCount)P") }
+        if session.clientCount > 0 {
+            parts.append(splits
+                ? "\(session.clientCount)C"
+                : "\(session.clientCount) CLIENT\(session.clientCount == 1 ? "" : "S")")
+        }
+        var agents: [AgentKind] = []
+        if let active = session.activeAgent { agents.append(active) }
+        for agent in session.detectedAgents where !agents.contains(agent) { agents.append(agent) }
+        for agent in agents {
+            let count = session.detectedAgents.count { $0 == agent }
+            parts.append(count > 1 ? "\(count)×\(agent.telemetryLabel)" : agent.telemetryLabel)
+        }
+        if agentRunning { parts.append("RUNNING") }
+        parts.append(sessionAge(session))
+        return parts.joined(separator: " · ")
+    }
+
+    private func sessionAge(_ session: TmuxSession) -> String {
         let seconds = max(0, Date().timeIntervalSince(session.created))
         if seconds >= 86_400 { return "\(Int(seconds / 86_400))d" }
         if seconds >= 3_600 { return "\(Int(seconds / 3_600))h" }
         return "\(max(1, Int(seconds / 60)))m"
     }
 
-    /// One line per window: `0 EDITOR · ✳ Claude Code`. The pane title is the
-    /// active pane's, so it only describes the whole window when that is the
-    /// *only* pane — a split window keeps reporting its pane count instead,
-    /// which is the fact a title would otherwise hide.
-    private func segment(_ window: TmuxWindow) -> Text {
-        let name = Text("\(window.index) \(window.name)".uppercased())
-            .foregroundStyle(window.isActive ? Theme.signal : Theme.signal2)
-        if window.paneCount > 1 {
-            return name + Text(" · \(window.paneCount)P")
-                .foregroundStyle(window.isActive ? Theme.signal : Theme.signal2)
-        }
-        guard let title = window.displayPaneTitle(serverHost: session.serverHost)
-        else { return name }
-        // Verbatim, unlike the window name it follows: a pane title is screen
-        // content, not a chassis label, and uppercasing mangles what an agent
-        // wrote there (`π - harness` → `Π - HARNESS`).
-        return name + Text(" · \(title)")
-            .foregroundStyle(window.isActive ? Theme.signal2 : Theme.signal3)
-    }
-
-    private var segmentStrip: some View {
-        HStack(spacing: 3) {
-            ForEach(session.windows) { window in
-                VStack(spacing: 0) {
-                    Rectangle()
-                        .fill(window.isActive ? Theme.signal : Theme.bezelHi)
-                        .frame(height: 2)
-                    segment(window)
-                        .font(.mono(8))
-                        .kerning(0.4)
-                        .lineLimit(1)
-                        .padding(.top, 4)
-                }
-                .frame(maxWidth: .infinity)
-                .overlay(alignment: .topTrailing) {
-                    if window.hasBell || window.hasActivity {
-                        Rectangle()
-                            .fill(Theme.caution)
-                            .frame(width: 5, height: 5)
-                            .offset(y: -2)
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 3)
-        .padding(.bottom, 3)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spineSummary)
-    }
-
-    private var spineSummary: String {
+    private func spineSummary(_ session: TmuxSession) -> String {
         let activeWindow = session.windows.first(where: \.isActive)
         let active = activeWindow.map { "\($0.name) active" } ?? ""
         let title = activeWindow?
@@ -2114,108 +2520,1503 @@ private struct SessionTile: View, Equatable {
     }
 
     private func accessibilitySummary(
+        _ configuration: FleetSessionTileConfiguration,
         agentRunning: Bool,
         agentNeedsYou: Bool
     ) -> String {
+        let session = configuration.session
         var parts = [session.name, session.isAttached ? "live" : "not attached"]
         if agentNeedsYou { parts.append("agent needs your input") }
         if agentRunning { parts.append("agent running") }
         parts.append("\(session.windowCount) windows and \(session.paneCount) panes")
         return parts.joined(separator: ", ")
-            + (hasOpenTab ? ". \(openTabAccessibilityText)" : ". Attach")
+            + (configuration.hasOpenTab
+                ? ". \(configuration.openTabAccessibilityText)"
+                : ". Attach")
     }
 }
 
-#if DEBUG
-private enum FleetWallPreviewData {
-    static let host = Host(
-        name: "devbox",
-        hostname: "127.0.0.1",
-        port: 2222,
-        username: "jhen",
-        workingDirs: ["~/workspace/Multiplex", "~/workspace"]
-    )
+@MainActor
+private final class FleetWindowSegmentView: UIView {
+    private let bar = UIView()
+    private let tick = UIView()
+    private let activeColor: UIColor
 
-    static let session = TmuxSession(
-        name: "agent",
-        windows: [
-            TmuxWindow(
-                index: 0,
-                name: "codex",
-                isActive: true,
-                hasBell: false,
-                hasActivity: true,
-                agent: .codex,
-                paneTitle: "Action Required | ~/workspace/Multiplex",
-                panes: [
-                    TmuxPane(
-                        index: 0,
-                        isActive: true,
-                        tmuxID: "%1",
-                        pid: 101,
-                        tty: "ttys001",
-                        command: "codex",
-                        title: "Action Required | ~/workspace/Multiplex",
-                        agent: .codex
-                    ),
-                ]
-            ),
-            TmuxWindow(
-                index: 1,
-                name: "logs",
-                isActive: false,
-                hasBell: true,
-                hasActivity: false,
-                agent: nil
-            ),
-        ],
-        clientCount: 1,
-        created: Date().addingTimeInterval(-7_200),
-        tmuxID: "$1"
-    )
-}
+    init(window: TmuxWindow, serverHost: String) {
+        activeColor = window.isActive ? UIKitChassis.signal : UIKitChassis.bezelHi
+        super.init(frame: .zero)
+        bar.backgroundColor = activeColor
+        addSubview(bar)
+        bar.translatesAutoresizingMaskIntoConstraints = false
 
-#Preview("Session tile") {
-    SessionTile(
-        session: FleetWallPreviewData.session,
-        lines: [
-            "$ codex",
-            "Review the preview coverage",
-            "Waiting for approval…",
-        ],
-        attention: .needsYou(.permission),
-        hasLiveAgentState: true,
-        hasOpenTab: true,
-        compact: false,
-        selected: true,
-        duplicateAttachTitle: "Attach in New Window",
-        openTabAccessibilityText: "Shows its open window",
-        attach: {},
-        attachNewWindow: {},
-        delete: {}
-    )
-    .frame(width: 360)
-    .padding()
-    .background(Theme.chassis)
-}
-
-#Preview("New session sheet") {
-    NewSessionSheet(
-        host: FleetWallPreviewData.host,
-        existingNames: ["main", "scratch"],
-        create: { _, _, _, _, _, _ in },
-        preferences: NewSessionPreferences(
-            defaults: UserDefaults(
-                suiteName: "app.multiplexterm.multiplex.preview.new-session"
-            )!
+        let label = UILabel()
+        label.font = UIKitChassis.monoFont(8)
+        label.numberOfLines = 1
+        label.lineBreakMode = .byTruncatingTail
+        let baseColor = window.isActive ? UIKitChassis.signal : UIKitChassis.signal2
+        let text = NSMutableAttributedString(
+            string: "\(window.index) \(window.name)".uppercased(),
+            attributes: [.foregroundColor: baseColor, .kern: 0.4]
         )
-    )
+        if window.paneCount > 1 {
+            text.append(NSAttributedString(
+                string: " · \(window.paneCount)P",
+                attributes: [.foregroundColor: baseColor, .kern: 0.4]
+            ))
+        } else if let title = window.displayPaneTitle(serverHost: serverHost) {
+            text.append(NSAttributedString(
+                string: " · \(title)",
+                attributes: [
+                    .foregroundColor: window.isActive
+                        ? UIKitChassis.signal2 : UIKitChassis.signal3,
+                    .kern: 0.4,
+                ]
+            ))
+        }
+        label.attributedText = text
+        addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        tick.backgroundColor = TallyPalette.caution
+        tick.isHidden = !(window.hasBell || window.hasActivity)
+        addSubview(tick)
+        tick.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bar.topAnchor.constraint(equalTo: topAnchor),
+            bar.heightAnchor.constraint(equalToConstant: 2),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor),
+            label.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 4),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor),
+            tick.widthAnchor.constraint(equalToConstant: 5),
+            tick.heightAnchor.constraint(equalToConstant: 5),
+            tick.trailingAnchor.constraint(equalTo: trailingAnchor),
+            tick.centerYAnchor.constraint(equalTo: topAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
 }
 
-#Preview("Hatched screen") {
-    HatchedScreen()
-        .frame(width: 360, height: 180)
-        .padding()
-        .background(Theme.chassis)
+// MARK: - Special tiles
+
+@MainActor
+private final class FleetNewSessionTileView: FleetPressView {
+    private let label = UIKitChassisLabel("+ New Session", size: 11, color: UIKitChassis.signal2)
+    private let dashLayer = CAShapeLayer()
+    private var heightConstraint: NSLayoutConstraint?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        tallyBorderColor = .clear
+        layer.borderWidth = 0
+        layer.addSublayer(dashLayer)
+        addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        heightConstraint = heightAnchor.constraint(greaterThanOrEqualToConstant: 138)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 10),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
+            heightConstraint!,
+        ])
+    }
+
+    func configure(hostName: String, compact: Bool, action: @escaping () -> Void) {
+        pressAction = action
+        heightConstraint?.constant = compact ? 92 : 138
+        accessibilityLabel = "New session on \(hostName)"
+        setNeedsLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        dashLayer.frame = bounds
+        dashLayer.path = UIBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5)).cgPath
+        dashLayer.fillColor = UIColor.clear.cgColor
+        dashLayer.strokeColor = UIKitChassis.bezelHi.resolvedColor(with: traitCollection).cgColor
+        dashLayer.lineWidth = 1
+        dashLayer.lineDashPattern = [5, 4]
+    }
 }
-#endif
+
+@MainActor
+private final class FleetNoSignalTileView: FleetPressView {
+    enum Mode {
+        case unreachable
+        case passphrase
+        case disabled
+    }
+
+    private let content = UIStackView()
+    private var screenHeightConstraint: NSLayoutConstraint?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIKitChassis.bezel
+        content.axis = .vertical
+        content.spacing = 0
+        content.alignment = .fill
+        addSubview(content)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
+            content.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+        ])
+    }
+
+    func configure(host: Host, mode: Mode, compact: Bool, action: @escaping () -> Void) {
+        pressAction = action
+        content.arrangedSubviews.forEach {
+            content.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        let screen = FleetHatchedView()
+        let caption: String
+        let ink: UIColor
+        let badge: String
+        switch mode {
+        case .unreachable:
+            caption = "No Signal"
+            ink = UIKitChassis.signal3
+            badge = "RECONNECT"
+            accessibilityLabel = "\(host.name) unreachable. Reconnect"
+        case .passphrase:
+            caption = "Passphrase Required"
+            ink = TallyPalette.caution
+            badge = "UNLOCK"
+            accessibilityLabel = "\(host.name) needs its SSH key passphrase. Unlock"
+        case .disabled:
+            caption = "Disabled"
+            ink = UIKitChassis.signal3
+            badge = "ENABLE"
+            accessibilityLabel = "\(host.name) is disabled. Enable"
+            accessibilityHint = "Starts monitoring this host on the deck again"
+        }
+        let title = UIKitChassisLabel(caption, size: 13, color: ink)
+        screen.addSubview(title)
+        title.translatesAutoresizingMaskIntoConstraints = false
+        screenHeightConstraint = screen.heightAnchor.constraint(
+            greaterThanOrEqualToConstant: compact ? 64 : 96
+        )
+        NSLayoutConstraint.activate([
+            title.centerXAnchor.constraint(equalTo: screen.centerXAnchor),
+            title.centerYAnchor.constraint(equalTo: screen.centerYAnchor),
+            screenHeightConstraint!,
+        ])
+        content.addArrangedSubview(screen)
+
+        let hostLabel = UIKitChassisLabel(host.name, size: 12, color: UIKitChassis.signal3)
+        let verdict = FleetBadgeView(caption: badge)
+        let row = UIStackView(arrangedSubviews: [hostLabel, UIView(), verdict])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 8
+        let wrapper = UIView()
+        wrapper.addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 7),
+            row.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor, constant: -7),
+            row.topAnchor.constraint(equalTo: wrapper.topAnchor, constant: 8),
+            row.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor, constant: -8),
+        ])
+        content.addArrangedSubview(wrapper)
+    }
+}
+
+@MainActor
+private final class FleetAcquiringTileView: UIKitTallyBorderedView {
+    private let spinner = UIActivityIndicatorView(style: .medium)
+    private var heightConstraint: NSLayoutConstraint?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = TallyPalette.screen
+        let label = UIKitChassisLabel(
+            "Acquiring signal", size: 10, color: UIKitChassis.signal3
+        )
+        let stack = UIStackView(arrangedSubviews: [spinner, label])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 8
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        heightConstraint = heightAnchor.constraint(greaterThanOrEqualToConstant: 138)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
+            heightConstraint!,
+        ])
+        spinner.color = UIKitChassis.signal2
+        spinner.startAnimating()
+        isAccessibilityElement = true
+        accessibilityLabel = "Acquiring signal"
+    }
+
+    func configure(compact: Bool) {
+        heightConstraint?.constant = compact ? 92 : 138
+    }
+}
+
+@MainActor
+private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
+    private var installChip: UIKitChassisChip!
+    private var action: (() -> Void)?
+    private var heightConstraint: NSLayoutConstraint?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        installChip = UIKitChassisChip(
+            "INSTALL GUIDE",
+            accessibilityLabel: "Install guide"
+        ) { [weak self] in self?.action?() }
+        let title = UIKitChassisLabel(
+            "No tmux on host", size: 11, color: UIKitChassis.signal3
+        )
+        let body = UILabel()
+        body.font = .preferredFont(forTextStyle: .footnote)
+        body.textColor = UIKitChassis.signal2
+        body.text = "You can still use a plain shell — press SHELL."
+        body.numberOfLines = 0
+        body.textAlignment = .center
+        let stack = UIStackView(arrangedSubviews: [title, body, installChip])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 8
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        heightConstraint = heightAnchor.constraint(greaterThanOrEqualToConstant: 138)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -10),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightConstraint!,
+        ])
+        isAccessibilityElement = false
+    }
+
+    func configure(compact: Bool, action: @escaping () -> Void) {
+        self.action = action
+        heightConstraint?.constant = compact ? 92 : 138
+    }
+}
+
+@MainActor
+private final class FleetAwaitingSignalView: UIView {
+    private let tile = UIKitTallyBorderedView()
+    private var addChip: UIKitChassisChip!
+    private var action: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        addChip = UIKitChassisChip(
+            "ADD HOST",
+            systemImage: "plus",
+            prominent: true,
+            accessibilityLabel: "Add host"
+        ) { [weak self] in self?.action?() }
+        tile.backgroundColor = UIKitChassis.bezel
+        addSubview(tile)
+        tile.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            tile.topAnchor.constraint(equalTo: topAnchor, constant: 40),
+            tile.bottomAnchor.constraint(equalTo: bottomAnchor),
+            tile.centerXAnchor.constraint(equalTo: centerXAnchor),
+            tile.widthAnchor.constraint(lessThanOrEqualToConstant: 430),
+            tile.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor),
+            tile.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+        ])
+
+        let content = UIStackView()
+        content.axis = .vertical
+        content.alignment = .fill
+        content.spacing = 0
+        tile.addSubview(content)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: tile.leadingAnchor, constant: 5),
+            content.trailingAnchor.constraint(equalTo: tile.trailingAnchor, constant: -5),
+            content.topAnchor.constraint(equalTo: tile.topAnchor, constant: 5),
+            content.bottomAnchor.constraint(equalTo: tile.bottomAnchor, constant: -5),
+        ])
+
+        let screen = FleetHatchedView()
+        let title = UIKitChassisLabel(
+            "Awaiting signal", size: 13, color: UIKitChassis.signal3
+        )
+        let body = UILabel()
+        body.font = .preferredFont(forTextStyle: .footnote)
+        body.textColor = UIKitChassis.signal2
+        body.text = "Every tmux session, its own window in space."
+        body.textAlignment = .center
+        let route = UILabel()
+        route.font = UIKitChassis.monoFont(10)
+        route.textColor = UIKitChassis.signal3
+        route.text = "add host  ▸  bind  or  manual"
+        route.textAlignment = .center
+        let screenStack = UIStackView(arrangedSubviews: [title, body, route])
+        screenStack.axis = .vertical
+        screenStack.alignment = .center
+        screenStack.spacing = 12
+        screen.addSubview(screenStack)
+        screenStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            screenStack.centerXAnchor.constraint(equalTo: screen.centerXAnchor),
+            screenStack.centerYAnchor.constraint(equalTo: screen.centerYAnchor),
+            screenStack.leadingAnchor.constraint(greaterThanOrEqualTo: screen.leadingAnchor, constant: 12),
+            screenStack.trailingAnchor.constraint(lessThanOrEqualTo: screen.trailingAnchor, constant: -12),
+            screen.heightAnchor.constraint(greaterThanOrEqualToConstant: 150),
+        ])
+        content.addArrangedSubview(screen)
+
+        let noHosts = UIKitChassisLabel("No hosts", size: 12, color: UIKitChassis.signal3)
+        let row = UIStackView(arrangedSubviews: [noHosts, UIView(), addChip])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 8
+        let rowWrapper = UIView()
+        rowWrapper.addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: rowWrapper.leadingAnchor, constant: 7),
+            row.trailingAnchor.constraint(equalTo: rowWrapper.trailingAnchor, constant: -7),
+            row.topAnchor.constraint(equalTo: rowWrapper.topAnchor, constant: 8),
+            row.bottomAnchor.constraint(equalTo: rowWrapper.bottomAnchor, constant: -8),
+        ])
+        content.addArrangedSubview(rowWrapper)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func configure(addHost: @escaping () -> Void) { action = addHost }
+}
+
+// MARK: - New Session state
+
+struct NewSessionSubmission: Equatable {
+    let name: String
+    let agent: AgentKind?
+    let model: String?
+    let initialPrompt: String
+    let directory: String?
+    let script: SessionScript?
+}
+
+/// Framework-independent form rules shared by the native controller and its
+/// tests. The one-shot prompt is deliberately absent from preferences.
+struct NewSessionFormState {
+    enum LaunchMode: Hashable {
+        case shell
+        case agents
+    }
+
+    let host: Host
+    let existingNames: [String]
+    let preferences: NewSessionPreferences
+    var name: String
+    var launchMode: LaunchMode
+    var selectedAgent: AgentKind
+    var model: String
+    var initialPrompt: String
+    var directory: String?
+    var script: SessionScript?
+    var remembersLastLaunch: Bool
+
+    init(
+        host: Host,
+        existingNames: [String],
+        preferences: NewSessionPreferences = NewSessionPreferences()
+    ) {
+        self.host = host
+        self.existingNames = existingNames
+        self.preferences = preferences
+        remembersLastLaunch = preferences.remembersLastLaunch
+        let agent = preferences.rememberedAgent
+        launchMode = agent == nil ? .shell : .agents
+        selectedAgent = agent ?? .claudeCode
+        model = agent.flatMap(preferences.rememberedModel) ?? ""
+        initialPrompt = ""
+        directory = host.workingDirs.first
+        script = preferences.rememberedScript(for: host)
+        name = TmuxProbe.uniqueSessionName(
+            base: agent?.launchCommand ?? "main",
+            existing: existingNames
+        )
+    }
+
+    var agentToLaunch: AgentKind? {
+        launchMode == .agents ? selectedAgent : nil
+    }
+
+    var modelToLaunch: String? {
+        guard agentToLaunch != nil else { return nil }
+        let trimmed = model.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var canSubmit: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var commandPreview: String {
+        guard let agentToLaunch else { return "login shell" }
+        return agentToLaunch.launchCommand(model: modelToLaunch, initialPrompt: "")
+    }
+
+    mutating func selectShell() {
+        select(agent: nil)
+    }
+
+    mutating func selectAgent(_ agent: AgentKind) {
+        select(agent: agent)
+    }
+
+    mutating func select(agent: AgentKind?) {
+        let previous = agentToLaunch
+        let nameUntouched = name == prefill(for: previous)
+        let modelUntouched = model == modelPrefill(for: previous)
+        if let agent {
+            selectedAgent = agent
+            launchMode = .agents
+        } else {
+            launchMode = .shell
+        }
+        if nameUntouched { name = prefill(for: agent) }
+        if modelUntouched { model = modelPrefill(for: agent) }
+    }
+
+    func savePreferences() {
+        preferences.save(
+            remembersLastLaunch: remembersLastLaunch,
+            agent: agentToLaunch,
+            model: agentToLaunch == nil ? nil : model,
+            script: script,
+            hostID: host.id
+        )
+    }
+
+    var submission: NewSessionSubmission {
+        NewSessionSubmission(
+            name: name,
+            agent: agentToLaunch,
+            model: modelToLaunch,
+            initialPrompt: initialPrompt,
+            directory: directory,
+            script: script
+        )
+    }
+
+    var launchDetail: String {
+        let remembers = host.sessionScripts.isEmpty
+            ? "REMEMBER saves only the launch choice."
+            : "REMEMBER saves the launch and setup-script choices."
+        guard let agentToLaunch else {
+            return "Creates the tmux session, then attaches to its login shell. \(remembers)"
+        }
+        return "Starts \(agentToLaunch.displayName) in the fresh shell. The optional prompt becomes its first message; \(remembers)"
+    }
+
+    var scriptDetail: String {
+        guard let script else {
+            return "Nothing extra runs. A setup script is typed into the fresh shell before the launch."
+        }
+        return "Types \(script.displayName) into the fresh shell first, so the launch inherits what it sets up."
+    }
+
+    var directoryDetail: String {
+        guard !host.workingDirs.isEmpty else {
+            return "Uses the host's login-shell home directory."
+        }
+        if let directory {
+            return "Starts in \(directory). Choose Home to use the login shell's default."
+        }
+        return "Uses the host's login-shell home directory."
+    }
+
+    private func prefill(for agent: AgentKind?) -> String {
+        TmuxProbe.uniqueSessionName(
+            base: agent?.launchCommand ?? "main",
+            existing: existingNames
+        )
+    }
+
+    private func modelPrefill(for agent: AgentKind?) -> String {
+        agent.flatMap(preferences.rememberedModel) ?? ""
+    }
+}
+
+// MARK: - Native New Session sheet
+
+@MainActor
+final class NewSessionViewController: UIViewController,
+    UITextFieldDelegate, UIGestureRecognizerDelegate
+{
+    static let contentMaximumWidth: CGFloat = 600
+    static let outerInset: CGFloat = 18
+    static let sectionSpacing: CGFloat = 18
+
+    var onDismiss: (() -> Void)?
+
+    private(set) var form: NewSessionFormState
+    private let create: (NewSessionSubmission) -> Void
+    private let scrollView = UIScrollView()
+    private let contentStack = UIStackView()
+    private let nameField = UITextField()
+    private let modelField = UITextField()
+    private let promptView = FleetPromptTextView()
+    private let launchChoice = FleetLaunchChoiceView()
+    private let rememberToggle = FleetToggleView(caption: "REMEMBER")
+    private let commandLabel = UILabel()
+    private var launchSection: FleetFormSectionView?
+    private var agentFieldsRow: UIView?
+    private var modelInputRow: UIStackView?
+    private var modelMenuButton: UIButton?
+    private var scriptButton: FleetMenuFieldButton?
+    private var scriptSection: FleetFormSectionView?
+    private var directoryButton: FleetMenuFieldButton?
+    private var directorySection: FleetFormSectionView?
+    private var createItem: UIBarButtonItem?
+
+    init(
+        host: Host,
+        existingNames: [String],
+        preferences: NewSessionPreferences = NewSessionPreferences(),
+        create: @escaping (NewSessionSubmission) -> Void
+    ) {
+        form = NewSessionFormState(
+            host: host,
+            existingNames: existingNames,
+            preferences: preferences
+        )
+        self.create = create
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "New Session"
+        view.backgroundColor = UIKitChassis.chassis
+        navigationItem.largeTitleDisplayMode = .never
+        #if os(visionOS)
+        navigationItem.titleView = UIKitChassisLabel("New Session", size: 12)
+        #endif
+
+        let cancel = UIBarButtonItem(
+            title: "Cancel",
+            style: .plain,
+            target: self,
+            action: #selector(cancelPressed)
+        )
+        cancel.tintColor = UIKitChassis.signal
+        cancel.accessibilityLabel = "Cancel"
+        navigationItem.leftBarButtonItem = cancel
+        let createItem = UIBarButtonItem(
+            title: "Create & Attach",
+            style: .plain,
+            target: self,
+            action: #selector(createPressed)
+        )
+        createItem.tintColor = UIKitChassis.signal
+        createItem.accessibilityLabel = "Create and attach"
+        navigationItem.rightBarButtonItem = createItem
+        self.createItem = createItem
+
+        configureContent()
+        renderForm()
+    }
+
+    private func configureContent() {
+        scrollView.alwaysBounceVertical = true
+        scrollView.backgroundColor = UIKitChassis.chassis
+        view.addSubview(scrollView)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+            scrollView.contentLayoutGuide.widthAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.widthAnchor
+            ),
+        ])
+        contentStack.axis = .vertical
+        contentStack.alignment = .fill
+        contentStack.spacing = Self.sectionSpacing
+        scrollView.addSubview(contentStack)
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        let fillWidth = contentStack.widthAnchor.constraint(
+            equalTo: scrollView.frameLayoutGuide.widthAnchor,
+            constant: -(Self.outerInset * 2)
+        )
+        fillWidth.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            contentStack.topAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.topAnchor,
+                constant: Self.outerInset
+            ),
+            contentStack.bottomAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.bottomAnchor,
+                constant: -Self.outerInset
+            ),
+            contentStack.centerXAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.centerXAnchor
+            ),
+            contentStack.leadingAnchor.constraint(
+                greaterThanOrEqualTo: scrollView.contentLayoutGuide.leadingAnchor,
+                constant: Self.outerInset
+            ),
+            contentStack.trailingAnchor.constraint(
+                lessThanOrEqualTo: scrollView.contentLayoutGuide.trailingAnchor,
+                constant: -Self.outerInset
+            ),
+            contentStack.widthAnchor.constraint(lessThanOrEqualToConstant: Self.contentMaximumWidth),
+            fillWidth,
+        ])
+
+        contentStack.addArrangedSubview(makeTargetSection())
+        contentStack.addArrangedSubview(makeIdentitySection())
+        let launch = makeLaunchSection()
+        launchSection = launch
+        contentStack.addArrangedSubview(launch)
+        if !form.host.sessionScripts.isEmpty {
+            let section = makeScriptSection()
+            scriptSection = section
+            contentStack.addArrangedSubview(section)
+        }
+        let directory = makeDirectorySection()
+        directorySection = directory
+        contentStack.addArrangedSubview(directory)
+
+        let dismissTap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        dismissTap.cancelsTouchesInView = false
+        dismissTap.delegate = self
+        scrollView.addGestureRecognizer(dismissTap)
+    }
+
+    private func makeTargetSection() -> UIView {
+        let name = UIKitChassisLabel(form.host.name, size: 12)
+        let address = UILabel()
+        address.font = UIKitChassis.monoFont(10)
+        address.textColor = UIKitChassis.signal2
+        address.text = form.host.address
+        address.numberOfLines = 1
+        address.lineBreakMode = .byTruncatingTail
+        let identity = UIStackView(arrangedSubviews: [name, address])
+        identity.axis = .vertical
+        identity.alignment = .leading
+        identity.spacing = 4
+        let badge = FleetBadgeView(caption: form.host.useMosh ? "MOSH" : "SSH")
+        let row = UIStackView(arrangedSubviews: [identity, UIView(), badge])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 12
+        return FleetFormSectionView(title: "Target host", rows: [row])
+    }
+
+    private func makeIdentitySection() -> UIView {
+        configureTextField(nameField, placeholder: "main", accessibilityLabel: "Name")
+        nameField.text = form.name
+        nameField.returnKeyType = .next
+        nameField.addTarget(self, action: #selector(nameChanged), for: .editingChanged)
+        nameField.accessibilityIdentifier = "newSession.name"
+        let row = makeField(label: "Name", input: makeWell(containing: nameField))
+        return FleetFormSectionView(
+            title: "Session identity",
+            detail: "Shown on the deck and in the terminal window's source label.",
+            rows: [row]
+        )
+    }
+
+    private func makeLaunchSection() -> FleetFormSectionView {
+        launchChoice.onSelectShell = { [weak self] in
+            self?.syncFormFromInputs()
+            self?.form.selectShell()
+            self?.renderForm()
+        }
+        launchChoice.onSelectAgent = { [weak self] agent in
+            self?.syncFormFromInputs()
+            self?.form.selectAgent(agent)
+            self?.renderForm()
+        }
+        launchChoice.accessibilityIdentifier = "newSession.launchChoice"
+
+        configureTextField(
+            modelField,
+            placeholder: "Agent default",
+            accessibilityLabel: "Optional model"
+        )
+        modelField.returnKeyType = .next
+        modelField.addTarget(self, action: #selector(modelChanged), for: .editingChanged)
+        modelField.accessibilityIdentifier = "newSession.model"
+        let modelRow = UIStackView(arrangedSubviews: [modelField])
+        modelRow.axis = .horizontal
+        modelRow.alignment = .center
+        modelRow.spacing = 8
+        modelInputRow = modelRow
+        let modelWell = makeWell(containing: modelRow)
+
+        promptView.accessibilityIdentifier = "newSession.initialPrompt"
+        promptView.onTextChange = { [weak self] text in self?.form.initialPrompt = text }
+        let fields = UIStackView(arrangedSubviews: [
+            makeField(label: "Model (optional)", input: modelWell),
+            makeField(label: "Initial prompt (optional)", input: makeWell(containing: promptView)),
+        ])
+        fields.axis = .vertical
+        fields.alignment = .fill
+        fields.spacing = 12
+        fields.accessibilityIdentifier = "newSession.agentFields"
+        agentFieldsRow = fields
+
+        rememberToggle.onChange = { [weak self] value in
+            self?.form.remembersLastLaunch = value
+        }
+        commandLabel.font = UIKitChassis.monoFont(9, weight: .medium)
+        commandLabel.textColor = UIKitChassis.signal2
+        commandLabel.numberOfLines = 1
+        commandLabel.lineBreakMode = .byTruncatingHead
+        commandLabel.textAlignment = .right
+        commandLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let commandCaption = UIKitChassisLabel("Command", size: 7, color: UIKitChassis.signal3)
+        let commandStack = UIStackView(arrangedSubviews: [commandCaption, commandLabel])
+        commandStack.axis = .vertical
+        commandStack.alignment = .trailing
+        commandStack.spacing = 3
+        let rememberRow = UIStackView(arrangedSubviews: [rememberToggle, UIView(), commandStack])
+        rememberRow.axis = .horizontal
+        rememberRow.alignment = .center
+        rememberRow.spacing = 12
+
+        let section = FleetFormSectionView(
+            title: "Launch",
+            detail: form.launchDetail,
+            rows: [launchChoice, fields, rememberRow]
+        )
+        section.accessibilityIdentifier = "newSession.launchSection"
+        return section
+    }
+
+    private func makeScriptSection() -> FleetFormSectionView {
+        let button = FleetMenuFieldButton()
+        button.accessibilityLabel = "Setup script"
+        button.accessibilityIdentifier = "newSession.script"
+        scriptButton = button
+        return FleetFormSectionView(
+            title: "Setup script",
+            detail: form.scriptDetail,
+            rows: [makeField(label: "Runs first", input: button)]
+        )
+    }
+
+    private func makeDirectorySection() -> FleetFormSectionView {
+        if form.host.workingDirs.isEmpty {
+            let starts = UILabel()
+            starts.font = UIKitChassis.uiFont(10, weight: .semibold)
+            starts.textColor = UIKitChassis.signal2
+            starts.text = "Starts in"
+            let home = UILabel()
+            home.font = UIKitChassis.monoFont(10, weight: .medium)
+            home.textColor = UIKitChassis.signal
+            home.text = "HOME"
+            let row = UIStackView(arrangedSubviews: [starts, UIView(), home])
+            row.axis = .horizontal
+            row.alignment = .center
+            row.spacing = 12
+            row.isAccessibilityElement = true
+            row.accessibilityLabel = "Starts in, Home"
+            return FleetFormSectionView(
+                title: "Directory",
+                detail: form.directoryDetail,
+                rows: [row]
+            )
+        }
+        let button = FleetMenuFieldButton()
+        button.accessibilityLabel = "Starting directory"
+        button.accessibilityIdentifier = "newSession.directory"
+        directoryButton = button
+        return FleetFormSectionView(
+            title: "Directory",
+            detail: form.directoryDetail,
+            rows: [makeField(label: "Starts in", input: button)]
+        )
+    }
+
+    private func renderForm() {
+        nameField.text = form.name
+        modelField.text = form.model
+        promptView.setText(form.initialPrompt)
+        launchChoice.configure(mode: form.launchMode, selectedAgent: form.selectedAgent)
+        rememberToggle.setOn(form.remembersLastLaunch)
+        commandLabel.text = form.commandPreview
+        launchSection?.setDetail(form.launchDetail)
+        if let agentFieldsRow {
+            // SwiftUI removed this row entirely for SHELL. Hiding only the
+            // row's contents leaves its section wrapper, 24 points of inset,
+            // and the model/prompt intrinsic height in Auto Layout, producing
+            // the large blank launch option reported on visionOS.
+            launchSection?.setRow(agentFieldsRow, visible: form.agentToLaunch != nil)
+        }
+        modelField.accessibilityLabel = form.agentToLaunch.map {
+            "Optional model for \($0.displayName)"
+        } ?? "Optional model"
+        promptView.setPlaceholder(form.agentToLaunch.map {
+            "What should \($0.displayName) do?"
+        } ?? "Initial prompt")
+        updateModelMenu()
+        updateScriptMenu()
+        updateDirectoryMenu()
+        scriptSection?.setDetail(form.scriptDetail)
+        directorySection?.setDetail(form.directoryDetail)
+        createItem?.isEnabled = form.canSubmit
+    }
+
+    private func updateModelMenu() {
+        modelMenuButton?.removeFromSuperview()
+        modelMenuButton = nil
+        guard let agent = form.agentToLaunch else { return }
+        let configured = form.host.launchModels(for: agent)
+        guard !configured.isEmpty, let row = modelInputRow else { return }
+        let button = UIButton(type: .custom)
+        button.setImage(
+            UIImage(
+                systemName: "chevron.down",
+                withConfiguration: UIImage.SymbolConfiguration(
+                    pointSize: 9 * Theme.typeScale,
+                    weight: .semibold
+                )
+            ),
+            for: .normal
+        )
+        button.tintColor = UIKitChassis.signal2
+        button.backgroundColor = UIKitChassis.chassis
+        button.layer.borderWidth = 1
+        button.layer.borderColor = UIKitChassis.bezelHi
+            .resolvedColor(with: button.traitCollection).cgColor
+        button.registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (button: UIButton, _: UITraitCollection) in
+            button.layer.borderColor = UIKitChassis.bezelHi
+                .resolvedColor(with: button.traitCollection).cgColor
+        }
+        button.showsMenuAsPrimaryAction = true
+        button.accessibilityLabel = "Configured models for \(agent.displayName)"
+        button.accessibilityIdentifier = "newSession.modelMenu"
+        var children: [UIMenuElement] = configured.map { candidate in
+            UIAction(title: candidate) { [weak self] _ in
+                self?.form.model = candidate
+                self?.renderForm()
+            }
+        }
+        children.append(UIMenu(options: .displayInline, children: [
+            UIAction(title: "Agent default") { [weak self] _ in
+                self?.form.model = ""
+                self?.renderForm()
+            },
+        ]))
+        button.menu = UIMenu(children: children)
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 25),
+            button.heightAnchor.constraint(equalToConstant: 25),
+        ])
+        row.addArrangedSubview(button)
+        modelMenuButton = button
+    }
+
+    private func updateScriptMenu() {
+        guard let scriptButton else { return }
+        scriptButton.setValue(form.script?.displayName ?? "None")
+        var actions: [UIMenuElement] = form.host.sessionScripts.map { script in
+            UIAction(title: script.displayName) { [weak self] _ in
+                self?.form.script = script
+                self?.renderForm()
+            }
+        }
+        actions.append(UIMenu(options: .displayInline, children: [
+            UIAction(title: "None") { [weak self] _ in
+                self?.form.script = nil
+                self?.renderForm()
+            },
+        ]))
+        scriptButton.menu = UIMenu(children: actions)
+        scriptButton.showsMenuAsPrimaryAction = true
+    }
+
+    private func updateDirectoryMenu() {
+        guard let directoryButton else { return }
+        directoryButton.setValue(form.directory ?? "Home")
+        directoryButton.accessibilityValue = form.directory ?? "Home"
+        var actions: [UIMenuElement] = form.host.workingDirs.map { directory in
+            UIAction(title: directory) { [weak self] _ in
+                self?.form.directory = directory
+                self?.renderForm()
+            }
+        }
+        actions.append(UIMenu(options: .displayInline, children: [
+            UIAction(title: "Home") { [weak self] _ in
+                self?.form.directory = nil
+                self?.renderForm()
+            },
+        ]))
+        directoryButton.menu = UIMenu(children: actions)
+        directoryButton.showsMenuAsPrimaryAction = true
+    }
+
+    private func configureTextField(
+        _ field: UITextField,
+        placeholder: String,
+        accessibilityLabel: String
+    ) {
+        field.placeholder = placeholder
+        field.font = UIKitChassis.monoFont(12)
+        field.textColor = UIKitChassis.signal
+        field.tintColor = UIKitChassis.signal
+        field.backgroundColor = .clear
+        field.borderStyle = .none
+        field.autocorrectionType = .no
+        field.autocapitalizationType = .none
+        field.spellCheckingType = .no
+        field.smartDashesType = .no
+        field.smartQuotesType = .no
+        field.delegate = self
+        field.accessibilityLabel = accessibilityLabel
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+
+    private func makeWell(containing input: UIView) -> UIView {
+        let well = UIKitTallyBorderedView()
+        well.backgroundColor = UIKitChassis.screen
+        well.addSubview(input)
+        input.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            input.leadingAnchor.constraint(equalTo: well.leadingAnchor, constant: input is FleetPromptTextView ? 0 : 10),
+            input.trailingAnchor.constraint(equalTo: well.trailingAnchor, constant: input is FleetPromptTextView ? 0 : -10),
+            input.topAnchor.constraint(equalTo: well.topAnchor, constant: input is FleetPromptTextView ? 0 : 9),
+            input.bottomAnchor.constraint(equalTo: well.bottomAnchor, constant: input is FleetPromptTextView ? 0 : -9),
+        ])
+        return well
+    }
+
+    private func makeField(label: String, input: UIView) -> UIView {
+        let fieldLabel = UILabel()
+        fieldLabel.font = UIKitChassis.uiFont(10, weight: .semibold)
+        fieldLabel.textColor = UIKitChassis.signal2
+        fieldLabel.text = label
+        let stack = UIStackView(arrangedSubviews: [fieldLabel, input])
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 7
+        return stack
+    }
+
+    private func syncFormFromInputs() {
+        form.name = nameField.text ?? ""
+        form.model = modelField.text ?? ""
+        form.initialPrompt = promptView.text
+    }
+
+    @objc private func nameChanged() {
+        form.name = nameField.text ?? ""
+        createItem?.isEnabled = form.canSubmit
+    }
+
+    @objc private func modelChanged() {
+        form.model = modelField.text ?? ""
+        commandLabel.text = form.commandPreview
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        if textField === nameField, form.agentToLaunch != nil {
+            modelField.becomeFirstResponder()
+        } else {
+            textField.resignFirstResponder()
+        }
+        return true
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldReceive touch: UITouch
+    ) -> Bool {
+        !(touch.view is UIControl) && !(touch.view is UITextField)
+    }
+
+    @objc private func dismissKeyboard() { view.endEditing(true) }
+
+    @objc private func cancelPressed() { dismissSheet() }
+
+    @objc private func createPressed() {
+        syncFormFromInputs()
+        guard form.canSubmit else { return }
+        form.savePreferences()
+        create(form.submission)
+        dismissSheet()
+    }
+
+    private func dismissSheet() {
+        if let onDismiss { onDismiss() }
+        else { navigationController?.dismiss(animated: true) }
+    }
+}
+
+@MainActor
+private final class FleetFormSectionView: UIView {
+    private let detailLabel = UILabel()
+    private let detailContainer = UIView()
+    private var managedRows: [(content: UIView, wrapper: UIView)] = []
+    /// Divider `i` follows managed row `i` and precedes the next row.
+    private var rowDividers: [UIView] = []
+
+    init(title: String, detail: String? = nil, rows: [UIView]) {
+        super.init(frame: .zero)
+        let titleLabel = UIKitChassisLabel(title, size: 10)
+        titleLabel.accessibilityTraits.insert(.header)
+        let header = UIView()
+        header.backgroundColor = UIKitChassis.bezel
+        header.addSubview(titleLabel)
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 12),
+            titleLabel.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -12),
+            titleLabel.topAnchor.constraint(equalTo: header.topAnchor, constant: 10),
+            titleLabel.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -10),
+        ])
+
+        var rowViews: [UIView] = []
+        for (index, row) in rows.enumerated() {
+            if index > 0 {
+                let divider = UIView()
+                divider.backgroundColor = UIKitChassis.bezelHi
+                divider.heightAnchor.constraint(equalToConstant: 1).isActive = true
+                rowViews.append(divider)
+                rowDividers.append(divider)
+            }
+            let wrapper = UIView()
+            wrapper.backgroundColor = UIKitChassis.chassis
+            wrapper.addSubview(row)
+            row.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                row.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 12),
+                row.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor, constant: -12),
+                row.topAnchor.constraint(equalTo: wrapper.topAnchor, constant: 12),
+                row.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor, constant: -12),
+            ])
+            rowViews.append(wrapper)
+            managedRows.append((content: row, wrapper: wrapper))
+        }
+        let rowsStack = UIStackView(arrangedSubviews: rowViews)
+        rowsStack.axis = .vertical
+        rowsStack.spacing = 0
+        let cardStack = UIStackView(arrangedSubviews: [header, rowsStack])
+        cardStack.axis = .vertical
+        cardStack.spacing = 1
+        let card = UIKitTallyBorderedView()
+        card.addSubview(cardStack)
+        cardStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            cardStack.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            cardStack.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            cardStack.topAnchor.constraint(equalTo: card.topAnchor),
+            cardStack.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+        ])
+
+        detailLabel.font = UIKitChassis.uiFont(10)
+        detailLabel.textColor = UIKitChassis.signal2
+        detailLabel.numberOfLines = 0
+        detailContainer.addSubview(detailLabel)
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            detailLabel.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor, constant: 2),
+            detailLabel.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor, constant: -2),
+            detailLabel.topAnchor.constraint(equalTo: detailContainer.topAnchor),
+            detailLabel.bottomAnchor.constraint(equalTo: detailContainer.bottomAnchor),
+        ])
+        let stack = UIStackView(arrangedSubviews: [card, detailContainer])
+        stack.axis = .vertical
+        stack.spacing = 8
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        setDetail(detail)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func setDetail(_ detail: String?) {
+        detailLabel.text = detail
+        detailContainer.isHidden = detail == nil
+    }
+
+    func setRow(_ row: UIView, visible: Bool) {
+        guard let index = managedRows.firstIndex(where: { $0.content === row })
+        else { return }
+        managedRows[index].wrapper.isHidden = !visible
+        updateDividerVisibility()
+    }
+
+    private func updateDividerVisibility() {
+        for index in rowDividers.indices {
+            // Keep exactly one legacy 1-point seam between adjacent visible
+            // rows, even when one or more optional rows are absent.
+            let hasVisibleRowBefore = !managedRows[index].wrapper.isHidden
+            let hasVisibleRowAfter = managedRows[(index + 1)...]
+                .contains { !$0.wrapper.isHidden }
+            rowDividers[index].isHidden = !(hasVisibleRowBefore && hasVisibleRowAfter)
+        }
+    }
+}
+
+@MainActor
+private final class FleetLaunchChoiceView: UIView {
+    private static let selectionAnimationDuration: TimeInterval = 0.14
+
+    var onSelectShell: (() -> Void)?
+    var onSelectAgent: ((AgentKind) -> Void)?
+    private let shell = FleetChoiceButton()
+    private let agents = FleetChoiceButton()
+    private var selectedAgent = AgentKind.claudeCode
+    private var renderedMode: NewSessionFormState.LaunchMode?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        let stack = UIStackView(arrangedSubviews: [shell, agents])
+        stack.axis = .horizontal
+        stack.alignment = .fill
+        stack.distribution = .fillEqually
+        stack.spacing = 1
+        backgroundColor = UIKitChassis.bezelHi
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            heightAnchor.constraint(equalToConstant: 34),
+        ])
+        shell.addAction(UIAction { [weak self] _ in self?.onSelectShell?() }, for: .touchUpInside)
+        agents.showsMenuAsPrimaryAction = true
+        isAccessibilityElement = false
+        accessibilityLabel = "What to launch"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func configure(mode: NewSessionFormState.LaunchMode, selectedAgent: AgentKind) {
+        let animatesSelection = renderedMode != nil && renderedMode != mode
+        renderedMode = mode
+        self.selectedAgent = selectedAgent
+        shell.configure(
+            title: "Shell",
+            selected: mode == .shell,
+            showsChevron: false,
+            animationDuration: animatesSelection ? Self.selectionAnimationDuration : nil
+        )
+        agents.configure(
+            title: mode == .agents ? selectedAgent.displayName : "Agents",
+            selected: mode == .agents,
+            showsChevron: true,
+            animationDuration: animatesSelection ? Self.selectionAnimationDuration : nil
+        )
+        agents.accessibilityLabel = "Agents"
+        agents.accessibilityValue = mode == .agents ? selectedAgent.displayName : "Not selected"
+        agents.accessibilityHint = "Choose Claude Code, Codex, or Pi"
+        agents.menu = UIMenu(children: AgentKind.allCases.map { agent in
+            UIAction(title: agent.displayName, state: agent == selectedAgent ? .on : .off) {
+                [weak self] _ in self?.onSelectAgent?(agent)
+            }
+        })
+    }
+}
+
+@MainActor
+private final class FleetChoiceButton: UIButton {
+    private let caption = UILabel()
+    private let chevron = UIImageView()
+    private var sourceTitle = ""
+    private var selectionActive = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        caption.numberOfLines = 1
+        caption.lineBreakMode = .byTruncatingTail
+        chevron.image = UIImage(
+            systemName: "chevron.down",
+            withConfiguration: UIImage.SymbolConfiguration(
+                pointSize: 8 * Theme.typeScale,
+                weight: .semibold
+            )
+        )
+        let stack = UIStackView(arrangedSubviews: [caption, chevron])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 6
+        stack.isUserInteractionEnabled = false
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+        ])
+        layer.borderWidth = 1
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (button: FleetChoiceButton, _: UITraitCollection) in
+            button.render()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func configure(
+        title: String,
+        selected: Bool,
+        showsChevron: Bool,
+        animationDuration: TimeInterval?
+    ) {
+        sourceTitle = title
+        selectionActive = selected
+        chevron.isHidden = !showsChevron
+        accessibilityLabel = title
+        accessibilityTraits = selected ? [.button, .selected] : [.button]
+        if let animationDuration {
+            UIView.transition(
+                with: self,
+                duration: animationDuration,
+                options: [
+                    .transitionCrossDissolve,
+                    .curveEaseOut,
+                    .beginFromCurrentState,
+                    .allowUserInteraction,
+                ],
+                animations: { [self] in render() }
+            )
+        } else {
+            render()
+        }
+    }
+
+    private func render() {
+        let ink = selectionActive ? UIKitChassis.signal : UIKitChassis.signal2
+        let scaled = 9 * Theme.typeScale
+        caption.attributedText = NSAttributedString(
+            string: sourceTitle.uppercased(),
+            attributes: [
+                .font: UIKitChassis.compressedLabelFont(9),
+                .kern: scaled * 0.09,
+                .foregroundColor: ink.resolvedColor(with: traitCollection),
+            ]
+        )
+        chevron.tintColor = ink
+        backgroundColor = selectionActive ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        layer.borderColor = (selectionActive ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
+            .resolvedColor(with: traitCollection).cgColor
+    }
+}
+
+@MainActor
+private final class FleetToggleView: UIView {
+    var onChange: ((Bool) -> Void)?
+    private let caption: UIKitChassisLabel
+    private let track = UIKitTallyBorderedView()
+    private let thumb = UIView()
+    private var thumbLeading: NSLayoutConstraint?
+    private var isOn = false
+
+    init(caption: String) {
+        self.caption = UIKitChassisLabel(caption, size: 9)
+        super.init(frame: .zero)
+        let stack = UIStackView(arrangedSubviews: [self.caption, track])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 8
+        stack.isUserInteractionEnabled = false
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            track.widthAnchor.constraint(equalToConstant: 34),
+            track.heightAnchor.constraint(equalToConstant: 18),
+        ])
+        track.backgroundColor = UIKitChassis.screen
+        track.addSubview(thumb)
+        thumb.translatesAutoresizingMaskIntoConstraints = false
+        thumbLeading = thumb.leadingAnchor.constraint(equalTo: track.leadingAnchor, constant: 3)
+        NSLayoutConstraint.activate([
+            thumbLeading!,
+            thumb.centerYAnchor.constraint(equalTo: track.centerYAnchor),
+            thumb.widthAnchor.constraint(equalToConstant: 12),
+            thumb.heightAnchor.constraint(equalToConstant: 12),
+        ])
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        accessibilityLabel = "Remember launch choice"
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(toggle)))
+        render()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func setOn(_ value: Bool) {
+        isOn = value
+        render()
+    }
+
+    override func accessibilityActivate() -> Bool {
+        toggle()
+        return true
+    }
+
+    @objc private func toggle() {
+        isOn.toggle()
+        render()
+        onChange?(isOn)
+    }
+
+    private func render() {
+        thumbLeading?.constant = isOn ? 19 : 3
+        thumb.backgroundColor = isOn ? UIKitChassis.signal : UIKitChassis.signal3
+        track.tallyBorderColor = isOn ? UIKitChassis.signal2 : UIKitChassis.bezelHi
+        accessibilityValue = isOn ? "On" : "Off"
+    }
+}
+
+@MainActor
+private final class FleetMenuFieldButton: UIButton {
+    private let valueLabel = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIKitChassis.screen
+        layer.borderWidth = 1
+        refreshBorder()
+        valueLabel.font = UIKitChassis.monoFont(12)
+        valueLabel.textColor = UIKitChassis.signal
+        valueLabel.numberOfLines = 1
+        valueLabel.lineBreakMode = .byTruncatingTail
+        let chevron = UIImageView(image: UIImage(
+            systemName: "chevron.down",
+            withConfiguration: UIImage.SymbolConfiguration(
+                pointSize: 9 * Theme.typeScale,
+                weight: .semibold
+            )
+        ))
+        chevron.tintColor = UIKitChassis.signal2
+        let stack = UIStackView(arrangedSubviews: [valueLabel, UIView(), chevron])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 10
+        stack.isUserInteractionEnabled = false
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -9),
+        ])
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (button: FleetMenuFieldButton, _: UITraitCollection) in
+            button.refreshBorder()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func setValue(_ value: String) { valueLabel.text = value }
+
+    private func refreshBorder() {
+        layer.borderColor = UIKitChassis.bezelHi
+            .resolvedColor(with: traitCollection).cgColor
+    }
+}
+
+@MainActor
+private final class FleetPromptTextView: UITextView, UITextViewDelegate {
+    var onTextChange: ((String) -> Void)?
+    private let placeholderLabel = UILabel()
+
+    init() {
+        super.init(frame: .zero, textContainer: nil)
+        delegate = self
+        font = UIKitChassis.monoFont(12)
+        textColor = UIKitChassis.signal
+        tintColor = UIKitChassis.signal
+        backgroundColor = .clear
+        textContainerInset = UIEdgeInsets(top: 9, left: 10, bottom: 9, right: 10)
+        textContainer.lineFragmentPadding = 0
+        isScrollEnabled = true
+        autocorrectionType = .default
+        autocapitalizationType = .sentences
+        placeholderLabel.font = UIKitChassis.monoFont(12)
+        placeholderLabel.textColor = UIKitChassis.signal3
+        placeholderLabel.numberOfLines = 2
+        placeholderLabel.isAccessibilityElement = false
+        addSubview(placeholderLabel)
+        placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            placeholderLabel.leadingAnchor.constraint(
+                equalTo: frameLayoutGuide.leadingAnchor,
+                constant: 10
+            ),
+            placeholderLabel.trailingAnchor.constraint(
+                equalTo: frameLayoutGuide.trailingAnchor,
+                constant: -10
+            ),
+            placeholderLabel.topAnchor.constraint(
+                equalTo: frameLayoutGuide.topAnchor,
+                constant: 9
+            ),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 58),
+            heightAnchor.constraint(lessThanOrEqualToConstant: 110),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func setPlaceholder(_ value: String) {
+        placeholderLabel.text = value
+        accessibilityLabel = "Optional initial prompt"
+    }
+
+    func setText(_ value: String) {
+        guard text != value else { return }
+        text = value
+        placeholderLabel.isHidden = !value.isEmpty
+    }
+
+    func textViewDidChange(_ textView: UITextView) {
+        placeholderLabel.isHidden = !textView.text.isEmpty
+        onTextChange?(textView.text)
+    }
+}
