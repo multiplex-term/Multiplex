@@ -38,6 +38,13 @@ struct TerminalPathTarget: Equatable, Identifiable {
 
     var id: String { raw }
 
+    /// The canonical field spelling — the path plus its `:line` suffix —
+    /// i.e. the text that re-resolves to this same target. The sheet's
+    /// editable field starts here, and its OPENS row compares against it.
+    var spelling: String {
+        line.map { "\(path):\($0)" } ?? path
+    }
+
     /// The path relative to its base, ready for remote resolution:
     /// absolute stays absolute, home drops the `~/`/`$HOME/` marker,
     /// working-directory keeps its relative spelling (minus `./`).
@@ -60,33 +67,29 @@ struct TerminalPathTarget: Equatable, Identifiable {
         guard !text.isEmpty, text.count <= 1024 else { return nil }
         // URLs belong to TerminalLink; anything scheme-shaped is not a path.
         if text.contains("://") { return nil }
-        // Tabs and line breaks are never part of a target; plain spaces are
-        // judged below.
-        guard !text.contains(where: { $0.isWhitespace && $0 != " " }) else { return nil }
-        guard !text.contains(where: { $0.asciiValue.map { $0 < 0x20 } == true })
-        else { return nil }
-
-        if text.contains(" ") {
-            // A spaced target is admitted only when it roots itself with a
-            // base marker (`/x y`, `~/x y`, `./x y`, `$HOME/x y`): the
-            // marker is what says "path" when whitespace no longer can.
-            // Bare-relative keeps the prose guard — "see src/foo.ts and
-            // lib/bar.rs" must not classify as one spaced path.
-            guard let first = text.first, "/~.$".contains(first) else { return nil }
-            // The matcher's space-segment branches swallow trailing prose
-            // whenever the first chunk is dot-free ("/etc/hosts is missing"
-            // arrives whole), so prose-shaped tail chunks — no `/`, no `.` —
-            // are shed until the text ends path-like again. A spaced
-            // directory whose last segment is markerless ("~/My Folder")
-            // loses that segment to this rule; the sheet's editable field
-            // is the recovery.
-            text = trimmingProseTail(text)
-        } else {
-            // Trailing prose punctuation the matcher can leave on a path.
-            while let last = text.last, ".,;)".contains(last) {
-                text.removeLast()
-            }
+        // One pass: controls and non-space whitespace (tabs, line breaks,
+        // Unicode spaces) are never part of a target; plain spaces are
+        // judged by the marker gate below.
+        var hasSpace = false
+        for character in text {
+            if character == " " { hasSpace = true; continue }
+            if character.isWhitespace { return nil }
+            if character.asciiValue.map({ $0 < 0x20 }) == true { return nil }
         }
+
+        // A spaced target is admitted only when it roots itself with a
+        // base marker (`/x y`, `~/x y`, `./x y`, `$HOME/x y`): the marker
+        // is what says "path" when whitespace no longer can. Bare-relative
+        // keeps the prose guard — "see src/foo.ts and lib/bar.rs" must not
+        // classify as one spaced path.
+        if hasSpace, !hasBaseMarker(text) { return nil }
+        // Shed trailing sentence punctuation, and — because the matcher's
+        // space-segment branches swallow trailing prose whenever the first
+        // chunk is dot-free ("/etc/hosts is missing" arrives whole) —
+        // prose-shaped tail chunks too. A spaced directory whose last
+        // segment is markerless ("~/My Folder") loses that segment to the
+        // same rule; the sheet's editable field is the recovery.
+        text = trimmingProseTail(text)
         guard !text.isEmpty else { return nil }
         text = strippingWrappedProseHead(text)
 
@@ -114,21 +117,30 @@ struct TerminalPathTarget: Equatable, Identifiable {
         return classified(raw: raw, path: text, line: line)
     }
 
-    /// Sheds trailing space-chunks that read as prose, one at a time from
-    /// the end: a chunk carrying neither `/` nor `.` is a sentence word,
-    /// not a path segment ("is", "missing", "now"). Sentence punctuation is
-    /// re-trimmed after every cut so "…/app.log failed." sheds cleanly.
+    /// The self-rooting first characters — absolute, home, dot-relative,
+    /// `$HOME` — one definition for the spaced-target gate and the
+    /// prose-head stripper's early return.
+    private static func hasBaseMarker(_ text: String) -> Bool {
+        text.first.map { "/~.$".contains($0) } ?? false
+    }
+
+    /// Sheds trailing sentence punctuation and space-chunks that read as
+    /// prose, one at a time from the end (`WrappedRowGlue.isProseChunk` is
+    /// the shared tell: no `/`, no `.` — "is", "missing", "now").
+    /// Punctuation is re-examined after every cut so "…/app.log failed."
+    /// sheds cleanly. One index walks backward; the string is copied once.
     private static func trimmingProseTail(_ input: String) -> String {
-        var text = input
+        var end = input.endIndex
         while true {
-            while let last = text.last, ".,;) ".contains(last) {
-                text.removeLast()
+            while end > input.startIndex, ".,;) ".contains(input[input.index(before: end)]) {
+                end = input.index(before: end)
             }
-            guard let cut = text.lastIndex(of: " ") else { return text }
-            let tail = text[text.index(after: cut)...]
-            if tail.contains("/") || tail.contains(".") { return text }
-            text = String(text[text.startIndex..<cut])
+            guard let cut = input[input.startIndex..<end].lastIndex(of: " "),
+                  WrappedRowGlue.isProseChunk(input[input.index(after: cut)..<end])
+            else { break }
+            end = cut
         }
+        return end == input.endIndex ? input : String(input[input.startIndex..<end])
     }
 
     /// Drops a sentence's tail that a *row join* glued to the front of a
@@ -150,9 +162,7 @@ struct TerminalPathTarget: Equatable, Identifiable {
     /// (`word.src/foo.ts` cannot be told from a real `word.src/foo.ts`) —
     /// that is what the confirmation sheet's editable field is for.
     private static func strippingWrappedProseHead(_ text: String) -> String {
-        guard let first = text.first,
-              first != "/", first != "~", first != ".", first != "$"
-        else { return text }
+        guard !hasBaseMarker(text) else { return text }
         let characters = Array(text)
         for index in 1..<max(1, characters.count - 1)
         where characters[index] == "." && characters[index + 1] == "/" {

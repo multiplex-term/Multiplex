@@ -68,8 +68,13 @@ extension TerminalLink {
     /// word, or bytes that cannot be a URL. `SwiftTermView` declines those, so
     /// the gesture falls through to normal selection handling.
     ///
+    /// `schemelessHosts` opts the schemeless reading out for callers whose
+    /// spec already answers the question: a markdown destination without a
+    /// scheme is a *relative reference* by definition, so the file viewer
+    /// passes false and `api.v2/index.md` keeps navigating in-document.
+    ///
     /// Pure: no URL is opened here and nothing is logged.
-    static func resolve(_ target: String) -> TerminalLink? {
+    static func resolve(_ target: String, schemelessHosts: Bool = true) -> TerminalLink? {
         let trimmed = target.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, trimmed.count <= maxLength else { return nil }
         // Controls and line breaks are never part of a legitimate target, and
@@ -98,7 +103,7 @@ extension TerminalLink {
         // in a pane is a URL to a person, but implicit detection hands it
         // over through a *path* branch, and `example.com:8080/x` parses as
         // scheme "example.com" under RFC 3986 (dots are scheme characters).
-        if let link = schemelessLink(from: trimmed) { return link }
+        if schemelessHosts, let link = schemelessLink(from: trimmed) { return link }
         // A real scheme that is neither allowlisted nor a host:port shape
         // keeps today's answer: reported, never opened. A *dotted* scheme
         // candidate is a hostname that failed the reading above, not a
@@ -155,11 +160,12 @@ extension TerminalLink {
     private static func schemelessLink(from text: String) -> TerminalLink? {
         var candidate = text
         // Path-branch matches carry sentence punctuation the URL branch's
-        // own guard would have stripped ("visit example.com/foo.").
+        // own guard would have stripped ("visit example.com/foo."). `)` is
+        // deliberately NOT trimmed here, unlike paths: parens are real in
+        // URLs (Wikipedia articles) and never reach us from the matcher.
         while let last = candidate.last, ".,;".contains(last) {
             candidate.removeLast()
         }
-        guard !candidate.isEmpty else { return nil }
         let restStart = candidate.firstIndex(where: { "/?#".contains($0) })
             ?? candidate.endIndex
         let authority = candidate[candidate.startIndex..<restStart]
@@ -178,16 +184,21 @@ extension TerminalLink {
         guard restStart < candidate.endIndex || lowered.hasPrefix("www.") else {
             return nil
         }
-        guard isDomainShaped(lowered) || isIPv4(lowered) else { return nil }
+        guard isDomainShaped(lowered) || ViewportReach.isIPv4Literal(lowered) else {
+            return nil
+        }
 
-        guard let probe = URL(string: "http://" + candidate, encodingInvalidCharacters: true),
-              let reach = ViewportReach.classify(probe)
+        // The viewport's typed-input rule, from the shared classifier:
+        // LAN/loopback addresses are dev servers and default cleartext
+        // http, everything else https.
+        let prefix = ViewportReach.classify(host: lowered) == .internet
+            ? "https://" : "http://"
+        guard let url = URL(string: prefix + candidate, encodingInvalidCharacters: true)
         else { return nil }
-        let prefix = reach == .internet ? "https://" : "http://"
-        guard let url = URL(string: prefix + candidate, encodingInvalidCharacters: true),
-              let urlHost = url.host(), !urlHost.isEmpty
-        else { return nil }
-        return TerminalLink(raw: candidate, kind: .openable(url))
+        // raw is what the sheet shows and what a press opens — the composed
+        // URL, so the scheme this resolution chose (cleartext http on a LAN
+        // address in particular) is said in the open, never implied.
+        return TerminalLink(raw: url.absoluteString, kind: .openable(url))
     }
 
     /// ≥2 DNS-shaped ASCII labels with an alphabetic, ≥2-char final label.
@@ -195,26 +206,13 @@ extension TerminalLink {
     /// is far more likely a filename than an IDN worth guessing at.
     private static func isDomainShaped(_ host: String) -> Bool {
         let labels = host.split(separator: ".", omittingEmptySubsequences: false)
-        guard labels.count >= 2 else { return false }
-        for label in labels {
-            guard (1...63).contains(label.count),
-                  label.first != "-", label.last != "-",
-                  label.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") })
-            else { return false }
-        }
-        guard let tld = labels.last else { return false }
-        return tld.count >= 2 && tld.allSatisfy { $0.isASCII && $0.isLetter }
-    }
-
-    private static func isIPv4(_ host: String) -> Bool {
-        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count == 4 else { return false }
-        return parts.allSatisfy { part in
-            guard !part.isEmpty, part.count <= 3,
-                  part.allSatisfy({ $0.isASCII && $0.isNumber }),
-                  let value = Int(part)
-            else { return false }
-            return (0...255).contains(value)
+        guard labels.count >= 2, let tld = labels.last,
+              tld.count >= 2, tld.allSatisfy({ $0.isASCII && $0.isLetter })
+        else { return false }
+        return labels.allSatisfy { label in
+            (1...63).contains(label.count)
+                && label.first != "-" && label.last != "-"
+                && label.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
         }
     }
 

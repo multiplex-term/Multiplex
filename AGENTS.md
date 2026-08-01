@@ -893,13 +893,19 @@ views.
   *path* branch, so without this they confirmed as files. The gate is
   narrow because everything here is also a legal filename — the authority
   must be domain-shaped (≥2 ASCII labels, alphabetic ≥2-char TLD) or
-  dotted-quad IPv4, with URL evidence beyond the dot (a `/`/`?`/`#` rest
-  or a `www.` prefix, so a markdown link's `setup.md` stays a sibling
-  document and file-viewer relative navigation keeps working), userinfo
-  rejected outright; the scheme defaults by reach exactly like the
-  viewport's typed input (http for LAN/loopback, https elsewhere). A
-  *dotted* non-allowlisted scheme candidate (`example.com:99999/x`)
-  declines to nil rather than reporting a nonsense blocked scheme. The sheet renders
+  dotted-quad IPv4 (`ViewportReach.isIPv4Literal`, the one parser), with
+  URL evidence beyond the dot (a `/`/`?`/`#` rest or a `www.` prefix, so
+  a markdown link's `setup.md` stays a sibling document), userinfo
+  rejected outright; the scheme defaults by reach through the shared
+  `ViewportReach.classify(host:)` — the viewport's typed-input rule, http
+  for LAN/loopback, https elsewhere — and `raw` is the *composed* URL, so
+  the sheet says the scheme this resolution chose (cleartext http on a
+  LAN address in particular) instead of implying it. Markdown
+  destinations opt out entirely (`resolve(_:schemelessHosts: false)` in
+  `FileViewerPane`): a schemeless markdown href is a relative reference
+  by spec, so `api.v2/index.md` keeps navigating in-document. A *dotted*
+  non-allowlisted scheme candidate (`example.com:99999/x`) declines to
+  nil rather than reporting a nonsense blocked scheme. The sheet renders
   the **resolved target** with the host on its own line — an OSC 8 label is
   chosen independently of its destination, and that line is also what
   exposes `https://github.com@evil.example/x`. Blocked and malformed
@@ -1005,8 +1011,11 @@ views.
   bare-relative match, and `…and` above `local-plan/x` arrives as
   `andlocal-plan/x`. The joined *text* cannot always tell glue from a real
   wrapped target, so the fork keeps the seams: `LinkMatch.rowTexts`
-  carries the match's per-row fragments into `linkActivationHandler`'s
-  params (`rowTexts`, newline-joined — buffer cells cannot hold one), and
+  carries the match's per-row fragments (built only when a match actually
+  spans rows — the gaze-region rebuild never pays for it) into
+  `linkActivationHandler`'s own third parameter — deliberately NOT the
+  `params` dictionary, whose explicit-branch keys are parsed out of the
+  remote-authored OSC 8 payload — and
   `WrappedRowGlue.cutTarget` (pure + tested) cuts at the first seam whose
   butting chunk — the run since the last space — carries neither `/` nor
   `.`: structure there means a target continuing

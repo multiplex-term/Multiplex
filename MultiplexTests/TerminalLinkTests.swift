@@ -170,11 +170,21 @@ final class TerminalLinkTests: XCTestCase {
 
     func testSchemelessTrailingPunctuationIsTrimmed() {
         // Path-branch matches keep sentence punctuation the URL branch's
-        // own guard would have dropped.
+        // own guard would have dropped. raw is the composed URL — the
+        // sheet must show the scheme this resolution chose.
         XCTAssertEqual(
             TerminalLink.resolve("example.com/foo.")?.raw,
-            "example.com/foo"
+            "https://example.com/foo"
         )
+    }
+
+    func testSchemelessReadingCanBeOptedOut() {
+        // Markdown destinations are relative references by spec — the file
+        // viewer resolves with schemelessHosts: false so `api.v2/index.md`
+        // navigates in-document instead of becoming a URL.
+        XCTAssertNil(TerminalLink.resolve("example.com/docs", schemelessHosts: false))
+        // Real schemes are unaffected by the opt-out.
+        XCTAssertNotNil(TerminalLink.resolve("https://example.com/docs", schemelessHosts: false))
     }
 
     func testBareDottedWordsStayDeclined() {

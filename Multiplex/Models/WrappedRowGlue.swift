@@ -37,16 +37,24 @@ enum WrappedRowGlue {
             // The chunk butting this seam: everything after the last space
             // (the whole prefix when it carries none).
             let chunk = prefix.lastIndex(of: " ").map {
-                String(prefix[prefix.index(after: $0)...])
-            } ?? prefix
+                prefix[prefix.index(after: $0)...]
+            } ?? prefix[...]
             // Empty means the row ended on a space — no glue evidence, and
             // a spaced path can genuinely wrap right after its space.
             guard !chunk.isEmpty else { continue }
-            if !chunk.contains("/"), !chunk.contains(".") {
+            if isProseChunk(chunk) {
                 let suffix = fragments[(index + 1)...].joined()
                 return suffix.isEmpty ? nil : suffix
             }
         }
         return nil
+    }
+
+    /// The one spelling of "this space-delimited chunk reads as a sentence
+    /// word, not a path segment": it carries neither `/` nor `.`. Shared
+    /// with `TerminalPathTarget.trimmingProseTail`, so the glue cut and the
+    /// shed tail can never disagree about what prose looks like.
+    static func isProseChunk(_ chunk: Substring) -> Bool {
+        !chunk.contains("/") && !chunk.contains(".")
     }
 }

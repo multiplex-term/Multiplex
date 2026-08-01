@@ -219,12 +219,8 @@ final class TerminalSessionController {
         // never fire here; this pane decides instead. The view owns the
         // closure and this controller owns the view — capture weakly.
         view.linkActivationIgnoresHighlight = true
-        view.linkActivationHandler = { [weak self] target, params in
-            self?.activateLink(
-                target,
-                rowFragments: params["rowTexts"]
-                    .map { $0.components(separatedBy: "\n") } ?? []
-            ) ?? false
+        view.linkActivationHandler = { [weak self] target, _, rowTexts in
+            self?.activateLink(target, rowFragments: rowTexts) ?? false
         }
         if !pendingOutput.isEmpty {
             view.feed(byteArray: pendingOutput[...])

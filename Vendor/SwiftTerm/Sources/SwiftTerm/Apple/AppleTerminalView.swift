@@ -948,7 +948,14 @@ extension TerminalView {
         }
     }
 
-    func linkForClick(at position: Position, hasCommandModifier: Bool) -> (link: String, params: [String:String])?
+    // Multiplex patch: `rowTexts` is its own element — an implicit match
+    // that crossed a hard-wrap seam carries its per-row fragments so the
+    // app can tell a wrapped path from prose glued to the path below it.
+    // Deliberately NOT smuggled through `params`: on the explicit branch
+    // that dictionary is parsed straight out of the remote-authored OSC 8
+    // payload, and the app's structured channel must not share a keyspace
+    // with it.
+    func linkForClick(at position: Position, hasCommandModifier: Bool) -> (link: String, params: [String:String], rowTexts: [String])?
     {
         guard let match = terminal.linkMatch(at: .buffer(position), mode: .explicitAndImplicit) else {
             return nil
@@ -959,17 +966,9 @@ extension TerminalView {
         if match.isExplicit,
            let payload = payloadString(at: position),
            let (url, params) = urlAndParamsFrom(payload: payload) {
-            return (url, params)
+            return (url, params, [])
         }
-        // Multiplex patch: an implicit match that crossed a hard-wrap seam
-        // carries its per-row fragments so the app can tell a wrapped path
-        // from prose glued to the path below it. Newline is the one safe
-        // separator — buffer cells cannot hold it, so it never appears in
-        // matched text.
-        if match.rowTexts.count > 1 {
-            return (match.text, ["rowTexts": match.rowTexts.joined(separator: "\n")])
-        }
-        return (match.text, [:])
+        return (match.text, [:], match.rowTexts)
     }
     
     /// Returns the selection range for the specified row, if any.

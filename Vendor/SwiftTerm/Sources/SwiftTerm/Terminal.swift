@@ -6213,20 +6213,28 @@ open class Terminal {
             // seams. `lineMap.cells` maps 1:1 onto the text's characters,
             // so grouping consecutive matched characters by their cell's
             // row reassembles exactly what each visual row contributed.
+            // Built only for matches that actually span rows (`rowBounds`
+            // already counted them) — single-row matches, the overwhelming
+            // majority on hot callers like the gaze-region rebuild, pay
+            // nothing — and sliced in one O(match) walk, never by
+            // materializing the whole logical line.
             var rowTexts: [String] = []
-            var currentRow: Int?
-            var currentFragment = ""
-            let characters = Array(lineMap.text)
-            for idx in startOffset..<boundedEndOffset {
-                let cellRow = lineMap.cells[idx].row
-                if cellRow != currentRow {
-                    if currentRow != nil { rowTexts.append(currentFragment) }
-                    currentRow = cellRow
-                    currentFragment = ""
+            if rowBounds.count > 1 {
+                var cursor = textRange.lowerBound
+                var fragment = ""
+                var currentRow = lineMap.cells[startOffset].row
+                for idx in startOffset..<boundedEndOffset {
+                    let cellRow = lineMap.cells[idx].row
+                    if cellRow != currentRow {
+                        rowTexts.append(fragment)
+                        fragment = ""
+                        currentRow = cellRow
+                    }
+                    fragment.append(lineMap.text[cursor])
+                    lineMap.text.formIndex(after: &cursor)
                 }
-                currentFragment.append(characters[idx])
+                rowTexts.append(fragment)
             }
-            if currentRow != nil { rowTexts.append(currentFragment) }
 
             return LinkMatch(
                 text: String(lineMap.text[textRange]),
