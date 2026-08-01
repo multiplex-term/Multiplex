@@ -525,11 +525,10 @@ final class TerminalVisionTabOrnamentHostView: UIView {
     }
 
     private func tabStripSize() -> CGSize {
-        let measured = tabStrip.systemLayoutSizeFitting(
-            CGSize(width: UIView.layoutFittingCompressedSize.width, height: 30),
-            withHorizontalFittingPriority: .fittingSizeLevel,
-            verticalFittingPriority: .required
-        )
+        // `TerminalTabStripView` owns an arithmetic fitting contract. Do not
+        // feed its live, edge-pinned stack back through Auto Layout while a
+        // pinch action may be updating the selected cell in place.
+        let measured = tabStrip.fittingContentSize()
         return CGSize(width: max(1, ceil(measured.width)), height: 30)
     }
 }

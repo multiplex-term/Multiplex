@@ -154,19 +154,12 @@ final class BindPaneViewController: UIViewController {
         bind.bindSurfaceOpen = false
     }
 
-    /// `contentStack` is required-pinned to all four edges of `paneView`, so
-    /// its width already follows the pane. Requiring a second width on top of
-    /// those pins is what breaks them whenever the pane has not been laid out
-    /// at this width yet — the engine drops a pin rather than the required
-    /// fitting width, and the sections solve to zero size (empty grey bars).
-    /// So refuse a degenerate proposal outright, and leave the fitting width
-    /// non-required so a residual mismatch degrades the measurement instead.
     func fittingSize(for width: CGFloat) -> CGSize {
         guard width > 0 else { return CGSize(width: max(0, width), height: 0) }
         let target = CGSize(width: width, height: UIView.layoutFittingCompressedSize.height)
         let size = contentStack.systemLayoutSizeFitting(
             target,
-            withHorizontalFittingPriority: .defaultHigh,
+            withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
         return CGSize(width: width, height: ceil(size.height))
@@ -502,7 +495,7 @@ private final class BindPaneRootView: UIView {
         }
         let size = measuredContent.systemLayoutSizeFitting(
             CGSize(width: bounds.width, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .defaultHigh,
+            withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
         return CGSize(width: UIView.noIntrinsicMetric, height: ceil(size.height))

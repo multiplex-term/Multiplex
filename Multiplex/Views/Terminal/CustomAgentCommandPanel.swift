@@ -592,7 +592,7 @@ final class CustomAgentCommandPanelViewController: UIViewController {
                 width: contentWidth,
                 height: UIView.layoutFittingCompressedSize.height
             ),
-            withHorizontalFittingPriority: .defaultHigh,
+            withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         ).height + 24
         let estimate = CGFloat(max(1, drafts.commands.count)) * 102 + 60
@@ -666,17 +666,6 @@ private final class CustomAgentCommandPanelRootView: UIKitTallyBorderedView {
         fittingSize(for: width)
     }
 
-    /// The fitting width is a proposal, never a requirement: `rootStack` is
-    /// required-pinned to all four edges of this view, whose own width is set
-    /// by the popover (its autoresizing mask stays translated, so UIKit
-    /// synthesizes a REQUIRED width from the frame it currently has — zero
-    /// before the first layout, and the previous width for one pass after a
-    /// width change). Requiring a second, different width on top of those pins
-    /// is unsatisfiable, and Auto Layout resolves it by breaking the pins
-    /// instead: rows and section headers solve to zero size and render as
-    /// empty bars until a later clean pass heals them. A non-required proposal
-    /// degrades the measurement rather than the editor's layout — the same
-    /// reason `updateEditorHeight` measures its list that way.
     func fittingSize(for proposedWidth: CGFloat) -> CGSize {
         guard let rootStack else { return CGSize(width: proposedWidth, height: 0) }
         let measured = rootStack.systemLayoutSizeFitting(
@@ -684,7 +673,7 @@ private final class CustomAgentCommandPanelRootView: UIKitTallyBorderedView {
                 width: proposedWidth,
                 height: UIView.layoutFittingCompressedSize.height
             ),
-            withHorizontalFittingPriority: .defaultHigh,
+            withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
         return CGSize(width: proposedWidth, height: ceil(measured.height))

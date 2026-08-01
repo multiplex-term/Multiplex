@@ -1991,21 +1991,13 @@ private final class FleetTileGridView: UIView {
             let row = items[index..<end]
             var heights: [CGFloat] = []
             for item in row {
-                // Tiles are framed by hand, so their autoresizing masks stay
-                // translated and UIKit synthesizes REQUIRED width/height
-                // constraints from whatever frame they carry right now —
-                // .zero for a tile added in this pass. Measuring against that
-                // at a required fitting width is unsatisfiable, and the engine
-                // resolves it by breaking the tile's own required content pins
-                // instead: the labels solve to zero size at the tile's
-                // top-left over an empty ground. Seed the real width first,
-                // and leave the fitting width non-required so any residual
-                // conflict degrades this measurement, never the tile's
-                // internal layout.
-                item.view.frame.size.width = tileWidth
+                // Width is the grid's contract, not a hint. Lowering this
+                // priority lets a newly added tile solve at its compressed
+                // width; framing the outer tile afterwards does not repair the
+                // already-collapsed content stack (labels remain at origin).
                 let size = item.view.systemLayoutSizeFitting(
                     CGSize(width: tileWidth, height: UIView.layoutFittingCompressedSize.height),
-                    withHorizontalFittingPriority: .defaultHigh,
+                    withHorizontalFittingPriority: .required,
                     verticalFittingPriority: .fittingSizeLevel
                 )
                 heights.append(max(1, ceil(size.height)))

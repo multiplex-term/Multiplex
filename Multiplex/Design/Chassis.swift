@@ -51,7 +51,7 @@ enum UIKitChassis {
 final class UIKitChassisLabel: UILabel {
     private var sourceText: String
     private let pointSize: CGFloat
-    private let ink: UIColor
+    private var ink: UIColor
 
     init(_ text: String, size: CGFloat = 12, color: UIColor? = nil) {
         sourceText = text
@@ -70,6 +70,14 @@ final class UIKitChassisLabel: UILabel {
     func setText(_ text: String) {
         sourceText = text
         accessibilityLabel = text
+        refreshAttributedText()
+    }
+
+    /// Changes only the label's ink while preserving its UIKit identity and
+    /// layout subtree. Interactive controls use this instead of replacing a
+    /// label that may still be participating in the current touch/layout pass.
+    func setInk(_ color: UIColor) {
+        ink = color
         refreshAttributedText()
     }
 

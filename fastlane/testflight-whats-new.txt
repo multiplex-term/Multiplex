@@ -181,3 +181,12 @@ find.
 - New Session (and Add Host, agent prompt, theme editor): content scrolls
   under the home indicator again, and typing in any field keeps it above
   the keyboard.
+
+TWO-TAB RAIL + NEW DECK TILES — labels stay in their frames
+
+- On iPhone, add a second tab and switch between the two repeatedly. Both
+  cells must keep their full width, spacing, and hit regions — no labels
+  piling up at the rail's origin. Repeat in the Vision Pro top ornament.
+- Return to the deck while new sessions appear: every new tile must lay out
+  its miniature, title, tally, and telemetry normally instead of stacking
+  them in its top-left corner.

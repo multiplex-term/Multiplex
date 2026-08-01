@@ -224,8 +224,11 @@ final class TerminalTabStripView: UIView {
                     canSplit: key.cells[index].canSplit
                 )
             }
+            // Keep invalidation local. Each host already requests its own
+            // geometry pass after `apply`; walking the ancestor chain here can
+            // pull unrelated pending descendants into a shell animation.
             invalidateIntrinsicContentSize()
-            requestHostSizingPass()
+            setNeedsLayout()
             return
         }
 
@@ -250,21 +253,7 @@ final class TerminalTabStripView: UIView {
             return cell
         }
         invalidateIntrinsicContentSize()
-        requestHostSizingPass()
-    }
-
-    /// The host sizes this strip from `fittingContentSize()` during ITS OWN
-    /// layout pass (the window's `layoutNativeChrome`), and a tally-observed
-    /// render can change that size with no bounds change anywhere — nothing
-    /// else re-requests the pass, so a stale strip frame would stick until
-    /// rotation (user-reported). Dirty the whole ancestor chain so whichever
-    /// view the host actually lays out runs again.
-    private func requestHostSizingPass() {
-        var ancestor: UIView? = self
-        while let view = ancestor {
-            view.setNeedsLayout()
-            ancestor = view.superview
-        }
+        setNeedsLayout()
     }
 }
 
@@ -420,37 +409,28 @@ final class TerminalTabCell: UIControl {
             self.canSplit = canSplit
             accessibilityCustomActions = makeAccessibilityActions()
         }
+        let nextLabelText = Self.label(for: item)
+        if labelText != nextLabelText {
+            labelText = nextLabelText
+            sourceLabel.setText(nextLabelText)
+        }
         if isActive != item.isActive {
             isActive = item.isActive
             backgroundColor = Self.ground(isActive: item.isActive)
             accessibilityTraits = Self.traits(isActive: item.isActive)
-            // `UIKitChassisLabel` bakes its ink at init, so an active-ground
-            // change swaps the label. The cell — the control under the
-            // finger — is untouched.
-            labelText = Self.label(for: item)
-            replaceSourceLabel(color: Self.ink(isActive: item.isActive))
-        } else if labelText != Self.label(for: item) {
-            labelText = Self.label(for: item)
-            sourceLabel.setText(labelText)
+            // Keep the arranged-subview tree untouched while this control's
+            // own touch action is switching tabs. The host may measure the
+            // strip before that action has unwound.
+            sourceLabel.setInk(Self.ink(isActive: item.isActive))
         }
         accessibilityLabel = Self.accessibilityLabel(for: item)
-        guard self.tallyState != tallyState else { return }
-        self.tallyState = tallyState
-        dotView?.backgroundColor = tallyState.color
-        refreshLampShadow()
-    }
-
-    private func replaceSourceLabel(color: UIColor) {
-        let replacement = UIKitChassisLabel(labelText, size: 10, color: color)
-        replacement.isAccessibilityElement = false
-        if let index = contentStack.arrangedSubviews.firstIndex(of: sourceLabel) {
-            contentStack.insertArrangedSubview(replacement, at: index)
-        } else {
-            contentStack.addArrangedSubview(replacement)
+        if self.tallyState != tallyState {
+            self.tallyState = tallyState
+            dotView?.backgroundColor = tallyState.color
+            refreshLampShadow()
         }
-        contentStack.removeArrangedSubview(sourceLabel)
-        sourceLabel.removeFromSuperview()
-        sourceLabel = replacement
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
     }
 
     private static func label(for item: TerminalTabStrip.Item) -> String {

@@ -235,7 +235,6 @@ final class SingleWindowShellViewController: UIViewController {
     private var routeObservationGeneration = 0
     private var layoutAnimator: UIViewPropertyAnimator?
     private var layoutCompletion: (() -> Void)?
-    private var isApplyingLayoutChanges = false
     private var targetLayoutMetrics: SingleWindowShellLayoutMetrics?
     private var testLayoutInput: (
         size: CGSize,
@@ -625,20 +624,6 @@ final class SingleWindowShellViewController: UIViewController {
             let controller = terminalFactory(shellState, actions)
             terminalController = controller
             install(controller, in: shellRootView.terminalContainer)
-            // Every caller here follows with an animated `applyLayout`, whose
-            // changes block resolves this subtree's first layout pass inside a
-            // UIViewPropertyAnimator — so every freshly installed subview
-            // would spring out of `.zero` at the container's top-left (labels
-            // stacked on the origin, the rail riding high, a clipped panel).
-            // Settle its resting geometry first; only the slide animates.
-            // The flag keeps a layout pass this resolution reaches from
-            // committing the caller's still-pending animated transition
-            // unanimated — the same re-entrancy `applyLayout` already guards.
-            isApplyingLayoutChanges = true
-            UIView.performWithoutAnimation {
-                shellRootView.terminalContainer.layoutIfNeeded()
-            }
-            isApplyingLayoutChanges = false
             (controller as? TerminalWindowViewController)?.setAppLocked(appLocked)
         } else {
             if let controller = terminalController {
@@ -741,10 +726,7 @@ final class SingleWindowShellViewController: UIViewController {
         animated: Bool,
         completion: (() -> Void)? = nil
     ) {
-        // Resolving the containers' children inside the transition below runs
-        // a layout pass, whose containment bookkeeping re-enters here with the
-        // geometry already committed above it.
-        guard isViewLoaded, !isApplyingLayoutChanges else { return }
+        guard isViewLoaded else { return }
         let metrics = resolvedLayoutMetrics()
         if !animated,
            layoutAnimator?.isRunning == true,
@@ -769,17 +751,15 @@ final class SingleWindowShellViewController: UIViewController {
         updateChildPresentation(metrics)
         updateBackSwipeAvailability(expanded: metrics.expanded)
 
-        let changes = { [weak self] in
-            guard let self else { return }
-            self.isApplyingLayoutChanges = true
-            self.shellRootView.apply(metrics)
-            // The deck and terminal controller views are pinned to those
-            // containers with constraints, so a container's new bounds reach
-            // them only at the next layout pass — outside this transaction.
-            // Resolve it here or the rail toggle snaps their content to its
-            // final width while the container is still sliding.
-            self.shellRootView.layoutIfNeeded()
-            self.isApplyingLayoutChanges = false
+        // Animate only the shell's frame/alpha contract. Forcing
+        // `layoutIfNeeded()` on the root here also resolves every pending
+        // descendant constraint inside this property animator. A probe tick or
+        // second tab can install fresh tile/cell content during that window;
+        // UIKit then preserves its zero-origin presentation geometry, piling
+        // labels into the corner. Descendants own their ordinary next layout
+        // pass, exactly as they did on the working #23 base.
+        let changes: () -> Void = { [weak self] in
+            self?.shellRootView.apply(metrics)
         }
         // `stopAnimation(true)` retires an animator without running its
         // completions, so an interrupted transition would strand the caller's

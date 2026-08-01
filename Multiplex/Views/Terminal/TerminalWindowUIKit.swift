@@ -1621,23 +1621,9 @@ extension TerminalWindowViewController {
                     for: shell?.availableWidth ?? bounds.width
                 ).height
             }
-            // This view is frame-managed below, so its synthesized
-            // autoresizing constraints are *required* at whatever width it
-            // currently carries — a zero or stale one fights a required
-            // fitting width and the solve collapses the content onto the
-            // origin. Seed the proposal, then ask below required.
-            let umdView: UIView = umdController.view
-            if umdView.bounds.width != bounds.width {
-                umdView.frame = CGRect(
-                    x: umdView.frame.minX,
-                    y: umdView.frame.minY,
-                    width: bounds.width,
-                    height: umdView.frame.height
-                )
-            }
-            return umdView.systemLayoutSizeFitting(
+            return umdController.view.systemLayoutSizeFitting(
                 CGSize(width: bounds.width, height: UIView.layoutFittingCompressedSize.height),
-                withHorizontalFittingPriority: .defaultHigh,
+                withHorizontalFittingPriority: .required,
                 verticalFittingPriority: .fittingSizeLevel
             ).height
         }()
