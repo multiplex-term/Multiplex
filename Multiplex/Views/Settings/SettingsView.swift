@@ -634,6 +634,7 @@ final class SettingsViewController: UIViewController {
         overrideUserInterfaceStyle = style
         navigationController?.overrideUserInterfaceStyle = style
         viewIfLoaded?.window?.overrideUserInterfaceStyle = style
+        refreshDynamicTextColorsAfterTraitPropagation()
         if let navigationBar = navigationController?.navigationBar {
             UIKitChassis.configureSheetNavigationBar(navigationBar)
         }

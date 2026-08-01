@@ -305,13 +305,23 @@ logic belongs — keep parsing/command-building out of views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5),
     patched to declare the `NIO` product it imports (Xcode 27 rejects the
     undeclared import); also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in ten behavior groups
+  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in eleven behavior groups
     (marked `Multiplex patch`):
     - `keyboardType` settable; kept `.default` so the user's language and
       multistage IME survive.
     - Pans scroll the *remote* (`performRemoteScroll`): wheel events under
       mouse tracking, DECCKM-aware arrows in the alternate screen with mouse
       off; plain-shell tabs keep native local scrollback.
+    - The single→double→triple tap failure chain is decided PER TOUCH by a
+      gesture-delegate method, never static `require(toFail:)`
+      (`remoteOwnsImmediateTaps`): while the client reports mouse (tmux
+      `mouse on`, the app's premise) all three taps send the same click, so
+      the static chain bought ~350 ms of latency per tap and collapsed two
+      fast taps into ONE click — remote double-click was impossible. Now
+      every tap fires immediately as its own click there (double/triple's
+      mouse branches send nothing extra), while mouse-off — and a held
+      hardware Shift bypassing reporting — keeps the old chain so local
+      word/line selection still works.
     - A tap while a local selection **or its context menu** is present
       dismisses it and is consumed (`dismissLocalSelectionUI`, checked
       before link opening and mouse reporting, mirrored into the
@@ -1156,14 +1166,17 @@ behavior change. Bake-off records stay here under `docs/landing/`.
   SYSTEM/LIGHT/DARK) is applied by
   `UIKitSceneRootViewController.applyAppearance` through each scene
   window's `overrideUserInterfaceStyle` — never a mechanism that stops at
-  presentation boundaries (SwiftUI's `preferredColorScheme` did). Two
+  presentation boundaries (SwiftUI's `preferredColorScheme` did). Three
   traps: a visionOS sheet/popover hosts in its own window and misses an
-  override already in place, and a presented controller's own override
-  beats its window's — so presented chassis surfaces adopt
+  override already in place; a presented controller's own override beats
+  its window's; and visionOS can retain a `UILabel`'s previously resolved
+  dynamic ink after an in-place override. Presented chassis surfaces adopt
   `AppAppearanceFollowing` (`followAppAppearance(themes)` in
   Chassis.swift; a presenter with no store seeds from the scene window's
-  applied style). Never write `.unspecified` over a scene window carrying
-  a pinned override. Components in `Chassis.swift`: `ChassisLabel`
+  applied style), and every override writer schedules
+  `refreshDynamicTextColorsAfterTraitPropagation()` after trait delivery.
+  Never write `.unspecified` over a scene window carrying a pinned override.
+  Components in `Chassis.swift`: `ChassisLabel`
   (compressed caps), `ChassisChip`/`ChassisBadge` (square actions),
   `TallyLamp` (captioned state lamp), `ChassisSwitch` +
   `TallyFormBoolField` (monochrome switches — never the system green

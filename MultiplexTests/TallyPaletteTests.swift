@@ -53,6 +53,30 @@ final class TallyPaletteTests: XCTestCase {
         )
     }
 
+    func testDeferredAppearanceRefreshReappliesMountedLabelInk() async {
+        let controller = UIViewController()
+        controller.loadViewIfNeeded()
+        let plain = PlainInkWriteProbeLabel()
+        plain.text = "Plain"
+        plain.textColor = TallyPalette.signal2
+        let attributed = AttributedInkWriteProbeLabel()
+        attributed.attributedText = NSAttributedString(
+            string: "Tracked",
+            attributes: [.foregroundColor: TallyPalette.signal2]
+        )
+        controller.view.addSubview(plain)
+        controller.view.addSubview(attributed)
+        plain.resetWriteCount()
+        attributed.resetWriteCount()
+
+        controller.overrideUserInterfaceStyle = .light
+        controller.refreshDynamicTextColorsAfterTraitPropagation()
+        for _ in 0..<4 { await Task.yield() }
+
+        XCTAssertGreaterThan(plain.textColorWriteCount, 0)
+        XCTAssertGreaterThan(attributed.attributedTextWriteCount, 0)
+    }
+
     private func assert(
         _ color: UIColor,
         resolvesTo hex: UInt32,
@@ -77,5 +101,31 @@ final class TallyPaletteTests: XCTestCase {
         XCTAssertEqual(green, CGFloat((hex >> 8) & 0xFF) / 255, accuracy: 0.001, file: file, line: line)
         XCTAssertEqual(blue, CGFloat(hex & 0xFF) / 255, accuracy: 0.001, file: file, line: line)
         XCTAssertEqual(alpha, expectedAlpha, accuracy: 0.001, file: file, line: line)
+    }
+}
+
+@MainActor
+private final class PlainInkWriteProbeLabel: UILabel {
+    private(set) var textColorWriteCount = 0
+
+    override var textColor: UIColor! {
+        didSet { textColorWriteCount += 1 }
+    }
+
+    func resetWriteCount() {
+        textColorWriteCount = 0
+    }
+}
+
+@MainActor
+private final class AttributedInkWriteProbeLabel: UILabel {
+    private(set) var attributedTextWriteCount = 0
+
+    override var attributedText: NSAttributedString? {
+        didSet { attributedTextWriteCount += 1 }
+    }
+
+    func resetWriteCount() {
+        attributedTextWriteCount = 0
     }
 }

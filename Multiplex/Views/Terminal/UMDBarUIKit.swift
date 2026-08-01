@@ -812,6 +812,10 @@ final class UMDBarViewController: UIViewController,
         )
         tmuxPopoverController = panel
         panel.modalPresentationStyle = .popover
+        // visionOS hosts this popover in a window of its own; carry the
+        // ornament mount's appearance override across or a pinned LIGHT
+        // presents a dark panel. Inert wherever inheritance already works.
+        panel.overrideUserInterfaceStyle = inheritedInterfaceStyleOverride
         panel.loadViewIfNeeded()
         panel.view.backgroundColor = UIKitChassis.bezel
         panel.preferredContentSize = panel.fittingContentSize()

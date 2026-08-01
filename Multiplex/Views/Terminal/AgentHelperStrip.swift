@@ -479,6 +479,10 @@ final class AgentHelperStripViewController: UIViewController,
     }
 
     private func configurePopover(_ panel: UIViewController, sourceView: UIView) {
+        // visionOS hosts these popovers in windows of their own; carry the
+        // ornament mount's appearance override across or a pinned LIGHT
+        // presents dark panels. Inert wherever inheritance already works.
+        panel.overrideUserInterfaceStyle = inheritedInterfaceStyleOverride
         guard let popover = panel.popoverPresentationController else { return }
         popover.sourceView = sourceView
         popover.sourceRect = sourceView.bounds

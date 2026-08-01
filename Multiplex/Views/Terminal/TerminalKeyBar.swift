@@ -1417,6 +1417,10 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         )
         comboPopoverController = controller
         controller.modalPresentationStyle = .popover
+        // The popover hosts in its own window: hand it the same appearance
+        // override the ornament mount carries, or a pinned LIGHT presents a
+        // dark slab (`.unspecified` under SYSTEM keeps the native style).
+        controller.overrideUserInterfaceStyle = overrideUserInterfaceStyle
         controller.loadViewIfNeeded()
         if let popover = controller.popoverPresentationController {
             popover.sourceView = ctrlKey

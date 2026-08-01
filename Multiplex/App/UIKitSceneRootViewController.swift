@@ -243,9 +243,9 @@ final class UIKitSceneRootViewController: UIViewController {
         lockShieldWindow?.overrideUserInterfaceStyle = style
         lockViewController?.overrideUserInterfaceStyle = style
         // PROTOTYPE(GLASS): the independent GLASS choice rides a custom
-        // color-affecting trait, so every material re-resolves live. The
-        // app-lock shield and sheet windows never get the trait — they stay
-        // opaque chassis by design. A glass-selected terminal scene also
+        // color-affecting trait, so every material re-resolves live. Sheets
+        // receive it through `pinHostingWindow`; the app-lock shield never
+        // does (opaque privacy veil). A glass-selected terminal scene also
         // re-admits its platter and clears its window backing.
         let glassSelected = GlassPrototype.enabled && appearance == .glass
         GlassSelectionState.shared.isGlass = glassSelected
@@ -257,6 +257,8 @@ final class UIKitSceneRootViewController: UIViewController {
             viewIfLoaded?.window?.backgroundColor = glassSelected ? nil : .clear
         }
         #endif
+        refreshDynamicTextColorsAfterTraitPropagation()
+        lockViewController?.refreshDynamicTextColorsAfterTraitPropagation()
         if platformChrome.appliesSignalTint {
             viewIfLoaded?.window?.tintColor = TallyPalette.signal
             lockShieldWindow?.tintColor = TallyPalette.signal
