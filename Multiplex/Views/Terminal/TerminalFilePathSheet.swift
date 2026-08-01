@@ -24,6 +24,8 @@ final class TerminalFilePathSheetViewController: UIViewController {
     private(set) var scrollView = UIScrollView()
     private(set) var rowStack = UIStackView()
     private let hostNameLabel = UILabel()
+    private let opensStack = UIStackView()
+    private let opensValueLabel = UILabel()
     private let lineStack = UIStackView()
     private let lineValueLabel = UILabel()
     private(set) var actionStack = UIStackView()
@@ -45,9 +47,11 @@ final class TerminalFilePathSheetViewController: UIViewController {
         self.hostName = hostName
         self.onView = onView
         self.onCopy = onCopy
+        // The field starts at the model's canonical spelling, so an
+        // untouched field re-resolves to the same target.
         editor = UIKitTerminalEditableValueBox(
             label: "PATH",
-            text: Self.editorText(for: target)
+            text: target.spelling
         )
         super.init(nibName: nil, bundle: nil)
     }
@@ -78,7 +82,7 @@ final class TerminalFilePathSheetViewController: UIViewController {
         sourceTarget = target
         self.hostName = hostName
         if targetChanged {
-            editor.setText(Self.editorText(for: target), notify: false)
+            editor.setText(target.spelling, notify: false)
         }
         if isViewLoaded { refreshState() }
     }
@@ -93,11 +97,6 @@ final class TerminalFilePathSheetViewController: UIViewController {
     ) {
         self.onView = onView
         self.onCopy = onCopy
-    }
-
-    static func editorText(for target: TerminalPathTarget) -> String {
-        guard let line = target.line else { return target.path }
-        return "\(target.path):\(line)"
     }
 
     private func configureNavigation() {
@@ -141,6 +140,17 @@ final class TerminalFilePathSheetViewController: UIViewController {
         hostNameLabel.textColor = UIKitChassis.signal
         hostNameLabel.numberOfLines = 0
         hostNameLabel.accessibilityIdentifier = "terminal.path.hostValue"
+
+        let opensTitle = UIKitChassisLabel("OPENS", size: 9, color: TallyPalette.caution)
+        opensValueLabel.font = UIKitChassis.monoFont(11)
+        opensValueLabel.textColor = UIKitChassis.signal2
+        opensValueLabel.numberOfLines = 0
+        opensValueLabel.accessibilityIdentifier = "terminal.path.opensValue"
+        opensStack.axis = .horizontal
+        opensStack.alignment = .firstBaseline
+        opensStack.spacing = 8
+        opensStack.addArrangedSubview(opensTitle)
+        opensStack.addArrangedSubview(opensValueLabel)
 
         let lineTitle = UIKitChassisLabel("LINE", size: 9, color: UIKitChassis.signal3)
         lineValueLabel.font = UIKitChassis.monoFont(11)
@@ -186,6 +196,7 @@ final class TerminalFilePathSheetViewController: UIViewController {
         rowStack.spacing = Metrics.rowSpacing
         rowStack.addArrangedSubview(hostStack)
         rowStack.addArrangedSubview(editor)
+        rowStack.addArrangedSubview(opensStack)
         rowStack.addArrangedSubview(lineStack)
         rowStack.addArrangedSubview(actionStack)
 
@@ -237,12 +248,31 @@ final class TerminalFilePathSheetViewController: UIViewController {
         hostNameLabel.text = hostName
         hostNameLabel.accessibilityLabel = hostName
         editor.setNote(target == nil ? "NOT A PATH MULTIPLEX CAN READ" : nil)
+        // Resolution can shed what it reads as prose (a spaced press
+        // arrives with its sentence tail), so when the opened path is not
+        // the field's text, say so — verbatim, mono: a path is screen
+        // content.
+        let divergence = resolvedDivergence(target)
+        opensValueLabel.text = divergence
+        opensValueLabel.accessibilityLabel = divergence
+        opensStack.isHidden = divergence == nil
         lineValueLabel.text = target?.line.map(String.init)
         lineValueLabel.accessibilityLabel = target?.line.map(String.init)
         lineStack.isHidden = target?.line == nil
         viewChip.isHidden = target == nil
         sectionView.setTitle(sectionTitle(for: target))
         sectionView.setDetail(detail(for: target))
+    }
+
+    /// The spelling VIEW will actually open when it differs from what the
+    /// field holds — trailing punctuation trimmed, a prose tail shed from a
+    /// spaced press. nil while they agree (the common case) or nothing
+    /// resolves (the note already says so).
+    private func resolvedDivergence(_ target: TerminalPathTarget?) -> String? {
+        guard let target else { return nil }
+        let resolved = target.spelling
+        return resolved == editor.text.trimmingCharacters(in: .whitespaces)
+            ? nil : resolved
     }
 
     private func sectionTitle(for target: TerminalPathTarget?) -> String {
@@ -256,9 +286,10 @@ final class TerminalFilePathSheetViewController: UIViewController {
 
     private func detail(for target: TerminalPathTarget?) -> String {
         guard let target else {
-            return "The field holds nothing the viewer can resolve — a path "
-                + "needs a directory in it, and no spaces. Edit it, or copy "
-                + "the text if it's still useful."
+            return "The field holds nothing the viewer can resolve — a "
+                + "relative path needs a directory in it, and spaces only "
+                + "work behind /, ~/, ./ or $HOME/. Edit it, or copy the "
+                + "text if it's still useful."
         }
         var text = "VIEW opens it read-only in the file viewer, beside this "
             + "session — nothing runs, nothing is written. The path is "

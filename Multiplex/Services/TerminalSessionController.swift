@@ -219,8 +219,8 @@ final class TerminalSessionController {
         // never fire here; this pane decides instead. The view owns the
         // closure and this controller owns the view — capture weakly.
         view.linkActivationIgnoresHighlight = true
-        view.linkActivationHandler = { [weak self] target, _ in
-            self?.activateLink(target) ?? false
+        view.linkActivationHandler = { [weak self] target, _, rowTexts in
+            self?.activateLink(target, rowFragments: rowTexts) ?? false
         }
         if !pendingOutput.isEmpty {
             view.feed(byteArray: pendingOutput[...])
@@ -1492,10 +1492,24 @@ final class TerminalSessionController {
     /// confirms through the file-viewer sheet instead of falling to
     /// selection; only what neither resolver accepts ($VAR/…, colon prose)
     /// still declines into text selection.
-    func activateLink(_ target: String) -> Bool {
+    ///
+    /// `rowFragments` is the match split at its hard-wrap seams (empty when
+    /// it fit one row, or from callers without seam info — the debug hook,
+    /// gaze regions): a prose word butting a seam means the rows below start
+    /// their own target (`and`⏎`local-plan/x` is not one path), so the cut
+    /// suffix resolves first and the join stays the fallback.
+    func activateLink(_ target: String, rowFragments: [String] = []) -> Bool {
         // The jump search owns the pane's input while it pages and its veil
         // covers the text being pressed — same rule as a drop.
         if case .finding = historyJump { return false }
+        if let cut = WrappedRowGlue.cutTarget(fragments: rowFragments),
+           claimResolved(cut) {
+            return true
+        }
+        return claimResolved(target)
+    }
+
+    private func claimResolved(_ target: String) -> Bool {
         if let link = TerminalLink.resolve(target) {
             pendingActivation = .link(link)
             return true

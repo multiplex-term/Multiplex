@@ -5927,6 +5927,14 @@ open class Terminal {
         let range: Range<Int>
         let isExplicit: Bool
         let rowRanges: [RowRange]
+        // Multiplex patch: the matched text split at hard-wrap seams,
+        // topmost row first (`text` is these joined). A wrapped-row join
+        // glues a sentence's tail to the path or address below it with no
+        // space at the seam; only the seam positions can tell the two
+        // apart, so the activation path carries them instead of flattening
+        // the match. Empty for explicit (OSC 8) matches — their target is
+        // the payload, not the rendered rows.
+        var rowTexts: [String] = []
     }
 
     func bufferFromKind (kind: BufferKind) -> Buffer
@@ -5972,6 +5980,17 @@ open class Terminal {
     public func link(at location: LinkLookupLocation, mode: LinkLookupMode) -> String?
     {
         return linkMatch(at: location, mode: mode)?.text
+    }
+
+    // Multiplex patch: the same lookup with the match's hard-wrap seams
+    // kept — `rowTexts` is the text split at row boundaries, topmost first
+    // (empty for explicit matches and single-row implicit ones). Callers
+    // that resolve targets need the seams to tell a wrapped target from
+    // prose glued to the path below it.
+    public func linkWithRowTexts(at location: LinkLookupLocation, mode: LinkLookupMode) -> (text: String, rowTexts: [String])?
+    {
+        guard let match = linkMatch(at: location, mode: mode) else { return nil }
+        return (match.text, match.rowTexts)
     }
 
     // Multiplex patch: gaze link regions (visionOS). The system renders gaze
@@ -6190,12 +6209,40 @@ open class Terminal {
                     return .init(row: row, range: bounds.start..<bounds.end)
                 }
 
+            // Multiplex patch: split the matched text at its hard-wrap
+            // seams. `lineMap.cells` maps 1:1 onto the text's characters,
+            // so grouping consecutive matched characters by their cell's
+            // row reassembles exactly what each visual row contributed.
+            // Built only for matches that actually span rows (`rowBounds`
+            // already counted them) — single-row matches, the overwhelming
+            // majority on hot callers like the gaze-region rebuild, pay
+            // nothing — and sliced in one O(match) walk, never by
+            // materializing the whole logical line.
+            var rowTexts: [String] = []
+            if rowBounds.count > 1 {
+                var cursor = textRange.lowerBound
+                var fragment = ""
+                var currentRow = lineMap.cells[startOffset].row
+                for idx in startOffset..<boundedEndOffset {
+                    let cellRow = lineMap.cells[idx].row
+                    if cellRow != currentRow {
+                        rowTexts.append(fragment)
+                        fragment = ""
+                        currentRow = cellRow
+                    }
+                    fragment.append(lineMap.text[cursor])
+                    lineMap.text.formIndex(after: &cursor)
+                }
+                rowTexts.append(fragment)
+            }
+
             return LinkMatch(
                 text: String(lineMap.text[textRange]),
                 row: lineMap.targetRow,
                 range: rowStart..<rowEnd,
                 isExplicit: false,
-                rowRanges: rowRanges
+                rowRanges: rowRanges,
+                rowTexts: rowTexts
             )
         }
         return nil
