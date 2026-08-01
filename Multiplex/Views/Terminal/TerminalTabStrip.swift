@@ -446,7 +446,10 @@ final class TerminalTabCell: UIControl {
     }
 
     private static func ground(isActive: Bool) -> UIColor {
-        isActive ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): tabs are strata chips over the smoke; the active
+        // tab keeps its border and ink distinction.
+        if GlassPrototype.active { return GlassPrototype.strata }
+        return isActive ? UIKitChassis.bezelHi : UIKitChassis.chassis
     }
 
     private static func traits(isActive: Bool) -> UIAccessibilityTraits {

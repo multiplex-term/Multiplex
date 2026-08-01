@@ -328,7 +328,8 @@ final class TerminalWindowViewController: UIViewController,
 
     override func loadView() {
         view = rootView
-        view.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): the scene root carries the smoke ground.
+        view.backgroundColor = GlassPrototype.active ? .clear : UIKitChassis.chassis
         #if os(visionOS)
         updateVisionOrnamentInstallation()
         #endif
@@ -2462,9 +2463,14 @@ final class TerminalWindowUIKitRootView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIKitChassis.chassis
-        paneContainer.backgroundColor = UIKitChassis.screen
-        tabScrollView.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): the scene root paints the smoke; window chrome
+        // goes clear, and the terminal surface itself carries the screen
+        // pane (theme-tinted) — a pane ground here would double-tint it.
+        backgroundColor = GlassPrototype.active ? .clear : UIKitChassis.chassis
+        paneContainer.backgroundColor =
+            GlassPrototype.active ? .clear : UIKitChassis.screen
+        tabScrollView.backgroundColor =
+            GlassPrototype.active ? .clear : UIKitChassis.chassis
         tabScrollView.showsHorizontalScrollIndicator = false
         tabDivider.backgroundColor = UIKitChassis.bezelHi
         umdContainer.backgroundColor = .clear
@@ -2538,21 +2544,19 @@ final class TerminalWindowUIKitRootView: UIView {
     }
 
     func setShellMode(_ shell: Bool) {
-        layer.cornerRadius = shell ? 0 : {
-            #if os(visionOS)
-            24
-            #else
-            0
-            #endif
-        }()
+        #if os(visionOS)
+        // PROTOTYPE(GLASS): the system platter is the silhouette — the fill
+        // and border retire, but clipping stays at a platter-matching radius
+        // so edge-to-edge terminal rows cannot poke past the system corner.
+        let rounded = !shell
+        let glass = GlassPrototype.active
+        #else
+        let rounded = false
+        let glass = false
+        #endif
+        layer.cornerRadius = rounded ? (glass ? 46 : 24) : 0
         clipsToBounds = true
-        layer.borderWidth = shell ? 0 : {
-            #if os(visionOS)
-            1
-            #else
-            0
-            #endif
-        }()
+        layer.borderWidth = (rounded && !glass) ? 1 : 0
         layer.borderColor = UIKitChassis.bezelHi
             .resolvedColor(with: traitCollection).cgColor
     }

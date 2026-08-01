@@ -43,8 +43,11 @@ final class TerminalSurfaceView: UIView {
         self.configuration = configuration
         coordinator = Coordinator(controller: controller)
         super.init(frame: .zero)
-        backgroundColor = UIColor(configuration.theme.background)
-        isOpaque = true
+        // PROTOTYPE(GLASS): the terminal view itself carries the glass pane
+        // (theme background at `screenAlpha`); this wrapper goes clear.
+        backgroundColor = GlassPrototype.active
+            ? .clear : UIColor(configuration.theme.background)
+        isOpaque = !GlassPrototype.active
         installTerminal()
     }
 
@@ -249,7 +252,8 @@ final class TerminalSurfaceView: UIView {
 
     func update(configuration: Configuration) {
         self.configuration = configuration
-        backgroundColor = UIColor(configuration.theme.background)
+        backgroundColor = GlassPrototype.active
+            ? .clear : UIColor(configuration.theme.background)
         // A moved tab's view may already belong to another window while this
         // (about to be torn down) surface gets one last update.
         guard let view = coordinator.terminalView,
@@ -306,7 +310,12 @@ final class TerminalSurfaceView: UIView {
     /// Colors change live — SwiftTerm's setters queue a full redraw, so an
     /// open session re-skins in place when the user switches themes.
     private func apply(_ theme: TerminalTheme, to view: TerminalView) {
-        view.nativeBackgroundColor = UIColor(theme.background)
+        // PROTOTYPE(GLASS): keep the fork's own non-opaque invariant — cells
+        // stay transparent (`nativeBackgroundColor = .clear` is exactly what
+        // its setupOptions chose) and the pane ground lives on the view's
+        // layer below, at `screenAlpha`, tinted by the selected theme.
+        view.nativeBackgroundColor = GlassPrototype.active
+            ? .clear : UIColor(theme.background)
         view.nativeForegroundColor = UIColor(theme.foreground)
         applyCaretColor(theme: theme, to: view)
         view.selectedTextBackgroundColor = UIColor(theme.cursor).withAlphaComponent(0.3)
@@ -323,7 +332,9 @@ final class TerminalSurfaceView: UIView {
                 )
             })
         }
-        view.backgroundColor = UIColor(theme.background)
+        view.backgroundColor = GlassPrototype.active
+            ? UIColor(theme.background).withAlphaComponent(GlassPrototype.screenAlpha)
+            : UIColor(theme.background)
         // The keyboard belongs to the chassis, not the terminal surface:
         // `.default` follows the window's appearance (the Settings choice via
         // `overrideUserInterfaceStyle`), so a light terminal theme under dark

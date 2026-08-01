@@ -103,7 +103,11 @@ final class UIKitSceneRootViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = plainWindowBackground ? .clear : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): one smoke tint over the system platter is the
+        // whole window ground; every full-bleed layer above it goes clear.
+        let ground = GlassPrototype.active
+            ? GlassPrototype.smokeTint : UIKitChassis.chassis
+        view.backgroundColor = plainWindowBackground ? .clear : ground
         #if os(visionOS)
         // The window resolves the container style from its root view
         // controller, which is this one. The preference is fixed at init, so

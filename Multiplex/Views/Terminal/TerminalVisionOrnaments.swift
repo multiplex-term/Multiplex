@@ -159,12 +159,14 @@ final class TerminalVisionOrnamentCoordinator {
             contentAlignment: SwiftUI.Alignment.center
         ) {
             TerminalVisionTopOrnament(state: state)
+                .modifier(GlassPrototypeOrnamentGround())
         }
         let bottom = UIHostingOrnament(
             sceneAnchor: UnitPoint.bottom,
             contentAlignment: SwiftUI.Alignment.center
         ) {
             TerminalVisionBottomOrnament(state: state)
+                .modifier(GlassPrototypeOrnamentGround())
         }
         owner.ornaments = [top, bottom]
         installed = true
@@ -475,6 +477,21 @@ extension TerminalKeyCluster where Center == EmptyView {
     }
 }
 
+/// PROTOTYPE(GLASS): ornament chrome sits on real system glass carrying the
+/// smoke tint — matching the window ground — instead of floating opaque
+/// slabs (ornaments get no platter of their own; the app must supply one).
+private struct GlassPrototypeOrnamentGround: ViewModifier {
+    func body(content: Content) -> some View {
+        if GlassPrototype.active {
+            content
+                .background(Color(uiColor: GlassPrototype.smokeTint))
+                .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 16))
+        } else {
+            content
+        }
+    }
+}
+
 // MARK: - UIKit mounts
 
 @MainActor
@@ -484,7 +501,8 @@ final class TerminalVisionTabOrnamentHostView: UIView {
     init(tabStrip: TerminalTabStripView) {
         self.tabStrip = tabStrip
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): the ornament's glass ground provides the slab.
+        backgroundColor = GlassPrototype.active ? .clear : UIKitChassis.chassis
         layer.cornerRadius = 10
         layer.cornerCurve = .continuous
         accessibilityIdentifier = "terminal.vision.topOrnament"

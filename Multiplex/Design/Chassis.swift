@@ -8,9 +8,19 @@ import UIKit
 @MainActor
 enum UIKitChassis {
     static var chassis: UIColor { TallyPalette.chassis }
-    static var bezel: UIColor { TallyPalette.bezel }
-    static var bezelHi: UIColor { TallyPalette.bezelHi }
-    static var screen: UIColor { TallyPalette.screen }
+    // PROTOTYPE(GLASS): raised chrome and screens resolve to the smoke
+    // materials at this one switch point. `chassis` deliberately does not —
+    // sheets, forms, and the launch handoff stay opaque (plan §2); the few
+    // full-bleed chassis layers are gated at their own sites instead.
+    static var bezel: UIColor {
+        GlassPrototype.active ? GlassPrototype.strata : TallyPalette.bezel
+    }
+    static var bezelHi: UIColor {
+        GlassPrototype.active ? GlassPrototype.line : TallyPalette.bezelHi
+    }
+    static var screen: UIColor {
+        GlassPrototype.active ? GlassPrototype.screenGlass : TallyPalette.screen
+    }
     static var signal: UIColor { TallyPalette.signal }
     static var signal2: UIColor { TallyPalette.signal2 }
     static var signal3: UIColor { TallyPalette.signal3 }
@@ -159,7 +169,9 @@ final class UIKitChassisChip: UIKitTallyBorderedView {
         self.action = action
         isProminent = prominent
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): chips are strata over the smoke, not chassis cuts.
+        backgroundColor = GlassPrototype.active
+            ? GlassPrototype.strata : UIKitChassis.chassis
         tallyBorderColor = prominent ? UIKitChassis.signal2 : UIKitChassis.bezelHi
         isAccessibilityElement = true
         accessibilityTraits = .button

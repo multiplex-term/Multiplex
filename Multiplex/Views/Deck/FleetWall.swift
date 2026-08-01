@@ -56,7 +56,9 @@ final class FleetWallContainerViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): the scene root carries the smoke ground — every
+        // full-bleed deck layer above it goes clear so the tint never stacks.
+        view.backgroundColor = GlassPrototype.active ? .clear : UIKitChassis.chassis
         installChildIfNeeded()
     }
 
@@ -270,7 +272,8 @@ final class FleetWallViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): full-bleed layer — clear over the smoke.
+        view.backgroundColor = GlassPrototype.active ? .clear : UIKitChassis.chassis
         configureHierarchy()
         observeWall()
     }
@@ -332,7 +335,10 @@ final class FleetWallViewController: UIViewController {
             rootStack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
-        fixedHeaderContainer.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): header and wall are non-overlapping siblings in
+        // the root stack, so both clear without any ghosting underneath.
+        fixedHeaderContainer.backgroundColor =
+            GlassPrototype.active ? .clear : UIKitChassis.chassis
         fixedHeaderContainer.addSubview(fixedHeader)
         fixedHeaderContainer.addSubview(fixedHeaderRule)
         fixedHeader.translatesAutoresizingMaskIntoConstraints = false
@@ -357,7 +363,8 @@ final class FleetWallViewController: UIViewController {
         rootStack.addArrangedSubview(fixedHeaderContainer)
 
         scrollView.alwaysBounceVertical = true
-        scrollView.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): full-bleed layer — clear over the smoke.
+        scrollView.backgroundColor = GlassPrototype.active ? .clear : UIKitChassis.chassis
         rootStack.addArrangedSubview(scrollView)
 
         contentStack.axis = .vertical
@@ -1894,7 +1901,8 @@ private final class FleetMenuBadgeButton: UIButton {
             for: .normal
         )
         tintColor = UIKitChassis.signal2
-        backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): bordered control on glass — no chassis cut.
+        backgroundColor = GlassPrototype.active ? .clear : UIKitChassis.chassis
         layer.borderWidth = 1
         refreshBorder()
         registerForTraitChanges(
@@ -2076,7 +2084,8 @@ private final class FleetBadgeView: UIKitTallyBorderedView {
 
     init(caption: String) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): bordered badge on glass — no chassis cut.
+        backgroundColor = GlassPrototype.active ? .clear : UIKitChassis.chassis
         label.font = UIKitChassis.monoFont(8, weight: .semibold)
         label.textColor = UIKitChassis.signal2
         label.numberOfLines = 1
@@ -2130,8 +2139,11 @@ private final class FleetColorDotView: UIView {
 private final class FleetHatchedView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = TallyPalette.screen
-        isOpaque = true
+        // PROTOTYPE(GLASS): a dead monitor is still a glass pane — the same
+        // screen ground as live tiles, with an etched white hatch (plan §4).
+        backgroundColor = GlassPrototype.active
+            ? GlassPrototype.screenGlass : TallyPalette.screen
+        isOpaque = !GlassPrototype.active
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: FleetHatchedView, _: UITraitCollection) in
             view.setNeedsDisplay()
         }
@@ -2142,9 +2154,9 @@ private final class FleetHatchedView: UIView {
 
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
-        context.setStrokeColor(
-            TallyPalette.screenHatch.resolvedColor(with: traitCollection).cgColor
-        )
+        let stripe = GlassPrototype.active
+            ? GlassPrototype.hatchStripe : TallyPalette.screenHatch
+        context.setStrokeColor(stripe.resolvedColor(with: traitCollection).cgColor)
         context.setLineWidth(5)
         var x = -bounds.height
         while x < bounds.width {
@@ -2355,7 +2367,9 @@ final class FleetSessionTileView: FleetPressView,
 
     private func makeScreen(_ configuration: FleetSessionTileConfiguration) -> UIView {
         let screen = UIView()
-        screen.backgroundColor = TallyPalette.screen
+        // PROTOTYPE(GLASS): the miniature is an open glass pane.
+        screen.backgroundColor = GlassPrototype.active
+            ? GlassPrototype.screenGlass : TallyPalette.screen
         let lines = UIStackView()
         lines.axis = .vertical
         lines.alignment = .fill
@@ -2774,7 +2788,9 @@ private final class FleetAcquiringTileView: UIKitTallyBorderedView {
         // Same chassis anatomy as every tile beside it: the screen sits inside
         // a five-point bezel frame, never painted out to the border.
         backgroundColor = UIKitChassis.bezel
-        screen.backgroundColor = TallyPalette.screen
+        // PROTOTYPE(GLASS): the acquiring screen is an open glass pane.
+        screen.backgroundColor = GlassPrototype.active
+            ? GlassPrototype.screenGlass : TallyPalette.screen
         addSubview(screen)
         screen.translatesAutoresizingMaskIntoConstraints = false
         let label = UIKitChassisLabel(

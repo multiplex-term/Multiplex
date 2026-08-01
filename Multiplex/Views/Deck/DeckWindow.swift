@@ -333,7 +333,8 @@ final class DeckWindowViewController: UIViewController {
 
     override func loadView() {
         let root = DeckSceneRegistrationView()
-        root.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): the scene root paints the smoke; this layer clears.
+        root.backgroundColor = GlassPrototype.active ? .clear : UIKitChassis.chassis
         root.sceneConnected = { [weak self] session in
             DeckScene.register(session)
             self?.externalActionCoordinator?.presenterDidBecomeAvailable()
