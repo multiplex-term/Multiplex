@@ -328,8 +328,11 @@ final class TerminalWindowViewController: UIViewController,
 
     override func loadView() {
         view = rootView
-        // PROTOTYPE(GLASS): the scene root carries the smoke ground.
-        view.backgroundColor = GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): the scene root's `TerminalGlassWindowShell`
+        // carries the smoked system glass; this silhouette goes clear
+        // over it.
+        view.backgroundColor = GlassPrototype.enabled
+            ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         #if os(visionOS)
         updateVisionOrnamentInstallation()
         #endif
@@ -2470,14 +2473,17 @@ final class TerminalWindowUIKitRootView: UIView {
     private let bottomSafeAreaBackfill = UIView()
     private let fileAttachPresenterParking = UIView()
     private let tabDivider = UIView()
-    private var shellMode = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        // PROTOTYPE(GLASS): the scene root paints the smoke; window chrome
-        // goes clear, and the terminal surface itself carries the screen
-        // pane (theme-tinted) — a pane ground here would double-tint it.
-        backgroundColor = GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): the scene root's glass shell carries the
+        // window's smoke; chrome goes clear over it, and the terminal
+        // surface itself carries the screen pane (theme-tinted) — a pane
+        // ground here would double-tint it. Geometry is untouched: the
+        // 24pt bordered silhouette and compact gutter are the shipping
+        // ones (user direction 2026-08-02).
+        backgroundColor = GlassPrototype.enabled
+            ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         paneContainer.backgroundColor =
             GlassPrototype.enabled ? GlassPrototype.clearedScreen : UIKitChassis.screen
         tabScrollView.backgroundColor =
@@ -2506,12 +2512,6 @@ final class TerminalWindowUIKitRootView: UIView {
         tabScrollView.accessibilityIdentifier = "terminalWindow.tabs"
         umdContainer.accessibilityIdentifier = "terminalWindow.umd"
         helperContainer.accessibilityIdentifier = "terminalWindow.helpers"
-
-        registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
-        ) { (view: TerminalWindowUIKitRootView, _: UITraitCollection) in
-            view.applyShellChrome()
-        }
     }
 
     @available(*, unavailable)
@@ -2561,28 +2561,21 @@ final class TerminalWindowUIKitRootView: UIView {
     }
 
     func setShellMode(_ shell: Bool) {
-        shellMode = shell
-        applyShellChrome()
-    }
-
-    /// PROTOTYPE(GLASS): under the GLASS selection the system platter is
-    /// the silhouette: fill and border retire, and clipping stays at a
-    /// platter-matching radius so edge-to-edge terminal rows cannot poke
-    /// past the system corner. Re-applied on trait flips because every
-    /// other appearance keeps the baseline 24pt bordered chassis.
-    private func applyShellChrome() {
-        #if os(visionOS)
-        let rounded = !shellMode
-        let glass = GlassPrototype.enabled
-            && traitCollection[GlassAppearanceTrait.self]
-            && traitCollection.userInterfaceStyle == .dark
-        #else
-        let rounded = false
-        let glass = false
-        #endif
-        layer.cornerRadius = rounded ? (glass ? 46 : 24) : 0
+        layer.cornerRadius = shell ? 0 : {
+            #if os(visionOS)
+            24
+            #else
+            0
+            #endif
+        }()
         clipsToBounds = true
-        layer.borderWidth = (rounded && !glass) ? 1 : 0
+        layer.borderWidth = shell ? 0 : {
+            #if os(visionOS)
+            1
+            #else
+            0
+            #endif
+        }()
         layer.borderColor = UIKitChassis.bezelHi
             .resolvedColor(with: traitCollection).cgColor
     }

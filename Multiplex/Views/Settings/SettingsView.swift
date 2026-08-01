@@ -899,7 +899,9 @@ private final class SettingsChoiceButton: UIButton {
     required init?(coder: NSCoder) { fatalError("unused") }
 
     func setSelected(_ selected: Bool) {
-        backgroundColor = selected ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): resting segments are strata over the smoke like
+        // every chassis control; opaque graphite otherwise.
+        backgroundColor = selected ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
         chassisTitle.attributedText = NSAttributedString(
             string: sourceTitle.uppercased(),
             attributes: [
@@ -995,7 +997,12 @@ final class SettingsBooleanRow: UIControl {
     required init?(coder: NSCoder) { fatalError("unused") }
 
     override var isHighlighted: Bool {
-        didSet { backgroundColor = isHighlighted ? UIKitChassis.bezel : UIKitChassis.chassis }
+        // PROTOTYPE(GLASS): rest on strataChassis — the ground the init
+        // chose — or the first tap permanently flips the row opaque.
+        didSet {
+            backgroundColor = isHighlighted
+                ? UIKitChassis.bezel : GlassPrototype.strataChassis
+        }
     }
 
     override func accessibilityActivate() -> Bool {
@@ -1266,7 +1273,9 @@ private final class SettingsThemeRowView: UIView {
         super.init(frame: .zero)
         backgroundColor = UIKitChassis.bezelHi
 
-        selectControl.backgroundColor = isSelected ? UIKitChassis.bezel : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): theme rows rest on strata over the smoke.
+        selectControl.backgroundColor = isSelected
+            ? UIKitChassis.bezel : GlassPrototype.strataChassis
         selectControl.hoverStyle = UIHoverStyle(
             effect: .highlight,
             shape: .rect(cornerRadius: 2)

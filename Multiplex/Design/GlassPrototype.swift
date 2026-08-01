@@ -19,6 +19,17 @@ import UIKit
 /// (user direction): `pinHostingWindow` carries the trait onto each
 /// sheet's own window, whose root paints `sheetGround` over the sheet
 /// platter. Only the app-lock shield stays opaque (privacy veil).
+///
+/// The terminal WINDOW keeps its shipping GEOMETRY under GLASS (user
+/// direction 2026-08-02: the padded 46pt platter-matching clip read as
+/// "padding too large"): the 24pt bordered silhouette, the compact grid
+/// gutter, and the hidden system platter all stay exactly as shipped.
+/// Its REAL glass comes from `TerminalGlassWindowShell` — the scene root
+/// mounts the window content inside a SwiftUI hierarchy owning a smoked
+/// `glassBackgroundEffect` in the silhouette's shape, because system
+/// glass renders behind UIKit content only from INSIDE its hierarchy (a
+/// sibling effect composites OVER the window — verified 2026-08-02).
+/// Do not rebuild the platter re-admission or a flat alpha-only tint.
 struct GlassAppearanceTrait: UITraitDefinition {
     static let defaultValue = false
     static let affectsColorAppearance = true
@@ -103,14 +114,17 @@ enum GlassPrototype {
     /// become strata over the smoke, like chips.
     static let strataChassis = material(strataMaterial, fallback: TallyPalette.chassis)
 
-    /// Terminal wrapper layers: clear on glass so the pane never
-    /// double-tints; the opaque theme ground otherwise.
+    /// Terminal layers that must NOT tint: the pane wrapper below the
+    /// surface and the grid's own layer go clear on glass (the surface
+    /// wrapper carries the one tint); the opaque theme ground otherwise.
     static func terminalWrapperGround(themeBackground: UIColor) -> UIColor {
         enabled ? material(.clear, fallback: themeBackground) : themeBackground
     }
 
-    /// The terminal view's own ground: theme background at `screenAlpha` on
-    /// glass, opaque otherwise.
+    /// The one pane tint — theme background at `screenAlpha` on glass,
+    /// opaque otherwise. Carried by the terminal SURFACE wrapper, which
+    /// spans the whole silhouette, so the tint reaches the window border
+    /// instead of stopping at the inset grid.
     static func terminalGround(themeBackground: UIColor) -> UIColor {
         guard enabled else { return themeBackground }
         return material(

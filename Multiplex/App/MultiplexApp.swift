@@ -518,9 +518,6 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
         // the platter, exactly as `.windowStyle` left it.
         let plainWindowBackground: Bool = {
             #if os(visionOS)
-            // PROTOTYPE(GLASS): a GLASS-selected scene re-admits the platter
-            // live (the scene root and applyAppearance own that switch); the
-            // connect-time plan keeps its shipping meaning.
             if case .terminal = plan { return true }
             #endif
             return false

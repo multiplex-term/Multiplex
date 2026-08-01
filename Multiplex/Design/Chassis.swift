@@ -677,11 +677,14 @@ extension AppAppearanceFollowing where Self: UIViewController {
     /// override it does not own; the scene root writes that one.
     private func pinHostingWindow(to style: UIUserInterfaceStyle) {
         guard let window = viewIfLoaded?.window else { return }
-        // PROTOTYPE(GLASS): the sheet's own window carries the glass trait
-        // too ("all modals need apply"); the value is global, so writing it
-        // on a shared window is always consistent.
-        window.traitOverrides[GlassAppearanceTrait.self] =
-            GlassPrototype.enabled && GlassSelectionState.shared.isGlass
+        // PROTOTYPE(GLASS): a sheet hosted in its OWN window carries the
+        // glass trait too ("all modals need apply"). A presentation sharing
+        // the scene's window must not write it — the scene root owns that
+        // trait, and terminal scenes deliberately never carry it.
+        if window !== presentingViewController?.viewIfLoaded?.window {
+            window.traitOverrides[GlassAppearanceTrait.self] =
+                GlassPrototype.enabled && GlassSelectionState.shared.isGlass
+        }
         guard style != .unspecified
             || window !== presentingViewController?.viewIfLoaded?.window
         else { return }

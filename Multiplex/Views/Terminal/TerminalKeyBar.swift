@@ -240,9 +240,19 @@ final class TerminalTallyKeyControl: UIControl {
         let foreground = isLatched ? UIKitChassis.chassis : UIKitChassis.signal2
         textLabel.textColor = foreground
         symbolView.tintColor = foreground
+        // PROTOTYPE(GLASS): resting key faces take the chip treatment —
+        // strata over the smoke — under the GLASS selection; every other
+        // appearance keeps the opaque chassis face. Latched and highlighted
+        // states already resolve through glass-aware accessors.
+        let restingFace = GlassPrototype.enabled
+            ? GlassPrototype.material(
+                GlassPrototype.strataMaterial,
+                fallback: TallyPalette.chassis
+            )
+            : UIKitChassis.chassis
         faceView.backgroundColor = isLatched
             ? UIKitChassis.signal2
-            : isHighlighted ? UIKitChassis.bezelHi : UIKitChassis.chassis
+            : isHighlighted ? UIKitChassis.bezelHi : restingFace
         faceView.tallyBorderColor = isLatched
             ? UIKitChassis.signal2
             : UIKitChassis.bezelHi
@@ -1422,6 +1432,11 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         // dark slab (`.unspecified` under SYSTEM keeps the native style).
         controller.overrideUserInterfaceStyle = overrideUserInterfaceStyle
         controller.loadViewIfNeeded()
+        // PROTOTYPE(GLASS): the popover window carries no scene traits —
+        // mirror the glass selection the same way the style is mirrored
+        // above, so the slab and its key faces resolve the smoke materials.
+        controller.view.traitOverrides[GlassAppearanceTrait.self] =
+            traitCollection[GlassAppearanceTrait.self]
         if let popover = controller.popoverPresentationController {
             popover.sourceView = ctrlKey
             popover.sourceRect = ctrlKey.bounds

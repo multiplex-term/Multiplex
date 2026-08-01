@@ -43,9 +43,12 @@ final class TerminalSurfaceView: UIView {
         self.configuration = configuration
         coordinator = Coordinator(controller: controller)
         super.init(frame: .zero)
-        // PROTOTYPE(GLASS): the terminal view itself carries the glass pane
-        // (theme background at `screenAlpha`); this wrapper goes clear.
-        backgroundColor = GlassPrototype.terminalWrapperGround(
+        // PROTOTYPE(GLASS): THIS wrapper carries the glass pane (theme
+        // background at `screenAlpha`) — it spans the whole silhouette, so
+        // the tint fills the compact gutter to the window border instead of
+        // leaving a bare-smoke band around the inset grid (user report
+        // 2026-08-02: "different border"). The grid's own layer goes clear.
+        backgroundColor = GlassPrototype.terminalGround(
             themeBackground: UIColor(configuration.theme.background)
         )
         isOpaque = !GlassPrototype.enabled
@@ -262,7 +265,7 @@ final class TerminalSurfaceView: UIView {
 
     func update(configuration: Configuration) {
         self.configuration = configuration
-        backgroundColor = GlassPrototype.terminalWrapperGround(
+        backgroundColor = GlassPrototype.terminalGround(
             themeBackground: UIColor(configuration.theme.background)
         )
         // A moved tab's view may already belong to another window while this
@@ -344,7 +347,9 @@ final class TerminalSurfaceView: UIView {
                 )
             })
         }
-        view.backgroundColor = GlassPrototype.terminalGround(
+        // PROTOTYPE(GLASS): the surface wrapper above carries the pane
+        // tint edge-to-edge; the grid's own layer stays clear over it.
+        view.backgroundColor = GlassPrototype.terminalWrapperGround(
             themeBackground: UIColor(theme.background)
         )
         // The keyboard belongs to the chassis, not the terminal surface:
