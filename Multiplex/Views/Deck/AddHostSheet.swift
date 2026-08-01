@@ -210,7 +210,8 @@ struct AddHostFormState {
 /// roads within one controller; editing an existing host is manual-only.
 @MainActor
 final class AddHostViewController: UIViewController, UITextFieldDelegate,
-    UIGestureRecognizerDelegate, UIAdaptivePresentationControllerDelegate {
+    UIGestureRecognizerDelegate, UIAdaptivePresentationControllerDelegate,
+    AppAppearanceFollowing {
     enum Mode: Hashable {
         case bind
         case manual
@@ -250,6 +251,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     var appAppearance = AppAppearance.system {
         didSet { applyAppearance() }
     }
+    let appAppearanceFollower = AppAppearanceFollower()
 
     private(set) var contentStack = UIStackView()
     private(set) var manualStack = UIStackView()
@@ -373,16 +375,14 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         navigationController?.presentationController?.delegate = self
-        if pendingPaywallPresentation {
-            pendingPaywallPresentation = false
-            presentPaywall()
-        }
+        drainPendingPaywall()
         scheduleDebugScrollIfNeeded()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         updateBindHeight()
+        applyKeyboardContentInset(to: scrollView)
     }
 
     func presentationControllerShouldDismiss(
@@ -574,7 +574,17 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         let container = UIView()
         container.addSubview(controller.view)
         controller.view.translatesAutoresizingMaskIntoConstraints = false
-        let height = container.heightAnchor.constraint(equalToConstant: 1)
+        // The pane's own view is required-pinned to this container, so a
+        // REQUIRED placeholder height crushes everything inside it until
+        // `updateBindHeight()` can measure — and that measurement is refused
+        // until the container has a real width, so the pane's first solve is
+        // always the degenerate one. Auto Layout resolves the impossible
+        // height by breaking the pane's internal pins instead, which is what
+        // renders its sections as empty grey bars. A near-required placeholder
+        // yields to the pane's own content when it cannot hold, and still
+        // outranks every content priority once the measured height lands.
+        let height = container.heightAnchor.constraint(equalToConstant: 240)
+        height.priority = UILayoutPriority(999)
         bindHeightConstraint = height
         NSLayoutConstraint.activate([
             controller.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -620,6 +630,16 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         let enabled = form.isValid
         saveItem?.isEnabled = enabled
         saveItem?.tintColor = enabled ? UIKitChassis.signal : UIKitChassis.signal3
+        updateTestAvailability()
+    }
+
+    /// Save and the Signal check answer to the same validity, so the chip has
+    /// to follow every identity/transport edit. Its enabled state is otherwise
+    /// baked at `renderTestSection()` time, which never re-runs while the test
+    /// state is idle — the state a brand-new (invalid) form starts in.
+    private func updateTestAvailability() {
+        guard let testChip else { return }
+        setChip(testChip, enabled: form.isValid && testState != .running)
     }
 
     private func updateDismissPolicy() {
@@ -629,18 +649,15 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     }
 
     private func applyAppearance() {
-        let style: UIUserInterfaceStyle
-        switch appAppearance.resolvedOverride {
-        case nil: style = .unspecified
-        case .light: style = .light
-        case .dark: style = .dark
-        }
-        overrideUserInterfaceStyle = style
-        navigationController?.overrideUserInterfaceStyle = style
-        viewIfLoaded?.window?.overrideUserInterfaceStyle = style
-        if let navigationBar = navigationController?.navigationBar {
-            UIKitChassis.configureSheetNavigationBar(navigationBar)
-        }
+        applyAppAppearance()
+        // The paywall this sheet raises is a sheet-on-a-sheet with no store of
+        // its own: hand the choice down so a flip reaches it too.
+        presentedPaywall?.appAppearance = appAppearance
+    }
+
+    private var presentedPaywall: ProPaywallViewController? {
+        (presentedViewController as? UINavigationController)?
+            .viewControllers.first as? ProPaywallViewController
     }
 
     // MARK: Manual form construction
@@ -978,8 +995,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             self?.runTest()
         }
         testChip = chip
-        let canTest = form.isValid && testState != .running
-        setChip(chip, enabled: canTest)
+        updateTestAvailability()
         let testRowStack = UIStackView(arrangedSubviews: [chip, addHostFlexibleSpacer()])
         testRowStack.axis = .horizontal
         testRowStack.alignment = .center
@@ -1492,12 +1508,28 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             pendingPaywallPresentation = true
             return
         }
-        guard presentedViewController == nil else { return }
+        // The bind flow consumes its host-limit request before it reaches here,
+        // so a busy presentation slot — normally the QR scanner still animating
+        // out under the confirm that raised this — must park the intent instead
+        // of dropping it, then present once that modal has finished leaving.
+        if let presented = presentedViewController {
+            pendingPaywallPresentation = true
+            presented.transitionCoordinator?.animate(alongsideTransition: nil) { [weak self] _ in
+                self?.drainPendingPaywall()
+            }
+            return
+        }
         let controller = ProPaywallViewController(entitlements: entitlements)
         controller.appAppearance = appAppearance
         let navigation = UINavigationController(rootViewController: controller)
         controller.onDone = { [weak navigation] in navigation?.dismiss(animated: true) }
         present(navigation, animated: true)
+    }
+
+    private func drainPendingPaywall() {
+        guard pendingPaywallPresentation else { return }
+        pendingPaywallPresentation = false
+        presentPaywall()
     }
 
     // MARK: Save / cancel

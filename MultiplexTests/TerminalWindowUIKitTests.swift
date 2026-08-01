@@ -46,9 +46,9 @@ final class TerminalWindowUIKitTests: XCTestCase {
             second,
             allowed: true
         )
-        XCTAssertNil(
-            TerminalFocusArbiter.current,
-            "Foreground notification order must not elect a terminal when ownership is empty"
+        XCTAssertTrue(
+            TerminalFocusArbiter.current === contender,
+            "An empty ownership is re-elected on restore: app-unlock clears the owner via inputSuppressed and a closed focused window deallocates it, and neither has another claim site"
         )
     }
 
@@ -212,6 +212,56 @@ final class TerminalWindowUIKitTests: XCTestCase {
             accuracy: 0.5
         )
         XCTAssertEqual(panes.frame.minY, rail.frame.maxY, accuracy: 0.5)
+    }
+
+    func testTabRailScrollerTracksPressesAtOnceAndSizesWithItsLayoutPass() throws {
+        let first = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "main"))
+        let second = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "scratch"))
+        // The rail only exists on the shell stage: a classic visionOS window
+        // hands its strip to the ornament instead.
+        let shell = TerminalWindowShellConfiguration(
+            deckControlLabel: "DECK",
+            availableWidth: 420,
+            showDeck: {},
+            openTerminalRoute: { _ in },
+            revealTab: { _ in },
+            tabsEmptied: {},
+            terminalFocusAllowed: false
+        )
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tabs: [first, second]),
+            shell: shell
+        )
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 420, height: 620)
+        fixture.controller.view.setNeedsLayout()
+        fixture.controller.view.layoutIfNeeded()
+
+        let rail = try XCTUnwrap(
+            view("terminalWindow.tabs", in: fixture.controller.view)
+                as? TerminalTabScrollView
+        )
+        let strip = try XCTUnwrap(descendant(
+            of: TerminalTabStripView.self,
+            in: fixture.controller.view
+        ))
+        let cell = try XCTUnwrap(strip.cells.first)
+
+        XCTAssertFalse(
+            rail.delaysContentTouches,
+            "A delayed content touch is the press a drifting finger loses"
+        )
+        XCTAssertTrue(
+            rail.touchesShouldCancel(in: cell),
+            "A real drag starting on a cell must still scroll the strip"
+        )
+        XCTAssertEqual(
+            rail.contentSize.width,
+            strip.frame.maxX + TerminalWindowUIKitRootView.tabRailHorizontalInset,
+            accuracy: 0.5,
+            "Strip frame and content size are one measurement per layout pass"
+        )
+        XCTAssertGreaterThanOrEqual(strip.frame.width, strip.fittingContentSize().width)
     }
 
     func testRestoredAuxiliaryWithoutLiveControllerIsStrippedBeforeRendering() {

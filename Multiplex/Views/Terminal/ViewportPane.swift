@@ -647,6 +647,7 @@ final class ViewportFailureOverlayView: UIView {
         let messageLabel = UILabel()
         messageLabel.text = message
         messageLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
+        messageLabel.adjustsFontForContentSizeCategory = true
         messageLabel.textColor = UIKitChassis.signal2
         messageLabel.numberOfLines = 0
         messageLabel.textAlignment = .center
@@ -659,6 +660,7 @@ final class ViewportFailureOverlayView: UIView {
             let hintLabel = UILabel()
             hintLabel.text = hint
             hintLabel.font = UIFont.preferredFont(forTextStyle: .footnote)
+            hintLabel.adjustsFontForContentSizeCategory = true
             hintLabel.textColor = UIKitChassis.signal3
             hintLabel.numberOfLines = 0
             hintLabel.textAlignment = .center

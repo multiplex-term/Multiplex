@@ -632,6 +632,7 @@ final class TerminalWindowViewController: UIViewController,
         rootView.setShellMode(shell != nil)
         layoutNativeChrome()
         presentPendingFeatureIfPossible()
+        applyAppearanceToPresentedFeature()
     }
 
     // MARK: Route reconciliation
@@ -881,13 +882,16 @@ final class TerminalWindowViewController: UIViewController,
 
     // MARK: Focus and probes
 
+    /// Keyboard focus follows the visible tab whatever its transport is
+    /// doing. Claiming is what resigns the tab that just went off screen, so
+    /// gating this on `.live` would leave a hidden live session first
+    /// responder while a connecting/ended pane is on screen — every keystroke
+    /// would land invisibly in the session behind it.
     private func claimActiveTerminalFocusIfAllowed() {
         guard terminalFocusAllowed,
               activeTab?.isAuxiliaryPane != true
         else { return }
-        if activeController?.status == .live {
-            activeController?.focusTerminal()
-        }
+        activeController?.focusTerminal()
     }
 
     /// Appearance and scene activation are not user focus requests. Several
@@ -1216,19 +1220,12 @@ extension TerminalWindowViewController {
             tabStrip.removeFromSuperview()
             rootView.tabScrollView.addSubview(tabStrip)
         }
-        let fitting = tabStrip.fittingContentSize()
-        let verticalInset = TerminalWindowUIKitRootView.tabRailVerticalInset
-        tabStrip.frame = CGRect(
-            x: TerminalWindowUIKitRootView.tabRailHorizontalInset,
-            y: verticalInset,
-            width: max(fitting.width, 1),
-            height: fitting.height
-        )
-        rootView.tabScrollView.contentSize = CGSize(
-            width: tabStrip.frame.maxX
-                + TerminalWindowUIKitRootView.tabRailHorizontalInset,
-            height: fitting.height + verticalInset * 2
-        )
+        // Geometry belongs to `layoutNativeChrome`, which measures the strip
+        // on every layout pass anyway: sizing it only here left a pass that
+        // changed the fitting size without a render with a stale strip width
+        // — cells compressed into each other, and the overflow past that
+        // width stopped hit-testing entirely.
+        rootView.setNeedsLayout()
     }
 
     private var tabItems: [TerminalTabStrip.Item] {
@@ -1612,8 +1609,9 @@ extension TerminalWindowViewController {
             reservesBottomSafeArea: shell == nil,
             safeAreaInsets: rootView.safeAreaInsets
         )
+        let tabsFitting = tabStrip.fittingContentSize()
         let tabsHeight: CGFloat = route.tabs.count > 1
-            ? tabStrip.fittingContentSize().height
+            ? tabsFitting.height
                 + TerminalWindowUIKitRootView.tabRailVerticalInset * 2
             : 0
         let umdHeight: CGFloat = {
@@ -1644,16 +1642,41 @@ extension TerminalWindowViewController {
                 height: max(0, contentBounds.height - umdHeight - tabsHeight)
             )
         } else {
+            // The classic window is the one plan hosted inside a
+            // UINavigationController, and a native child controller receives
+            // the navigation controller's FULL bounds — the translucent bar
+            // overlays the top band. Spend the top safe area here exactly
+            // like the bottom is spent below, or the tab rail lays out
+            // entirely under the bar (user-reported as "tab system gone")
+            // and the pane's first text row slides beneath it.
+            let topInset = rootView.safeAreaInsets.top
             rootView.tabScrollView.frame = CGRect(
-                x: 0, y: 0, width: contentBounds.width, height: tabsHeight
+                x: 0, y: topInset, width: contentBounds.width, height: tabsHeight
             )
             rootView.paneContainer.frame = CGRect(
                 x: 0,
-                y: tabsHeight,
+                y: topInset + tabsHeight,
                 width: contentBounds.width,
-                height: max(0, contentBounds.height - tabsHeight)
+                height: max(0, contentBounds.height - topInset - tabsHeight)
             )
             rootView.umdContainer.frame = .zero
+        }
+        // One measurement per pass owns the rail's height, the strip's frame,
+        // and the scroller's content size together, so they can never disagree
+        // about how wide the tabs are.
+        if tabStrip.superview === rootView.tabScrollView {
+            let verticalInset = TerminalWindowUIKitRootView.tabRailVerticalInset
+            tabStrip.frame = CGRect(
+                x: TerminalWindowUIKitRootView.tabRailHorizontalInset,
+                y: verticalInset,
+                width: max(tabsFitting.width, 1),
+                height: tabsFitting.height
+            )
+            rootView.tabScrollView.contentSize = CGSize(
+                width: tabStrip.frame.maxX
+                    + TerminalWindowUIKitRootView.tabRailHorizontalInset,
+                height: tabsFitting.height + verticalInset * 2
+            )
         }
         rootView.setBottomSafeAreaBackfill(
             frame: CGRect(
@@ -2174,8 +2197,20 @@ extension TerminalWindowViewController {
         UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
         navigation.presentationController?.delegate = self
         presentedFeatureController = navigation
+        applyAppearanceToPresentedFeature()
         present(navigation, animated: true)
         navigation.presentationController?.delegate = self
+    }
+
+    /// The link and path sheets carry no appearance property of their own, so
+    /// the stack they are hosted in wears the choice for them. `renderNow`
+    /// re-runs this on every appearance change (the observation reads
+    /// `themes.appearance`), which is what keeps an open sheet in step.
+    private func applyAppearanceToPresentedFeature() {
+        guard let presented = presentedFeatureController else { return }
+        let style = themes.appearance.interfaceStyle
+        guard presented.overrideUserInterfaceStyle != style else { return }
+        presented.overrideUserInterfaceStyle = style
     }
 
     private func dismissPresentedFeature() {
@@ -2202,7 +2237,7 @@ extension TerminalWindowViewController {
     private func presentPaywall() {
         guard !appLocked, presentedViewController == nil else { return }
         let paywall = ProPaywallViewController(entitlements: entitlements)
-        paywall.appAppearance = themes.appearance
+        paywall.followAppAppearance(themes)
         let navigation = UINavigationController(rootViewController: paywall)
         UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
         paywall.onDone = { [weak navigation] in navigation?.dismiss(animated: true) }
@@ -2220,7 +2255,7 @@ extension TerminalWindowViewController {
             host: host,
             sessionNames: notice.sessionNames
         )
-        guide.appAppearance = themes.appearance
+        guide.followAppAppearance(themes)
         let navigation = UINavigationController(rootViewController: guide)
         UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
         guide.onDone = { [weak navigation] in navigation?.dismiss(animated: true) }
@@ -2378,13 +2413,36 @@ extension TerminalWindowViewController {
 }
 #endif
 
+/// The tab rail's scroller. A `UIScrollView` delays content touches by 150 ms
+/// and discards them outright if the finger drifts during that window, so once
+/// the tabs overflow the rail a perfectly ordinary press never reached the
+/// cell — the "tabs feel dead" report. Track immediately instead, and let a
+/// genuine drag that starts on a cell still scroll the strip: UIKit's default
+/// `touchesShouldCancel` answers *false* for a `UIControl`, which with
+/// undelayed touches would pin the strip in place under any press.
+@MainActor
+final class TerminalTabScrollView: UIScrollView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        delaysContentTouches = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func touchesShouldCancel(in view: UIView) -> Bool {
+        if view is TerminalTabCell { return true }
+        return super.touchesShouldCancel(in: view)
+    }
+}
+
 @MainActor
 final class TerminalWindowUIKitRootView: UIView {
     static let tabRailHorizontalInset: CGFloat = 12
     static let tabRailVerticalInset: CGFloat = 6
 
     let paneContainer = UIView()
-    let tabScrollView = UIScrollView()
+    let tabScrollView = TerminalTabScrollView()
     let umdContainer = UIView()
     let helperContainer = UIView()
     private let bottomSafeAreaBackfill = UIView()

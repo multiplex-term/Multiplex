@@ -208,6 +208,10 @@ final class AgentHistoryPanelViewController: UIViewController {
         switch status {
         case nil, .loading:
             let spinner = UIActivityIndicatorView(style: .medium)
+            // An unstyled indicator resolves to the system gray and ignores the
+            // window tint, so the TALLY ink must be assigned directly — the same
+            // token every other busy indicator in the app uses.
+            spinner.color = UIKitChassis.signal2
             spinner.startAnimating()
             spinner.accessibilityLabel = "Reading session file"
             let label = UIKitChassisLabel(

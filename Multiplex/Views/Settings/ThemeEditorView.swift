@@ -5,7 +5,8 @@ import UIKit
 /// Edits a private draft and commits only through Save. Popping the controller
 /// leaves the store untouched, matching the former NavigationStack behavior.
 @MainActor
-final class ThemeEditorViewController: UIViewController, UITextFieldDelegate {
+final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
+    AppAppearanceFollowing {
     enum Metrics {
         static let contentMaximumWidth: CGFloat = 680
         static let outerInset: CGFloat = 18
@@ -20,6 +21,7 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate {
     var appAppearance = AppAppearance.system {
         didSet { applyAppearance() }
     }
+    let appAppearanceFollower = AppAppearanceFollower()
 
     private(set) var preview: UIKitThemePreviewView!
     private(set) var nameField = UITextField()
@@ -56,6 +58,13 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         applyAppearance()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Editing the theme name raises a keyboard over the color table below
+        // it, so this form pays for the overlap the way the sheets do.
+        applyKeyboardContentInset(to: scrollView)
     }
 
     private func configureNavigation() {
@@ -351,21 +360,12 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate {
         return true
     }
 
+    /// A pushed editor shares Settings' navigation stack, whose chrome and
+    /// window belong to that root — only a standalone editor pins them.
     private func applyAppearance() {
-        let style: UIUserInterfaceStyle
-        switch appAppearance.resolvedOverride {
-        case nil: style = .unspecified
-        case .light: style = .light
-        case .dark: style = .dark
-        }
-        overrideUserInterfaceStyle = style
-        if navigationController?.viewControllers.first === self {
-            navigationController?.overrideUserInterfaceStyle = style
-            viewIfLoaded?.window?.overrideUserInterfaceStyle = style
-        }
-        if let navigationBar = navigationController?.navigationBar {
-            UIKitChassis.configureSheetNavigationBar(navigationBar)
-        }
+        applyAppAppearance(
+            pinsHostingChrome: navigationController?.viewControllers.first === self
+        )
     }
 
     @objc private func nameChanged() {

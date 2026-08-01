@@ -89,15 +89,47 @@ final class SceneActivityCodecTests: XCTestCase {
         ))
         XCTAssertEqual(SceneActivityCodec.payload(from: activity), expected)
 
-        // Saved-state files and live SwiftUI activation requests can carry
-        // either key depending on which lifecycle edge produced the activity.
+        // Saved-state archives can carry either value key depending on which
+        // lifecycle edge wrote them; the activity type is the same one every
+        // real archive uses.
         var savedOnly = activity.userInfo ?? [:]
         savedOnly.removeValue(forKey: SceneActivityCodec.legacyPresentedSceneValueKey)
         let savedActivity = NSUserActivity(
-            activityType: SceneActivityCodec.legacyOpenWindowActivityType
+            activityType: SceneActivityCodec.legacyStateRestorationActivityType
         )
         savedActivity.addUserInfoEntries(from: savedOnly)
         XCTAssertEqual(SceneActivityCodec.payload(from: savedActivity), expected)
+    }
+
+    func testLegacySessionUserInfoStandsInForADelayedRestorationActivity() throws {
+        let route = TerminalWindowRoute(tab: TerminalRoute(
+            hostID: UUID(),
+            mode: .attach(sessionName: "main")
+        ))
+        let userInfo: [String: Any] = [
+            SceneActivityCodec.legacySceneIDKey: "terminal",
+            SceneActivityCodec.legacySceneValueKey: try JSONEncoder().encode(route),
+            // A real session also carries keys this app knows nothing about.
+            "com.apple.SwiftUI.sceneTypeHash": 12_345,
+        ]
+        let activity = try XCTUnwrap(
+            SceneActivityCodec.legacySessionActivity(from: userInfo)
+        )
+        XCTAssertEqual(
+            activity.activityType,
+            SceneActivityCodec.legacyStateRestorationActivityType
+        )
+        XCTAssertEqual(SceneActivityCodec.payload(from: activity), .terminal(route))
+
+        // Nothing to decode is not a scene: an ID with no value, a session
+        // that never was SwiftUI's, and no userInfo at all all decline.
+        XCTAssertNil(SceneActivityCodec.legacySessionActivity(from: [
+            SceneActivityCodec.legacySceneIDKey: "terminal",
+        ]))
+        XCTAssertNil(SceneActivityCodec.legacySessionActivity(from: [
+            "unrelated": "value",
+        ]))
+        XCTAssertNil(SceneActivityCodec.legacySessionActivity(from: nil))
     }
 
     func testCapturedSwiftUIDeckValueMigrates() {

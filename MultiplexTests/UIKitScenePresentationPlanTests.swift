@@ -110,7 +110,7 @@ final class UIKitScenePresentationPlanTests: XCTestCase {
             mode: .attach(sessionName: "main")
         ))
         let terminal = NSUserActivity(
-            activityType: SceneActivityCodec.legacyOpenWindowActivityType
+            activityType: SceneActivityCodec.legacyStateRestorationActivityType
         )
         terminal.addUserInfoEntries(from: [
             SceneActivityCodec.legacySceneIDKey: "terminal",
@@ -202,39 +202,55 @@ final class UIKitScenePresentationPlanTests: XCTestCase {
         XCTAssertEqual(buffer.accept([live], phase: .activation), [live])
     }
 
-    func testPersistedSwiftUISessionAdoptionIsNarrow() {
-        let legacy = NSUserActivity(
-            activityType: SceneActivityCodec.legacyStateRestorationActivityType
-        )
-        legacy.addUserInfoEntries(from: [
-            SceneActivityCodec.legacySceneIDKey: "deck",
-            SceneActivityCodec.legacyPresentedSceneValueKey: Data("\"main\"".utf8),
-        ])
+    func testSceneAdoptionFollowsDelegateOwnershipNotLegacyFingerprints() {
+        let native = "Multiplex.MultiplexSceneDelegate"
 
+        // The persisted SwiftUI delegate, resolvable because SwiftUI happens
+        // to be loaded. Either slot naming it is the scene UIKit would
+        // otherwise connect to a lifecycle this executable no longer runs.
         XCTAssertTrue(UIKitLegacySceneMigrationPolicy.requiresAdoption(
-            configuredDelegateClassName: "SwiftUI.AppSceneDelegate",
-            liveDelegateClassName: nil,
-            restorationActivity: legacy
+            nativeDelegateClassName: native,
+            configuredDelegateClassName:
+                UIKitLegacySceneMigrationPolicy.swiftUIDelegateClassName,
+            liveDelegateClassName: nil
         ))
         XCTAssertTrue(UIKitLegacySceneMigrationPolicy.requiresAdoption(
+            nativeDelegateClassName: native,
             configuredDelegateClassName: nil,
-            liveDelegateClassName: "SwiftUI.AppSceneDelegate",
-            restorationActivity: nil
+            liveDelegateClassName:
+                UIKitLegacySceneMigrationPolicy.swiftUIDelegateClassName
         ))
+
+        // The safety net that used to erase itself: without SwiftUI in the
+        // process the persisted class name resolves to nothing in BOTH slots,
+        // and after the first adoption the session's restoration activity is
+        // this app's own type, so no legacy fingerprint remains to match. A
+        // scene in this state has no delegate at all and must still be
+        // adopted — the alternative is a blank window on every later launch.
         XCTAssertTrue(UIKitLegacySceneMigrationPolicy.requiresAdoption(
+            nativeDelegateClassName: native,
             configuredDelegateClassName: nil,
-            liveDelegateClassName: nil,
-            restorationActivity: legacy
+            liveDelegateClassName: nil
+        ))
+
+        // A scene UIKit owns natively is never taken: already connected, and
+        // configured-but-not-yet-instantiated (where stealing it would orphan
+        // the connection options UIKit is about to deliver).
+        XCTAssertFalse(UIKitLegacySceneMigrationPolicy.requiresAdoption(
+            nativeDelegateClassName: native,
+            configuredDelegateClassName: native,
+            liveDelegateClassName: native
         ))
         XCTAssertFalse(UIKitLegacySceneMigrationPolicy.requiresAdoption(
-            configuredDelegateClassName: "Multiplex.MultiplexSceneDelegate",
-            liveDelegateClassName: "Multiplex.MultiplexSceneDelegate",
-            restorationActivity: legacy
+            nativeDelegateClassName: native,
+            configuredDelegateClassName: native,
+            liveDelegateClassName: nil
         ))
         XCTAssertFalse(UIKitLegacySceneMigrationPolicy.requiresAdoption(
-            configuredDelegateClassName: nil,
-            liveDelegateClassName: nil,
-            restorationActivity: nil
+            nativeDelegateClassName: native,
+            configuredDelegateClassName:
+                UIKitLegacySceneMigrationPolicy.swiftUIDelegateClassName,
+            liveDelegateClassName: native
         ))
     }
 
@@ -256,6 +272,71 @@ final class UIKitScenePresentationPlanTests: XCTestCase {
         XCTAssertNil(UIKitSceneGeometryPolicy.parseSize("0x700"))
         XCTAssertNil(UIKitSceneGeometryPolicy.parseSize("1120"))
         XCTAssertNil(UIKitSceneGeometryPolicy.parseSize("wideX700"))
+    }
+
+    func testRememberedWindowSizeStandsInForTheAuthoredDefault() throws {
+        let suiteName = "SceneWindowSizeStoreTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SceneWindowSizeStore(defaults: defaults)
+        let terminalDefault = UIKitSceneGeometryPolicy.terminalDefault
+
+        // Nothing remembered: the authored default, exactly as `.defaultSize`.
+        XCTAssertNil(store.lastSize(for: .terminal))
+        XCTAssertEqual(
+            SceneGeometryPolicy.chooseInitialSize(
+                environmentOverride: nil,
+                remembered: store.lastSize(for: .terminal),
+                default: terminalDefault
+            ),
+            terminalDefault
+        )
+
+        // A window the user resized is what the next window of that kind
+        // opens at, and it says nothing about the other kind.
+        let resized = CGSize(width: 1_600, height: 1_000)
+        store.record(resized, for: .terminal)
+        XCTAssertNil(store.lastSize(for: .deck))
+        XCTAssertEqual(
+            SceneGeometryPolicy.chooseInitialSize(
+                environmentOverride: nil,
+                remembered: store.lastSize(for: .terminal),
+                default: terminalDefault
+            ),
+            resized
+        )
+
+        // A DEBUG screenshot override still wins outright.
+        XCTAssertEqual(
+            SceneGeometryPolicy.chooseInitialSize(
+                environmentOverride: CGSize(width: 860, height: 540),
+                remembered: store.lastSize(for: .terminal),
+                default: terminalDefault
+            ),
+            CGSize(width: 860, height: 540)
+        )
+
+        // A scene sampled mid-teardown reports nothing worth remembering.
+        store.record(.zero, for: .terminal)
+        store.record(CGSize(width: 1_600, height: CGFloat.nan), for: .terminal)
+        XCTAssertEqual(store.lastSize(for: .terminal), resized)
+    }
+
+    func testGeometryOverrideKeysStayInStepWithTheGeometryPolicy() {
+        for kind in SceneGeometryKind.allCases {
+            let payload: ScenePayload = switch kind {
+            case .deck: .deck(.main)
+            case .terminal: .terminal(TerminalWindowRoute(tabs: []))
+            }
+            XCTAssertEqual(SceneGeometryKind(payload), kind)
+            XCTAssertEqual(
+                UIKitSceneGeometryPolicy.preferredSize(
+                    for: payload,
+                    environment: [kind.debugSizeEnvironmentKey: "900x600"]
+                ),
+                CGSize(width: 900, height: 600)
+            )
+        }
     }
 
     func testConnectionPhaseWaitsForDelayedRestorationAndPreservesActivation() throws {

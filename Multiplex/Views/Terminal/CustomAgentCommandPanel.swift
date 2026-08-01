@@ -53,6 +53,9 @@ final class CustomAgentCommandDrafts {
 final class CustomAgentCommandPanelViewController: UIViewController {
     nonisolated static let preferredWidth: CGFloat = 500
     nonisolated static let maximumEditorHeight: CGFloat = 430
+    /// Below the footer legend's own resistance (see `legendRow`), so a
+    /// shortened popover spends the scroll viewport before any chrome.
+    private static let listHeightPriority = UILayoutPriority(650)
 
     let agent: AgentKind
     private(set) var panelWidth: CGFloat
@@ -71,11 +74,13 @@ final class CustomAgentCommandPanelViewController: UIViewController {
     private let listScrollView = UIScrollView()
     private let listStack = UIStackView()
     private var listHeightConstraint: NSLayoutConstraint?
+    private var listHeightCeilingConstraint: NSLayoutConstraint?
     private weak var accordionControl: CustomCommandAccordionControl?
     private var rowViews: [UUID: CustomCommandRowView] = [:]
     private var renderedColumnCount = 0
     private var renderedCompactControls: Bool?
     private var rebuildingList = false
+    private var listContentExceedsCap = false
 
     init(
         agent: AgentKind,
@@ -116,6 +121,7 @@ final class CustomAgentCommandPanelViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        refreshListScrollEnabled()
         let columns = builtInColumnCount(for: panelView.bounds.width)
         let compact = usesCompactControls(for: panelView.bounds.width)
         guard !rebuildingList,
@@ -212,9 +218,13 @@ final class CustomAgentCommandPanelViewController: UIViewController {
     }
 
     func deleteCommand(id: UUID) {
+        // Only the deleted row hands back its editor. Another row being typed
+        // into keeps the keyboard and its caret across the rebuild, and because
+        // focus is restored by command UUID it can never land on whichever row
+        // slid into the deleted one's position.
         rowViews[id]?.resignEditor()
         drafts.remove(id: id)
-        rebuildCommandList()
+        rebuildCommandList(preservingFocus: true)
     }
 
     func updateCommand(_ command: CustomAgentCommand) {
@@ -326,8 +336,26 @@ final class CustomAgentCommandPanelViewController: UIViewController {
                 constant: -24
             ),
         ])
+        // The viewport's height is a ceiling that must hold and a resting
+        // height that may give way. UIKit shortens an anchored popover above a
+        // docked keyboard, and the SwiftUI panel this replaced spelled the same
+        // rule `.frame(minHeight: 0, idealHeight:, maxHeight:)`: only the list
+        // contracts, so the header and the ADD/CANCEL/DONE footer stay on
+        // screen instead of being clipped out of reach.
+        let ceiling = listScrollView.heightAnchor.constraint(
+            lessThanOrEqualToConstant: 0
+        )
+        ceiling.identifier = "customCommands.listHeightCeiling"
+        ceiling.isActive = true
+        listHeightCeilingConstraint = ceiling
+        // Contracting stops at zero: past that the legend gives way, never the
+        // stack's arithmetic.
+        listScrollView.heightAnchor.constraint(
+            greaterThanOrEqualToConstant: 0
+        ).isActive = true
         let height = listScrollView.heightAnchor.constraint(equalToConstant: 0)
         height.identifier = "customCommands.listHeight"
+        height.priority = Self.listHeightPriority
         height.isActive = true
         listHeightConstraint = height
         return listScrollView
@@ -410,7 +438,10 @@ final class CustomAgentCommandPanelViewController: UIViewController {
         label.font = UIKitChassis.monoFont(8, weight: .medium)
         label.textColor = UIKitChassis.signal2
         label.numberOfLines = 0
-        label.setContentCompressionResistancePriority(.required, for: .vertical)
+        // Above the list viewport's resting height, below required: the legend
+        // is the last thing in the panel to give way, and a required floor here
+        // would make a popover shorter than the whole panel unsatisfiable.
+        label.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
 
         let row = UIStackView(arrangedSubviews: [dot, label])
         row.axis = .horizontal
@@ -434,8 +465,9 @@ final class CustomAgentCommandPanelViewController: UIViewController {
         rebuildingList = true
         defer { rebuildingList = false }
 
-        let focusedID = preservingFocus
-            ? rowViews.first(where: { $0.value.isEditing })?.key
+        let focused: (id: UUID, selection: NSRange)? = preservingFocus
+            ? rowViews.first(where: { $0.value.isEditing })
+                .map { (id: $0.key, selection: $0.value.editorSelection) }
             : nil
         listStack.arrangedSubviews.forEach {
             listStack.removeArrangedSubview($0)
@@ -504,9 +536,9 @@ final class CustomAgentCommandPanelViewController: UIViewController {
 
         listStack.layoutIfNeeded()
         refreshPreferredContentSize()
-        if let focusedID {
+        if let focused {
             DispatchQueue.main.async { [weak self] in
-                self?.rowViews[focusedID]?.focusEditor()
+                self?.rowViews[focused.id]?.focusEditor(selection: focused.selection)
             }
         }
     }
@@ -569,10 +601,12 @@ final class CustomAgentCommandPanelViewController: UIViewController {
             ceil(measured > 24 ? measured : estimate)
         )
         listHeightConstraint?.constant = resolved
-        listScrollView.isScrollEnabled = measured > Self.maximumEditorHeight
+        listHeightCeilingConstraint?.constant = resolved
+        listContentExceedsCap = measured > Self.maximumEditorHeight
         panelView.invalidateIntrinsicContentSize()
         view.setNeedsLayout()
         view.layoutIfNeeded()
+        refreshListScrollEnabled()
 
         let size = panelView.fittingSize(for: width)
         guard preferredContentSize != size else { return }
@@ -580,6 +614,15 @@ final class CustomAgentCommandPanelViewController: UIViewController {
         if notifiesParent {
             parent?.preferredContentSizeDidChange(forChildContentContainer: self)
         }
+    }
+
+    /// The resting height is what the content wants; the frame is what the
+    /// popover was given. A contracted viewport has to scroll even when the
+    /// content would otherwise have fit.
+    private func refreshListScrollEnabled() {
+        let contracted = listScrollView.bounds.height + 0.5
+            < listScrollView.contentSize.height
+        listScrollView.isScrollEnabled = listContentExceedsCap || contracted
     }
 
     private func refreshPreferredContentSize() {
@@ -1135,8 +1178,14 @@ private final class CustomCommandRowView: UIView, UITextViewDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
-    func focusEditor() {
+    var editorSelection: NSRange { editor.selectedRange }
+
+    func focusEditor(selection: NSRange? = nil) {
         editor.becomeFirstResponder()
+        guard let selection,
+              selection.location + selection.length <= (editor.text as NSString).length
+        else { return }
+        editor.selectedRange = selection
     }
 
     func resignEditor() {
@@ -1284,7 +1333,10 @@ private final class CustomCommandSwitch: UIControl {
         )
         super.init(frame: .zero)
         isAccessibilityElement = true
-        accessibilityTraits = .button
+        // The SwiftUI row was a real `Toggle`; `.toggleButton` is UIKit's
+        // equivalent identity, so the switch rotor and the spoken On/Off
+        // state survive the port.
+        accessibilityTraits = [.button, .toggleButton]
         self.accessibilityLabel = accessibilityLabel
         accessibilityIdentifier = "customCommands.switch.\(label.lowercased())"
         addTarget(self, action: #selector(pressed), for: .touchUpInside)
@@ -1313,12 +1365,12 @@ private final class CustomCommandSwitch: UIControl {
 
     @objc private func pressed() {
         isOn.toggle()
-        render()
+        render(animated: true)
         changed(isOn)
     }
 
-    private func render() {
-        track.setOn(isOn)
+    private func render(animated: Bool = false) {
+        track.setOn(isOn, animated: animated)
         caption.setColor(isOn ? UIKitChassis.signal : UIKitChassis.signal2)
         accessibilityValue = isOn ? "On" : "Off"
         if isOn {
@@ -1358,13 +1410,28 @@ private final class CustomCommandSwitchTrack: UIKitTallyBorderedView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
-    func setOn(_ on: Bool) {
+    func setOn(_ on: Bool, animated: Bool = false) {
         leading.isActive = false
         trailing.isActive = false
         (on ? trailing : leading).isActive = true
-        backgroundColor = on ? UIKitChassis.bezelHi : UIKitChassis.screen
-        thumb.backgroundColor = on ? UIKitChassis.signal : UIKitChassis.signal3
-        tallyBorderColor = on ? UIKitChassis.signal2 : UIKitChassis.bezelHi
+        let apply = {
+            self.backgroundColor = on ? UIKitChassis.bezelHi : UIKitChassis.screen
+            self.thumb.backgroundColor = on ? UIKitChassis.signal : UIKitChassis.signal3
+            self.tallyBorderColor = on ? UIKitChassis.signal2 : UIKitChassis.bezelHi
+            // The swapped constraint only moves the thumb inside an animation
+            // transaction if the layout pass runs there too.
+            self.layoutIfNeeded()
+        }
+        guard animated, window != nil, !UIAccessibility.isReduceMotionEnabled else {
+            apply()
+            return
+        }
+        UIView.animate(
+            withDuration: CustomCommandChoiceMetrics.selectionAnimationDuration,
+            delay: 0,
+            options: [.curveEaseOut, .beginFromCurrentState],
+            animations: apply
+        )
     }
 }
 

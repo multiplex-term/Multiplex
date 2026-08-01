@@ -59,15 +59,17 @@ struct AgentPromptFormState {
 /// immediately focuses the optional first prompt, and resubmits the action
 /// only when Launch is pressed.
 @MainActor
-final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegate {
+final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegate,
+    AppAppearanceFollowing {
     static let contentMaximumWidth: CGFloat = 680
     static let outerInset: CGFloat = 18
     static let sectionSpacing: CGFloat = 18
 
     var onDismiss: (() -> Void)?
     var appAppearance = AppAppearance.system {
-        didSet { applyAppearance() }
+        didSet { applyAppAppearance() }
     }
+    let appAppearanceFollower = AppAppearanceFollower()
 
     private(set) var contentStack = UIStackView()
 
@@ -127,7 +129,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
         navigationItem.rightBarButtonItem = launch
 
         configureContent()
-        applyAppearance()
+        applyAppAppearance()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -140,6 +142,9 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         updatePromptHeight()
+        // This sheet opens with its prompt already focused, so the inset is
+        // what keeps the sections below reachable under a standing keyboard.
+        applyKeyboardContentInset(to: scrollView)
     }
 
     private func configureContent() {
@@ -151,7 +156,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: view.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             scrollView.contentLayoutGuide.widthAnchor.constraint(
                 equalTo: scrollView.frameLayoutGuide.widthAnchor
             ),
@@ -442,21 +447,6 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         textField.resignFirstResponder()
         return true
-    }
-
-    private func applyAppearance() {
-        let style: UIUserInterfaceStyle
-        switch appAppearance.resolvedOverride {
-        case nil: style = .unspecified
-        case .light: style = .light
-        case .dark: style = .dark
-        }
-        overrideUserInterfaceStyle = style
-        navigationController?.overrideUserInterfaceStyle = style
-        viewIfLoaded?.window?.overrideUserInterfaceStyle = style
-        if let navigationBar = navigationController?.navigationBar {
-            UIKitChassis.configureSheetNavigationBar(navigationBar)
-        }
     }
 
     @objc private func cancelPressed() {

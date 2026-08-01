@@ -248,6 +248,14 @@ final class AppLockView: UIView {
             right: Metrics.chipHorizontalPadding
         )
         unlockButton.layer.borderWidth = 1
+        // The gaze/pointer highlight resolves where the effect is attached, so
+        // it belongs on the control itself. Square it to the chip's own border
+        // box: the default visionOS platter is heavily rounded and fights the
+        // chassis geometry (the SwiftUI veil applied `chassisHover(2)` here).
+        unlockButton.hoverStyle = UIHoverStyle(
+            effect: .highlight,
+            shape: .rect(cornerRadius: 2)
+        )
         unlockButton.accessibilityLabel = "Unlock"
         unlockButton.accessibilityHint = "Unlocks Multiplex with \(AppLockStore.methodName)"
         unlockButton.addTarget(self, action: #selector(unlockPressed), for: .touchUpInside)

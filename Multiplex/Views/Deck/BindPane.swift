@@ -82,6 +82,7 @@ final class BindPaneViewController: UIViewController {
     private let incomingSection = BindIncomingSectionView()
     private let passphraseField = BindRevealableSecretField()
     private let pasteFailureLabel = UILabel()
+    private let pasteSlot = UIView()
     private var elsewhereSection: UIView!
     private var candidateRows: [String: BindCandidateRowView] = [:]
     private var orderedCandidateIDs: [String] = []
@@ -154,6 +155,7 @@ final class BindPaneViewController: UIViewController {
     }
 
     func fittingSize(for width: CGFloat) -> CGSize {
+        guard width > 0 else { return CGSize(width: max(0, width), height: 0) }
         let target = CGSize(width: width, height: UIView.layoutFittingCompressedSize.height)
         let size = contentStack.systemLayoutSizeFitting(
             target,
@@ -322,20 +324,14 @@ final class BindPaneViewController: UIViewController {
         }
         #endif
 
-        let pasteConfiguration = UIPasteControl.Configuration()
-        pasteConfiguration.displayMode = .iconAndLabel
-        #if os(iOS)
-        pasteConfiguration.cornerStyle = .fixed
-        pasteConfiguration.cornerRadius = 4
-        #endif
-        pasteConfiguration.baseBackgroundColor = UIKitChassis.bezelHi
-        pasteConfiguration.baseForegroundColor = UIKitChassis.signal
-        let paste = BindPasteControl(configuration: pasteConfiguration)
-        paste.target = pasteTarget
-        paste.accessibilityIdentifier = "bind.paste"
-        paste.setContentHuggingPriority(.required, for: .horizontal)
-        paste.setContentCompressionResistancePriority(.required, for: .horizontal)
-        actions.addArrangedSubview(paste)
+        pasteSlot.setContentHuggingPriority(.required, for: .horizontal)
+        pasteSlot.setContentCompressionResistancePriority(.required, for: .horizontal)
+        installPasteControl()
+        pasteSlot.registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            [weak self] (_: UIView, _: UITraitCollection) in
+            self?.installPasteControl()
+        }
+        actions.addArrangedSubview(pasteSlot)
         actions.addArrangedSubview(UIView())
 
         pasteFailureLabel.font = UIKitChassis.uiFont(10)
@@ -357,6 +353,38 @@ final class BindPaneViewController: UIViewController {
             detail: BindPaneCopy.elsewhereDetail,
             contentView: content
         )
+    }
+
+    /// `UIPasteControl` consumes its configuration at init and offers no way to
+    /// re-apply one, so the chassis colors it is built with are baked for the
+    /// control's lifetime — a LIGHT/DARK flip would otherwise leave the chip's
+    /// ink from the old polarity. Rebuilding the control in its slot is the
+    /// heal path, driven by the same trait registration the file's hand-drawn
+    /// chrome uses.
+    private func installPasteControl() {
+        pasteSlot.subviews.forEach { $0.removeFromSuperview() }
+
+        let pasteConfiguration = UIPasteControl.Configuration()
+        pasteConfiguration.displayMode = .iconAndLabel
+        #if os(iOS)
+        pasteConfiguration.cornerStyle = .fixed
+        pasteConfiguration.cornerRadius = 4
+        #endif
+        pasteConfiguration.baseBackgroundColor = UIKitChassis.bezelHi
+        pasteConfiguration.baseForegroundColor = UIKitChassis.signal
+        let paste = BindPasteControl(configuration: pasteConfiguration)
+        paste.target = pasteTarget
+        paste.accessibilityIdentifier = "bind.paste"
+        paste.setContentHuggingPriority(.required, for: .horizontal)
+        paste.setContentCompressionResistancePriority(.required, for: .horizontal)
+        pasteSlot.addSubview(paste)
+        paste.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            paste.leadingAnchor.constraint(equalTo: pasteSlot.leadingAnchor),
+            paste.trailingAnchor.constraint(equalTo: pasteSlot.trailingAnchor),
+            paste.topAnchor.constraint(equalTo: pasteSlot.topAnchor),
+            paste.bottomAnchor.constraint(equalTo: pasteSlot.bottomAnchor),
+        ])
     }
 
     private func makeFooter() -> UIView {
@@ -782,6 +810,7 @@ final class BindCandidateRowView: UIView {
         actionRow.alignment = .center
         actionRow.spacing = 8
 
+        busySpinner.color = UIKitChassis.signal2
         busySpinner.transform = CGAffineTransform(scaleX: 0.65, y: 0.65)
         let spinnerSlot = UIView()
         spinnerSlot.addSubview(busySpinner)

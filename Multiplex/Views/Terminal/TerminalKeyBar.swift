@@ -1188,6 +1188,22 @@ final class TerminalKeyClusterContext {
         #endif
     }
 
+    /// Block-based registrations outlive the object that installed them, and
+    /// `update(controller:)` only retires the previous terminal's — a context
+    /// that goes away with its window would otherwise strand every one it
+    /// still holds.
+    deinit {
+        let center = NotificationCenter.default
+        if let controlResetObserver {
+            center.removeObserver(controlResetObserver)
+        }
+        #if DEBUG
+        for observer in debugObservers {
+            center.removeObserver(observer)
+        }
+        #endif
+    }
+
     func update(controller: TerminalSessionController?) {
         let controllerChanged = self.controller !== controller
         self.controller = controller
@@ -1497,20 +1513,26 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
             : metric
         var x: CGFloat = 12
         let y: CGFloat = 9
+        // `layout(range:)` leaves the cursor on the last key's trailing edge
+        // with no spacing appended, so a group boundary advances by the whole
+        // `groupGap` — the pre-UIKit `HStack(spacing: groupGap)` gap, and what
+        // the reserved slab widths below already pay for. Subtracting
+        // `spacing` here packed the keys left and dumped the slack on the
+        // right edge.
         switch role {
         case .leading:
             layout(range: keys.indices, x: &x, y: y, spacing: activeMetric.spacing)
         case .trailing:
             layout(range: 0..<4, x: &x, y: y, spacing: activeMetric.spacing)
-            x += activeMetric.groupGap - activeMetric.spacing
+            x += activeMetric.groupGap
             layout(range: 4..<keys.count, x: &x, y: y, spacing: activeMetric.groupGap)
         case .standalone:
             layout(range: 0..<3, x: &x, y: y, spacing: activeMetric.spacing)
-            x += activeMetric.groupGap - activeMetric.spacing
+            x += activeMetric.groupGap
             let arrowCount = variant == .minimal ? 0 : 4
             if arrowCount > 0 {
                 layout(range: 3..<(3 + arrowCount), x: &x, y: y, spacing: activeMetric.spacing)
-                x += activeMetric.groupGap - activeMetric.spacing
+                x += activeMetric.groupGap
             }
             layout(
                 range: (3 + arrowCount)..<keys.count,

@@ -593,7 +593,7 @@ final class SettingsViewController: UIViewController {
         let controller = ThemeEditorViewController(theme: theme) { [weak self] edited in
             self?.save(edited)
         }
-        controller.appAppearance = themes.appearance
+        controller.followAppAppearance(themes)
         navigationController?.pushViewController(controller, animated: true)
     }
 
@@ -613,7 +613,7 @@ final class SettingsViewController: UIViewController {
         }
         guard presentedViewController == nil else { return }
         let controller = ProPaywallViewController(entitlements: entitlements)
-        controller.appAppearance = themes.appearance
+        controller.followAppAppearance(themes)
         let navigation = UINavigationController(rootViewController: controller)
         controller.onDone = { [weak navigation] in
             navigation?.dismiss(animated: true)
@@ -959,7 +959,10 @@ final class SettingsBooleanRow: UIControl {
         self.accessibilityLabel = accessibilityLabel ?? title
         self.accessibilityHint = accessibilityHint
         isAccessibilityElement = true
-        accessibilityTraits = .button
+        // The SwiftUI row represented itself to assistive technology as a real
+        // `Toggle`; `.toggleButton` is UIKit's equivalent identity, so the
+        // switch rotor and the spoken On/Off state survive the port.
+        accessibilityTraits = [.button, .toggleButton]
 
         titleLabel.text = title
         titleLabel.font = UIKitChassis.uiFont(12, weight: .semibold)
@@ -1009,55 +1012,70 @@ final class SettingsBooleanRow: UIControl {
         let requestedValue = !isOn
         if optimisticallyUpdates {
             isOn = requestedValue
-            refresh()
+            refresh(animated: true)
         }
         changed(requestedValue)
     }
 
-    private func refresh() {
-        indicator.setOn(isOn)
+    private func refresh(animated: Bool = false) {
+        indicator.setOn(isOn, animated: animated)
         accessibilityValue = isOn ? "On" : "Off"
     }
 }
 
 @MainActor
 private final class SettingsSwitchIndicator: UIKitTallyBorderedView {
+    /// The SwiftUI switch slid its thumb with `.easeOut(duration: 0.14)`; the
+    /// appearance choice bar above it still uses exactly that timing, so the
+    /// two controls must not disagree.
+    private static let slideDuration: TimeInterval = 0.14
+
     private let thumb = UIView()
+    private var thumbLeading: NSLayoutConstraint!
+    private var thumbTrailing: NSLayoutConstraint!
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = UIKitChassis.chassis
         addSubview(thumb)
         thumb.translatesAutoresizingMaskIntoConstraints = false
+        thumbLeading = thumb.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4)
+        thumbTrailing = thumb.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4)
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: 36),
             heightAnchor.constraint(equalToConstant: 20),
             thumb.widthAnchor.constraint(equalToConstant: 12),
             thumb.heightAnchor.constraint(equalToConstant: 12),
             thumb.centerYAnchor.constraint(equalTo: centerYAnchor),
+            thumbLeading,
         ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
-    func setOn(_ isOn: Bool) {
-        NSLayoutConstraint.deactivate(thumb.constraints.filter {
-            $0.firstAttribute == .leading || $0.firstAttribute == .trailing
-        })
-        for constraint in constraints where
-            (constraint.firstItem as? UIView) === thumb
-                && (constraint.firstAttribute == .leading || constraint.firstAttribute == .trailing) {
-            constraint.isActive = false
+    func setOn(_ isOn: Bool, animated: Bool = false) {
+        thumbLeading.isActive = false
+        thumbTrailing.isActive = false
+        (isOn ? thumbTrailing : thumbLeading).isActive = true
+        let apply = {
+            self.backgroundColor = isOn ? UIKitChassis.bezelHi : UIKitChassis.screen
+            self.thumb.backgroundColor = isOn ? UIKitChassis.signal : UIKitChassis.signal3
+            self.tallyBorderColor = isOn ? UIKitChassis.signal2 : UIKitChassis.bezelHi
+            // The swapped constraint only moves the thumb inside an animation
+            // transaction if the layout pass runs there too.
+            self.layoutIfNeeded()
         }
-        if isOn {
-            thumb.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4).isActive = true
-        } else {
-            thumb.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4).isActive = true
+        guard animated, window != nil, !UIAccessibility.isReduceMotionEnabled else {
+            apply()
+            return
         }
-        backgroundColor = isOn ? UIKitChassis.bezelHi : UIKitChassis.screen
-        thumb.backgroundColor = isOn ? UIKitChassis.signal : UIKitChassis.signal3
-        tallyBorderColor = isOn ? UIKitChassis.signal2 : UIKitChassis.bezelHi
+        UIView.animate(
+            withDuration: Self.slideDuration,
+            delay: 0,
+            options: [.curveEaseOut, .beginFromCurrentState],
+            animations: apply
+        )
     }
 }
 

@@ -16,6 +16,10 @@ struct FleetWallConfiguration {
     let hub: ConnectionHub
     let networkChanges: NetworkChangeMonitor
     let workspace: TerminalWorkspace
+    /// Present when the scene can supply it: the wall's own guide sheets then
+    /// follow a live appearance change instead of snapshotting the choice
+    /// (`AppAppearanceFollowing`). Without it they read the scene window.
+    var themes: ThemeStore? = nil
     var terminalOpener: TerminalRouteOpener
     var presentation: FleetWall.Presentation
     var selectedTerminal: TerminalRoute?
@@ -225,11 +229,6 @@ final class FleetWallViewController: UIViewController {
         let passphraseChallenge: SSHKeyPassphraseChallenge?
     }
 
-    private struct FeedIdentity: Equatable {
-        let hosts: [Host]
-        let active: Bool
-    }
-
     private static let feedInterval: Duration = .seconds(5)
 
     private var configuration: FleetWallConfiguration
@@ -252,7 +251,7 @@ final class FleetWallViewController: UIViewController {
     private var latestSnapshot: WallSnapshot?
     private var observationGeneration = 0
     private var feedTask: Task<Void, Never>?
-    private var feedIdentity: FeedIdentity?
+    private var feedIdentity: FleetFeedID?
     private var availableColumnCount: Int?
     private var resolvedColumnCount = 1
     private var keyPassphraseHostID: UUID?
@@ -411,6 +410,14 @@ final class FleetWallViewController: UIViewController {
             summary: fleetSummary,
             actions: headerActions
         )
+
+        // The shell spends the bottom safe area and its panes hand back the
+        // clearance exactly once: the wall restores it as scroll padding
+        // below. Letting UIKit adjust the viewport's content inset for the
+        // same band would count it twice, so the shell viewport opts out —
+        // the classic deck passes a zero shell inset and keeps the automatic
+        // adjustment (its nav bar and home indicator ride on it).
+        scrollView.contentInsetAdjustmentBehavior = shell ? .never : .automatic
 
         let wallPadding: CGFloat = presentation == .shellRail ? 12 : 26
         let safe = configuration.shellSafeArea
@@ -615,28 +622,17 @@ final class FleetWallViewController: UIViewController {
             setEnabled: { [weak self] enabled in self?.setEnabled(enabled, for: host) },
             editHost: { [weak self] in self?.configuration.editHost(host) },
             removeHost: { [weak self] in self?.confirmRemove(host) },
+            // The store mutation on its own animates nothing — the new order
+            // only reaches the grid through the section's re-render and the
+            // layout pass after it. The section therefore owns the animation
+            // block (see its `droppedSession`), which is where that pass runs.
             reorderSession: { [weak self] source, target, sessions in
-                guard let self else { return }
-                let move = {
-                    self.configuration.store.moveSession(
-                        source,
-                        to: target,
-                        for: host.id,
-                        available: sessions
-                    )
-                }
-                if self.configuration.reduceMotion {
-                    move()
-                } else {
-                    UIView.animate(
-                        withDuration: 0.32,
-                        delay: 0,
-                        usingSpringWithDamping: 1,
-                        initialSpringVelocity: 0,
-                        options: [.beginFromCurrentState],
-                        animations: move
-                    )
-                }
+                self?.configuration.store.moveSession(
+                    source,
+                    to: target,
+                    for: host.id,
+                    available: sessions
+                )
             },
             modelDidChange: { [weak self] in
                 self?.synchronizePassphrasePrompt()
@@ -676,15 +672,18 @@ final class FleetWallViewController: UIViewController {
     private func restartFeedIfNeeded(force: Bool) {
         guard isViewLoaded else { return }
         let hosts = latestSnapshot?.hosts ?? configuration.store.hosts
-        let identity = FeedIdentity(
-            hosts: hosts,
-            active: configuration.sceneIsActive && isOnScreen
-        )
+        let active = configuration.sceneIsActive && isOnScreen
+        // `FleetFeedID` normalizes every host through
+        // `connectionModelConfiguration`, so command-setup, setup-script,
+        // launch-model, and tmux-conf edits (and the `updatedAt` bump any save
+        // carries) deliberately keep the running feed instead of cancelling
+        // every host's probe and resetting its connect-retry backoff.
+        let identity = FleetFeedID(hosts: hosts, active: active)
         guard force || feedIdentity != identity else { return }
         feedTask?.cancel()
         feedTask = nil
         feedIdentity = identity
-        guard identity.active else { return }
+        guard active else { return }
         feedTask = Task { [weak self] in await self?.runFeed(hosts: hosts) }
     }
 
@@ -806,6 +805,7 @@ final class FleetWallViewController: UIViewController {
 
     private func presentTmuxGuide(for host: Host) {
         let controller = TmuxInstallViewController(host: host)
+        controller.followAppAppearance(configuration.themes, presentedFrom: self)
         let navigation = UINavigationController(rootViewController: controller)
         UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
         navigation.modalPresentationStyle = .formSheet
@@ -815,6 +815,7 @@ final class FleetWallViewController: UIViewController {
 
     private func presentKeychainGuide(for host: Host, sessionNames: [String]) {
         let controller = KeychainUnlockViewController(host: host, sessionNames: sessionNames)
+        controller.followAppAppearance(configuration.themes, presentedFrom: self)
         let navigation = UINavigationController(rootViewController: controller)
         UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
         navigation.modalPresentationStyle = .formSheet
@@ -1376,11 +1377,29 @@ private final class FleetHostSectionView: UIView {
                     },
                     droppedSession: { [weak self] source in
                         guard let self else { return }
-                        self.configuration.reorderSession(source, session.name, sessions)
-                        // Session order is device-local HostStore state, not a
-                        // probe change. Re-arm its Observation read now so the
-                        // native grid settles immediately after the drop.
-                        self.observeModel()
+                        let move = {
+                            self.configuration.reorderSession(source, session.name, sessions)
+                            // Session order is device-local HostStore state,
+                            // not a probe change. Re-arm its Observation read
+                            // now so the native grid settles immediately after
+                            // the drop — and run the grid's layout pass inside
+                            // the animation block, since that pass is the only
+                            // thing that moves a tile.
+                            self.observeModel()
+                            self.grid.layoutIfNeeded()
+                        }
+                        if self.configuration.reduceMotion {
+                            move()
+                        } else {
+                            UIView.animate(
+                                withDuration: 0.32,
+                                delay: 0,
+                                usingSpringWithDamping: 1,
+                                initialSpringVelocity: 0,
+                                options: [.beginFromCurrentState],
+                                animations: move
+                            )
+                        }
                     }
                 ))
                 items.append(FleetGridItem(id: key, view: tile))
@@ -1972,6 +1991,10 @@ private final class FleetTileGridView: UIView {
             let row = items[index..<end]
             var heights: [CGFloat] = []
             for item in row {
+                // Width is the grid's contract, not a hint. Lowering this
+                // priority lets a newly added tile solve at its compressed
+                // width; framing the outer tile afterwards does not repair the
+                // already-collapsed content stack (labels remain at origin).
                 let size = item.view.systemLayoutSizeFitting(
                     CGSize(width: tileWidth, height: UIView.layoutFittingCompressedSize.height),
                     withHorizontalFittingPriority: .required,
@@ -2215,6 +2238,22 @@ struct FleetSessionTileConfiguration {
     let attachNewWindow: () -> Void
     let delete: () -> Void
     let droppedSession: (String) -> Void
+
+    /// Data equality of everything the tile draws. The actions are the only
+    /// exclusions: equal data means their captured host/session inputs are
+    /// equivalent, while the closures receive a fresh identity on every pass.
+    func hasSameContent(as other: FleetSessionTileConfiguration) -> Bool {
+        hostID == other.hostID
+            && session == other.session
+            && lines == other.lines
+            && attention == other.attention
+            && hasLiveAgentState == other.hasLiveAgentState
+            && hasOpenTab == other.hasOpenTab
+            && compact == other.compact
+            && selected == other.selected
+            && duplicateAttachTitle == other.duplicateAttachTitle
+            && openTabAccessibilityText == other.openTabAccessibilityText
+    }
 }
 
 @MainActor
@@ -2228,6 +2267,12 @@ final class FleetSessionTileView: FleetPressView,
 
     private let contentStack = UIStackView()
     private var configuration: FleetSessionTileConfiguration?
+    private var isDropTarget = false {
+        didSet {
+            guard oldValue != isDropTarget else { return }
+            applyBorder()
+        }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -2252,10 +2297,14 @@ final class FleetSessionTileView: FleetPressView,
     }
 
     func configure(_ configuration: FleetSessionTileConfiguration) {
+        // Every pass hands over freshly captured closures, so the stored
+        // configuration and the actions always take the new ones. Only the
+        // view tree is gated: rebuilding a tile's ~20 views and their
+        // constraints because another host's probe ticked is exactly what the
+        // pre-UIKit `.equatable()` tile gate existed to prevent.
+        let unchanged = self.configuration?.hasSameContent(as: configuration) ?? false
         self.configuration = configuration
         pressAction = configuration.attach
-        tallyBorderColor = configuration.selected ? UIKitChassis.signal2 : UIKitChassis.bezelHi
-        layer.borderWidth = configuration.selected ? 1.5 : 1
         menuProvider = { [weak self] in
             guard let configuration = self?.configuration else { return nil }
             return UIMenu(children: [
@@ -2267,6 +2316,8 @@ final class FleetSessionTileView: FleetPressView,
                 },
             ])
         }
+        applyBorder()
+        guard !unchanged else { return }
         rebuildContent()
         let running = agentRunning(configuration)
         let needsYou = agentNeedsYou(configuration)
@@ -2297,21 +2348,53 @@ final class FleetSessionTileView: FleetPressView,
         _ interaction: UIDropInteraction,
         sessionDidUpdate session: UIDropSession
     ) -> UIDropProposal {
-        guard let configuration,
-              session.items.contains(where: {
-                  ($0.localObject as? DragPayload)?.hostID == configuration.hostID
-              })
-        else { return UIDropProposal(operation: .forbidden) }
+        guard accepts(session) else { return UIDropProposal(operation: .forbidden) }
         return UIDropProposal(operation: .move)
     }
 
+    // A drop lands in the tile it is released over, so the pending
+    // destination has to be visible while the finger is still down.
+    func dropInteraction(_ interaction: UIDropInteraction, sessionDidEnter session: UIDropSession) {
+        isDropTarget = accepts(session)
+    }
+
+    func dropInteraction(_ interaction: UIDropInteraction, sessionDidExit session: UIDropSession) {
+        isDropTarget = false
+    }
+
+    func dropInteraction(_ interaction: UIDropInteraction, sessionDidEnd session: UIDropSession) {
+        isDropTarget = false
+    }
+
     func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
+        isDropTarget = false
         guard let configuration,
               let item = session.items.first,
               let payload = item.localObject as? DragPayload,
               payload.hostID == configuration.hostID
         else { return }
         configuration.droppedSession(payload.sessionName)
+    }
+
+    /// Only this host's own session tiles reorder each other.
+    private func accepts(_ session: UIDropSession) -> Bool {
+        guard let configuration else { return false }
+        return session.items.contains {
+            ($0.localObject as? DragPayload)?.hostID == configuration.hostID
+        }
+    }
+
+    private func applyBorder() {
+        // While a compatible drag hovers, the pending destination outranks
+        // selection — it is the one thing the drop needs to say.
+        if isDropTarget {
+            tallyBorderColor = UIKitChassis.signal2
+            layer.borderWidth = 2
+            return
+        }
+        let selected = configuration?.selected ?? false
+        tallyBorderColor = selected ? UIKitChassis.signal2 : UIKitChassis.bezelHi
+        layer.borderWidth = selected ? 1.5 : 1
     }
 
     private func rebuildContent() {
@@ -2624,6 +2707,12 @@ private final class FleetNewSessionTileView: FleetPressView {
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
             heightConstraint!,
         ])
+        // A CALayer stroke is a resolved CGColor: it needs re-resolving on an
+        // appearance flip, which alone changes no bounds and triggers no layout.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (tile: FleetNewSessionTileView, _: UITraitCollection) in
+            tile.refreshDash()
+        }
     }
 
     func configure(hostName: String, compact: Bool, action: @escaping () -> Void) {
@@ -2637,6 +2726,10 @@ private final class FleetNewSessionTileView: FleetPressView {
         super.layoutSubviews()
         dashLayer.frame = bounds
         dashLayer.path = UIBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5)).cgPath
+        refreshDash()
+    }
+
+    private func refreshDash() {
         dashLayer.fillColor = UIColor.clear.cgColor
         dashLayer.strokeColor = UIKitChassis.bezelHi.resolvedColor(with: traitCollection).cgColor
         dashLayer.lineWidth = 1
@@ -2734,11 +2827,17 @@ private final class FleetNoSignalTileView: FleetPressView {
 @MainActor
 private final class FleetAcquiringTileView: UIKitTallyBorderedView {
     private let spinner = UIActivityIndicatorView(style: .medium)
+    private let screen = UIView()
     private var heightConstraint: NSLayoutConstraint?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = TallyPalette.screen
+        // Same chassis anatomy as every tile beside it: the screen sits inside
+        // a five-point bezel frame, never painted out to the border.
+        backgroundColor = UIKitChassis.bezel
+        screen.backgroundColor = TallyPalette.screen
+        addSubview(screen)
+        screen.translatesAutoresizingMaskIntoConstraints = false
         let label = UIKitChassisLabel(
             "Acquiring signal", size: 10, color: UIKitChassis.signal3
         )
@@ -2746,14 +2845,20 @@ private final class FleetAcquiringTileView: UIKitTallyBorderedView {
         stack.axis = .vertical
         stack.alignment = .center
         stack.spacing = 8
-        addSubview(stack)
+        screen.addSubview(stack)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        heightConstraint = heightAnchor.constraint(greaterThanOrEqualToConstant: 138)
+        heightConstraint = screen.heightAnchor.constraint(greaterThanOrEqualToConstant: 138)
         NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 10),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
+            screen.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
+            screen.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
+            screen.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            screen.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+            stack.centerXAnchor.constraint(equalTo: screen.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: screen.centerYAnchor),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: screen.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: screen.trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: screen.topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: screen.bottomAnchor, constant: -10),
             heightConstraint!,
         ])
         spinner.color = UIKitChassis.signal2
@@ -2783,7 +2888,11 @@ private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
             "No tmux on host", size: 11, color: UIKitChassis.signal3
         )
         let body = UILabel()
+        // A semantic role keeps Dynamic Type and the scene root's
+        // iOS-on-Mac content-size override; the chassis label above it is
+        // fixed chrome type and already carries `Theme.typeScale`.
         body.font = .preferredFont(forTextStyle: .footnote)
+        body.adjustsFontForContentSizeCategory = true
         body.textColor = UIKitChassis.signal2
         body.text = "You can still use a plain shell — press SHELL."
         body.numberOfLines = 0
@@ -2857,6 +2966,7 @@ private final class FleetAwaitingSignalView: UIView {
         )
         let body = UILabel()
         body.font = .preferredFont(forTextStyle: .footnote)
+        body.adjustsFontForContentSizeCategory = true
         body.textColor = UIKitChassis.signal2
         body.text = "Every tmux session, its own window in space."
         body.textAlignment = .center
@@ -3140,6 +3250,11 @@ final class NewSessionViewController: UIViewController,
         renderForm()
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        applyKeyboardContentInset(to: scrollView)
+    }
+
     private func configureContent() {
         scrollView.alwaysBounceVertical = true
         scrollView.backgroundColor = UIKitChassis.chassis
@@ -3149,7 +3264,7 @@ final class NewSessionViewController: UIViewController,
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: view.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             scrollView.contentLayoutGuide.widthAnchor.constraint(
                 equalTo: scrollView.frameLayoutGuide.widthAnchor
             ),

@@ -234,6 +234,7 @@ final class SingleWindowShellViewController: UIViewController {
     private var externalCoordinator: ExternalActionUIKitCoordinator?
     private var routeObservationGeneration = 0
     private var layoutAnimator: UIViewPropertyAnimator?
+    private var layoutCompletion: (() -> Void)?
     private var targetLayoutMetrics: SingleWindowShellLayoutMetrics?
     private var testLayoutInput: (
         size: CGSize,
@@ -447,6 +448,7 @@ final class SingleWindowShellViewController: UIViewController {
         routeObservationGeneration &+= 1
         layoutAnimator?.stopAnimation(true)
         layoutAnimator = nil
+        layoutCompletion = nil
         externalCoordinator?.detach()
         externalCoordinator = nil
         #if os(iOS)
@@ -602,7 +604,14 @@ final class SingleWindowShellViewController: UIViewController {
         let controller = deckFactory(shellState, actions)
         deckController = controller
         install(controller, in: shellRootView.deckContainer)
-        (controller as? DeckWindowViewController)?.setAppLocked(appLocked)
+        if let deck = controller as? DeckWindowViewController {
+            deck.setAppLocked(appLocked)
+            // Deck sheets present from this shell's presenter, so their
+            // dismissal is what frees the shell-owned external-action queue.
+            deck.presentationDidEnd = { [weak self] in
+                self?.externalCoordinator?.presenterDidBecomeAvailable()
+            }
+        }
         updateNativeDeckController()
     }
 
@@ -651,6 +660,7 @@ final class SingleWindowShellViewController: UIViewController {
     /// interactive visionOS chrome behind the veil.
     func setAppLocked(_ locked: Bool) {
         appLocked = locked
+        externalCoordinator?.setAppLocked(locked)
         (deckController as? DeckWindowViewController)?.setAppLocked(locked)
         (terminalController as? TerminalWindowViewController)?.setAppLocked(locked)
     }
@@ -741,9 +751,31 @@ final class SingleWindowShellViewController: UIViewController {
         updateChildPresentation(metrics)
         updateBackSwipeAvailability(expanded: metrics.expanded)
 
-        let changes = { [weak self] in
-            guard let self else { return }
-            self.shellRootView.apply(metrics)
+        // Animate only the shell's frame/alpha contract. Forcing
+        // `layoutIfNeeded()` on the root here also resolves every pending
+        // descendant constraint inside this property animator. A probe tick or
+        // second tab can install fresh tile/cell content during that window;
+        // UIKit then preserves its zero-origin presentation geometry, piling
+        // labels into the corner. Descendants own their ordinary next layout
+        // pass, exactly as they did on the working #23 base.
+        let changes: () -> Void = { [weak self] in
+            self?.shellRootView.apply(metrics)
+        }
+        // `stopAnimation(true)` retires an animator without running its
+        // completions, so an interrupted transition would strand the caller's
+        // state cleanup. Carry it to whichever pass finally settles the
+        // layout — the interruption coverage SwiftUI's `.removed` completion
+        // criteria gave this transition before.
+        let pending = layoutCompletion
+        layoutCompletion = nil
+        let settled: (() -> Void)?
+        if pending != nil || completion != nil {
+            settled = {
+                pending?()
+                completion?()
+            }
+        } else {
+            settled = nil
         }
         let shouldAnimate = animated
             && !shellState.reduceMotion
@@ -752,7 +784,7 @@ final class SingleWindowShellViewController: UIViewController {
             layoutAnimator?.stopAnimation(true)
             layoutAnimator = nil
             changes()
-            completion?()
+            settled?()
             return
         }
 
@@ -763,10 +795,12 @@ final class SingleWindowShellViewController: UIViewController {
             animations: changes
         )
         layoutAnimator = animator
+        layoutCompletion = settled
         animator.addCompletion { [weak self] _ in
             guard let self, self.layoutAnimator === animator else { return }
             self.layoutAnimator = nil
-            completion?()
+            self.layoutCompletion = nil
+            settled?()
         }
         animator.startAnimation()
     }
@@ -946,8 +980,35 @@ extension SingleWindowShellViewController: UIGestureRecognizerDelegate {
         guard gestureRecognizer === backSwipeRecognizer,
               backSwipeRecognizer.isEnabled
         else { return false }
+        // The recognizer lives on the window and cancels touches in view, so
+        // everything sitting inside the left grab region is its to steal —
+        // including the tab strip's leading cells and the UMD's own ‹ DECK
+        // control, which a press with a few points of rightward drift then
+        // never reaches. Those two are app chrome with their own actions, so
+        // the edge gesture declines them outright; over the terminal pane it
+        // keeps its first refusal on horizontal movement.
+        if isShellChromeTouch(touch.view) {
+            initialTouchTerminal = nil
+            return false
+        }
         initialTouchTerminal = terminalView(containing: touch.view)
         return initialTouchTerminal?.hasActiveSelection != true
+    }
+
+    /// Walks up from the touched view: a cell is nested several levels inside
+    /// its strip, and a UMD control inside its bar's stacks.
+    private func isShellChromeTouch(_ view: UIView?) -> Bool {
+        var candidate = view
+        while let current = candidate {
+            if current is TerminalTabStripView
+                || current is TerminalTabScrollView
+                || current is UMDBarRootView
+                || current is ViewportUMDRootView {
+                return true
+            }
+            candidate = current.superview
+        }
+        return false
     }
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -1107,6 +1168,7 @@ final class SingleWindowShellEmptyTerminalView: UIView {
         let detail = UILabel()
         detail.text = "Choose a session from the deck to attach it here."
         detail.font = .preferredFont(forTextStyle: .footnote)
+        detail.adjustsFontForContentSizeCategory = true
         detail.textColor = UIKitChassis.signal2
         detail.textAlignment = .center
         detail.numberOfLines = 0

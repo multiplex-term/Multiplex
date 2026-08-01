@@ -62,8 +62,17 @@ final class TerminalVisionOrnamentState {
     private(set) var activeTerminalController: TerminalSessionController?
     private(set) var umdController: UIViewController?
     private(set) var helperController: AgentHelperStripViewController?
+    /// The width the console row reserves for the mounted UMD. Held here
+    /// rather than measured inside the ornament body: the bar re-renders on
+    /// its own observations (a mosh contact loss swaps LIVE for the wider
+    /// NO LINK lamp) that the window's render pass never sees, and a stale
+    /// reservation squeezes the bar the UMD must never compress.
+    private(set) var umdContentSize: CGSize = .zero
 
     let topHostView: TerminalVisionTabOrnamentHostView
+    /// One key-cluster owner per ornament — the latch state and the DEBUG
+    /// proof hook stay single-owner across every fitting candidate.
+    let keyClusterContext = TerminalKeyClusterContext()
 
     init(tabStrip: TerminalTabStripView) {
         topHostView = TerminalVisionTabOrnamentHostView(tabStrip: tabStrip)
@@ -94,15 +103,27 @@ final class TerminalVisionOrnamentState {
         self.umdController = umdController
         self.helperController = nextHelper
         presentation = nextPresentation
+        refreshUMDContentSize()
         guard changed || forceRevision else { return }
         revision &+= 1
         topHostView.refreshFittingSize()
+    }
+
+    /// Re-derives the console row's reserved UMD geometry. Called on every
+    /// window render and whenever the mounted bar reports its own size change,
+    /// so the ornament never frames new status content at the old width.
+    func refreshUMDContentSize() {
+        let size = (umdController as? UMDBarViewController)?
+            .fittingContentSize(for: nil) ?? .zero
+        guard umdContentSize != size else { return }
+        umdContentSize = size
     }
 
     func clear() {
         activeTerminalController = nil
         umdController = nil
         helperController = nil
+        umdContentSize = .zero
         presentation = TerminalVisionOrnamentPresentation(
             showsTopSourceLabels: false,
             bottom: .hidden,
@@ -234,17 +255,27 @@ private struct TerminalVisionBottomOrnament: View {
                 TerminalVisionOrnamentWidthClamp(
                     maxWidth: state.presentation.maximumConsoleWidth
                 ) {
-                    let umdSize = (state.umdController as? UMDBarViewController)?
-                        .fittingContentSize(for: nil) ?? .zero
+                    // Observed, not measured here: the bar's own re-renders
+                    // move this width without a window render behind them.
                     TerminalKeyCluster(
                         controller: state.activeTerminalController,
-                        centerSize: umdSize
+                        centerSize: state.umdContentSize,
+                        context: state.keyClusterContext
                     ) {
                         if let umd = state.umdController {
                             TerminalVisionControllerMount(
                                 controller: umd,
                                 sizing: .terminalUMD,
-                                revision: state.revision
+                                revision: state.revision,
+                                onContentSizeChange: { [state] in
+                                    // The bar reports mid-layout; take the
+                                    // new reservation on the next turn so
+                                    // the ornament is never re-entered
+                                    // during its own update.
+                                    Task { @MainActor in
+                                        state.refreshUMDContentSize()
+                                    }
+                                }
                             )
                             .fixedSize()
                         }
@@ -339,15 +370,22 @@ struct TerminalKeyCluster<Center: View>: View {
     var controller: TerminalSessionController?
     private let center: Center?
     private let centerSize: CGSize
-    @State private var context = TerminalKeyClusterContext()
+    /// Supplied by the owner, never `@State`: the struct is rebuilt on every
+    /// ornament revision, and a default-expression context would mint (and
+    /// register) a throwaway owner each time. One instance per ornament keeps
+    /// the CTRL latch and the DEBUG proof hook single-owner, as the shell
+    /// layout's own long-lived context does.
+    private let context: TerminalKeyClusterContext
 
     init(
         controller: TerminalSessionController?,
         centerSize: CGSize,
+        context: TerminalKeyClusterContext? = nil,
         @ViewBuilder center: () -> Center
     ) {
         self.controller = controller
         self.centerSize = centerSize
+        self.context = context ?? TerminalKeyClusterContext()
         self.center = center()
     }
 
@@ -426,8 +464,12 @@ struct TerminalKeyCluster<Center: View>: View {
 }
 
 extension TerminalKeyCluster where Center == EmptyView {
-    init(controller: TerminalSessionController?) {
+    init(
+        controller: TerminalSessionController?,
+        context: TerminalKeyClusterContext? = nil
+    ) {
         self.controller = controller
+        self.context = context ?? TerminalKeyClusterContext()
         centerSize = .zero
         center = nil
     }
@@ -483,11 +525,10 @@ final class TerminalVisionTabOrnamentHostView: UIView {
     }
 
     private func tabStripSize() -> CGSize {
-        let measured = tabStrip.systemLayoutSizeFitting(
-            CGSize(width: UIView.layoutFittingCompressedSize.width, height: 30),
-            withHorizontalFittingPriority: .fittingSizeLevel,
-            verticalFittingPriority: .required
-        )
+        // `TerminalTabStripView` owns an arithmetic fitting contract. Do not
+        // feed its live, edge-pinned stack back through Auto Layout while a
+        // pinch action may be updating the selected cell in place.
+        let measured = tabStrip.fittingContentSize()
         return CGSize(width: max(1, ceil(measured.width)), height: 30)
     }
 }
@@ -528,9 +569,11 @@ private struct TerminalVisionControllerMount: UIViewControllerRepresentable {
     let controller: UIViewController
     let sizing: TerminalVisionControllerSizing
     let revision: Int
+    var onContentSizeChange: (() -> Void)?
 
     func makeUIViewController(context: Context) -> TerminalVisionControllerHost {
         let host = TerminalVisionControllerHost()
+        host.onContentSizeChange = onContentSizeChange
         host.update(content: controller, sizing: sizing)
         return host
     }
@@ -540,6 +583,7 @@ private struct TerminalVisionControllerMount: UIViewControllerRepresentable {
         context: Context
     ) {
         _ = revision
+        host.onContentSizeChange = onContentSizeChange
         host.update(content: controller, sizing: sizing)
     }
 
@@ -547,6 +591,7 @@ private struct TerminalVisionControllerMount: UIViewControllerRepresentable {
         _ host: TerminalVisionControllerHost,
         coordinator: Void
     ) {
+        host.onContentSizeChange = nil
         host.update(content: nil, sizing: .terminalUMD)
     }
 
@@ -561,6 +606,10 @@ private struct TerminalVisionControllerMount: UIViewControllerRepresentable {
 
 @MainActor
 private final class TerminalVisionControllerHost: UIViewController {
+    /// The mounted child is the only witness to its own content changes; the
+    /// ornament reserves its geometry and has to hear about them.
+    var onContentSizeChange: (() -> Void)?
+
     private var content: UIViewController?
     private var sizing = TerminalVisionControllerSizing.terminalUMD
 
@@ -582,6 +631,7 @@ private final class TerminalVisionControllerHost: UIViewController {
         let size = fittingSize(proposedWidth: nil)
         if preferredContentSize != size { preferredContentSize = size }
         parent?.preferredContentSizeDidChange(forChildContentContainer: self)
+        onContentSizeChange?()
     }
 
     func update(

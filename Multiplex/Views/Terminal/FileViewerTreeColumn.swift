@@ -76,6 +76,9 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
     private(set) var tableView = UITableView(frame: .zero, style: .plain)
 
     private let columnStack = UIStackView()
+    private var gitBlock: UIView?
+    private var gitDivider: UIView?
+    private var chromeRendered = false
     private var snapshot = FileViewerTreeColumnSnapshot(
         hostName: "",
         rootPath: "",
@@ -129,6 +132,7 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
             forCellReuseIdentifier: FileViewerTreeMessageCell.reuseIdentifier
         )
         tableView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        buildChrome()
     }
 
     @available(*, unavailable)
@@ -154,14 +158,25 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
         onChangedFilter: @escaping () -> Void = {},
         onSelect: @escaping (FileTree.Row) -> Void = { _ in }
     ) {
+        // The chrome is built once and mutated in place: `render` runs on every
+        // file selection and on every watch tick, and tearing the stack down
+        // would re-parent the table view under the reader's fingers (a
+        // decelerating flick stops dead, VoiceOver focus resets to the top).
+        let previous = chromeRendered ? self.snapshot : nil
+        let previousRows = displayRows
         self.snapshot = snapshot
         self.onUp = onUp
         self.onRepoDiff = onRepoDiff
         self.onChangedFilter = onChangedFilter
         self.onSelect = onSelect
-        rebuildChrome()
+        updateChrome(previous: previous)
+        chromeRendered = true
         rebuildDisplayRows()
-        tableView.reloadData()
+        if displayRows != previousRows {
+            tableView.reloadData()
+        } else if previous?.railPath != snapshot.railPath {
+            refreshCurrentRowHighlight()
+        }
     }
 
     func selectRow(at index: Int) {
@@ -238,12 +253,7 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
         )
     }
 
-    private func rebuildChrome() {
-        for view in columnStack.arrangedSubviews {
-            columnStack.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-
+    private func buildChrome() {
         let location = UIKitChassisLabel(
             snapshot.locationLabel,
             size: 8,
@@ -253,22 +263,19 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
         location.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         locationSourceLabel = location
 
+        let chip = UIKitChassisChip(
+            "UP",
+            accessibilityLabel: "Show the parent directory",
+            action: { [weak self] in self?.onUp() }
+        )
+        upChip = chip
+
         let headerStack = UIStackView(arrangedSubviews: [location])
         headerStack.axis = .horizontal
         headerStack.alignment = .center
         headerStack.spacing = 7
         headerStack.addArrangedSubview(makeFlexibleSpacer(minimumWidth: 4))
-        if snapshot.canHoistRoot {
-            let chip = UIKitChassisChip(
-                "UP",
-                accessibilityLabel: "Show the parent directory",
-                action: { [weak self] in self?.onUp() }
-            )
-            upChip = chip
-            headerStack.addArrangedSubview(chip)
-        } else {
-            upChip = nil
-        }
+        headerStack.addArrangedSubview(chip)
         columnStack.addArrangedSubview(inset(
             headerStack,
             horizontal: Self.headerHorizontalInset,
@@ -276,60 +283,99 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
         ))
         columnStack.addArrangedSubview(makeDivider())
 
-        if snapshot.gitRoot != nil {
-            let branch = UILabel()
-            branch.text = "⎇ \(snapshot.branch ?? "—")"
-            branch.font = UIKitChassis.monoFont(10, weight: .semibold)
-            branch.textColor = UIKitChassis.signal
-            branch.lineBreakMode = .byTruncatingTail
-            branch.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            branchLabel = branch
+        let branch = UILabel()
+        branch.font = UIKitChassis.monoFont(10, weight: .semibold)
+        branch.textColor = UIKitChassis.signal
+        branch.lineBreakMode = .byTruncatingTail
+        branch.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        branchLabel = branch
 
-            // The SwiftUI source used `.buttonStyle(.plain)`: the diff
-            // numbers are the complete visual treatment. A system button can
-            // acquire the platform's native button ground on newer releases,
-            // which turns this compact readout into an unrelated pill.
-            let counts = UIButton(type: .custom)
-            counts.backgroundColor = .clear
-            counts.contentEdgeInsets = .zero
-            counts.setAttributedTitle(Self.countsText(snapshot.shortStat), for: .normal)
-            counts.contentHorizontalAlignment = .leading
-            counts.accessibilityLabel = "Open the working tree's diff"
-            counts.hoverStyle = UIHoverStyle(
-                effect: .highlight,
-                shape: .rect(cornerRadius: 2)
-            )
-            counts.addAction(UIAction { [weak self] _ in self?.onRepoDiff() }, for: .touchUpInside)
-            countsButton = counts
+        // The SwiftUI source used `.buttonStyle(.plain)`: the diff
+        // numbers are the complete visual treatment. A system button can
+        // acquire the platform's native button ground on newer releases,
+        // which turns this compact readout into an unrelated pill.
+        let counts = UIButton(type: .custom)
+        counts.backgroundColor = .clear
+        counts.contentEdgeInsets = .zero
+        counts.contentHorizontalAlignment = .leading
+        counts.accessibilityLabel = "Open the working tree's diff"
+        counts.hoverStyle = UIHoverStyle(
+            effect: .highlight,
+            shape: .rect(cornerRadius: 2)
+        )
+        counts.addAction(UIAction { [weak self] _ in self?.onRepoDiff() }, for: .touchUpInside)
+        countsButton = counts
 
-            let changed = UIKitChassisChip(
-                "CHANGED",
-                prominent: snapshot.changedFilter,
-                accessibilityLabel: snapshot.changedFilter
-                    ? "Show the whole tree" : "Show only changed files",
-                action: { [weak self] in self?.onChangedFilter() }
-            )
-            changedChip = changed
+        let changed = UIKitChassisChip(
+            "CHANGED",
+            accessibilityLabel: "Show only changed files",
+            action: { [weak self] in self?.onChangedFilter() }
+        )
+        changedChip = changed
 
-            let gitStack = UIStackView(arrangedSubviews: [branch, counts])
-            gitStack.axis = .horizontal
-            gitStack.alignment = .center
-            gitStack.spacing = 8
-            gitStack.addArrangedSubview(makeFlexibleSpacer(minimumWidth: 4))
-            gitStack.addArrangedSubview(changed)
-            columnStack.addArrangedSubview(inset(
-                gitStack,
-                horizontal: Self.headerHorizontalInset,
-                vertical: Self.headerVerticalInset
-            ))
-            columnStack.addArrangedSubview(makeDivider())
-        } else {
-            branchLabel = nil
-            countsButton = nil
-            changedChip = nil
-        }
+        let gitStack = UIStackView(arrangedSubviews: [branch, counts])
+        gitStack.axis = .horizontal
+        gitStack.alignment = .center
+        gitStack.spacing = 8
+        gitStack.addArrangedSubview(makeFlexibleSpacer(minimumWidth: 4))
+        gitStack.addArrangedSubview(changed)
+        let gitRow = inset(
+            gitStack,
+            horizontal: Self.headerHorizontalInset,
+            vertical: Self.headerVerticalInset
+        )
+        let gitRule = makeDivider()
+        gitBlock = gitRow
+        gitDivider = gitRule
+        columnStack.addArrangedSubview(gitRow)
+        columnStack.addArrangedSubview(gitRule)
 
         columnStack.addArrangedSubview(tableView)
+        updateChrome(previous: nil)
+    }
+
+    /// Field-by-field, so an unchanged watch tick touches nothing. `previous`
+    /// is nil for the first pass, which then writes every value.
+    private func updateChrome(previous: FileViewerTreeColumnSnapshot?) {
+        let first = previous == nil
+        if first || previous?.locationLabel != snapshot.locationLabel {
+            locationSourceLabel?.setText(snapshot.locationLabel)
+        }
+        if first || previous?.canHoistRoot != snapshot.canHoistRoot {
+            upChip?.isHidden = !snapshot.canHoistRoot
+        }
+        let hasGit = snapshot.gitRoot != nil
+        if first || previous.map({ $0.gitRoot != nil }) != hasGit {
+            gitBlock?.isHidden = !hasGit
+            gitDivider?.isHidden = !hasGit
+        }
+        guard hasGit else { return }
+        if first || previous?.branch != snapshot.branch {
+            branchLabel?.text = "⎇ \(snapshot.branch ?? "—")"
+        }
+        if first || previous?.shortStat != snapshot.shortStat {
+            countsButton?.setAttributedTitle(
+                Self.countsText(snapshot.shortStat),
+                for: .normal
+            )
+        }
+        if first || previous?.changedFilter != snapshot.changedFilter {
+            changedChip?.isProminent = snapshot.changedFilter
+            changedChip?.accessibilityLabel = snapshot.changedFilter
+                ? "Show the whole tree" : "Show only changed files"
+        }
+    }
+
+    /// The current row's ground is snapshot state, not row state, so a rail
+    /// move repaints the cells on screen instead of reloading the table.
+    private func refreshCurrentRowHighlight() {
+        for indexPath in tableView.indexPathsForVisibleRows ?? [] {
+            guard displayRows.indices.contains(indexPath.row),
+                  case .tree(let row) = displayRows[indexPath.row],
+                  let cell = tableView.cellForRow(at: indexPath) as? FileViewerTreeRowCell
+            else { continue }
+            cell.apply(row, isCurrent: snapshot.railPath == row.entry.path)
+        }
     }
 
     private func rebuildDisplayRows() {
@@ -401,7 +447,7 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
         return result
     }
 
-    private enum DisplayRow {
+    private enum DisplayRow: Equatable {
         case failure(String)
         case empty(String)
         case tree(FileTree.Row)
@@ -555,6 +601,10 @@ final class FileViewerTreeMessageCell: UITableViewCell {
     required init?(coder: NSCoder) { fatalError("unused") }
 
     func apply(_ text: String, color: UIColor, chassisCaps: Bool) {
+        // Body copy keeps Dynamic Type; the caps branch is chassis chrome at a
+        // fixed size (already scaled by `Theme.typeScale`) and must not
+        // compound with it.
+        messageLabel.adjustsFontForContentSizeCategory = !chassisCaps
         let inset: CGFloat = chassisCaps ? 12 : 10
         leadingConstraint.constant = inset
         trailingConstraint.constant = -inset

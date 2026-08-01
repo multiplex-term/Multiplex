@@ -77,6 +77,111 @@ final class TerminalTabStripUIKitTests: XCTestCase {
         XCTAssertEqual(view.intrinsicContentSize.height, expectedHeight)
     }
 
+    /// A real tab press synchronously updates both cells while the pressed
+    /// UIControl is still dispatching its action. The control, its labels, and
+    /// every hit region must survive that update; visionOS immediately asks
+    /// the ornament to fit this same live subtree.
+    func testTwoTabActivationKeepsIdentityAndGeometryStable() {
+        let firstID = UUID()
+        let secondID = UUID()
+        let view = TerminalTabStripView()
+        var rerender: ((UUID) -> Void)!
+        rerender = { activeID in
+            view.apply(
+                items: [
+                    .init(
+                        id: firstID,
+                        title: "main",
+                        controller: nil,
+                        isActive: activeID == firstID
+                    ),
+                    .init(
+                        id: secondID,
+                        title: "scratch",
+                        controller: nil,
+                        isActive: activeID == secondID
+                    ),
+                ],
+                allowsSplit: true,
+                activate: { rerender($0) },
+                split: { _ in },
+                close: { _ in }
+            )
+        }
+        rerender(firstID)
+
+        let originalSize = view.fittingContentSize()
+        view.frame = CGRect(origin: .zero, size: originalSize)
+        view.layoutIfNeeded()
+        let originalCells = view.cells
+        let originalLabels = view.cells.map(\.sourceLabel)
+
+        view.cells[1].sendActions(for: .touchUpInside)
+        view.frame.size = view.fittingContentSize()
+        view.layoutIfNeeded()
+
+        XCTAssertEqual(view.fittingContentSize(), originalSize)
+        XCTAssertTrue(view.cells[0] === originalCells[0])
+        XCTAssertTrue(view.cells[1] === originalCells[1])
+        XCTAssertTrue(view.cells[0].sourceLabel === originalLabels[0])
+        XCTAssertTrue(view.cells[1].sourceLabel === originalLabels[1])
+        XCTAssertFalse(view.cells[0].accessibilityTraits.contains(.selected))
+        XCTAssertTrue(view.cells[1].accessibilityTraits.contains(.selected))
+        XCTAssertEqual(
+            view.cells[1].frame.minX - view.cells[0].frame.maxX,
+            TerminalTabStripView.cellSpacing,
+            accuracy: 0.5
+        )
+        for cell in view.cells {
+            XCTAssertGreaterThan(cell.frame.width, 0)
+            XCTAssertGreaterThan(cell.frame.height, 0)
+            let center = cell.convert(
+                CGPoint(x: cell.bounds.midX, y: cell.bounds.midY),
+                to: view
+            )
+            XCTAssertTrue(view.hitTest(center, with: nil) === cell)
+        }
+        rerender = nil
+    }
+
+    #if os(visionOS)
+    func testVisionTopOrnamentKeepsArithmeticTwoTabSizeAcrossActivation() {
+        let firstID = UUID()
+        let secondID = UUID()
+        let strip = TerminalTabStripView()
+        let host = TerminalVisionTabOrnamentHostView(tabStrip: strip)
+        func render(activeID: UUID) {
+            strip.apply(
+                items: [
+                    .init(id: firstID, title: "main", controller: nil,
+                          isActive: activeID == firstID),
+                    .init(id: secondID, title: "scratch", controller: nil,
+                          isActive: activeID == secondID),
+                ],
+                allowsSplit: true,
+                activate: { render(activeID: $0) },
+                split: { _ in },
+                close: { _ in }
+            )
+            host.refreshFittingSize()
+        }
+        render(activeID: firstID)
+        let originalSize = host.fittingSize()
+        host.frame = CGRect(origin: .zero, size: originalSize)
+        host.layoutIfNeeded()
+
+        strip.cells[1].sendActions(for: .touchUpInside)
+        host.frame.size = host.fittingSize()
+        host.layoutIfNeeded()
+
+        XCTAssertEqual(host.fittingSize(), originalSize)
+        XCTAssertEqual(strip.frame.width, strip.fittingContentSize().width, accuracy: 0.5)
+        XCTAssertEqual(strip.frame.height, 30, accuracy: 0.5)
+        XCTAssertEqual(strip.cells.count, 2)
+        XCTAssertTrue(strip.cells.allSatisfy { !$0.frame.isEmpty })
+    }
+    #endif
+
     func testAuxiliaryTabHasNoTallyLamp() {
         let id = UUID()
         let view = configuredView(items: [
@@ -137,6 +242,55 @@ final class TerminalTabStripUIKitTests: XCTestCase {
         view.cells[0].sendActions(for: .touchUpInside)
         XCTAssertTrue(firstActivations.isEmpty)
         XCTAssertEqual(replacementActivations, [id])
+    }
+
+    /// Status churn and tab switches must not cancel a press already tracking
+    /// one of these controls, so a render that changes only what a cell wears
+    /// mutates it instead of rebuilding the row.
+    func testStatusAndActiveChurnMutateCellsInPlace() throws {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        let controller = TerminalSessionController(
+            route: TerminalRoute(hostID: host.id, mode: .attach(sessionName: "main")),
+            host: host
+        )
+        let id = UUID()
+        let view = TerminalTabStripView()
+        apply(to: view, items: [
+            .init(id: id, title: "main", controller: nil, isActive: false),
+        ])
+        let cell = try XCTUnwrap(view.cells.first)
+        let dot = try XCTUnwrap(cell.dotView)
+        let label = cell.sourceLabel
+        XCTAssertEqual(cell.tallyState, .ended)
+
+        apply(to: view, items: [
+            .init(id: id, title: "main", controller: controller, isActive: false),
+        ])
+        XCTAssertTrue(view.cells[0] === cell)
+        XCTAssertTrue(cell.dotView === dot)
+        XCTAssertEqual(cell.tallyState, .connecting)
+
+        apply(to: view, items: [
+            .init(id: id, title: "agent", controller: controller, isActive: false),
+        ])
+        XCTAssertTrue(view.cells[0] === cell)
+        XCTAssertTrue(cell.sourceLabel === label)
+        XCTAssertEqual(cell.sourceLabel.accessibilityLabel, "agent")
+
+        apply(to: view, items: [
+            .init(id: id, title: "agent", controller: controller, isActive: true),
+        ])
+        XCTAssertTrue(view.cells[0] === cell)
+        XCTAssertTrue(cell.sourceLabel === label)
+        XCTAssertTrue(cell.accessibilityTraits.contains(.selected))
+        XCTAssertEqual(cell.accessibilityLabel, "agent tab, active")
+        XCTAssertEqual(cell.sourceLabel.accessibilityLabel, "agent")
+
+        // Only a changed identity list is allowed to rebuild the row.
+        apply(to: view, items: [
+            .init(id: UUID(), title: "agent", controller: controller, isActive: true),
+        ])
+        XCTAssertFalse(view.cells[0] === cell)
     }
 
     func testCellsEnableTouchContextMenuInteraction() throws {
@@ -219,6 +373,14 @@ final class TerminalTabStripUIKitTests: XCTestCase {
         items: [TerminalTabStrip.Item]
     ) -> TerminalTabStripView {
         let view = TerminalTabStripView()
+        apply(to: view, items: items)
+        return view
+    }
+
+    private func apply(
+        to view: TerminalTabStripView,
+        items: [TerminalTabStrip.Item]
+    ) {
         view.apply(
             items: items,
             allowsSplit: true,
@@ -226,7 +388,6 @@ final class TerminalTabStripUIKitTests: XCTestCase {
             split: { _ in },
             close: { _ in }
         )
-        return view
     }
 
     private func menuTitles(_ menu: UIMenu) -> [String] {
