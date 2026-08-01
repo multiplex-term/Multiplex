@@ -119,13 +119,17 @@ enum HerdrProbe {
         var paneCWDs: [String: String]
         var tailPaneIDs: [String]
         var serverVersion: String?
+        /// The session's focused pane — what every attached herdr client
+        /// shows, workspace switches inside the TUI included.
+        var focusedPaneID: String?
     }
 
     static func parseProbe(_ output: String) -> ParsedProbe {
         var result = ParsedProbe(
             state: .failed("unreadable herdr probe response"),
             tails: [:], miniatures: [:], paneStatuses: [:],
-            paneCWDs: [:], tailPaneIDs: [], serverVersion: nil
+            paneCWDs: [:], tailPaneIDs: [], serverVersion: nil,
+            focusedPaneID: nil
         )
         let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
         if lines.contains(where: { $0 == noHerdrMarker }) {
@@ -182,7 +186,8 @@ enum HerdrProbe {
                 uniquingKeysWith: { first, _ in first }
             ),
             tailPaneIDs: frontPaneIDs(snapshot: snapshot),
-            serverVersion: snapshot.version
+            serverVersion: snapshot.version,
+            focusedPaneID: snapshot.focusedPaneID
         )
     }
 
@@ -203,11 +208,16 @@ enum HerdrProbe {
         var tabs: [Tab]
         var panes: [Pane]
         var layouts: [Layout]
+        /// The session's globally focused pane — herdr keeps ONE focus for
+        /// the whole session, and the full client mirrors it, so this is
+        /// what an attached tab is actually looking at.
+        var focusedPaneID: String?
 
         enum CodingKeys: String, CodingKey {
             case version
             case protocolVersion = "protocol"
             case workspaces, tabs, panes, layouts
+            case focusedPaneID = "focused_pane_id"
         }
     }
 

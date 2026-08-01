@@ -538,7 +538,23 @@ final class TerminalWindowViewController: UIViewController,
             return activeController?.directShellAgent
         }
         guard let host = store.host(id: activeTab.hostID) else { return nil }
-        return hub.model(for: host).tmux.sessions
+        let model = hub.model(for: host)
+        // A herdr tab shows the SESSION's focused pane, not its summoning
+        // workspace: herdr keeps one focus per session and the full client
+        // mirrors it, so switching workspaces inside the TUI must move the
+        // helper strip too. Fall back to the tab's workspace record only
+        // while no probe has named a focus yet.
+        if host.sessionBackend == .herdr, let focused = model.herdrFocusedPaneID {
+            for session in model.tmux.sessions {
+                for window in session.windows {
+                    if let pane = window.panes?.first(where: { $0.tmuxID == focused }) {
+                        return pane.agent
+                    }
+                }
+            }
+            return nil
+        }
+        return model.tmux.sessions
             .first { $0.name == sessionName }?
             .activeAgent
     }
@@ -1001,6 +1017,24 @@ final class TerminalWindowViewController: UIViewController,
             .processFingerprint
         if agentChanged { renderNow() }
         await model.refreshAndWait(ifStaleFor: 4)
+
+        if host.sessionBackend == .herdr {
+            // No list-panes fast path in herdr mode; the probe's snapshot is
+            // the authority and `detectedAgent` follows the session's live
+            // focused pane — re-read it each interval so a workspace switch
+            // inside the TUI moves the strip within a probe tick.
+            while !Task.isCancelled {
+                guard activeTab?.id == watchedTab.id else { return }
+                let nextAgent = detectedAgent
+                if shownAgent != nextAgent {
+                    hideAgentTask?.cancel()
+                    shownAgent = nextAgent
+                    renderNow()
+                }
+                try? await Task.sleep(for: Self.focusedPaneProbeInterval)
+            }
+            return
+        }
 
         while !Task.isCancelled {
             if UIApplication.shared.applicationState == .active,

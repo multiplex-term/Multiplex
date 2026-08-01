@@ -171,6 +171,13 @@ final class HostConnectionModel {
     /// herdr is installed on this host (the tmux probe checks presence
     /// every tick). Read only by the dead-tmux tile's switch hint.
     private(set) var herdrPresent = false
+    /// herdr mode: the session's globally focused pane. herdr keeps ONE
+    /// focus per session and every attached client mirrors it, so this —
+    /// never the tab's summoning workspace — is what an attached herdr
+    /// terminal is looking at. Observable on purpose: the helper strip
+    /// re-resolves its agent when the person switches workspaces inside
+    /// the TUI.
+    private(set) var herdrFocusedPaneID: String?
     /// Session name → last visible lines of its active pane; the deck
     /// wall's live miniatures, refreshed by every probe (the probe's single
     /// exec carries the capture tails).
@@ -458,6 +465,9 @@ final class HostConnectionModel {
                 herdrTailPaneIDs = herdrParsed.tailPaneIDs
                 herdrPaneStatuses = herdrParsed.paneStatuses
                 herdrPaneCWDs = herdrParsed.paneCWDs
+                if herdrFocusedPaneID != herdrParsed.focusedPaneID {
+                    herdrFocusedPaneID = herdrParsed.focusedPaneID
+                }
                 parsed = TmuxProbe.ParsedProbe(
                     state: herdrParsed.state.tmuxState,
                     tails: herdrParsed.tails,
