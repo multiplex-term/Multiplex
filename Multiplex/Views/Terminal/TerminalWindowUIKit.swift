@@ -543,7 +543,16 @@ final class TerminalWindowViewController: UIViewController,
             .activeAgent
     }
     private var resolvedTerminalTheme: TerminalTheme {
-        themes.selected(for: traitCollection.userInterfaceStyle == .light ? .light : .dark)
+        // Prefer the pinned choice over the live traits: the observation
+        // render can run before the scene root writes the new override onto
+        // the window, and a trait-derived read in that gap re-applies the
+        // OLD appearance's theme (white-on-white text until the trait pass
+        // catches up — user-reported as intermittent). Traits remain the
+        // source only under SYSTEM, where the device is the authority and
+        // `traitCollectionDidChange` re-renders.
+        let appearance = themes.appearance.resolvedOverride
+            ?? (traitCollection.userInterfaceStyle == .light ? .light : .dark)
+        return themes.selected(for: appearance)
     }
 
     // MARK: Observation
@@ -1487,6 +1496,7 @@ extension TerminalWindowViewController {
             umdController: umdController,
             helperController: helperController,
             windowWidth: rootView.bounds.width,
+            interfaceStyle: themes.appearance.interfaceStyle,
             forceRevision: forceRevision
         )
     }
