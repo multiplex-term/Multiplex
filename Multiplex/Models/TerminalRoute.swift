@@ -17,6 +17,13 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         /// on). A real terminal like `.attach`: restores across launches,
         /// resumes per `SessionResumePolicy`.
         case herdrAttach(workspaceID: String, label: String)
+        /// The agent doors' scoped attach — `herdr agent attach <target>`,
+        /// chrome-free, exactly one agent's terminal (decision #4's
+        /// hybrid: tiles get the full client, agent doors get this).
+        /// `sessionName` deliberately answers nil: this tab is not the
+        /// workspace's client, so tile-press focus dedupe must never
+        /// raise it in place of a real attach.
+        case herdrAgentAttach(target: String, label: String)
         /// The viewport — an inline browser tab, docked beside the sessions
         /// that produced its URL and moved with the same merge/split
         /// machinery. Not a terminal: no remote command, no tmux session, no
@@ -70,6 +77,8 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
             )
         case .herdrAttach(let workspaceID, _):
             return HerdrProbe.attachCommand(workspaceID: workspaceID)
+        case .herdrAgentAttach(let target, _):
+            return HerdrProbe.agentAttachCommand(target: target)
         case .shell, .viewport, .fileViewer, .agentGallery:
             return nil
         }
@@ -98,6 +107,10 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
             // has no workspace flag), so a shell must carry them; execvp
             // gets that shell as its argv.
             return "sh -c \(HerdrProbe.attachCommand(workspaceID: workspaceID).shellQuoted)"
+        case .herdrAgentAttach(let target, _):
+            // One argv, no shell needed — mosh-server execvp()s it and the
+            // bootstrap's PATH already covers herdr's homes.
+            return "herdr agent attach \(target.shellQuoted)"
         case .shell, .viewport, .fileViewer, .agentGallery:
             return nil
         }
@@ -107,6 +120,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         switch mode {
         case .attach(let name), .create(let name, _): name
         case .herdrAttach(_, let label): label
+        case .herdrAgentAttach(_, let label): label
         case .shell: "shell"
         case .viewport(let urlString): Self.viewportLabel(urlString)
         case .fileViewer(let path): Self.fileViewerLabel(path)
@@ -123,7 +137,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         switch mode {
         case .attach(let name), .create(let name, _): name
         case .herdrAttach(_, let label): label
-        case .shell, .viewport, .fileViewer, .agentGallery: nil
+        case .shell, .viewport, .fileViewer, .agentGallery, .herdrAgentAttach: nil
         }
     }
 
@@ -133,7 +147,8 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
     var usesTmux: Bool {
         switch mode {
         case .attach, .create: true
-        case .herdrAttach, .shell, .viewport, .fileViewer, .agentGallery: false
+        case .herdrAttach, .herdrAgentAttach, .shell, .viewport, .fileViewer,
+             .agentGallery: false
         }
     }
 

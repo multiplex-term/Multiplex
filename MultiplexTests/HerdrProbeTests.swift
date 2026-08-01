@@ -555,6 +555,25 @@ final class HerdrRouteTests: XCTestCase {
         let shellRoute = TerminalRoute(hostID: UUID(), mode: .shell)
         XCTAssertFalse(shellRoute.usesTmux)
     }
+
+    func testAgentDoorAttachIsScopedAndNeverDedupesAsTheWorkspace() throws {
+        // Decision #4's hybrid: agent doors take `herdr agent attach` —
+        // chrome-free, one agent's terminal — never the full client.
+        let door = TerminalRoute(
+            hostID: UUID(),
+            mode: .herdrAgentAttach(target: "w2:p1", label: "codex · api")
+        )
+        let command = try XCTUnwrap(door.remoteCommand)
+        XCTAssertTrue(command.hasSuffix("exec herdr agent attach 'w2:p1'"))
+        XCTAssertFalse(command.contains("session attach"))
+        XCTAssertEqual(door.moshRemoteCommand, "herdr agent attach 'w2:p1'")
+        XCTAssertEqual(door.displayName, "codex · api")
+        // Not the workspace's client: tile-press focus dedupe matches on
+        // sessionName, and this tab must never be raised in its place.
+        XCTAssertNil(door.sessionName)
+        XCTAssertFalse(door.usesTmux)
+        XCTAssertFalse(door.isAuxiliaryPane)
+    }
 }
 
 /// The backend field itself: legacy records decode to tmux, unknown

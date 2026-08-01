@@ -332,9 +332,11 @@ final class AgentGalleryPaneViewController: UIViewController, UITextFieldDelegat
 
     private func openSelectedTerminal() {
         guard let selected = selectedAgent else { return }
-        openTerminal(.herdrAttach(
-            workspaceID: selected.workspaceID,
-            label: selected.workspaceName
+        // Decision #4's agent door: the scoped, chrome-free single-agent
+        // attach — never the full client (that's the deck tile's road).
+        openTerminal(.herdrAgentAttach(
+            target: selected.paneID,
+            label: "\(selected.herdrKind) · \(selected.workspaceName)"
         ))
     }
 

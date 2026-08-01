@@ -608,6 +608,16 @@ enum HerdrProbe {
         var error: Body
     }
 
+    /// The agent doors' scoped attach — `herdr agent attach <target>` is
+    /// chrome-free and shows exactly one agent's terminal, the one scoped
+    /// attach herdr has (workspace attach doesn't exist; the full client
+    /// below is the tile press's road). No `--takeover` by default: the
+    /// door observes-and-types beside other clients rather than kicking
+    /// them.
+    static func agentAttachCommand(target: String) -> String {
+        pathPrefix + "exec herdr agent attach \(target.shellQuoted)"
+    }
+
     /// The PTY attach line `ShellHandoff` injects for a herdr tab:
     /// pre-focus the workspace over the socket (fail-soft — a vanished
     /// workspace still attaches to the session), then exec the full herdr
