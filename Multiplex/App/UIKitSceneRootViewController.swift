@@ -105,9 +105,18 @@ final class UIKitSceneRootViewController: UIViewController {
         super.viewDidLoad()
         // PROTOTYPE(GLASS): one smoke tint over the system platter is the
         // whole window ground; every full-bleed layer above it goes clear.
-        let ground = GlassPrototype.active
-            ? GlassPrototype.smokeTint : UIKitChassis.chassis
-        view.backgroundColor = plainWindowBackground ? .clear : ground
+        // A plain (terminal) scene stays clear except under GLASS, where the
+        // re-admitted platter carries the same smoke.
+        let ground: UIColor
+        if plainWindowBackground {
+            ground = GlassPrototype.enabled
+                ? GlassPrototype.material(GlassPrototype.smokeMaterial, fallback: .clear)
+                : .clear
+        } else {
+            ground = GlassPrototype.enabled
+                ? GlassPrototype.windowGround : UIKitChassis.chassis
+        }
+        view.backgroundColor = ground
         #if os(visionOS)
         // The window resolves the container style from its root view
         // controller, which is this one. The preference is fixed at init, so
@@ -160,7 +169,13 @@ final class UIKitSceneRootViewController: UIViewController {
     /// `childViewControllerForPreferredContainerBackgroundStyle` stays nil,
     /// so no mounted content controller can hand the platter back.
     override var preferredContainerBackgroundStyle: UIContainerBackgroundStyle {
-        plainWindowBackground ? .hidden : super.preferredContainerBackgroundStyle
+        // PROTOTYPE(GLASS): a glass-selected terminal scene re-admits the
+        // platter — tinted system glass is the window ground there.
+        if plainWindowBackground,
+           !(GlassPrototype.enabled && GlassSelectionState.shared.isGlass) {
+            return .hidden
+        }
+        return super.preferredContainerBackgroundStyle
     }
     #endif
 
@@ -227,6 +242,21 @@ final class UIKitSceneRootViewController: UIViewController {
         viewIfLoaded?.window?.overrideUserInterfaceStyle = style
         lockShieldWindow?.overrideUserInterfaceStyle = style
         lockViewController?.overrideUserInterfaceStyle = style
+        // PROTOTYPE(GLASS): the independent GLASS choice rides a custom
+        // color-affecting trait, so every material re-resolves live. The
+        // app-lock shield and sheet windows never get the trait — they stay
+        // opaque chassis by design. A glass-selected terminal scene also
+        // re-admits its platter and clears its window backing.
+        let glassSelected = GlassPrototype.enabled && appearance == .glass
+        GlassSelectionState.shared.isGlass = glassSelected
+        traitOverrides[GlassAppearanceTrait.self] = glassSelected
+        viewIfLoaded?.window?.traitOverrides[GlassAppearanceTrait.self] = glassSelected
+        #if os(visionOS)
+        setNeedsUpdateOfPreferredContainerBackgroundStyle()
+        if plainWindowBackground {
+            viewIfLoaded?.window?.backgroundColor = glassSelected ? nil : .clear
+        }
+        #endif
         if platformChrome.appliesSignalTint {
             viewIfLoaded?.window?.tintColor = TallyPalette.signal
             lockShieldWindow?.tintColor = TallyPalette.signal

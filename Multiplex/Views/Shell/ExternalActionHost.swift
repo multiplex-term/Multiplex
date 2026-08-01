@@ -137,7 +137,7 @@ final class ExternalActionUIKitCoordinator: NSObject,
             prompt.followAppAppearance(themes)
             let navigation = UINavigationController(rootViewController: prompt)
             navigation.navigationBar.prefersLargeTitles = false
-            navigation.view.backgroundColor = UIKitChassis.chassis
+            navigation.view.backgroundColor = GlassPrototype.sheetGround
             UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
             navigation.presentationController?.delegate = self
             prompt.onDismiss = { [weak self, weak navigation] in

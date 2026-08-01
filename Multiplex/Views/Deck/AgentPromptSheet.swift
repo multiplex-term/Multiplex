@@ -102,7 +102,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
         super.viewDidLoad()
         let title = "\(form.request.agent.displayName) on \(form.request.host.name)"
         self.title = title
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.sheetGround
 
         navigationItem.largeTitleDisplayMode = .never
         #if os(visionOS)
@@ -149,7 +149,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
 
     private func configureContent() {
         scrollView.alwaysBounceVertical = true
-        scrollView.backgroundColor = UIKitChassis.chassis
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
         view.addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -367,7 +367,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
             for: .normal
         )
         button.tintColor = UIKitChassis.signal2
-        button.backgroundColor = UIKitChassis.chassis
+        button.backgroundColor = GlassPrototype.strataChassis
         button.hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
         button.accessibilityLabel =
             "Configured models for \(form.request.agent.displayName)"
@@ -375,7 +375,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
         button.showsMenuAsPrimaryAction = true
 
         let border = UIKitTallyBorderedView()
-        border.backgroundColor = UIKitChassis.chassis
+        border.backgroundColor = GlassPrototype.clearedChassis
         border.addSubview(button)
         button.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([

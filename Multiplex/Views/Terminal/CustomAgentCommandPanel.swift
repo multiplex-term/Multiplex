@@ -512,7 +512,7 @@ final class CustomAgentCommandPanelViewController: UIViewController {
                 color: UIKitChassis.signal3
             )
             empty.textAlignment = .center
-            empty.backgroundColor = UIKitChassis.chassis
+            empty.backgroundColor = GlassPrototype.clearedChassis
             empty.accessibilityIdentifier = "customCommands.empty"
             empty.translatesAutoresizingMaskIntoConstraints = false
             empty.heightAnchor.constraint(greaterThanOrEqualToConstant: 90).isActive = true
@@ -765,7 +765,7 @@ private final class CustomBuiltInCommandRow: UIView {
         changed: @escaping (AgentCommandPlacement) -> Void
     ) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
         accessibilityIdentifier = "customCommands.builtIn.\(command.id)"
 
         let label = UILabel()
@@ -953,7 +953,7 @@ private final class CustomCommandRowView: UIView, UITextViewDelegate {
         self.changed = changed
         self.heightChanged = heightChanged
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
         accessibilityIdentifier = "customCommands.row.\(command.id.uuidString)"
 
         let number = UILabel()
@@ -1368,7 +1368,7 @@ private final class CustomCommandRowActionButton: UIButton {
     ) {
         self.action = action
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         layer.borderWidth = 1
         layer.borderColor = UIKitChassis.bezelHi
             .resolvedColor(with: traitCollection).cgColor

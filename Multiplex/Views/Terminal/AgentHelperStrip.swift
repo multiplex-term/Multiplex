@@ -717,7 +717,7 @@ private final class AgentHelperStripButton: UIButton {
         self.prominent = prominent
         storedAction = action
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         layer.borderWidth = 1
         contentEdgeInsets = UIEdgeInsets(top: 5, left: 9, bottom: 5, right: 9)
         titleLabel?.numberOfLines = 1

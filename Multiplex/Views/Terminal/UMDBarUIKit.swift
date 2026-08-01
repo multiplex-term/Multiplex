@@ -1035,7 +1035,7 @@ final class UMDBarButton: UIButton {
         self.prominent = prominent
         super.init(frame: .zero)
         self.accessibilityLabel = accessibilityLabel
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         layer.borderWidth = 1
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
 
@@ -1133,7 +1133,7 @@ private final class UMDStateBadgeView: UIKitTallyBorderedView {
     init(caption: String, accessibilityLabel: String) {
         self.caption = caption
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         isAccessibilityElement = true
         self.accessibilityLabel = accessibilityLabel
         addSubview(captionLabel)

@@ -62,7 +62,7 @@ final class TerminalFilePathSheetViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "View file"
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.sheetGround
         configureNavigation()
         configureContent()
         editor.onTextChange = { [weak self] _ in self?.refreshState() }
@@ -116,7 +116,7 @@ final class TerminalFilePathSheetViewController: UIViewController {
 
     private func configureContent() {
         scrollView.alwaysBounceVertical = true
-        scrollView.backgroundColor = UIKitChassis.chassis
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
         view.addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([

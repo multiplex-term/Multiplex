@@ -518,10 +518,10 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
         // the platter, exactly as `.windowStyle` left it.
         let plainWindowBackground: Bool = {
             #if os(visionOS)
-            // PROTOTYPE(GLASS): under the smoke prototype the terminal scene
-            // keeps the platter after all — tinted system glass is the window
-            // ground, and the pane stack stops painting its own silhouette.
-            if case .terminal = plan { return !GlassPrototype.active }
+            // PROTOTYPE(GLASS): a GLASS-selected scene re-admits the platter
+            // live (the scene root and applyAppearance own that switch); the
+            // connect-time plan keeps its shipping meaning.
+            if case .terminal = plan { return true }
             #endif
             return false
         }()

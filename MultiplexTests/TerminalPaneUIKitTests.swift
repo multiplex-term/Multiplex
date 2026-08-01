@@ -93,7 +93,9 @@ final class TerminalPaneUIKitTests: XCTestCase {
             expected
         )
         let surface = try XCTUnwrap(pane.terminalSurface)
-        XCTAssertTrue(surface.isOpaque)
+        // PROTOTYPE(GLASS): the surface stays non-opaque wherever the glass
+        // prototype is compiled in, so the pane can go translucent live.
+        XCTAssertEqual(surface.isOpaque, !GlassPrototype.enabled)
         XCTAssertEqual(
             surface.backgroundColor?.resolvedColor(with: surface.traitCollection),
             expected

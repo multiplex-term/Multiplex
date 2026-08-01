@@ -329,7 +329,7 @@ final class TerminalWindowViewController: UIViewController,
     override func loadView() {
         view = rootView
         // PROTOTYPE(GLASS): the scene root carries the smoke ground.
-        view.backgroundColor = GlassPrototype.active ? .clear : UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         #if os(visionOS)
         updateVisionOrnamentInstallation()
         #endif
@@ -2198,7 +2198,7 @@ extension TerminalWindowViewController {
     private func presentFeature(_ content: UIViewController) {
         let navigation = UINavigationController(rootViewController: content)
         navigation.navigationBar.prefersLargeTitles = false
-        navigation.view.backgroundColor = UIKitChassis.chassis
+        navigation.view.backgroundColor = GlassPrototype.sheetGround
         UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
         navigation.presentationController?.delegate = self
         presentedFeatureController = navigation
@@ -2460,17 +2460,18 @@ final class TerminalWindowUIKitRootView: UIView {
     private let bottomSafeAreaBackfill = UIView()
     private let fileAttachPresenterParking = UIView()
     private let tabDivider = UIView()
+    private var shellMode = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         // PROTOTYPE(GLASS): the scene root paints the smoke; window chrome
         // goes clear, and the terminal surface itself carries the screen
         // pane (theme-tinted) — a pane ground here would double-tint it.
-        backgroundColor = GlassPrototype.active ? .clear : UIKitChassis.chassis
+        backgroundColor = GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         paneContainer.backgroundColor =
-            GlassPrototype.active ? .clear : UIKitChassis.screen
+            GlassPrototype.enabled ? GlassPrototype.clearedScreen : UIKitChassis.screen
         tabScrollView.backgroundColor =
-            GlassPrototype.active ? .clear : UIKitChassis.chassis
+            GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         tabScrollView.showsHorizontalScrollIndicator = false
         tabDivider.backgroundColor = UIKitChassis.bezelHi
         umdContainer.backgroundColor = .clear
@@ -2495,6 +2496,12 @@ final class TerminalWindowUIKitRootView: UIView {
         tabScrollView.accessibilityIdentifier = "terminalWindow.tabs"
         umdContainer.accessibilityIdentifier = "terminalWindow.umd"
         helperContainer.accessibilityIdentifier = "terminalWindow.helpers"
+
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
+        ) { (view: TerminalWindowUIKitRootView, _: UITraitCollection) in
+            view.applyShellChrome()
+        }
     }
 
     @available(*, unavailable)
@@ -2544,12 +2551,21 @@ final class TerminalWindowUIKitRootView: UIView {
     }
 
     func setShellMode(_ shell: Bool) {
+        shellMode = shell
+        applyShellChrome()
+    }
+
+    /// PROTOTYPE(GLASS): under the GLASS selection the system platter is
+    /// the silhouette: fill and border retire, and clipping stays at a
+    /// platter-matching radius so edge-to-edge terminal rows cannot poke
+    /// past the system corner. Re-applied on trait flips because every
+    /// other appearance keeps the baseline 24pt bordered chassis.
+    private func applyShellChrome() {
         #if os(visionOS)
-        // PROTOTYPE(GLASS): the system platter is the silhouette — the fill
-        // and border retire, but clipping stays at a platter-matching radius
-        // so edge-to-edge terminal rows cannot poke past the system corner.
-        let rounded = !shell
-        let glass = GlassPrototype.active
+        let rounded = !shellMode
+        let glass = GlassPrototype.enabled
+            && traitCollection[GlassAppearanceTrait.self]
+            && traitCollection.userInterfaceStyle == .dark
         #else
         let rounded = false
         let glass = false

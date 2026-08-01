@@ -356,7 +356,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     override func viewDidLoad() {
         super.viewDidLoad()
         title = form.editing == nil ? "Add Host" : "Host Settings"
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.sheetGround
         configureNavigation()
         configureScrollView()
         buildManualForm()
@@ -461,7 +461,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         #if !os(visionOS)
         scrollView.keyboardDismissMode = .interactive
         #endif
-        scrollView.backgroundColor = UIKitChassis.chassis
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
         view.addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -1860,7 +1860,7 @@ final class AddHostSectionView: UIView {
 final class AddHostInsetRow: UIView {
     init(contentView: UIView) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
         addSubview(contentView)
         contentView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -1879,7 +1879,7 @@ final class AddHostInsetRow: UIView {
 final class AddHostFieldRow: UIView {
     init(label: String, inputView: UIView) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
         let caption = addHostLabel(
             label,
             font: UIKitChassis.uiFont(10, weight: .semibold),
@@ -2336,7 +2336,7 @@ private final class AddHostIconButton: UIButton {
             )
         ), for: .normal)
         tintColor = enabled ? UIKitChassis.signal2 : UIKitChassis.signal3
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         layer.borderWidth = 1
         layer.borderColor = dynamicBorder.resolvedColor(with: traitCollection).cgColor
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))

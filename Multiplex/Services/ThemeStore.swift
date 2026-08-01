@@ -22,6 +22,20 @@ enum AppAppearance: String, CaseIterable {
     case system
     case light
     case dark
+    /// PROTOTYPE(GLASS): the SMOKE glass chassis as an independent choice —
+    /// visionOS only, derived from the dark palette (dark traits + the dark
+    /// terminal-theme slot). Exists only where the prototype is compiled in.
+    case glass
+
+    /// The choices a platform's Settings bar offers and the DEBUG
+    /// appearance hook cycles. GLASS is visionOS DEBUG only.
+    static var availableCases: [AppAppearance] {
+        #if os(visionOS) && DEBUG
+        allCases
+        #else
+        [.system, .light, .dark]
+        #endif
+    }
 
     /// The pinned appearance, when there is one. `nil` means follow the
     /// scene's UIKit traits.
@@ -29,7 +43,7 @@ enum AppAppearance: String, CaseIterable {
         switch self {
         case .system: return nil
         case .light: return .light
-        case .dark: return .dark
+        case .dark, .glass: return .dark
         }
     }
 }
@@ -77,8 +91,12 @@ final class ThemeStore {
             ?? TerminalTheme.tally.id
         selectedLightID = defaults.string(forKey: Self.selectedLightIDKey)
             ?? TerminalTheme.lightDefault.id
-        appearance = defaults.string(forKey: Self.appearanceKey)
+        let storedAppearance = defaults.string(forKey: Self.appearanceKey)
             .flatMap(AppAppearance.init(rawValue:)) ?? .system
+        // A persisted GLASS choice on a platform/build without the prototype
+        // falls back to SYSTEM rather than acting as a hidden DARK.
+        appearance = AppAppearance.availableCases.contains(storedAppearance)
+            ? storedAppearance : .system
         load()
         #if DEBUG
         installDebugAppearanceHook()
@@ -99,7 +117,7 @@ final class ThemeStore {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let all = AppAppearance.allCases
+                let all = AppAppearance.availableCases
                 let index = all.firstIndex(of: self.appearance) ?? 0
                 self.appearance = all[(index + 1) % all.count]
             }

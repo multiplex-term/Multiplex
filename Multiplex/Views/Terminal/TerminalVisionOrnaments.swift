@@ -159,14 +159,12 @@ final class TerminalVisionOrnamentCoordinator {
             contentAlignment: SwiftUI.Alignment.center
         ) {
             TerminalVisionTopOrnament(state: state)
-                .modifier(GlassPrototypeOrnamentGround())
         }
         let bottom = UIHostingOrnament(
             sceneAnchor: UnitPoint.bottom,
             contentAlignment: SwiftUI.Alignment.center
         ) {
             TerminalVisionBottomOrnament(state: state)
-                .modifier(GlassPrototypeOrnamentGround())
         }
         owner.ornaments = [top, bottom]
         installed = true
@@ -217,6 +215,7 @@ private struct TerminalVisionTopOrnament: View {
                 revision: state.revision
             )
             .fixedSize()
+            .modifier(GlassPrototypeSlabGround(cornerRadius: 10))
         }
     }
 }
@@ -238,6 +237,7 @@ private struct TerminalVisionBottomOrnament: View {
                     revision: state.revision
                 )
                 .fixedSize()
+                .modifier(GlassPrototypeSlabGround())
                 .alignmentGuide(VerticalAlignment.center) { _ in
                     state.presentation.bottomCenterGuide
                 }
@@ -252,6 +252,7 @@ private struct TerminalVisionBottomOrnament: View {
                         revision: state.revision
                     )
                     .fixedSize()
+                    .modifier(GlassPrototypeSlabGround())
                 }
 
                 TerminalVisionOrnamentWidthClamp(
@@ -280,6 +281,7 @@ private struct TerminalVisionBottomOrnament: View {
                                 }
                             )
                             .fixedSize()
+                            .modifier(GlassPrototypeSlabGround())
                         }
                     }
                 }
@@ -355,6 +357,7 @@ private struct TerminalKeyClusterGroupRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ view: TerminalKeyClusterGroupView, context _: Context) {
+        applyGlassTrait(to: view)
         view.update(controller: controller)
     }
 
@@ -425,6 +428,7 @@ struct TerminalKeyCluster<Center: View>: View {
                 context: context,
                 controller: controller
             )
+            .modifier(GlassPrototypeSlabGround())
         }
     }
 
@@ -445,6 +449,7 @@ struct TerminalKeyCluster<Center: View>: View {
                 context: context,
                 controller: controller
             )
+            .modifier(GlassPrototypeSlabGround())
             Color.clear
                 .frame(
                     width: normalizedCenterSize.width,
@@ -461,6 +466,7 @@ struct TerminalKeyCluster<Center: View>: View {
                 context: context,
                 controller: controller
             )
+            .modifier(GlassPrototypeSlabGround())
         }
     }
 }
@@ -477,19 +483,43 @@ extension TerminalKeyCluster where Center == EmptyView {
     }
 }
 
-/// PROTOTYPE(GLASS): ornament chrome sits on real system glass carrying the
-/// smoke tint — matching the window ground — instead of floating opaque
-/// slabs (ornaments get no platter of their own; the app must supply one).
-private struct GlassPrototypeOrnamentGround: ViewModifier {
+/// PROTOTYPE(GLASS): each ornament bar is its own smoked-glass slab — UMD
+/// console, key clusters, the agent helper strip, and the tab strip — never
+/// one platter behind the whole ornament (user feedback: an area-wide glass
+/// background read as noise). Ornaments get no platter of their own; the
+/// app supplies one per bar.
+private struct GlassPrototypeSlabGround: ViewModifier {
+    var cornerRadius: CGFloat = 12
+
     func body(content: Content) -> some View {
-        if GlassPrototype.active {
+        if GlassPrototype.enabled && GlassSelectionState.shared.isGlass {
             content
-                .background(Color(uiColor: GlassPrototype.smokeTint))
-                .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 16))
+                .background(
+                    Color(uiColor: GlassPrototype.smokeMaterial),
+                    in: RoundedRectangle(cornerRadius: cornerRadius)
+                )
+                .glassBackgroundEffect(
+                    in: RoundedRectangle(cornerRadius: cornerRadius)
+                )
         } else {
             content
         }
     }
+}
+
+/// PROTOTYPE(GLASS): custom traits do not cross `UIHostingOrnament` — the
+/// mounted native chrome must be handed the glass trait explicitly, or its
+/// materials resolve to the opaque baseline (the "dark theme" bars).
+@MainActor
+private func applyGlassTrait(to view: UIView) {
+    view.traitOverrides[GlassAppearanceTrait.self] =
+        GlassPrototype.enabled && GlassSelectionState.shared.isGlass
+}
+
+@MainActor
+private func applyGlassTrait(to controller: UIViewController) {
+    controller.traitOverrides[GlassAppearanceTrait.self] =
+        GlassPrototype.enabled && GlassSelectionState.shared.isGlass
 }
 
 // MARK: - UIKit mounts
@@ -502,7 +532,8 @@ final class TerminalVisionTabOrnamentHostView: UIView {
         self.tabStrip = tabStrip
         super.init(frame: .zero)
         // PROTOTYPE(GLASS): the ornament's glass ground provides the slab.
-        backgroundColor = GlassPrototype.active ? .clear : UIKitChassis.chassis
+        backgroundColor =
+            GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         layer.cornerRadius = 10
         layer.cornerCurve = .continuous
         accessibilityIdentifier = "terminal.vision.topOrnament"
@@ -565,6 +596,7 @@ private struct TerminalVisionTabOrnamentMount: UIViewRepresentable {
         context: Context
     ) {
         _ = revision
+        applyGlassTrait(to: view)
         view.refreshFittingSize()
     }
 
@@ -601,6 +633,7 @@ private struct TerminalVisionControllerMount: UIViewControllerRepresentable {
         context: Context
     ) {
         _ = revision
+        applyGlassTrait(to: host)
         host.onContentSizeChange = onContentSizeChange
         host.update(content: controller, sizing: sizing)
     }

@@ -611,7 +611,7 @@ private final class BindIncomingSectionView: UIView {
 private final class BindListeningRowView: UIView {
     init() {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
 
         let lamp = UIKitTallyLamp(caption: "LISTENING", color: TallyPalette.caution)
         let message = BindUI.label(
@@ -731,7 +731,7 @@ final class BindCandidateRowView: UIView {
     }
 
     private func build() {
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
         shouldGroupAccessibilityChildren = true
         accessibilityContainerType = .semanticGroup
 
@@ -1262,7 +1262,7 @@ private final class BindScannerViewController: UIViewController {
     }
 
     private func showUnavailable() {
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.clearedChassis
         let label = UILabel()
         label.text = "This device can’t scan. Paste the bind code instead."
         label.textColor = UIKitChassis.signal2

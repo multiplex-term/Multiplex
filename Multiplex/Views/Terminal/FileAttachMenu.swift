@@ -433,7 +433,7 @@ final class FileAttachBadgeButton: UIButton {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         layer.borderWidth = 1
         showsMenuAsPrimaryAction = true
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))

@@ -66,7 +66,7 @@ final class SettingsViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Settings"
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.sheetGround
         configureNavigation()
         configureContent()
         observeStores()
@@ -134,7 +134,7 @@ final class SettingsViewController: UIViewController {
 
     private func configureContent() {
         scrollView.alwaysBounceVertical = true
-        scrollView.backgroundColor = UIKitChassis.chassis
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
         view.addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -754,7 +754,7 @@ final class SettingsSectionView: UIView {
 final class SettingsInsetRow: UIView {
     init(contentView: UIView) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
         addSubview(contentView)
         contentView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -777,6 +777,17 @@ enum SettingsAppearanceChoiceMetrics {
 }
 
 @MainActor
+private extension AppAppearance {
+    var settingsTitle: String {
+        switch self {
+        case .system: "SYSTEM"
+        case .light: "LIGHT"
+        case .dark: "DARK"
+        case .glass: "GLASS"
+        }
+    }
+}
+
 final class SettingsAppearanceChoiceBar: UIStackView {
     private(set) var selection: AppAppearance
     private let changed: (AppAppearance) -> Void
@@ -799,12 +810,12 @@ final class SettingsAppearanceChoiceBar: UIStackView {
         spacing = SettingsAppearanceChoiceMetrics.seam
         backgroundColor = UIKitChassis.bezelHi
 
-        for (title, appearance) in [
-            ("SYSTEM", AppAppearance.system),
-            ("LIGHT", AppAppearance.light),
-            ("DARK", AppAppearance.dark),
-        ] {
-            let button = SettingsChoiceButton(title: title, appearance: appearance)
+        // PROTOTYPE(GLASS): GLASS joins the bar where the prototype is
+        // compiled in (visionOS DEBUG); other platforms keep the three.
+        for appearance in AppAppearance.availableCases {
+            let button = SettingsChoiceButton(
+                title: appearance.settingsTitle, appearance: appearance
+            )
             button.addTarget(self, action: #selector(choicePressed(_:)), for: .touchUpInside)
             addArrangedSubview(button)
             buttons.append(button)
@@ -937,7 +948,7 @@ final class SettingsBooleanRow: UIControl {
         self.changed = changed
         self.optimisticallyUpdates = optimisticallyUpdates
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
         self.accessibilityLabel = accessibilityLabel ?? title
         self.accessibilityHint = accessibilityHint
@@ -1019,7 +1030,7 @@ private final class SettingsSwitchIndicator: UIKitTallyBorderedView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         addSubview(thumb)
         thumb.translatesAutoresizingMaskIntoConstraints = false
         thumbLeading = thumb.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4)
@@ -1068,7 +1079,7 @@ final class SettingsBadgeView: UIKitTallyBorderedView {
 
     init(_ text: String, systemImage: String? = nil, prominent: Bool = false) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         tallyBorderColor = prominent ? UIKitChassis.signal2 : UIKitChassis.bezelHi
 
         if let systemImage {

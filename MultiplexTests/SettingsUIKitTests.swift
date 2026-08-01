@@ -65,7 +65,10 @@ final class SettingsUIKitTests: XCTestCase {
         XCTAssertTrue(rendered.contains("CUSTOM THEMES"))
         XCTAssertTrue(rendered.contains("PRIVACY POLICY"))
 
-        XCTAssertEqual(fixture.controller.appearanceChoiceBar?.arrangedSubviews.count, 3)
+        XCTAssertEqual(
+            fixture.controller.appearanceChoiceBar?.arrangedSubviews.count,
+            AppAppearance.availableCases.count
+        )
         XCTAssertEqual(
             fixture.controller.appearanceChoiceBar?.selection,
             AppAppearance.system

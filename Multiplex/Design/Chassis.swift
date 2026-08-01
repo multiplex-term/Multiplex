@@ -13,13 +13,13 @@ enum UIKitChassis {
     // sheets, forms, and the launch handoff stay opaque (plan §2); the few
     // full-bleed chassis layers are gated at their own sites instead.
     static var bezel: UIColor {
-        GlassPrototype.active ? GlassPrototype.strata : TallyPalette.bezel
+        GlassPrototype.enabled ? GlassPrototype.strata : TallyPalette.bezel
     }
     static var bezelHi: UIColor {
-        GlassPrototype.active ? GlassPrototype.line : TallyPalette.bezelHi
+        GlassPrototype.enabled ? GlassPrototype.line : TallyPalette.bezelHi
     }
     static var screen: UIColor {
-        GlassPrototype.active ? GlassPrototype.screenGlass : TallyPalette.screen
+        GlassPrototype.enabled ? GlassPrototype.screenGlass : TallyPalette.screen
     }
     static var signal: UIColor { TallyPalette.signal }
     static var signal2: UIColor { TallyPalette.signal2 }
@@ -43,8 +43,14 @@ enum UIKitChassis {
 
     static func configureSheetNavigationBar(_ navigationBar: UINavigationBar) {
         let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = chassis
+        // PROTOTYPE(GLASS): on glass the sheet root carries the smoke and the
+        // bar goes transparent over it; opaque chassis otherwise.
+        if GlassPrototype.enabled && GlassSelectionState.shared.isGlass {
+            appearance.configureWithTransparentBackground()
+        } else {
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = chassis
+        }
         appearance.shadowColor = bezelHi
         appearance.titleTextAttributes = [.foregroundColor: signal]
         navigationBar.standardAppearance = appearance
@@ -169,9 +175,14 @@ final class UIKitChassisChip: UIKitTallyBorderedView {
         self.action = action
         isProminent = prominent
         super.init(frame: .zero)
-        // PROTOTYPE(GLASS): chips are strata over the smoke, not chassis cuts.
-        backgroundColor = GlassPrototype.active
-            ? GlassPrototype.strata : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): chips are strata over the smoke, not chassis
+        // cuts; pinned LIGHT keeps the chassis ground (§8 v1).
+        backgroundColor = GlassPrototype.enabled
+            ? GlassPrototype.material(
+                GlassPrototype.strataMaterial,
+                fallback: TallyPalette.chassis
+            )
+            : UIKitChassis.chassis
         tallyBorderColor = prominent ? UIKitChassis.signal2 : UIKitChassis.bezelHi
         isAccessibilityElement = true
         accessibilityTraits = .button
@@ -403,7 +414,7 @@ final class UIKitTallyFormSectionView: UIView {
         divider.heightAnchor.constraint(equalToConstant: 1).isActive = true
 
         let row = UIView()
-        row.backgroundColor = UIKitChassis.chassis
+        row.backgroundColor = GlassPrototype.clearedChassis
         row.addSubview(contentView)
         contentView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -602,6 +613,11 @@ extension AppAppearanceFollowing where Self: UIViewController {
     /// override it does not own; the scene root writes that one.
     private func pinHostingWindow(to style: UIUserInterfaceStyle) {
         guard let window = viewIfLoaded?.window else { return }
+        // PROTOTYPE(GLASS): the sheet's own window carries the glass trait
+        // too ("all modals need apply"); the value is global, so writing it
+        // on a shared window is always consistent.
+        window.traitOverrides[GlassAppearanceTrait.self] =
+            GlassPrototype.enabled && GlassSelectionState.shared.isGlass
         guard style != .unspecified
             || window !== presentingViewController?.viewIfLoaded?.window
         else { return }

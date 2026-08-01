@@ -19,7 +19,7 @@ final class FAQViewController: UIViewController, AppAppearanceFollowing {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "FAQ"
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.sheetGround
 
         navigationItem.largeTitleDisplayMode = .never
         #if os(visionOS)
@@ -48,7 +48,7 @@ final class FAQViewController: UIViewController, AppAppearanceFollowing {
 
     private func configureContent() {
         scrollView.alwaysBounceVertical = true
-        scrollView.backgroundColor = UIKitChassis.chassis
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
         view.addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([

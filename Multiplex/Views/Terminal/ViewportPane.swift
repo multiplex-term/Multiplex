@@ -513,7 +513,7 @@ final class ViewportBadgeView: UIKitTallyBorderedView {
 
     init(_ text: String) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         addSubview(label)
         label.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -998,7 +998,7 @@ final class ViewportMenuButton: UIButton {
         self.caption = caption
         super.init(frame: .zero)
         configuration = nil
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         layer.borderWidth = 1
         captionLabel.isUserInteractionEnabled = false
         addSubview(captionLabel)
