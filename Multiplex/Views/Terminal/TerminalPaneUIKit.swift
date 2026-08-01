@@ -587,7 +587,7 @@ final class TerminalPanePanelView: UIKitTallyBorderedView {
         close: @escaping () -> Void
     ) -> TerminalPanePanelView {
         var views: [UIView] = [
-            TerminalTallyLampView(
+            UIKitTallyLamp(
                 caption: reason == nil ? "DETACHED" : "ENDED",
                 color: UIKitChassis.signal3
             ),
@@ -626,77 +626,6 @@ final class TerminalPanePanelView: UIKitTallyBorderedView {
 }
 
 @MainActor
-final class TerminalTallyLampView: UIView {
-    private let dot = UIView()
-    private let color: UIColor
-
-    init(caption: String, color: UIColor) {
-        self.color = color
-        super.init(frame: .zero)
-        isAccessibilityElement = true
-        accessibilityLabel = caption.lowercased()
-
-        dot.backgroundColor = color
-        let diameter = 7 * Theme.typeScale
-        dot.layer.cornerRadius = diameter / 2
-        dot.layer.shadowOpacity = 0.7
-        dot.layer.shadowRadius = 4
-        dot.layer.shadowOffset = .zero
-        refreshLampGlow()
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            dot.widthAnchor.constraint(equalToConstant: diameter),
-            dot.heightAnchor.constraint(equalToConstant: diameter),
-        ])
-
-        let label = UILabel()
-        let scaled = 9 * Theme.typeScale
-        label.attributedText = NSAttributedString(
-            string: caption,
-            attributes: [
-                .font: UIKitChassis.monoFont(9, weight: .bold),
-                .kern: scaled * 0.13,
-                .foregroundColor: color,
-            ]
-        )
-        label.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        let row = UIStackView(arrangedSubviews: [dot, label])
-        row.axis = .horizontal
-        row.alignment = .center
-        row.spacing = 5
-        row.isUserInteractionEnabled = false
-        addSubview(row)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor),
-            row.topAnchor.constraint(equalTo: topAnchor),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
-        else { return }
-        refreshLampGlow()
-    }
-
-    /// The dot's fill and the caption follow the appearance on their own; a
-    /// CGColor does not — it flattens whatever traits are current when it is
-    /// taken, and these lamps are built from observation renders rather than
-    /// a UIKit callback. Resolve the glow against this view's own traits and
-    /// re-resolve whenever the appearance flips.
-    private func refreshLampGlow() {
-        dot.layer.shadowColor = color.resolvedColor(with: traitCollection).cgColor
-    }
-}
-
-@MainActor
 final class TerminalContextBarView: UIKitTallyBorderedView {
     private let row = UIStackView()
 
@@ -726,7 +655,7 @@ final class TerminalContextBarView: UIKitTallyBorderedView {
 
     static func copyMode(done: @escaping () -> Void) -> TerminalContextBarView {
         TerminalContextBarView(items: [
-            TerminalTallyLampView(caption: "COPY MODE", color: TallyPalette.caution),
+            UIKitTallyLamp(caption: "COPY MODE", color: TallyPalette.caution),
             UIKitChassisChip(
                 "DONE",
                 prominent: true,
@@ -745,7 +674,7 @@ final class TerminalContextBarView: UIKitTallyBorderedView {
         switch state {
         case .listening(let pending):
             var items: [UIView] = [
-                TerminalTallyLampView(caption: "LISTENING", color: TallyPalette.tally),
+                UIKitTallyLamp(caption: "LISTENING", color: TallyPalette.tally),
             ]
             if !pending.isEmpty {
                 let pendingLabel = UILabel()
@@ -779,7 +708,7 @@ final class TerminalContextBarView: UIKitTallyBorderedView {
             messageLabel.numberOfLines = 2
             messageLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 320).isActive = true
             return TerminalContextBarView(items: [
-                TerminalTallyLampView(caption: "DICTATION", color: TallyPalette.caution),
+                UIKitTallyLamp(caption: "DICTATION", color: TallyPalette.caution),
                 messageLabel,
             ])
         }
@@ -821,7 +750,7 @@ final class TerminalContextBarView: UIKitTallyBorderedView {
         previewLabel.lineBreakMode = .byTruncatingTail
         previewLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 220).isActive = true
         return TerminalContextBarView(items: [
-            TerminalTallyLampView(caption: caption, color: TallyPalette.caution),
+            UIKitTallyLamp(caption: caption, color: TallyPalette.caution),
             previewLabel,
             action,
         ])

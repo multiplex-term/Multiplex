@@ -316,8 +316,8 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
     ) -> UIView {
         let row = ThemeEditorColorRow(
             label: label,
-            color: value(),
-            resetIsDisabled: value() == initial,
+            currentColor: value,
+            initial: initial,
             colorChanged: { [weak self] color in
                 update(color)
                 self?.refreshDraftRendering()
@@ -327,8 +327,6 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
                 self?.refreshDraftRendering()
             }
         )
-        row.currentColor = value
-        row.initialColor = initial
         colorRows.append(row)
         return row
     }
@@ -400,17 +398,19 @@ final class ThemeEditorColorRow: UIView {
     private let colorChanged: (ThemeColor) -> Void
     private let reset: () -> Void
 
-    var currentColor: () -> ThemeColor = { ThemeColor(0) }
-    var initialColor = ThemeColor(0)
+    private let currentColor: () -> ThemeColor
+    private let initialColor: ThemeColor
 
     init(
         label: String,
-        color: ThemeColor,
-        resetIsDisabled: Bool,
+        currentColor: @escaping () -> ThemeColor,
+        initial: ThemeColor,
         colorChanged: @escaping (ThemeColor) -> Void,
         reset: @escaping () -> Void
     ) {
         self.label = label
+        self.currentColor = currentColor
+        self.initialColor = initial
         self.colorChanged = colorChanged
         self.reset = reset
         super.init(frame: .zero)
@@ -430,7 +430,6 @@ final class ThemeEditorColorRow: UIView {
 
         colorWell.supportsAlpha = false
         colorWell.title = label
-        colorWell.selectedColor = UIColor(color)
         colorWell.accessibilityLabel = label
         colorWell.addTarget(self, action: #selector(colorWellChanged), for: .valueChanged)
         colorWell.translatesAutoresizingMaskIntoConstraints = false
@@ -478,9 +477,7 @@ final class ThemeEditorColorRow: UIView {
             row.topAnchor.constraint(equalTo: topAnchor, constant: 12),
             row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
         ])
-        resetButton.isEnabled = !resetIsDisabled
-        resetButton.alpha = resetIsDisabled ? 0.35 : 1
-        hexLabel.text = color.hexString
+        refresh()
     }
 
     @available(*, unavailable)

@@ -59,24 +59,6 @@ final class TmuxShortcutPanelViewController: UIViewController {
         windowLoadTask = nil
     }
 
-    /// Keeps a mounted controller current when its native caller changes
-    /// width or action closures without replacing the panel itself.
-    func updateCallbacks(
-        width: CGFloat,
-        select: @escaping (TmuxShortcut) -> Void,
-        loadWindows: (() async -> [TmuxWindowChoice]?)?,
-        selectWindow: ((TmuxWindowChoice) -> Void)?
-    ) {
-        if panelWidth != width {
-            panelWidth = width
-            panelView.setWidth(width)
-            refreshPreferredContentSize()
-        }
-        self.select = select
-        self.loadWindows = loadWindows
-        self.selectWindow = selectWindow
-    }
-
     /// The view controller owns an intrinsic height so UIKit popovers follow
     /// the grid instead of a tall keyboard-adjusted proposal.
     func fittingContentSize(for width: CGFloat? = nil) -> CGSize {
@@ -132,12 +114,6 @@ final class TmuxShortcutPanelViewController: UIViewController {
 
         windowSection.isHidden = false
         refreshPreferredContentSize()
-    }
-
-    func cancelWork() {
-        disarm()
-        windowLoadTask?.cancel()
-        windowLoadTask = nil
     }
 
     private func buildContent() {
@@ -342,11 +318,6 @@ private final class TmuxShortcutPanelRootView: UIKitTallyBorderedView {
             contentStack.topAnchor.constraint(equalTo: topAnchor, constant: 14),
             contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
         ])
-    }
-
-    func setWidth(_ width: CGFloat) {
-        self.width = width
-        invalidateIntrinsicContentSize()
     }
 
     override var intrinsicContentSize: CGSize {

@@ -527,7 +527,6 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     private var observedState: TerminalKeyBarObservedState?
     private var observationGeneration = 0
     private var renderedSignature: RenderSignature?
-    private(set) var renderedTier: TerminalKeyBarLayout.Tier?
     private(set) var renderedKeys: [TerminalTallyKeyControl] = []
     private weak var ctrlKeyControl: TerminalTallyKeyControl?
     private weak var tmuxPopoverController: UIViewController?
@@ -598,7 +597,6 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         if renderedSignature != signature {
             rebuildRow(specification: specification, state: state)
             renderedSignature = signature
-            renderedTier = specification.tier
         }
         layoutRow(specification: specification, includesReturn: includesReturn)
         bringSubviewToFront(topBorder)
@@ -1273,6 +1271,7 @@ final class TerminalKeyClusterContext {
         for group in groups.allObjects { group.hideCtrlCombos() }
     }
 
+    #if DEBUG
     private var visibleControlGroup: TerminalKeyClusterGroupView? {
         groups.allObjects.first {
             $0.carriesControlKey
@@ -1283,7 +1282,6 @@ final class TerminalKeyClusterContext {
         }
     }
 
-    #if DEBUG
     private func debugExercise() {
         guard let terminal = observedTerminal,
               TerminalFocusArbiter.current === terminal

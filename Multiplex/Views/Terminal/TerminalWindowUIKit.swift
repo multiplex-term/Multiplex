@@ -44,6 +44,7 @@ private struct TerminalWindowShellPresentationKey: Equatable {
     }
 }
 
+#if !os(visionOS)
 private struct TerminalWindowMergeSourceKey: Equatable {
     var id: UUID
     var label: String
@@ -64,6 +65,7 @@ private struct TerminalWindowNavigationChromeKey: Equatable {
     var keyboardLocked: Bool
     var compactAttachmentAvailability: FileAttachMenuAvailability?
 }
+#endif
 
 /// The classic scene lays pane controls above the protected bottom strip,
 /// then paints that noninteractive strip as a continuation of the surface
@@ -244,7 +246,9 @@ final class TerminalWindowViewController: UIViewController,
     private var creatingTab = false
     private var preparedForRemoval = false
     private var appLocked = false
+    #if !os(visionOS)
     private var renderedNavigationChromeKey: TerminalWindowNavigationChromeKey?
+    #endif
 
     private let rootView = TerminalWindowUIKitRootView()
     private let tabStrip = TerminalTabStripView()
@@ -1495,7 +1499,7 @@ extension TerminalWindowViewController {
             AgentHelperStripViewController.maximumFloatingWidth,
             max(
                 1,
-                (shell?.availableWidth ?? rootView.bounds.width)
+                rootView.bounds.width
                     - AgentHelperStripViewController.floatingEdgeClearance * 2
             )
         )
@@ -1848,7 +1852,7 @@ extension TerminalWindowViewController {
             trailing.append(makeNavigationBarItem(customView: badge))
         }
         if case .needsYou = activeController?.directShellAttention {
-            trailing.append(makeNavigationBarItem(customView: TerminalTallyLampView(
+            trailing.append(makeNavigationBarItem(customView: UIKitTallyLamp(
                 caption: "NEEDS YOU",
                 color: TallyPalette.caution
             )))

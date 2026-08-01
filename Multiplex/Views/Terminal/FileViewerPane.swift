@@ -44,8 +44,11 @@ private struct FileViewerPaneObservedState {
         documentDiffBadge = controller.documentDiffBadge
         markdownRaw = controller.markdownRaw
         isBusy = controller.isBusy
-        if case .document(let document) = controller.content {
-            documentBadge = controller.badges[document.path]
+        if case .document = controller.content {
+            // `documentDiffBadge` is the document's own badge already, and
+            // every read of `controller.badges` rebuilds the repo-wide map —
+            // one render pays for that once.
+            documentBadge = documentDiffBadge
         }
     }
 }
@@ -1167,66 +1170,6 @@ final class FileViewerMessageView: UIView {
 }
 
 @MainActor
-final class FileViewerTallyLampView: UIView {
-    private let dot = UIView()
-    private let color: UIColor
-
-    init(caption: String, color: UIColor = TallyPalette.caution) {
-        self.color = color
-        super.init(frame: .zero)
-        let diameter = 7 * Theme.typeScale
-        dot.backgroundColor = color
-        dot.layer.cornerRadius = diameter / 2
-        dot.layer.shadowOpacity = 0.7
-        dot.layer.shadowRadius = 4
-        refreshLampGlow()
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            (view: FileViewerTallyLampView, _: UITraitCollection) in
-            view.refreshLampGlow()
-        }
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            dot.widthAnchor.constraint(equalToConstant: diameter),
-            dot.heightAnchor.constraint(equalToConstant: diameter),
-        ])
-        let label = UILabel()
-        label.attributedText = NSAttributedString(
-            string: caption,
-            attributes: [
-                .font: UIKitChassis.monoFont(9, weight: .bold),
-                .kern: 1.2,
-                .foregroundColor: color,
-            ]
-        )
-        let row = UIStackView(arrangedSubviews: [dot, label])
-        row.axis = .horizontal
-        row.alignment = .center
-        row.spacing = 5
-        addSubview(row)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor),
-            row.topAnchor.constraint(equalTo: topAnchor),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-        isAccessibilityElement = true
-        accessibilityLabel = caption.lowercased()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    /// The dot's fill and the caption follow the appearance on their own; a
-    /// CGColor does not — it flattens whatever traits were current when it
-    /// was taken, and these panels are built from an observation render
-    /// rather than a UIKit callback.
-    private func refreshLampGlow() {
-        dot.layer.shadowColor = color.resolvedColor(with: traitCollection).cgColor
-    }
-}
-
-@MainActor
 final class FileViewerPanelView: UIKitTallyBorderedView {
     typealias Detail = (text: String, font: UIFont, color: UIColor)
 
@@ -1245,7 +1188,7 @@ final class FileViewerPanelView: UIKitTallyBorderedView {
         stack.axis = .vertical
         stack.alignment = .center
         stack.spacing = 14
-        stack.addArrangedSubview(FileViewerTallyLampView(caption: caption))
+        stack.addArrangedSubview(UIKitTallyLamp(caption: caption, color: TallyPalette.caution))
         for detail in details {
             let label = UILabel()
             label.text = detail.text

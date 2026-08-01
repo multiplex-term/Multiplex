@@ -130,22 +130,6 @@ final class CustomAgentCommandPanelViewController: UIViewController {
         rebuildCommandList(preservingFocus: true)
     }
 
-    func update(
-        width: CGFloat,
-        save: @escaping (
-            [CustomAgentCommand],
-            [String: AgentCommandPlacement]
-        ) -> Void,
-        cancel: @escaping () -> Void
-    ) {
-        self.save = save
-        self.cancel = cancel
-        guard panelWidth != width else { return }
-        panelWidth = width
-        panelView.setWidth(width)
-        rebuildCommandList(preservingFocus: true)
-    }
-
     func fittingContentSize(for width: CGFloat? = nil) -> CGSize {
         loadViewIfNeeded()
         let resolvedWidth = width ?? panelWidth
@@ -657,11 +641,6 @@ private final class CustomAgentCommandPanelRootView: UIKitTallyBorderedView {
         ])
     }
 
-    func setWidth(_ width: CGFloat) {
-        self.width = width
-        invalidateIntrinsicContentSize()
-    }
-
     override var intrinsicContentSize: CGSize {
         fittingSize(for: width)
     }
@@ -895,67 +874,12 @@ private final class CustomCommandPlacementChoice: UIView {
     }
 }
 
-/// A chassis label whose ink can change with draft state. The shared
-/// `UIKitChassisLabel` intentionally fixes its color at initialization, while
-/// placement and switch captions brighten and dim in place.
-@MainActor
-private final class CustomCommandMutableChassisLabel: UILabel {
-    private var sourceText: String
-    private let pointSize: CGFloat
-    private var ink: UIColor
-
-    init(_ text: String, size: CGFloat, color: UIColor) {
-        sourceText = text
-        pointSize = size
-        ink = color
-        super.init(frame: .zero)
-        numberOfLines = 1
-        lineBreakMode = .byTruncatingTail
-        accessibilityLabel = text
-        refresh()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    func set(text: String, color: UIColor) {
-        sourceText = text
-        ink = color
-        accessibilityLabel = text
-        refresh()
-    }
-
-    func setColor(_ color: UIColor) {
-        ink = color
-        textColor = color
-    }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
-        else { return }
-        refresh()
-    }
-
-    private func refresh() {
-        let scaled = pointSize * Theme.typeScale
-        attributedText = NSAttributedString(
-            string: sourceText.uppercased(),
-            attributes: [
-                .font: UIKitChassis.compressedLabelFont(pointSize),
-                .kern: scaled * 0.09,
-            ]
-        )
-        textColor = ink
-    }
-}
-
 @MainActor
 private final class CustomCommandChoiceSegment: UIControl {
-    private let label: CustomCommandMutableChassisLabel
+    private let label: UIKitChassisLabel
 
     init(label: String) {
-        self.label = CustomCommandMutableChassisLabel(
+        self.label = UIKitChassisLabel(
             label,
             size: 9,
             color: UIKitChassis.signal2
@@ -983,7 +907,7 @@ private final class CustomCommandChoiceSegment: UIControl {
         backgroundColor = selected ? UIKitChassis.bezelHi : UIKitChassis.chassis
         layer.borderColor = (selected ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
             .resolvedColor(with: traitCollection).cgColor
-        label.setColor(selected ? UIKitChassis.signal : UIKitChassis.signal2)
+        label.setInk(selected ? UIKitChassis.signal : UIKitChassis.signal2)
         if selected {
             accessibilityTraits.insert(.selected)
         } else {
@@ -1002,11 +926,10 @@ private final class CustomCommandChoiceSegment: UIControl {
 @MainActor
 private final class CustomCommandRowView: UIView, UITextViewDelegate {
     private(set) var command: CustomAgentCommand
-    private let index: Int
     private let changed: (CustomAgentCommand) -> Void
     private let heightChanged: () -> Void
     private let editor = CustomCommandTextView()
-    private let placementLabel = CustomCommandMutableChassisLabel(
+    private let placementLabel = UIKitChassisLabel(
         "",
         size: 8,
         color: UIKitChassis.signal3
@@ -1026,7 +949,6 @@ private final class CustomCommandRowView: UIView, UITextViewDelegate {
         heightChanged: @escaping () -> Void
     ) {
         self.command = command
-        self.index = index
         self.changed = changed
         self.heightChanged = heightChanged
         super.init(frame: .zero)
@@ -1235,11 +1157,9 @@ private final class CustomCommandRowView: UIView, UITextViewDelegate {
         case (false, true): "BAR · \(barLabel ?? "EMPTY")"
         case (false, false): "MORE"
         }
-        placementLabel.set(
-            text: text,
-            color: command.showInBar
-                ? TallyPalette.customCommand
-                : UIKitChassis.signal3
+        placementLabel.setText(text)
+        placementLabel.setInk(
+            command.showInBar ? TallyPalette.customCommand : UIKitChassis.signal3
         )
     }
 
@@ -1314,7 +1234,7 @@ private final class CustomCommandTextView: UITextView {
 @MainActor
 private final class CustomCommandSwitch: UIControl {
     private let track = CustomCommandSwitchTrack()
-    private let caption: CustomCommandMutableChassisLabel
+    private let caption: UIKitChassisLabel
     private var isOn: Bool
     private let changed: (Bool) -> Void
 
@@ -1326,7 +1246,7 @@ private final class CustomCommandSwitch: UIControl {
     ) {
         self.isOn = isOn
         self.changed = changed
-        caption = CustomCommandMutableChassisLabel(
+        caption = UIKitChassisLabel(
             label,
             size: 8,
             color: isOn ? UIKitChassis.signal : UIKitChassis.signal2
@@ -1371,7 +1291,7 @@ private final class CustomCommandSwitch: UIControl {
 
     private func render(animated: Bool = false) {
         track.setOn(isOn, animated: animated)
-        caption.setColor(isOn ? UIKitChassis.signal : UIKitChassis.signal2)
+        caption.setInk(isOn ? UIKitChassis.signal : UIKitChassis.signal2)
         accessibilityValue = isOn ? "On" : "Off"
         if isOn {
             accessibilityTraits.insert(.selected)

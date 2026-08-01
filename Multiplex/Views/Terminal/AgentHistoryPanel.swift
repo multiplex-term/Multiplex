@@ -99,15 +99,6 @@ final class AgentHistoryPanelViewController: UIViewController {
         stopObservingAndClose()
     }
 
-    func update(width: CGFloat, dismiss: @escaping () -> Void) {
-        self.dismiss = dismiss
-        guard panelWidth != width else { return }
-        panelWidth = width
-        panelView.setWidth(width)
-        messageRows.values.forEach { $0.setAvailableWidth(width - 28) }
-        refreshListAndPreferredSize()
-    }
-
     func fittingContentSize(for width: CGFloat? = nil) -> CGSize {
         loadViewIfNeeded()
         return panelView.fittingSize(for: width ?? panelWidth)
@@ -402,11 +393,6 @@ private final class AgentHistoryPanelRootView: UIView {
         ])
     }
 
-    func setWidth(_ width: CGFloat) {
-        self.width = width
-        invalidateIntrinsicContentSize()
-    }
-
     override var intrinsicContentSize: CGSize {
         fittingSize(for: width)
     }
@@ -508,12 +494,6 @@ private final class AgentHistoryMessageRowView: UIView {
         guard self.expanded != expanded else { return }
         self.expanded = expanded
         renderText()
-    }
-
-    func setAvailableWidth(_ width: CGFloat) {
-        guard availableWidth != width else { return }
-        availableWidth = width
-        if expanded { renderText() }
     }
 
     private func renderText() {

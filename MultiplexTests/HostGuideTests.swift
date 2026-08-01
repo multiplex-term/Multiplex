@@ -43,23 +43,4 @@ final class HostGuideTests: XCTestCase {
         let command = HostGuide.Command(label: "macOS", command: "brew install tmux")
         XCTAssertEqual(command.id, "macOSbrew install tmux")
     }
-
-    func testKeychainTipRequestSnapshotsHostSessionsAndUsesHostIdentity() {
-        let id = UUID()
-        var host = Host(
-            id: id,
-            name: "studio",
-            hostname: "studio.local",
-            username: "jhen"
-        )
-        var sessions = ["main", "agent"]
-
-        let request = KeychainTipRequest(host: host, sessionNames: sessions)
-        host.name = "changed later"
-        sessions.removeAll()
-
-        XCTAssertEqual(request.id, id)
-        XCTAssertEqual(request.host.name, "studio")
-        XCTAssertEqual(request.sessionNames, ["main", "agent"])
-    }
 }

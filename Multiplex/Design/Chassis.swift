@@ -271,6 +271,95 @@ final class UIKitChassisChip: UIKitTallyBorderedView {
     }
 }
 
+/// The lit lamp + caption, the one spelling every surface uses. Tally red is
+/// always captioned so it can never read as an error; other states reuse the
+/// same anatomy — a 7×typeScale dot with its own glow, a five-point gap, and a
+/// monospace caption in the lamp's own color.
+@MainActor
+final class UIKitTallyLamp: UIView {
+    private let dot = UIView()
+    private let captionLabel = UILabel()
+    private let caption: String
+    private let color: UIColor
+
+    init(caption: String, color: UIColor) {
+        self.caption = caption
+        self.color = color
+        super.init(frame: .zero)
+        isAccessibilityElement = true
+        accessibilityLabel = caption.lowercased()
+
+        // The dot tracks the type scale with its caption so the lamp keeps its
+        // proportions on iOS-on-Mac.
+        let diameter = 7 * Theme.typeScale
+        dot.backgroundColor = color
+        dot.layer.cornerRadius = diameter / 2
+        dot.layer.shadowOpacity = 0.7
+        dot.layer.shadowRadius = 4
+        dot.layer.shadowOffset = .zero
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            dot.widthAnchor.constraint(equalToConstant: diameter),
+            dot.heightAnchor.constraint(equalToConstant: diameter),
+        ])
+
+        // The caption is the lamp's meaning — it must win layout compression,
+        // or a crowded row shows an uncaptioned red dot.
+        captionLabel.isAccessibilityElement = false
+        captionLabel.setContentHuggingPriority(.required, for: .horizontal)
+        captionLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let row = UIStackView(arrangedSubviews: [dot, captionLabel])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 5
+        row.isUserInteractionEnabled = false
+        addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        refreshInk()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    /// A lamp stands beside prose in baseline-aligned rows (INVALID + its
+    /// explanation), so the caption carries the baseline; this wrapper's own
+    /// bottom edge would drop the sentence beside it.
+    override var forFirstBaselineLayout: UIView { captionLabel }
+    override var forLastBaselineLayout: UIView { captionLabel }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        refreshInk()
+    }
+
+    /// The dot's fill follows the appearance on its own; the glow's CGColor
+    /// does not — it flattens whatever traits are current when it is taken,
+    /// and these lamps are built from observation renders rather than a UIKit
+    /// callback. Resolve both against this view's traits and re-resolve
+    /// whenever the appearance flips.
+    private func refreshInk() {
+        let resolved = color.resolvedColor(with: traitCollection)
+        dot.layer.shadowColor = resolved.cgColor
+        captionLabel.attributedText = NSAttributedString(
+            string: caption,
+            attributes: [
+                .font: UIKitChassis.monoFont(9, weight: .bold),
+                .kern: 1.2,
+                .foregroundColor: resolved,
+            ]
+        )
+    }
+}
+
 /// One native TALLY form section: bezel title/header, one chassis row, square
 /// divider/border, and the optional explanatory postscript below it.
 @MainActor

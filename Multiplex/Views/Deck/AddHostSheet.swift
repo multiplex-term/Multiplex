@@ -1001,7 +1001,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         testRowStack.alignment = .center
         testRowStack.spacing = 12
         if testState == .running {
-            testRowStack.addArrangedSubview(AddHostTallyLamp(
+            testRowStack.addArrangedSubview(UIKitTallyLamp(
                 caption: "TESTING",
                 color: TallyPalette.caution
             ))
@@ -1012,7 +1012,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             break
         case .passed(let headline, let warnings):
             let connected = UIStackView(arrangedSubviews: [
-                AddHostTallyLamp(caption: "CONNECTED", color: TallyPalette.ok),
+                UIKitTallyLamp(caption: "CONNECTED", color: TallyPalette.ok),
                 addHostLabel(
                     headline,
                     font: UIKitChassis.uiFont(11, weight: .medium),
@@ -1033,7 +1033,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                     color: UIKitChassis.signal2
                 )
                 let row = UIStackView(arrangedSubviews: [
-                    AddHostTallyLamp(caption: "CHECK", color: TallyPalette.caution),
+                    UIKitTallyLamp(caption: "CHECK", color: TallyPalette.caution),
                     warningLabel,
                 ])
                 row.axis = .horizontal
@@ -1044,7 +1044,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             rows.append(AddHostInsetRow(contentView: result))
         case .failed(let message):
             let failure = UIStackView(arrangedSubviews: [
-                AddHostTallyLamp(caption: "NO SIGNAL", color: TallyPalette.caution),
+                UIKitTallyLamp(caption: "NO SIGNAL", color: TallyPalette.caution),
                 addHostLabel(
                     message,
                     font: UIKitChassis.uiFont(11),
@@ -1434,7 +1434,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             rows.append(AddHostFieldRow(label: "UDP port or range", inputView: ports))
 
             let invalid = UIStackView(arrangedSubviews: [
-                AddHostTallyLamp(caption: "INVALID", color: TallyPalette.caution),
+                UIKitTallyLamp(caption: "INVALID", color: TallyPalette.caution),
                 addHostLabel(
                     "Use one port or a range from 1 to 65535.",
                     font: UIKitChassis.uiFont(10),
@@ -2361,74 +2361,6 @@ private final class AddHostIconButton: UIButton {
 
     @objc private func pressed() {
         actionHandler()
-    }
-}
-
-@MainActor
-private final class AddHostTallyLamp: UIView {
-    private let caption: String
-    private let color: UIColor
-    private let dot = UIView()
-    private let captionLabel = UILabel()
-
-    init(caption: String, color: UIColor) {
-        self.caption = caption
-        self.color = color
-        super.init(frame: .zero)
-        isAccessibilityElement = true
-        accessibilityLabel = caption.lowercased()
-        let scale = Theme.typeScale
-        dot.backgroundColor = color
-        dot.layer.cornerRadius = 3.5 * scale
-        dot.layer.shadowOpacity = 0.7
-        dot.layer.shadowRadius = 4
-        dot.layer.shadowOffset = .zero
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            dot.widthAnchor.constraint(equalToConstant: 7 * scale),
-            dot.heightAnchor.constraint(equalToConstant: 7 * scale),
-        ])
-        captionLabel.isAccessibilityElement = false
-        captionLabel.setContentHuggingPriority(.required, for: .horizontal)
-        let row = UIStackView(arrangedSubviews: [dot, captionLabel])
-        row.axis = .horizontal
-        row.alignment = .center
-        row.spacing = 5
-        row.isUserInteractionEnabled = false
-        addSubview(row)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor),
-            row.topAnchor.constraint(equalTo: topAnchor),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-        refreshInk()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    override var forFirstBaselineLayout: UIView { captionLabel }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
-        else { return }
-        refreshInk()
-    }
-
-    private func refreshInk() {
-        let resolved = color.resolvedColor(with: traitCollection)
-        dot.layer.shadowColor = resolved.cgColor
-        captionLabel.attributedText = NSAttributedString(
-            string: caption,
-            attributes: [
-                .font: UIKitChassis.monoFont(9, weight: .bold),
-                .kern: CGFloat(1.2),
-                .foregroundColor: resolved,
-            ]
-        )
     }
 }
 

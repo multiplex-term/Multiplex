@@ -218,12 +218,7 @@ final class UIKitSceneRootViewController: UIViewController {
     }
 
     private func applyAppearance(_ appearance: AppAppearance) {
-        let style: UIUserInterfaceStyle
-        switch appearance.resolvedOverride {
-        case nil: style = .unspecified
-        case .light: style = .light
-        case .dark: style = .dark
-        }
+        let style = appearance.interfaceStyle
         overrideUserInterfaceStyle = style
         viewIfLoaded?.window?.overrideUserInterfaceStyle = style
         lockShieldWindow?.overrideUserInterfaceStyle = style

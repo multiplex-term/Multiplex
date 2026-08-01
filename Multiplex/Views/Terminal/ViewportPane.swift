@@ -643,7 +643,7 @@ final class ViewportFailureOverlayView: UIView {
         panel.layer.cornerCurve = .continuous
         panel.clipsToBounds = true
 
-        let lamp = ViewportTallyLampView(caption: "NO ROUTE")
+        let lamp = UIKitTallyLamp(caption: "NO ROUTE", color: TallyPalette.caution)
         let messageLabel = UILabel()
         messageLabel.text = message
         messageLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
@@ -718,49 +718,6 @@ final class ViewportFailureOverlayView: UIView {
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         panel.frame.contains(point)
     }
-}
-
-@MainActor
-private final class ViewportTallyLampView: UIView {
-    init(caption: String) {
-        super.init(frame: .zero)
-        let color = TallyPalette.caution
-        let dot = UIView()
-        let size = 7 * Theme.typeScale
-        dot.backgroundColor = color
-        dot.layer.cornerRadius = size / 2
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            dot.widthAnchor.constraint(equalToConstant: size),
-            dot.heightAnchor.constraint(equalToConstant: size),
-        ])
-        let label = UILabel()
-        label.attributedText = NSAttributedString(
-            string: caption,
-            attributes: [
-                .font: UIKitChassis.monoFont(9, weight: .bold),
-                .kern: 1.2,
-                .foregroundColor: color,
-            ]
-        )
-        let row = UIStackView(arrangedSubviews: [dot, label])
-        row.axis = .horizontal
-        row.alignment = .center
-        row.spacing = 5
-        addSubview(row)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor),
-            row.topAnchor.constraint(equalTo: topAnchor),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-        isAccessibilityElement = true
-        accessibilityLabel = caption.lowercased()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
 }
 
 // MARK: - Native auxiliary-pane UMD

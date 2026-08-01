@@ -225,7 +225,6 @@ final class BindPaneViewController: UIViewController {
                 row = existing
             } else {
                 row = BindCandidateRowView(
-                    id: candidate.id,
                     setPIN: { [weak bind] pin in
                         bind?.setPIN(pin, for: candidate.id)
                     },
@@ -613,7 +612,7 @@ private final class BindListeningRowView: UIView {
         super.init(frame: .zero)
         backgroundColor = UIKitChassis.chassis
 
-        let lamp = BindTallyLamp(caption: "LISTENING", color: TallyPalette.caution)
+        let lamp = UIKitTallyLamp(caption: "LISTENING", color: TallyPalette.caution)
         let message = BindUI.label(
             "No machine has answered yet.",
             font: UIKitChassis.uiFont(11),
@@ -642,7 +641,6 @@ private final class BindListeningRowView: UIView {
 /// place; the PIN field remains mounted across all awaiting/failed updates.
 @MainActor
 final class BindCandidateRowView: UIView {
-    private let candidateID: String
     private let setPIN: (String) -> Void
     private let confirm: () -> Void
     private let dismiss: () -> Void
@@ -664,12 +662,10 @@ final class BindCandidateRowView: UIView {
     private var canSubmit = false
 
     init(
-        id: String,
         setPIN: @escaping (String) -> Void,
         confirm: @escaping () -> Void,
         dismiss: @escaping () -> Void
     ) {
-        candidateID = id
         self.setPIN = setPIN
         self.confirm = confirm
         self.dismiss = dismiss
@@ -862,12 +858,12 @@ final class BindCandidateRowView: UIView {
         let status: UIView
         switch pending.stage {
         case .bound:
-            status = BindTallyLamp(caption: "BOUND", color: TallyPalette.ok)
+            status = UIKitTallyLamp(caption: "BOUND", color: TallyPalette.ok)
         case .failed:
-            status = BindTallyLamp(caption: "FAILED", color: TallyPalette.caution)
+            status = UIKitTallyLamp(caption: "FAILED", color: TallyPalette.caution)
         default:
             if pending.isBusy {
-                status = BindTallyLamp(
+                status = UIKitTallyLamp(
                     caption: pending.statusCaption,
                     color: TallyPalette.caution
                 )
@@ -1131,72 +1127,6 @@ private final class BindRevealableSecretField: UIView, UITextFieldDelegate {
 
     private static func bullets(_ count: Int) -> String {
         String(repeating: "\u{2022}", count: count)
-    }
-}
-
-@MainActor
-private final class BindTallyLamp: UIView {
-    private let dot = UIView()
-    private let captionLabel = UILabel()
-    private let color: UIColor
-
-    init(caption: String, color: UIColor) {
-        self.color = color
-        super.init(frame: .zero)
-        isAccessibilityElement = true
-        accessibilityLabel = caption.lowercased()
-
-        let scale = Theme.typeScale
-        dot.backgroundColor = color
-        dot.layer.cornerRadius = 3.5 * scale
-        dot.layer.shadowOpacity = 0.7
-        dot.layer.shadowRadius = 4
-        dot.layer.shadowOffset = .zero
-        NSLayoutConstraint.activate([
-            dot.widthAnchor.constraint(equalToConstant: 7 * scale),
-            dot.heightAnchor.constraint(equalToConstant: 7 * scale),
-        ])
-
-        captionLabel.attributedText = NSAttributedString(
-            string: caption,
-            attributes: [
-                .font: UIKitChassis.monoFont(9, weight: .bold),
-                .kern: 1.2,
-                .foregroundColor: color,
-            ]
-        )
-        captionLabel.isAccessibilityElement = false
-        captionLabel.setContentHuggingPriority(.required, for: .horizontal)
-        captionLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        let row = UIStackView(arrangedSubviews: [dot, captionLabel])
-        row.axis = .horizontal
-        row.alignment = .center
-        row.spacing = 5
-        row.isUserInteractionEnabled = false
-        addSubview(row)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor),
-            row.topAnchor.constraint(equalTo: topAnchor),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-        refreshShadow()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
-        else { return }
-        refreshShadow()
-    }
-
-    private func refreshShadow() {
-        dot.layer.shadowColor = color.resolvedColor(with: traitCollection).cgColor
     }
 }
 

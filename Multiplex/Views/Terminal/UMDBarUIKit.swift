@@ -535,17 +535,17 @@ final class UMDBarViewController: UIViewController,
         switch state.status {
         case .live:
             let lamp = state.contactLost
-                ? UMDTallyLampView(caption: "NO LINK", color: TallyPalette.caution)
-                : UMDTallyLampView(caption: "LIVE", color: TallyPalette.tally)
+                ? UIKitTallyLamp(caption: "NO LINK", color: TallyPalette.caution)
+                : UIKitTallyLamp(caption: "LIVE", color: TallyPalette.tally)
             lamp.accessibilityIdentifier = state.contactLost
                 ? "umd.status.noLink" : "umd.status.live"
             views.append(lamp)
         case .connecting:
-            let lamp = UMDTallyLampView(caption: "LINK", color: TallyPalette.caution)
+            let lamp = UIKitTallyLamp(caption: "LINK", color: TallyPalette.caution)
             lamp.accessibilityIdentifier = "umd.status.link"
             views.append(lamp)
         case .ended:
-            let lamp = UMDTallyLampView(caption: "ENDED", color: TallyPalette.signal3)
+            let lamp = UIKitTallyLamp(caption: "ENDED", color: TallyPalette.signal3)
             lamp.accessibilityIdentifier = "umd.status.ended"
             views.append(lamp)
         case nil:
@@ -553,7 +553,7 @@ final class UMDBarViewController: UIViewController,
         }
 
         if configuration.keychainTip != nil {
-            let lamp = UMDTallyLampView(
+            let lamp = UIKitTallyLamp(
                 caption: "KEYCHAIN LOCKED",
                 color: TallyPalette.caution
             )
@@ -568,7 +568,7 @@ final class UMDBarViewController: UIViewController,
         }
 
         if state.needsYou {
-            let lamp = UMDTallyLampView(
+            let lamp = UIKitTallyLamp(
                 caption: "NEEDS YOU",
                 color: TallyPalette.caution
             )
@@ -1171,77 +1171,11 @@ private final class UMDStateBadgeView: UIKitTallyBorderedView {
 }
 
 @MainActor
-private final class UMDTallyLampView: UIView {
-    private let dot = UIView()
-    private let captionLabel = UILabel()
-    private let caption: String
-    private let color: UIColor
-
-    init(caption: String, color: UIColor) {
-        self.caption = caption
-        self.color = color
-        super.init(frame: .zero)
-        isAccessibilityElement = true
-        accessibilityLabel = caption.lowercased()
-
-        let size = 7 * Theme.typeScale
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            dot.widthAnchor.constraint(equalToConstant: size),
-            dot.heightAnchor.constraint(equalToConstant: size),
-        ])
-        dot.layer.cornerRadius = size / 2
-        dot.layer.shadowRadius = 4
-        dot.layer.shadowOpacity = 0.7
-        dot.layer.shadowOffset = .zero
-
-        let stack = UIStackView(arrangedSubviews: [dot, captionLabel])
-        stack.axis = .horizontal
-        stack.alignment = .center
-        stack.spacing = 5
-        addSubview(stack)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-        refreshColors()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
-        else { return }
-        refreshColors()
-    }
-
-    private func refreshColors() {
-        let resolved = color.resolvedColor(with: traitCollection)
-        dot.backgroundColor = color
-        dot.layer.shadowColor = resolved.cgColor
-        captionLabel.attributedText = NSAttributedString(
-            string: caption,
-            attributes: [
-                .font: UIKitChassis.monoFont(9, weight: .bold),
-                .kern: 1.2,
-                .foregroundColor: resolved,
-            ]
-        )
-        captionLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-    }
-}
-
-@MainActor
 private final class UMDLampButton: UIControl {
     private let action: () -> Void
 
     init(
-        lamp: UMDTallyLampView,
+        lamp: UIKitTallyLamp,
         accessibilityLabel: String,
         accessibilityHint: String,
         action: @escaping () -> Void

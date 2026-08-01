@@ -2076,52 +2076,27 @@ class FleetPressView: UIKitTallyBorderedView, UIContextMenuInteractionDelegate {
 @MainActor
 private final class FleetBadgeView: UIKitTallyBorderedView {
     private let label = UILabel()
-    private let imageView = UIImageView()
 
-    init(caption: String = "", systemImage: String? = nil, prominent: Bool = false) {
+    init(caption: String) {
         super.init(frame: .zero)
         backgroundColor = UIKitChassis.chassis
-        let stack = UIStackView(arrangedSubviews: [imageView, label])
-        stack.axis = .horizontal
-        stack.alignment = .center
-        stack.spacing = 5
-        addSubview(stack)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
-        ])
-        imageView.contentMode = .scaleAspectFit
-        imageView.tintColor = prominent ? UIKitChassis.signal : UIKitChassis.signal2
-        imageView.setContentHuggingPriority(.required, for: .horizontal)
         label.font = UIKitChassis.monoFont(8, weight: .semibold)
-        label.textColor = prominent ? UIKitChassis.signal : UIKitChassis.signal2
+        label.textColor = UIKitChassis.signal2
         label.numberOfLines = 1
-        configure(caption: caption, systemImage: systemImage, prominent: prominent)
+        label.text = caption
+        addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+        ])
+        accessibilityLabel = caption
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
-
-    func configure(caption: String, systemImage: String? = nil, prominent: Bool = false) {
-        label.text = caption
-        imageView.isHidden = systemImage == nil
-        imageView.image = systemImage.flatMap {
-            UIImage(
-                systemName: $0,
-                withConfiguration: UIImage.SymbolConfiguration(
-                    pointSize: 8 * Theme.typeScale,
-                    weight: .semibold
-                )
-            )
-        }
-        tallyBorderColor = prominent ? UIKitChassis.signal2 : UIKitChassis.bezelHi
-        label.textColor = prominent ? UIKitChassis.signal : UIKitChassis.signal2
-        imageView.tintColor = prominent ? UIKitChassis.signal : UIKitChassis.signal2
-        accessibilityLabel = caption
-    }
 }
 
 @MainActor
@@ -2153,39 +2128,6 @@ private final class FleetColorDotView: UIView {
         layer.shadowRadius = 4
         layer.shadowOffset = .zero
     }
-}
-
-@MainActor
-private final class FleetTallyLampView: UIView {
-    init(caption: String = "LIVE", color: UIColor = TallyPalette.tally) {
-        super.init(frame: .zero)
-        let dot = FleetColorDotView(color: color, diameter: 7)
-        let label = UILabel()
-        label.font = UIKitChassis.monoFont(9, weight: .bold)
-        label.textColor = color
-        label.attributedText = NSAttributedString(
-            string: caption,
-            attributes: [.kern: 1.2, .foregroundColor: color]
-        )
-        label.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let stack = UIStackView(arrangedSubviews: [dot, label])
-        stack.axis = .horizontal
-        stack.alignment = .center
-        stack.spacing = 5
-        addSubview(stack)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-        isAccessibilityElement = true
-        accessibilityLabel = caption.lowercased()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
 }
 
 @MainActor
@@ -2472,7 +2414,7 @@ final class FleetSessionTileView: FleetPressView,
         let attachSlot = UIView()
         let attach = FleetBadgeView(caption: "ATTACH")
         attach.alpha = configuration.session.isAttached ? 0 : 1
-        let live = FleetTallyLampView()
+        let live = UIKitTallyLamp(caption: "LIVE", color: TallyPalette.tally)
         live.isHidden = !configuration.session.isAttached
         attachSlot.addSubview(attach)
         attachSlot.addSubview(live)
@@ -2488,7 +2430,7 @@ final class FleetSessionTileView: FleetPressView,
         ])
         row.addArrangedSubview(attachSlot)
         if agentNeedsYou {
-            row.addArrangedSubview(FleetTallyLampView(
+            row.addArrangedSubview(UIKitTallyLamp(
                 caption: "NEEDS YOU",
                 color: TallyPalette.caution
             ))

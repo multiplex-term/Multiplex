@@ -140,7 +140,6 @@ final class BindPaneUIKitTests: XCTestCase {
         var confirmCount = 0
         var dismissCount = 0
         let row = BindCandidateRowView(
-            id: announcement.id,
             setPIN: { submittedPIN = $0 },
             confirm: { confirmCount += 1 },
             dismiss: { dismissCount += 1 }

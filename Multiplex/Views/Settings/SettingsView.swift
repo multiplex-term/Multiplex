@@ -43,7 +43,6 @@ final class SettingsViewController: UIViewController {
 
     private let scrollView = UIScrollView()
     private var appearanceSection: SettingsSectionView?
-    private var observesStores = true
     private var observationGeneration = 0
     private var didRunDebugPresentation = false
     private var hasEstablishedInitialTopAlignment = false
@@ -63,10 +62,6 @@ final class SettingsViewController: UIViewController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
-
-    deinit {
-        observesStores = false
-    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -193,7 +188,7 @@ final class SettingsViewController: UIViewController {
     /// snapshot, registers the next callback, then rebuilds the form from that
     /// snapshot. No SwiftUI state owner is needed to keep the sheet live.
     private func observeStores() {
-        guard observesStores, isViewLoaded else { return }
+        guard isViewLoaded else { return }
         observationGeneration += 1
         let generation = observationGeneration
         let state = withObservationTracking {
@@ -211,7 +206,6 @@ final class SettingsViewController: UIViewController {
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self,
-                      self.observesStores,
                       self.observationGeneration == generation
                 else { return }
                 self.observeStores()
@@ -637,21 +631,15 @@ final class SettingsViewController: UIViewController {
 
     private func applyAppearance(_ appearance: AppAppearance? = nil) {
         let appearance = appearance ?? themes.appearance
-        let style: UIUserInterfaceStyle
-        switch appearance.resolvedOverride {
-        case nil: style = .unspecified
-        case .light: style = .light
-        case .dark: style = .dark
-        }
+        let style = appearance.interfaceStyle
         overrideUserInterfaceStyle = style
         navigationController?.overrideUserInterfaceStyle = style
         viewIfLoaded?.window?.overrideUserInterfaceStyle = style
         if let navigationBar = navigationController?.navigationBar {
             UIKitChassis.configureSheetNavigationBar(navigationBar)
         }
-        if let editor = navigationController?.topViewController as? ThemeEditorViewController {
-            editor.appAppearance = appearance
-        }
+        // A presented theme editor follows the store through its own
+        // `followAppAppearance` link installed at presentation — no push here.
     }
 
     @objc private func donePressed() {
@@ -681,13 +669,9 @@ final class SettingsViewController: UIViewController {
 @MainActor
 final class SettingsSectionView: UIView {
     let title: String
-    let detail: String?
-    private(set) var rows: [UIView]
 
     init(title: String, detail: String?, rows: [UIView]) {
         self.title = title
-        self.detail = detail
-        self.rows = rows
         super.init(frame: .zero)
 
         let headerLabel = UIKitChassisLabel(title, size: 10)

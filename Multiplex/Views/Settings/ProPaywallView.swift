@@ -44,7 +44,6 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
 
     private let scrollView = UIScrollView()
     private var storefrontTask: Task<Void, Never>?
-    private var observesEntitlements = true
 
     init(entitlements: EntitlementStore) {
         self.entitlements = entitlements
@@ -75,7 +74,6 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
     }
 
     deinit {
-        observesEntitlements = false
         storefrontTask?.cancel()
     }
 
@@ -349,7 +347,6 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
     /// latest snapshot keeps every async StoreKit transition reflected while
     /// avoiding a framework-specific state wrapper around the service.
     private func observeEntitlements() {
-        guard observesEntitlements else { return }
         let state = withObservationTracking {
             ViewState(
                 isPro: entitlements.isPro,
@@ -461,15 +458,15 @@ private enum ProPaywallFont {
         for style: UIFont.TextStyle,
         weight: UIFont.Weight = .regular
     ) -> UIFont {
-        let pointSize: CGFloat
-        switch style {
-        case .title3: pointSize = 20
-        case .headline, .body: pointSize = 17
-        case .subheadline: pointSize = 15
-        case .footnote: pointSize = 13
-        case .caption1: pointSize = 12
-        default: pointSize = 17
-        }
+        // The base descriptor is pinned to the default category: the metrics
+        // wrapper applies the live Dynamic Type scale, so a live-category
+        // descriptor here would scale twice.
+        let pointSize = UIFontDescriptor.preferredFontDescriptor(
+            withTextStyle: style,
+            compatibleWith: UITraitCollection(
+                preferredContentSizeCategory: .large
+            )
+        ).pointSize
         return UIFontMetrics(forTextStyle: style).scaledFont(
             for: .systemFont(ofSize: pointSize, weight: weight)
         )
