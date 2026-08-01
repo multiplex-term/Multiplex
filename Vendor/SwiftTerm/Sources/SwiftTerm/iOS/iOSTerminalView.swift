@@ -212,13 +212,17 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     ///
     /// With no handler installed, upstream behavior stands: the delegate's
     /// `requestOpenLink` is called and the gesture is consumed.
-    public var linkActivationHandler: ((_ link: String, _ params: [String: String]) -> Bool)?
+    ///
+    /// `rowTexts` is the implicit match split at its hard-wrap seams
+    /// (empty for explicit links and single-row matches) — the app-side
+    /// glue detector's evidence.
+    public var linkActivationHandler: ((_ link: String, _ params: [String: String], _ rowTexts: [String]) -> Bool)?
 
     /// Multiplex patch: shared activation path for tap and long press.
-    func activateLink(_ result: (link: String, params: [String: String])) -> Bool
+    func activateLink(_ result: (link: String, params: [String: String], rowTexts: [String])) -> Bool
     {
         if let linkActivationHandler {
-            return linkActivationHandler(result.link, result.params)
+            return linkActivationHandler(result.link, result.params, result.rowTexts)
         }
         terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
         return true

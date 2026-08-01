@@ -252,8 +252,9 @@ terminal's agent HISTORY panel (session-file prompt list) for layout
 capture, and
 `… -p app.multiplexterm.multiplex.debug.link` activates the first link on
 the focused pane's visible screen through the same resolve → policy →
-confirmation path a long press takes (a screen of only filesystem paths
-must present nothing — that's the decline working), with
+confirmation path a long press takes (a URL raises the link sheet, a
+path-shaped press the file-viewer sheet; a screen of only what both
+resolvers decline — $VAR/…, colon prose — must present nothing), with
 `….debug.linkopen` running the sheet's OPEN action so the system log shows
 the URL reaching SurfBoard, and `….debug.viewportopen` running the sheet's
 ⌗ VIEWPORT chip for the pending link — the headless way to dock the inline
@@ -884,9 +885,27 @@ views.
   `open?host=…&action=agent&prompt=…`**, so pane output can't launch an
   agent on another host; implicit detection matches **filesystem paths**
   (`./x`, `/etc/hosts`, `~/x`) as readily as URLs, so those resolve to nil
-  and the press falls through to selection; and interior whitespace
-  disqualifies a target, because prose carrying a colon (`warning: unused
-  variable`) otherwise classifies as a `warning:` link. The sheet renders
+  here (and confirm through the file-viewer sheet instead); and interior
+  whitespace disqualifies a link target, because prose carrying a colon
+  (`warning: unused variable`) otherwise classifies as a `warning:` link.
+  **Schemeless URLs resolve as links too** (`TerminalLink.schemelessLink`):
+  the matcher hands `example.com/docs` over through its bare-relative
+  *path* branch, so without this they confirmed as files. The gate is
+  narrow because everything here is also a legal filename — the authority
+  must be domain-shaped (≥2 ASCII labels, alphabetic ≥2-char TLD) or
+  dotted-quad IPv4 (`ViewportReach.isIPv4Literal`, the one parser), with
+  URL evidence beyond the dot (a `/`/`?`/`#` rest or a `www.` prefix, so
+  a markdown link's `setup.md` stays a sibling document), userinfo
+  rejected outright; the scheme defaults by reach through the shared
+  `ViewportReach.classify(host:)` — the viewport's typed-input rule, http
+  for LAN/loopback, https elsewhere — and `raw` is the *composed* URL, so
+  the sheet says the scheme this resolution chose (cleartext http on a
+  LAN address in particular) instead of implying it. Markdown
+  destinations opt out entirely (`resolve(_:schemelessHosts: false)` in
+  `FileViewerPane`): a schemeless markdown href is a relative reference
+  by spec, so `api.v2/index.md` keeps navigating in-document. A *dotted*
+  non-allowlisted scheme candidate (`example.com:99999/x`) declines to
+  nil rather than reporting a nonsense blocked scheme. The sheet renders
   the **resolved target** with the host on its own line — an OSC 8 label is
   chosen independently of its destination, and that line is also what
   exposes `https://github.com@evil.example/x`. Blocked and malformed
@@ -973,17 +992,48 @@ views.
   `TerminalFilePathSheet`, whose ▤ VIEW docks the tab. **This changed a
   load-bearing behavior**: path-shaped presses used to fall through to text
   selection; now only what BOTH resolvers decline ($VAR/…, colon prose,
-  interior whitespace) still does. visionOS gaze regions stay URL-only on
+  whitespace in a *bare-relative* shape) still does. **Paths with spaces
+  resolve when they root themselves with a base marker** (`/`, `~/`, `./`,
+  `$HOME/`) — the marker says "path" when whitespace no longer can; bare
+  relatives keep the prose guard ("see src/foo.ts and lib/bar.rs" must not
+  classify as one spaced path). The matcher's space-segment branches
+  swallow trailing prose whenever the first chunk is dot-free
+  (`/etc/hosts is missing` arrives whole), so `trimmingProseTail` sheds
+  end chunks carrying neither `/` nor `.`; a spaced directory whose last
+  segment is markerless (`~/My Folder`) loses that segment to the same
+  rule, which is why the sheet shows an OPENS row (verbatim mono — a path
+  is screen content) whenever the resolved spelling differs from the
+  field. visionOS gaze regions stay URL-only on
   purpose (hover regions are hit regions; build logs are walls of paths).
   **A wrapped row can hand over a sentence glued to the path below it** —
   the fork reassembles wrapped rows and a hard wrap leaves no space at the
   seam, so `…the file.` above `/Users/me/x.swift` arrives as one
-  bare-relative match. `strippingWrappedProseHead` cuts at the first `X./`
-  whose `X` is neither `.` nor `..`, and only when the text doesn't already
-  start with its own base marker (`/`, `~`, `.`, `$`) — so real paths,
-  including `a.b/c.d` and `dir/./file`, are untouched. A join whose lower
-  row carried a *relative* path is unrecoverable by construction; that is
-  what the sheet's editable field is for.
+  bare-relative match, and `…and` above `local-plan/x` arrives as
+  `andlocal-plan/x`. The joined *text* cannot always tell glue from a real
+  wrapped target, so the fork keeps the seams: `LinkMatch.rowTexts`
+  carries the match's per-row fragments (built only when a match actually
+  spans rows — the gaze-region rebuild never pays for it) into
+  `linkActivationHandler`'s own third parameter — deliberately NOT the
+  `params` dictionary, whose explicit-branch keys are parsed out of the
+  remote-authored OSC 8 payload — and
+  `WrappedRowGlue.cutTarget` (pure + tested) cuts at the first seam whose
+  butting chunk — the run since the last space — carries neither `/` nor
+  `.`: structure there means a target continuing
+  (`/Users/jhen/wor`⏎`kspace2/x`, `example.c`⏎`om/x`), a plain word means
+  the rows below start their own target. The cut suffix resolves through
+  the normal link-then-path order with the join as fallback, so a wrong
+  cut can never turn a working press into a dead one. Accepted trade, on
+  record: a bare path whose entire first segment sat on the upper row
+  (`local-p`⏎`lan/x`) reads as glue and cuts wrong — visible in the
+  editable field, and far rarer than hard-wrapped prose above a path.
+  `strippingWrappedProseHead` stays as the textual fallback for callers
+  without seam info (the edited field, gaze regions; the debug.link hook
+  carries seams via `Terminal.linkWithRowTexts`): it
+  cuts at the first `X./` whose `X` is neither `.` nor `..`, and only when
+  the text doesn't already start with its own base marker (`/`, `~`, `.`,
+  `$`) — so real paths, including `a.b/c.d` and `dir/./file`, are
+  untouched; a *relative* join stays unrecoverable there, which is what
+  the sheet's editable field is for.
   Load-bearing details: **the viewer dials its own SSHConnection** — never
   the probe's (a disabled host must not be revived by a tab) and never the
   summoning tab's transport (merge/split moves the viewer away) — redialed

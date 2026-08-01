@@ -186,10 +186,11 @@ struct FileViewerPane: View {
             openLink: { destination in
                 // External targets are untrusted document text — the
                 // link sheet decides, exactly like a pane press. A
-                // scheme-less relative target is in-document
-                // navigation (docs/setup.md), which stays inside the
-                // already-confirmed viewer.
-                if let link = TerminalLink.resolve(destination) {
+                // scheme-less target is in-document navigation by
+                // markdown's own definition (a relative reference), so
+                // the pane-press schemeless-host reading is opted out —
+                // `api.v2/index.md` navigates, it does not become a URL.
+                if let link = TerminalLink.resolve(destination, schemelessHosts: false) {
                     confirmingLink = link
                 } else if !destination.contains(":"),
                           let current = controller.lastDocument {

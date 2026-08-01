@@ -142,3 +142,46 @@ each ask is a slow round trip. It is now asked once per launch.
 - The App lock row still names your device's real method ("Require Face
   ID" on a Face ID phone, "Require device passcode" without biometry), and
   the lock itself still prompts correctly when you turn it on.
+
+PATHS WITH SPACES OPEN — and prose stops riding along
+
+Long-pressing a path that contains spaces (/Users/me/My Documents/x.txt,
+~/My Folder/notes.md) now raises the file-viewer sheet instead of doing
+nothing. Rooted paths followed by a sentence ("/etc/hosts is missing") shed
+the prose and open the path alone; when the opened spelling differs from
+the field, the sheet says OPENS with the exact path.
+
+- Print a spaced path (ls a directory with spaces), long-press it: the
+  sheet shows the full path, ▤ VIEW opens it.
+- Long-press /etc/hosts inside "error: /etc/hosts is missing": PATH reads
+  /etc/hosts, no prose.
+- "see src/foo.ts and lib/bar.rs" still falls through to text selection —
+  bare relative paths never absorb spaces.
+
+BARE URLS ARE LINKS — example.com/docs stops opening as a file
+
+A URL printed without its scheme (example.com/docs, docs.rs/serde,
+www.example.com, 192.168.1.5:3000/app) now raises the link sheet — OPEN,
+⌗ VIEWPORT, the host line — instead of the file-viewer sheet or nothing.
+LAN and loopback addresses open as http (dev servers), everything else as
+https.
+
+- echo example.com/anything, long-press it: link sheet, HOST example.com,
+  OPEN goes to https.
+- A LAN dev server address (192.168.x.x:3000/app) offers the viewport and
+  opens as http.
+- setup.md in a rendered markdown doc still navigates inside the file
+  viewer; src/foo.ts still confirms as a file, not a link.
+
+WRAPPED PROSE STOPS GLUING TO PATHS — and<newline>local-plan/x opens local-plan/x
+
+A hard-wrapped line ending in a plain word above a path used to press as one
+glued target (andlocal-plan/…). The press now cuts at the wrap seam when the
+text butting it is a word with no slash or dot, so the path below opens as
+itself. Genuinely wrapped long paths and URLs still join.
+
+- cat a doc whose line ends exactly at the pane edge with a word, path on
+  the next line: long-press the path — the sheet shows the path alone.
+- A long absolute path wrapped mid-segment still presses as the full path.
+- A schemeless URL below wrapped prose raises the link sheet, not a glued
+  file path.

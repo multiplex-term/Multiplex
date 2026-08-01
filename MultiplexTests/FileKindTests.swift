@@ -48,6 +48,62 @@ final class FileKindTests: XCTestCase {
     }
 }
 
+final class WrappedRowGlueTests: XCTestCase {
+    func testProseGluedToThePathBelowIsCutAtTheSeam() {
+        // A source line ending `…and` above `local-plan/x` reaches the
+        // resolvers as one joined match; the seam is the only tell.
+        XCTAssertEqual(
+            WrappedRowGlue.cutTarget(fragments: ["and", "local-plan/terminal-links.md"]),
+            "local-plan/terminal-links.md"
+        )
+        // Glue above an absolute path, and above a schemeless URL.
+        XCTAssertEqual(
+            WrappedRowGlue.cutTarget(fragments: ["and", "/etc/hosts"]),
+            "/etc/hosts"
+        )
+        XCTAssertEqual(
+            WrappedRowGlue.cutTarget(fragments: ["table", "docs.example.com/x"]),
+            "docs.example.com/x"
+        )
+        // The chunk test looks after the prefix's last space, so a spaced
+        // marker path keeps only its own text when prose glues mid-match.
+        XCTAssertEqual(
+            WrappedRowGlue.cutTarget(fragments: ["/Users/x and", "local-plan/y"]),
+            "local-plan/y"
+        )
+    }
+
+    func testGenuineWrappedTargetsKeepTheirJoin() {
+        // Structure before the seam — a slash or a dot — is a wrapped
+        // target continuing, never prose.
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["/Users/jhen/wor", "kspace2/x.swift"]))
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["https://exam", "ple.com/x"]))
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["example.c", "om/docs"]))
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["Sources/Fo", "o/Bar.swift"]))
+        // A row ending on a space is no glue evidence — a spaced path can
+        // wrap right after its space.
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["/tmp/My ", "Folder/x.txt"]))
+        // One row means no seam at all.
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["src/foo.ts"]))
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: []))
+    }
+
+    func testLaterSeamsAreExaminedWhenTheFirstIsClean() {
+        // A long path wraps once more below the glue: cut at the first
+        // qualifying seam, keep the rest joined.
+        XCTAssertEqual(
+            WrappedRowGlue.cutTarget(fragments: ["and", "local-plan/very-long-", "name.md"]),
+            "local-plan/very-long-name.md"
+        )
+        // First seam is a genuine wrap (dot before it), second butts prose
+        // — the cut takes the suffix from the seam that qualifies.
+        XCTAssertEqual(
+            WrappedRowGlue.cutTarget(fragments: ["example.c", "om and", "/etc/hosts"]),
+            "/etc/hosts"
+        )
+    }
+}
+
 final class TerminalPathTargetTests: XCTestCase {
     func testAbsoluteHomeAndRelative() {
         XCTAssertEqual(TerminalPathTarget.resolve("/etc/hosts")?.base, .absolute)
@@ -97,8 +153,58 @@ final class TerminalPathTargetTests: XCTestCase {
     }
 
     func testInteriorWhitespaceIsProse() {
+        // Bare-relative keeps the prose guard: without a base marker,
+        // whitespace is what separates a path from a sentence about one.
         XCTAssertNil(TerminalPathTarget.resolve("(see src/foo.ts)"))
         XCTAssertNil(TerminalPathTarget.resolve("path with space/file.txt"))
+        // Tabs and line breaks never resolve, marker or not.
+        XCTAssertNil(TerminalPathTarget.resolve("/tmp/a\tb"))
+        XCTAssertNil(TerminalPathTarget.resolve("/tmp/a\nb"))
+    }
+
+    func testSpacedPathsBehindABaseMarkerResolve() {
+        let absolute = TerminalPathTarget.resolve("/Users/me/My Documents/file.txt")
+        XCTAssertEqual(absolute?.base, .absolute)
+        XCTAssertEqual(absolute?.path, "/Users/me/My Documents/file.txt")
+        let home = TerminalPathTarget.resolve("~/My Folder/notes.md")
+        XCTAssertEqual(home?.base, .home)
+        XCTAssertEqual(home?.relativePart, "My Folder/notes.md")
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("./My File.md")?.base,
+            .workingDirectory
+        )
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("$HOME/My Docs/x.txt")?.relativePart,
+            "My Docs/x.txt"
+        )
+    }
+
+    func testSpacedProseTailIsShed() {
+        // The matcher's space-segment branches swallow trailing prose
+        // whenever the first chunk is dot-free — "/etc/hosts is missing"
+        // arrives whole — so prose-shaped tail chunks are shed.
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("/etc/hosts is missing")?.path,
+            "/etc/hosts"
+        )
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("/Users/me/My Documents/file.txt now really")?.path,
+            "/Users/me/My Documents/file.txt"
+        )
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("/tmp/a b c/d.log ok")?.path,
+            "/tmp/a b c/d.log"
+        )
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("~/My Folder/notes.md today, fine.")?.path,
+            "~/My Folder/notes.md"
+        )
+    }
+
+    func testSpacedLineSuffixSurvives() {
+        let target = TerminalPathTarget.resolve("/tmp/My Dir/app.swift:42")
+        XCTAssertEqual(target?.path, "/tmp/My Dir/app.swift")
+        XCTAssertEqual(target?.line, 42)
     }
 
     /// A hard-wrapped row glues a sentence's tail to the path below it (no

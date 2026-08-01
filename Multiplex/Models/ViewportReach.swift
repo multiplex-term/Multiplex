@@ -31,10 +31,22 @@ enum ViewportReach: Equatable {
               scheme == "http" || scheme == "https",
               let rawHost = url.host(), !rawHost.isEmpty
         else { return nil }
-        let host = rawHost.lowercased()
+        return classify(host: rawHost)
+    }
+
+    /// The same verdict for a bare host — callers that already hold the
+    /// authority (schemeless link resolution) skip building a probe URL.
+    static func classify(host: String) -> ViewportReach {
+        let host = host.lowercased()
         if isLoopback(host) { return .remoteLoopback }
         if isLAN(host) { return .lan }
         return .internet
+    }
+
+    /// Whether `host` is a dotted-quad IPv4 literal — the one parser for
+    /// that shape, shared with schemeless link resolution.
+    static func isIPv4Literal(_ host: String) -> Bool {
+        ipv4Octets(host) != nil
     }
 
     /// The host's own loopback spellings, including `0.0.0.0`/`::` — a

@@ -29,27 +29,21 @@ struct TerminalFilePathSheet: View {
         self.hostName = hostName
         self.onView = onView
         self.onCopy = onCopy
-        _text = State(initialValue: Self.editorText(for: target))
+        // The field starts at the model's canonical spelling, so an
+        // untouched field re-resolves to the same target.
+        _text = State(initialValue: target.spelling)
     }
-
-    /// What the field starts with: the classified path, plus the `:line`
-    /// suffix if the press carried one — the spelling the viewer accepts
-    /// back, so an untouched field re-resolves to the same target.
-    private static func editorText(for target: TerminalPathTarget) -> String {
-        guard let line = target.line else { return target.path }
-        return "\(target.path):\(line)"
-    }
-
-    /// The edited target, or nil while the field holds nothing that
-    /// classifies — VIEW goes quiet rather than opening the pressed path
-    /// behind the person's back.
-    private var edited: TerminalPathTarget? { TerminalPathTarget.resolve(text) }
 
     var body: some View {
+        // Resolved once per body pass — the field re-resolves per
+        // keystroke, and every row below reads the same verdict. nil while
+        // the field holds nothing that classifies; VIEW then goes quiet
+        // rather than opening the pressed path behind the person's back.
+        let edited = TerminalPathTarget.resolve(text)
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
-                    TallyFormSection(sectionTitle, detail: detail) {
+                    TallyFormSection(sectionTitle(edited), detail: detail(edited)) {
                         TallyFormRow {
                             VStack(alignment: .leading, spacing: 12) {
                                 VStack(alignment: .leading, spacing: 4) {
@@ -65,6 +59,20 @@ struct TerminalFilePathSheet: View {
                                         ? "NOT A PATH MULTIPLEX CAN READ"
                                         : nil
                                 )
+
+                                // Resolution can shed what it reads as prose
+                                // (a spaced press arrives with its sentence
+                                // tail), so when the opened path is not the
+                                // field's text, say so — verbatim, mono:
+                                // a path is screen content.
+                                if let divergence = resolvedDivergence(edited) {
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        ChassisLabel("OPENS", size: 9, color: Theme.caution)
+                                        Text(divergence)
+                                            .font(.mono(11))
+                                            .foregroundStyle(Theme.signal2)
+                                    }
+                                }
 
                                 if let line = edited?.line {
                                     HStack(spacing: 8) {
@@ -107,7 +115,17 @@ struct TerminalFilePathSheet: View {
         }
     }
 
-    private var sectionTitle: String {
+    /// The spelling VIEW will actually open when it differs from what the
+    /// field holds — trailing punctuation trimmed, a prose tail shed from a
+    /// spaced press. nil while they agree (the common case) or nothing
+    /// resolves (the note already says so).
+    private func resolvedDivergence(_ edited: TerminalPathTarget?) -> String? {
+        guard let edited else { return nil }
+        let resolved = edited.spelling
+        return resolved == text.trimmingCharacters(in: .whitespaces) ? nil : resolved
+    }
+
+    private func sectionTitle(_ edited: TerminalPathTarget?) -> String {
         switch edited?.base {
         case .absolute: "A path on \(hostName)"
         case .home: "In \(hostName)'s home"
@@ -116,11 +134,12 @@ struct TerminalFilePathSheet: View {
         }
     }
 
-    private var detail: String {
+    private func detail(_ edited: TerminalPathTarget?) -> String {
         guard let edited else {
-            return "The field holds nothing the viewer can resolve — a path "
-                + "needs a directory in it, and no spaces. Edit it, or copy "
-                + "the text if it's still useful."
+            return "The field holds nothing the viewer can resolve — a "
+                + "relative path needs a directory in it, and spaces only "
+                + "work behind /, ~/, ./ or $HOME/. Edit it, or copy the "
+                + "text if it's still useful."
         }
         var text = "VIEW opens it read-only in the file viewer, beside this "
             + "session — nothing runs, nothing is written. The path is "
