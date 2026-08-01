@@ -260,6 +260,7 @@ focused. Needs herdr 0.7.5+ on the host (brew install herdr).
   still type in); CLOSE closes exactly that workspace.
 - Widget/Shortcut agent launches on herdr hosts refuse with a clear
   message for now; attach and focus work.
+
 FASTER TAPS — clicks reach tmux immediately
 
 With mouse reporting on (tmux's default here), a tap used to wait ~a third

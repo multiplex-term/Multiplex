@@ -1218,14 +1218,17 @@ behavior change. Bake-off records stay here under `docs/landing/`.
   SYSTEM/LIGHT/DARK) is applied by
   `UIKitSceneRootViewController.applyAppearance` through each scene
   window's `overrideUserInterfaceStyle` — never a mechanism that stops at
-  presentation boundaries (SwiftUI's `preferredColorScheme` did). Two
+  presentation boundaries (SwiftUI's `preferredColorScheme` did). Three
   traps: a visionOS sheet/popover hosts in its own window and misses an
-  override already in place, and a presented controller's own override
-  beats its window's — so presented chassis surfaces adopt
+  override already in place; a presented controller's own override beats
+  its window's; and visionOS can retain a `UILabel`'s previously resolved
+  dynamic ink after an in-place override. Presented chassis surfaces adopt
   `AppAppearanceFollowing` (`followAppAppearance(themes)` in
   Chassis.swift; a presenter with no store seeds from the scene window's
-  applied style). Never write `.unspecified` over a scene window carrying
-  a pinned override. Components in `Chassis.swift`: `ChassisLabel`
+  applied style), and every override writer schedules
+  `refreshDynamicTextColorsAfterTraitPropagation()` after trait delivery.
+  Never write `.unspecified` over a scene window carrying a pinned override.
+  Components in `Chassis.swift`: `ChassisLabel`
   (compressed caps), `ChassisChip`/`ChassisBadge` (square actions),
   `TallyLamp` (captioned state lamp), `ChassisSwitch` +
   `TallyFormBoolField` (monochrome switches — never the system green

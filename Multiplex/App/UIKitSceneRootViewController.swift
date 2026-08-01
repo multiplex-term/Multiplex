@@ -223,6 +223,8 @@ final class UIKitSceneRootViewController: UIViewController {
         viewIfLoaded?.window?.overrideUserInterfaceStyle = style
         lockShieldWindow?.overrideUserInterfaceStyle = style
         lockViewController?.overrideUserInterfaceStyle = style
+        refreshDynamicTextColorsAfterTraitPropagation()
+        lockViewController?.refreshDynamicTextColorsAfterTraitPropagation()
         if platformChrome.appliesSignalTint {
             viewIfLoaded?.window?.tintColor = TallyPalette.signal
             lockShieldWindow?.tintColor = TallyPalette.signal

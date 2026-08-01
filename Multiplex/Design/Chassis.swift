@@ -44,6 +44,49 @@ enum UIKitChassis {
         navigationBar.tintColor = signal
     }
 }
+
+extension UIView {
+    /// Re-applies text-bearing dynamic colors after an in-place appearance
+    /// override. visionOS redraws dynamic view grounds when a window is
+    /// switched directly between LIGHT and DARK, but UILabel can retain the
+    /// color it resolved for the previous traits. Reassigning its authored
+    /// color payload after trait propagation makes UIKit resolve it against
+    /// the appearance the view now carries.
+    fileprivate func refreshDynamicTextColors() {
+        if let label = self as? UILabel {
+            // UILabel can synthesize attributedText for a plain `text` value,
+            // so refresh both payloads: textColor owns plain ink, while an
+            // explicit foreground attribute owns tracked/mixed ink.
+            label.textColor = label.textColor
+            if let attributedText = label.attributedText {
+                label.attributedText = NSAttributedString(
+                    attributedString: attributedText
+                )
+            }
+            label.setNeedsDisplay()
+        }
+        subviews.forEach { $0.refreshDynamicTextColors() }
+    }
+}
+
+extension UIViewController {
+    /// The override write and its trait delivery finish after the current
+    /// UIKit callback. Refresh on the following main-actor turn, when labels
+    /// (including ones rebuilt by that callback) carry their final traits.
+    func refreshDynamicTextColorsAfterTraitPropagation() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            viewIfLoaded?.refreshDynamicTextColors()
+            if let navigationController {
+                navigationController.viewIfLoaded?.refreshDynamicTextColors()
+                UIKitChassis.configureSheetNavigationBar(
+                    navigationController.navigationBar
+                )
+            }
+        }
+    }
+}
+
 /// Compressed bold caps, proportional
 /// tracking, one line. Accessibility text deliberately keeps the caller's
 /// original capitalization instead of reading the visual all-caps treatment.
@@ -483,6 +526,26 @@ extension AppAppearance {
     }
 }
 
+extension UIViewController {
+    /// The nearest explicit appearance override at or above this controller,
+    /// falling back to the hosting window's. A popover presented from
+    /// ornament-mounted content lands in a window of its own on visionOS, so
+    /// it inherits nothing — it must carry this forward or a pinned
+    /// LIGHT/DARK presents in the platform's native style. `.unspecified`
+    /// (SYSTEM everywhere) stays `.unspecified`, which keeps the popover on
+    /// its own window's native appearance.
+    var inheritedInterfaceStyleOverride: UIUserInterfaceStyle {
+        var candidate: UIViewController? = self
+        while let controller = candidate {
+            if controller.overrideUserInterfaceStyle != .unspecified {
+                return controller.overrideUserInterfaceStyle
+            }
+            candidate = controller.parent
+        }
+        return viewIfLoaded?.window?.overrideUserInterfaceStyle ?? .unspecified
+    }
+}
+
 /// Keeps one presented surface in step with `ThemeStore.appearance`.
 /// Observation callbacks are one-shot, so each pass registers the next — the
 /// same loop `UIKitSceneRootViewController` runs for the scene window.
@@ -582,6 +645,7 @@ extension AppAppearanceFollowing where Self: UIViewController {
         if let navigationBar = navigationController?.navigationBar {
             UIKitChassis.configureSheetNavigationBar(navigationBar)
         }
+        refreshDynamicTextColorsAfterTraitPropagation()
     }
 
     /// visionOS hosts a sheet in a window of its own, which misses the override
