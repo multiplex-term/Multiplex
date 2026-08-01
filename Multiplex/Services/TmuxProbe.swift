@@ -63,6 +63,11 @@ enum TmuxProbe {
             + "#{window_bell_flag} #{window_activity_flag} #{window_name}"
         let paneLineFormat = paneFormat(tag: "P")
         return pathPrefix
+            // One extra `command -v` per tick so a dead-tmux tile can offer
+            // the herdr switch only when herdr is actually installed
+            // (`Host.SessionBackend` — the hint is one tap, never an
+            // auto-flip). Before the tmux guard on purpose: the guard exits.
+            + "command -v herdr >/dev/null 2>&1 && echo MULTIPLEX_HERDR_PRESENT; "
             + "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
             // The server's own hostname — the exact string tmux seeded every
             // untouched pane title with (see `PaneTitleDisplay`). Its own
@@ -95,18 +100,27 @@ enum TmuxProbe {
         var state: TmuxState
         var tails: [String: [String]]
         var miniatures: [String: [String]]
+        /// herdr is installed on this host — the dead-tmux tile's switch
+        /// hint. Presence only; nothing reads it while tmux is healthy.
+        var herdrPresent: Bool = false
     }
 
     static func parseProbe(_ output: String) -> ParsedProbe {
+        let herdrPresent = output.hasPrefix("MULTIPLEX_HERDR_PRESENT\n")
+            || output.contains("\nMULTIPLEX_HERDR_PRESENT\n")
         let state = parse(output)
         guard case .sessions(let sessions) = state else {
-            return ParsedProbe(state: state, tails: [:], miniatures: [:])
+            return ParsedProbe(
+                state: state, tails: [:], miniatures: [:],
+                herdrPresent: herdrPresent
+            )
         }
         let tails = parseTails(output, sessions: sessions)
         return ParsedProbe(
             state: state,
             tails: tails,
-            miniatures: tails.mapValues(miniatureTail)
+            miniatures: tails.mapValues(miniatureTail),
+            herdrPresent: herdrPresent
         )
     }
 

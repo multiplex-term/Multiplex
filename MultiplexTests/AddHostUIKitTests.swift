@@ -188,6 +188,7 @@ final class AddHostUIKitTests: XCTestCase {
         XCTAssertEqual(sectionHeaders(in: fixture.controller.view), [
             "Host identity",
             "Monitoring",
+            "Backend",
             "Credentials",
             "Signal check",
             "New session defaults",

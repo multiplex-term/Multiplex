@@ -596,7 +596,7 @@ final class FleetWallViewController: UIViewController {
             openDuplicateSession: { [weak self] session in
                 self?.open(TerminalRoute(
                     hostID: host.id,
-                    mode: .attach(sessionName: session.name)
+                    mode: .attach(host: host, session: session)
                 ))
             },
             requestNewSession: { [weak self] in self?.presentNewSession(on: host) },
@@ -721,7 +721,7 @@ final class FleetWallViewController: UIViewController {
         if configuration.workspace.focusTab(hostID: host.id, sessionName: session.name) {
             return
         }
-        open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: session.name)))
+        open(TerminalRoute(hostID: host.id, mode: .attach(host: host, session: session)))
     }
 
     private func presentNewSession(on host: Host) {
@@ -754,10 +754,7 @@ final class FleetWallViewController: UIViewController {
                     initialPrompt: submission.initialPrompt
                 )
             ) else { return }
-            self?.open(TerminalRoute(
-                hostID: host.id,
-                mode: .attach(sessionName: created)
-            ))
+            self?.open(TerminalRoute(hostID: host.id, mode: created))
         }
     }
 
@@ -1098,6 +1095,7 @@ private final class FleetHostSectionView: UIView {
         let keychainNotice: KeychainLockNotice?
         let openSessionNames: Set<String>
         let orderedSessions: [TmuxSession]
+        let herdrPresent: Bool
     }
 
     private enum GridIdentity: Equatable {
@@ -1105,7 +1103,8 @@ private final class FleetHostSectionView: UIView {
         case probing
         case sessions([String])
         case noServer
-        case tmuxMissing
+        // The hint chip is tile content, so its arrival must re-render.
+        case tmuxMissing(herdrHint: Bool)
         case failed
     }
 
@@ -1215,7 +1214,8 @@ private final class FleetHostSectionView: UIView {
                 orderedSessions: configuration.store.orderedSessions(
                     sessions,
                     for: host.id
-                )
+                ),
+                herdrPresent: model.herdrPresent
             )
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -1223,9 +1223,9 @@ private final class FleetHostSectionView: UIView {
                 self.observeModel()
             }
         }
-        let previousIdentity = currentSnapshot.map { gridIdentity(for: $0.tmux) }
+        let previousIdentity = currentSnapshot.map(gridIdentity(for:))
         currentSnapshot = snapshot
-        let identity = gridIdentity(for: snapshot.tmux)
+        let identity = gridIdentity(for: snapshot)
         if !configuration.reduceMotion,
            let previousIdentity,
            previousIdentity != identity {
@@ -1244,13 +1244,13 @@ private final class FleetHostSectionView: UIView {
         configuration.modelDidChange()
     }
 
-    private func gridIdentity(for state: TmuxState) -> GridIdentity {
-        switch state {
+    private func gridIdentity(for snapshot: Snapshot) -> GridIdentity {
+        switch snapshot.tmux {
         case .unknown: .unknown
         case .probing: .probing
         case .sessions(let sessions): .sessions(sessions.map(\.name))
         case .noServer: .noServer
-        case .tmuxMissing: .tmuxMissing
+        case .tmuxMissing: .tmuxMissing(herdrHint: snapshot.herdrPresent)
         case .failed: .failed
         }
     }
@@ -1414,8 +1414,14 @@ private final class FleetHostSectionView: UIView {
         case .tmuxMissing:
             let tile = reusableSpecialTile(key: "tmux") { FleetTmuxMissingTileView() }
             tile.configure(
+                backend: host.sessionBackend,
+                herdrHint: snapshot.herdrPresent,
                 compact: configuration.presentation == .shellRail,
-                action: configuration.showTmuxGuide
+                action: configuration.showTmuxGuide,
+                switchToHerdr: { [weak self] in
+                    guard let self else { return }
+                    self.configuration.store.setSessionBackend(.herdr, for: self.host.id)
+                }
             )
             grid.setItems([FleetGridItem(id: "tmux", view: tile)])
             pruneTiles(keeping: ["tmux"])
@@ -2814,7 +2820,10 @@ private final class FleetAcquiringTileView: UIKitTallyBorderedView {
 @MainActor
 private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
     private var installChip: UIKitChassisChip!
+    private var switchChip: UIKitChassisChip!
+    private var title: UIKitChassisLabel!
     private var action: (() -> Void)?
+    private var switchAction: (() -> Void)?
     private var heightConstraint: NSLayoutConstraint?
 
     override init(frame: CGRect) {
@@ -2823,7 +2832,14 @@ private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
             "INSTALL GUIDE",
             accessibilityLabel: "Install guide"
         ) { [weak self] in self?.action?() }
-        let title = UIKitChassisLabel(
+        // The one-tap side of decision "explicit + detect hint": shown only
+        // when the probe saw herdr installed while tmux is missing. A tap
+        // rewrites the host record; nothing ever flips it automatically.
+        switchChip = UIKitChassisChip(
+            "USE HERDR",
+            accessibilityLabel: "Switch this host to the herdr backend"
+        ) { [weak self] in self?.switchAction?() }
+        title = UIKitChassisLabel(
             "No tmux on host", size: 11, color: UIKitChassis.signal3
         )
         let body = UILabel()
@@ -2836,7 +2852,7 @@ private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
         body.text = "You can still use a plain shell — press SHELL."
         body.numberOfLines = 0
         body.textAlignment = .center
-        let stack = UIStackView(arrangedSubviews: [title, body, installChip])
+        let stack = UIStackView(arrangedSubviews: [title, body, installChip, switchChip])
         stack.axis = .vertical
         stack.alignment = .center
         stack.spacing = 8
@@ -2854,8 +2870,14 @@ private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
         isAccessibilityElement = false
     }
 
-    func configure(compact: Bool, action: @escaping () -> Void) {
+    func configure(
+        backend: Host.SessionBackend, herdrHint: Bool, compact: Bool,
+        action: @escaping () -> Void, switchToHerdr: (() -> Void)? = nil
+    ) {
         self.action = action
+        switchAction = switchToHerdr
+        title.setText(backend == .herdr ? "No herdr on host" : "No tmux on host")
+        switchChip.isHidden = !(backend == .tmux && herdrHint && switchToHerdr != nil)
         heightConstraint?.constant = compact ? 92 : 138
     }
 }

@@ -113,6 +113,10 @@ enum HerdrProbe {
         var tails: [String: [String]]
         var miniatures: [String: [String]]
         var paneStatuses: [String: AgentStatus]
+        /// pane id → working directory (the foreground process's when herdr
+        /// knows it — the same "agent's own cwd" rule as tmux's
+        /// `pane_current_path`). Feeds + TAB's same-directory inheritance.
+        var paneCWDs: [String: String]
         var tailPaneIDs: [String]
         var serverVersion: String?
     }
@@ -121,7 +125,7 @@ enum HerdrProbe {
         var result = ParsedProbe(
             state: .failed("unreadable herdr probe response"),
             tails: [:], miniatures: [:], paneStatuses: [:],
-            tailPaneIDs: [], serverVersion: nil
+            paneCWDs: [:], tailPaneIDs: [], serverVersion: nil
         )
         let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
         if lines.contains(where: { $0 == noHerdrMarker }) {
@@ -169,6 +173,12 @@ enum HerdrProbe {
             miniatures: tails.mapValues(TmuxProbe.miniatureTail),
             paneStatuses: Dictionary(
                 snapshot.panes.map { ($0.paneID, AgentStatus(tolerant: $0.agentStatus)) },
+                uniquingKeysWith: { first, _ in first }
+            ),
+            paneCWDs: Dictionary(
+                snapshot.panes.compactMap { pane in
+                    (pane.foregroundCwd ?? pane.cwd).map { (pane.paneID, $0) }
+                },
                 uniquingKeysWith: { first, _ in first }
             ),
             tailPaneIDs: frontPaneIDs(snapshot: snapshot),
@@ -234,6 +244,8 @@ enum HerdrProbe {
         var agent: String?
         var agentStatus: String
         var terminalTitleStripped: String?
+        var cwd: String?
+        var foregroundCwd: String?
 
         enum CodingKeys: String, CodingKey {
             case paneID = "pane_id"
@@ -242,6 +254,8 @@ enum HerdrProbe {
             case agent
             case agentStatus = "agent_status"
             case terminalTitleStripped = "terminal_title_stripped"
+            case cwd
+            case foregroundCwd = "foreground_cwd"
         }
     }
 
@@ -450,6 +464,115 @@ enum HerdrProbe {
         )
     }
 
+    // MARK: - Workspace actions
+
+    /// Create a workspace. Unlike tmux's one-shot mint the follow-ups
+    /// (script/launch typing) need the root pane id from the create's JSON
+    /// envelope, which a shell can't extract — so the mint is two execs:
+    /// this create, parsed by `parseNewWorkspace`, then `typeCommand`
+    /// against the returned pane. User-initiated, not the probe loop, so
+    /// the extra round trip costs nothing that matters. nil `cwd` lets
+    /// herdr default to $HOME. There is no tmux-conf analog — herdr owns
+    /// its own configuration.
+    static func newWorkspaceCommand(label: String, cwd: String?) -> String {
+        var command = pathPrefix + "herdr workspace create"
+        if let cwd, !cwd.isEmpty {
+            command += " --cwd \(cwd.shellQuotedDirectory)"
+        }
+        command += " --label \(label.shellQuoted) 2>/dev/null || true"
+        return command
+    }
+
+    struct NewWorkspace: Equatable {
+        var workspaceID: String
+        var label: String
+        var rootPaneID: String
+    }
+
+    private struct CreateWorkspaceRef: Decodable {
+        var workspaceID: String
+        var label: String
+        enum CodingKeys: String, CodingKey {
+            case workspaceID = "workspace_id"
+            case label
+        }
+    }
+
+    private struct CreatePaneRef: Decodable {
+        var paneID: String
+        enum CodingKeys: String, CodingKey {
+            case paneID = "pane_id"
+        }
+    }
+
+    private struct CreateResult: Decodable {
+        var workspace: CreateWorkspaceRef
+        var rootPane: CreatePaneRef
+        enum CodingKeys: String, CodingKey {
+            case workspace
+            case rootPane = "root_pane"
+        }
+    }
+
+    static func parseNewWorkspace(_ output: String) -> NewWorkspace? {
+        // The envelope is one line, but a login shell may print noise
+        // around it — decode the first line that parses.
+        for line in output.split(separator: "\n") {
+            guard let data = String(line).data(using: .utf8),
+                  let envelope = try? JSONDecoder().decode(
+                    Envelope<CreateResult>.self, from: data)
+            else { continue }
+            return NewWorkspace(
+                workspaceID: envelope.result.workspace.workspaceID,
+                label: envelope.result.workspace.label,
+                rootPaneID: envelope.result.rootPane.paneID
+            )
+        }
+        return nil
+    }
+
+    /// Type lines into a pane the way the tmux mint does — literal text,
+    /// then Enter, per line; sequential, never `&&`-gated, so a failing
+    /// setup script leaves its error visible above a launch that still
+    /// runs.
+    static func typeCommand(paneID: String, lines: [String]) -> String? {
+        let typed = lines.filter { !$0.isEmpty }
+        guard !typed.isEmpty else { return nil }
+        var command = pathPrefix
+        for line in typed {
+            command += "herdr pane send-text \(paneID.shellQuoted) \(line.shellQuoted)"
+                + " 2>/dev/null || true; "
+            command += "herdr pane send-keys \(paneID.shellQuoted) Enter"
+                + " 2>/dev/null || true; "
+        }
+        command += "true"
+        return command
+    }
+
+    /// Close a workspace (and every process in it) — the herdr analog of
+    /// kill-session, targeted by the server-minted workspace id (labels
+    /// can duplicate).
+    static func closeWorkspaceCommand(workspaceID: String) -> String {
+        pathPrefix + "herdr workspace close \(workspaceID.shellQuoted) 2>/dev/null || true"
+    }
+
+    /// The PTY attach line `ShellHandoff` injects for a herdr tab:
+    /// pre-focus the workspace over the socket (fail-soft — a vanished
+    /// workspace still attaches to the session), then exec the full herdr
+    /// client. `session attach` has no workspace flag (verified 0.7.5),
+    /// hence the two commands. An empty workspace id (a blind attach from
+    /// the debug auto-attach hook, before any probe named ids) skips the
+    /// focus and lands on whatever the session fronts. v1.3 speaks the
+    /// default session.
+    static func attachCommand(workspaceID: String) -> String {
+        var command = pathPrefix
+        if !workspaceID.isEmpty {
+            command += "herdr workspace focus \(workspaceID.shellQuoted) >/dev/null 2>&1; "
+        }
+        command += "exec herdr session attach default"
+        return command
+    }
+
     // MARK: - Tails (the deck wall's live miniatures)
 
     /// Parse the sentinel-framed pane reads into session name → trailing
@@ -510,6 +633,48 @@ extension HerdrProbe.AgentStatus {
     /// `.unknown`, never a dropped pane.
     init(tolerant raw: String) {
         self = HerdrProbe.AgentStatus(rawValue: raw) ?? .unknown
+    }
+}
+
+extension HerdrProbe {
+    /// In herdr mode the reported lifecycle status IS the pane's attention
+    /// authority — the needle heuristics (spinner titles, dialog shapes)
+    /// are bypassed, which is what makes Pi's states real here. `done`
+    /// maps to `.idle` on purpose: herdr derives it from a working → idle
+    /// report, and handing the tracker that same busy → idle edge is what
+    /// produces the turn-ended alert exactly once. `unknown` (herdr can't
+    /// say, or a state this build predates) is no claim at all, matching
+    /// the tmux path's unverified-agent posture.
+    ///
+    /// herdr's `blocked` doesn't distinguish permission dialogs from
+    /// questions; `.permission` is the honest generic ("blocked" is
+    /// deliberately strict in herdr's manifests — known approval/question
+    /// UI only).
+    static func paneAgentState(_ status: AgentStatus?) -> PaneAgentState? {
+        switch status {
+        case .working: .busy
+        case .blocked: .needsYou(.permission)
+        case .done, .idle: .idle
+        case .unknown, nil: nil
+        }
+    }
+}
+
+extension HerdrProbe.State {
+    /// The wall consumes `TmuxState`; herdr states fold onto it and the
+    /// tile chooses backend-aware copy (`Host.sessionBackend` is on the
+    /// tile's host). `updateNeeded` rides the failed lane with its own
+    /// sentence — an honest tile, never garbage from a protocol this
+    /// parser predates.
+    var tmuxState: TmuxState {
+        switch self {
+        case .herdrMissing: .tmuxMissing
+        case .noServer: .noServer
+        case .updateNeeded(let version):
+            .failed("herdr \(version) is older than this app speaks — update herdr on the host")
+        case .sessions(let sessions): .sessions(sessions)
+        case .failed(let message): .failed(message)
+        }
     }
 }
 

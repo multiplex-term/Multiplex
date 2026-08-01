@@ -121,6 +121,17 @@ final class HostStore {
         update(updated)
     }
 
+    /// One-tap backend switch — the dead-tmux tile's herdr hint and the
+    /// settings bar both land here. The field participates in
+    /// `connectionModelConfiguration`, so the wall feed rebuilds the probe
+    /// on its own.
+    func setSessionBackend(_ backend: Host.SessionBackend, for hostID: UUID) {
+        guard let host = host(id: hostID), host.sessionBackend != backend else { return }
+        var updated = host
+        updated.sessionBackend = backend
+        update(updated)
+    }
+
     func agentCommandConfiguration(for hostID: UUID) -> AgentCommandConfiguration {
         host(id: hostID)?.agentCommandConfiguration
             ?? AgentCommandConfiguration()
@@ -305,6 +316,12 @@ final class HostStore {
         // Absent mosh keys leave the host's current setting alone, so a
         // hand-trimmed seed doesn't silently flip transports.
         if let useMosh = seed.useMosh { host.useMosh = useMosh }
+        // Same rule for the session backend: seed-herdr.json flips devbox
+        // to herdr, seed.json (absent key) leaves it as it stands.
+        if let backend = seed.sessionBackend
+            .flatMap(Host.SessionBackend.init(rawValue:)) {
+            host.sessionBackend = backend
+        }
         if let path = seed.moshServerPath { host.moshServerPath = path }
         if let ports = seed.moshPorts { host.moshPorts = ports }
         // Optional so existing seeds leave the host's dirs alone; used by
@@ -376,6 +393,7 @@ final class HostStore {
         var passphrase: String?
         var enabled: Bool?
         var useMosh: Bool?
+        var sessionBackend: String?
         var moshServerPath: String?
         var moshPorts: String?
         var workingDirs: [String]?

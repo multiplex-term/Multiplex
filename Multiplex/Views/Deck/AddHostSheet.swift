@@ -50,6 +50,7 @@ struct AddHostFormState {
     var privateKeyConcealed = false
     var passphrase = ""
     var isEnabled = true
+    var sessionBackend = Host.SessionBackend.tmux
     var useMosh = false
     var moshServerPath = ""
     var moshPorts = ""
@@ -79,6 +80,7 @@ struct AddHostFormState {
         privateKeyConcealed = !privateKey.isEmpty
         passphrase = secrets.passphrase ?? ""
         isEnabled = host.isEnabled
+        sessionBackend = host.sessionBackend
         useMosh = host.useMosh
         moshServerPath = host.moshServerPath ?? ""
         moshPorts = host.moshPorts ?? ""
@@ -119,6 +121,7 @@ struct AddHostFormState {
             hostname, port, username, authMethod.rawValue,
             password, privateKey, passphrase,
             useMosh ? "mosh" : "ssh", moshServerPath,
+            sessionBackend.rawValue,
         ]
     }
 
@@ -156,6 +159,7 @@ struct AddHostFormState {
         host.username = username.trimmingCharacters(in: .whitespaces)
         host.authMethod = authMethod
         host.isEnabled = isEnabled
+        host.sessionBackend = sessionBackend
         host.useMosh = useMosh
         let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
@@ -291,6 +295,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private var scriptsSection: AddHostSectionView!
     private var agentModelsSection: AddHostSectionView!
     private var transportSection: AddHostSectionView!
+    private var backendSection: AddHostSectionView!
 
     private var workingDirectoryFields: [UUID: UITextField] = [:]
     private var scriptNameFields: [UUID: UITextField] = [:]
@@ -698,10 +703,13 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         agentModelsSection = makeAgentModelsSection()
         transportSection = AddHostSectionView(title: "Transport", detail: nil, rows: [])
         transportSection.accessibilityIdentifier = "addhost.section.transport"
+        backendSection = AddHostSectionView(title: "Backend", detail: nil, rows: [])
+        backendSection.accessibilityIdentifier = "addhost.section.backend"
 
         [
             hostSection,
             monitoringSection,
+            backendSection,
             credentialsSection,
             testSection,
             workingDirectoriesSection,
@@ -716,6 +724,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         renderWorkingDirectories()
         renderScripts()
         renderTransport()
+        renderBackend()
     }
 
     private func makeHostSection() -> AddHostSectionView {
@@ -1363,6 +1372,36 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         rows.append(AddHostInsetRow(contentView: addHostLeadingView(add)))
         scriptsSection.setDetail(scriptsDetail)
         scriptsSection.setRows(rows)
+    }
+
+    // MARK: Backend
+
+    private var backendDetail: String {
+        if form.sessionBackend == .herdr {
+            return "The deck monitors herdr (herdr.dev) workspaces and their "
+                + "agents through the herdr CLI; tiles attach the full herdr "
+                + "client. The tmux options editor doesn't apply here."
+        }
+        return "The deck monitors a remote tmux server — sessions, windows, "
+            + "and agent panes. herdr (herdr.dev) is the alternative for "
+            + "hosts that run it."
+    }
+
+    private func renderBackend() {
+        let bar = AddHostChoiceBar<Host.SessionBackend>(
+            choices: [("TMUX", .tmux), ("HERDR", .herdr)],
+            selection: form.sessionBackend
+        ) { [weak self] backend in
+            guard let self else { return }
+            self.updateTestSensitive { $0.sessionBackend = backend }
+            self.renderBackend()
+        }
+        bar.accessibilityIdentifier = "addhost.backendBar"
+        backendSection.setDetail(backendDetail)
+        backendSection.setRows([bar])
+        // herdr has no analog of the new-session tmux options; the record
+        // keeps whatever is stored, the editor just stops claiming it runs.
+        tmuxConfSection.isHidden = form.sessionBackend == .herdr
     }
 
     // MARK: Transport

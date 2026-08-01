@@ -10,6 +10,13 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         case create(sessionName: String, directory: String?)
         /// Plain login shell, no tmux.
         case shell
+        /// Attach the full herdr client with one workspace pre-focused —
+        /// the tile press on a herdr-backend host. `label` is the mapped
+        /// session name the tile shows (workspace labels can duplicate;
+        /// the id is the target, the label is the identity surfaces match
+        /// on). A real terminal like `.attach`: restores across launches,
+        /// resumes per `SessionResumePolicy`.
+        case herdrAttach(workspaceID: String, label: String)
         /// The viewport — an inline browser tab, docked beside the sessions
         /// that produced its URL and moved with the same merge/split
         /// machinery. Not a terminal: no remote command, no tmux session, no
@@ -29,6 +36,16 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         static func create(sessionName: String) -> Mode {
             .create(sessionName: sessionName, directory: nil)
         }
+
+        /// The attach mode for one probed session on this host — the tmux
+        /// attach or the herdr client, decided by the host's backend in
+        /// exactly one place so no mint site can disagree.
+        static func attach(host: Host, session: TmuxSession) -> Mode {
+            switch host.sessionBackend {
+            case .tmux: .attach(sessionName: session.name)
+            case .herdr: .herdrAttach(workspaceID: session.tmuxID, label: session.name)
+            }
+        }
     }
 
     var id: UUID = UUID()
@@ -45,6 +62,8 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
                 sessionName: name,
                 directory: directory
             )
+        case .herdrAttach(let workspaceID, _):
+            return HerdrProbe.attachCommand(workspaceID: workspaceID)
         case .shell, .viewport, .fileViewer:
             return nil
         }
@@ -68,6 +87,11 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
                 command += " -c \(directory.shellQuotedDirectory)"
             }
             return command
+        case .herdrAttach(let workspaceID, _):
+            // Two commands (focus, then attach — verified: `session attach`
+            // has no workspace flag), so a shell must carry them; execvp
+            // gets that shell as its argv.
+            return "sh -c \(HerdrProbe.attachCommand(workspaceID: workspaceID).shellQuoted)"
         case .shell, .viewport, .fileViewer:
             return nil
         }
@@ -76,19 +100,33 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
     var displayName: String {
         switch mode {
         case .attach(let name), .create(let name, _): name
+        case .herdrAttach(_, let label): label
         case .shell: "shell"
         case .viewport(let urlString): Self.viewportLabel(urlString)
         case .fileViewer(let path): Self.fileViewerLabel(path)
         }
     }
 
-    /// The tmux session this tab is bound to; nil for a plain shell (which
-    /// has no probe entry, so no agent detection) and for the viewport and
-    /// file viewer.
+    /// The multiplexer session this tab is bound to (a herdr tab answers
+    /// its mapped workspace name — the probe's session records use it, so
+    /// agent detection and focus dedupe match the same way); nil for a
+    /// plain shell (which has no probe entry, so no agent detection) and
+    /// for the viewport and file viewer.
     var sessionName: String? {
         switch mode {
         case .attach(let name), .create(let name, _): name
+        case .herdrAttach(_, let label): label
         case .shell, .viewport, .fileViewer: nil
+        }
+    }
+
+    /// The tab speaks tmux itself — the gate for tmux-specific chrome (the
+    /// TMUX shortcut popover, Copy Mode's app-owned state). A herdr tab is
+    /// a probe-backed session too, but its client owns those interactions.
+    var usesTmux: Bool {
+        switch mode {
+        case .attach, .create: true
+        case .herdrAttach, .shell, .viewport, .fileViewer: false
         }
     }
 

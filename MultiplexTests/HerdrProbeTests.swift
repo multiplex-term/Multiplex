@@ -278,6 +278,172 @@ final class HerdrProbeTests: XCTestCase {
         XCTAssertEqual(AgentKind(herdrAgent: "pi"), .pi)
         XCTAssertNil(AgentKind(herdrAgent: "opencode"))
     }
+
+    // MARK: Attention mapping
+
+    func testPaneAgentStateMapping() {
+        XCTAssertEqual(HerdrProbe.paneAgentState(.working), .busy)
+        XCTAssertEqual(HerdrProbe.paneAgentState(.blocked), .needsYou(.permission))
+        // done → idle hands the tracker the busy → idle edge that raises
+        // the turn-ended alert exactly once.
+        XCTAssertEqual(HerdrProbe.paneAgentState(.done), .idle)
+        XCTAssertEqual(HerdrProbe.paneAgentState(.idle), .idle)
+        XCTAssertNil(HerdrProbe.paneAgentState(.unknown))
+        XCTAssertNil(HerdrProbe.paneAgentState(nil))
+    }
+
+    func testStateFoldsOntoTmuxState() {
+        XCTAssertEqual(HerdrProbe.State.herdrMissing.tmuxState, .tmuxMissing)
+        XCTAssertEqual(HerdrProbe.State.noServer.tmuxState, .noServer)
+        guard case .failed(let message) = HerdrProbe.State
+            .updateNeeded(installedVersion: "0.4.0").tmuxState else {
+            return XCTFail("updateNeeded should ride the failed lane")
+        }
+        XCTAssertTrue(message.contains("0.4.0"))
+    }
+
+    // MARK: Working directories
+
+    func testPaneCWDsRideTheParse() throws {
+        let parsed = HerdrProbe.parseProbe(
+            transcript(status: statusUp, snapshot: try fixtureSnapshot())
+        )
+        XCTAssertEqual(parsed.paneCWDs["w1:p1"], "/Users/jhen")
+        XCTAssertEqual(parsed.paneCWDs["w2:p1"], "/private/tmp")
+    }
+
+    // MARK: Workspace actions
+
+    func testNewWorkspaceCommandShape() {
+        let command = HerdrProbe.newWorkspaceCommand(label: "web-2", cwd: "~/api")
+        XCTAssertTrue(command.contains(
+            #"herdr workspace create --cwd "$HOME"/'api' --label 'web-2' 2>/dev/null || true"#))
+        let bare = HerdrProbe.newWorkspaceCommand(label: "web", cwd: nil)
+        XCTAssertFalse(bare.contains("--cwd"))
+    }
+
+    func testParseNewWorkspaceReadsTheCreateEnvelope() {
+        // The captured create envelope's shape (2026-08-01, herdr 0.7.5),
+        // abridged around the fields the parser reads.
+        let output = "ignored login noise\n"
+            + #"{"id":"cli:workspace:create","result":{"root_pane":"#
+            + #"{"agent_status":"unknown","cwd":"/private/tmp","focused":false,"#
+            + #""pane_id":"w2:p1","revision":0,"tab_id":"w2:t1","workspace_id":"w2"},"#
+            + #""tab":{"label":"1","number":1,"tab_id":"w2:t1","workspace_id":"w2"},"#
+            + #""type":"workspace_created","workspace":{"active_tab_id":"w2:t1","#
+            + #""agent_status":"unknown","focused":false,"label":"demo","number":2,"#
+            + #""pane_count":1,"tab_count":1,"workspace_id":"w2"}}}"#
+        let created = HerdrProbe.parseNewWorkspace(output)
+        XCTAssertEqual(created, HerdrProbe.NewWorkspace(
+            workspaceID: "w2", label: "demo", rootPaneID: "w2:p1"))
+        XCTAssertNil(HerdrProbe.parseNewWorkspace("Error: no server\n"))
+    }
+
+    func testTypeCommandTypesLinesThenEnter() {
+        let command = HerdrProbe.typeCommand(
+            paneID: "w2:p1", lines: ["source .env", "claude 'do it'"])
+        XCTAssertNotNil(command)
+        XCTAssertTrue(command?.contains(
+            "herdr pane send-text 'w2:p1' 'source .env' 2>/dev/null || true") == true)
+        XCTAssertTrue(command?.contains(
+            "herdr pane send-text 'w2:p1' " + "claude 'do it'".shellQuoted) == true)
+        XCTAssertTrue(command?.contains(
+            "herdr pane send-keys 'w2:p1' Enter") == true)
+        XCTAssertNil(HerdrProbe.typeCommand(paneID: "w2:p1", lines: []))
+        XCTAssertNil(HerdrProbe.typeCommand(paneID: "w2:p1", lines: [""]))
+    }
+
+    func testCloseWorkspaceCommandShape() {
+        XCTAssertTrue(HerdrProbe.closeWorkspaceCommand(workspaceID: "w4")
+            .contains("herdr workspace close 'w4' 2>/dev/null || true"))
+    }
+
+    func testAttachCommandFocusesThenExecs() {
+        let command = HerdrProbe.attachCommand(workspaceID: "w3")
+        XCTAssertTrue(command.contains("herdr workspace focus 'w3' >/dev/null 2>&1; "))
+        XCTAssertTrue(command.hasSuffix("exec herdr session attach default"))
+        // The blind form (debug auto-attach before any probe) skips focus.
+        XCTAssertFalse(HerdrProbe.attachCommand(workspaceID: "").contains("focus"))
+    }
+}
+
+/// The tmux probe's herdr-presence line — the dead-tile switch hint's
+/// input. Presence rides every tick; only dead tiles read it.
+final class TmuxProbeHerdrPresenceTests: XCTestCase {
+    func testProbeCommandChecksHerdrBeforeTheTmuxGuard() {
+        let command = TmuxProbe.probeCommand
+        let herdrCheck = command.range(
+            of: "command -v herdr >/dev/null 2>&1 && echo MULTIPLEX_HERDR_PRESENT")
+        let tmuxGuard = command.range(of: "command -v tmux")
+        XCTAssertNotNil(herdrCheck)
+        XCTAssertNotNil(tmuxGuard)
+        if let herdrCheck, let tmuxGuard {
+            XCTAssertLessThan(herdrCheck.lowerBound, tmuxGuard.lowerBound,
+                              "the tmux guard exits; herdr must be checked first")
+        }
+    }
+
+    func testParseProbeReadsThePresenceMarker() {
+        let missingWithHerdr = TmuxProbe.parseProbe(
+            "MULTIPLEX_HERDR_PRESENT\nMULTIPLEX_NO_TMUX\n")
+        XCTAssertEqual(missingWithHerdr.state, .tmuxMissing)
+        XCTAssertTrue(missingWithHerdr.herdrPresent)
+
+        let missingAlone = TmuxProbe.parseProbe("MULTIPLEX_NO_TMUX\n")
+        XCTAssertFalse(missingAlone.herdrPresent)
+    }
+}
+
+/// The `.herdrAttach` route: the PTY command, the mosh argv, and the
+/// identity surfaces the workspace label answers for.
+final class HerdrRouteTests: XCTestCase {
+    private let route = TerminalRoute(
+        hostID: UUID(),
+        mode: .herdrAttach(workspaceID: "w3", label: "web")
+    )
+
+    func testRemoteCommandAttachesTheHerdrClient() throws {
+        let command = try XCTUnwrap(route.remoteCommand)
+        XCTAssertTrue(command.contains("herdr workspace focus 'w3'"))
+        XCTAssertTrue(command.hasSuffix("exec herdr session attach default"))
+    }
+
+    func testMoshRemoteCommandWrapsTheTwoCommandsInAShell() throws {
+        let command = try XCTUnwrap(route.moshRemoteCommand)
+        XCTAssertTrue(command.hasPrefix("sh -c '"))
+        XCTAssertTrue(command.contains("herdr session attach default"))
+    }
+
+    func testIdentitySurfacesAnswerTheLabel() {
+        XCTAssertEqual(route.displayName, "web")
+        XCTAssertEqual(route.sessionName, "web")
+        XCTAssertFalse(route.usesTmux)
+        XCTAssertFalse(route.isAuxiliaryPane)
+    }
+
+    func testAttachFactoryPicksTheBackend() {
+        var host = Host(name: "box", hostname: "10.0.0.1", username: "dev")
+        let session = TmuxSession(
+            name: "web", windows: [], created: .distantPast, tmuxID: "w3")
+
+        XCTAssertEqual(
+            TerminalRoute.Mode.attach(host: host, session: session),
+            .attach(sessionName: "web")
+        )
+        host.sessionBackend = .herdr
+        XCTAssertEqual(
+            TerminalRoute.Mode.attach(host: host, session: session),
+            .herdrAttach(workspaceID: "w3", label: "web")
+        )
+    }
+
+    func testTmuxRoutesKeepTmuxChrome() {
+        let tmuxRoute = TerminalRoute(
+            hostID: UUID(), mode: .attach(sessionName: "main"))
+        XCTAssertTrue(tmuxRoute.usesTmux)
+        let shellRoute = TerminalRoute(hostID: UUID(), mode: .shell)
+        XCTAssertFalse(shellRoute.usesTmux)
+    }
 }
 
 /// The backend field itself: legacy records decode to tmux, unknown

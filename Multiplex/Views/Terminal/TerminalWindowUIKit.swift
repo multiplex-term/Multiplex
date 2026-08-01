@@ -803,7 +803,7 @@ final class TerminalWindowViewController: UIViewController,
         Task { [weak self] in
             guard let self else { return }
             defer { creatingTab = false }
-            guard let name = await hub.model(for: host).createSession(
+            guard let created = await hub.model(for: host).createSession(
                 base: agent?.launchCommand ?? source ?? "main",
                 inDirectoryOf: source,
                 applying: host.newSessionTmuxConf,
@@ -818,10 +818,7 @@ final class TerminalWindowViewController: UIViewController,
                 presentNewTabFailure(hostName: host.name)
                 return
             }
-            let tab = TerminalRoute(
-                hostID: host.id,
-                mode: .attach(sessionName: name)
-            )
+            let tab = TerminalRoute(hostID: host.id, mode: created)
             mutateRoute { route in
                 route.tabs.append(tab)
                 route.activate(tab.id)
@@ -1321,7 +1318,7 @@ extension TerminalWindowViewController {
                 ? { [weak self] in self?.confirmCloseActiveSession() } : nil,
             keychainTip: activeTabKeychainNotice != nil
                 ? { [weak self] in self?.presentKeychainTip() } : nil,
-            showsTmuxShortcuts: activeTab?.sessionName != nil,
+            showsTmuxShortcuts: activeTab?.usesTmux == true,
             style: shell == nil ? .regular : .shell,
             deckControlLabel: shell?.deckControlLabel ?? "DECK",
             availableWidth: shell?.availableWidth,

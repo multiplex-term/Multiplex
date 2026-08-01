@@ -21,6 +21,26 @@ enum HostGuide {
         Command(label: "Arch", command: "sudo pacman -S tmux"),
     ]
 
+    /// herdr installs, for hosts on the herdr backend — the two roads
+    /// herdr.dev/docs/install leads with (verified 2026-08-01; its manual
+    /// road lands in `~/.local/bin`, already on the probe PATH). Homebrew
+    /// leads because it also handles upgrades.
+    static let herdrInstall: [Command] = [
+        Command(label: "Homebrew", command: "brew install herdr"),
+        Command(
+            label: "Or, macOS or Linux",
+            command: "curl -fsSL https://herdr.dev/install.sh | sh"),
+    ]
+
+    /// The guide set for one host's backend — a dead tile's INSTALL GUIDE
+    /// must speak the multiplexer the host is actually configured for.
+    static func multiplexerInstall(for backend: Host.SessionBackend) -> [Command] {
+        switch backend {
+        case .tmux: tmuxInstall
+        case .herdr: herdrInstall
+        }
+    }
+
     /// The macOS locked-keychain fix (see `KeychainLockCheck`): unlock once
     /// in any shell on the host, then restart the signed-out agent.
     static let keychainUnlock = Command(
