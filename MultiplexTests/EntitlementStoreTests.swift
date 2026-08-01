@@ -199,12 +199,15 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertTrue(store.canEnableMosh(currentlyEnabled: true))
         XCTAssertFalse(store.canMutateCustomThemes)
         XCTAssertFalse(store.canScheduleAgentAlerts)
+        // The Agent Gallery is Pro with no taste — HISTORY's posture.
+        XCTAssertFalse(store.canUseAgentChat)
 
         #if DEBUG
         store.setDebugUnlocked(true)
         XCTAssertTrue(store.canEnableMosh(currentlyEnabled: false))
         XCTAssertTrue(store.canMutateCustomThemes)
         XCTAssertTrue(store.canScheduleAgentAlerts)
+        XCTAssertTrue(store.canUseAgentChat)
         #endif
     }
 

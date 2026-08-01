@@ -484,8 +484,22 @@ final class DeckWindowViewController: UIViewController {
             addHost: { [weak self] in self?.requestAddHost() },
             editHost: { [weak self] host in self?.requestEditHost(host) },
             openSettings: { [weak self] in self?.requestSettings() },
-            openFAQ: { [weak self] in self?.requestFAQ() }
+            openFAQ: { [weak self] in self?.requestFAQ() },
+            openAgentGallery: { [weak self] host in self?.openAgentGallery(for: host) }
         )
+    }
+
+    /// The ✳ AGENTS door: Pro with no taste (`canUseAgentChat`) — locked
+    /// taps raise the paywall; unlocked ones register the controller FIRST
+    /// (the summoned-never-restored ordering rule) and open the tab.
+    private func openAgentGallery(for host: Host) {
+        guard configuration.entitlements.canUseAgentChat else {
+            presentPaywall()
+            return
+        }
+        let tab = TerminalRoute(hostID: host.id, mode: .agentGallery)
+        configuration.workspace.openAgentGallery(tab: tab, host: host)
+        configuration.terminalOpener(TerminalWindowRoute(tab: tab))
     }
 
     // MARK: Lifecycle / Observation
@@ -922,6 +936,9 @@ final class DeckWindowViewController: UIViewController {
             await self?.presentHostSettingsForVerificationIfRequested()
         })
         lifecycleTasks.append(Task { [weak self] in
+            await self?.openAgentGalleryForVerificationIfRequested()
+        })
+        lifecycleTasks.append(Task { [weak self] in
             guard let self else { return }
             await DeckScene.autoAttachIfRequested(
                 store: self.configuration.store,
@@ -968,6 +985,22 @@ final class DeckWindowViewController: UIViewController {
         else { return }
         configuration.entitlements.prepareDebugPaywallPreview()
         requestPresentation(.paywall)
+    }
+
+    /// Headless door for the ✳ Agent Gallery — the simulator can't tap the
+    /// rail chip. Runs the exact chip path (`openAgentGallery(for:)`), so a
+    /// launch with `MULTIPLEX_PRO_LOCKED=1` proves the paywall gate and an
+    /// unlocked one opens the real surface.
+    private func openAgentGalleryForVerificationIfRequested() async {
+        guard ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_AGENT_GALLERY"] == "1"
+        else { return }
+        for _ in 0..<50 {
+            if let host = configuration.store.hosts.first {
+                openAgentGallery(for: host)
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
     }
     #endif
 }

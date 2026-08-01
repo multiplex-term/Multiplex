@@ -134,10 +134,23 @@ final class TerminalWorkspace {
         )
     }
 
+    /// Register the Agent Gallery tab's controller BEFORE the tab enters
+    /// any route — the same ordering rule as the viewport, which is what
+    /// lets `syncTabs` strip restored corpses without ever touching a live
+    /// summons.
+    func openAgentGallery(tab: TerminalRoute, host: Host) {
+        guard tab.isAgentGallery, auxiliaryControllers[tab.id] == nil else { return }
+        auxiliaryControllers[tab.id] = AgentGalleryController(tabID: tab.id, host: host)
+    }
+
     /// The general question — "does this auxiliary tab have a live pane,
     /// and what does it call itself" — for the strip and the tab titles.
     func auxiliaryController(for tabID: UUID) -> (any AuxiliaryPaneController)? {
         auxiliaryControllers[tabID]
+    }
+
+    func agentGalleryController(for tabID: UUID) -> AgentGalleryController? {
+        auxiliaryControllers[tabID] as? AgentGalleryController
     }
 
     func viewportController(for tabID: UUID) -> ViewportController? {

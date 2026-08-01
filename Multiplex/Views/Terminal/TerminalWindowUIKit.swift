@@ -870,6 +870,16 @@ final class TerminalWindowViewController: UIViewController,
         dock(tab, after: activeTab.id)
     }
 
+    /// The Gallery's TERMINAL chip (and any future in-window herdr door):
+    /// register-then-dock for auxiliary modes, plain dock for terminals.
+    func openTab(_ tab: TerminalRoute) {
+        if tab.isAgentGallery, let host = store.host(id: tab.hostID) {
+            workspace.openAgentGallery(tab: tab, host: host)
+        }
+        let anchorID = activeTab?.id ?? tab.id
+        dock(tab, after: anchorID)
+    }
+
     private func dock(_ tab: TerminalRoute, after anchorID: UUID) {
         mutateRoute { route in
             if let index = route.tabs.firstIndex(where: { $0.id == anchorID }) {
@@ -1146,6 +1156,19 @@ extension TerminalWindowViewController {
                 close: { [weak self] in self?.closeTab(tab.id) }
             )
         }
+        if tab.isAgentGallery {
+            guard let gallery = workspace.agentGalleryController(for: tab.id) else { return nil }
+            return AgentGalleryPaneViewController(
+                controller: gallery,
+                model: hub.model(for: gallery.host),
+                contentSafeArea: contentSafeArea,
+                isActive: tab.id == activeTab?.id,
+                close: { [weak self] in self?.closeTab(tab.id) },
+                openTerminal: { [weak self] mode in
+                    self?.openTab(TerminalRoute(hostID: tab.hostID, mode: mode))
+                }
+            )
+        }
         return TerminalPaneViewController(configuration: paneConfiguration(
             for: tab,
             isActive: tab.id == activeTab?.id
@@ -1169,6 +1192,15 @@ extension TerminalWindowViewController {
                 contentSafeArea: contentSafeArea,
                 isActive: isActive,
                 close: { [weak self] in self?.closeTab(tab.id) }
+            )
+        } else if let gallery = pane as? AgentGalleryPaneViewController {
+            gallery.update(
+                contentSafeArea: contentSafeArea,
+                isActive: isActive,
+                close: { [weak self] in self?.closeTab(tab.id) },
+                openTerminal: { [weak self] mode in
+                    self?.openTab(TerminalRoute(hostID: tab.hostID, mode: mode))
+                }
             )
         }
     }
@@ -1195,6 +1227,7 @@ extension TerminalWindowViewController {
         (pane as? TerminalPaneViewController)?.prepareForRemoval()
         (pane as? ViewportPaneViewController)?.prepareForRemoval()
         (pane as? FileViewerPaneViewController)?.prepareForRemoval()
+        (pane as? AgentGalleryPaneViewController)?.prepareForRemoval()
     }
 
     private func unmount(_ controller: UIViewController) {
@@ -1266,7 +1299,9 @@ extension TerminalWindowViewController {
     }
 
     private var auxiliaryCloseLabel: String {
-        activeTab?.isFileViewer == true ? "Close file viewer" : "Close viewport"
+        if activeTab?.isFileViewer == true { return "Close file viewer" }
+        if activeTab?.isAgentGallery == true { return "Close agent gallery" }
+        return "Close viewport"
     }
 
     private func renderUMD() {

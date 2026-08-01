@@ -325,6 +325,11 @@ final class EntitlementStore {
     /// The HISTORY surface (reading agent session files + jump-to-message)
     /// is a Pro helper like the strip's commands; detection stays free.
     var canBrowseAgentHistory: Bool { isPro }
+    /// The Agent Gallery (herdr-backed chat surface) — Pro with no taste,
+    /// HISTORY's exact posture: doors render the PRO pill, the tap raises
+    /// the paywall, and there is no meter interplay. Detection and the
+    /// wall's herdr-state telemetry stay free.
+    var canUseAgentChat: Bool { isPro }
 
     /// Slash commands alone consume the taste meter. Keyboard-equivalent
     /// helper chips do not call this API.
