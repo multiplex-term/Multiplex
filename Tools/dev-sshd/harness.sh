@@ -10,11 +10,16 @@
 #   ./harness.sh turn    fake agent turn in agent:cc (busy title → idle);
 #                        optional seconds arg, default 8
 #   ./harness.sh ask     fake permission dialog in agent:cc (needs-you state)
+#   ./harness.sh herdr   start a real herdr server (brew install herdr) and
+#                        seed demo workspaces with deterministic agent
+#                        states via `pane report-agent` — the herdr-mode
+#                        analog of `demo`; point the app at
+#                        state/seed-herdr.json
 #   ./harness.sh bind    run the real `mpx bind` against this sshd with a
 #                        pinned token/PIN, so the app's bind flow can be
 #                        driven headlessly (MULTIPLEX_AUTO_BIND /
 #                        MULTIPLEX_BIND_AUTOPIN); prints the payload URL
-#   ./harness.sh stop    stop sshd and kill demo sessions
+#   ./harness.sh stop    stop sshd, kill demo sessions, retire herdr fakes
 #
 # Everything lives in ./state/ (gitignored).
 set -euo pipefail
@@ -78,7 +83,9 @@ seed = {
 # MULTIPLEX_SEED_HOST here to flip devbox to mosh; seed.json flips it back.
 (state / "seed-mosh.json").write_text(json.dumps(dict(seed, useMosh=True), indent=2))
 (state / "seed-mosh-v6.json").write_text(json.dumps(dict(seed, hostname="::1", useMosh=True), indent=2))
-print(f"wrote {state / 'seed.json'} (+ seed-mosh.json, seed-mosh-v6.json)")
+# Same host again, herdr backend — pair with `./harness.sh herdr`.
+(state / "seed-herdr.json").write_text(json.dumps(dict(seed, sessionBackend="herdr"), indent=2))
+print(f"wrote {state / 'seed.json'} (+ seed-mosh.json, seed-mosh-v6.json, seed-herdr.json)")
 PY
 }
 
@@ -161,7 +168,106 @@ EOF
     echo "agent:cc parked on a permission dialog (NEEDS YOU); run '$0 turn' to clear"
 }
 
+# Seed the herdr-mode analog of `demo`: a real herdr server (the same one
+# the app's probe reaches over SSH — the CLI resolves the default socket,
+# so a scratch socket would be invisible to the app) plus demo workspaces
+# whose agent states are reported through `pane report-agent`, herdr's own
+# integration door — deterministic, unlike OSC-title fakes. Everything the
+# harness creates is recorded in state/herdr-workspaces so `stop` retires
+# exactly those and never the developer's own workspaces.
+#
+# Facts this leans on (herdr 0.7.5 / protocol 17, verified 2026-08-01):
+# reportable states are idle|working|blocked|unknown; `done` is derived
+# server-side from a working → idle report; kinds canonicalize
+# (claude-code → claude).
+herdr_demo() {
+    command -v herdr >/dev/null 2>&1 || {
+        echo "herdr not installed — brew install herdr" >&2; exit 1
+    }
+    mkdir -p "$STATE"
+
+    if ! herdr status --json 2>/dev/null | grep -q '"running":true'; then
+        nohup herdr server > "$STATE/herdr-server.log" 2>&1 &
+        echo $! > "$STATE/herdr-server.pid"
+        for _ in $(seq 1 25); do
+            herdr status --json 2>/dev/null | grep -q '"running":true' && break
+            sleep 0.2
+        done
+        herdr status --json 2>/dev/null | grep -q '"running":true' || {
+            echo "herdr server failed to start — see $STATE/herdr-server.log" >&2
+            exit 1
+        }
+        echo "herdr server started (pid $(cat "$STATE/herdr-server.pid"))"
+    fi
+
+    # Re-runs recreate the demo topology from scratch.
+    if [ -f "$STATE/herdr-workspaces" ]; then
+        while IFS= read -r ws; do
+            herdr workspace close "$ws" >/dev/null 2>&1 || true
+        done < "$STATE/herdr-workspaces"
+        : > "$STATE/herdr-workspaces"
+    fi
+
+    # workspace create prints a JSON envelope; keep the ids for cleanup and
+    # the root pane ids for the agent reports.
+    python3 - "$STATE" <<'PY'
+import json, pathlib, subprocess, sys
+state = pathlib.Path(sys.argv[1])
+
+def create(label, cwd):
+    out = subprocess.run(
+        ["herdr", "workspace", "create", "--cwd", cwd, "--label", label],
+        capture_output=True, text=True, check=True).stdout
+    result = json.loads(out)["result"]
+    return result["workspace"]["workspace_id"], result["root_pane"]["pane_id"]
+
+def report(pane, agent, status, extra=None):
+    subprocess.run(
+        ["herdr", "pane", "report-agent", pane,
+         "--source", "multiplex-harness", "--agent", agent, "--state", status]
+        + (extra or []),
+        check=True)
+
+ids = []
+web_ws, web_pane = create("web", "/tmp")
+ids.append(web_ws)
+report(web_pane, "claude", "working")
+
+api_ws, api_pane = create("api", "/tmp")
+ids.append(api_ws)
+report(api_pane, "codex", "blocked",
+       ["--message", "Allow command: npm run deploy?"])
+
+scratch_ws, _ = create("scratch", "/tmp")
+ids.append(scratch_ws)  # no agent — a plain shell workspace
+
+# pi rides working -> idle so the server derives `done` (turn ended).
+pi_ws, pi_pane = create("pi-done", "/tmp")
+ids.append(pi_ws)
+report(pi_pane, "pi", "working")
+report(pi_pane, "pi", "idle")
+
+(state / "herdr-workspaces").write_text("\n".join(ids) + "\n")
+print("herdr demo workspaces:", ", ".join(ids))
+PY
+    herdr workspace list
+    echo "point the app at state/seed-herdr.json (run '$0 start' if absent)"
+}
+
 stop() {
+    # Retire only the workspaces this harness created; stop the server only
+    # if this harness started it. A developer's own herdr stays untouched.
+    if [ -f "$STATE/herdr-workspaces" ]; then
+        while IFS= read -r ws; do
+            herdr workspace close "$ws" >/dev/null 2>&1 || true
+        done < "$STATE/herdr-workspaces"
+        rm -f "$STATE/herdr-workspaces"
+    fi
+    if [ -f "$STATE/herdr-server.pid" ]; then
+        herdr server stop >/dev/null 2>&1 || true
+        kill "$(cat "$STATE/herdr-server.pid")" 2>/dev/null || true
+        rm -f "$STATE/herdr-server.pid"
+    fi
     if [ -f "$STATE/bind.pid" ]; then
         kill "$(cat "$STATE/bind.pid")" 2>/dev/null || true
         rm -f "$STATE/bind.pid"
@@ -255,7 +361,8 @@ case "${1:-}" in
     demo) demo ;;
     turn) shift; turn "$@" ;;
     ask) ask ;;
+    herdr) herdr_demo ;;
     bind) shift; bind "$@" ;;
     stop) stop ;;
-    *) echo "usage: $0 start|demo|turn [secs]|ask|bind [--print-only]|stop" >&2; exit 1 ;;
+    *) echo "usage: $0 start|demo|turn [secs]|ask|herdr|bind [--print-only]|stop" >&2; exit 1 ;;
 esac

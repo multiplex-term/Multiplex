@@ -15,6 +15,24 @@ struct Host: Identifiable, Codable, Hashable {
         }
     }
 
+    /// Which multiplexer this host's deck tiles and terminals speak —
+    /// remote tmux (the default) or herdr (herdr.dev). One backend per
+    /// host, chosen explicitly in Host Settings / manual Add; the dead-tmux
+    /// tile may *offer* a switch when it sees herdr installed, but nothing
+    /// ever flips this automatically.
+    enum SessionBackend: String, Codable, CaseIterable, Identifiable {
+        case tmux
+        case herdr
+
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .tmux: "tmux"
+            case .herdr: "herdr"
+            }
+        }
+    }
+
     var id: UUID = UUID()
     var name: String
     var hostname: String
@@ -32,6 +50,12 @@ struct Host: Identifiable, Codable, Hashable {
     /// The credentials above still authenticate the SSH bootstrap that
     /// launches `mosh-server`; deck probing stays on SSH either way.
     var useMosh: Bool = false
+    /// The session backend the probe and attach paths use. Rides the synced
+    /// record, and deliberately participates in
+    /// `connectionModelConfiguration`: flipping it must tear down and
+    /// rebuild the probe connection, because the probe command itself is
+    /// backend-shaped.
+    var sessionBackend: SessionBackend = .tmux
     /// Absolute path to `mosh-server` when it isn't on the exec PATH.
     var moshServerPath: String?
     /// UDP port or range ("60000:61000") handed to `mosh-server -p`.
@@ -139,6 +163,11 @@ extension Host {
         // expects to see probing: absent means enabled.
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         useMosh = try container.decodeIfPresent(Bool.self, forKey: .useMosh) ?? false
+        // Decode via the raw string so an unknown value — a record written
+        // by a newer schema that grew a third backend — degrades to tmux
+        // instead of throwing this host (and with it the whole list) away.
+        sessionBackend = (try container.decodeIfPresent(String.self, forKey: .sessionBackend))
+            .flatMap(SessionBackend.init(rawValue:)) ?? .tmux
         moshServerPath = try container.decodeIfPresent(String.self, forKey: .moshServerPath)
         moshPorts = try container.decodeIfPresent(String.self, forKey: .moshPorts)
         workingDirs = try container.decodeIfPresent([String].self, forKey: .workingDirs) ?? []
