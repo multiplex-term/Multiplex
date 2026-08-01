@@ -566,68 +566,6 @@ enum HerdrProbe {
         pathPrefix + "herdr workspace close \(workspaceID.shellQuoted) 2>/dev/null || true"
     }
 
-    /// One agent screen for the Gallery — raw visible-screen text, same
-    /// read the miniatures use, framed by nothing (the whole response IS
-    /// the screen; errors are silenced so an empty answer reads as an
-    /// empty screen, which the pane says honestly).
-    static func screenReadCommand(paneID: String) -> String {
-        pathPrefix + "herdr pane read \(paneID.shellQuoted) --source visible"
-            + " 2>/dev/null || true"
-    }
-
-    /// Submit a prompt through herdr's own composer door —
-    /// `agent prompt` types with bracketed paste and an encoded Enter
-    /// (multiline-safe, submits even a working agent). stderr joins stdout
-    /// and the exit is swallowed so Citadel doesn't throw: the *output*
-    /// carries the verdict, which `promptVerdict` reads.
-    static func promptCommand(paneID: String, text: String) -> String {
-        pathPrefix + "herdr agent prompt \(paneID.shellQuoted) \(text.shellQuoted)"
-            + " 2>&1 || true"
-    }
-
-    enum PromptVerdict: Equatable {
-        case delivered
-        /// herdr accepted the prompt but the agent's lifecycle never moved
-        /// (~5 s) — a real delivery signal, surfaced as a pill, never a
-        /// silent drop.
-        case stalled
-        case failed(String)
-    }
-
-    static func promptVerdict(_ output: String) -> PromptVerdict {
-        if output.contains("agent_prompt_stalled") { return .stalled }
-        for line in output.split(separator: "\n") {
-            guard let data = String(line).data(using: .utf8),
-                  let envelope = try? JSONDecoder().decode(
-                    ErrorEnvelope.self, from: data)
-            else { continue }
-            return .failed(envelope.error.message)
-        }
-        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("Error") || trimmed.hasPrefix("error:") {
-            return .failed(trimmed)
-        }
-        return .delivered
-    }
-
-    private struct ErrorEnvelope: Decodable {
-        struct Body: Decodable {
-            var code: String
-            var message: String
-        }
-        var error: Body
-    }
-
-    /// The agent doors' scoped attach — `herdr agent attach <target>` is
-    /// chrome-free and shows exactly one agent's terminal, the one scoped
-    /// attach herdr has (workspace attach doesn't exist; the full client
-    /// below is the tile press's road). No `--takeover` by default: the
-    /// door observes-and-types beside other clients rather than kicking
-    /// them.
-    static func agentAttachCommand(target: String) -> String {
-        pathPrefix + "exec herdr agent attach \(target.shellQuoted)"
-    }
-
     /// The PTY attach line `ShellHandoff` injects for a herdr tab:
     /// pre-focus the workspace over the socket (fail-soft — a vanished
     /// workspace still attaches to the session), then exec the full herdr

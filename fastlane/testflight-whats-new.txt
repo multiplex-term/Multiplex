@@ -260,20 +260,3 @@ focused. Needs herdr 0.7.5+ on the host (brew install herdr).
   still type in); CLOSE closes exactly that workspace.
 - Widget/Shortcut agent launches on herdr hosts refuse with a clear
   message for now; attach and focus work.
-
-AGENT GALLERY — every herdr agent on one board (Pro)
-
-herdr hosts grow a ✳ AGENTS chip on the deck rail: a window listing every
-agent on the host (name, workspace, WORKING / NEEDS YOU / DONE / IDLE),
-the selected agent's live screen, and a composer that prompts it directly
-— multiline-safe, and it tells you when the agent didn't pick the prompt
-up instead of dropping it silently.
-
-- Without Pro: the chip raises the paywall; nothing else is gated.
-- Blocked agent: the gallery auto-selects it and shows the amber NEEDS
-  YOU banner; TERMINAL jumps into that workspace, TYPE… focuses the
-  composer.
-- Send a prompt to a working agent: it lands in that agent's composer on
-  the host (watch the screen region update).
-- Merge/split the ✳ tab between windows: the gallery keeps its state; it
-  is never restored after relaunch (summon it again from the deck).

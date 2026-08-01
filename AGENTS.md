@@ -168,9 +168,7 @@ unavailable in sim tests).
 states via `pane report-agent` (working / blocked / derived done) —
 corralled in `state/herdr-workspaces` so `stop` retires exactly those and
 never the developer's own; seed with `state/seed-herdr.json` (same
-host/UUID, `sessionBackend: "herdr"`). `MULTIPLEX_AUTO_AGENT_GALLERY=1`
-opens the ✳ Agent Gallery through the exact deck-chip path (pair with
-`MULTIPLEX_PRO_LOCKED=1` to prove the paywall gate instead).
+host/UUID, `sessionBackend: "herdr"`).
 
 Simulator caveat: Xcode 27's DeviceHub always bridges the Mac keyboard as
 *hardware*, so the software keyboard never auto-shows (Device → Keyboard →
@@ -748,13 +746,14 @@ logic belongs — keep parsing/command-building out of views.
   tmux-conf editor hides; widget/Shortcut agent launches refuse honestly
   (v1.3 fence). The dead-tmux tile offers a one-tap USE HERDR switch only
   when the tmux probe's `MULTIPLEX_HERDR_PRESENT` line (checked BEFORE
-  the exiting tmux guard) saw it installed — never auto-flips. The
-  ✳ Agent Gallery (`.agentGallery`, Pro via `canUseAgentChat` — no
-  taste, HISTORY's posture) is a third auxiliary pane under the
-  viewport/file-viewer rules: controller-owned own-SSH surface (rail from
-  the probe's records, screen via `pane read`, composer via `agent
-  prompt` with stalled/error verdicts surfaced as pills), summoned from
-  the deck rail's ✳ AGENTS chip, never restored. ⚠ Open at 0.7.5: the
+  the exiting tmux guard) saw it installed — never auto-flips. ⚠ The
+  ✳ Agent Gallery (GUI mode) shipped and was WITHDRAWN 2026-08-01 after
+  a live trial: with no Claude transcript (blocked below) the SCREEN-only
+  body was judged not enough, so the whole surface — `.agentGallery`,
+  `canUseAgentChat`, the ✳ AGENTS chip, `agent prompt`/`pane read`
+  builders — came out (reverted in-branch; resurrect from git only
+  WITH the transcript stack, never as SCREEN-only again). ⚠ Open at
+  0.7.5: the
   blocked `message` surfaces nowhere readable and `agent_session`
   identity never lands from arbitrary `report-agent-session` sources
   (likely trusted-integration-only) — re-verify with a real integration

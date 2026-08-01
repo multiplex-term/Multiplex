@@ -30,9 +30,6 @@ struct FleetWallConfiguration {
     var editHost: (Host) -> Void
     var openSettings: () -> Void
     var openFAQ: () -> Void
-    /// The ✳ AGENTS door on herdr hosts' rails. The deck layer owns the
-    /// Pro gate and the paywall; the wall only offers the chip.
-    var openAgentGallery: (Host) -> Void = { _ in }
     var usesSystemNavigation = false
 }
 
@@ -593,9 +590,6 @@ final class FleetWallViewController: UIViewController {
             openShell: { [weak self] in
                 self?.open(TerminalRoute(hostID: host.id, mode: .shell))
             },
-            openAgents: host.sessionBackend == .herdr
-                ? { [weak self] in self?.configuration.openAgentGallery(host) }
-                : nil,
             openSession: { [weak self] session in
                 self?.focusOrAttach(host, session: session)
             },
@@ -1071,8 +1065,6 @@ private struct FleetHostSectionConfiguration {
     var duplicateAttachTitle: String
     var openTabAccessibilityText: String
     var openShell: () -> Void
-    /// Present on herdr-backend hosts only — the rail's ✳ AGENTS chip.
-    var openAgents: (() -> Void)?
     var openSession: (TmuxSession) -> Void
     var openDuplicateSession: (TmuxSession) -> Void
     var requestNewSession: () -> Void
@@ -1121,7 +1113,6 @@ private final class FleetHostSectionView: UIView {
         let hostName: String
         let hostAddress: String
         let hostUsesMosh: Bool
-        let hostBackend: Host.SessionBackend
         let hostIsEnabled: Bool
         let phase: HostConnectionModel.Phase?
         let keyPassphraseRequired: Bool
@@ -1273,7 +1264,6 @@ private final class FleetHostSectionView: UIView {
             hostName: host.name,
             hostAddress: host.address,
             hostUsesMosh: host.useMosh,
-            hostBackend: host.sessionBackend,
             hostIsEnabled: host.isEnabled,
             phase: snapshot?.phase,
             keyPassphraseRequired: snapshot?.keyPassphraseChallenge != nil,
@@ -1286,7 +1276,6 @@ private final class FleetHostSectionView: UIView {
         )
         rail.updateActions(
             openShell: { [weak self] in self?.configuration.openShell() },
-            openAgents: configuration.openAgents.map { open in { open() } },
             requestPassphrase: { [weak self] in
                 guard let self, let model = self.model else { return }
                 self.configuration.requestPassphrase(model)
@@ -1313,7 +1302,6 @@ private final class FleetHostSectionView: UIView {
                 canMoveDown: canMoveDown,
                 menu: hostMenu,
                 openShell: { [weak self] in self?.configuration.openShell() },
-                openAgents: configuration.openAgents.map { open in { open() } },
                 requestPassphrase: { [weak self] in
                     guard let self, let model = self.model else { return }
                     self.configuration.requestPassphrase(model)
@@ -1519,7 +1507,6 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         let hostName: String
         let hostAddress: String
         let hostUsesMosh: Bool
-        let hostBackend: Host.SessionBackend
         let hostIsEnabled: Bool
         let phase: HostConnectionModel.Phase?
         let keyPassphraseRequired: Bool
@@ -1536,7 +1523,6 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
     private var menu = UIMenu()
     private var renderedIdentity: PresentationIdentity?
     private var openShell: () -> Void = {}
-    private var openAgents: (() -> Void)?
     private var requestPassphrase: () -> Void = {}
     private var showUnreachable: (String) -> Void = { _ in }
     private var showKeychainGuide: ([String]) -> Void = { _ in }
@@ -1570,14 +1556,12 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         canMoveDown: Bool,
         menu: UIMenu,
         openShell: @escaping () -> Void,
-        openAgents: (() -> Void)?,
         requestPassphrase: @escaping () -> Void,
         showUnreachable: @escaping (String) -> Void,
         showKeychainGuide: @escaping ([String]) -> Void
     ) {
         updateActions(
             openShell: openShell,
-            openAgents: openAgents,
             requestPassphrase: requestPassphrase,
             showUnreachable: showUnreachable,
             showKeychainGuide: showKeychainGuide
@@ -1587,7 +1571,6 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
             hostName: host.name,
             hostAddress: host.address,
             hostUsesMosh: host.useMosh,
-            hostBackend: host.sessionBackend,
             hostIsEnabled: host.isEnabled,
             phase: phase,
             keyPassphraseRequired: keyPassphraseRequired,
@@ -1649,17 +1632,6 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         shell.alpha = connected ? 1 : 0
         shell.isUserInteractionEnabled = connected
         shell.accessibilityElementsHidden = !connected
-        // herdr hosts only: the Agent Gallery door. The deck layer gates
-        // it (Pro, no taste) — a locked tap raises the paywall there.
-        let agents = UIKitChassisChip(
-            "\u{2733} AGENTS",
-            accessibilityLabel: "Open the agent gallery on \(host.name)",
-            action: { [weak self] in self?.openAgents?() }
-        )
-        agents.isHidden = openAgents == nil
-        agents.alpha = connected ? 1 : 0
-        agents.isUserInteractionEnabled = connected && openAgents != nil
-        agents.accessibilityElementsHidden = !connected || openAgents == nil
         let menuButton = FleetMenuBadgeButton()
         menuButton.menu = menu
         menuButton.showsMenuAsPrimaryAction = true
@@ -1670,7 +1642,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
             first.axis = .horizontal
             first.alignment = .center
             first.spacing = 8
-            let second = UIStackView(arrangedSubviews: [address, mosh, UIView(), agents, shell])
+            let second = UIStackView(arrangedSubviews: [address, mosh, UIView(), shell])
             second.axis = .horizontal
             second.alignment = .center
             second.spacing = 8
@@ -1683,7 +1655,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
                 menuButton: menuButton
             )
             let row = UIStackView(arrangedSubviews: [
-                name, address, mosh, UIView(), agents, controls,
+                name, address, mosh, UIView(), controls,
             ])
             row.axis = .horizontal
             row.alignment = .firstBaseline
@@ -1695,13 +1667,11 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
 
     func updateActions(
         openShell: @escaping () -> Void,
-        openAgents: (() -> Void)?,
         requestPassphrase: @escaping () -> Void,
         showUnreachable: @escaping (String) -> Void,
         showKeychainGuide: @escaping ([String]) -> Void
     ) {
         self.openShell = openShell
-        self.openAgents = openAgents
         self.requestPassphrase = requestPassphrase
         self.showUnreachable = showUnreachable
         self.showKeychainGuide = showKeychainGuide

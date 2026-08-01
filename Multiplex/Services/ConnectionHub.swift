@@ -243,13 +243,6 @@ final class HostConnectionModel {
     /// + TAB's same-directory inheritance (tmux asks live; herdr already
     /// answered in the snapshot).
     @ObservationIgnored private var herdrPaneCWDs: [String: String] = [:]
-
-    /// The Gallery's rail pulls per-pane herdr statuses on its own tick;
-    /// a plain read keeps the statuses out of the observation graph (the
-    /// wall's per-tick views must not re-render on every status dict).
-    func herdrStatuses() -> [String: HerdrProbe.AgentStatus] {
-        herdrPaneStatuses
-    }
     /// Last keychain check answer + when it landed. `.notMacOS` is
     /// structural and never re-asked on this connection; other verdicts
     /// refresh after `keychainVerdictTTL` while the symptom persists.
