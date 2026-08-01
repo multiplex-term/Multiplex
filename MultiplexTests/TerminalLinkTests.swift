@@ -125,6 +125,86 @@ final class TerminalLinkTests: XCTestCase {
         XCTAssertNil(TerminalLink.resolve("https://example.com/a b"))
     }
 
+    // MARK: Schemeless
+
+    func testSchemelessDomainsWithPathsResolve() {
+        // Implicit detection hands these over through its bare-relative
+        // *path* branch (the dotted lookahead guarantees the dot), so
+        // without the schemeless reading they confirmed as files.
+        for (target, expected) in [
+            ("example.com/docs/setup", "https://example.com/docs/setup"),
+            ("docs.rs/serde/latest", "https://docs.rs/serde/latest"),
+            ("en.wikipedia.org/wiki/Tmux", "https://en.wikipedia.org/wiki/Tmux"),
+            ("www.example.com/foo?q=1", "https://www.example.com/foo?q=1"),
+        ] {
+            guard case .openable(let url)? = TerminalLink.resolve(target)?.kind else {
+                return XCTFail("expected \(target) to be openable")
+            }
+            XCTAssertEqual(url.absoluteString, expected)
+        }
+    }
+
+    func testWWWIsEvidenceEnoughWithoutAPath() {
+        guard case .openable(let url)? = TerminalLink.resolve("www.example.com")?.kind else {
+            return XCTFail("expected www.example.com to be openable")
+        }
+        XCTAssertEqual(url.absoluteString, "https://www.example.com")
+    }
+
+    func testSchemelessSchemeFollowsReach() {
+        // The viewport's typed-input rule: dev servers are cleartext, so
+        // LAN/loopback addresses default http; everything else https.
+        for (target, expected) in [
+            ("192.168.1.5:3000/app", "http://192.168.1.5:3000/app"),
+            ("devbox.local/status", "http://devbox.local/status"),
+            ("127.0.0.1:5173/", "http://127.0.0.1:5173/"),
+            ("example.com:8080/x", "https://example.com:8080/x"),
+        ] {
+            XCTAssertEqual(
+                TerminalLink.resolve(target)?.openableURL?.absoluteString,
+                expected,
+                "for \(target)"
+            )
+        }
+    }
+
+    func testSchemelessTrailingPunctuationIsTrimmed() {
+        // Path-branch matches keep sentence punctuation the URL branch's
+        // own guard would have dropped.
+        XCTAssertEqual(
+            TerminalLink.resolve("example.com/foo.")?.raw,
+            "example.com/foo"
+        )
+    }
+
+    func testBareDottedWordsStayDeclined() {
+        // A markdown link's `setup.md` is a sibling document, not a URL —
+        // the file viewer's relative navigation depends on this. A dot is
+        // not evidence; a path, query, or `www.` is.
+        for target in [
+            "setup.md",
+            "example.com",
+            "v1.2/notes",
+            "a.b/c.d",
+            "node_modules/.bin/tsc",
+        ] {
+            XCTAssertNil(TerminalLink.resolve(target), "expected \(target) to be declined")
+        }
+    }
+
+    func testSchemelessUserinfoIsDeclined() {
+        // `github.com@evil.example/x` without a scheme must not become a
+        // link whose label reads as GitHub.
+        XCTAssertNil(TerminalLink.resolve("github.com@evil.example/x"))
+    }
+
+    func testSchemelessSingleLabelsAndBadPortsAreDeclined() {
+        XCTAssertNil(TerminalLink.resolve("localhost/x"))
+        XCTAssertNil(TerminalLink.resolve("build/output.js"))
+        XCTAssertNil(TerminalLink.resolve("example.com:99999/x"))
+        XCTAssertNil(TerminalLink.resolve("example.com:80a/x"))
+    }
+
     // MARK: Malformed
 
     func testHostlessWebLinksAreMalformed() {

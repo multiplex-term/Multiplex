@@ -82,21 +82,34 @@ extension TerminalLink {
         // A URI has no raw spaces, and interior whitespace is what separates
         // an actual target from ordinary prose that happens to carry a colon:
         // `warning: unused variable` otherwise classifies as a `warning:`
-        // link. Implicit detection's path branches do match spaces, but those
-        // have no scheme and are declined below anyway.
+        // link. Implicit detection's path branches do match spaces; those
+        // belong to `TerminalPathTarget`, never here.
         guard !trimmed.contains(where: \.isWhitespace) else { return nil }
 
-        // No scheme means implicit detection matched a path branch
-        // (`./src/main.swift`, `/etc/hosts`, `~/notes`) or a bare token.
-        // Those are ordinary terminal output, not links.
-        guard let scheme = scheme(of: trimmed) else { return nil }
-        guard allowedSchemes.contains(scheme) else {
+        let scheme = scheme(of: trimmed)
+        if let scheme, allowedSchemes.contains(scheme) {
+            guard let url = url(from: trimmed, scheme: scheme) else {
+                return TerminalLink(raw: trimmed, kind: .malformed)
+            }
+            return TerminalLink(raw: trimmed, kind: .openable(url))
+        }
+        // No allowlisted scheme: before declining (or reporting a blocked
+        // scheme), try the schemeless reading — `example.com/docs` printed
+        // in a pane is a URL to a person, but implicit detection hands it
+        // over through a *path* branch, and `example.com:8080/x` parses as
+        // scheme "example.com" under RFC 3986 (dots are scheme characters).
+        if let link = schemelessLink(from: trimmed) { return link }
+        // A real scheme that is neither allowlisted nor a host:port shape
+        // keeps today's answer: reported, never opened. A *dotted* scheme
+        // candidate is a hostname that failed the reading above, not a
+        // scheme anyone registered — reporting it as one ("A example.com:
+        // link…") is nonsense, so it declines instead.
+        if let scheme, !scheme.contains(".") {
             return TerminalLink(raw: trimmed, kind: .blockedScheme(scheme))
         }
-        guard let url = url(from: trimmed, scheme: scheme) else {
-            return TerminalLink(raw: trimmed, kind: .malformed)
-        }
-        return TerminalLink(raw: trimmed, kind: .openable(url))
+        // A path branch match (`./src/main.swift`, `/etc/hosts`, `~/notes`)
+        // or a bare token — ordinary terminal output, not a link.
+        return nil
     }
 
     /// RFC 3986 scheme: an ASCII letter followed by letters, digits, `+`,
@@ -115,6 +128,94 @@ extension TerminalLink {
             return nil
         }
         return candidate.lowercased()
+    }
+
+    /// The schemeless reading of a target: `example.com/docs`,
+    /// `www.example.com`, `docs.rs/serde`, `192.168.1.5:3000/app`. Implicit
+    /// detection's bare-relative *path* branch is what hands these over (its
+    /// dotted lookahead guarantees a dot), so without this they confirmed as
+    /// files instead of links.
+    ///
+    /// The gate is deliberately narrow, because everything here is also a
+    /// legal filename:
+    /// - The authority must be domain-shaped — ≥2 ASCII labels, the last one
+    ///   alphabetic and ≥2 chars (TLD-shaped) — or a dotted-quad IPv4.
+    /// - There must be URL evidence beyond the dot: a path/query/fragment
+    ///   (`/`, `?`, `#`) or a `www.` prefix. A bare dotted word stays what it
+    ///   is — `setup.md` in a markdown link is a sibling document, not a
+    ///   Moldovan site, and the file viewer's relative navigation depends on
+    ///   that staying declined.
+    /// - Userinfo is rejected outright: `github.com@evil.example/x` is the
+    ///   exact lie the host line exists to expose, and a schemeless target
+    ///   has no business carrying credentials.
+    ///
+    /// The scheme is defaulted the way the viewport's typed input does it:
+    /// `http` where the address lives on a LAN or loopback (dev servers are
+    /// cleartext) and `https` everywhere else.
+    private static func schemelessLink(from text: String) -> TerminalLink? {
+        var candidate = text
+        // Path-branch matches carry sentence punctuation the URL branch's
+        // own guard would have stripped ("visit example.com/foo.").
+        while let last = candidate.last, ".,;".contains(last) {
+            candidate.removeLast()
+        }
+        guard !candidate.isEmpty else { return nil }
+        let restStart = candidate.firstIndex(where: { "/?#".contains($0) })
+            ?? candidate.endIndex
+        let authority = candidate[candidate.startIndex..<restStart]
+        guard !authority.isEmpty, !authority.contains("@") else { return nil }
+
+        var host = authority
+        if let colon = authority.firstIndex(of: ":") {
+            let port = authority[authority.index(after: colon)...]
+            guard (1...5).contains(port.count),
+                  port.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  let value = Int(port), (1...65535).contains(value)
+            else { return nil }
+            host = authority[authority.startIndex..<colon]
+        }
+        let lowered = host.lowercased()
+        guard restStart < candidate.endIndex || lowered.hasPrefix("www.") else {
+            return nil
+        }
+        guard isDomainShaped(lowered) || isIPv4(lowered) else { return nil }
+
+        guard let probe = URL(string: "http://" + candidate, encodingInvalidCharacters: true),
+              let reach = ViewportReach.classify(probe)
+        else { return nil }
+        let prefix = reach == .internet ? "https://" : "http://"
+        guard let url = URL(string: prefix + candidate, encodingInvalidCharacters: true),
+              let urlHost = url.host(), !urlHost.isEmpty
+        else { return nil }
+        return TerminalLink(raw: candidate, kind: .openable(url))
+    }
+
+    /// ≥2 DNS-shaped ASCII labels with an alphabetic, ≥2-char final label.
+    /// ASCII only on purpose: a non-ASCII first segment in terminal output
+    /// is far more likely a filename than an IDN worth guessing at.
+    private static func isDomainShaped(_ host: String) -> Bool {
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2 else { return false }
+        for label in labels {
+            guard (1...63).contains(label.count),
+                  label.first != "-", label.last != "-",
+                  label.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") })
+            else { return false }
+        }
+        guard let tld = labels.last else { return false }
+        return tld.count >= 2 && tld.allSatisfy { $0.isASCII && $0.isLetter }
+    }
+
+    private static func isIPv4(_ host: String) -> Bool {
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        return parts.allSatisfy { part in
+            guard !part.isEmpty, part.count <= 3,
+                  part.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  let value = Int(part)
+            else { return false }
+            return (0...255).contains(value)
+        }
     }
 
     private static func url(from text: String, scheme: String) -> URL? {

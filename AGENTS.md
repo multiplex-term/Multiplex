@@ -252,8 +252,9 @@ terminal's agent HISTORY panel (session-file prompt list) for layout
 capture, and
 `… -p app.multiplexterm.multiplex.debug.link` activates the first link on
 the focused pane's visible screen through the same resolve → policy →
-confirmation path a long press takes (a screen of only filesystem paths
-must present nothing — that's the decline working), with
+confirmation path a long press takes (a URL raises the link sheet, a
+path-shaped press the file-viewer sheet; a screen of only what both
+resolvers decline — $VAR/…, colon prose — must present nothing), with
 `….debug.linkopen` running the sheet's OPEN action so the system log shows
 the URL reaching SurfBoard, and `….debug.viewportopen` running the sheet's
 ⌗ VIEWPORT chip for the pending link — the headless way to dock the inline
@@ -884,9 +885,21 @@ views.
   `open?host=…&action=agent&prompt=…`**, so pane output can't launch an
   agent on another host; implicit detection matches **filesystem paths**
   (`./x`, `/etc/hosts`, `~/x`) as readily as URLs, so those resolve to nil
-  and the press falls through to selection; and interior whitespace
-  disqualifies a target, because prose carrying a colon (`warning: unused
-  variable`) otherwise classifies as a `warning:` link. The sheet renders
+  here (and confirm through the file-viewer sheet instead); and interior
+  whitespace disqualifies a link target, because prose carrying a colon
+  (`warning: unused variable`) otherwise classifies as a `warning:` link.
+  **Schemeless URLs resolve as links too** (`TerminalLink.schemelessLink`):
+  the matcher hands `example.com/docs` over through its bare-relative
+  *path* branch, so without this they confirmed as files. The gate is
+  narrow because everything here is also a legal filename — the authority
+  must be domain-shaped (≥2 ASCII labels, alphabetic ≥2-char TLD) or
+  dotted-quad IPv4, with URL evidence beyond the dot (a `/`/`?`/`#` rest
+  or a `www.` prefix, so a markdown link's `setup.md` stays a sibling
+  document and file-viewer relative navigation keeps working), userinfo
+  rejected outright; the scheme defaults by reach exactly like the
+  viewport's typed input (http for LAN/loopback, https elsewhere). A
+  *dotted* non-allowlisted scheme candidate (`example.com:99999/x`)
+  declines to nil rather than reporting a nonsense blocked scheme. The sheet renders
   the **resolved target** with the host on its own line — an OSC 8 label is
   chosen independently of its destination, and that line is also what
   exposes `https://github.com@evil.example/x`. Blocked and malformed
@@ -973,7 +986,18 @@ views.
   `TerminalFilePathSheet`, whose ▤ VIEW docks the tab. **This changed a
   load-bearing behavior**: path-shaped presses used to fall through to text
   selection; now only what BOTH resolvers decline ($VAR/…, colon prose,
-  interior whitespace) still does. visionOS gaze regions stay URL-only on
+  whitespace in a *bare-relative* shape) still does. **Paths with spaces
+  resolve when they root themselves with a base marker** (`/`, `~/`, `./`,
+  `$HOME/`) — the marker says "path" when whitespace no longer can; bare
+  relatives keep the prose guard ("see src/foo.ts and lib/bar.rs" must not
+  classify as one spaced path). The matcher's space-segment branches
+  swallow trailing prose whenever the first chunk is dot-free
+  (`/etc/hosts is missing` arrives whole), so `trimmingProseTail` sheds
+  end chunks carrying neither `/` nor `.`; a spaced directory whose last
+  segment is markerless (`~/My Folder`) loses that segment to the same
+  rule, which is why the sheet shows an OPENS row (verbatim mono — a path
+  is screen content) whenever the resolved spelling differs from the
+  field. visionOS gaze regions stay URL-only on
   purpose (hover regions are hit regions; build logs are walls of paths).
   **A wrapped row can hand over a sentence glued to the path below it** —
   the fork reassembles wrapped rows and a hard wrap leaves no space at the

@@ -97,8 +97,58 @@ final class TerminalPathTargetTests: XCTestCase {
     }
 
     func testInteriorWhitespaceIsProse() {
+        // Bare-relative keeps the prose guard: without a base marker,
+        // whitespace is what separates a path from a sentence about one.
         XCTAssertNil(TerminalPathTarget.resolve("(see src/foo.ts)"))
         XCTAssertNil(TerminalPathTarget.resolve("path with space/file.txt"))
+        // Tabs and line breaks never resolve, marker or not.
+        XCTAssertNil(TerminalPathTarget.resolve("/tmp/a\tb"))
+        XCTAssertNil(TerminalPathTarget.resolve("/tmp/a\nb"))
+    }
+
+    func testSpacedPathsBehindABaseMarkerResolve() {
+        let absolute = TerminalPathTarget.resolve("/Users/me/My Documents/file.txt")
+        XCTAssertEqual(absolute?.base, .absolute)
+        XCTAssertEqual(absolute?.path, "/Users/me/My Documents/file.txt")
+        let home = TerminalPathTarget.resolve("~/My Folder/notes.md")
+        XCTAssertEqual(home?.base, .home)
+        XCTAssertEqual(home?.relativePart, "My Folder/notes.md")
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("./My File.md")?.base,
+            .workingDirectory
+        )
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("$HOME/My Docs/x.txt")?.relativePart,
+            "My Docs/x.txt"
+        )
+    }
+
+    func testSpacedProseTailIsShed() {
+        // The matcher's space-segment branches swallow trailing prose
+        // whenever the first chunk is dot-free — "/etc/hosts is missing"
+        // arrives whole — so prose-shaped tail chunks are shed.
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("/etc/hosts is missing")?.path,
+            "/etc/hosts"
+        )
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("/Users/me/My Documents/file.txt now really")?.path,
+            "/Users/me/My Documents/file.txt"
+        )
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("/tmp/a b c/d.log ok")?.path,
+            "/tmp/a b c/d.log"
+        )
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("~/My Folder/notes.md today, fine.")?.path,
+            "~/My Folder/notes.md"
+        )
+    }
+
+    func testSpacedLineSuffixSurvives() {
+        let target = TerminalPathTarget.resolve("/tmp/My Dir/app.swift:42")
+        XCTAssertEqual(target?.path, "/tmp/My Dir/app.swift")
+        XCTAssertEqual(target?.line, 42)
     }
 
     /// A hard-wrapped row glues a sentence's tail to the path below it (no

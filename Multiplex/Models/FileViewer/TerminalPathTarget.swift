@@ -60,16 +60,32 @@ struct TerminalPathTarget: Equatable, Identifiable {
         guard !text.isEmpty, text.count <= 1024 else { return nil }
         // URLs belong to TerminalLink; anything scheme-shaped is not a path.
         if text.contains("://") { return nil }
-        // Interior whitespace is the prose guard, same rule as
-        // TerminalLink: "see src/foo.ts and lib/bar.rs" must not classify.
-        // Paths with spaces lose this trade — a wrong open costs more.
-        guard !text.contains(where: \.isWhitespace) else { return nil }
+        // Tabs and line breaks are never part of a target; plain spaces are
+        // judged below.
+        guard !text.contains(where: { $0.isWhitespace && $0 != " " }) else { return nil }
         guard !text.contains(where: { $0.asciiValue.map { $0 < 0x20 } == true })
         else { return nil }
 
-        // Trailing prose punctuation the matcher can leave on a path.
-        while let last = text.last, ".,;)".contains(last) {
-            text.removeLast()
+        if text.contains(" ") {
+            // A spaced target is admitted only when it roots itself with a
+            // base marker (`/x y`, `~/x y`, `./x y`, `$HOME/x y`): the
+            // marker is what says "path" when whitespace no longer can.
+            // Bare-relative keeps the prose guard — "see src/foo.ts and
+            // lib/bar.rs" must not classify as one spaced path.
+            guard let first = text.first, "/~.$".contains(first) else { return nil }
+            // The matcher's space-segment branches swallow trailing prose
+            // whenever the first chunk is dot-free ("/etc/hosts is missing"
+            // arrives whole), so prose-shaped tail chunks — no `/`, no `.` —
+            // are shed until the text ends path-like again. A spaced
+            // directory whose last segment is markerless ("~/My Folder")
+            // loses that segment to this rule; the sheet's editable field
+            // is the recovery.
+            text = trimmingProseTail(text)
+        } else {
+            // Trailing prose punctuation the matcher can leave on a path.
+            while let last = text.last, ".,;)".contains(last) {
+                text.removeLast()
+            }
         }
         guard !text.isEmpty else { return nil }
         text = strippingWrappedProseHead(text)
@@ -96,6 +112,23 @@ struct TerminalPathTarget: Equatable, Identifiable {
         // more than declining into text selection.
         guard !text.contains(":") else { return nil }
         return classified(raw: raw, path: text, line: line)
+    }
+
+    /// Sheds trailing space-chunks that read as prose, one at a time from
+    /// the end: a chunk carrying neither `/` nor `.` is a sentence word,
+    /// not a path segment ("is", "missing", "now"). Sentence punctuation is
+    /// re-trimmed after every cut so "…/app.log failed." sheds cleanly.
+    private static func trimmingProseTail(_ input: String) -> String {
+        var text = input
+        while true {
+            while let last = text.last, ".,;) ".contains(last) {
+                text.removeLast()
+            }
+            guard let cut = text.lastIndex(of: " ") else { return text }
+            let tail = text[text.index(after: cut)...]
+            if tail.contains("/") || tail.contains(".") { return text }
+            text = String(text[text.startIndex..<cut])
+        }
     }
 
     /// Drops a sentence's tail that a *row join* glued to the front of a

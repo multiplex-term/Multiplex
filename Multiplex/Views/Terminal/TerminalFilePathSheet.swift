@@ -66,6 +66,20 @@ struct TerminalFilePathSheet: View {
                                         : nil
                                 )
 
+                                // Resolution can shed what it reads as prose
+                                // (a spaced press arrives with its sentence
+                                // tail), so when the opened path is not the
+                                // field's text, say so — verbatim, mono:
+                                // a path is screen content.
+                                if let divergence = resolvedDivergence {
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        ChassisLabel("OPENS", size: 9, color: Theme.caution)
+                                        Text(divergence)
+                                            .font(.mono(11))
+                                            .foregroundStyle(Theme.signal2)
+                                    }
+                                }
+
                                 if let line = edited?.line {
                                     HStack(spacing: 8) {
                                         ChassisLabel("LINE", size: 9, color: Theme.signal3)
@@ -107,6 +121,16 @@ struct TerminalFilePathSheet: View {
         }
     }
 
+    /// The spelling VIEW will actually open when it differs from what the
+    /// field holds — trailing punctuation trimmed, a prose tail shed from a
+    /// spaced press. nil while they agree (the common case) or nothing
+    /// resolves (the note already says so).
+    private var resolvedDivergence: String? {
+        guard let edited else { return nil }
+        let resolved = Self.editorText(for: edited)
+        return resolved == text.trimmingCharacters(in: .whitespaces) ? nil : resolved
+    }
+
     private var sectionTitle: String {
         switch edited?.base {
         case .absolute: "A path on \(hostName)"
@@ -118,9 +142,10 @@ struct TerminalFilePathSheet: View {
 
     private var detail: String {
         guard let edited else {
-            return "The field holds nothing the viewer can resolve — a path "
-                + "needs a directory in it, and no spaces. Edit it, or copy "
-                + "the text if it's still useful."
+            return "The field holds nothing the viewer can resolve — a "
+                + "relative path needs a directory in it, and spaces only "
+                + "work behind /, ~/, ./ or $HOME/. Edit it, or copy the "
+                + "text if it's still useful."
         }
         var text = "VIEW opens it read-only in the file viewer, beside this "
             + "session — nothing runs, nothing is written. The path is "
