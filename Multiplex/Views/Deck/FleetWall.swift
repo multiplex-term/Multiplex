@@ -2526,11 +2526,15 @@ final class FleetSessionTileView: FleetPressView,
             parts.append(count > 1 ? "\(count)×\(agent.telemetryLabel)" : agent.telemetryLabel)
         }
         if agentRunning { parts.append("RUNNING") }
-        parts.append(sessionAge(session))
+        if let age = sessionAge(session) { parts.append(age) }
         return parts.joined(separator: " · ")
     }
 
-    private func sessionAge(_ session: TmuxSession) -> String {
+    /// nil for a synthetic creation date: herdr reports no creation time,
+    /// so its adapter seeds `created` near the epoch purely for ordering —
+    /// rendering that as "20666d" would be a claim nothing made.
+    private func sessionAge(_ session: TmuxSession) -> String? {
+        guard session.created.timeIntervalSince1970 > 86_400 else { return nil }
         let seconds = max(0, Date().timeIntervalSince(session.created))
         if seconds >= 86_400 { return "\(Int(seconds / 86_400))d" }
         if seconds >= 3_600 { return "\(Int(seconds / 3_600))h" }
