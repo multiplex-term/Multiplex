@@ -961,6 +961,14 @@ extension TerminalView {
            let (url, params) = urlAndParamsFrom(payload: payload) {
             return (url, params)
         }
+        // Multiplex patch: an implicit match that crossed a hard-wrap seam
+        // carries its per-row fragments so the app can tell a wrapped path
+        // from prose glued to the path below it. Newline is the one safe
+        // separator — buffer cells cannot hold it, so it never appears in
+        // matched text.
+        if match.rowTexts.count > 1 {
+            return (match.text, ["rowTexts": match.rowTexts.joined(separator: "\n")])
+        }
         return (match.text, [:])
     }
     

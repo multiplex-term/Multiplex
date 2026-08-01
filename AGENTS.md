@@ -1002,12 +1002,29 @@ views.
   **A wrapped row can hand over a sentence glued to the path below it** —
   the fork reassembles wrapped rows and a hard wrap leaves no space at the
   seam, so `…the file.` above `/Users/me/x.swift` arrives as one
-  bare-relative match. `strippingWrappedProseHead` cuts at the first `X./`
-  whose `X` is neither `.` nor `..`, and only when the text doesn't already
-  start with its own base marker (`/`, `~`, `.`, `$`) — so real paths,
-  including `a.b/c.d` and `dir/./file`, are untouched. A join whose lower
-  row carried a *relative* path is unrecoverable by construction; that is
-  what the sheet's editable field is for.
+  bare-relative match, and `…and` above `local-plan/x` arrives as
+  `andlocal-plan/x`. The joined *text* cannot always tell glue from a real
+  wrapped target, so the fork keeps the seams: `LinkMatch.rowTexts`
+  carries the match's per-row fragments into `linkActivationHandler`'s
+  params (`rowTexts`, newline-joined — buffer cells cannot hold one), and
+  `WrappedRowGlue.cutTarget` (pure + tested) cuts at the first seam whose
+  butting chunk — the run since the last space — carries neither `/` nor
+  `.`: structure there means a target continuing
+  (`/Users/jhen/wor`⏎`kspace2/x`, `example.c`⏎`om/x`), a plain word means
+  the rows below start their own target. The cut suffix resolves through
+  the normal link-then-path order with the join as fallback, so a wrong
+  cut can never turn a working press into a dead one. Accepted trade, on
+  record: a bare path whose entire first segment sat on the upper row
+  (`local-p`⏎`lan/x`) reads as glue and cuts wrong — visible in the
+  editable field, and far rarer than hard-wrapped prose above a path.
+  `strippingWrappedProseHead` stays as the textual fallback for callers
+  without seam info (the edited field, gaze regions; the debug.link hook
+  carries seams via `Terminal.linkWithRowTexts`): it
+  cuts at the first `X./` whose `X` is neither `.` nor `..`, and only when
+  the text doesn't already start with its own base marker (`/`, `~`, `.`,
+  `$`) — so real paths, including `a.b/c.d` and `dir/./file`, are
+  untouched; a *relative* join stays unrecoverable there, which is what
+  the sheet's editable field is for.
   Load-bearing details: **the viewer dials its own SSHConnection** — never
   the probe's (a disabled host must not be revived by a tab) and never the
   summoning tab's transport (merge/split moves the viewer away) — redialed

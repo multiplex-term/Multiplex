@@ -550,18 +550,22 @@ struct TerminalWindowRoot: View {
         for row in 0..<terminal.rows {
             var col = 0
             while col < terminal.cols {
-                guard let target = terminal.link(
+                // Same seam-carrying lookup the long-press route uses, so
+                // this hook proves the wrapped-glue cut headlessly too.
+                guard let result = terminal.linkWithRowTexts(
                     at: .screen(Position(col: col, row: row)),
                     mode: .explicitAndImplicit
                 ) else {
                     col += 1
                     continue
                 }
-                if controller.activateLink(target) { return }
-                // A declined match (a filesystem path) must not stall the
-                // scan on its own cells — step past the whole match's worth
-                // of columns rather than re-resolving each one.
-                col += max(1, target.count)
+                if controller.activateLink(result.text, rowFragments: result.rowTexts) {
+                    return
+                }
+                // A declined match must not stall the scan on its own
+                // cells — step past the whole match's worth of columns
+                // rather than re-resolving each one.
+                col += max(1, result.text.count)
             }
         }
     }

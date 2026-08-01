@@ -48,6 +48,62 @@ final class FileKindTests: XCTestCase {
     }
 }
 
+final class WrappedRowGlueTests: XCTestCase {
+    func testProseGluedToThePathBelowIsCutAtTheSeam() {
+        // A source line ending `…and` above `local-plan/x` reaches the
+        // resolvers as one joined match; the seam is the only tell.
+        XCTAssertEqual(
+            WrappedRowGlue.cutTarget(fragments: ["and", "local-plan/terminal-links.md"]),
+            "local-plan/terminal-links.md"
+        )
+        // Glue above an absolute path, and above a schemeless URL.
+        XCTAssertEqual(
+            WrappedRowGlue.cutTarget(fragments: ["and", "/etc/hosts"]),
+            "/etc/hosts"
+        )
+        XCTAssertEqual(
+            WrappedRowGlue.cutTarget(fragments: ["table", "docs.example.com/x"]),
+            "docs.example.com/x"
+        )
+        // The chunk test looks after the prefix's last space, so a spaced
+        // marker path keeps only its own text when prose glues mid-match.
+        XCTAssertEqual(
+            WrappedRowGlue.cutTarget(fragments: ["/Users/x and", "local-plan/y"]),
+            "local-plan/y"
+        )
+    }
+
+    func testGenuineWrappedTargetsKeepTheirJoin() {
+        // Structure before the seam — a slash or a dot — is a wrapped
+        // target continuing, never prose.
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["/Users/jhen/wor", "kspace2/x.swift"]))
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["https://exam", "ple.com/x"]))
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["example.c", "om/docs"]))
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["Sources/Fo", "o/Bar.swift"]))
+        // A row ending on a space is no glue evidence — a spaced path can
+        // wrap right after its space.
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["/tmp/My ", "Folder/x.txt"]))
+        // One row means no seam at all.
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["src/foo.ts"]))
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: []))
+    }
+
+    func testLaterSeamsAreExaminedWhenTheFirstIsClean() {
+        // A long path wraps once more below the glue: cut at the first
+        // qualifying seam, keep the rest joined.
+        XCTAssertEqual(
+            WrappedRowGlue.cutTarget(fragments: ["and", "local-plan/very-long-", "name.md"]),
+            "local-plan/very-long-name.md"
+        )
+        // First seam is a genuine wrap (dot before it), second butts prose
+        // — the cut takes the suffix from the seam that qualifies.
+        XCTAssertEqual(
+            WrappedRowGlue.cutTarget(fragments: ["example.c", "om and", "/etc/hosts"]),
+            "/etc/hosts"
+        )
+    }
+}
+
 final class TerminalPathTargetTests: XCTestCase {
     func testAbsoluteHomeAndRelative() {
         XCTAssertEqual(TerminalPathTarget.resolve("/etc/hosts")?.base, .absolute)

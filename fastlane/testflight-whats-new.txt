@@ -172,3 +172,16 @@ https.
   opens as http.
 - setup.md in a rendered markdown doc still navigates inside the file
   viewer; src/foo.ts still confirms as a file, not a link.
+
+WRAPPED PROSE STOPS GLUING TO PATHS — and<newline>local-plan/x opens local-plan/x
+
+A hard-wrapped line ending in a plain word above a path used to press as one
+glued target (andlocal-plan/…). The press now cuts at the wrap seam when the
+text butting it is a word with no slash or dot, so the path below opens as
+itself. Genuinely wrapped long paths and URLs still join.
+
+- cat a doc whose line ends exactly at the pane edge with a word, path on
+  the next line: long-press the path — the sheet shows the path alone.
+- A long absolute path wrapped mid-segment still presses as the full path.
+- A schemeless URL below wrapped prose raises the link sheet, not a glued
+  file path.
