@@ -663,7 +663,7 @@ final class FleetWallUIKitTests: XCTestCase {
     }
 
     private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
-        var result = root is T ? [root as! T] : []
+        var result: [T] = (root as? T).map { [$0] } ?? []
         for child in root.subviews {
             result.append(contentsOf: descendants(of: type, in: child))
         }

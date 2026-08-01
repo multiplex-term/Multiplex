@@ -773,8 +773,8 @@ final class TerminalWindowViewController: UIViewController,
             message: "Kills “\(sessionName)” on \(host.name) and everything running in it, then closes the tab.",
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Close Session", style: .destructive) {
-            [weak self] _ in self?.closeSession(activeTab)
+        alert.addAction(UIAlertAction(title: "Close Session", style: .destructive) { [weak self] _ in
+            self?.closeSession(activeTab)
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         present(alert, animated: true)

@@ -37,6 +37,35 @@ Always keep `-derivedDataPath DerivedData` (matches `.gitignore`; a shared path
 lets iPad/visionOS builds collide — never run both concurrently against it, the
 build DB locks).
 
+## Lint
+
+`./Tools/build.sh lint` (`brew install swiftlint`; `--fix` applies the
+correctable rules). It runs `--strict`, so the tree stays at zero violations
+and anything new fails the command instead of scrolling past. Deliberately
+**not** an Xcode build phase: `ENABLE_USER_SCRIPT_SANDBOXING` is on, so a
+phase reading the source tree would need an input file list regenerated on
+every added file — and a contributor without SwiftLint can still build.
+
+`.swiftlint.yml` is SwiftLint's default rule set moved in exactly two
+directions, and **every switch carries its reason in the file** — keep it that
+way, because an unexplained `disabled_rules` entry is how a linter stops being
+read. The size metrics (`file_length`, `type_body_length`,
+`function_body_length`, `cyclomatic_complexity`, `function_parameter_count`)
+are off: the UIKit controllers and the table-driven parsers are long because
+what they model is long, and the layer rule below — Views → Services → Models,
+logic in the pure models — is the structural check that actually matters here.
+`trailing_comma` is off for a subtler reason: the codebase writes collection
+literals two ways on purpose (vertical with a trailing comma, packed
+hanging-indent without), and either setting of that rule rewrites one style
+into the other. `optional_data_string_conversion` is off because
+`String(decoding:as:)` is deliberate at every site — terminal, SSH, git, and
+host-file bytes must degrade to U+FFFD rather than nil a whole capture away.
+
+Where a rule is right but a single line genuinely can't comply, the file
+carries a scoped `// swiftlint:disable:next <rule>` **with the reason above
+it** (a `LocalizedStringResource` must be a literal; a `.jsonl` fixture is one
+record per line; an RFC 7253 vector is diffed by eye). Prefer fixing the code.
+
 ## End-to-end verification (no real remote needed)
 
 `Tools/dev-sshd/harness.sh` runs a user-mode sshd on `127.0.0.1:2222` (own keys

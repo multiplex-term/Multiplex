@@ -66,9 +66,9 @@ enum DeckScene {
         }
         if let closeTarget = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_TMUX_CLOSE"],
            let shortcut: TmuxShortcut = switch closeTarget {
-               case "pane": .closePane
-               case "window": .closeWindow
-               default: nil
+           case "pane": .closePane
+           case "window": .closeWindow
+           default: nil
            },
            let tabID = firstTabID {
             for _ in 0..<100 {
@@ -827,8 +827,7 @@ final class DeckWindowViewController: UIViewController {
             message: "Multiplex can’t reach SSH hosts on your local network. Turn on Local Network access in Settings.",
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) {
-            [weak self] _ in
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { [weak self] _ in
             guard let self,
                   let url = URL(string: UIApplication.openSettingsURLString)
             else { return }

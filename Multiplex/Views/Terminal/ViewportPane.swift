@@ -242,8 +242,11 @@ final class ViewportPaneViewController: UIViewController,
             accessibility: "Reload"
         ) { [weak self] in
             guard let self else { return }
-            self.state?.isLoading == true
-                ? self.controller.stopLoading() : self.controller.reload()
+            if self.state?.isLoading == true {
+                self.controller.stopLoading()
+            } else {
+                self.controller.reload()
+            }
         }
         reloadChip.accessibilityIdentifier = "viewport.reload"
 
@@ -260,12 +263,12 @@ final class ViewportPaneViewController: UIViewController,
         urlButton.accessibilityIdentifier = "viewport.address"
 
         reachBadge.setContentHuggingPriority(.required, for: .horizontal)
-        systemChip = chip("SYSTEM", accessibility: "Open in the system browser") {
-            [weak controller] in controller?.openInSystemBrowser()
+        systemChip = chip("SYSTEM", accessibility: "Open in the system browser") { [weak controller] in
+            controller?.openInSystemBrowser()
         }
         systemChip.accessibilityIdentifier = "viewport.system"
-        closeChip = chip("CLOSE", prominent: true, accessibility: "Close viewport") {
-            [weak self] in self?.closeAction()
+        closeChip = chip("CLOSE", prominent: true, accessibility: "Close viewport") { [weak self] in
+            self?.closeAction()
         }
         closeChip.accessibilityIdentifier = "viewport.close"
         [backChip, reloadChip, urlButton, reachBadge, systemChip, closeChip]
@@ -330,8 +333,8 @@ final class ViewportPaneViewController: UIViewController,
 
     private func makeAddressMenu() -> UIMenu {
         UIMenu(children: [
-            UIAction(title: "Copy Address", image: UIImage(systemName: "doc.on.doc")) {
-                [weak controller] _ in controller?.copyURL()
+            UIAction(title: "Copy Address", image: UIImage(systemName: "doc.on.doc")) { [weak controller] _ in
+                controller?.copyURL()
             },
             UIAction(
                 title: "Clear Browsing Data…",
@@ -455,13 +458,12 @@ final class ViewportPaneViewController: UIViewController,
             message: Self.clearBrowsingMessage,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) {
-            [weak self] _ in
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
             self?.controller.clearBrowsingData()
             self?.presentPendingExternalLinkIfPossible()
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) {
-            [weak self] _ in self?.presentPendingExternalLinkIfPossible()
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+            self?.presentPendingExternalLinkIfPossible()
         })
         return alert
     }

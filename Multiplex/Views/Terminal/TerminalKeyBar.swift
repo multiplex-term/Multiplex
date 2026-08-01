@@ -1448,8 +1448,8 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         }
 
         if role != .trailing {
-            append(caps("ESC", "Escape", activeMetric, identifier: "escape") {
-                [weak context] in context?.sendEscape()
+            append(caps("ESC", "Escape", activeMetric, identifier: "escape") { [weak context] in
+                context?.sendEscape()
             })
             let control = caps(
                 "CTRL",
@@ -1463,8 +1463,8 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
             }
             append(control)
             ctrlKey = control
-            append(caps("TAB", "Tab", activeMetric, identifier: "tab") {
-                [weak context] in context?.sendTab()
+            append(caps("TAB", "Tab", activeMetric, identifier: "tab") { [weak context] in
+                context?.sendTab()
             })
         }
         if role != .leading {
@@ -1490,8 +1490,8 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
                     normal: EscapeSequences.moveRightNormal
                 ))
             }
-            append(caps("RET", "Return", activeMetric, identifier: "return") {
-                [weak context] in context?.sendReturn()
+            append(caps("RET", "Return", activeMetric, identifier: "return") { [weak context] in
+                context?.sendReturn()
             })
             let keyboard = TerminalTallyKeyControl(
                 face: .symbol("keyboard", pointSize: 12, weight: .semibold),

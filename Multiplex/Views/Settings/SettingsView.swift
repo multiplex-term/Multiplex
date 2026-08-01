@@ -261,8 +261,7 @@ final class SettingsViewController: UIViewController {
             appearanceChoiceBar.setSelection(state.appearance, animated: true)
             return appearanceSection
         }
-        let bar = SettingsAppearanceChoiceBar(selection: state.appearance) {
-            [weak self] appearance in
+        let bar = SettingsAppearanceChoiceBar(selection: state.appearance) { [weak self] appearance in
             self?.themes.appearance = appearance
         }
         appearanceChoiceBar = bar
@@ -1335,8 +1334,7 @@ extension SettingsThemeRowView: UIContextMenuInteractionDelegate {
         configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
         guard menuProvider() != nil else { return nil }
-        return UIContextMenuConfiguration(identifier: theme.id as NSString) {
-            [weak self] _ in
+        return UIContextMenuConfiguration(identifier: theme.id as NSString) { [weak self] _ in
             self?.menuProvider()
         }
     }

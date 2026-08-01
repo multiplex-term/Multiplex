@@ -326,8 +326,9 @@ final class BindPaneViewController: UIViewController {
         pasteSlot.setContentHuggingPriority(.required, for: .horizontal)
         pasteSlot.setContentCompressionResistancePriority(.required, for: .horizontal)
         installPasteControl()
-        pasteSlot.registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            [weak self] (_: UIView, _: UITraitCollection) in
+        pasteSlot.registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self]
+        ) { [weak self] (_: UIView, _: UITraitCollection) in
             self?.installPasteControl()
         }
         actions.addArrangedSubview(pasteSlot)
@@ -1158,6 +1159,9 @@ private final class BindPasteControl: UIPasteControl {
     /// one-time assignment during layout.
     override var accessibilityLabel: String? {
         get { Self.spokenLabel }
+        // Discarding `newValue` is the whole point: UIKit's generic “Paste”
+        // arrives through this setter and must not win.
+        // swiftlint:disable:next unused_setter_value
         set { super.accessibilityLabel = Self.spokenLabel }
     }
 

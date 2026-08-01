@@ -48,7 +48,9 @@ final class TerminalWindowUIKitTests: XCTestCase {
         )
         XCTAssertTrue(
             TerminalFocusArbiter.current === contender,
-            "An empty ownership is re-elected on restore: app-unlock clears the owner via inputSuppressed and a closed focused window deallocates it, and neither has another claim site"
+            "An empty ownership is re-elected on restore: app-unlock clears the owner via "
+                + "inputSuppressed and a closed focused window deallocates it, and neither "
+                + "has another claim site"
         )
     }
 
@@ -862,7 +864,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
     }
 
     private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
-        var matches = root is T ? [root as! T] : []
+        var matches: [T] = (root as? T).map { [$0] } ?? []
         for child in root.subviews {
             matches.append(contentsOf: descendants(of: type, in: child))
         }

@@ -213,8 +213,7 @@ enum MarkdownDocument {
         guard let first = line.first, "-*_".contains(first) else { return false }
         var count = 0
         for character in line {
-            if character == first { count += 1 }
-            else if character != " " { return false }
+            if character == first { count += 1 } else if character != " " { return false }
         }
         return count >= 3
     }
@@ -246,8 +245,10 @@ enum MarkdownDocument {
             var content = String(trimmed.dropFirst(2))
             var marker = "•"
             // Task list marker.
-            if content.hasPrefix("[ ] ") { marker = "□"; content = String(content.dropFirst(4)) }
-            else if content.hasPrefix("[x] ") || content.hasPrefix("[X] ") {
+            if content.hasPrefix("[ ] ") {
+                marker = "□"
+                content = String(content.dropFirst(4))
+            } else if content.hasPrefix("[x] ") || content.hasPrefix("[X] ") {
                 marker = "▣"
                 content = String(content.dropFirst(4))
             }

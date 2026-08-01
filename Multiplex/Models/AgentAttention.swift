@@ -52,13 +52,13 @@ struct AttentionAlert {
     /// Present for an event emitted by a plain-shell tab. tmux probe events
     /// remain session-scoped because the same remote session may have more
     /// than one attached client, while every plain shell is its own process.
-    var tabID: UUID? = nil
+    var tabID: UUID?
     var agent: AgentKind?
     var event: AttentionEvent
     var paneTitle: String
     /// What the blocking dialog asks (`AgentAttention.dialogSummary`),
     /// when the event is needs-input and the tail yielded readable copy.
-    var dialogSummary: String? = nil
+    var dialogSummary: String?
 }
 
 /// The state classifier. Everything here matches *structure*, not prose —

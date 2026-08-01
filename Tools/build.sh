@@ -2,12 +2,13 @@
 # Multiplex build / test / verify helper.
 #
 #   ./Tools/build.sh gen                 regenerate the Xcode project (XcodeGen)
+#   ./Tools/build.sh lint [--fix]        SwiftLint over the app + tests + tools
 #   ./Tools/build.sh build [vos|ipad]    build for a platform (default: vos)
 #   ./Tools/build.sh test  [vos|ipad]    run unit tests (default: vos)
 #   ./Tools/build.sh verify [vos|ipad]   build + install + drive end-to-end
 #                                        against the local sshd/tmux harness
 #   ./Tools/build.sh interop             round-trip against real mosh-server
-#   ./Tools/build.sh all                 gen + build both + test
+#   ./Tools/build.sh all                 gen + lint + build both + test
 #
 # Single source of truth for destinations, the shared DerivedData path, and the
 # headless verification recipe. Keep flags here, not scattered across callers.
@@ -50,6 +51,20 @@ require_udid() {
 gen() {
     command -v xcodegen >/dev/null || { echo "install xcodegen: brew install xcodegen" >&2; exit 1; }
     xcodegen generate
+}
+
+# Deliberately NOT an Xcode build phase: ENABLE_USER_SCRIPT_SANDBOXING is on,
+# and a phase that reads the whole source tree would need an input file list
+# regenerated on every added file. Keeping it here also means a contributor
+# without SwiftLint installed can still build and ship.
+lint() {
+    command -v swiftlint >/dev/null || {
+        echo "install swiftlint: brew install swiftlint" >&2
+        exit 1
+    }
+    # `--strict` promotes warnings to errors: the tree is clean, so anything
+    # new should fail the command rather than scroll past.
+    swiftlint lint --strict "$@"
 }
 
 build() {
@@ -134,10 +149,11 @@ interop() {
 
 case "${1:-}" in
     gen) gen ;;
+    lint) shift; lint "$@" ;;
     build) build "${2:-vos}" ;;
     test) run_tests "${2:-vos}" ;;
     verify) verify "${2:-vos}" ;;
     interop) interop ;;
-    all) gen; build vos; build ipad; run_tests vos ;;
-    *) sed -n '2,17p' "$0"; exit 1 ;;
+    all) gen; lint; build vos; build ipad; run_tests vos ;;
+    *) sed -n '2,18p' "$0"; exit 1 ;;
 esac

@@ -98,7 +98,7 @@ enum AgentSessionHistory {
         /// honors `CLAUDE_CONFIG_DIR`, so `~/.claude` is a default, not a
         /// fact. nil lets `readCommand` fall back to the exec shell's own
         /// env / the default root.
-        var configDir: String? = nil
+        var configDir: String?
     }
 
     /// Resolve the active pane cwd and Claude Code's exact session id in one

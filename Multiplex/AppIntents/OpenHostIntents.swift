@@ -32,6 +32,9 @@ struct OpenHostShellIntent: AppIntent {
 struct OpenHostAgentIntent: AppIntent {
     static let title: LocalizedStringResource = "Open Agent"
     static let description = IntentDescription(
+        // `LocalizedStringResource` must be a literal to be extractable for
+        // localization, so this copy cannot be split with `+`.
+        // swiftlint:disable:next line_length
         "Starts a CLI agent in a fresh tmux session, with an optional working directory, setup script, and first prompt.",
         categoryName: "Terminal"
     )
@@ -62,6 +65,8 @@ struct OpenHostAgentIntent: AppIntent {
     /// shell malformed.
     @Parameter(
         title: "Model",
+        // Literal for the same reason as `description` above.
+        // swiftlint:disable:next line_length
         description: "Launches the agent with --model set to this value. Configure choices in Multiplex's Host Settings; leave empty for the agent's default model.",
         optionsProvider: AgentModelOptionsProvider()
     ) var model: String?

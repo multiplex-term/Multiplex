@@ -9,7 +9,7 @@ import Foundation
 struct WidgetSessionState: Codable, Hashable {
     var name: String
     /// `AgentKind.rawValue` of the session's active-pane agent, if detected.
-    var agentRaw: String? = nil
+    var agentRaw: String?
     /// The window spine, in index order; `activeWindowIndex` indexes it.
     var windowNames: [String] = []
     /// Each window's active-pane title, parallel to `windowNames`. Already
@@ -64,12 +64,12 @@ struct WidgetHostState: Codable, Hashable, Identifiable {
     var address: String
     var sessions: [WidgetSessionState] = []
     /// When the app last had a live probe result for this host; nil = never.
-    var probedAt: Date? = nil
+    var probedAt: Date?
     /// Pre-configured launch models per agent raw value — what the Host
     /// widget's Model setting offers as picker rows in the widget process.
     /// Names only, no secrets. Optional-typed so files written before the
     /// field existed keep decoding (synthesized decoder; nil = none).
-    var agentModels: [String: [String]]? = nil
+    var agentModels: [String: [String]]?
 
     /// The session the per-host widget features and a bare shell deep link
     /// attaches — newest by creation, name-ordered on a tie. Must mirror

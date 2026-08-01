@@ -192,32 +192,55 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
         displayRows.count
     }
 
+    /// Dequeue by identifier and hand back the concrete cell. The identifier
+    /// and its class are registered together in `init(frame:)`, so a mismatch
+    /// is a wiring bug in this file — it traps, but says which pair came
+    /// apart instead of `as!`'s anonymous cast failure.
+    private func dequeue<Cell: UITableViewCell>(
+        _ type: Cell.Type,
+        identifier: String,
+        from tableView: UITableView,
+        at indexPath: IndexPath
+    ) -> Cell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: identifier, for: indexPath)
+        guard let typed = cell as? Cell else {
+            preconditionFailure("\(identifier) is registered as \(Swift.type(of: cell)), not \(Cell.self)")
+        }
+        return typed
+    }
+
     func tableView(
         _ tableView: UITableView,
         cellForRowAt indexPath: IndexPath
     ) -> UITableViewCell {
         switch displayRows[indexPath.row] {
         case .failure(let message):
-            let cell = tableView.dequeueReusableCell(
-                withIdentifier: FileViewerTreeMessageCell.reuseIdentifier,
-                for: indexPath
-            ) as! FileViewerTreeMessageCell
+            let cell = dequeue(
+                FileViewerTreeMessageCell.self,
+                identifier: FileViewerTreeMessageCell.reuseIdentifier,
+                from: tableView,
+                at: indexPath
+            )
             cell.apply(message, color: TallyPalette.caution, chassisCaps: false)
             return cell
 
         case .empty(let caption):
-            let cell = tableView.dequeueReusableCell(
-                withIdentifier: FileViewerTreeMessageCell.reuseIdentifier,
-                for: indexPath
-            ) as! FileViewerTreeMessageCell
+            let cell = dequeue(
+                FileViewerTreeMessageCell.self,
+                identifier: FileViewerTreeMessageCell.reuseIdentifier,
+                from: tableView,
+                at: indexPath
+            )
             cell.apply(caption, color: UIKitChassis.signal3, chassisCaps: true)
             return cell
 
         case .tree(let row):
-            let cell = tableView.dequeueReusableCell(
-                withIdentifier: FileViewerTreeRowCell.reuseIdentifier,
-                for: indexPath
-            ) as! FileViewerTreeRowCell
+            let cell = dequeue(
+                FileViewerTreeRowCell.self,
+                identifier: FileViewerTreeRowCell.reuseIdentifier,
+                from: tableView,
+                at: indexPath
+            )
             cell.apply(row, isCurrent: snapshot.railPath == row.entry.path)
             return cell
         }

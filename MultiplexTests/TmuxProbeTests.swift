@@ -470,7 +470,8 @@ final class TmuxProbeTests: XCTestCase {
         // Wanted name first, then the unnamed retry — the server settles
         // duplicate-name races and its printed id+name pair is the truth.
         XCTAssertTrue(command.contains(
-            "i=$(multiplex_tmux new-session -d -P -F '#{session_id} #{session_name}' -c \"$d\" -s 'claude' 2>/dev/null)"))
+            "i=$(multiplex_tmux new-session -d -P -F '#{session_id} #{session_name}' "
+                + "-c \"$d\" -s 'claude' 2>/dev/null)"))
         XCTAssertTrue(command.contains(
             "|| i=$(multiplex_tmux new-session -d -P -F '#{session_id} #{session_name}' -c \"$d\" 2>/dev/null)"))
         // The launch is TYPED into the shell (literal text, then Enter),

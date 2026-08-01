@@ -484,8 +484,8 @@ final class TerminalTabCell: UIControl {
         _ interaction: UIContextMenuInteraction,
         configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
-        UIContextMenuConfiguration(identifier: itemID as NSUUID, previewProvider: nil) {
-            [makeMenu] _ in makeMenu()
+        UIContextMenuConfiguration(identifier: itemID as NSUUID, previewProvider: nil) { [makeMenu] _ in
+            makeMenu()
         }
     }
 
@@ -542,7 +542,7 @@ enum TerminalTabStrip {
         let id: UUID
         var title: String
         /// Shown when the window's tabs span more than one host.
-        var hostName: String? = nil
+        var hostName: String?
         var controller: TerminalSessionController?
         var isActive: Bool
         /// Auxiliary tabs carry their mark in the title and no tally dot.

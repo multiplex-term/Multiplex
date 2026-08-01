@@ -59,7 +59,8 @@ enum TmuxProbe {
     /// opens, login-shell spawns, and round-trips.
     static let probeCommand: String = {
         let sessionFormat = "S #{session_id} #{session_attached} #{session_created} #{session_name}"
-        let windowFormat = "W #{session_id} #{window_index} #{window_active} #{window_bell_flag} #{window_activity_flag} #{window_name}"
+        let windowFormat = "W #{session_id} #{window_index} #{window_active} "
+            + "#{window_bell_flag} #{window_activity_flag} #{window_name}"
         let paneLineFormat = paneFormat(tag: "P")
         return pathPrefix
             + "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
@@ -553,8 +554,7 @@ enum TmuxProbe {
         let normalizedLineEndings = conf
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
-        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") {
-            result, scalar in
+        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") { result, scalar in
             let allowedControl = scalar.value == 0x09 || scalar.value == 0x0A
             if allowedControl || !CharacterSet.controlCharacters.contains(scalar) {
                 result.append(Character(scalar))

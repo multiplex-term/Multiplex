@@ -80,7 +80,8 @@ enum HostTest {
             case .incorrectKeyPassphrase:
                 return "That passphrase didn't unlock the private key. Try again."
             case .unsupportedKey:
-                return "The private key couldn't be read. Paste an OpenSSH ed25519 or RSA key, including its BEGIN/END lines."
+                return "The private key couldn't be read. Paste an OpenSSH ed25519 "
+                    + "or RSA key, including its BEGIN/END lines."
             case .connectFailed(let detail):
                 return connectFailureMessage(detail, host: host)
             case .notConnected:

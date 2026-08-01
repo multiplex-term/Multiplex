@@ -1,3 +1,7 @@
+// The fixtures below are `.jsonl` bodies: one JSON record per line is the
+// format under test, so wrapping a record would change what the parser sees.
+// swiftlint:disable line_length
+
 import XCTest
 @testable import Multiplex
 
@@ -751,3 +755,5 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertFalse(command.contains("Escape"))
     }
 }
+
+// swiftlint:enable line_length

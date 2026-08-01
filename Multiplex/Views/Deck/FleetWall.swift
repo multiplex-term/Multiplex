@@ -19,7 +19,7 @@ struct FleetWallConfiguration {
     /// Present when the scene can supply it: the wall's own guide sheets then
     /// follow a live appearance change instead of snapshotting the choice
     /// (`AppAppearanceFollowing`). Without it they read the scene window.
-    var themes: ThemeStore? = nil
+    var themes: ThemeStore?
     var terminalOpener: TerminalRouteOpener
     var presentation: FleetWall.Presentation
     var selectedTerminal: TerminalRoute?
@@ -703,13 +703,11 @@ final class FleetWallViewController: UIViewController {
         model.resetConnectRetryBackoff()
         while !Task.isCancelled {
             guard UIApplication.shared.applicationState == .active else {
-                do { try await Task.sleep(for: .milliseconds(200)) }
-                catch { return }
+                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
                 continue
             }
             await model.refreshAndWait(ifStaleFor: 4)
-            do { try await Task.sleep(for: feedInterval) }
-            catch { return }
+            do { try await Task.sleep(for: feedInterval) } catch { return }
         }
     }
 
@@ -1323,7 +1321,6 @@ private final class FleetHostSectionView: UIView {
 
         guard host.isEnabled, let model, let snapshot else {
             let tile = reusableSpecialTile(key: "disabled") { FleetNoSignalTileView() }
-                as! FleetNoSignalTileView
             tile.configure(
                 host: host,
                 mode: .disabled,
@@ -1340,7 +1337,6 @@ private final class FleetHostSectionView: UIView {
             let ordered = snapshot.orderedSessions
             var items: [FleetGridItem] = []
             let newTile = reusableSpecialTile(key: "new") { FleetNewSessionTileView() }
-                as! FleetNewSessionTileView
             newTile.configure(
                 hostName: host.name,
                 compact: configuration.presentation == .shellRail,
@@ -1408,7 +1404,6 @@ private final class FleetHostSectionView: UIView {
             pruneTiles(keeping: Set(items.map(\.id)))
         case .noServer:
             let tile = reusableSpecialTile(key: "new") { FleetNewSessionTileView() }
-                as! FleetNewSessionTileView
             tile.configure(
                 hostName: host.name,
                 compact: configuration.presentation == .shellRail,
@@ -1418,7 +1413,6 @@ private final class FleetHostSectionView: UIView {
             pruneTiles(keeping: ["new"])
         case .tmuxMissing:
             let tile = reusableSpecialTile(key: "tmux") { FleetTmuxMissingTileView() }
-                as! FleetTmuxMissingTileView
             tile.configure(
                 compact: configuration.presentation == .shellRail,
                 action: configuration.showTmuxGuide
@@ -1427,7 +1421,6 @@ private final class FleetHostSectionView: UIView {
             pruneTiles(keeping: ["tmux"])
         case .failed:
             let tile = reusableSpecialTile(key: "failed") { FleetNoSignalTileView() }
-                as! FleetNoSignalTileView
             tile.configure(
                 host: host,
                 mode: snapshot.keyPassphraseChallenge == nil ? .unreachable : .passphrase,
@@ -1441,7 +1434,6 @@ private final class FleetHostSectionView: UIView {
             pruneTiles(keeping: ["failed"])
         case .unknown, .probing:
             let tile = reusableSpecialTile(key: "acquiring") { FleetAcquiringTileView() }
-                as! FleetAcquiringTileView
             tile.configure(compact: configuration.presentation == .shellRail)
             grid.setItems([FleetGridItem(id: "acquiring", view: tile)])
             pruneTiles(keeping: ["acquiring"])
@@ -1469,8 +1461,8 @@ private final class FleetHostSectionView: UIView {
         let edit = UIAction(title: "Edit Host…") { [weak self] _ in
             self?.configuration.editHost()
         }
-        let remove = UIAction(title: "Remove Host…", attributes: .destructive) {
-            [weak self] _ in self?.configuration.removeHost()
+        let remove = UIAction(title: "Remove Host…", attributes: .destructive) { [weak self] _ in
+            self?.configuration.removeHost()
         }
         return UIMenu(children: [
             moveUp,
@@ -1479,11 +1471,15 @@ private final class FleetHostSectionView: UIView {
         ])
     }
 
-    private func reusableSpecialTile(
+    /// Generic in the tile type so callers get the concrete view back rather
+    /// than casting a `UIView` down to what they just asked `make` to build.
+    /// A cached view of another type (a key that changed hands between
+    /// releases) is rebuilt rather than trapped on.
+    private func reusableSpecialTile<Tile: UIView>(
         key: String,
-        make: () -> UIView
-    ) -> UIView {
-        if let existing = tileViews[key] { return existing }
+        make: () -> Tile
+    ) -> Tile {
+        if let existing = tileViews[key] as? Tile { return existing }
         let view = make()
         tileViews[key] = view
         return view
@@ -1901,8 +1897,9 @@ private final class FleetMenuBadgeButton: UIButton {
         backgroundColor = UIKitChassis.chassis
         layer.borderWidth = 1
         refreshBorder()
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            (button: FleetMenuBadgeButton, _: UITraitCollection) in
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self]
+        ) { (button: FleetMenuBadgeButton, _: UITraitCollection) in
             button.refreshBorder()
         }
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
@@ -2056,8 +2053,8 @@ class FleetPressView: UIKitTallyBorderedView, UIContextMenuInteractionDelegate {
         configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
         guard menuProvider?() != nil else { return nil }
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) {
-            [weak self] _ in self?.menuProvider?()
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            self?.menuProvider?()
         }
     }
 
@@ -2112,8 +2109,7 @@ private final class FleetColorDotView: UIView {
         ])
         layer.cornerRadius = diameter * Theme.typeScale / 2
         refresh()
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            (dot: FleetColorDotView, _: UITraitCollection) in
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (dot: FleetColorDotView, _: UITraitCollection) in
             dot.refresh()
         }
     }
@@ -2136,8 +2132,7 @@ private final class FleetHatchedView: UIView {
         super.init(frame: frame)
         backgroundColor = TallyPalette.screen
         isOpaque = true
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            (view: FleetHatchedView, _: UITraitCollection) in
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: FleetHatchedView, _: UITraitCollection) in
             view.setNeedsDisplay()
         }
     }
@@ -2386,11 +2381,12 @@ final class FleetSessionTileView: FleetPressView,
         let minimum = screen.heightAnchor.constraint(
             greaterThanOrEqualToConstant: configuration.compact ? 56 : 76
         )
+        let inset: CGFloat = configuration.compact ? 8 : 10
         NSLayoutConstraint.activate([
-            lines.leadingAnchor.constraint(equalTo: screen.leadingAnchor, constant: configuration.compact ? 8 : 10),
-            lines.trailingAnchor.constraint(equalTo: screen.trailingAnchor, constant: configuration.compact ? -8 : -10),
-            lines.topAnchor.constraint(equalTo: screen.topAnchor, constant: configuration.compact ? 8 : 10),
-            lines.bottomAnchor.constraint(lessThanOrEqualTo: screen.bottomAnchor, constant: configuration.compact ? -8 : -10),
+            lines.leadingAnchor.constraint(equalTo: screen.leadingAnchor, constant: inset),
+            lines.trailingAnchor.constraint(equalTo: screen.trailingAnchor, constant: -inset),
+            lines.topAnchor.constraint(equalTo: screen.topAnchor, constant: inset),
+            lines.bottomAnchor.constraint(lessThanOrEqualTo: screen.bottomAnchor, constant: -inset),
             minimum,
         ])
         return screen
@@ -2651,8 +2647,9 @@ private final class FleetNewSessionTileView: FleetPressView {
         ])
         // A CALayer stroke is a resolved CGColor: it needs re-resolving on an
         // appearance flip, which alone changes no bounds and triggers no layout.
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            (tile: FleetNewSessionTileView, _: UITraitCollection) in
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self]
+        ) { (tile: FleetNewSessionTileView, _: UITraitCollection) in
             tile.refreshDash()
         }
     }
@@ -3463,8 +3460,7 @@ final class NewSessionViewController: UIViewController,
         button.layer.borderWidth = 1
         button.layer.borderColor = UIKitChassis.bezelHi
             .resolvedColor(with: button.traitCollection).cgColor
-        button.registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            (button: UIButton, _: UITraitCollection) in
+        button.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (button: UIButton, _: UITraitCollection) in
             button.layer.borderColor = UIKitChassis.bezelHi
                 .resolvedColor(with: button.traitCollection).cgColor
         }
@@ -3557,11 +3553,14 @@ final class NewSessionViewController: UIViewController,
         well.backgroundColor = UIKitChassis.screen
         well.addSubview(input)
         input.translatesAutoresizingMaskIntoConstraints = false
+        // The prompt text view draws its own padding; every other input sits
+        // inset from the well.
+        let isPrompt = input is FleetPromptTextView
         NSLayoutConstraint.activate([
-            input.leadingAnchor.constraint(equalTo: well.leadingAnchor, constant: input is FleetPromptTextView ? 0 : 10),
-            input.trailingAnchor.constraint(equalTo: well.trailingAnchor, constant: input is FleetPromptTextView ? 0 : -10),
-            input.topAnchor.constraint(equalTo: well.topAnchor, constant: input is FleetPromptTextView ? 0 : 9),
-            input.bottomAnchor.constraint(equalTo: well.bottomAnchor, constant: input is FleetPromptTextView ? 0 : -9),
+            input.leadingAnchor.constraint(equalTo: well.leadingAnchor, constant: isPrompt ? 0 : 10),
+            input.trailingAnchor.constraint(equalTo: well.trailingAnchor, constant: isPrompt ? 0 : -10),
+            input.topAnchor.constraint(equalTo: well.topAnchor, constant: isPrompt ? 0 : 9),
+            input.bottomAnchor.constraint(equalTo: well.bottomAnchor, constant: isPrompt ? 0 : -9),
         ])
         return well
     }
@@ -3623,8 +3622,7 @@ final class NewSessionViewController: UIViewController,
     }
 
     private func dismissSheet() {
-        if let onDismiss { onDismiss() }
-        else { navigationController?.dismiss(animated: true) }
+        if let onDismiss { onDismiss() } else { navigationController?.dismiss(animated: true) }
     }
 }
 
@@ -3798,8 +3796,8 @@ private final class FleetLaunchChoiceView: UIView {
         agents.accessibilityValue = mode == .agents ? selectedAgent.displayName : "Not selected"
         agents.accessibilityHint = "Choose Claude Code, Codex, or Pi"
         agents.menu = UIMenu(children: AgentKind.allCases.map { agent in
-            UIAction(title: agent.displayName, state: agent == selectedAgent ? .on : .off) {
-                [weak self] _ in self?.onSelectAgent?(agent)
+            UIAction(title: agent.displayName, state: agent == selectedAgent ? .on : .off) { [weak self] _ in
+                self?.onSelectAgent?(agent)
             }
         })
     }
@@ -3838,8 +3836,7 @@ private final class FleetChoiceButton: UIButton {
         ])
         layer.borderWidth = 1
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            (button: FleetChoiceButton, _: UITraitCollection) in
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (button: FleetChoiceButton, _: UITraitCollection) in
             button.render()
         }
     }
@@ -4000,8 +3997,9 @@ private final class FleetMenuFieldButton: UIButton {
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -9),
         ])
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            (button: FleetMenuFieldButton, _: UITraitCollection) in
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self]
+        ) { (button: FleetMenuFieldButton, _: UITraitCollection) in
             button.refreshBorder()
         }
     }

@@ -542,7 +542,7 @@ final class HostConnectionModel {
         } else {
             let loaded = await HostSecrets.loadOffMain(for: host)
             if let expectedGeneration,
-               (expectedGeneration != refreshGeneration || Task.isCancelled) {
+               expectedGeneration != refreshGeneration || Task.isCancelled {
                 throw CancellationError()
             }
             cachedSecrets = loaded
@@ -550,7 +550,7 @@ final class HostConnectionModel {
             secrets = loaded
         }
         if let expectedGeneration,
-           (expectedGeneration != refreshGeneration || Task.isCancelled) {
+           expectedGeneration != refreshGeneration || Task.isCancelled {
             throw CancellationError()
         }
         let fresh = SSHConnection(host: host, secrets: secrets)
@@ -562,7 +562,7 @@ final class HostConnectionModel {
             throw error
         }
         if let expectedGeneration,
-           (expectedGeneration != refreshGeneration || Task.isCancelled) {
+           expectedGeneration != refreshGeneration || Task.isCancelled {
             await fresh.close()
             throw CancellationError()
         }
@@ -601,12 +601,14 @@ final class HostConnectionModel {
         return try await withCheckedThrowingContinuation { continuation in
             let gate = DeadlineGate(continuation)
             let work = Task {
-                do { gate.finish(.success(try await operation()), winner: .work) }
-                catch { gate.finish(.failure(error), winner: .work) }
+                do {
+                    gate.finish(.success(try await operation()), winner: .work)
+                } catch {
+                    gate.finish(.failure(error), winner: .work)
+                }
             }
             let timer = Task {
-                do { try await Task.sleep(for: .seconds(seconds)) }
-                catch { return }
+                do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
                 gate.finish(.failure(ProbeTimeoutError()), winner: .timer)
             }
             gate.install(work: work, timer: timer)

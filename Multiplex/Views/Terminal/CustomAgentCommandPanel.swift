@@ -265,7 +265,8 @@ final class CustomAgentCommandPanelViewController: UIViewController {
         titleRow.spacing = 12
 
         let description = UILabel()
-        description.text = "Place each built-in in Bar or More. Custom content may span many lines; turn Submit off to leave it ready to edit."
+        description.text = "Place each built-in in Bar or More. Custom content may span "
+            + "many lines; turn Submit off to leave it ready to edit."
         description.font = UIKitChassis.uiFont(11)
         description.textColor = UIKitChassis.signal2
         description.numberOfLines = 0

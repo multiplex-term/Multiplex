@@ -238,8 +238,11 @@ final class BindPaneUIKitTests: XCTestCase {
     private func renderedText(in root: UIView) -> [String] {
         var result: [String] = []
         if let label = root as? UILabel {
-            if let text = label.text { result.append(text) }
-            else if let text = label.attributedText?.string { result.append(text) }
+            if let text = label.text {
+                result.append(text)
+            } else if let text = label.attributedText?.string {
+                result.append(text)
+            }
         }
         if let textView = root as? UITextView, let text = textView.text {
             result.append(text)
@@ -251,7 +254,7 @@ final class BindPaneUIKitTests: XCTestCase {
     }
 
     private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
-        var result: [T] = root is T ? [root as! T] : []
+        var result: [T] = (root as? T).map { [$0] } ?? []
         for child in root.subviews {
             result.append(contentsOf: descendants(of: type, in: child))
         }

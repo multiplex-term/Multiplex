@@ -282,8 +282,7 @@ final class FileViewerTextView: UITextView {
         // glyphs render over the grounds.
         insertSubview(backdrop, at: 0)
         addSubview(gutter)
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            (view: FileViewerTextView, _: UITraitCollection) in
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: FileViewerTextView, _: UITraitCollection) in
             // Re-setting the text re-resolves its dynamic inks — TextKit
             // caches attributed colors and an appearance flip must reach
             // token colors, not just the drawn decor.

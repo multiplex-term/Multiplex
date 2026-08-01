@@ -265,7 +265,7 @@ struct SpineRow: View {
 struct ActionKey: View {
     let glyph: String
     let caption: String
-    var sub: String? = nil
+    var sub: String?
     var glyphSize: CGFloat = 14
 
     @Environment(\.tallyPalette) private var palette

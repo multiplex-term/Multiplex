@@ -65,7 +65,7 @@ struct TmuxWindow: Identifiable, Hashable, Codable {
     /// All panes from a live probe. Optional only so device-local snapshots
     /// written before multi-pane detection continue to decode; new probes
     /// always populate it.
-    var panes: [TmuxPane]? = nil
+    var panes: [TmuxPane]?
 
     var id: Int { index }
 

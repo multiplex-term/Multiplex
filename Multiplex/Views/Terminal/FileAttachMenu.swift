@@ -279,8 +279,8 @@ enum FileAttachDataLoader {
 
     private static func loadData(from provider: NSItemProvider, type: UTType) async -> Data? {
         await withCheckedContinuation { continuation in
-            provider.loadDataRepresentation(forTypeIdentifier: type.identifier) {
-                data, _ in continuation.resume(returning: data)
+            provider.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, _ in
+                continuation.resume(returning: data)
             }
         }
     }

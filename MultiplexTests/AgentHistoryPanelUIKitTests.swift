@@ -256,7 +256,7 @@ final class AgentHistoryPanelUIKitTests: XCTestCase {
     }
 
     private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
-        var matches = root as? T == nil ? [] : [root as! T]
+        var matches: [T] = (root as? T).map { [$0] } ?? []
         for child in root.subviews {
             matches.append(contentsOf: descendants(of: type, in: child))
         }

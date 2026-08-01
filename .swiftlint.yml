@@ -1,0 +1,108 @@
+# SwiftLint for Multiplex — `./Tools/build.sh lint` (add `--fix` to apply the
+# correctable ones). Install with `brew install swiftlint`.
+#
+# The rule set is SwiftLint's own defaults, moved in exactly two directions:
+# the size metrics are off, and a few thresholds match what this codebase
+# already writes. Every switch carries its reason — an unexplained
+# `disabled_rules` entry is how a linter stops being read, and then stops
+# being run.
+
+included:
+  - Multiplex
+  - MultiplexTests
+  - MultiplexWidgets
+  - Tools
+
+# Vendored SwiftTerm / swift-nio-ssh carry deliberate upstream patches and are
+# re-applied on every bump (see AGENTS.md) — restyling them would bury the
+# diff that matters. The rest is build output.
+excluded:
+  - Vendor
+  - DerivedData
+  - build
+  - .build
+
+disabled_rules:
+  # Size metrics, all of them. The UIKit scene runtime's controllers
+  # (FleetWall, TerminalWindowUIKit) and the pure table-driven parsers
+  # (CodeHighlighter, MoshProtobuf, TmuxProbe) are long because what they
+  # model is long; splitting them to satisfy a line count moves code without
+  # making it clearer. The layer rule in AGENTS.md — Views → Services →
+  # Models, with the pure models holding the logic — is the structural check
+  # that actually earns its keep here, and no linter can express it.
+  - file_length
+  - type_body_length
+  - function_body_length
+  - cyclomatic_complexity
+  - function_parameter_count
+
+  # The codebase writes collection literals two ways on purpose, and trailing
+  # commas belong to exactly one of them: the vertical form (one element per
+  # line, closer on its own line) takes them — 616 sites — while the packed
+  # hanging-indent form does not, because there the closer shares the last
+  # element's line:
+  #
+  #     for name in [UIResponder.keyboardWillChangeFrameNotification,
+  #                  UIResponder.keyboardDidChangeFrameNotification] {
+  #
+  # Either setting of this rule rewrites one of the two styles into the
+  # other — `mandatory_comma: true` in particular breaks that alignment apart
+  # to give the closer a line — and neither presence nor absence is a defect
+  # signal here. So the rule can't be configured, only switched off.
+  - trailing_comma
+
+  # `String(decoding: bytes, as: UTF8.self)` is deliberate at every site: they
+  # decode terminal output, SSH channel bytes, git diffs, and host files,
+  # where one invalid byte must degrade to U+FFFD rather than nil an entire
+  # capture out of existence. The failable initializer this rule prefers
+  # would silently drop the output the pane exists to show.
+  - optional_data_string_conversion
+
+identifier_name:
+  # Loop counters, coordinate pairs, and parser locals (`i`, `dx`, `lo`, `v4`)
+  # read better short than padded to three characters, and `pi` is an agent's
+  # actual name. The case and start-with-lowercase checks stay on; only the
+  # length floor goes.
+  min_length:
+    warning: 1
+    error: 1
+
+type_name:
+  # `SSHKeyPassphrasePromptPresenterViewController` says exactly what it is.
+  max_length:
+    warning: 50
+    error: 60
+
+nesting:
+  # One level of nesting is a namespace; two is a namespaced state machine
+  # (`BindController.Candidate.Phase`), which is where these land.
+  type_level: 2
+
+opening_brace:
+  # A long conformance list and a multi-clause `if` both wrap, and cuddling
+  # the brace onto the last of those lines hides where the body starts:
+  #
+  #     final class TerminalWindowViewController: UIViewController,
+  #         UIAdaptivePresentationControllerDelegate
+  #     {
+  #
+  # The brace on its own line is the readable form there, and only there —
+  # ordinary declarations still have to cuddle.
+  ignore_multiline_type_headers: true
+  ignore_multiline_statement_conditions: true
+
+large_tuple:
+  # A labelled four-member tuple is the return shape of the pure protocol and
+  # layout helpers (`MoshFragment.decode`, the policy test matrices), where a
+  # struct per call site would be noise. Five is where it stops reading.
+  warning: 4
+  error: 6
+
+line_length:
+  warning: 120
+  error: 250
+  ignores_urls: true
+  ignores_comments: true
+  # Logger format strings and user-facing copy interpolate; breaking a
+  # sentence across source lines to hit a column budget makes both worse.
+  ignores_interpolated_strings: true

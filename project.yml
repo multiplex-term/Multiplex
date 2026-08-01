@@ -30,6 +30,9 @@ packages:
 # App Store.
 fileGroups:
   - Multiplex.storekit
+  # Not a build phase (see AGENTS.md → Lint); listed so the rule set is
+  # visible and editable in Xcode rather than only from the shell.
+  - .swiftlint.yml
 
 settings:
   base:

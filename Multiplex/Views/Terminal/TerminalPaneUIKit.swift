@@ -344,8 +344,8 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         removeArrangedSubviews(from: topCenterStack)
         guard configuration.isActive else { return }
         if state.tmuxCopyModeUIActive {
-            let bar = TerminalContextBarView.copyMode {
-                [weak controller] in controller?.finishTmuxCopyMode()
+            let bar = TerminalContextBarView.copyMode { [weak controller] in
+                controller?.finishTmuxCopyMode()
             }
             bar.accessibilityIdentifier = "terminalPane.context.copyMode"
             topCenterStack.addArrangedSubview(bar)

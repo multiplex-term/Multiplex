@@ -719,8 +719,8 @@ final class FileViewerPaneViewController: UIViewController {
         treeChip = tree
         railStack.addArrangedSubview(tree)
 
-        let refresh = makeChip("REFRESH", accessibility: "Refresh file viewer") {
-            [weak controller] in controller?.refresh()
+        let refresh = makeChip("REFRESH", accessibility: "Refresh file viewer") { [weak controller] in
+            controller?.refresh()
         }
         refresh.accessibilityIdentifier = "fileViewer.refresh"
         refresh.isUserInteractionEnabled = !state.isBusy
@@ -1699,8 +1699,9 @@ final class FileViewerMarkdownTextView: UITextView, UITextViewDelegate {
         accessibilityLabel = attributed.text.string
         setContentHuggingPriority(.required, for: .vertical)
         setContentCompressionResistancePriority(.required, for: .vertical)
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            (view: FileViewerMarkdownTextView, _: UITraitCollection) in
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self]
+        ) { (view: FileViewerMarkdownTextView, _: UITraitCollection) in
             // TextKit resolves an attributed string's dynamic inks when the
             // text is set, so an appearance flip only reaches a rendered
             // block by re-feeding it. Blocks the reader has not scrolled to
@@ -2016,8 +2017,9 @@ final class FileViewerMarkdownCodeFenceView: UIKitTallyBorderedView {
         layer.cornerRadius = 6
         layer.cornerCurve = .continuous
         clipsToBounds = true
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            (view: FileViewerMarkdownCodeFenceView, _: UITraitCollection) in
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self]
+        ) { (view: FileViewerMarkdownCodeFenceView, _: UITraitCollection) in
             // Same rule as the prose blocks: TextKit caches the resolved
             // token colors, so the fence has to be re-fed on a flip.
             view.textView.attributedText = view.fenceText
@@ -2075,8 +2077,7 @@ final class FileViewerMarkdownTableView: UIKitTallyBorderedView {
         let headerFont = UIKitChassis.uiFont(12, weight: .semibold)
         let bodyFont = UIKitChassis.uiFont(12)
         let allRows = [header] + rows
-        let rendered: [[FileViewerMarkdownAttributedText]] = allRows.enumerated().map {
-            rowIndex, cells in
+        let rendered: [[FileViewerMarkdownAttributedText]] = allRows.enumerated().map { rowIndex, cells in
             (0..<columns).map { column in
                 FileViewerMarkdownInlineRenderer.render(
                     column < cells.count ? cells[column] : [],

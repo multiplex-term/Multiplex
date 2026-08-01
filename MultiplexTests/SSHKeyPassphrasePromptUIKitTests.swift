@@ -12,7 +12,9 @@ final class SSHKeyPassphrasePromptUIKitTests: XCTestCase {
         XCTAssertEqual(alert.title, "Unlock SSH Key")
         XCTAssertEqual(
             alert.message,
-            "The private key for “devbox” is encrypted. Connect Once keeps the passphrase until Multiplex closes. Save & Connect stores it in iCloud Keychain for your other devices."
+            "The private key for “devbox” is encrypted. Connect Once keeps the passphrase "
+                + "until Multiplex closes. Save & Connect stores it in iCloud Keychain "
+                + "for your other devices."
         )
         XCTAssertEqual(alert.preferredStyle, .alert)
         XCTAssertEqual(alert.actions.map(\.title), [
@@ -49,7 +51,8 @@ final class SSHKeyPassphrasePromptUIKitTests: XCTestCase {
 
         XCTAssertEqual(
             SSHKeyPassphrasePromptPresenterViewController.message(for: challenge),
-            "That passphrase didn't unlock the private key for “devbox”. Try again. Save & Connect replaces the copy in iCloud Keychain."
+            "That passphrase didn't unlock the private key for “devbox”. Try again. "
+                + "Save & Connect replaces the copy in iCloud Keychain."
         )
     }
 

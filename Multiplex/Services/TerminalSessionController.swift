@@ -1369,7 +1369,7 @@ final class TerminalSessionController {
         // The jump search owns the pane's input while it pages; the FINDING
         // veil is visible over the drop target for its few seconds.
         if case .finding = historyJump { return }
-        if (host.useMosh || route.sessionName == nil),
+        if host.useMosh || route.sessionName == nil,
            status == .live, dropTask == nil, !files.isEmpty {
             // Mosh has no SFTP channel, while a plain shell has no tmux pane
             // whose foreground cwd can be resolved. Say so instead of

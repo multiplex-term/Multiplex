@@ -40,7 +40,10 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertEqual(view("umd.title", in: controller.view)?.accessibilityLabel, "agent · devbox")
         XCTAssertEqual(view("umd.status.live", in: controller.view)?.accessibilityLabel, "live")
         XCTAssertEqual(control("umd.tmux", in: controller.view)?.accessibilityLabel, "Show tmux shortcuts")
-        XCTAssertEqual(control("umd.merge", in: controller.view)?.accessibilityLabel, "Merge another window into this one")
+        XCTAssertEqual(
+            control("umd.merge", in: controller.view)?.accessibilityLabel,
+            "Merge another window into this one"
+        )
         XCTAssertEqual(control("umd.detach", in: controller.view)?.accessibilityLabel, "Detach or close the session")
         XCTAssertFalse(try XCTUnwrap(control("terminal.fileAttach", in: controller.view)).isHidden)
 
@@ -388,7 +391,7 @@ final class UMDBarUIKitTests: XCTestCase {
     }
 
     private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
-        var matches = root as? T == nil ? [] : [root as! T]
+        var matches: [T] = (root as? T).map { [$0] } ?? []
         for child in root.subviews {
             matches.append(contentsOf: descendants(of: type, in: child))
         }
