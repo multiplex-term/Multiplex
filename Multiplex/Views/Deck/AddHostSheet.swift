@@ -574,17 +574,18 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         let container = UIView()
         container.addSubview(controller.view)
         controller.view.translatesAutoresizingMaskIntoConstraints = false
-        // The pane's own view is required-pinned to this container, so a
-        // REQUIRED placeholder height crushes everything inside it until
-        // `updateBindHeight()` can measure — and that measurement is refused
-        // until the container has a real width, so the pane's first solve is
-        // always the degenerate one. Auto Layout resolves the impossible
-        // height by breaking the pane's internal pins instead, which is what
-        // renders its sections as empty grey bars. A near-required placeholder
-        // yields to the pane's own content when it cannot hold, and still
-        // outranks every content priority once the measured height lands.
+        // The pane's own view is required-pinned to this container, and the
+        // placeholder height must sit BELOW the content's standard 750
+        // hugging/compression priorities: Auto Layout satisfies priorities
+        // strictly, so a 999 placeholder crushes every ordinary label to zero
+        // height before it would stretch by a point — only required-priority
+        // content (chips, the text field) survived, which is exactly the
+        // "section titles missing until an appearance flip relayouts" first
+        // render (the measurement below never got a pass with real width to
+        // correct it). At defaultLow the pane renders from its own intrinsic
+        // height immediately and the measured constant is just a refinement.
         let height = container.heightAnchor.constraint(equalToConstant: 240)
-        height.priority = UILayoutPriority(999)
+        height.priority = .defaultLow
         bindHeightConstraint = height
         NSLayoutConstraint.activate([
             controller.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),

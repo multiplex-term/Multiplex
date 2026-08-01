@@ -178,6 +178,11 @@ find.
 - First presentation renders complete: Add Host ▸ BIND section titles and
   the paste control, and a deck tile appearing for a session created
   while you watch — nothing stacked in a corner, no empty grey bars.
+- Add Host ▸ BIND on a fresh install (appearance still SYSTEM): every
+  section header (ON THE MACHINE, ASKING TO BIND, KEY PASSPHRASE), the
+  per-command labels, and the explanation text under each card must all
+  be there the FIRST time the sheet opens — previously they appeared
+  only after switching LIGHT/DARK or rotating.
 - New Session (and Add Host, agent prompt, theme editor): content scrolls
   under the home indicator again, and typing in any field keeps it above
   the keyboard.
