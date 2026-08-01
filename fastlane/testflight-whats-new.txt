@@ -238,3 +238,18 @@ itself. Genuinely wrapped long paths and URLs still join.
 - A long absolute path wrapped mid-segment still presses as the full path.
 - A schemeless URL below wrapped prose raises the link sheet, not a glued
   file path.
+
+FASTER TAPS — clicks reach tmux immediately
+
+With mouse reporting on (tmux's default here), a tap used to wait ~a third
+of a second for the double-tap window before reaching the remote — and two
+fast taps arrived as ONE click. Taps now send immediately, one click per
+tap, so remote double-clicks (tmux, vim, mouse-first TUIs) finally work.
+
+- Tap panes/windows in tmux quickly: each tap lands instantly, no lag.
+- Double-click something that supports it remotely (vim word select with
+  mouse on): the remote sees two fast clicks and reacts.
+- With mouse off (plain shell): double-tap still selects a word, triple-tap
+  a line, exactly as before.
+- Hold Shift on a hardware keyboard over a mouse-on app: double-tap still
+  makes a local word selection (the documented bypass).

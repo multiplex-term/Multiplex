@@ -52,7 +52,7 @@ public extension Notification.Name {
  * Use the `configureNativeColors()` to set the defaults colors for the view to match the OS
  * defaults, otherwise, this uses its own set of defaults colors.
  */
-open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollViewDelegate, TerminalDelegate, UIPointerInteractionDelegate {
+open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollViewDelegate, TerminalDelegate, UIPointerInteractionDelegate, UIGestureRecognizerDelegate {
     private enum PendingKoreanResyllabificationResult {
         case none
         case prefixReinserted
@@ -977,6 +977,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             if dismissLocalSelectionUI() {
                 return
             }
+            // Multiplex patch: while the remote owns taps the failure chain
+            // is bypassed, so singleTap already sent a click for every
+            // physical tap — this recognizer still fires on the second one
+            // and must not add a third click on top.
+            if remoteOwnsImmediateTaps(for: gestureRecognizer) {
+                return
+            }
             sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
 
             if terminal.mouseMode.sendButtonRelease() {
@@ -1004,6 +1011,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode.sendButtonPress() {
             // Multiplex patch: same dismissal rule as singleTap/doubleTap.
             if dismissLocalSelectionUI() {
+                return
+            }
+            // Multiplex patch: same no-extra-click rule as doubleTap while
+            // the failure chain is bypassed.
+            if remoteOwnsImmediateTaps(for: gestureRecognizer) {
                 return
             }
             sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
@@ -1357,8 +1369,44 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         tripleTap.numberOfTapsRequired = 3
         addGestureRecognizer(tripleTap)
 
-        singleTap.require(toFail: doubleTap)
-        doubleTap.require(toFail: tripleTap)
+        // Multiplex patch: the single→double→triple failure chain is decided
+        // per touch by the delegate instead of `require(toFail:)`. With mouse
+        // reporting active all three taps send the same remote click, so the
+        // static chain bought nothing but ~350 ms of latency on every tap —
+        // and collapsed two fast taps into ONE click, making remote
+        // double-click semantics (tmux, herdr, vim) impossible. With mouse
+        // off, the delegate answers exactly like the old chain: double/triple
+        // keep their local word/line selection, singles keep waiting.
+        singleTap.delegate = self
+        doubleTap.delegate = self
+        tripleTap.delegate = self
+    }
+
+    /// Multiplex patch: true while a tap belongs to the remote right now —
+    /// the same predicate the tap handlers' mouse branches test, evaluated
+    /// per touch so runtime mouse-mode flips and the Copy Mode
+    /// `allowMouseReporting` toggle are always honored.
+    private func remoteOwnsImmediateTaps(for gestureRecognizer: UIGestureRecognizer) -> Bool {
+        allowMouseReporting
+            && !shiftBypassesMouseReporting(for: gestureRecognizer)
+            && terminal.mouseMode.sendButtonPress()
+    }
+
+    /// Multiplex patch: the dynamic form of the tap failure chain. Only the
+    /// single→double and double→triple pairs are ever required, and only
+    /// while taps have local meaning (mouse reporting off, or bypassed by a
+    /// held hardware Shift). While the remote owns taps, no requirement
+    /// exists and every tap fires immediately as its own click.
+    public func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        guard let tap = gestureRecognizer as? UITapGestureRecognizer,
+              let other = otherGestureRecognizer as? UITapGestureRecognizer,
+              tap.view === self, other.view === self,
+              other.numberOfTapsRequired == tap.numberOfTapsRequired + 1
+        else { return false }
+        return !remoteOwnsImmediateTaps(for: tap)
     }
 
     func setupLinkReportingInteractions ()
