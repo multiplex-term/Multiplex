@@ -1098,6 +1098,16 @@ enum CodePalette {
 
 // MARK: - Native content states
 
+private extension UIFont {
+    /// Only a semantic text style scales with Dynamic Type; the chassis's
+    /// fixed sizes already carry `Theme.typeScale` and must never compound
+    /// with it. The panels below take their body font from the caller, so
+    /// they opt in by what they were handed.
+    var followsDynamicType: Bool {
+        fontDescriptor.object(forKey: .textStyle) != nil
+    }
+}
+
 @MainActor
 final class FileViewerMessageView: UIView {
     private(set) var captionLabel: UIKitChassisLabel
@@ -1120,6 +1130,7 @@ final class FileViewerMessageView: UIView {
         backgroundColor = UIKitChassis.screen
         detailLabel.text = detail
         detailLabel.font = detailFont
+        detailLabel.adjustsFontForContentSizeCategory = detailFont.followsDynamicType
         detailLabel.textColor = caption == "LOADING"
             ? UIKitChassis.signal2 : UIKitChassis.signal3
         detailLabel.numberOfLines = caption == "LOADING" ? 2 : 0
@@ -1152,15 +1163,22 @@ final class FileViewerMessageView: UIView {
 
 @MainActor
 final class FileViewerTallyLampView: UIView {
+    private let dot = UIView()
+    private let color: UIColor
+
     init(caption: String, color: UIColor = TallyPalette.caution) {
+        self.color = color
         super.init(frame: .zero)
-        let dot = UIView()
         let diameter = 7 * Theme.typeScale
         dot.backgroundColor = color
         dot.layer.cornerRadius = diameter / 2
-        dot.layer.shadowColor = color.cgColor
         dot.layer.shadowOpacity = 0.7
         dot.layer.shadowRadius = 4
+        refreshLampGlow()
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (view: FileViewerTallyLampView, _: UITraitCollection) in
+            view.refreshLampGlow()
+        }
         dot.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             dot.widthAnchor.constraint(equalToConstant: diameter),
@@ -1193,6 +1211,14 @@ final class FileViewerTallyLampView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
+
+    /// The dot's fill and the caption follow the appearance on their own; a
+    /// CGColor does not — it flattens whatever traits were current when it
+    /// was taken, and these panels are built from an observation render
+    /// rather than a UIKit callback.
+    private func refreshLampGlow() {
+        dot.layer.shadowColor = color.resolvedColor(with: traitCollection).cgColor
+    }
 }
 
 @MainActor
@@ -1219,6 +1245,7 @@ final class FileViewerPanelView: UIKitTallyBorderedView {
             let label = UILabel()
             label.text = detail.text
             label.font = detail.font
+            label.adjustsFontForContentSizeCategory = detail.font.followsDynamicType
             label.textColor = detail.color
             label.numberOfLines = 0
             label.textAlignment = .center
@@ -1297,6 +1324,7 @@ final class FileViewerCodeContentView: UIView {
         let detail = UILabel()
         detail.text = "Showing the first \(FileViewerController.formatBytes(UInt64(FileViewerController.textByteLimit)))."
         detail.font = UIFont.preferredFont(forTextStyle: .footnote)
+        detail.adjustsFontForContentSizeCategory = true
         detail.textColor = UIKitChassis.signal3
         let row = UIStackView(arrangedSubviews: [caption, detail, UIView()])
         row.axis = .horizontal
@@ -1700,11 +1728,13 @@ final class FileViewerMarkdownTextView: UITextView, UITextViewDelegate {
     private var destinations: [URL: String] = [:]
     var openLink: (String) -> Void = { _ in }
     private var lastMeasuredWidth: CGFloat = -1
+    private let attributed: FileViewerMarkdownAttributedText
 
     init(
         attributed: FileViewerMarkdownAttributedText,
         openLink: @escaping (String) -> Void
     ) {
+        self.attributed = attributed
         super.init(frame: .zero, textContainer: nil)
         backgroundColor = .clear
         isEditable = false
@@ -1721,6 +1751,15 @@ final class FileViewerMarkdownTextView: UITextView, UITextViewDelegate {
         accessibilityLabel = attributed.text.string
         setContentHuggingPriority(.required, for: .vertical)
         setContentCompressionResistancePriority(.required, for: .vertical)
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (view: FileViewerMarkdownTextView, _: UITraitCollection) in
+            // TextKit resolves an attributed string's dynamic inks when the
+            // text is set, so an appearance flip only reaches a rendered
+            // block by re-feeding it. Blocks the reader has not scrolled to
+            // are not built yet and resolve against the new appearance when
+            // they mount.
+            view.attributedText = view.attributed.text
+        }
     }
 
     @available(*, unavailable)
@@ -1748,23 +1787,46 @@ final class FileViewerMarkdownTextView: UITextView, UITextViewDelegate {
         in characterRange: NSRange,
         interaction: UITextItemInteraction
     ) -> Bool {
+        // Only an actual activation opens the link. UIKit also asks with
+        // `.presentActions` and `.preview` while a long press is building its
+        // menu, and answering those would raise the confirmation sheet from a
+        // gesture that used to offer text selection instead. `false` keeps the
+        // system's own link menu (which would bypass the sheet) out of the way.
+        guard interaction == .invokeDefaultAction else { return false }
         openLink(destinations[URL] ?? URL.absoluteString)
         return false
     }
 }
 
 @MainActor
-final class FileViewerMarkdownContentView: UIView {
+final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
+    /// Blocks mount progressively — enough to fill the viewport plus
+    /// `mountAhead`, then more as the reader scrolls — because each one is a
+    /// full TextKit surface and a document may hold thousands of them
+    /// (`FileViewerController.textByteLimit` is 1.5 MB). This is the UIKit
+    /// spelling of the `LazyVStack` this screen replaced, and the smallest
+    /// design that bounds the work: appending in order keeps the geometry
+    /// above the reader exact, so no block ever needs an estimated height,
+    /// and mounted blocks are kept (never recycled) so scrolling back is
+    /// instant and a live text selection survives.
+    private static let mountAhead: CGFloat = 600
+    private static let mountBatch = 8
+    private static let maximumMountPasses = 24
+
     var openLink: (String) -> Void = { _ in }
     private(set) var scrollView = UIScrollView()
     private(set) var blockStack = UIStackView()
     private var blocks: [MarkdownBlock] = []
+    private var mountedCount = 0
+    private var mounting = false
+    private var pendingRestoreOffset: CGFloat?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = UIKitChassis.screen
         scrollView.backgroundColor = UIKitChassis.screen
         scrollView.alwaysBounceVertical = true
+        scrollView.delegate = self
         addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -1812,11 +1874,47 @@ final class FileViewerMarkdownContentView: UIView {
             blockStack.removeArrangedSubview(child)
             child.removeFromSuperview()
         }
-        for block in blocks { blockStack.addArrangedSubview(makeBlock(block)) }
-        setNeedsLayout()
-        layoutIfNeeded()
+        mountedCount = 0
+        // The QUIET watch swap keeps the reader where they were, so the fill
+        // has to reach the restored offset before it can be applied.
+        pendingRestoreOffset = oldOffset.y
+        mountBlocksIfNeeded()
+        pendingRestoreOffset = nil
         let maximum = max(0, scrollView.contentSize.height - scrollView.bounds.height)
         scrollView.contentOffset = CGPoint(x: 0, y: min(oldOffset.y, maximum))
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // A width or height change moves the fill line — the pane sizes this
+        // view only after `apply(blocks:)` has already run.
+        mountBlocksIfNeeded()
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        mountBlocksIfNeeded()
+    }
+
+    private func mountBlocksIfNeeded() {
+        guard !mounting, mountedCount < blocks.count else { return }
+        mounting = true
+        defer { mounting = false }
+        var passes = 0
+        while mountedCount < blocks.count, passes < Self.maximumMountPasses {
+            passes += 1
+            let reach = max(scrollView.contentOffset.y, pendingRestoreOffset ?? 0)
+                + max(scrollView.bounds.height, 1)
+                + Self.mountAhead
+            guard scrollView.contentSize.height < reach else { break }
+            let end = min(mountedCount + Self.mountBatch, blocks.count)
+            while mountedCount < end {
+                blockStack.addArrangedSubview(makeBlock(blocks[mountedCount]))
+                mountedCount += 1
+            }
+            // Resolve the new content height before deciding on another batch.
+            scrollView.setNeedsLayout()
+            scrollView.layoutIfNeeded()
+        }
     }
 
     private func makeBlock(_ block: MarkdownBlock) -> UIView {
@@ -1929,6 +2027,8 @@ final class FileViewerMarkdownContentView: UIView {
 @MainActor
 final class FileViewerMarkdownCodeFenceView: UIKitTallyBorderedView {
     private let fixedHeight: CGFloat
+    private let fenceText: NSAttributedString
+    private let textView = UITextView()
 
     init(language: CodeLanguage?, lines: [String]) {
         let highlighted = CodeHighlighter.highlight(
@@ -1962,15 +2062,21 @@ final class FileViewerMarkdownCodeFenceView: UIKitTallyBorderedView {
             if index < visualLines.count - 1 { text.append(NSAttributedString(string: "\n")) }
         }
         fixedHeight = ceil(font.lineHeight * CGFloat(visualLines.count)) + 20
+        fenceText = text
         super.init(frame: .zero)
         backgroundColor = UIKitChassis.chassis
         layer.cornerRadius = 6
         layer.cornerCurve = .continuous
         clipsToBounds = true
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (view: FileViewerMarkdownCodeFenceView, _: UITraitCollection) in
+            // Same rule as the prose blocks: TextKit caches the resolved
+            // token colors, so the fence has to be re-fed on a flip.
+            view.textView.attributedText = view.fenceText
+        }
 
         let scroll = UIScrollView()
         scroll.showsHorizontalScrollIndicator = false
-        let textView = UITextView()
         textView.backgroundColor = .clear
         textView.isEditable = false
         textView.isSelectable = true

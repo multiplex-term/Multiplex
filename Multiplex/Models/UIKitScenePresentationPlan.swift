@@ -203,29 +203,44 @@ struct UIKitSceneURLBuffer {
     }
 }
 
-/// A UISceneSession persists the delegate class that originally created it.
-/// After an in-place upgrade from the former SwiftUI lifecycle, UIKit can
-/// therefore reconnect `SwiftUI.AppSceneDelegate` even though the executable
-/// now has a UIKit `@main`, producing a permanently empty scene. The app
-/// delegate uses this pure policy to adopt only those legacy live scenes with
-/// a native delegate while every newly created session uses the manifest's
-/// UIKit configuration.
+/// A UISceneSession persists the delegate class that originally created it,
+/// and `UISceneSession.configuration` is read-only — that name is never
+/// rewritten. After an in-place upgrade from the former SwiftUI lifecycle
+/// UIKit therefore keeps trying to reconnect `SwiftUI.AppSceneDelegate` even
+/// though the executable now has a UIKit `@main`, producing a permanently
+/// empty scene unless the app delegate adopts it.
+///
+/// The question this answers is **who owns the scene**, deliberately not
+/// "which legacy fingerprint does it match". Fingerprint matching cannot hold:
+/// `configuration.delegateClass` resolves the persisted name through the ObjC
+/// runtime and answers *nil* whenever SwiftUI is not loaded in the process,
+/// and SwiftUI's presence here is accidental — the Release iOS binary does not
+/// link it directly and it arrives transitively through WidgetKit, one
+/// dependency change away from disappearing. A legacy-activity-type fallback
+/// erases itself for the same reason: the first adoption rewrites
+/// `stateRestorationActivity` to this app's own type, so the second launch
+/// matches nothing, installs no delegate, and leaves a blank window that only
+/// deleting the app can clear. What stays true in every one of those worlds is
+/// that a window scene no *native* delegate owns is this delegate's to adopt.
 enum UIKitLegacySceneMigrationPolicy {
     static let swiftUIDelegateClassName = "SwiftUI.AppSceneDelegate"
 
     static func requiresAdoption(
+        nativeDelegateClassName: String,
         configuredDelegateClassName: String?,
-        liveDelegateClassName: String?,
-        restorationActivity: NSUserActivity?
+        liveDelegateClassName: String?
     ) -> Bool {
-        if configuredDelegateClassName == swiftUIDelegateClassName
-            || liveDelegateClassName == swiftUIDelegateClassName {
-            return true
-        }
-        return configuredDelegateClassName == nil
-            && liveDelegateClassName == nil
-            && restorationActivity?.activityType
-                == SceneActivityCodec.legacyStateRestorationActivityType
+        // Already connected natively: UIKit drives this scene through
+        // `scene(_:willConnectTo:)` and adoption would fight its own delegate.
+        if liveDelegateClassName == nativeDelegateClassName { return false }
+        // Configured natively but not yet instantiated. Still UIKit's to
+        // connect, and replacing the delegate it is about to install would
+        // orphan the connection options that arrive with it.
+        if configuredDelegateClassName == nativeDelegateClassName { return false }
+        // Anything else — SwiftUI's serialized delegate, or a persisted class
+        // name this process can no longer resolve — leaves the scene with no
+        // owner at all. That is the blank-window case, and it is ours.
+        return true
     }
 }
 

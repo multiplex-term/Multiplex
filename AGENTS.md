@@ -322,7 +322,9 @@ headlessly; `SwiftTermView` logs each decision to the unified log
 ## Architecture
 
 ```
-SwiftUI: classic Deck window + N Terminal windows, or one adaptive Shell
+UIKit scene runtime (`MultiplexSceneDelegate` + `UIKitSceneRootViewController`;
+         SwiftUI survives ONLY where visionOS's public ornament API needs a
+         `View`): classic Deck window + N Terminal windows, or one adaptive Shell
          Shell = real FleetWall + one ordered TerminalWindowRoute tab set
          a terminal window/shell = ordered tabs; each tab a TerminalRoute
   BindController     Bind Host: the candidates Add Host ▸ BIND renders,
@@ -1206,12 +1208,19 @@ views.
   still connects on demand. Free host plumbing, not an agent-helper surface;
   the free-tier host limit remains an add-flow check, so disabling never
   buys back a host slot.
-- **"Back to deck" reuses the one deck scene**: the data-driven `WindowGroup`
-  always opens `DeckWindowRoute.main`, so `openWindow(id:value:)` raises the
-  matching deck instead of minting another; `DeckScene` also destroys a second
-  legacy/restored session. Keep visionOS on this SwiftUI route too — activating
-  its `UISceneSession` directly can reset a user-resized deck to the scene's
-  default size.
+- **"Back to deck" reuses the one deck scene**: `UIKitSceneRouting` resolves
+  DECK to `.activateExisting` whenever a deck session exists (legacy SwiftUI
+  and native restoration activities both decode), so the press raises the
+  matching deck instead of minting another; `DeckScene` also destroys a
+  second legacy/restored session. Raising an existing scene can never resize
+  it — a `UISceneSessionActivationRequest` cannot carry geometry (SDK
+  headers) — and only a scene *creation* (the activity's
+  `sceneRequestsInitialGeometry` marker) runs `configureGeometry`, which
+  resolves DEBUG env override → that kind's remembered last size
+  (`SceneWindowSizeStore`, fed by effective-geometry updates) → the authored
+  default. That ordering is what preserves SwiftUI `.defaultSize`'s advisory
+  semantics: an imperative `requestGeometryUpdate` on every create was
+  snapping user-resized windows back to the default.
   Symmetrically, a deck tile press focuses the window already attached to that
   session
   (`TerminalWorkspace.focusTab` → `WindowEntry.reveal` → controller
@@ -1897,18 +1906,24 @@ unchosen candidates stay here under `docs/landing/`.
   Paper/Ivory alternates recorded there). `chassis` stays an asset color so
   the launch screen hands off in either polarity. The user's appearance
   choice (`ThemeStore.appearance`: SYSTEM/LIGHT/DARK, Settings) is applied by
-  `PlatformChrome` through each scene window's `overrideUserInterfaceStyle` —
-  **never `preferredColorScheme`, which stops at presentation boundaries**:
-  with it, an open Settings sheet kept stale traits and the tokens inside
-  never flipped (user-reported). Window traits also drive the keyboard and
-  UIKit-hosted popovers. One nuance: **a visionOS sheet/popover hosts in its
-  own window, which follows a live override change but misses the override
-  already in place when it presents** — a fresh launch with LIGHT pinned
-  opened Settings dark (user-reported). Presented chassis surfaces therefore
-  carry `followsAppAppearance()` (bundled into `chassisSheetGround()`;
-  applicator in `Design/AppearanceApplicator.swift`), which re-applies the
-  same choice to whatever window hosts them — a no-op where presentations
-  share the scene window.
+  `UIKitSceneRootViewController.applyAppearance` through each scene window's
+  `overrideUserInterfaceStyle` — **never a mechanism that stops at
+  presentation boundaries** (SwiftUI's `preferredColorScheme` did; an open
+  Settings sheet kept stale traits, user-reported). Window traits also drive
+  the keyboard and UIKit-hosted popovers. Two nuances: **a visionOS
+  sheet/popover hosts in its own window, which misses the override already
+  in place when it presents** — a fresh launch with LIGHT pinned opened
+  Settings dark (user-reported) — and **a presented controller's own
+  override wins over its window's**, so an appearance snapshotted at present
+  time goes stale on the next flip. Presented chassis surfaces therefore
+  adopt `AppAppearanceFollowing` (Chassis.swift, the UIKit heir of the
+  retired `followsAppAppearance()`): `followAppAppearance(themes)` observes
+  `ThemeStore.appearance` and re-applies it live to the controller, its
+  navigation stack, and whatever window hosts them; a presenter with no
+  store seeds from the scene window's applied style instead. Never write
+  `.unspecified` over a scene window that carries a pinned override — the
+  deck's guide sheets shipped doing exactly that and reset the whole
+  window's appearance.
   Components live in `Chassis.swift`: `ChassisLabel` (compressed caps
   — rails, tile names, UMD titles), `ChassisChip`/`ChassisBadge` (square
   actions), `TallyLamp` (captioned state lamp), `ChassisSwitch` (compact square
@@ -1925,15 +1940,18 @@ unchosen candidates stay here under `docs/landing/`.
   byte-identically). `ChassisLabel` scales its size+kerning together, and
   type-locked accents (badge icon slot, lamp dot) ride the same scale while
   control geometry (padding, key sizes, switch tracks) deliberately stays
-  authored. Semantic text styles (`.footnote`…) keep Dynamic Type and get
-  the equivalent Mac boost once at the scene root (`PlatformChrome`'s
-  `dynamicTypeSize(.xxLarge)`); fixed-size fonts ignore Dynamic Type, so
-  the two mechanisms never compound.
-- **visionOS hover**: use `chassisHover(_:)` on every custom Button/Menu —
-  and it must sit on the Button itself, NOT its label (the system resolves
-  the hover shape where the effect attaches; a label-level
-  `contentShape(.hoverEffect,…)` is silently ignored and you get the default
-  rounded platter).
+  authored. Semantic text styles (`.footnote`…) keep Dynamic Type — in
+  UIKit that means `preferredFont(forTextStyle:)` PLUS
+  `adjustsFontForContentSizeCategory = true` on the label — and get the
+  equivalent Mac boost once at the scene root (the root controller's
+  `traitOverrides.preferredContentSizeCategory`); fixed-size fonts ignore
+  Dynamic Type, so the two mechanisms never compound.
+- **visionOS hover**: set `hoverStyle` (`UIHoverStyle`, square
+  `.rect(cornerRadius: 2)` for chassis controls) on every custom
+  button/menu — and it must sit on the CONTROL itself, NOT a subview or
+  label (the system resolves the hover shape where the style attaches; a
+  label-level shape is silently ignored and you get the default rounded
+  platter — the same trap SwiftUI's `chassisHover(_:)` guarded).
 - **Terminal surface colors are user preference, not identity**: they come
   from the selected `TerminalTheme` (wall SETTINGS chip), never `Theme`
   tokens. **Each appearance keeps its own selection** —
@@ -1943,9 +1961,9 @@ unchosen candidates stay here under `docs/landing/`.
   house trio `tallyFrost`/`tallyPaper`/`tallyIvory` is contrast-tested in
   `TerminalThemeTests`). Settings rows edit the slot of the appearance on
   screen; chrome keeps the chassis whatever the theme. Open terminals re-skin
-  live — `SwiftTermView.updateUIView` re-applies when the theme value
-  changes, and a scheme flip re-resolves the slot through `TerminalPane`'s
-  `colorScheme`. `keyboardAppearance` stays `.default` — the keyboard belongs
+  live — the terminal container re-applies when the theme value changes,
+  and a scheme flip re-resolves the slot through the pane's trait
+  collection (`TerminalPaneUIKit`). `keyboardAppearance` stays `.default` — the keyboard belongs
   to the chassis appearance, not the terminal theme (a light theme under dark
   chrome keeps a dark keyboard; user-reported). tmux's own status line is
   left to the user's config on purpose (no `status-style` injection).

@@ -302,6 +302,7 @@ final class DeckWindowViewController: UIViewController {
     private var lastDenialRevision: Int?
     private var lastSceneActive: Bool?
     private var lifecycleTasks: [Task<Void, Never>] = []
+    private var cloudRefreshTask: Task<Void, Never>?
     private var externalActionCoordinator: ExternalActionUIKitCoordinator?
     #if DEBUG
     private var debugAutomationStarted = false
@@ -310,6 +311,13 @@ final class DeckWindowViewController: UIViewController {
     var pendingPresentationKinds: [PresentationKind] {
         pendingPresentations.map(\.kind)
     }
+
+    /// The adaptive shell owns the external-action coordinator, so a nested
+    /// deck builds none of its own (its opener destination is `.shell`). Its
+    /// sheets still occupy the shell's presenter, so the owner hears every
+    /// deck dismissal here and drains the queue the classic path drains
+    /// through `externalActionCoordinator` in `finishPresentation`.
+    var presentationDidEnd: (() -> Void)?
 
     var sceneIsActive: Bool { configuration.sceneIsActive }
     var isPreparedForRemoval: Bool { lifecycleStopped }
@@ -351,6 +359,7 @@ final class DeckWindowViewController: UIViewController {
 
     deinit {
         lifecycleTasks.forEach { $0.cancel() }
+        cloudRefreshTask?.cancel()
     }
 
     /// One update seam for classic scenes and the adaptive shell. Dependency
@@ -423,6 +432,8 @@ final class DeckWindowViewController: UIViewController {
         observationGeneration += 1
         lifecycleTasks.forEach { $0.cancel() }
         lifecycleTasks.removeAll()
+        cloudRefreshTask?.cancel()
+        cloudRefreshTask = nil
         configuration.lifecycleDriver.suspendLocalNetwork()
         configuration.lifecycleDriver.suspendNetworkChanges()
         configuration.lifecycleDriver.endBindDiscovery()
@@ -458,6 +469,7 @@ final class DeckWindowViewController: UIViewController {
             hub: configuration.hub,
             networkChanges: configuration.networkChanges,
             workspace: configuration.workspace,
+            themes: configuration.themes,
             terminalOpener: configuration.terminalOpener,
             presentation: configuration.presentation,
             selectedTerminal: configuration.selectedTerminal,
@@ -492,10 +504,19 @@ final class DeckWindowViewController: UIViewController {
             guard let self else { return }
             await self.configuration.lifecycleDriver.rotatePendingBindKeys()
         })
-        lifecycleTasks.append(Task { [weak self] in
+        refreshHostsFromCloud()
+    }
+
+    /// Every foreground refreshes, and the scene reports one for each system
+    /// alert, app-switcher peek, and Control Center pull. One replaceable
+    /// handle keeps that from retaining a finished task per activation for
+    /// the life of the deck.
+    private func refreshHostsFromCloud() {
+        cloudRefreshTask?.cancel()
+        cloudRefreshTask = Task { [weak self] in
             guard let self else { return }
             await self.configuration.lifecycleDriver.refreshHostsFromCloud()
-        })
+        }
     }
 
     private func restartLifecycleServices(previous: DeckWindowConfiguration) {
@@ -622,10 +643,7 @@ final class DeckWindowViewController: UIViewController {
         defer { lastSceneActive = active }
         guard lastSceneActive != active else { return }
         if active {
-            lifecycleTasks.append(Task { [weak self] in
-                guard let self else { return }
-                await self.configuration.lifecycleDriver.refreshHostsFromCloud()
-            })
+            refreshHostsFromCloud()
         } else {
             configuration.lifecycleDriver.flushSnapshots()
         }
@@ -737,7 +755,7 @@ final class DeckWindowViewController: UIViewController {
             bind: configuration.bind,
             editing: host
         )
-        controller.appAppearance = configuration.themes.appearance
+        controller.followAppAppearance(configuration.themes)
         controller.onDismiss = { [weak self] in self?.dismissActivePresentation() }
         controller.onPresentationDismissed = { [weak self] in
             self?.presentationEndedExternally()
@@ -766,7 +784,7 @@ final class DeckWindowViewController: UIViewController {
 
     private func presentFAQ() {
         let controller = FAQViewController()
-        controller.appAppearance = configuration.themes.appearance
+        controller.followAppAppearance(configuration.themes)
         controller.onDone = { [weak self] in self?.dismissActivePresentation() }
         let navigation = makeNavigation(root: controller)
         beginPresentation(navigation, kind: .faq, usesOwnerDelegate: true)
@@ -774,7 +792,7 @@ final class DeckWindowViewController: UIViewController {
 
     private func presentPaywall() {
         let controller = ProPaywallViewController(entitlements: configuration.entitlements)
-        controller.appAppearance = configuration.themes.appearance
+        controller.followAppAppearance(configuration.themes)
         controller.onDone = { [weak self] in self?.dismissActivePresentation() }
         let navigation = makeNavigation(root: controller)
         beginPresentation(navigation, kind: .paywall, usesOwnerDelegate: true)
@@ -857,6 +875,7 @@ final class DeckWindowViewController: UIViewController {
         activePresentationKind = nil
         schedulePresentationRetry()
         externalActionCoordinator?.presenterDidBecomeAvailable()
+        presentationDidEnd?()
     }
 
     private func schedulePresentationRetry() {

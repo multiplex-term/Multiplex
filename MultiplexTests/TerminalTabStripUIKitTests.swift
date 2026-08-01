@@ -139,6 +139,54 @@ final class TerminalTabStripUIKitTests: XCTestCase {
         XCTAssertEqual(replacementActivations, [id])
     }
 
+    /// Status churn and tab switches must not cancel a press already tracking
+    /// one of these controls, so a render that changes only what a cell wears
+    /// mutates it instead of rebuilding the row.
+    func testStatusAndActiveChurnMutateCellsInPlace() throws {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        let controller = TerminalSessionController(
+            route: TerminalRoute(hostID: host.id, mode: .attach(sessionName: "main")),
+            host: host
+        )
+        let id = UUID()
+        let view = TerminalTabStripView()
+        apply(to: view, items: [
+            .init(id: id, title: "main", controller: nil, isActive: false),
+        ])
+        let cell = try XCTUnwrap(view.cells.first)
+        let dot = try XCTUnwrap(cell.dotView)
+        let label = cell.sourceLabel
+        XCTAssertEqual(cell.tallyState, .ended)
+
+        apply(to: view, items: [
+            .init(id: id, title: "main", controller: controller, isActive: false),
+        ])
+        XCTAssertTrue(view.cells[0] === cell)
+        XCTAssertTrue(cell.dotView === dot)
+        XCTAssertEqual(cell.tallyState, .connecting)
+
+        apply(to: view, items: [
+            .init(id: id, title: "agent", controller: controller, isActive: false),
+        ])
+        XCTAssertTrue(view.cells[0] === cell)
+        XCTAssertTrue(cell.sourceLabel === label)
+        XCTAssertEqual(cell.sourceLabel.accessibilityLabel, "agent")
+
+        apply(to: view, items: [
+            .init(id: id, title: "agent", controller: controller, isActive: true),
+        ])
+        XCTAssertTrue(view.cells[0] === cell)
+        XCTAssertTrue(cell.accessibilityTraits.contains(.selected))
+        XCTAssertEqual(cell.accessibilityLabel, "agent tab, active")
+        XCTAssertEqual(cell.sourceLabel.accessibilityLabel, "agent")
+
+        // Only a changed identity list is allowed to rebuild the row.
+        apply(to: view, items: [
+            .init(id: UUID(), title: "agent", controller: controller, isActive: true),
+        ])
+        XCTAssertFalse(view.cells[0] === cell)
+    }
+
     func testCellsEnableTouchContextMenuInteraction() throws {
         let id = UUID()
         let view = configuredView(items: [
@@ -219,6 +267,14 @@ final class TerminalTabStripUIKitTests: XCTestCase {
         items: [TerminalTabStrip.Item]
     ) -> TerminalTabStripView {
         let view = TerminalTabStripView()
+        apply(to: view, items: items)
+        return view
+    }
+
+    private func apply(
+        to view: TerminalTabStripView,
+        items: [TerminalTabStrip.Item]
+    ) {
         view.apply(
             items: items,
             allowsSplit: true,
@@ -226,7 +282,6 @@ final class TerminalTabStripUIKitTests: XCTestCase {
             split: { _ in },
             close: { _ in }
         )
-        return view
     }
 
     private func menuTitles(_ menu: UIMenu) -> [String] {

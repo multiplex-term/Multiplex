@@ -5,12 +5,13 @@ import UIKit
 /// Frequently asked questions, opened from the deck's FAQ chip. The screen and
 /// all of its content are UIKit.
 @MainActor
-final class FAQViewController: UIViewController {
+final class FAQViewController: UIViewController, AppAppearanceFollowing {
     var onDone: (() -> Void)?
 
     var appAppearance = AppAppearance.system {
-        didSet { applyAppearance() }
+        didSet { applyAppAppearance() }
     }
+    let appAppearanceFollower = AppAppearanceFollower()
 
     private let scrollView = UIScrollView()
     private let contentStack = UIStackView()
@@ -37,12 +38,12 @@ final class FAQViewController: UIViewController {
         navigationItem.rightBarButtonItem = done
 
         configureContent()
-        applyAppearance()
+        applyAppAppearance()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        applyAppearance()
+        applyAppAppearance()
     }
 
     private func configureContent() {
@@ -122,22 +123,6 @@ final class FAQViewController: UIViewController {
             detail: entry.postscript,
             contentView: rowStack
         )
-    }
-
-    private func applyAppearance() {
-        let style: UIUserInterfaceStyle
-        switch appAppearance.resolvedOverride {
-        case nil: style = .unspecified
-        case .light: style = .light
-        case .dark: style = .dark
-        }
-
-        overrideUserInterfaceStyle = style
-        navigationController?.overrideUserInterfaceStyle = style
-        viewIfLoaded?.window?.overrideUserInterfaceStyle = style
-        if let navigationBar = navigationController?.navigationBar {
-            UIKitChassis.configureSheetNavigationBar(navigationBar)
-        }
     }
 
     @objc private func donePressed() {

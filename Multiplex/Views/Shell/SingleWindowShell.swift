@@ -234,6 +234,8 @@ final class SingleWindowShellViewController: UIViewController {
     private var externalCoordinator: ExternalActionUIKitCoordinator?
     private var routeObservationGeneration = 0
     private var layoutAnimator: UIViewPropertyAnimator?
+    private var layoutCompletion: (() -> Void)?
+    private var isApplyingLayoutChanges = false
     private var targetLayoutMetrics: SingleWindowShellLayoutMetrics?
     private var testLayoutInput: (
         size: CGSize,
@@ -447,6 +449,7 @@ final class SingleWindowShellViewController: UIViewController {
         routeObservationGeneration &+= 1
         layoutAnimator?.stopAnimation(true)
         layoutAnimator = nil
+        layoutCompletion = nil
         externalCoordinator?.detach()
         externalCoordinator = nil
         #if os(iOS)
@@ -602,7 +605,14 @@ final class SingleWindowShellViewController: UIViewController {
         let controller = deckFactory(shellState, actions)
         deckController = controller
         install(controller, in: shellRootView.deckContainer)
-        (controller as? DeckWindowViewController)?.setAppLocked(appLocked)
+        if let deck = controller as? DeckWindowViewController {
+            deck.setAppLocked(appLocked)
+            // Deck sheets present from this shell's presenter, so their
+            // dismissal is what frees the shell-owned external-action queue.
+            deck.presentationDidEnd = { [weak self] in
+                self?.externalCoordinator?.presenterDidBecomeAvailable()
+            }
+        }
         updateNativeDeckController()
     }
 
@@ -615,6 +625,20 @@ final class SingleWindowShellViewController: UIViewController {
             let controller = terminalFactory(shellState, actions)
             terminalController = controller
             install(controller, in: shellRootView.terminalContainer)
+            // Every caller here follows with an animated `applyLayout`, whose
+            // changes block resolves this subtree's first layout pass inside a
+            // UIViewPropertyAnimator — so every freshly installed subview
+            // would spring out of `.zero` at the container's top-left (labels
+            // stacked on the origin, the rail riding high, a clipped panel).
+            // Settle its resting geometry first; only the slide animates.
+            // The flag keeps a layout pass this resolution reaches from
+            // committing the caller's still-pending animated transition
+            // unanimated — the same re-entrancy `applyLayout` already guards.
+            isApplyingLayoutChanges = true
+            UIView.performWithoutAnimation {
+                shellRootView.terminalContainer.layoutIfNeeded()
+            }
+            isApplyingLayoutChanges = false
             (controller as? TerminalWindowViewController)?.setAppLocked(appLocked)
         } else {
             if let controller = terminalController {
@@ -651,6 +675,7 @@ final class SingleWindowShellViewController: UIViewController {
     /// interactive visionOS chrome behind the veil.
     func setAppLocked(_ locked: Bool) {
         appLocked = locked
+        externalCoordinator?.setAppLocked(locked)
         (deckController as? DeckWindowViewController)?.setAppLocked(locked)
         (terminalController as? TerminalWindowViewController)?.setAppLocked(locked)
     }
@@ -716,7 +741,10 @@ final class SingleWindowShellViewController: UIViewController {
         animated: Bool,
         completion: (() -> Void)? = nil
     ) {
-        guard isViewLoaded else { return }
+        // Resolving the containers' children inside the transition below runs
+        // a layout pass, whose containment bookkeeping re-enters here with the
+        // geometry already committed above it.
+        guard isViewLoaded, !isApplyingLayoutChanges else { return }
         let metrics = resolvedLayoutMetrics()
         if !animated,
            layoutAnimator?.isRunning == true,
@@ -743,7 +771,31 @@ final class SingleWindowShellViewController: UIViewController {
 
         let changes = { [weak self] in
             guard let self else { return }
+            self.isApplyingLayoutChanges = true
             self.shellRootView.apply(metrics)
+            // The deck and terminal controller views are pinned to those
+            // containers with constraints, so a container's new bounds reach
+            // them only at the next layout pass — outside this transaction.
+            // Resolve it here or the rail toggle snaps their content to its
+            // final width while the container is still sliding.
+            self.shellRootView.layoutIfNeeded()
+            self.isApplyingLayoutChanges = false
+        }
+        // `stopAnimation(true)` retires an animator without running its
+        // completions, so an interrupted transition would strand the caller's
+        // state cleanup. Carry it to whichever pass finally settles the
+        // layout — the interruption coverage SwiftUI's `.removed` completion
+        // criteria gave this transition before.
+        let pending = layoutCompletion
+        layoutCompletion = nil
+        let settled: (() -> Void)?
+        if pending != nil || completion != nil {
+            settled = {
+                pending?()
+                completion?()
+            }
+        } else {
+            settled = nil
         }
         let shouldAnimate = animated
             && !shellState.reduceMotion
@@ -752,7 +804,7 @@ final class SingleWindowShellViewController: UIViewController {
             layoutAnimator?.stopAnimation(true)
             layoutAnimator = nil
             changes()
-            completion?()
+            settled?()
             return
         }
 
@@ -763,10 +815,12 @@ final class SingleWindowShellViewController: UIViewController {
             animations: changes
         )
         layoutAnimator = animator
+        layoutCompletion = settled
         animator.addCompletion { [weak self] _ in
             guard let self, self.layoutAnimator === animator else { return }
             self.layoutAnimator = nil
-            completion?()
+            self.layoutCompletion = nil
+            settled?()
         }
         animator.startAnimation()
     }
@@ -946,8 +1000,35 @@ extension SingleWindowShellViewController: UIGestureRecognizerDelegate {
         guard gestureRecognizer === backSwipeRecognizer,
               backSwipeRecognizer.isEnabled
         else { return false }
+        // The recognizer lives on the window and cancels touches in view, so
+        // everything sitting inside the left grab region is its to steal —
+        // including the tab strip's leading cells and the UMD's own ‹ DECK
+        // control, which a press with a few points of rightward drift then
+        // never reaches. Those two are app chrome with their own actions, so
+        // the edge gesture declines them outright; over the terminal pane it
+        // keeps its first refusal on horizontal movement.
+        if isShellChromeTouch(touch.view) {
+            initialTouchTerminal = nil
+            return false
+        }
         initialTouchTerminal = terminalView(containing: touch.view)
         return initialTouchTerminal?.hasActiveSelection != true
+    }
+
+    /// Walks up from the touched view: a cell is nested several levels inside
+    /// its strip, and a UMD control inside its bar's stacks.
+    private func isShellChromeTouch(_ view: UIView?) -> Bool {
+        var candidate = view
+        while let current = candidate {
+            if current is TerminalTabStripView
+                || current is TerminalTabScrollView
+                || current is UMDBarRootView
+                || current is ViewportUMDRootView {
+                return true
+            }
+            candidate = current.superview
+        }
+        return false
     }
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -1107,6 +1188,7 @@ final class SingleWindowShellEmptyTerminalView: UIView {
         let detail = UILabel()
         detail.text = "Choose a session from the deck to attach it here."
         detail.font = .preferredFont(forTextStyle: .footnote)
+        detail.adjustsFontForContentSizeCategory = true
         detail.textColor = UIKitChassis.signal2
         detail.textAlignment = .center
         detail.numberOfLines = 0

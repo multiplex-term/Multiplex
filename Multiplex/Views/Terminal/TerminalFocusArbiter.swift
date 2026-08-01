@@ -200,12 +200,13 @@ enum TerminalFocusArbiter {
             }
             return
         }
-        // Foregrounding is not an ownership election. On iPadOS and
-        // visionOS several scenes activate together; allowing a nil owner to
-        // be claimed here makes notification order choose an arbitrary
-        // window. Fresh/live panes and explicit tab/window interactions use
-        // `claim` directly.
-        guard current === view else { return }
+        // An empty ownership IS re-elected here, on purpose: the two ways the
+        // app-wide owner goes nil have no other claim site. Releasing the app
+        // lock's `inputSuppressed` cleared it, and closing the focused window
+        // deallocated its TerminalView out of this weak reference — in both
+        // cases the terminal the user is looking at would otherwise sit there
+        // with no keyboard until they tap its grid.
+        guard current === view || current == nil else { return }
         claim(view)
     }
 

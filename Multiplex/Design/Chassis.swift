@@ -1,3 +1,4 @@
+import Observation
 import UIKit
 
 // MARK: - UIKit chassis primitives
@@ -357,4 +358,175 @@ final class UIKitTallyFormSectionView: UIView {
         detailContainer.isHidden = detail == nil
     }
 
+}
+
+// MARK: - Appearance follow-through
+
+extension AppAppearance {
+    /// The style a scene carries for this choice — what
+    /// `UIKitSceneRootViewController` writes onto its root and window.
+    var interfaceStyle: UIUserInterfaceStyle {
+        switch resolvedOverride {
+        case nil: return .unspecified
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+
+    /// Reads the choice back off a scene window. The scene root writes exactly
+    /// the three styles above, so the mapping is exact in both directions —
+    /// which is what lets a presenter with no `ThemeStore` in hand still hand
+    /// a sheet the choice the scene is painting with.
+    init(sceneWindowStyle style: UIUserInterfaceStyle) {
+        switch style {
+        case .light: self = .light
+        case .dark: self = .dark
+        default: self = .system
+        }
+    }
+}
+
+/// Keeps one presented surface in step with `ThemeStore.appearance`.
+/// Observation callbacks are one-shot, so each pass registers the next — the
+/// same loop `UIKitSceneRootViewController` runs for the scene window.
+@MainActor
+final class AppAppearanceFollower {
+    private weak var themes: ThemeStore?
+    private var apply: ((AppAppearance) -> Void)?
+    private var generation = 0
+
+    /// Applies the current choice now and re-applies it on every later change.
+    func follow(_ themes: ThemeStore, apply: @escaping (AppAppearance) -> Void) {
+        self.themes = themes
+        self.apply = apply
+        generation &+= 1
+        observe(generation: generation)
+    }
+
+    /// Drops the link — a surface handed a one-off appearance instead.
+    func stop() {
+        generation &+= 1
+        themes = nil
+        apply = nil
+    }
+
+    private func observe(generation: Int) {
+        guard generation == self.generation, let themes, let apply else { return }
+        let appearance = withObservationTracking {
+            themes.appearance
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.observe(generation: generation)
+            }
+        }
+        apply(appearance)
+    }
+}
+
+/// A presented chassis surface that follows the app's appearance choice — the
+/// UIKit counterpart of the retired SwiftUI `followsAppAppearance()`.
+///
+/// Two things make this structural rather than per-call-site. A sheet's own
+/// `overrideUserInterfaceStyle` outranks its window's, so a surface that only
+/// snapshots the choice as it is presented never hears a flip made while it is
+/// open (Settings in another iPad window, or the debug appearance hook). And a
+/// presenter that forgets to hand the choice over leaves the default `.system`
+/// writing `.unspecified` over the scene's pinned override, dropping LIGHT or
+/// DARK for the whole window. Conformers keep their `appAppearance` property —
+/// assigning it directly still works; the link just keeps assigning it.
+@MainActor
+protocol AppAppearanceFollowing: AnyObject {
+    /// The choice this surface paints with.
+    var appAppearance: AppAppearance { get set }
+    /// Storage for the link — one line per conformer:
+    /// `let appAppearanceFollower = AppAppearanceFollower()`.
+    var appAppearanceFollower: AppAppearanceFollower { get }
+}
+
+extension AppAppearanceFollowing where Self: UIViewController {
+    /// Live link: the surface paints the current choice and keeps following it.
+    func followAppAppearance(_ themes: ThemeStore) {
+        appAppearanceFollower.follow(themes) { [weak self] appearance in
+            self?.appAppearance = appearance
+        }
+    }
+
+    /// Store-free seed for a presenter that has no `ThemeStore` in hand: the
+    /// scene window the presenter lives in already carries the applied choice.
+    /// Exact, but a snapshot — it cannot follow a later flip.
+    func adoptAppAppearance(presentedFrom presenter: UIViewController) {
+        appAppearanceFollower.stop()
+        appAppearance = AppAppearance(
+            sceneWindowStyle: presenter.viewIfLoaded?.window?.overrideUserInterfaceStyle
+                ?? .unspecified
+        )
+    }
+
+    /// Whichever of the two the presenter can supply.
+    func followAppAppearance(_ themes: ThemeStore?, presentedFrom presenter: UIViewController) {
+        if let themes {
+            followAppAppearance(themes)
+        } else {
+            adoptAppAppearance(presentedFrom: presenter)
+        }
+    }
+
+    /// The write a presented chassis surface makes: pin itself and the
+    /// navigation controller it is hosted in, then re-tint the opaque sheet
+    /// navigation bar. `pinsHostingChrome` is false for a pushed screen, whose
+    /// hosting chrome belongs to the root of that stack.
+    func applyAppAppearance(pinsHostingChrome: Bool = true) {
+        let style = appAppearance.interfaceStyle
+        overrideUserInterfaceStyle = style
+        if pinsHostingChrome {
+            navigationController?.overrideUserInterfaceStyle = style
+            pinHostingWindow(to: style)
+        }
+        if let navigationBar = navigationController?.navigationBar {
+            UIKitChassis.configureSheetNavigationBar(navigationBar)
+        }
+    }
+
+    /// visionOS hosts a sheet in a window of its own, which misses the override
+    /// already in place when it presents — that window needs the write. A sheet
+    /// sharing the scene's window (every iOS presentation) must not clear an
+    /// override it does not own; the scene root writes that one.
+    private func pinHostingWindow(to style: UIUserInterfaceStyle) {
+        guard let window = viewIfLoaded?.window else { return }
+        guard style != .unspecified
+            || window !== presentingViewController?.viewIfLoaded?.window
+        else { return }
+        window.overrideUserInterfaceStyle = style
+    }
+}
+
+// MARK: - Keyboard clearance
+
+extension UIViewController {
+    /// Spends a docked keyboard as CONTENT inset on a form's scroll view, never
+    /// as that scroll view's frame — the one shape every chassis form shares.
+    ///
+    /// The trap it replaces: `keyboardLayoutGuide` rests on the BOTTOM
+    /// SAFE-AREA edge while no keyboard is up, so a scroll view whose frame is
+    /// pinned to the guide ends there — content clipped mid-glyph above a dead
+    /// home-indicator band (user-reported on the New Session sheet). The frame
+    /// spans the window instead and `contentInsetAdjustmentBehavior` already
+    /// pays the safe area, so only the overlap BEYOND that band is added here
+    /// and the two can never charge for it twice. Undocked keyboards leave the
+    /// guide where it is (`followsUndockedKeyboard` is false), which is the
+    /// app's floating-keyboard rule for free.
+    ///
+    /// Call it from `viewDidLayoutSubviews`: the guide's own constants dirty
+    /// this view's layout, so the pass runs inside the keyboard's animation and
+    /// the inset rides along with it.
+    func applyKeyboardContentInset(to scrollView: UIScrollView) {
+        let guideTop = view.keyboardLayoutGuide.layoutFrame.minY
+        // A guide the engine has not measured yet reports an empty frame; a
+        // resting one always sits below the window's own top edge.
+        guard !view.bounds.isEmpty, guideTop > 0 else { return }
+        let inset = max(0, view.bounds.maxY - guideTop - view.safeAreaInsets.bottom)
+        guard abs(scrollView.contentInset.bottom - inset) > 0.5 else { return }
+        scrollView.contentInset.bottom = inset
+        scrollView.verticalScrollIndicatorInsets.bottom = inset
+    }
 }

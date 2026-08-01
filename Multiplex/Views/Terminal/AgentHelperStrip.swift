@@ -53,6 +53,14 @@ final class AgentHelperStripViewController: UIViewController,
         let safeAreaRight: CGFloat
     }
 
+    /// What the live Observation registration is armed against. Everything
+    /// else a configuration carries is read at render time, so only a move
+    /// here needs a fresh — and uncancellable — tracking.
+    private struct ObservationKey: Equatable {
+        let agent: AgentKind
+        let historyController: ObjectIdentifier?
+    }
+
     nonisolated static let dockedHeight: CGFloat = 48
     nonisolated static let chipHeight: CGFloat = 22
     nonisolated static let maximumFloatingWidth: CGFloat = 760
@@ -65,6 +73,7 @@ final class AgentHelperStripViewController: UIViewController,
     private weak var customPanelController: CustomAgentCommandPanelViewController?
     private weak var historyPanelController: AgentHistoryPanelViewController?
     private var observationGeneration = 0
+    private var observedKey: ObservationKey?
     private var renderedKey: RenderKey?
     private(set) var historyAvailable = false
     #if DEBUG
@@ -94,6 +103,15 @@ final class AgentHelperStripViewController: UIViewController,
             dismissOpenPanels(animated: false)
         }
         guard isViewLoaded else { return }
+        // A tracking is one-shot and cannot be cancelled, while the parent
+        // re-renders on every probe tick — re-arming here stranded one dead
+        // registration per render on a controller whose status stays `.live`
+        // for hours. The live one still speaks for an unchanged identity, so
+        // routine updates only re-render.
+        guard observationKey != observedKey else {
+            renderIfNeeded(available: historyAvailable)
+            return
+        }
         observationGeneration &+= 1
         renderAndObserve(generation: observationGeneration)
     }
@@ -105,6 +123,8 @@ final class AgentHelperStripViewController: UIViewController,
 
     func prepareForRemoval() {
         observationGeneration &+= 1
+        // The bump retires the live chain, so a later update must re-arm.
+        observedKey = nil
         dismissOpenPanels(animated: false)
         #if DEBUG
         for observer in debugObservers {
@@ -199,12 +219,21 @@ final class AgentHelperStripViewController: UIViewController,
         renderIfNeeded(available: available)
     }
 
+    private var observationKey: ObservationKey {
+        ObservationKey(
+            agent: configuration.agent,
+            historyController: configuration.historyController
+                .map(ObjectIdentifier.init)
+        )
+    }
+
     private func renderAndObserve(generation: Int? = nil) {
         let generation = generation ?? {
             observationGeneration &+= 1
             return observationGeneration
         }()
         guard generation == observationGeneration else { return }
+        observedKey = observationKey
 
         let available = withObservationTracking {
             configuration.agent == .claudeCode
@@ -307,7 +336,7 @@ final class AgentHelperStripViewController: UIViewController,
         rail.alignment = .center
         rail.spacing = 6
 
-        let scroll = UIScrollView()
+        let scroll = AgentHelperCommandScrollView()
         scroll.showsHorizontalScrollIndicator = false
         scroll.showsVerticalScrollIndicator = false
         scroll.alwaysBounceHorizontal = false
@@ -642,6 +671,28 @@ private final class AgentHelperStripRootView: UIKitTallyBorderedView {
             width: proposedWidth ?? ceil(measured.width + horizontalInsets),
             height: AgentHelperStripViewController.dockedHeight
         )
+    }
+}
+
+/// The command rail's scroller. Same contract as the tab rail's: a scroll
+/// view delays content touches by 150 ms and drops them if the finger drifts
+/// during that window, so an overflowing chip row loses ordinary presses.
+/// Track at once, and keep drag-to-scroll from a chip by answering the cancel
+/// question for controls, whose UIKit default (false) would otherwise pin the
+/// rail once touches are undelayed.
+@MainActor
+final class AgentHelperCommandScrollView: UIScrollView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        delaysContentTouches = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func touchesShouldCancel(in view: UIView) -> Bool {
+        if view is UIButton { return true }
+        return super.touchesShouldCancel(in: view)
     }
 }
 

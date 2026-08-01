@@ -134,7 +134,7 @@ final class ExternalActionUIKitCoordinator: NSObject,
                 request: request,
                 submit: { [weak router] action in router?.submit(action) }
             )
-            prompt.appAppearance = themes.appearance
+            prompt.followAppAppearance(themes)
             let navigation = UINavigationController(rootViewController: prompt)
             navigation.navigationBar.prefersLargeTitles = false
             navigation.view.backgroundColor = UIKitChassis.chassis

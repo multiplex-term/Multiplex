@@ -353,12 +353,22 @@ private final class TmuxShortcutPanelRootView: UIKitTallyBorderedView {
         fittingSize(for: width)
     }
 
+    /// The fitting width is a proposal, never a requirement: `contentStack` is
+    /// required-pinned to all four edges of this view, whose own width is set
+    /// by the popover (its autoresizing mask stays translated, so UIKit
+    /// synthesizes a REQUIRED width from the frame it currently has — zero
+    /// before the first layout, and the previous width for one pass after a
+    /// width change). Requiring a second, different width on top of those pins
+    /// is unsatisfiable, and Auto Layout resolves it by breaking the pins
+    /// instead: the grid solves to zero size and renders as empty bars until a
+    /// later clean pass heals it. A non-required proposal degrades the
+    /// measurement rather than the panel's layout.
     func fittingSize(for proposedWidth: CGFloat) -> CGSize {
         guard let contentStack else { return CGSize(width: proposedWidth, height: 28) }
         let contentWidth = max(0, proposedWidth - 28)
         let measured = contentStack.systemLayoutSizeFitting(
             CGSize(width: contentWidth, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
+            withHorizontalFittingPriority: .defaultHigh,
             verticalFittingPriority: .fittingSizeLevel
         )
         return CGSize(width: proposedWidth, height: ceil(measured.height + 28))

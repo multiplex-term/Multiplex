@@ -58,6 +58,11 @@ final class UIKitSceneRootViewController: UIViewController {
     private let sceneWindows: SceneWindowRouting
     private let platformChrome: UIKitPlatformChromePolicy
     private let handlesExternalActions: Bool
+    /// The UIKit equivalent of SwiftUI's `.windowStyle(.plain)`, which the
+    /// visionOS terminal scene shipped with: the system glass container is
+    /// hidden and this root paints nothing, so the content's own rounded
+    /// chassis is the whole window. Deck scenes keep the glass platter.
+    private let plainWindowBackground: Bool
 
     private var lockViewController: AppLockViewController?
     private var lockShieldWindow: UIWindow?
@@ -77,7 +82,8 @@ final class UIKitSceneRootViewController: UIViewController {
         bind: BindController,
         sceneWindows: SceneWindowRouting,
         platformChrome: UIKitPlatformChromePolicy = .current,
-        handlesExternalActions: Bool = true
+        handlesExternalActions: Bool = true,
+        plainWindowBackground: Bool = false
     ) {
         contentViewController = content
         self.themes = themes
@@ -87,6 +93,7 @@ final class UIKitSceneRootViewController: UIViewController {
         self.sceneWindows = sceneWindows
         self.platformChrome = platformChrome
         self.handlesExternalActions = handlesExternalActions
+        self.plainWindowBackground = plainWindowBackground
         lastHandledPendingSignal = externalActions.pendingSignal
         super.init(nibName: nil, bundle: nil)
     }
@@ -96,7 +103,13 @@ final class UIKitSceneRootViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = plainWindowBackground ? .clear : UIKitChassis.chassis
+        #if os(visionOS)
+        // The window resolves the container style from its root view
+        // controller, which is this one. The preference is fixed at init, so
+        // one request as the view loads under that window is enough.
+        setNeedsUpdateOfPreferredContainerBackgroundStyle()
+        #endif
         applyPlatformChrome()
         addChild(contentViewController)
         view.addSubview(contentViewController.view)
@@ -136,6 +149,16 @@ final class UIKitSceneRootViewController: UIViewController {
             hasContext: externalActions.hasContext
         )
     }
+
+    #if os(visionOS)
+    /// `.hidden` is what `.windowStyle(.plain)` compiled down to: the scene
+    /// drops its glass container and only what the app draws is visible.
+    /// `childViewControllerForPreferredContainerBackgroundStyle` stays nil,
+    /// so no mounted content controller can hand the platter back.
+    override var preferredContainerBackgroundStyle: UIContainerBackgroundStyle {
+        plainWindowBackground ? .hidden : super.preferredContainerBackgroundStyle
+    }
+    #endif
 
     deinit {
         observationGeneration &+= 1

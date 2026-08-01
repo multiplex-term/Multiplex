@@ -20,7 +20,19 @@ final class TerminalTabStripView: UIView {
             var canSplit: Bool
         }
 
+        /// What a cell's *anatomy* depends on: its identity and whether it
+        /// carries a tally dot at all. Everything else a render can change is
+        /// mutable in place.
+        struct Structure: Equatable {
+            var id: UUID
+            var isAuxiliary: Bool
+        }
+
         var cells: [Cell]
+
+        var structure: [Structure] {
+            cells.map { Structure(id: $0.id, isAuxiliary: $0.isAuxiliary) }
+        }
     }
 
     private(set) var cells: [TerminalTabCell] = []
@@ -32,6 +44,9 @@ final class TerminalTabStripView: UIView {
     private var split: (UUID) -> Void = { _ in }
     private var close: (UUID) -> Void = { _ in }
     private var configurationGeneration = 0
+    /// The session controllers the live observation registration covers, in
+    /// item order. `nil` until the first arming.
+    private var observedControllers: [ObjectIdentifier]?
     private var renderedKey: RenderKey?
 
     override init(frame: CGRect) {
@@ -58,13 +73,25 @@ final class TerminalTabStripView: UIView {
     /// The SwiftUI source let the source-label cells determine the strip's
     /// height. Keep that intrinsic measurement explicit so every host (the
     /// iOS rail and the visionOS ornament) consumes the same geometry.
+    ///
+    /// Arithmetic on purpose, never a constraint solve: the stack is
+    /// required-pinned to this frame-managed view, and asking that live
+    /// subtree to fit a zero proposal from inside a layout pass can COMMIT
+    /// the degenerate solve instead of rolling it back — every authored
+    /// constant came out multiplied by one tiny factor and the rail drew
+    /// stacked glyphs over dead hit regions until a bounds change (device
+    /// rotation) forced a fresh pass (user-reported).
     func fittingContentSize() -> CGSize {
-        let fitted = stackView.systemLayoutSizeFitting(
-            UIView.layoutFittingCompressedSize,
-            withHorizontalFittingPriority: .fittingSizeLevel,
-            verticalFittingPriority: .fittingSizeLevel
-        )
-        return CGSize(width: ceil(fitted.width), height: ceil(fitted.height))
+        guard !cells.isEmpty else { return .zero }
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+        for cell in cells {
+            let size = cell.intrinsicContentSize
+            width += size.width
+            height = max(height, size.height)
+        }
+        width += Self.cellSpacing * CGFloat(cells.count - 1)
+        return CGSize(width: ceil(width), height: ceil(height))
     }
 
     override var intrinsicContentSize: CGSize {
@@ -85,6 +112,20 @@ final class TerminalTabStripView: UIView {
         self.close = close
         accessibilityLabel = "\(items.count) tabs"
 
+        // The window re-renders this strip on every observed change of its
+        // own (a ~5 s host probe is enough), and an Observation registration
+        // can only be superseded, never cancelled — re-arming per render
+        // would strand one dead tracking per render against every tab's
+        // still-`.live` status. What the tracking actually covers is the tab
+        // controllers' identities, so re-arm only when that list changes and
+        // otherwise let the standing registration do its job, rendering from
+        // a plain (unregistered) read.
+        let tracked = trackedControllerIdentities()
+        guard tracked != observedControllers else {
+            render(states: items.map { TerminalTabTallyState(item: $0) })
+            return
+        }
+        observedControllers = tracked
         configurationGeneration &+= 1
         observeStatusesAndRender(generation: configurationGeneration)
     }
@@ -128,6 +169,15 @@ final class TerminalTabStripView: UIView {
         allowsSplit && items.count > 1 && items.contains(where: { $0.id == id })
     }
 
+    /// Everything `TerminalTabTallyState` reads observably is one session
+    /// controller's `status`, so this list is the whole tracked set.
+    private func trackedControllerIdentities() -> [ObjectIdentifier] {
+        items.compactMap { item in
+            guard !item.isAuxiliary, let controller = item.controller else { return nil }
+            return ObjectIdentifier(controller)
+        }
+    }
+
     /// Observation callbacks are one-shot. Each status change snapshots and
     /// re-arms the native strip, while a new item configuration invalidates
     /// callbacks registered for its predecessor.
@@ -156,7 +206,28 @@ final class TerminalTabStripView: UIView {
             )
         })
         guard renderedKey != key else { return }
+        let previousStructure = renderedKey?.structure
         renderedKey = key
+
+        // A cell is a UIControl a finger can already be tracking, and this
+        // strip re-renders on every observed status change (a ~5 s host probe
+        // is enough) and on every tab switch. Destroying and recreating the
+        // cells there cancels that in-flight touch, which is what makes a tab
+        // press read as dead. Nothing structural moved, so mutate in place.
+        if previousStructure == key.structure,
+           cells.count == key.cells.count,
+           items.count == key.cells.count {
+            for index in key.cells.indices {
+                cells[index].update(
+                    item: items[index],
+                    tallyState: states[index],
+                    canSplit: key.cells[index].canSplit
+                )
+            }
+            invalidateIntrinsicContentSize()
+            requestHostSizingPass()
+            return
+        }
 
         for arrangedSubview in stackView.arrangedSubviews {
             stackView.removeArrangedSubview(arrangedSubview)
@@ -179,6 +250,21 @@ final class TerminalTabStripView: UIView {
             return cell
         }
         invalidateIntrinsicContentSize()
+        requestHostSizingPass()
+    }
+
+    /// The host sizes this strip from `fittingContentSize()` during ITS OWN
+    /// layout pass (the window's `layoutNativeChrome`), and a tally-observed
+    /// render can change that size with no bounds change anywhere — nothing
+    /// else re-requests the pass, so a stale strip frame would stick until
+    /// rotation (user-reported). Dirty the whole ancestor chain so whichever
+    /// view the host actually lays out runs again.
+    private func requestHostSizingPass() {
+        var ancestor: UIView? = self
+        while let view = ancestor {
+            view.setNeedsLayout()
+            ancestor = view.superview
+        }
     }
 }
 
@@ -226,7 +312,7 @@ final class TerminalTabCell: UIControl {
     static let lampSize: CGFloat = 6
 
     let itemID: UUID
-    let tallyState: TerminalTabTallyState
+    private(set) var tallyState: TerminalTabTallyState
     private(set) var dotView: UIView?
     private(set) var sourceLabel: UIKitChassisLabel
 
@@ -234,7 +320,9 @@ final class TerminalTabCell: UIControl {
     private let makeMenu: () -> UIMenu
     private let split: () -> Void
     private let close: () -> Void
-    private let canSplit: Bool
+    private var canSplit: Bool
+    private var isActive: Bool
+    private var labelText: String
     private let contentStack = UIStackView()
 
     init(
@@ -253,22 +341,24 @@ final class TerminalTabCell: UIControl {
         self.split = split
         self.close = close
         self.canSplit = canSplit
+        isActive = item.isActive
+        labelText = Self.label(for: item)
         sourceLabel = UIKitChassisLabel(
-            item.hostName.map { "\(item.title) · \($0)" } ?? item.title,
+            labelText,
             size: 10,
-            color: item.isActive ? UIKitChassis.signal : UIKitChassis.signal2
+            color: Self.ink(isActive: item.isActive)
         )
         super.init(frame: .zero)
 
-        backgroundColor = item.isActive ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        backgroundColor = Self.ground(isActive: item.isActive)
         layer.borderWidth = 1
         refreshBorderAndLamp()
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 3))
         isContextMenuInteractionEnabled = true
 
         isAccessibilityElement = true
-        accessibilityTraits = item.isActive ? [.button, .selected] : .button
-        accessibilityLabel = "\(item.title) tab\(item.isActive ? ", active" : "")"
+        accessibilityTraits = Self.traits(isActive: item.isActive)
+        accessibilityLabel = Self.accessibilityLabel(for: item)
         accessibilityCustomActions = makeAccessibilityActions()
 
         contentStack.axis = .horizontal
@@ -319,15 +409,82 @@ final class TerminalTabCell: UIControl {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
+    /// In-place refresh for a cell whose identity and anatomy are unchanged.
+    /// The control itself survives, so a press already tracking it does too.
+    func update(
+        item: TerminalTabStrip.Item,
+        tallyState: TerminalTabTallyState,
+        canSplit: Bool
+    ) {
+        if self.canSplit != canSplit {
+            self.canSplit = canSplit
+            accessibilityCustomActions = makeAccessibilityActions()
+        }
+        if isActive != item.isActive {
+            isActive = item.isActive
+            backgroundColor = Self.ground(isActive: item.isActive)
+            accessibilityTraits = Self.traits(isActive: item.isActive)
+            // `UIKitChassisLabel` bakes its ink at init, so an active-ground
+            // change swaps the label. The cell — the control under the
+            // finger — is untouched.
+            labelText = Self.label(for: item)
+            replaceSourceLabel(color: Self.ink(isActive: item.isActive))
+        } else if labelText != Self.label(for: item) {
+            labelText = Self.label(for: item)
+            sourceLabel.setText(labelText)
+        }
+        accessibilityLabel = Self.accessibilityLabel(for: item)
+        guard self.tallyState != tallyState else { return }
+        self.tallyState = tallyState
+        dotView?.backgroundColor = tallyState.color
+        refreshLampShadow()
+    }
+
+    private func replaceSourceLabel(color: UIColor) {
+        let replacement = UIKitChassisLabel(labelText, size: 10, color: color)
+        replacement.isAccessibilityElement = false
+        if let index = contentStack.arrangedSubviews.firstIndex(of: sourceLabel) {
+            contentStack.insertArrangedSubview(replacement, at: index)
+        } else {
+            contentStack.addArrangedSubview(replacement)
+        }
+        contentStack.removeArrangedSubview(sourceLabel)
+        sourceLabel.removeFromSuperview()
+        sourceLabel = replacement
+    }
+
+    private static func label(for item: TerminalTabStrip.Item) -> String {
+        item.hostName.map { "\(item.title) · \($0)" } ?? item.title
+    }
+
+    private static func accessibilityLabel(for item: TerminalTabStrip.Item) -> String {
+        "\(item.title) tab\(item.isActive ? ", active" : "")"
+    }
+
+    private static func ink(isActive: Bool) -> UIColor {
+        isActive ? UIKitChassis.signal : UIKitChassis.signal2
+    }
+
+    private static func ground(isActive: Bool) -> UIColor {
+        isActive ? UIKitChassis.bezelHi : UIKitChassis.chassis
+    }
+
+    private static func traits(isActive: Bool) -> UIAccessibilityTraits {
+        isActive ? [.button, .selected] : .button
+    }
+
     override var intrinsicContentSize: CGSize {
-        let content = contentStack.systemLayoutSizeFitting(
-            UIView.layoutFittingCompressedSize,
-            withHorizontalFittingPriority: .fittingSizeLevel,
-            verticalFittingPriority: .fittingSizeLevel
-        )
+        // Arithmetic from the label's text measurement and the authored
+        // constants — contentStack is required-pinned to the edges, so the
+        // cell's size is fully determined without asking the engine. A
+        // nested zero-proposal fit here, running while the strip's own
+        // measurement was in flight, is what collapsed the whole rail.
+        let label = sourceLabel.intrinsicContentSize
+        let lamp = dotView == nil ? 0 : Self.lampSize
+        let lampWidth = dotView == nil ? 0 : Self.lampSize + Self.contentSpacing
         return CGSize(
-            width: ceil(content.width + Self.horizontalInset * 2),
-            height: ceil(content.height + Self.verticalInset * 2)
+            width: ceil(label.width + lampWidth + Self.horizontalInset * 2),
+            height: ceil(max(label.height, lamp) + Self.verticalInset * 2)
         )
     }
 

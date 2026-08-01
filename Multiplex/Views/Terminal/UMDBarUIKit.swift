@@ -992,8 +992,12 @@ final class UMDBarRootView: UIView {
         }
         let targetWidth = proposedWidth.map { max(0, $0 - horizontalInset) }
             ?? UIView.layoutFittingCompressedSize.width
+        // .defaultHigh, not .required: the content container is required-pinned
+        // to this bar's edges, and a required fitting width can only disagree
+        // with those pins by breaking one — degrading the measurement is safe,
+        // breaking the bar's internal layout draws its labels at the origin.
         let horizontalPriority: UILayoutPriority = proposedWidth == nil
-            ? .fittingSizeLevel : .required
+            ? .fittingSizeLevel : .defaultHigh
         let contentSize = contentView.systemLayoutSizeFitting(
             CGSize(
                 width: targetWidth,

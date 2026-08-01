@@ -9,7 +9,7 @@ import UIKit
 /// only presentation, scene-anchored purchase intent, restoration intent, and
 /// a live UIKit rendering of the store's observable state.
 @MainActor
-final class ProPaywallViewController: UIViewController {
+final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
     enum Metrics {
         static let contentMaximumWidth: CGFloat = 620
         static let outerInset: CGFloat = 26
@@ -32,8 +32,9 @@ final class ProPaywallViewController: UIViewController {
     var onDone: (() -> Void)?
 
     var appAppearance = AppAppearance.system {
-        didSet { applyAppearance() }
+        didSet { applyAppAppearance() }
     }
+    let appAppearanceFollower = AppAppearanceFollower()
 
     private(set) var contentStack = UIStackView()
     private(set) var purchaseButton = ProPaywallPurchaseButton()
@@ -61,7 +62,7 @@ final class ProPaywallViewController: UIViewController {
         configureNavigation()
         configureContent()
         observeEntitlements()
-        applyAppearance()
+        applyAppAppearance()
 
         storefrontTask = Task { @MainActor [weak entitlementStore = self.entitlements] in
             await entitlementStore?.loadStorefront()
@@ -70,7 +71,7 @@ final class ProPaywallViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        applyAppearance()
+        applyAppAppearance()
     }
 
     deinit {
@@ -419,22 +420,6 @@ final class ProPaywallViewController: UIViewController {
                 : "No Multiplex Pro purchase was found for this Apple ID."
         case .failed(let message):
             return message
-        }
-    }
-
-    private func applyAppearance() {
-        let style: UIUserInterfaceStyle
-        switch appAppearance.resolvedOverride {
-        case nil: style = .unspecified
-        case .light: style = .light
-        case .dark: style = .dark
-        }
-
-        overrideUserInterfaceStyle = style
-        navigationController?.overrideUserInterfaceStyle = style
-        viewIfLoaded?.window?.overrideUserInterfaceStyle = style
-        if let navigationBar = navigationController?.navigationBar {
-            UIKitChassis.configureSheetNavigationBar(navigationBar)
         }
     }
 

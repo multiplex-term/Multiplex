@@ -129,15 +129,16 @@ final class UIKitCopyableCommandField: UIKitTallyBorderedView {
 /// appearance switching are the exact UIKit counterparts of the former
 /// `NavigationStack` + `ScrollView` composition.
 @MainActor
-class UIKitHostGuideSheetViewController: UIViewController {
+class UIKitHostGuideSheetViewController: UIViewController, AppAppearanceFollowing {
     static let contentMaximumWidth: CGFloat = 560
     static let outerInset: CGFloat = 18
     static let sectionSpacing: CGFloat = 18
 
     var onDone: (() -> Void)?
     var appAppearance = AppAppearance.system {
-        didSet { applyAppearance() }
+        didSet { applyAppAppearance() }
     }
+    let appAppearanceFollower = AppAppearanceFollower()
 
     private let sheetTitle: String
     private let scrollView = UIScrollView()
@@ -171,12 +172,12 @@ class UIKitHostGuideSheetViewController: UIViewController {
         navigationItem.rightBarButtonItem = done
 
         configureContent()
-        applyAppearance()
+        applyAppAppearance()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        applyAppearance()
+        applyAppAppearance()
     }
 
     func addSection(_ section: UIView) {
@@ -242,22 +243,6 @@ class UIKitHostGuideSheetViewController: UIViewController {
             ),
             fillVisibleWidth,
         ])
-    }
-
-    private func applyAppearance() {
-        let style: UIUserInterfaceStyle
-        switch appAppearance.resolvedOverride {
-        case nil: style = .unspecified
-        case .light: style = .light
-        case .dark: style = .dark
-        }
-
-        overrideUserInterfaceStyle = style
-        navigationController?.overrideUserInterfaceStyle = style
-        viewIfLoaded?.window?.overrideUserInterfaceStyle = style
-        if let navigationBar = navigationController?.navigationBar {
-            UIKitChassis.configureSheetNavigationBar(navigationBar)
-        }
     }
 
     @objc private func donePressed() {

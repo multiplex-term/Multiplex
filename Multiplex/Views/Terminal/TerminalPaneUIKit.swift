@@ -405,11 +405,13 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         }
     }
 
+    /// Deliberately unconditional in the transport's status: becoming the
+    /// visible tab must move the app-wide input session onto this pane even
+    /// when it is connecting or ended, or the tab that just went off screen
+    /// keeps the keyboard. The `.live` condition belongs only to the
+    /// status-change caller in `observeAndRender`.
     private func focusIfAppropriate() {
-        guard configuration.isActive,
-              configuration.focusAllowed,
-              configuration.controller?.status == .live
-        else { return }
+        guard configuration.isActive, configuration.focusAllowed else { return }
         configuration.controller?.focusTerminal()
     }
 
@@ -513,7 +515,10 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
 
         let detail = UILabel()
         detail.text = "The tab can't reconnect because its host no longer exists in the deck."
-        detail.font = UIKitChassis.uiFont(13)
+        // Body copy, not chrome: a semantic style keeps Dynamic Type (fixed
+        // `uiFont` sizes ignore it, and the two mechanisms never compound).
+        detail.font = .preferredFont(forTextStyle: .subheadline)
+        detail.adjustsFontForContentSizeCategory = true
         detail.textColor = UIKitChassis.signal2
         detail.textAlignment = .center
         detail.numberOfLines = 0
@@ -590,7 +595,8 @@ final class TerminalPanePanelView: UIKitTallyBorderedView {
         if let reason {
             let label = UILabel()
             label.text = reason
-            label.font = UIKitChassis.uiFont(13)
+            label.font = .preferredFont(forTextStyle: .subheadline)
+            label.adjustsFontForContentSizeCategory = true
             label.textColor = UIKitChassis.signal2
             label.textAlignment = .center
             label.numberOfLines = 0
@@ -621,19 +627,22 @@ final class TerminalPanePanelView: UIKitTallyBorderedView {
 
 @MainActor
 final class TerminalTallyLampView: UIView {
+    private let dot = UIView()
+    private let color: UIColor
+
     init(caption: String, color: UIColor) {
+        self.color = color
         super.init(frame: .zero)
         isAccessibilityElement = true
         accessibilityLabel = caption.lowercased()
 
-        let dot = UIView()
         dot.backgroundColor = color
         let diameter = 7 * Theme.typeScale
         dot.layer.cornerRadius = diameter / 2
-        dot.layer.shadowColor = color.cgColor
         dot.layer.shadowOpacity = 0.7
         dot.layer.shadowRadius = 4
         dot.layer.shadowOffset = .zero
+        refreshLampGlow()
         dot.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             dot.widthAnchor.constraint(equalToConstant: diameter),
@@ -669,6 +678,22 @@ final class TerminalTallyLampView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        refreshLampGlow()
+    }
+
+    /// The dot's fill and the caption follow the appearance on their own; a
+    /// CGColor does not — it flattens whatever traits are current when it is
+    /// taken, and these lamps are built from observation renders rather than
+    /// a UIKit callback. Resolve the glow against this view's own traits and
+    /// re-resolve whenever the appearance flips.
+    private func refreshLampGlow() {
+        dot.layer.shadowColor = color.resolvedColor(with: traitCollection).cgColor
+    }
 }
 
 @MainActor
@@ -748,7 +773,8 @@ final class TerminalContextBarView: UIKitTallyBorderedView {
         case .failed(let message):
             let messageLabel = UILabel()
             messageLabel.text = message
-            messageLabel.font = UIKitChassis.uiFont(11)
+            messageLabel.font = .preferredFont(forTextStyle: .footnote)
+            messageLabel.adjustsFontForContentSizeCategory = true
             messageLabel.textColor = UIKitChassis.signal2
             messageLabel.numberOfLines = 2
             messageLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 320).isActive = true
@@ -856,6 +882,16 @@ final class TerminalKeyboardLockedView: UIKitTallyBorderedView {
         // behind the TALLY lock badge.
         let mic = UIButton(type: .custom)
         mic.setImage(UIImage(systemName: isDictating ? "mic.fill" : "mic"), for: .normal)
+        // Type-locked chrome glyph: authored point size, riding `typeScale`
+        // like the padlock beside it. Without a configuration UIKit draws it
+        // at the default body symbol size and never scales it on Mac.
+        mic.setPreferredSymbolConfiguration(
+            UIImage.SymbolConfiguration(
+                pointSize: 12 * Theme.typeScale,
+                weight: .semibold
+            ),
+            forImageIn: .normal
+        )
         mic.tintColor = isDictating ? UIKitChassis.chassis : UIKitChassis.signal2
         mic.backgroundColor = isDictating ? UIKitChassis.signal2 : .clear
         mic.accessibilityLabel = isDictating ? "Stop dictation" : "Dictate"

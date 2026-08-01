@@ -279,6 +279,10 @@ final class TerminalSurfaceView: UIView {
         }
         if coordinator.appliedTheme != configuration.theme {
             apply(configuration.theme, to: view)
+        } else if coordinator.appliedCaretVisible != (controller.status == .live) {
+            // The pane re-runs this update on every observed status change,
+            // which is where a connecting tab earns its caret back.
+            applyCaretColor(theme: configuration.theme, to: view)
         }
         #if !os(visionOS)
         coordinator.updateBottomChromeHeight(
@@ -304,7 +308,7 @@ final class TerminalSurfaceView: UIView {
     private func apply(_ theme: TerminalTheme, to view: TerminalView) {
         view.nativeBackgroundColor = UIColor(theme.background)
         view.nativeForegroundColor = UIColor(theme.foreground)
-        view.caretColor = UIColor(theme.cursor)
+        applyCaretColor(theme: theme, to: view)
         view.selectedTextBackgroundColor = UIColor(theme.cursor).withAlphaComponent(0.3)
         // SwiftTerm 1.15 adds an explicit selected-text foreground whose
         // upstream default is black. Preserve the theme's former text color,
@@ -328,6 +332,17 @@ final class TerminalSurfaceView: UIView {
         coordinator.appliedTheme = theme
     }
 
+    /// The caret carries the theme's cursor color — tally red in the house
+    /// themes — and SwiftTerm parks it at row 0 / column 0 while the screen is
+    /// still empty. Over the CONNECTING panel that lone red glyph reads as a
+    /// rendering fault, so the caret stays invisible until the tab's transport
+    /// is actually live.
+    private func applyCaretColor(theme: TerminalTheme, to view: TerminalView) {
+        let visible = controller.status == .live
+        view.caretColor = visible ? UIColor(theme.cursor) : .clear
+        coordinator.appliedCaretVisible = visible
+    }
+
     /// Forwards SwiftTerm delegate events to the session controller.
     /// SwiftTerm calls these on the main thread; `assumeIsolated` bridges
     /// into the controller's MainActor isolation.
@@ -340,6 +355,9 @@ final class TerminalSurfaceView: UIView {
         weak var linkHoverOverlay: TerminalLinkHoverOverlay?
         #endif
         var appliedTheme: TerminalTheme?
+        /// Whether the last applied caret color was the theme's cursor (live)
+        /// or clear. `nil` until the first application.
+        var appliedCaretVisible: Bool?
 
         init(controller: TerminalSessionController) {
             self.controller = controller

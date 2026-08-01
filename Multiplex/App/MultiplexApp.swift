@@ -59,22 +59,21 @@ final class MultiplexApplicationDelegate: UIResponder, UIApplicationDelegate {
         }
         let liveName = scene.delegate.map { NSStringFromClass(type(of: $0)) }
         guard UIKitLegacySceneMigrationPolicy.requiresAdoption(
+            nativeDelegateClassName: NSStringFromClass(MultiplexSceneDelegate.self),
             configuredDelegateClassName: configuredName,
-            liveDelegateClassName: liveName,
-            restorationActivity: session.stateRestorationActivity
+            liveDelegateClassName: liveName
         ) else { return }
 
         let nativeDelegate = MultiplexSceneDelegate()
         scene.delegate = nativeDelegate
-        // On current UIKit the notification precedes the delegate callback,
-        // so that callback supplies every connection option normally. Older
-        // runtimes can post it after the serialized delegate's callback; the
-        // next-turn fallback mounts from the session's public restoration
-        // activity only when UIKit did not call the native delegate itself.
-        DispatchQueue.main.async { [weak scene, weak nativeDelegate] in
-            guard let scene, let nativeDelegate else { return }
-            nativeDelegate.connectPersistedLegacySceneIfNeeded(scene)
-        }
+        // Mount immediately from the session's own persisted state. This
+        // notification can arrive either side of the serialized delegate's
+        // `willConnect`, and deferring a turn leaves the sole foreground scene
+        // inert meanwhile. When UIKit does reach this delegate afterwards, the
+        // `connectedSession` guard keeps the mount single and hands that
+        // callback's connection options — the cold-launch widget tap, URL, or
+        // Shortcut — to `adoptLateConnectionOptions` instead of dropping them.
+        nativeDelegate.connectPersistedLegacySceneIfNeeded(scene)
         sceneLog.notice(
             "Adopted persisted SwiftUI scene \(session.persistentIdentifier, privacy: .public) into UIKit"
         )
@@ -104,12 +103,6 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
             }
         }
 
-        func setReduceMotion(_ reduceMotion: Bool) {
-            if case .shell(let controller) = self {
-                controller.setReduceMotion(reduceMotion)
-            }
-        }
-
         func prepareForRemoval() {
             switch self {
             case .deck(let controller): controller.prepareForRemoval()
@@ -125,9 +118,19 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
     private var payload: ScenePayload?
     private var connectionPhase: UIKitSceneConnectionPhase = .awaitingRestoration
     private var urlBuffer = UIKitSceneURLBuffer()
+    /// Scene callbacks that landed before this delegate connected. The legacy
+    /// adoption path installs the delegate mid-connection, so UIKit can offer
+    /// restored state or activate the scene while there is still nothing to
+    /// apply it to. Dropping either is what leaves a restored terminal window
+    /// coming back as a bare deck, or a scene parked on its placeholder.
+    private var pendingRestorationActivity: NSUserActivity?
+    private var pendingActivation = false
     private var preservesDeckIdentity = true
     private weak var connectedSession: UISceneSession?
     private var reduceMotionObserver: NSObjectProtocol?
+    #if os(visionOS)
+    private let windowSizes = SceneWindowSizeStore()
+    #endif
 
     private var runtime: AppRuntime {
         guard let delegate = UIApplication.shared.delegate
@@ -166,15 +169,27 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
         activationActivities: [NSUserActivity],
         initialURLs: [URL]
     ) {
-        guard connectedSession == nil else { return }
+        guard connectedSession == nil else {
+            adoptLateConnectionOptions(
+                activationActivities: activationActivities,
+                initialURLs: initialURLs,
+                in: windowScene
+            )
+            return
+        }
         connectedSession = session
+        // A legacy session may not have handed over its restoration activity
+        // yet (UISceneSession documents that), but it always carries the same
+        // SwiftUI envelope in `userInfo`.
+        let restorationActivity = session.stateRestorationActivity
+            ?? SceneActivityCodec.legacySessionActivity(from: session.userInfo)
         let resolution = UIKitScenePayloadResolver.resolution(
             activationActivities: activationActivities,
-            restorationActivity: session.stateRestorationActivity
+            restorationActivity: restorationActivity
         )
         connectionPhase = UIKitSceneConnectionPhase.initial(
             resolution: resolution,
-            restorationActivityWasSupplied: session.stateRestorationActivity != nil
+            restorationActivityWasSupplied: restorationActivity != nil
         )
 
         let router = UIKitSceneRouter(scene: windowScene)
@@ -195,6 +210,7 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
             configureGeometry(for: resolution.payload, in: windowScene)
         }
         installReduceMotionObserver()
+        drainPendingSceneCallbacks(in: windowScene)
 
         for url in initialURLs.sorted(by: {
             $0.absoluteString < $1.absoluteString
@@ -203,26 +219,73 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
     }
 
+    /// UIKit's `scene(_:willConnectTo:)` can reach a session this delegate
+    /// already connected from `willConnectNotification`. The mount is done, but
+    /// the options it brings are the launch itself — a widget tap, a
+    /// `multiplex://` URL, a Shortcut — and are the one thing still owed.
+    private func adoptLateConnectionOptions(
+        activationActivities: [NSUserActivity],
+        initialURLs: [URL],
+        in windowScene: UIWindowScene
+    ) {
+        let resolution = UIKitScenePayloadResolver.resolution(
+            activationActivities: activationActivities,
+            restorationActivity: nil
+        )
+        if resolution.source == .activation {
+            activate(resolution.payload, in: windowScene)
+        }
+        for url in initialURLs.sorted(by: {
+            $0.absoluteString < $1.absoluteString
+        }) {
+            receiveOrBuffer(url)
+        }
+    }
+
+    private func drainPendingSceneCallbacks(in windowScene: UIWindowScene) {
+        // Restored state first: it is what activation would otherwise
+        // overwrite with the fresh value-less deck.
+        if let activity = pendingRestorationActivity {
+            pendingRestorationActivity = nil
+            applyRestoration(activity, in: windowScene)
+        }
+        if pendingActivation {
+            pendingActivation = false
+            promoteAwaitingRestorationIfNeeded(in: windowScene)
+            mountedContent?.setSceneActive(true)
+        }
+    }
+
     func sceneDidBecomeActive(_ scene: UIScene) {
-        if connectionPhase == .awaitingRestoration,
-           let windowScene = scene as? UIWindowScene,
-           let sceneRouter {
-            // UIKit promises restoreInteractionState before activation. If
-            // no callback arrived by this point, this is genuinely the fresh
-            // value-less deck/shell scene rather than protected delayed state.
-            connectionPhase = .freshDefault
-            replaceContent(
-                with: .deck(.main),
-                in: windowScene,
-                routing: sceneRouter.routing
-            )
-            configureGeometry(for: .deck(.main), in: windowScene)
+        if sceneRouter == nil {
+            pendingActivation = true
+        } else if let windowScene = scene as? UIWindowScene {
+            promoteAwaitingRestorationIfNeeded(in: windowScene)
         }
         mountedContent?.setSceneActive(true)
         Task { await runtime.appLock.autoUnlock() }
     }
 
+    private func promoteAwaitingRestorationIfNeeded(in windowScene: UIWindowScene) {
+        guard connectionPhase == .awaitingRestoration, let sceneRouter else {
+            return
+        }
+        // UIKit promises restoreInteractionState before activation. If
+        // no callback arrived by this point, this is genuinely the fresh
+        // value-less deck/shell scene rather than protected delayed state.
+        connectionPhase = .freshDefault
+        replaceContent(
+            with: .deck(.main),
+            in: windowScene,
+            routing: sceneRouter.routing
+        )
+        configureGeometry(for: .deck(.main), in: windowScene)
+    }
+
     func sceneWillResignActive(_ scene: UIScene) {
+        #if os(visionOS)
+        recordSceneGeometry()
+        #endif
         mountedContent?.setSceneActive(false)
     }
 
@@ -235,11 +298,16 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
+        #if os(visionOS)
+        recordSceneGeometry()
+        #endif
         mountedContent?.prepareForRemoval()
         rootController?.prepareForRemoval()
         mountedContent = nil
         rootController = nil
         sceneRouter = nil
+        pendingRestorationActivity = nil
+        pendingActivation = false
         if let reduceMotionObserver {
             NotificationCenter.default.removeObserver(reduceMotionObserver)
             self.reduceMotionObserver = nil
@@ -259,9 +327,13 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
         guard let incoming = SceneActivityCodec.payload(from: userActivity),
-              let windowScene = scene as? UIWindowScene,
-              let sceneRouter
+              let windowScene = scene as? UIWindowScene
         else { return }
+        activate(incoming, in: windowScene)
+    }
+
+    private func activate(_ incoming: ScenePayload, in windowScene: UIWindowScene) {
+        guard let sceneRouter else { return }
         connectionPhase = .activation
         if let current = payload,
            !UIKitSceneContentReplacementPolicy.requiresReplacement(
@@ -281,12 +353,23 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
         _ scene: UIScene,
         restoreInteractionStateWith stateRestorationActivity: NSUserActivity
     ) {
+        guard let windowScene = scene as? UIWindowScene else { return }
+        guard sceneRouter != nil else {
+            pendingRestorationActivity = stateRestorationActivity
+            return
+        }
+        applyRestoration(stateRestorationActivity, in: windowScene)
+    }
+
+    private func applyRestoration(
+        _ activity: NSUserActivity,
+        in windowScene: UIWindowScene
+    ) {
         guard connectionPhase.acceptsInitialRestorationCallback,
-              let windowScene = scene as? UIWindowScene,
               let sceneRouter
         else { return }
         let restored: ScenePayload
-        if let decoded = SceneActivityCodec.payload(from: stateRestorationActivity) {
+        if let decoded = SceneActivityCodec.payload(from: activity) {
             restored = decoded
         } else if connectionPhase == .awaitingRestoration {
             restored = .deck(.main)
@@ -302,7 +385,13 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func stateRestorationActivity(for scene: UIScene) -> NSUserActivity? {
-        guard connectionPhase != .awaitingRestoration, let payload else { return nil }
+        // Nothing is mounted yet, so this delegate has nothing to say about
+        // the window — but UIKit is free to snapshot here, and answering nil
+        // would erase the session's own persisted activity, i.e. the window
+        // the person actually left open. Hand back what is already on file.
+        guard connectionPhase != .awaitingRestoration, let payload else {
+            return connectedSession?.stateRestorationActivity
+        }
         return try? SceneActivityCodec.makeActivity(for: payload)
     }
 
@@ -371,17 +460,12 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
         let content: UIViewController
         switch plan {
         case .deck:
-            let controller = DeckWindowViewController(configuration: deckConfiguration(
-                routing: routing,
-                terminalOpener: TerminalRouteOpener(
-                    destination: .window,
-                    action: routing.openTerminal
-                ),
-                presentation: .standard,
-                selectedTerminal: nil,
-                shellSafeArea: .zero,
-                sceneIsActive: windowScene.activationState == .foregroundActive
-            ))
+            let controller = DeckWindowViewController(
+                configuration: classicDeckConfiguration(
+                    routing: routing,
+                    sceneIsActive: windowScene.activationState == .foregroundActive
+                )
+            )
             mountedContent = .deck(controller)
             content = controller
 
@@ -424,16 +508,33 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
             content = controller
         }
 
+        // visionOS's terminal scene was declared `.windowStyle(.plain)`: no
+        // system glass platter, so the pane stack's own 24pt rounded chassis
+        // (`TerminalWindowUIKitRootView`) is the window's silhouette against
+        // the room. UIKit spells the same thing
+        // `preferredContainerBackgroundStyle == .hidden`, and it only reads
+        // as plain while nothing opaque is painted behind that rounded rect —
+        // hence the clear root view and window backing below. The deck keeps
+        // the platter, exactly as `.windowStyle` left it.
+        let plainWindowBackground: Bool = {
+            #if os(visionOS)
+            if case .terminal = plan { return true }
+            #endif
+            return false
+        }()
+
         let root = UIKitSceneRootViewController(
             content: content,
             themes: runtime.themes,
             appLock: runtime.appLock,
             externalActions: runtime.externalActions,
             bind: runtime.bind,
-            sceneWindows: routing
+            sceneWindows: routing,
+            plainWindowBackground: plainWindowBackground
         )
         rootController = root
         window?.rootViewController = root
+        window?.backgroundColor = plainWindowBackground ? .clear : nil
         windowScene.title = title(for: payload)
         log(plan: plan, in: windowScene)
     }
@@ -465,6 +566,25 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
             bind: runtime.bind,
             openURL: Self.openSystemURL,
             sceneWindows: routing
+        )
+    }
+
+    /// The one shape a deck scene of its own mounts with. Both the mount and
+    /// the Reduce Motion refresh build it here so the two can never drift.
+    private func classicDeckConfiguration(
+        routing: SceneWindowRouting,
+        sceneIsActive: Bool
+    ) -> DeckWindowConfiguration {
+        deckConfiguration(
+            routing: routing,
+            terminalOpener: TerminalRouteOpener(
+                destination: .window,
+                action: routing.openTerminal
+            ),
+            presentation: .standard,
+            selectedTerminal: nil,
+            shellSafeArea: .zero,
+            sceneIsActive: sceneIsActive
         )
     }
 
@@ -547,9 +667,21 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
         #else
         let environment: [String: String] = [:]
         #endif
-        let size = UIKitSceneGeometryPolicy.preferredSize(
-            for: payload,
-            environment: environment
+        // SwiftUI's `.defaultSize` was a hint: visionOS reopens a window group
+        // at whatever size the user last left it and only reaches for the
+        // declared default when it remembers nothing. This request runs on
+        // every scene UIKit creates, so it answers the same question in the
+        // same order — otherwise one resized terminal is undone by the next
+        // attach. Raising an existing scene still requests no geometry at all.
+        let kind = SceneGeometryKind(payload)
+        let size = SceneGeometryPolicy.chooseInitialSize(
+            environmentOverride: environment[kind.debugSizeEnvironmentKey]
+                .flatMap(UIKitSceneGeometryPolicy.parseSize),
+            remembered: windowSizes.lastSize(for: kind),
+            default: UIKitSceneGeometryPolicy.preferredSize(
+                for: payload,
+                environment: [:]
+            )
         )
         scene.requestGeometryUpdate(UIWindowScene.GeometryPreferences.Vision(
             size: size,
@@ -562,6 +694,35 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
         #endif
     }
 
+    #if os(visionOS)
+    /// `UIWindowSceneGeometry` exposes no size on visionOS (only the app's own
+    /// minimum/maximum and resizing restriction), so the live size is read
+    /// from the scene coordinate space where that exists and from the window
+    /// UIKit keeps spanning the scene everywhere else.
+    private func currentSceneSize() -> CGSize? {
+        if #available(visionOS 26.0, *), let scene = window?.windowScene {
+            return scene.effectiveGeometry.coordinateSpace.bounds.size
+        }
+        return window?.bounds.size
+    }
+
+    private func recordSceneGeometry() {
+        guard let payload, let size = currentSceneSize() else { return }
+        windowSizes.record(size, for: SceneGeometryKind(payload))
+    }
+
+    /// The resize signal itself. Older visionOS has no such callback, so
+    /// there the scene lifecycle captures (resign active, disconnect) are
+    /// what carry a resize into the next window of the same kind.
+    @available(visionOS 26.0, *)
+    func windowScene(
+        _ windowScene: UIWindowScene,
+        didUpdateEffectiveGeometry previousEffectiveGeometry: UIWindowScene.Geometry
+    ) {
+        recordSceneGeometry()
+    }
+    #endif
+
     private func installReduceMotionObserver() {
         reduceMotionObserver = NotificationCenter.default.addObserver(
             forName: UIAccessibility.reduceMotionStatusDidChangeNotification,
@@ -569,10 +730,31 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.mountedContent?.setReduceMotion(
-                    UIAccessibility.isReduceMotionEnabled
-                )
+                self?.applyReduceMotion()
             }
+        }
+    }
+
+    private func applyReduceMotion() {
+        guard let mountedContent else { return }
+        switch mountedContent {
+        case .deck(let controller):
+            // The classic deck takes Reduce Motion through its immutable
+            // configuration (the rail's LINKING pulse, the tile-grid
+            // crossfade), where the SwiftUI wall read it from the
+            // environment and followed it live. Rebuilding the same
+            // configuration re-reads the current value and lands as a wall
+            // re-render: every dependency reference is identical, so no part
+            // of the deck's lifecycle restarts.
+            guard let routing = sceneRouter?.routing else { return }
+            controller.update(configuration: classicDeckConfiguration(
+                routing: routing,
+                sceneIsActive: controller.sceneIsActive
+            ))
+        case .terminal:
+            break
+        case .shell(let controller):
+            controller.setReduceMotion(UIAccessibility.isReduceMotionEnabled)
         }
     }
 
