@@ -143,6 +143,59 @@ each ask is a slow round trip. It is now asked once per launch.
   ID" on a Face ID phone, "Require device passcode" without biometry), and
   the lock itself still prompts correctly when you turn it on.
 
+UIKIT REBUILD — the whole chrome, same TALLY
+
+Every surface — deck, terminal windows, the iPhone shell, Settings, Add
+Host and Bind, the paywall, file viewer, and viewport — now runs on UIKit
+instead of SwiftUI. Layout and behavior are meant to be IDENTICAL to the
+July 31 beta; anything that looks or feels different from that build is a
+find.
+
+- Sweep your usual flows on iPhone, iPad, and Vision Pro: attach, tabs,
+  merge/split, the key rail, agent chips, file drops, link presses,
+  Settings, Add Host.
+- Update in place over the previous beta with windows open: the same
+  decks and terminals must come back after the update, not a fresh
+  launch.
+- Settings opens at the top, and keeps your place when you scroll and
+  return.
+- Native confirmation actions (Done, Create & Attach) use system Liquid
+  Glass.
+- Long-press a link or path: the prompt shows the complete target,
+  hyphenated URLs included.
+- Flip SYSTEM / LIGHT / DARK while sheets and terminals are open: every
+  surface follows, including sheets that were already up.
+- Vision Pro: a terminal window is still the rounded monitor silhouette
+  against the room — no square glass corners; a new terminal opens at
+  the size you last used, not a fixed default.
+
+- Tabs press reliably: near the left edge (drifting taps used to start a
+  back-swipe instead), with many tabs open (the strip used to cancel the
+  press), and while a session's status is changing under your finger.
+- Attach on iPhone: the window must lay out cleanly during CONNECTING —
+  no piled-up title text, no key rail at the top, no text spilling out of
+  the connecting panel, no red mark in the corner.
+- First presentation renders complete: Add Host ▸ BIND section titles and
+  the paste control, and a deck tile appearing for a session created
+  while you watch — nothing stacked in a corner, no empty grey bars.
+- Add Host ▸ BIND on a fresh install (appearance still SYSTEM): every
+  section header (ON THE MACHINE, ASKING TO BIND, KEY PASSPHRASE), the
+  per-command labels, and the explanation text under each card must all
+  be there the FIRST time the sheet opens — previously they appeared
+  only after switching LIGHT/DARK or rotating.
+- New Session (and Add Host, agent prompt, theme editor): content scrolls
+  under the home indicator again, and typing in any field keeps it above
+  the keyboard.
+
+TWO-TAB RAIL + NEW DECK TILES — labels stay in their frames
+
+- On iPhone, add a second tab and switch between the two repeatedly. Both
+  cells must keep their full width, spacing, and hit regions — no labels
+  piling up at the rail's origin. Repeat in the Vision Pro top ornament.
+- Return to the deck while new sessions appear: every new tile must lay out
+  its miniature, title, tally, and telemetry normally instead of stacking
+  them in its top-left corner.
+
 PATHS WITH SPACES OPEN — and prose stops riding along
 
 Long-pressing a path that contains spaces (/Users/me/My Documents/x.txt,

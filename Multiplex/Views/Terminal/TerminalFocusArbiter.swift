@@ -40,7 +40,8 @@ enum TerminalFocusArbiter {
     /// hardware keystrokes from reaching a first responder, and
     /// foregrounding restoration would otherwise re-summon one behind the
     /// veil. Setting this releases the current owner; `claim`/`restore`
-    /// refuse while it holds. `AppLockGate` is the only writer.
+    /// refuse while it holds. The native `AppLockViewController` is the only
+    /// writer; its SwiftUI gate is merely a transitional mounting adapter.
     static var inputSuppressed = false {
         didSet {
             guard inputSuppressed, let owner = current else { return }
@@ -199,6 +200,12 @@ enum TerminalFocusArbiter {
             }
             return
         }
+        // An empty ownership IS re-elected here, on purpose: the two ways the
+        // app-wide owner goes nil have no other claim site. Releasing the app
+        // lock's `inputSuppressed` cleared it, and closing the focused window
+        // deallocated its TerminalView out of this weak reference — in both
+        // cases the terminal the user is looking at would otherwise sit there
+        // with no keyboard until they tap its grid.
         guard current === view || current == nil else { return }
         claim(view)
     }

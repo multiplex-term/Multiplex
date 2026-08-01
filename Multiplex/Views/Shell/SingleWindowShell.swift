@@ -1,380 +1,853 @@
-import SwiftUI
+import Observation
+import UIKit
 #if os(iOS)
 import SwiftTerm
-import UIKit
 #endif
 
-/// Holds the expensive deck subtree behind value-only identity. The shell's
-/// swipe offset and visibility modifiers remain outside this boundary.
-private struct ShellDeckPane: View, Equatable {
-    let terminalOpener: TerminalRouteOpener
-    let wallPresentation: FleetWall.Presentation
-    let selectedTerminal: TerminalRoute?
-    let shellSafeArea: EdgeInsets
+@MainActor
+struct SingleWindowShellDependencies {
+    let store: HostStore
+    let hub: ConnectionHub
+    let themes: ThemeStore
+    let workspace: TerminalWorkspace
+    let entitlements: EntitlementStore
+    let attention: AttentionCenter
+    let localNetworkAccess: LocalNetworkAccessMonitor
+    let networkChanges: NetworkChangeMonitor
+    let externalActions: ExternalActionRouter
+    let appLock: AppLockStore
+    let bind: BindController
+    let openURL: (URL) -> Void
+    let sceneWindows: SceneWindowRouting
+}
 
-    var body: some View {
-        DeckWindow(
-            terminalOpener: terminalOpener,
-            wallPresentation: wallPresentation,
-            selectedTerminal: selectedTerminal,
-            shellSafeArea: shellSafeArea
-        )
-    }
+/// Values consumed by the native deck and terminal. One coherent
+/// snapshot prevents a rotation or rail animation from briefly giving the
+/// terminal its new frame with the old safe-area contract.
+struct SingleWindowShellPresentation: Equatable {
+    var expanded = false
+    var deckPresentation = FleetWall.Presentation.shellCompact
+    var deckSafeArea = UIEdgeInsets.zero
+    var terminalAvailableWidth: CGFloat = 0
+    var terminalSafeArea = UIEdgeInsets.zero
+    var railOwnsBottomSafeArea = false
+    var deckControlLabel = "‹ DECK"
+    var terminalFocusAllowed = false
+}
 
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        // All three value inputs read by the deck participate.
-        // `terminalOpener` is the sole exclusion: this private boundary is
-        // always built for the same shell destination/action, whose closure
-        // identity alone changes when the shell body evaluates.
-        lhs.wallPresentation == rhs.wallPresentation
-            && lhs.selectedTerminal == rhs.selectedTerminal
-            && lhs.shellSafeArea == rhs.shellSafeArea
+@MainActor
+@Observable
+final class SingleWindowShellState {
+    var terminalRoute: TerminalWindowRoute
+    var presentation = SingleWindowShellPresentation()
+    var sceneIsActive: Bool
+    var reduceMotion: Bool
+
+    init(
+        terminalRoute: TerminalWindowRoute,
+        sceneIsActive: Bool,
+        reduceMotion: Bool
+    ) {
+        self.terminalRoute = terminalRoute
+        self.sceneIsActive = sceneIsActive
+        self.reduceMotion = reduceMotion
     }
 }
 
-/// Multiplex's real one-scene shell for iPhone and full-screen iPad. The deck
-/// and terminal stage remain mounted together: compact navigation slides the
-/// live terminal over the deck, while expanded layout exposes the same deck
-/// as a one-session-wide rail. TerminalSessionController continues to own the
-/// TerminalView, so back navigation, rail collapse, and width transitions do
-/// not interrupt the shell or lose scrollback.
-struct SingleWindowShell: View {
-    @Environment(TerminalWorkspace.self) private var workspace
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
+/// Pure result of the shell's UIKit layout pass. Tests can pin every safe-area
+/// and breakpoint contract without instantiating FleetWall or a live terminal.
+struct SingleWindowShellLayoutMetrics: Equatable {
+    var expanded: Bool
+    var deckFrame: CGRect
+    var terminalFrame: CGRect
+    var dividerFrame: CGRect
+    var deckAlpha: CGFloat
+    var terminalAlpha: CGFloat
+    var deckInteractive: Bool
+    var terminalInteractive: Bool
+    var deckSafeArea: UIEdgeInsets
+    var terminalSafeArea: UIEdgeInsets
+    var terminalAvailableWidth: CGFloat
+    var railOwnsBottomSafeArea: Bool
+}
 
-    @State private var terminalRoute: TerminalWindowRoute
-    @State private var compactShowsTerminal: Bool
-    /// Keeps the first responder off the navigation's critical path. The
-    /// first software-keyboard setup can synchronously occupy the main actor;
-    /// the terminal should start moving before UIKit does that cold work.
-    @State private var terminalFocusReady = true
-    @State private var deckRailVisible = true
-    /// Interactive position for the iPhone's left-edge back gesture. The
-    /// deck stays mounted beneath the terminal, so the swipe can reveal the
-    /// real live wall without rebuilding either surface.
-    @State private var compactBackSwipeOffset: CGFloat = 0
-    @State private var compactBackSwipeActive = false
-
-    private static let navigationResponse: TimeInterval = 0.3
-
-    init(initialRoute: TerminalWindowRoute? = nil) {
-        let route = initialRoute ?? TerminalWindowRoute(tabs: [])
-        _terminalRoute = State(initialValue: route)
-        _compactShowsTerminal = State(initialValue: !route.tabs.isEmpty)
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            let safeArea = geometry.safeAreaInsets
-            // A landscape phone insets both long edges by the Dynamic
-            // Island's band. This reader stays inside them — an ignoring one
-            // reports the edges it spans as zero — so the stack below spans
-            // them explicitly and every pane is handed its own clearance.
-            // The breakpoint keeps measuring the width panes can really use.
-            let expanded = SingleWindowShellLayout.isExpanded(width: geometry.size.width)
-            let fullWidth = geometry.size.width + safeArea.leading + safeArea.trailing
-            // The rail carries its own leading clearance: the frame spans the
-            // Island's band so the wall's chassis and rules reach the physical
-            // edge, while FleetWall pads its content back out of it.
-            let deckWidth = expanded
-                ? (deckRailVisible
-                    ? min(
-                        SingleWindowShellLayout.deckRailWidth + safeArea.leading,
-                        fullWidth
-                    )
-                    : 0)
-                : fullWidth
-            let terminalWidth = expanded
-                ? max(0, fullWidth - deckWidth)
-                : fullWidth
-            // This reader is inset by whichever bottom region applies, so
-            // adding it back always lands on the window's bottom edge —
-            // keyboard or not. The deck's scroll viewport always wants that:
-            // FleetWall restores the strip as content padding, so tiles pass
-            // beneath the home indicator (and a docked keyboard) instead of
-            // stopping short of it.
-            let deckHeight = geometry.size.height + safeArea.bottom
-            // Only a phone held in landscape — the one layout with a compact
-            // vertical size class — is short enough to spend the home
-            // indicator's strip on the key rail. Everywhere with room to
-            // spare the rail keeps the standard clearance and the pane's
-            // bezel simply paints through it. When the rail does take the
-            // strip, SwiftTermView's container becomes the sole owner of
-            // docked-keyboard clearance, exactly as in a classic window.
-            let railTakesBottomStrip = verticalSizeClass == .compact
-            let terminalHeight = geometry.size.height
-                + (railTakesBottomStrip ? safeArea.bottom : 0)
-            // Each pane keeps its content clear of the bands its own frame
-            // spans — a hidden rail hands the Island's band to the terminal,
-            // and a compact deck spans both. iOS reports both landscape edges
-            // as unsafe without saying which one carries the Island, and the
-            // Island sits mid-edge, over text rows: neither band is safe to
-            // read in, so surfaces fill them and content stays out.
-            let terminalOriginX = expanded ? deckWidth : 0
-            let backSwipeOffset = expanded
-                ? 0
-                : SingleWindowShellBackSwipe.constrainedTranslation(
-                    compactBackSwipeOffset,
-                    width: fullWidth
-                )
-
-            ZStack(alignment: .topLeading) {
-                deck(
-                    expanded: expanded,
-                    safeArea: EdgeInsets(
-                        top: 0,
-                        leading: safeArea.leading,
-                        bottom: safeArea.bottom,
-                        trailing: max(0, deckWidth - (fullWidth - safeArea.trailing))
-                    )
-                )
-                    .frame(width: deckWidth, height: deckHeight)
-                    .clipped()
-                    .opacity(
-                        expanded || !compactShowsTerminal || compactBackSwipeActive
-                            ? 1
-                            : 0
-                    )
-                    .allowsHitTesting(expanded ? deckRailVisible : !compactShowsTerminal)
-                    .zIndex(0)
-
-                terminalStage(
-                    expanded: expanded,
-                    availableWidth: terminalWidth
-                        - max(0, safeArea.leading - terminalOriginX)
-                        - safeArea.trailing,
-                    contentSafeArea: EdgeInsets(
-                        top: 0,
-                        leading: max(0, safeArea.leading - terminalOriginX),
-                        bottom: 0,
-                        trailing: safeArea.trailing
-                    ),
-                    railOwnsBottomSafeArea: railTakesBottomStrip
-                )
-                    .frame(width: terminalWidth, height: terminalHeight)
-                    .offset(x: expanded
-                        ? deckWidth
-                        : (compactShowsTerminal ? backSwipeOffset : fullWidth))
-                    .opacity(expanded || compactShowsTerminal ? 1 : 0)
-                    .allowsHitTesting(expanded || compactShowsTerminal)
-                    .zIndex(1)
-
-                if expanded, deckRailVisible {
-                    Rectangle()
-                        .fill(Theme.bezelHi)
-                        .frame(width: 1, height: deckHeight)
-                        .offset(x: deckWidth - 1)
-                        .allowsHitTesting(false)
-                        .zIndex(2)
-                }
-            }
-            // Both panes are placed from the leading edge and the terminal
-            // rides an `.offset`, which never claims width. The stack is
-            // therefore narrower than the shell, and an unaligned frame
-            // would center it — in landscape that pushed the deck inward and
-            // ran the terminal off the screen's trailing edge.
-            .frame(
-                width: fullWidth,
-                height: deckHeight,
-                alignment: .topLeading
-            )
-            // Spend the safe areas rather than letting SwiftUI reserve them:
-            // each pane fills its band with chassis and screen, and is handed
-            // the inset back to spend on its own content — so what must stay
-            // legible (tiles, chips, text) keeps clear of the Island and the
-            // corners, while the deck's tiles scroll on through the bottom.
-            .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
-            .background(Theme.chassis.ignoresSafeArea())
-            .background {
-                #if os(iOS)
-                ShellBackSwipeRecognizer(
-                    isEnabled: UIDevice.current.userInterfaceIdiom == .phone
-                        && !expanded
-                        && compactShowsTerminal,
-                    onChanged: {
-                        updateBackSwipe(translation: $0, width: fullWidth)
-                    },
-                    onEnded: { translation, velocity in
-                        finishBackSwipe(
-                            translation: translation,
-                            velocity: velocity,
-                            width: fullWidth
-                        )
-                    },
-                    onCancelled: cancelBackSwipe
-                )
-                #endif
-            }
-            .animation(shellAnimation, value: compactShowsTerminal)
-            .animation(shellAnimation, value: deckRailVisible)
-            .animation(shellAnimation, value: expanded)
-            .onChange(of: expanded) { _, isExpanded in
-                if isExpanded {
-                    resetBackSwipe()
-                } else if !compactShowsTerminal {
-                    releaseTerminalFocus()
-                }
-            }
-            .onChange(of: scenePhase) { _, phase in
-                guard phase == .active,
-                      !expanded,
-                      !compactShowsTerminal
-                else { return }
-                // UIKit may try to restore the still-mounted terminal's input
-                // session as this scene foregrounds. The deck is frontmost,
-                // so reassert the shell's no-terminal-focus invariant through
-                // the controller/arbiter path.
-                releaseTerminalFocus()
-            }
-        }
-        // The shell's external-action executor. Anchored here — never on the
-        // nested deck pane, which the expanded layout can clip to zero width
-        // while its rail is hidden — so the failure alert and the widget-ASK
-        // prompt sheet always present over whichever stage is frontmost.
-        .modifier(ExternalActionHost(terminalOpener: TerminalRouteOpener(
-            destination: .shell,
-            action: openTerminalRoute
-        )))
-    }
-
-    private func deck(
-        expanded: Bool,
-        safeArea: EdgeInsets
-    ) -> some View {
-        ShellDeckPane(
-            terminalOpener: TerminalRouteOpener(
-                destination: .shell,
-                action: openTerminalRoute
-            ),
-            wallPresentation: expanded ? .shellRail : .shellCompact,
-            selectedTerminal: terminalRoute.activeTab,
-            shellSafeArea: safeArea
-        )
-        .equatable()
-    }
-
-    @ViewBuilder
-    private func terminalStage(
-        expanded: Bool,
-        availableWidth: CGFloat,
-        contentSafeArea: EdgeInsets,
-        railOwnsBottomSafeArea: Bool
-    ) -> some View {
-        if terminalRoute.tabs.isEmpty {
-            emptyTerminal
+enum SingleWindowShellNativeLayout {
+    static func resolve(
+        size: CGSize,
+        safeArea: UIEdgeInsets,
+        verticalSizeClass: UIUserInterfaceSizeClass?,
+        deckRailVisible: Bool,
+        compactShowsTerminal: Bool,
+        compactBackSwipeOffset: CGFloat,
+        compactBackSwipeActive: Bool
+    ) -> SingleWindowShellLayoutMetrics {
+        let fullWidth = max(0, size.width)
+        let usableWidth = max(0, fullWidth - safeArea.left - safeArea.right)
+        let expanded = SingleWindowShellLayout.isExpanded(width: usableWidth)
+        let deckWidth: CGFloat
+        if expanded {
+            deckWidth = deckRailVisible
+                ? min(SingleWindowShellLayout.deckRailWidth + safeArea.left, fullWidth)
+                : 0
         } else {
-            TerminalWindowRoot(
-                route: $terminalRoute,
-                shell: .init(
-                    deckControlLabel: expanded
-                        ? (deckRailVisible ? "◧ HIDE" : "◧ DECK")
-                        : "‹ DECK",
-                    availableWidth: availableWidth,
-                    contentSafeArea: contentSafeArea,
-                    railOwnsBottomSafeArea: railOwnsBottomSafeArea,
-                    showDeck: { showDeck(expanded: expanded) },
-                    openTerminalRoute: openTerminalRoute,
-                    revealTab: revealTab,
-                    tabsEmptied: terminalTabsEmptied,
-                    terminalFocusAllowed: (expanded || compactShowsTerminal)
-                        && terminalFocusReady
+            deckWidth = fullWidth
+        }
+        let terminalWidth = max(0, fullWidth - (expanded ? deckWidth : 0))
+        let contentOriginY = safeArea.top
+        let deckHeight = max(0, size.height - safeArea.top)
+        let railTakesBottomStrip = verticalSizeClass == .compact
+        let terminalHeight = max(
+            0,
+            size.height - safeArea.top - safeArea.bottom
+                + (railTakesBottomStrip ? safeArea.bottom : 0)
+        )
+        let terminalOriginX = expanded ? deckWidth : 0
+        let constrainedSwipe = expanded ? 0 : SingleWindowShellBackSwipe
+            .constrainedTranslation(compactBackSwipeOffset, width: fullWidth)
+        let terminalX = expanded
+            ? deckWidth
+            : (compactShowsTerminal ? constrainedSwipe : fullWidth)
+        let deckTrailingSafeArea = max(
+            0,
+            deckWidth - (fullWidth - safeArea.right)
+        )
+        let terminalLeadingSafeArea = max(0, safeArea.left - terminalOriginX)
+        let terminalAvailableWidth = max(
+            0,
+            terminalWidth - terminalLeadingSafeArea - safeArea.right
+        )
+
+        return SingleWindowShellLayoutMetrics(
+            expanded: expanded,
+            deckFrame: CGRect(
+                x: 0,
+                y: contentOriginY,
+                width: deckWidth,
+                height: deckHeight
+            ),
+            terminalFrame: CGRect(
+                x: terminalX,
+                y: contentOriginY,
+                width: terminalWidth,
+                height: terminalHeight
+            ),
+            dividerFrame: CGRect(
+                x: max(0, deckWidth - 1),
+                y: contentOriginY,
+                width: 1,
+                height: deckHeight
+            ),
+            deckAlpha: expanded || !compactShowsTerminal || compactBackSwipeActive
+                ? 1 : 0,
+            terminalAlpha: expanded || compactShowsTerminal ? 1 : 0,
+            deckInteractive: expanded ? deckRailVisible : !compactShowsTerminal,
+            terminalInteractive: expanded || compactShowsTerminal,
+            deckSafeArea: UIEdgeInsets(
+                top: 0,
+                left: safeArea.left,
+                bottom: safeArea.bottom,
+                right: deckTrailingSafeArea
+            ),
+            terminalSafeArea: UIEdgeInsets(
+                top: 0,
+                left: terminalLeadingSafeArea,
+                bottom: 0,
+                right: safeArea.right
+            ),
+            terminalAvailableWidth: terminalAvailableWidth,
+            railOwnsBottomSafeArea: railTakesBottomStrip
+        )
+    }
+}
+
+/// Weak action proxy shared by the native deck and terminal. It keeps
+/// their closures from retaining the native container and gives both sides
+/// one routing/focus authority.
+@MainActor
+final class SingleWindowShellActions {
+    weak var controller: SingleWindowShellViewController?
+
+    func openTerminalRoute(_ route: TerminalWindowRoute) {
+        controller?.openTerminalRoute(route)
+    }
+
+    func revealTab(_ id: UUID) {
+        controller?.revealTab(id)
+    }
+
+    func showDeck() {
+        controller?.showDeck()
+    }
+
+    func terminalTabsEmptied() {
+        controller?.terminalTabsEmptied()
+    }
+
+    func terminalRouteChanged(_ route: TerminalWindowRoute) {
+        controller?.replaceTerminalRoute(route)
+    }
+}
+
+/// UIKit owner of the adaptive shell. Both the full deck lifecycle owner and
+/// terminal workspace are native child controllers. UIKit owns geometry,
+/// safe-area spending, transitions, focus, the edge gesture, route state,
+/// hit testing, and accessibility visibility.
+@MainActor
+final class SingleWindowShellViewController: UIViewController {
+    typealias ChildFactory = (
+        SingleWindowShellState,
+        SingleWindowShellActions
+    ) -> UIViewController
+    typealias ExternalCoordinatorFactory = (
+        UIViewController,
+        TerminalRouteOpener
+    ) -> ExternalActionUIKitCoordinator
+    typealias ChildUpdater = (
+        UIViewController,
+        SingleWindowShellState,
+        SingleWindowShellActions
+    ) -> Void
+
+    nonisolated static let navigationResponse: TimeInterval = 0.3
+
+    private(set) var shellState: SingleWindowShellState
+    private(set) var compactShowsTerminal: Bool
+    private(set) var terminalFocusReady = true
+    private(set) var deckRailVisible = true
+    private(set) var compactBackSwipeOffset: CGFloat = 0
+    private(set) var compactBackSwipeActive = false
+    private(set) var currentLayoutMetrics: SingleWindowShellLayoutMetrics?
+
+    private let workspace: TerminalWorkspace
+    private let shellRootView = SingleWindowShellRootView()
+    private let actions = SingleWindowShellActions()
+    private let deckFactory: ChildFactory
+    private let deckUpdater: ChildUpdater?
+    private let terminalFactory: ChildFactory
+    private let externalCoordinatorFactory: ExternalCoordinatorFactory?
+    private let routeChanged: (TerminalWindowRoute) -> Void
+    private var lastReportedRoute: TerminalWindowRoute
+    private var deckController: UIViewController?
+    private var terminalController: UIViewController?
+    private var appLocked = false
+    private var emptyTerminalView: SingleWindowShellEmptyTerminalView?
+    private var externalCoordinator: ExternalActionUIKitCoordinator?
+    private var routeObservationGeneration = 0
+    private var layoutAnimator: UIViewPropertyAnimator?
+    private var layoutCompletion: (() -> Void)?
+    private var targetLayoutMetrics: SingleWindowShellLayoutMetrics?
+    private var testLayoutInput: (
+        size: CGSize,
+        safeArea: UIEdgeInsets,
+        verticalSizeClass: UIUserInterfaceSizeClass?
+    )?
+    #if os(iOS)
+    private weak var gestureWindow: UIWindow?
+    private weak var initialTouchTerminal: TerminalView?
+    private lazy var backSwipeRecognizer: UIScreenEdgePanGestureRecognizer = {
+        let recognizer = UIScreenEdgePanGestureRecognizer(
+            target: self,
+            action: #selector(handleBackSwipe(_:))
+        )
+        recognizer.edges = .left
+        recognizer.minimumNumberOfTouches = 1
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.cancelsTouchesInView = true
+        recognizer.delegate = self
+        recognizer.isEnabled = false
+        return recognizer
+    }()
+    #endif
+
+    init(
+        workspace: TerminalWorkspace,
+        initialRoute: TerminalWindowRoute = TerminalWindowRoute(tabs: []),
+        sceneIsActive: Bool = true,
+        reduceMotion: Bool = false,
+        deckFactory: @escaping ChildFactory,
+        deckUpdater: ChildUpdater? = nil,
+        terminalFactory: @escaping ChildFactory,
+        externalCoordinatorFactory: ExternalCoordinatorFactory? = nil,
+        routeChanged: @escaping (TerminalWindowRoute) -> Void = { _ in }
+    ) {
+        self.workspace = workspace
+        shellState = SingleWindowShellState(
+            terminalRoute: initialRoute,
+            sceneIsActive: sceneIsActive,
+            reduceMotion: reduceMotion
+        )
+        compactShowsTerminal = !initialRoute.tabs.isEmpty
+        self.deckFactory = deckFactory
+        self.deckUpdater = deckUpdater
+        self.terminalFactory = terminalFactory
+        self.externalCoordinatorFactory = externalCoordinatorFactory
+        self.routeChanged = routeChanged
+        lastReportedRoute = initialRoute
+        super.init(nibName: nil, bundle: nil)
+        actions.controller = self
+    }
+
+    /// Framework-neutral production path used by UIKit scene delegates. The
+    /// injected factories in the designated initializer remain only as a
+    /// focused test seam.
+    convenience init(
+        dependencies: SingleWindowShellDependencies,
+        initialRoute: TerminalWindowRoute = TerminalWindowRoute(tabs: []),
+        sceneIsActive: Bool = true,
+        reduceMotion: Bool = false,
+        routeChanged: @escaping (TerminalWindowRoute) -> Void = { _ in }
+    ) {
+        self.init(
+            workspace: dependencies.workspace,
+            initialRoute: initialRoute,
+            sceneIsActive: sceneIsActive,
+            reduceMotion: reduceMotion,
+            deckFactory: { state, actions in
+                DeckWindowViewController(
+                    configuration: SingleWindowShellViewController
+                        .nativeDeckConfiguration(
+                            dependencies: dependencies,
+                            state: state,
+                            actions: actions
+                        )
                 )
+            },
+            deckUpdater: { controller, state, actions in
+                guard let controller = controller as? DeckWindowViewController else {
+                    return
+                }
+                controller.update(
+                    configuration: SingleWindowShellViewController
+                        .nativeDeckConfiguration(
+                            dependencies: dependencies,
+                            state: state,
+                            actions: actions
+                        )
+                )
+            },
+            terminalFactory: { state, actions in
+                TerminalWindowViewController(
+                    route: state.terminalRoute,
+                    dependencies: TerminalWindowDependencies(
+                        store: dependencies.store,
+                        hub: dependencies.hub,
+                        themes: dependencies.themes,
+                        workspace: dependencies.workspace,
+                        entitlements: dependencies.entitlements
+                    ),
+                    sceneWindows: dependencies.sceneWindows,
+                    shell: SingleWindowShellViewController
+                        .nativeTerminalShellConfiguration(
+                        state: state,
+                        actions: actions
+                    ),
+                    routeChanged: actions.terminalRouteChanged
+                )
+            },
+            externalCoordinatorFactory: { presenter, opener in
+                ExternalActionUIKitCoordinator(
+                    presenter: presenter,
+                    store: dependencies.store,
+                    hub: dependencies.hub,
+                    workspace: dependencies.workspace,
+                    router: dependencies.externalActions,
+                    themes: dependencies.themes,
+                    terminalOpener: opener,
+                    sceneWindows: dependencies.sceneWindows
+                )
+            },
+            routeChanged: routeChanged
+        )
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    var currentRoute: TerminalWindowRoute { shellState.terminalRoute }
+
+    override func loadView() {
+        view = shellRootView
+        shellRootView.backgroundColor = UIKitChassis.chassis
+        mountDeck()
+        updateTerminalSurface()
+        observeRoute()
+
+        if let externalCoordinatorFactory {
+            let opener = TerminalRouteOpener(
+                destination: .shell,
+                action: { [weak actions] route in
+                    actions?.openTerminalRoute(route)
+                }
             )
+            externalCoordinator = externalCoordinatorFactory(self, opener)
         }
+        applyLayout(animated: false)
     }
 
-    private var emptyTerminal: some View {
-        ZStack {
-            Theme.screen
-            VStack(spacing: 10) {
-                ChassisLabel("No terminal selected", size: 13, color: Theme.signal3)
-                Text("Choose a session from the deck to attach it here.")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.signal2)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(24)
-        }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        externalCoordinator?.attach()
+        #if os(iOS)
+        attachBackSwipeRecognizer()
+        #endif
     }
 
-    private var shellAnimation: Animation? {
-        reduceMotion
-            ? nil
-            : .spring(response: Self.navigationResponse, dampingFraction: 1)
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        #if os(iOS)
+        if view.window == nil { detachBackSwipeRecognizer() }
+        #endif
     }
 
-    /// Every incoming window route becomes tabs in this shell. AUTO_ATTACH
-    /// `+` groups arrive as one route and comma-separated entries simply add
-    /// to the same ordered tab list.
-    private func openTerminalRoute(_ incoming: TerminalWindowRoute) {
+    override func didMove(toParent parent: UIViewController?) {
+        super.didMove(toParent: parent)
+        #if os(iOS)
+        if parent != nil { attachBackSwipeRecognizer() }
+        #endif
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let nextExpanded = resolvedLayoutMetrics().expanded
+        let crossesBreakpoint = currentLayoutMetrics.map {
+            $0.expanded != nextExpanded
+        } ?? false
+        applyLayout(animated: crossesBreakpoint)
+        #if os(iOS)
+        attachBackSwipeRecognizer()
+        #endif
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        applyLayout(animated: false)
+    }
+
+    /// Scene delegates forward activity through one framework-neutral seam.
+    func setSceneActive(_ active: Bool) {
+        guard shellState.sceneIsActive != active else { return }
+        shellState.sceneIsActive = active
+        updateNativeDeckController()
+        guard active,
+              currentLayoutMetrics?.expanded != true,
+              !compactShowsTerminal
+        else { return }
+        releaseTerminalFocus()
+    }
+
+    func setReduceMotion(_ reduceMotion: Bool) {
+        guard shellState.reduceMotion != reduceMotion else { return }
+        shellState.reduceMotion = reduceMotion
+        updateNativeDeckController()
+        updateBackSwipeAvailability(
+            expanded: currentLayoutMetrics?.expanded ?? false
+        )
+    }
+
+    func prepareForRemoval() {
+        routeObservationGeneration &+= 1
+        layoutAnimator?.stopAnimation(true)
+        layoutAnimator = nil
+        layoutCompletion = nil
+        externalCoordinator?.detach()
+        externalCoordinator = nil
+        #if os(iOS)
+        detachBackSwipeRecognizer()
+        #endif
+        releaseTerminalFocus()
+        prepareTerminalForRemoval()
+        terminalController?.willMove(toParent: nil)
+        terminalController?.view.removeFromSuperview()
+        terminalController?.removeFromParent()
+        terminalController = nil
+        (deckController as? DeckWindowViewController)?.prepareForRemoval()
+        deckController?.willMove(toParent: nil)
+        deckController?.view.removeFromSuperview()
+        deckController?.removeFromParent()
+        deckController = nil
+        actions.controller = nil
+    }
+
+    // MARK: Route and navigation actions
+
+    /// Every incoming window route becomes tabs in this one shell. Grouped
+    /// AUTO_ATTACH routes and comma-separated routes retain their order.
+    func openTerminalRoute(_ incoming: TerminalWindowRoute) {
         guard !incoming.tabs.isEmpty else { return }
-        let isColdStart = terminalRoute.tabs.isEmpty
+        let isColdStart = shellState.terminalRoute.tabs.isEmpty
         if isColdStart { terminalFocusReady = false }
         resetBackSwipe()
-        terminalRoute.merge(incoming.tabs)
+
+        var route = shellState.terminalRoute
+        route.merge(incoming.tabs)
         if let selected = incoming.activeTab?.id ?? incoming.tabs.first?.id {
-            terminalRoute.activate(selected)
+            route.activate(selected)
         }
+        replaceTerminalRoute(route)
         compactShowsTerminal = true
+        updateTerminalSurface()
+        updateNativeTerminalController()
+        applyLayout(animated: true)
         focusAfterNavigation(
-            tabID: terminalRoute.activeTabID,
+            tabID: route.activeTabID,
             deferringColdStart: isColdStart
         )
     }
 
-    /// TerminalWorkspace's existing press-to-focus lookup calls this reveal
-    /// closure for an already-open session instead of creating a duplicate.
-    private func revealTab(_ tabID: UUID) {
+    /// Workspace press-to-focus calls this instead of opening a duplicate.
+    func revealTab(_ tabID: UUID) {
         resetBackSwipe()
         compactShowsTerminal = true
+        applyLayout(animated: true)
         focusAfterNavigation(tabID: tabID, deferringColdStart: false)
     }
 
-    private func showDeck(expanded: Bool) {
-        if expanded {
+    func showDeck() {
+        if currentLayoutMetrics?.expanded == true {
             deckRailVisible.toggle()
+            applyLayout(animated: true)
         } else {
             releaseTerminalFocus()
             resetBackSwipe()
             compactShowsTerminal = false
-            // Cancel any still-pending cold-focus gate. Its delayed claim
-            // sees the hidden stage and no-ops; a later warm reveal can focus
-            // immediately, including after rotating into expanded layout.
             terminalFocusReady = true
+            applyLayout(animated: true)
         }
     }
 
-    private func terminalTabsEmptied() {
+    func terminalTabsEmptied() {
         terminalFocusReady = true
         releaseTerminalFocus()
         resetBackSwipe()
         compactShowsTerminal = false
         deckRailVisible = true
+        if terminalController is TerminalWindowViewController {
+            // The callback originates inside TerminalWindowViewController's
+            // empty-route reconciliation. Let that stack unwind before
+            // removing and preparing its controller hierarchy.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.shellState.terminalRoute.tabs.isEmpty else { return }
+                self.updateTerminalSurface()
+            }
+        } else {
+            updateTerminalSurface()
+        }
+        applyLayout(animated: true)
     }
 
-    /// A cold `becomeFirstResponder()` initializes TextInputUI and can block
-    /// the main actor long enough to delay the shell's first rendered motion.
-    /// Let the navigation spring get underway before asking for the keyboard.
-    /// Warm returns only yield one run-loop turn, preserving their existing
-    /// immediate focus behavior. Reduced Motion still gets one frame
-    /// to commit the static stage change before keyboard setup begins.
+    func replaceTerminalRoute(_ route: TerminalWindowRoute) {
+        guard shellState.terminalRoute != route else { return }
+        shellState.terminalRoute = route
+        reportRouteChangeIfNeeded()
+    }
+
+    func updateBackSwipe(translation: CGFloat, width: CGFloat? = nil) {
+        guard !shellState.reduceMotion else { return }
+        layoutAnimator?.stopAnimation(true)
+        layoutAnimator = nil
+        compactBackSwipeActive = true
+        compactBackSwipeOffset = SingleWindowShellBackSwipe.constrainedTranslation(
+            translation,
+            width: width ?? layoutSize.width
+        )
+        applyLayout(animated: false)
+    }
+
+    func finishBackSwipe(
+        translation: CGFloat,
+        velocity: CGFloat,
+        width: CGFloat? = nil
+    ) {
+        if SingleWindowShellBackSwipe.shouldReturnToDeck(
+            translation: translation,
+            velocity: velocity,
+            width: width ?? layoutSize.width
+        ) {
+            showDeck()
+        } else {
+            cancelBackSwipe(animated: true)
+        }
+    }
+
+    func cancelBackSwipe(animated: Bool) {
+        guard compactBackSwipeActive || compactBackSwipeOffset != 0 else { return }
+        compactBackSwipeOffset = 0
+        applyLayout(animated: animated) { [weak self] in
+            guard let self, self.compactBackSwipeOffset == 0 else { return }
+            self.compactBackSwipeActive = false
+            self.applyLayout(animated: false)
+        }
+    }
+
+    func resetBackSwipe() {
+        compactBackSwipeOffset = 0
+        compactBackSwipeActive = false
+    }
+
+    /// Focused native tests supply deterministic geometry without a scene or
+    /// mutating UIWindow safe-area internals.
+    func applyTestLayout(
+        size: CGSize,
+        safeArea: UIEdgeInsets = .zero,
+        verticalSizeClass: UIUserInterfaceSizeClass? = .regular
+    ) {
+        loadViewIfNeeded()
+        testLayoutInput = (size, safeArea, verticalSizeClass)
+        shellRootView.frame = CGRect(origin: .zero, size: size)
+        applyLayout(animated: false)
+    }
+
+    // MARK: Child ownership
+
+    private func mountDeck() {
+        guard deckController == nil else { return }
+        let controller = deckFactory(shellState, actions)
+        deckController = controller
+        install(controller, in: shellRootView.deckContainer)
+        if let deck = controller as? DeckWindowViewController {
+            deck.setAppLocked(appLocked)
+            // Deck sheets present from this shell's presenter, so their
+            // dismissal is what frees the shell-owned external-action queue.
+            deck.presentationDidEnd = { [weak self] in
+                self?.externalCoordinator?.presenterDidBecomeAvailable()
+            }
+        }
+        updateNativeDeckController()
+    }
+
+    private func updateTerminalSurface() {
+        let hasTabs = !shellState.terminalRoute.tabs.isEmpty
+        if hasTabs {
+            emptyTerminalView?.removeFromSuperview()
+            emptyTerminalView = nil
+            guard terminalController == nil else { return }
+            let controller = terminalFactory(shellState, actions)
+            terminalController = controller
+            install(controller, in: shellRootView.terminalContainer)
+            (controller as? TerminalWindowViewController)?.setAppLocked(appLocked)
+        } else {
+            if let controller = terminalController {
+                (controller as? TerminalWindowViewController)?.prepareForRemoval()
+                controller.willMove(toParent: nil)
+                controller.view.removeFromSuperview()
+                controller.removeFromParent()
+                terminalController = nil
+            }
+            guard emptyTerminalView == nil else { return }
+            let empty = SingleWindowShellEmptyTerminalView()
+            emptyTerminalView = empty
+            shellRootView.terminalContainer.addSubview(empty)
+            empty.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                empty.leadingAnchor.constraint(
+                    equalTo: shellRootView.terminalContainer.leadingAnchor
+                ),
+                empty.trailingAnchor.constraint(
+                    equalTo: shellRootView.terminalContainer.trailingAnchor
+                ),
+                empty.topAnchor.constraint(
+                    equalTo: shellRootView.terminalContainer.topAnchor
+                ),
+                empty.bottomAnchor.constraint(
+                    equalTo: shellRootView.terminalContainer.bottomAnchor
+                ),
+            ])
+        }
+    }
+
+    /// Retains the lock verdict even while the shell is showing only its
+    /// deck, so a terminal controller created later cannot briefly install
+    /// interactive visionOS chrome behind the veil.
+    func setAppLocked(_ locked: Bool) {
+        appLocked = locked
+        externalCoordinator?.setAppLocked(locked)
+        (deckController as? DeckWindowViewController)?.setAppLocked(locked)
+        (terminalController as? TerminalWindowViewController)?.setAppLocked(locked)
+    }
+
+    private func install(_ controller: UIViewController, in container: UIView) {
+        addChild(controller)
+        container.addSubview(controller.view)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            controller.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            controller.view.topAnchor.constraint(equalTo: container.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        controller.didMove(toParent: self)
+    }
+
+    private func observeRoute(generation: Int? = nil) {
+        let generation = generation ?? {
+            routeObservationGeneration &+= 1
+            return routeObservationGeneration
+        }()
+        guard generation == routeObservationGeneration else { return }
+        _ = withObservationTracking {
+            shellState.terminalRoute
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, generation == self.routeObservationGeneration else { return }
+                self.reportRouteChangeIfNeeded()
+                self.updateTerminalSurface()
+                self.updateNativeDeckController()
+                self.updateNativeTerminalController()
+                self.applyLayout(animated: true)
+                self.observeRoute(generation: generation)
+            }
+        }
+    }
+
+    // MARK: Layout and focus
+
+    private var layoutSize: CGSize {
+        testLayoutInput?.size ?? shellRootView.bounds.size
+    }
+
+    private func resolvedLayoutMetrics() -> SingleWindowShellLayoutMetrics {
+        let input = testLayoutInput ?? (
+            size: shellRootView.bounds.size,
+            safeArea: shellRootView.safeAreaInsets,
+            verticalSizeClass: traitCollection.verticalSizeClass
+        )
+        return SingleWindowShellNativeLayout.resolve(
+            size: input.size,
+            safeArea: input.safeArea,
+            verticalSizeClass: input.verticalSizeClass,
+            deckRailVisible: deckRailVisible,
+            compactShowsTerminal: compactShowsTerminal,
+            compactBackSwipeOffset: compactBackSwipeOffset,
+            compactBackSwipeActive: compactBackSwipeActive
+        )
+    }
+
+    private func applyLayout(
+        animated: Bool,
+        completion: (() -> Void)? = nil
+    ) {
+        guard isViewLoaded else { return }
+        let metrics = resolvedLayoutMetrics()
+        if !animated,
+           layoutAnimator?.isRunning == true,
+           targetLayoutMetrics == metrics {
+            // Direct frame animations can trigger a containment layout pass.
+            // Do not let that bookkeeping pass snap the in-flight spring to
+            // its endpoint; only genuinely new geometry interrupts it.
+            updateChildPresentation(metrics)
+            updateBackSwipeAvailability(expanded: metrics.expanded)
+            return
+        }
+        let previousExpanded = currentLayoutMetrics?.expanded
+        if previousExpanded != metrics.expanded {
+            if metrics.expanded {
+                resetBackSwipe()
+            } else if !compactShowsTerminal {
+                releaseTerminalFocus()
+            }
+        }
+        currentLayoutMetrics = metrics
+        targetLayoutMetrics = metrics
+        updateChildPresentation(metrics)
+        updateBackSwipeAvailability(expanded: metrics.expanded)
+
+        // Animate only the shell's frame/alpha contract. Forcing
+        // `layoutIfNeeded()` on the root here also resolves every pending
+        // descendant constraint inside this property animator. A probe tick or
+        // second tab can install fresh tile/cell content during that window;
+        // UIKit then preserves its zero-origin presentation geometry, piling
+        // labels into the corner. Descendants own their ordinary next layout
+        // pass, exactly as they did on the working #23 base.
+        let changes: () -> Void = { [weak self] in
+            self?.shellRootView.apply(metrics)
+        }
+        // `stopAnimation(true)` retires an animator without running its
+        // completions, so an interrupted transition would strand the caller's
+        // state cleanup. Carry it to whichever pass finally settles the
+        // layout — the interruption coverage SwiftUI's `.removed` completion
+        // criteria gave this transition before.
+        let pending = layoutCompletion
+        layoutCompletion = nil
+        let settled: (() -> Void)?
+        if pending != nil || completion != nil {
+            settled = {
+                pending?()
+                completion?()
+            }
+        } else {
+            settled = nil
+        }
+        let shouldAnimate = animated
+            && !shellState.reduceMotion
+            && shellRootView.window != nil
+        guard shouldAnimate else {
+            layoutAnimator?.stopAnimation(true)
+            layoutAnimator = nil
+            changes()
+            settled?()
+            return
+        }
+
+        layoutAnimator?.stopAnimation(true)
+        let animator = UIViewPropertyAnimator(
+            duration: Self.navigationResponse,
+            dampingRatio: 1,
+            animations: changes
+        )
+        layoutAnimator = animator
+        layoutCompletion = settled
+        animator.addCompletion { [weak self] _ in
+            guard let self, self.layoutAnimator === animator else { return }
+            self.layoutAnimator = nil
+            self.layoutCompletion = nil
+            settled?()
+        }
+        animator.startAnimation()
+    }
+
+    private func updateChildPresentation(_ metrics: SingleWindowShellLayoutMetrics) {
+        let presentation = SingleWindowShellPresentation(
+            expanded: metrics.expanded,
+            deckPresentation: metrics.expanded ? .shellRail : .shellCompact,
+            deckSafeArea: metrics.deckSafeArea,
+            terminalAvailableWidth: metrics.terminalAvailableWidth,
+            terminalSafeArea: metrics.terminalSafeArea,
+            railOwnsBottomSafeArea: metrics.railOwnsBottomSafeArea,
+            deckControlLabel: metrics.expanded
+                ? (deckRailVisible ? "◧ HIDE" : "◧ DECK")
+                : "‹ DECK",
+            terminalFocusAllowed: (metrics.expanded || compactShowsTerminal)
+                && terminalFocusReady
+        )
+        guard shellState.presentation != presentation else { return }
+        shellState.presentation = presentation
+        updateNativeDeckController()
+        updateNativeTerminalController()
+    }
+
     private func focusAfterNavigation(
         tabID: UUID?,
         deferringColdStart: Bool
     ) {
         guard let tabID else { return }
-        let claim = {
-            guard compactShowsTerminal,
-                  terminalRoute.activeTabID == tabID
+        let claim: @MainActor () -> Void = { [weak self] in
+            guard let self,
+                  self.compactShowsTerminal,
+                  self.shellState.terminalRoute.activeTabID == tabID
             else { return }
-            terminalFocusReady = true
-            workspace.controller(for: tabID)?.focusTerminal()
+            self.terminalFocusReady = true
+            var presentation = self.shellState.presentation
+            presentation.terminalFocusAllowed = true
+            self.shellState.presentation = presentation
+            self.updateNativeTerminalController()
+            self.workspace.controller(for: tabID)?.focusTerminal()
         }
         if deferringColdStart {
             DispatchQueue.main.asyncAfter(
-                deadline: .now() + (reduceMotion ? 0.05 : Self.navigationResponse),
+                deadline: .now() + (
+                    self.shellState.reduceMotion
+                        ? 0.05 : Self.navigationResponse
+                ),
                 execute: claim
             )
         } else {
@@ -382,236 +855,339 @@ struct SingleWindowShell: View {
         }
     }
 
-    /// Tracks the terminal one-to-one with a directional rightward pan. Reduced
-    /// Motion keeps the gesture as a navigation shortcut but removes the
-    /// full-screen interactive travel.
-    private func updateBackSwipe(translation: CGFloat, width: CGFloat) {
-        guard !reduceMotion else { return }
-        compactBackSwipeActive = true
-        compactBackSwipeOffset = SingleWindowShellBackSwipe.constrainedTranslation(
-            translation,
-            width: width
+    private func releaseTerminalFocus() {
+        guard let tabID = shellState.terminalRoute.activeTab?.id else { return }
+        workspace.controller(for: tabID)?.releaseFocus()
+    }
+
+    private func updateBackSwipeAvailability(expanded: Bool) {
+        #if os(iOS)
+        let idiom: ShellModeDecision.Idiom = switch UIDevice.current.userInterfaceIdiom {
+        case .phone: .phone
+        case .pad: .pad
+        default: .other
+        }
+        backSwipeRecognizer.isEnabled = SingleWindowShellBackSwipe.isAvailable(
+            idiom: idiom,
+            expanded: expanded,
+            compactShowsTerminal: compactShowsTerminal
+        )
+        #endif
+    }
+
+    private func updateNativeTerminalController() {
+        guard let controller = terminalController as? TerminalWindowViewController else {
+            return
+        }
+        controller.update(
+            route: shellState.terminalRoute,
+            shell: Self.nativeTerminalShellConfiguration(
+                state: shellState,
+                actions: actions
+            )
         )
     }
 
-    private func finishBackSwipe(
-        translation: CGFloat,
-        velocity: CGFloat,
-        width: CGFloat
-    ) {
-        if SingleWindowShellBackSwipe.shouldReturnToDeck(
-            translation: translation,
-            velocity: velocity,
-            width: width
-        ) {
-            showDeck(expanded: false)
-        } else {
-            cancelBackSwipe()
-        }
+    private func updateNativeDeckController() {
+        guard let deckController, let deckUpdater else { return }
+        deckUpdater(deckController, shellState, actions)
     }
 
-    private func cancelBackSwipe() {
-        guard compactBackSwipeActive || compactBackSwipeOffset != 0 else { return }
-        withAnimation(shellAnimation, completionCriteria: .removed) {
-            compactBackSwipeOffset = 0
-        } completion: {
-            guard compactBackSwipeOffset == 0 else { return }
-            compactBackSwipeActive = false
-        }
+    private func prepareTerminalForRemoval() {
+        (terminalController as? TerminalWindowViewController)?.prepareForRemoval()
     }
 
-    private func resetBackSwipe() {
-        compactBackSwipeOffset = 0
-        compactBackSwipeActive = false
+    private func reportRouteChangeIfNeeded() {
+        let route = shellState.terminalRoute
+        guard lastReportedRoute != route else { return }
+        lastReportedRoute = route
+        routeChanged(route)
     }
 
-    private func releaseTerminalFocus() {
-        guard let tabID = terminalRoute.activeTab?.id else { return }
-        workspace.controller(for: tabID)?.releaseFocus()
+    static func nativeDeckConfiguration(
+        dependencies: SingleWindowShellDependencies,
+        state: SingleWindowShellState,
+        actions: SingleWindowShellActions
+    ) -> DeckWindowConfiguration {
+        let presentation = state.presentation
+        return DeckWindowConfiguration(
+            store: dependencies.store,
+            entitlements: dependencies.entitlements,
+            hub: dependencies.hub,
+            workspace: dependencies.workspace,
+            localNetworkAccess: dependencies.localNetworkAccess,
+            networkChanges: dependencies.networkChanges,
+            bind: dependencies.bind,
+            themes: dependencies.themes,
+            attention: dependencies.attention,
+            appLock: dependencies.appLock,
+            externalActions: dependencies.externalActions,
+            sceneWindows: dependencies.sceneWindows,
+            openURL: dependencies.openURL,
+            terminalOpener: TerminalRouteOpener(
+                destination: .shell,
+                action: actions.openTerminalRoute
+            ),
+            presentation: presentation.deckPresentation,
+            selectedTerminal: state.terminalRoute.activeTab,
+            shellSafeArea: presentation.deckSafeArea,
+            sceneIsActive: state.sceneIsActive,
+            reduceMotion: state.reduceMotion
+        )
+    }
+
+    static func nativeTerminalShellConfiguration(
+        state: SingleWindowShellState,
+        actions: SingleWindowShellActions
+    ) -> TerminalWindowShellConfiguration {
+        let presentation = state.presentation
+        return TerminalWindowShellConfiguration(
+            deckControlLabel: presentation.deckControlLabel,
+            availableWidth: presentation.terminalAvailableWidth,
+            contentSafeArea: presentation.terminalSafeArea,
+            railOwnsBottomSafeArea: presentation.railOwnsBottomSafeArea,
+            showDeck: actions.showDeck,
+            openTerminalRoute: actions.openTerminalRoute,
+            revealTab: actions.revealTab,
+            tabsEmptied: actions.terminalTabsEmptied,
+            terminalFocusAllowed: presentation.terminalFocusAllowed
+        )
     }
 }
 
+// MARK: - UIKit edge-back gesture
+
 #if os(iOS)
-/// Installs a left-edge pan on the shell window so a right swipe can reveal
-/// the deck without stealing horizontal drags elsewhere (including the agent
-/// helper strip). At the edge, the shell pan gets first refusal only for
-/// horizontal movement; it fails immediately for vertical intent and for an
-/// active terminal text selection, handing the touch stream back to SwiftTerm.
-private struct ShellBackSwipeRecognizer: UIViewRepresentable {
-    var isEnabled: Bool
-    var onChanged: (CGFloat) -> Void
-    var onEnded: (_ translation: CGFloat, _ velocity: CGFloat) -> Void
-    var onCancelled: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(
-            isEnabled: isEnabled,
-            onChanged: onChanged,
-            onEnded: onEnded,
-            onCancelled: onCancelled
-        )
+extension SingleWindowShellViewController: UIGestureRecognizerDelegate {
+    private func attachBackSwipeRecognizer() {
+        guard gestureWindow !== view.window else { return }
+        detachBackSwipeRecognizer()
+        guard let window = view.window else { return }
+        window.addGestureRecognizer(backSwipeRecognizer)
+        gestureWindow = window
     }
 
-    func makeUIView(context: Context) -> AttachmentView {
-        let view = AttachmentView()
-        view.isUserInteractionEnabled = false
-        view.coordinator = context.coordinator
-        return view
+    private func detachBackSwipeRecognizer() {
+        gestureWindow?.removeGestureRecognizer(backSwipeRecognizer)
+        gestureWindow = nil
+        initialTouchTerminal = nil
     }
 
-    func updateUIView(_ view: AttachmentView, context: Context) {
-        context.coordinator.update(
-            isEnabled: isEnabled,
-            onChanged: onChanged,
-            onEnded: onEnded,
-            onCancelled: onCancelled
-        )
-        context.coordinator.attach(to: view.window)
-    }
-
-    static func dismantleUIView(_ view: AttachmentView, coordinator: Coordinator) {
-        coordinator.detach()
-    }
-
-    final class AttachmentView: UIView {
-        weak var coordinator: Coordinator?
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            coordinator?.attach(to: window)
-        }
-    }
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        private weak var attachedWindow: UIWindow?
-        /// Terminal beneath this pan's initial touch. Keeping the origin (not
-        /// the finger's later location) makes a selection-handle drag remain
-        /// terminal-owned even if it crosses the view's edge.
-        private weak var initialTouchTerminal: TerminalView?
-        private var isEnabled: Bool
-        private var onChanged: (CGFloat) -> Void
-        private var onEnded: (CGFloat, CGFloat) -> Void
-        private var onCancelled: () -> Void
-
-        private lazy var recognizer: UIScreenEdgePanGestureRecognizer = {
-            let recognizer = UIScreenEdgePanGestureRecognizer(
-                target: self,
-                action: #selector(handleGesture(_:))
-            )
-            recognizer.edges = .left
-            recognizer.minimumNumberOfTouches = 1
-            recognizer.maximumNumberOfTouches = 1
-            recognizer.cancelsTouchesInView = true
-            recognizer.delegate = self
-            recognizer.isEnabled = isEnabled
-            return recognizer
-        }()
-
-        init(
-            isEnabled: Bool,
-            onChanged: @escaping (CGFloat) -> Void,
-            onEnded: @escaping (CGFloat, CGFloat) -> Void,
-            onCancelled: @escaping () -> Void
-        ) {
-            self.isEnabled = isEnabled
-            self.onChanged = onChanged
-            self.onEnded = onEnded
-            self.onCancelled = onCancelled
-            super.init()
-        }
-
-        func update(
-            isEnabled: Bool,
-            onChanged: @escaping (CGFloat) -> Void,
-            onEnded: @escaping (CGFloat, CGFloat) -> Void,
-            onCancelled: @escaping () -> Void
-        ) {
-            self.isEnabled = isEnabled
-            self.onChanged = onChanged
-            self.onEnded = onEnded
-            self.onCancelled = onCancelled
-            if recognizer.isEnabled != isEnabled {
-                recognizer.isEnabled = isEnabled
-            }
-        }
-
-        func attach(to window: UIWindow?) {
-            guard attachedWindow !== window else { return }
-            detach()
-            guard let window else { return }
-            window.addGestureRecognizer(recognizer)
-            attachedWindow = window
-        }
-
-        func detach() {
-            attachedWindow?.removeGestureRecognizer(recognizer)
-            attachedWindow = nil
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldReceive touch: UITouch
+    ) -> Bool {
+        guard gestureRecognizer === backSwipeRecognizer,
+              backSwipeRecognizer.isEnabled
+        else { return false }
+        // The recognizer lives on the window and cancels touches in view, so
+        // everything sitting inside the left grab region is its to steal —
+        // including the tab strip's leading cells and the UMD's own ‹ DECK
+        // control, which a press with a few points of rightward drift then
+        // never reaches. Those two are app chrome with their own actions, so
+        // the edge gesture declines them outright; over the terminal pane it
+        // keeps its first refusal on horizontal movement.
+        if isShellChromeTouch(touch.view) {
             initialTouchTerminal = nil
+            return false
         }
+        initialTouchTerminal = terminalView(containing: touch.view)
+        return initialTouchTerminal?.hasActiveSelection != true
+    }
 
-        /// Exclude an already-active local selection before the window pan
-        /// starts tracking. Otherwise its horizontal handle drag wins the
-        /// shell's direction race and cancels SwiftTerm's selection pan.
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldReceive touch: UITouch
-        ) -> Bool {
-            guard gestureRecognizer === recognizer, isEnabled else { return false }
-            initialTouchTerminal = terminalView(containing: touch.view)
-            return initialTouchTerminal?.hasActiveSelection != true
+    /// Walks up from the touched view: a cell is nested several levels inside
+    /// its strip, and a UMD control inside its bar's stacks.
+    private func isShellChromeTouch(_ view: UIView?) -> Bool {
+        var candidate = view
+        while let current = candidate {
+            if current is TerminalTabStripView
+                || current is TerminalTabScrollView
+                || current is UMDBarRootView
+                || current is ViewportUMDRootView {
+                return true
+            }
+            candidate = current.superview
         }
+        return false
+    }
 
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard isEnabled,
-                  let pan = gestureRecognizer as? UIPanGestureRecognizer
-            else { return false }
-            let velocity = pan.velocity(in: pan.view)
-            // Re-check live in case selection became active after touch-down
-            // but before the pan crossed UIKit's recognition threshold.
-            return SingleWindowShellBackSwipe.shouldBegin(
-                horizontalVelocity: velocity.x,
-                verticalVelocity: velocity.y,
-                hasActiveTextSelection: initialTouchTerminal?.hasActiveSelection == true
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === backSwipeRecognizer,
+              backSwipeRecognizer.isEnabled,
+              let pan = gestureRecognizer as? UIPanGestureRecognizer
+        else { return false }
+        let velocity = pan.velocity(in: pan.view)
+        return SingleWindowShellBackSwipe.shouldBegin(
+            horizontalVelocity: velocity.x,
+            verticalVelocity: velocity.y,
+            hasActiveTextSelection: initialTouchTerminal?.hasActiveSelection == true
+        )
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === backSwipeRecognizer
+            && otherGestureRecognizer is UIPanGestureRecognizer
+    }
+
+    private func terminalView(containing view: UIView?) -> TerminalView? {
+        var candidate = view
+        while let current = candidate {
+            if let terminal = current as? TerminalView { return terminal }
+            candidate = current.superview
+        }
+        return nil
+    }
+
+    @objc private func handleBackSwipe(_ recognizer: UIPanGestureRecognizer) {
+        let translation = max(0, recognizer.translation(in: recognizer.view).x)
+        switch recognizer.state {
+        case .began, .changed:
+            updateBackSwipe(translation: translation)
+        case .ended:
+            finishBackSwipe(
+                translation: translation,
+                velocity: recognizer.velocity(in: recognizer.view).x
             )
-        }
-
-        private func terminalView(containing view: UIView?) -> TerminalView? {
-            var candidate = view
-            while let current = candidate {
-                if let terminal = current as? TerminalView { return terminal }
-                candidate = current.superview
-            }
-            return nil
-        }
-
-        /// Let navigation settle direction before a descendant pan recognizes
-        /// only when the touch began in UIKit's native left-edge activation
-        /// region. Everywhere else this recognizer never enters the race. If
-        /// edge intent is vertical, `gestureRecognizerShouldBegin` fails and
-        /// SwiftTerm receives the same accumulated stream.
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            gestureRecognizer === recognizer
-                && otherGestureRecognizer is UIPanGestureRecognizer
-        }
-
-        @objc private func handleGesture(_ recognizer: UIPanGestureRecognizer) {
-            let translation = max(0, recognizer.translation(in: recognizer.view).x)
-            switch recognizer.state {
-            case .began, .changed:
-                onChanged(translation)
-            case .ended:
-                onEnded(translation, recognizer.velocity(in: recognizer.view).x)
-                initialTouchTerminal = nil
-            case .cancelled, .failed:
-                onCancelled()
-                initialTouchTerminal = nil
-            default:
-                break
-            }
+            initialTouchTerminal = nil
+        case .cancelled, .failed:
+            cancelBackSwipe(animated: true)
+            initialTouchTerminal = nil
+        default:
+            break
         }
     }
 }
 #endif
+
+// MARK: - Native root views
+
+@MainActor
+final class SingleWindowShellRootView: UIView {
+    let deckContainer = UIView()
+    /// The terminal's legacy bezel paint ignored the top safe area while the
+    /// themed pane began below it. Keep this stage-owned band moving with the
+    /// terminal during compact back navigation instead of exposing chassis.
+    let terminalTopBackfill = UIView()
+    /// The pre-migration terminal surface painted the protected bottom band
+    /// as rail bezel while the terminal theme covered only ordinary bounds.
+    /// Keep that paint separate from the pane so SwiftTerm remains flush and
+    /// the home-indicator tail does not fall through to chassis gray.
+    let terminalBottomBackfill = UIView()
+    let terminalContainer = UIView()
+    let divider = UIView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        accessibilityIdentifier = "singleWindowShell.root"
+        backgroundColor = UIKitChassis.chassis
+        deckContainer.accessibilityIdentifier = "singleWindowShell.deck"
+        terminalTopBackfill.accessibilityIdentifier =
+            "singleWindowShell.terminalTopBackfill"
+        terminalTopBackfill.backgroundColor = UIKitChassis.bezel
+        terminalTopBackfill.isUserInteractionEnabled = false
+        terminalTopBackfill.isAccessibilityElement = false
+        terminalBottomBackfill.accessibilityIdentifier =
+            "singleWindowShell.terminalBottomBackfill"
+        terminalBottomBackfill.backgroundColor = UIKitChassis.bezel
+        terminalBottomBackfill.isUserInteractionEnabled = false
+        terminalBottomBackfill.isAccessibilityElement = false
+        terminalContainer.accessibilityIdentifier = "singleWindowShell.terminal"
+        divider.accessibilityIdentifier = "singleWindowShell.divider"
+        divider.backgroundColor = UIKitChassis.bezelHi
+        divider.isUserInteractionEnabled = false
+        divider.isAccessibilityElement = false
+        for child in [
+            deckContainer,
+            terminalTopBackfill,
+            terminalBottomBackfill,
+            terminalContainer,
+            divider,
+        ] {
+            addSubview(child)
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func apply(_ metrics: SingleWindowShellLayoutMetrics) {
+        deckContainer.frame = metrics.deckFrame
+        terminalContainer.frame = metrics.terminalFrame
+        let topBackfillHeight = max(0, metrics.terminalFrame.minY)
+        terminalTopBackfill.frame = CGRect(
+            x: metrics.terminalFrame.minX,
+            y: 0,
+            width: metrics.terminalFrame.width,
+            height: topBackfillHeight
+        )
+        terminalTopBackfill.alpha = metrics.terminalAlpha
+        terminalTopBackfill.isHidden = topBackfillHeight == 0
+        let backfillHeight = metrics.railOwnsBottomSafeArea
+            ? 0
+            : max(0, bounds.height - metrics.terminalFrame.maxY)
+        terminalBottomBackfill.frame = CGRect(
+            x: metrics.terminalFrame.minX,
+            y: metrics.terminalFrame.maxY,
+            width: metrics.terminalFrame.width,
+            height: backfillHeight
+        )
+        terminalBottomBackfill.alpha = metrics.terminalAlpha
+        // Alpha and x-position animate with the terminal. Hiding merely
+        // because the destination alpha is zero would pop this band away at
+        // the start of a terminal-to-deck transition.
+        terminalBottomBackfill.isHidden = backfillHeight == 0
+        divider.frame = metrics.dividerFrame
+        deckContainer.alpha = metrics.deckAlpha
+        terminalContainer.alpha = metrics.terminalAlpha
+        deckContainer.isUserInteractionEnabled = metrics.deckInteractive
+        terminalContainer.isUserInteractionEnabled = metrics.terminalInteractive
+        deckContainer.accessibilityElementsHidden = !metrics.deckInteractive
+        terminalContainer.accessibilityElementsHidden = !metrics.terminalInteractive
+        divider.isHidden = !(metrics.expanded && metrics.deckFrame.width > 0)
+        bringSubviewToFront(terminalContainer)
+        bringSubviewToFront(divider)
+    }
+}
+
+@MainActor
+final class SingleWindowShellEmptyTerminalView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        accessibilityIdentifier = "singleWindowShell.emptyTerminal"
+        backgroundColor = UIKitChassis.screen
+
+        let title = UIKitChassisLabel(
+            "No terminal selected",
+            size: 13,
+            color: UIKitChassis.signal3
+        )
+        title.accessibilityIdentifier = "singleWindowShell.emptyTitle"
+        let detail = UILabel()
+        detail.text = "Choose a session from the deck to attach it here."
+        detail.font = .preferredFont(forTextStyle: .footnote)
+        detail.adjustsFontForContentSizeCategory = true
+        detail.textColor = UIKitChassis.signal2
+        detail.textAlignment = .center
+        detail.numberOfLines = 0
+        detail.accessibilityIdentifier = "singleWindowShell.emptyDetail"
+
+        let stack = UIStackView(arrangedSubviews: [title, detail])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 10
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+}

@@ -1,66 +1,145 @@
-import SwiftUI
 import UIKit
 
-/// Frequently asked questions, opened from the deck's FAQ chip. Static
-/// troubleshooting notes — append new entries to `FAQEntry.all`.
-struct FAQView: View {
-    @Environment(\.dismiss) private var dismiss
+// MARK: - Native UIKit screen
 
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    ForEach(FAQEntry.all) { entry in
-                        FAQEntryCard(entry: entry)
-                    }
-                }
-                .frame(maxWidth: 680)
-                .padding(18)
-                .frame(maxWidth: .infinity)
-            }
-            .chassisSheetGround()
-            .navigationTitle("FAQ")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ChassisSheetTitle("FAQ")
-                ToolbarItem(placement: .confirmationAction) {
-                    ChassisBarButton("Done") { dismiss() }
-                }
-            }
+/// Frequently asked questions, opened from the deck's FAQ chip. The screen and
+/// all of its content are UIKit.
+@MainActor
+final class FAQViewController: UIViewController, AppAppearanceFollowing {
+    var onDone: (() -> Void)?
+
+    var appAppearance = AppAppearance.system {
+        didSet { applyAppAppearance() }
+    }
+    let appAppearanceFollower = AppAppearanceFollower()
+
+    private let scrollView = UIScrollView()
+    private let contentStack = UIStackView()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "FAQ"
+        view.backgroundColor = UIKitChassis.chassis
+
+        navigationItem.largeTitleDisplayMode = .never
+        #if os(visionOS)
+        // SwiftUI's sheet title needed the same explicit TALLY ink on visionOS;
+        // the native controller keeps that principal-title treatment.
+        navigationItem.titleView = UIKitChassisLabel("FAQ", size: 12)
+        #endif
+        let done = UIBarButtonItem(
+            title: "Done",
+            style: .plain,
+            target: self,
+            action: #selector(donePressed)
+        )
+        done.tintColor = UIKitChassis.signal
+        done.accessibilityLabel = "Done"
+        navigationItem.rightBarButtonItem = done
+
+        configureContent()
+        applyAppAppearance()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        applyAppAppearance()
+    }
+
+    private func configureContent() {
+        scrollView.alwaysBounceVertical = true
+        scrollView.backgroundColor = UIKitChassis.chassis
+        view.addSubview(scrollView)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            // The SwiftUI sheet never scrolled horizontally; lock the content
+            // guide to the visible frame before applying the 680-point cap.
+            scrollView.contentLayoutGuide.widthAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.widthAnchor
+            ),
+        ])
+
+        contentStack.axis = .vertical
+        contentStack.spacing = 18
+        for entry in FAQEntry.all {
+            contentStack.addArrangedSubview(makeSection(for: entry))
+        }
+        scrollView.addSubview(contentStack)
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let fillVisibleWidth = contentStack.widthAnchor.constraint(
+            equalTo: scrollView.frameLayoutGuide.widthAnchor,
+            constant: -36
+        )
+        fillVisibleWidth.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            contentStack.topAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.topAnchor,
+                constant: 18
+            ),
+            contentStack.bottomAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.bottomAnchor,
+                constant: -18
+            ),
+            contentStack.centerXAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.centerXAnchor
+            ),
+            contentStack.leadingAnchor.constraint(
+                greaterThanOrEqualTo: scrollView.contentLayoutGuide.leadingAnchor,
+                constant: 18
+            ),
+            contentStack.trailingAnchor.constraint(
+                lessThanOrEqualTo: scrollView.contentLayoutGuide.trailingAnchor,
+                constant: -18
+            ),
+            contentStack.widthAnchor.constraint(lessThanOrEqualToConstant: 680),
+            fillVisibleWidth,
+        ])
+    }
+
+    private func makeSection(for entry: FAQEntry) -> UIView {
+        let answer = UILabel()
+        answer.font = UIKitChassis.uiFont(11)
+        answer.textColor = UIKitChassis.signal
+        answer.text = entry.answer
+        answer.numberOfLines = 0
+
+        let rowStack = UIStackView(arrangedSubviews: [answer])
+        rowStack.axis = .vertical
+        rowStack.spacing = 12
+        for command in entry.commands {
+            rowStack.addArrangedSubview(UIKitCopyableCommandField(
+                label: command.label,
+                command: command.command
+            ))
+        }
+
+        return UIKitTallyFormSectionView(
+            title: entry.question,
+            detail: entry.postscript,
+            contentView: rowStack
+        )
+    }
+
+    @objc private func donePressed() {
+        if let onDone {
+            onDone()
+        } else {
+            navigationController?.dismiss(animated: true)
         }
     }
 }
 
-/// One FAQ entry as a Tally form section: the question is the section title,
-/// the answer is prose, and each command sits on its own screen well with a
-/// copy chip (`CopyableCommandField` — shared with the deck's guide sheets).
-private struct FAQEntryCard: View {
-    let entry: FAQEntry
+// MARK: - Static content
 
-    var body: some View {
-        TallyFormSection(entry.question, detail: entry.postscript) {
-            TallyFormRow {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(entry.answer)
-                        .font(.ui(11))
-                        .foregroundStyle(Theme.signal)
-                        .fixedSize(horizontal: false, vertical: true)
-                    ForEach(entry.commands) { command in
-                        CopyableCommandField(
-                            label: command.label,
-                            command: command.command
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Static FAQ content. Questions render as compressed-caps section titles,
-/// so keep them short enough for one line at phone-sheet width. Commands
-/// shared with a deck tip surface live in `HostGuide` so they can't drift.
-private struct FAQEntry: Identifiable {
+/// Questions render as compressed-caps section titles, so keep them short
+/// enough for one line at phone-sheet width. Commands shared with a deck tip
+/// surface live in `HostGuide` so they cannot drift.
+private struct FAQEntry {
     let id: String
     let question: String
     let answer: String
@@ -99,11 +178,3 @@ private struct FAQEntry: Identifiable {
         )
     ]
 }
-
-#if DEBUG
-#Preview("FAQ") {
-    FAQView()
-        .frame(width: 720, height: 640)
-        .preferredColorScheme(.dark)
-}
-#endif

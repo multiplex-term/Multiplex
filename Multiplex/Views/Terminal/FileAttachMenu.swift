@@ -1,12 +1,10 @@
+import Observation
 import PhotosUI
-import SwiftUI
-import UniformTypeIdentifiers
-#if !os(visionOS)
 import UIKit
-#endif
+import UniformTypeIdentifiers
 
 /// Camera / Photos / Files entry point shared by terminal chrome on
-/// SSH-backed tmux tabs. All selections become `DroppedFile`s and rejoin
+/// SSH-backed tmux tabs. Every selection becomes a `DroppedFile` and rejoins
 /// the same SFTP + typed-path pipeline as a drag onto the terminal pane.
 enum FileAttachPicker: Equatable {
     case camera
@@ -14,227 +12,240 @@ enum FileAttachPicker: Equatable {
     case files
 }
 
-/// The direct FILE chip owns a stable picker presenter. Compact layouts use
-/// `FileAttachSubmenu` instead so their *outer* overflow menu can own that
-/// presenter; state attached to nested Menu content is torn down on iPhone as
-/// soon as the selection closes.
-struct FileAttachMenu: View {
-    var controller: TerminalSessionController?
-
-    @State private var requestedPicker: FileAttachPicker?
-
-    var body: some View {
-        FileAttachControl(
-            controller: controller,
-            labelStyle: .badge,
-            request: { requestedPicker = $0 }
-        )
-        .fileAttachPickers(
-            controller: controller,
-            request: $requestedPicker
-        )
-    }
-}
-
-/// Menu-only content for compact terminal overflow. The request escapes to a
-/// presenter mounted on the outer menu, which remains alive while this nested
-/// submenu dismisses.
-struct FileAttachSubmenu: View {
-    var controller: TerminalSessionController?
-    var request: (FileAttachPicker) -> Void
-
-    var body: some View {
-        FileAttachControl(
-            controller: controller,
-            labelStyle: .submenu,
-            request: request
-        )
-    }
-}
-
-private struct FileAttachControl: View {
-    enum LabelStyle {
-        case badge
-        case submenu
-    }
-
-    var controller: TerminalSessionController?
-    var labelStyle: LabelStyle
-    var request: (FileAttachPicker) -> Void
-
-    #if !os(visionOS)
-    private static let cameraAvailable = UIImagePickerController
-        .isSourceTypeAvailable(.camera)
-    #endif
-
-    @ViewBuilder
-    var body: some View {
-        if canOfferFileAttach {
-            Menu {
-                #if !os(visionOS)
-                Button {
-                    request(.camera)
-                } label: {
-                    Label("Camera…", systemImage: "camera")
-                }
-                .disabled(!Self.cameraAvailable)
-                #endif
-
-                Button {
-                    request(.photoLibrary)
-                } label: {
-                    Label("Photo Library…", systemImage: "photo.on.rectangle")
-                }
-
-                Button {
-                    request(.files)
-                } label: {
-                    Label("Files…", systemImage: "folder")
-                }
-            } label: {
-                switch labelStyle {
-                case .badge:
-                    ChassisBadge("FILE", systemImage: "paperclip")
-                case .submenu:
-                    Label("Send File…", systemImage: "paperclip")
-                }
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .chassisHover(2)
-            .disabled(controller?.status != .live)
-            .accessibilityLabel("Send a file to this session")
-        }
-    }
-
-    private var canOfferFileAttach: Bool {
+enum FileAttachAvailability {
+    @MainActor
+    static func canOffer(for controller: TerminalSessionController?) -> Bool {
         guard let controller else { return false }
         return !controller.host.useMosh && controller.route.sessionName != nil
     }
-}
 
-extension View {
-    func fileAttachPickers(
-        controller: TerminalSessionController?,
-        request: Binding<FileAttachPicker?>
-    ) -> some View {
-        modifier(FileAttachPickerModifier(
-            controller: controller,
-            request: request
-        ))
-    }
-}
-
-/// Owns every system picker on a view that survives menu dismissal. This is
-/// especially important for iPhone, where FILE is nested inside the terminal
-/// overflow menu rather than mounted as a direct UMD chip.
-private struct FileAttachPickerModifier: ViewModifier {
-    var controller: TerminalSessionController?
-    @Binding var request: FileAttachPicker?
-
-    @State private var showingFileImporter = false
-    @State private var showingPhotoLibrary = false
-    @State private var selectedPhotos: [PhotosPickerItem] = []
-    @State private var fileTarget: TerminalSessionController?
-    @State private var photoTarget: TerminalSessionController?
     #if !os(visionOS)
-    @State private var showingCamera = false
-    @State private var cameraTarget: TerminalSessionController?
+    @MainActor
+    static var cameraAvailable: Bool {
+        UIImagePickerController.isSourceTypeAvailable(.camera)
+    }
     #endif
+}
 
-    func body(content: Content) -> some View {
-        content
-            .onChange(of: request) { _, picker in
-                guard let picker else { return }
-                request = nil
-                rememberTarget(for: picker)
+/// The semantic state a native attachment menu renders. Keeping this smaller
+/// than the terminal's full connection status means equivalent disabled
+/// states (connecting and ended) preserve their UIKit menu identity, while
+/// the transition to live is still observable by chrome that snapshots its
+/// actions.
+struct FileAttachMenuAvailability: Equatable {
+    let canOffer: Bool
+    let actionsEnabled: Bool
 
-                // Let the Menu finish its selection transaction before asking
-                // the same SwiftUI host to present another controller.
-                DispatchQueue.main.async {
-                    present(picker)
-                }
-            }
-            .fileImporter(
-                isPresented: $showingFileImporter,
-                allowedContentTypes: [.item],
-                allowsMultipleSelection: true,
-                onCompletion: receiveFiles
-            )
-            .photosPicker(
-                isPresented: $showingPhotoLibrary,
-                selection: $selectedPhotos,
-                matching: .images
-            )
-            .onChange(of: selectedPhotos) { _, items in
-                guard !items.isEmpty else { return }
-                selectedPhotos = []
-                let target = photoTarget
-                photoTarget = nil
-                Task { @MainActor in
-                    target?.deliverDrop(await loadPhotos(items))
-                }
-            }
-            #if !os(visionOS)
-            .fullScreenCover(isPresented: $showingCamera) {
-                CameraCaptureView(
-                    captured: { data in
-                        let target = cameraTarget
-                        cameraTarget = nil
-                        showingCamera = false
-                        target?.deliverDrop([
-                            DroppedFile(name: DropText.photoName(), data: data)
-                        ])
-                    },
-                    cancelled: {
-                        cameraTarget = nil
-                        showingCamera = false
-                    }
-                )
-                .ignoresSafeArea()
-            }
-            #endif
+    init(canOffer: Bool, isLive: Bool) {
+        self.canOffer = canOffer
+        actionsEnabled = canOffer && isLive
     }
 
-    private func rememberTarget(for picker: FileAttachPicker) {
-        switch picker {
-        case .camera:
-            #if !os(visionOS)
-            cameraTarget = controller
-            #endif
-        case .photoLibrary:
-            photoTarget = controller
-        case .files:
-            fileTarget = controller
+    @MainActor
+    init(controller: TerminalSessionController?) {
+        self.init(
+            canOffer: FileAttachAvailability.canOffer(for: controller),
+            isLive: controller?.status == .live
+        )
+    }
+}
+
+// MARK: - Native picker owner
+
+/// A stable UIKit presenter for every system attachment picker. It snapshots
+/// the terminal controller when the user chooses a source; a later tab switch
+/// therefore cannot redirect the selected bytes to a different session.
+@MainActor
+class FileAttachPickerPresenterViewController: UIViewController,
+    UIDocumentPickerDelegate, PHPickerViewControllerDelegate
+{
+    private(set) var queuedPicker: FileAttachPicker?
+    private(set) weak var queuedTarget: TerminalSessionController?
+
+    private var activeTarget: TerminalSessionController?
+    private var externalRequestIsLatched = false
+    private var presentationRetryWorkItem: DispatchWorkItem?
+
+    override func loadView() {
+        let hostView = UIView()
+        hostView.backgroundColor = .clear
+        hostView.isUserInteractionEnabled = false
+        view = hostView
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        presentQueuedPickerIfPossible()
+    }
+
+    func request(
+        _ picker: FileAttachPicker,
+        target: TerminalSessionController?
+    ) {
+        guard let target, FileAttachAvailability.canOffer(for: target) else { return }
+        queuedPicker = picker
+        queuedTarget = target
+
+        // Let a menu finish its selection transaction before asking the same
+        // scene to present another controller.
+        DispatchQueue.main.async { [weak self] in
+            self?.presentQueuedPickerIfPossible()
         }
     }
 
-    private func present(_ picker: FileAttachPicker) {
-        switch picker {
+    /// Consumes a state-driven external request. The latch prevents repeated
+    /// updates from presenting the same non-nil request more than once.
+    func consumeExternalRequest(
+        _ picker: FileAttachPicker?,
+        target: TerminalSessionController?
+    ) {
+        guard let picker else {
+            externalRequestIsLatched = false
+            return
+        }
+        guard !externalRequestIsLatched else { return }
+        externalRequestIsLatched = true
+        request(picker, target: target)
+    }
+
+    func makePicker(for source: FileAttachPicker) -> UIViewController? {
+        switch source {
+        case .files:
+            let picker = UIDocumentPickerViewController(
+                forOpeningContentTypes: [.item],
+                asCopy: true
+            )
+            picker.allowsMultipleSelection = true
+            picker.delegate = self
+            return picker
+
+        case .photoLibrary:
+            // The system library is sufficient here; Multiplex never asks
+            // PHPicker for Photos asset identifiers, only item-provider data.
+            var configuration = PHPickerConfiguration()
+            configuration.filter = .images
+            configuration.selectionLimit = 0
+            configuration.selection = .ordered
+            let picker = PHPickerViewController(configuration: configuration)
+            picker.delegate = self
+            return picker
+
         case .camera:
             #if !os(visionOS)
-            showingCamera = true
+            guard FileAttachAvailability.cameraAvailable else { return nil }
+            let picker = UIImagePickerController()
+            picker.sourceType = .camera
+            picker.cameraCaptureMode = .photo
+            picker.delegate = self
+            return picker
+            #else
+            return nil
             #endif
-        case .photoLibrary:
-            showingPhotoLibrary = true
-        case .files:
-            showingFileImporter = true
         }
     }
 
-    private func receiveFiles(_ result: Result<[URL], Error>) {
-        let target = fileTarget
-        fileTarget = nil
-        guard case .success(let urls) = result else { return }
+    func documentPicker(
+        _ controller: UIDocumentPickerViewController,
+        didPickDocumentsAt urls: [URL]
+    ) {
+        let target = activeTarget
+        activeTarget = nil
         Task { @MainActor in
-            target?.deliverDrop(await Self.readSecurityScopedFiles(urls))
+            target?.deliverDrop(await FileAttachDataLoader.readSecurityScopedFiles(urls))
+        }
+        scheduleQueuedPresentation()
+    }
+
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        activeTarget = nil
+        scheduleQueuedPresentation()
+    }
+
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        let target = activeTarget
+        activeTarget = nil
+        picker.dismiss(animated: true) { [weak self] in
+            self?.presentQueuedPickerIfPossible()
+        }
+        guard !results.isEmpty else { return }
+        Task { @MainActor in
+            target?.deliverDrop(await FileAttachDataLoader.loadPhotos(results))
         }
     }
 
+    private func presentQueuedPickerIfPossible() {
+        guard isViewLoaded, view.window != nil, let source = queuedPicker else { return }
+        guard let target = queuedTarget else {
+            queuedPicker = nil
+            return
+        }
+        guard presentedViewController == nil else {
+            scheduleQueuedPresentation()
+            return
+        }
+
+        presentationRetryWorkItem?.cancel()
+        presentationRetryWorkItem = nil
+        queuedPicker = nil
+        queuedTarget = nil
+        guard let picker = makePicker(for: source) else { return }
+        activeTarget = target
+        present(picker, animated: true)
+    }
+
+    private func scheduleQueuedPresentation() {
+        guard queuedPicker != nil, presentationRetryWorkItem == nil else { return }
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            presentationRetryWorkItem = nil
+            presentQueuedPickerIfPossible()
+        }
+        presentationRetryWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
+    }
+}
+
+#if !os(visionOS)
+extension FileAttachPickerPresenterViewController: UINavigationControllerDelegate,
+    UIImagePickerControllerDelegate
+{
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        activeTarget = nil
+        picker.dismiss(animated: true) { [weak self] in
+            self?.presentQueuedPickerIfPossible()
+        }
+    }
+
+    func imagePickerController(
+        _ picker: UIImagePickerController,
+        didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+    ) {
+        let target = activeTarget
+        activeTarget = nil
+        guard let image = info[.originalImage] as? UIImage,
+              let data = image.jpegData(compressionQuality: 0.9)
+        else {
+            picker.dismiss(animated: true) { [weak self] in
+                self?.presentQueuedPickerIfPossible()
+            }
+            return
+        }
+
+        picker.dismiss(animated: true) { [weak self] in
+            self?.presentQueuedPickerIfPossible()
+        }
+        target?.deliverDrop([
+            DroppedFile(name: DropText.photoName(), data: data),
+        ])
+    }
+}
+#endif
+
+enum FileAttachDataLoader {
     /// File-importer URLs are security scoped and may point at an iCloud
-    /// provider. Keep the grant open for the whole read and do that blocking
-    /// work away from the UI actor.
-    private static func readSecurityScopedFiles(_ urls: [URL]) async -> [DroppedFile] {
+    /// provider. Keep the grant open for the whole read and perform that
+    /// blocking work away from the UI actor.
+    static func readSecurityScopedFiles(_ urls: [URL]) async -> [DroppedFile] {
         await Task.detached(priority: .userInitiated) {
             urls.compactMap { url in
                 let accessed = url.startAccessingSecurityScopedResource()
@@ -247,78 +258,272 @@ private struct FileAttachPickerModifier: ViewModifier {
         }.value
     }
 
-    private func loadPhotos(_ items: [PhotosPickerItem]) async -> [DroppedFile] {
+    static func loadPhotos(_ results: [PHPickerResult]) async -> [DroppedFile] {
         var files: [DroppedFile] = []
-        for item in items {
-            guard let data = try? await item.loadTransferable(type: Data.self) else {
-                continue
-            }
-            let filenameExtension = item.supportedContentTypes.lazy
-                .compactMap(\.preferredFilenameExtension)
-                .first ?? "jpg"
+        for result in results {
+            let provider = result.itemProvider
+            guard let type = provider.registeredContentTypes.first(where: {
+                $0.conforms(to: .image)
+            }), let data = await loadData(from: provider, type: type)
+            else { continue }
+
             files.append(DroppedFile(
-                name: DropText.photoName(filenameExtension: filenameExtension),
+                name: DropText.photoName(
+                    filenameExtension: type.preferredFilenameExtension ?? "jpg"
+                ),
                 data: data
             ))
         }
         return files
     }
-}
 
-#if !os(visionOS)
-/// UIKit's camera picker remains the system camera capture surface on iPadOS
-/// and iOS. It is intentionally absent from the visionOS build.
-private struct CameraCaptureView: UIViewControllerRepresentable {
-    var captured: (Data) -> Void
-    var cancelled: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(captured: captured, cancelled: cancelled)
-    }
-
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.cameraCaptureMode = .photo
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(
-        _ picker: UIImagePickerController,
-        context: Context
-    ) {
-        context.coordinator.captured = captured
-        context.coordinator.cancelled = cancelled
-    }
-
-    @MainActor
-    final class Coordinator: NSObject, UINavigationControllerDelegate,
-        UIImagePickerControllerDelegate {
-        var captured: (Data) -> Void
-        var cancelled: () -> Void
-
-        init(captured: @escaping (Data) -> Void, cancelled: @escaping () -> Void) {
-            self.captured = captured
-            self.cancelled = cancelled
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            cancelled()
-        }
-
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            guard let image = info[.originalImage] as? UIImage,
-                  let data = image.jpegData(compressionQuality: 0.9)
-            else {
-                cancelled()
-                return
+    private static func loadData(from provider: NSItemProvider, type: UTType) async -> Data? {
+        await withCheckedContinuation { continuation in
+            provider.loadDataRepresentation(forTypeIdentifier: type.identifier) {
+                data, _ in continuation.resume(returning: data)
             }
-            captured(data)
         }
     }
 }
-#endif
+
+// MARK: - Native direct FILE chip
+
+@MainActor
+final class FileAttachMenuViewController: FileAttachPickerPresenterViewController {
+    private(set) var attachButton = FileAttachBadgeButton()
+
+    private var terminalController: TerminalSessionController?
+    private var observationGeneration = 0
+    private var buttonParkingConstraints: [NSLayoutConstraint] = []
+
+    init(controller: TerminalSessionController?) {
+        terminalController = controller
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func loadView() {
+        let presenterHost = UIView()
+        presenterHost.backgroundColor = .clear
+        presenterHost.isUserInteractionEnabled = false
+        presenterHost.clipsToBounds = true
+        view = presenterHost
+        parkAttachButton()
+        attachButton.accessibilityIdentifier = "terminal.fileAttach"
+        renderAndObserve()
+    }
+
+    /// The controller's root view stays inside its parent's hierarchy so it
+    /// can present system pickers. Only this ordinary button view moves into
+    /// a navigation bar or UMD stack; moving a child controller's root view
+    /// there violates UIKit containment and crashes during state restoration.
+    func takeAttachButton() -> FileAttachBadgeButton {
+        loadViewIfNeeded()
+        NSLayoutConstraint.deactivate(buttonParkingConstraints)
+        buttonParkingConstraints.removeAll()
+        if let stack = attachButton.superview as? UIStackView {
+            stack.removeArrangedSubview(attachButton)
+        }
+        attachButton.removeFromSuperview()
+        return attachButton
+    }
+
+    func parkAttachButton() {
+        guard isViewLoaded else { return }
+        guard attachButton.superview !== view else { return }
+        _ = takeAttachButton()
+        view.addSubview(attachButton)
+        attachButton.translatesAutoresizingMaskIntoConstraints = false
+        buttonParkingConstraints = [
+            attachButton.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            attachButton.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            attachButton.topAnchor.constraint(equalTo: view.topAnchor),
+            attachButton.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ]
+        NSLayoutConstraint.activate(buttonParkingConstraints)
+    }
+
+    func update(controller: TerminalSessionController?) {
+        terminalController = controller
+        guard isViewLoaded else { return }
+        observationGeneration &+= 1
+        renderAndObserve(generation: observationGeneration)
+    }
+
+    private func renderAndObserve(generation: Int? = nil) {
+        let generation = generation ?? {
+            observationGeneration &+= 1
+            return observationGeneration
+        }()
+        guard generation == observationGeneration else { return }
+
+        let availability = withObservationTracking {
+            FileAttachMenuAvailability(controller: terminalController)
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.renderAndObserve(generation: generation)
+            }
+        }
+        attachButton.isHidden = !availability.canOffer
+        attachButton.isEnabled = availability.actionsEnabled
+        attachButton.menu = availability.canOffer
+            ? makeSourceMenu(availability: availability)
+            : nil
+    }
+
+    /// The direct FILE chip and compact terminal overflows share these exact
+    /// picker actions. Capturing `target` when the menu is built preserves
+    /// the selected session if a tab switch races the system picker.
+    func makeSourceMenu(
+        title: String = "",
+        image: UIImage? = nil,
+        availability: FileAttachMenuAvailability? = nil
+    ) -> UIMenu? {
+        guard let target = terminalController,
+              FileAttachAvailability.canOffer(for: target)
+        else { return nil }
+        let availability = availability
+            ?? FileAttachMenuAvailability(controller: target)
+        guard availability.canOffer else { return nil }
+        let enabled = availability.actionsEnabled
+        var actions: [UIMenuElement] = []
+        #if !os(visionOS)
+        actions.append(UIAction(
+            title: "Camera…",
+            image: UIImage(systemName: "camera"),
+            identifier: UIAction.Identifier("terminal.attach.camera"),
+            attributes: enabled && FileAttachAvailability.cameraAvailable
+                ? [] : .disabled
+        ) { [weak self, weak target] _ in
+            self?.request(.camera, target: target)
+        })
+        #endif
+        actions.append(UIAction(
+            title: "Photo Library…",
+            image: UIImage(systemName: "photo.on.rectangle"),
+            identifier: UIAction.Identifier("terminal.attach.photos"),
+            attributes: enabled ? [] : .disabled
+        ) { [weak self, weak target] _ in
+            self?.request(.photoLibrary, target: target)
+        })
+        actions.append(UIAction(
+            title: "Files…",
+            image: UIImage(systemName: "folder"),
+            identifier: UIAction.Identifier("terminal.attach.files"),
+            attributes: enabled ? [] : .disabled
+        ) { [weak self, weak target] _ in
+            self?.request(.files, target: target)
+        })
+        return UIMenu(title: title, image: image, children: actions)
+    }
+
+}
+
+@MainActor
+final class FileAttachBadgeButton: UIButton {
+    static let horizontalInset: CGFloat = 9
+    static let verticalInset: CGFloat = 5
+    static let contentSpacing: CGFloat = 5
+
+    private let symbolView = UIImageView()
+    private let captionLabel = UILabel()
+    private let contentStack = UIStackView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIKitChassis.chassis
+        layer.borderWidth = 1
+        showsMenuAsPrimaryAction = true
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        accessibilityLabel = "Send a file to this session"
+
+        symbolView.image = UIImage(
+            systemName: "paperclip",
+            withConfiguration: UIImage.SymbolConfiguration(
+                pointSize: 9 * Theme.typeScale,
+                weight: .semibold
+            )
+        )
+        symbolView.contentMode = .scaleAspectFit
+        symbolView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            symbolView.widthAnchor.constraint(equalToConstant: 10 * Theme.typeScale),
+            symbolView.heightAnchor.constraint(equalToConstant: 10 * Theme.typeScale),
+        ])
+
+        contentStack.axis = .horizontal
+        contentStack.alignment = .center
+        contentStack.spacing = Self.contentSpacing
+        contentStack.isUserInteractionEnabled = false
+        contentStack.addArrangedSubview(symbolView)
+        contentStack.addArrangedSubview(captionLabel)
+        captionLabel.setContentHuggingPriority(.required, for: .horizontal)
+        captionLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        addSubview(contentStack)
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            contentStack.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: Self.horizontalInset
+            ),
+            contentStack.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -Self.horizontalInset
+            ),
+            contentStack.topAnchor.constraint(
+                equalTo: topAnchor,
+                constant: Self.verticalInset
+            ),
+            contentStack.bottomAnchor.constraint(
+                equalTo: bottomAnchor,
+                constant: -Self.verticalInset
+            ),
+        ])
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .vertical)
+        refreshColors()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override var isEnabled: Bool {
+        didSet { alpha = isEnabled ? 1 : 0.4 }
+    }
+
+    override var intrinsicContentSize: CGSize {
+        let content = contentStack.systemLayoutSizeFitting(
+            UIView.layoutFittingCompressedSize
+        )
+        return CGSize(
+            width: ceil(content.width + Self.horizontalInset * 2),
+            height: ceil(content.height + Self.verticalInset * 2)
+        )
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        refreshColors()
+    }
+
+    private func refreshColors() {
+        layer.borderColor = UIKitChassis.bezelHi
+            .resolvedColor(with: traitCollection).cgColor
+        symbolView.tintColor = UIKitChassis.signal2
+        captionLabel.attributedText = NSAttributedString(
+            string: "FILE",
+            attributes: [
+                .font: UIKitChassis.monoFont(9, weight: .semibold),
+                .kern: 1.1,
+                .foregroundColor: UIKitChassis.signal2
+                    .resolvedColor(with: traitCollection),
+            ]
+        )
+    }
+}

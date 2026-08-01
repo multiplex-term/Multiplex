@@ -1,9 +1,16 @@
 import Foundation
 import Observation
-import SwiftUI
 #if DEBUG
 import notify
 #endif
+
+/// The resolved light/dark appearance currently painting a scene. This is an
+/// app-owned value instead of SwiftUI's `ColorScheme`, so theme selection is
+/// equally usable from UIKit scene/view-controller code and pure tests.
+enum ResolvedAppearance: String, CaseIterable {
+    case light
+    case dark
+}
 
 /// The app-wide appearance choice, persisted by `ThemeStore` and applied at
 /// every scene root by `PlatformChrome`. `.system` follows the device (and on
@@ -16,8 +23,9 @@ enum AppAppearance: String, CaseIterable {
     case light
     case dark
 
-    /// What `preferredColorScheme` receives: nil means "follow the system".
-    var colorSchemeOverride: ColorScheme? {
+    /// The pinned appearance, when there is one. `nil` means follow the
+    /// scene's UIKit traits.
+    var resolvedOverride: ResolvedAppearance? {
         switch self {
         case .system: return nil
         case .light: return .light
@@ -102,12 +110,12 @@ final class ThemeStore {
     /// The active theme for a chassis appearance; a stale selection (deleted
     /// custom theme, renamed built-in) falls back to that appearance's house
     /// default rather than a blank screen.
-    func selected(for scheme: ColorScheme) -> TerminalTheme {
-        theme(id: selectedID(for: scheme)) ?? Self.fallback(for: scheme)
+    func selected(for appearance: ResolvedAppearance) -> TerminalTheme {
+        theme(id: selectedID(for: appearance)) ?? Self.fallback(for: appearance)
     }
 
-    func selectedID(for scheme: ColorScheme) -> String {
-        scheme == .light ? selectedLightID : selectedID
+    func selectedID(for appearance: ResolvedAppearance) -> String {
+        appearance == .light ? selectedLightID : selectedID
     }
 
     var allThemes: [TerminalTheme] {
@@ -118,8 +126,8 @@ final class ThemeStore {
         TerminalTheme.builtIn(id: id) ?? customThemes.first { $0.id == id }
     }
 
-    func select(_ theme: TerminalTheme, for scheme: ColorScheme) {
-        if scheme == .light {
+    func select(_ theme: TerminalTheme, for appearance: ResolvedAppearance) {
+        if appearance == .light {
             selectedLightID = theme.id
             defaults.set(selectedLightID, forKey: Self.selectedLightIDKey)
         } else {
@@ -154,8 +162,8 @@ final class ThemeStore {
         save()
     }
 
-    private static func fallback(for scheme: ColorScheme) -> TerminalTheme {
-        scheme == .light ? .lightDefault : .tally
+    private static func fallback(for appearance: ResolvedAppearance) -> TerminalTheme {
+        appearance == .light ? .lightDefault : .tally
     }
 
     private func load() {

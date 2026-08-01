@@ -1,426 +1,1062 @@
-import SwiftUI
+import Observation
+import UIKit
 import WebKit
 
-/// One viewport tab's surface: the page above, the TALLY rail below.
-///
-/// The page is screen content — it may be bright inside the dark chassis,
-/// exactly like a light terminal theme. The rail keeps the confirmed
-/// verdict visible for the life of the tab (monospace URL, host emphasized,
-/// the REACH tag that admitted it) and carries the only controls a monitor
-/// needs: back, reload/stop, the SYSTEM handoff, and CLOSE. A caution
-/// hairline sweeps its top edge while loading — the rail's only motion,
-/// never red.
-struct ViewportPane: View {
-    @Bindable var controller: ViewportController
-    var contentSafeArea = EdgeInsets()
-    let close: () -> Void
+struct ViewportPaneObservedState {
+    var displayURL: URL
+    var railTag: String
+    var isLoading: Bool
+    var progress: Double
+    var canGoBack: Bool
+    var failure: String?
+    var currentReach: ViewportReach
+    var hostName: String
+    var externalLink: TerminalLink?
 
-    /// The rail's address editor, presented as a top contextual bar — the
-    /// same slot Copy Mode and the jump bar use. Top on purpose: the pane
-    /// opts out of SwiftUI keyboard avoidance for the terminal's sake, so a
-    /// docked keyboard would cover an editor living in the bottom rail.
-    @State private var editingAddress = false
-    @State private var addressDraft = ""
-    @State private var addressRejected = false
-    @FocusState private var addressFieldFocused: Bool
-    /// Clearing wipes the store every viewport shares — destructive, so it
-    /// confirms (the deck's delete-action policy).
-    @State private var confirmingClearBrowsingData = false
+    @MainActor
+    init(controller: ViewportController) {
+        displayURL = controller.displayURL
+        railTag = controller.railTag
+        isLoading = controller.isLoading
+        progress = controller.progress
+        canGoBack = controller.canGoBack
+        failure = controller.failure
+        currentReach = controller.currentReach
+        hostName = controller.hostName
+        externalLink = controller.externalLink
+    }
+}
 
-    var body: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                Theme.screen
-                ViewportWebHost(controller: controller)
-                if let failure = controller.failure {
-                    failurePanel(failure)
-                }
-            }
-            .overlay(alignment: .top) {
-                if editingAddress {
-                    addressEditor
-                        .padding(.horizontal, 12)
-                        .padding(.top, 12)
-                }
-            }
-            rail
+/// Native viewport surface. It adopts the controller-owned WKWebView instead
+/// of recreating it, so merge/split keeps page state, sockets, and scroll;
+/// every piece of app chrome around that page is UIKit-owned here.
+@MainActor
+final class ViewportPaneViewController: UIViewController,
+    UIAdaptivePresentationControllerDelegate
+{
+    static let clearBrowsingMessage = "Clears cookies, caches, and site storage for every "
+        + "viewport page — dev-server logins included. This page reloads signed out."
+
+    private let controller: ViewportController
+    private var contentSafeArea: UIEdgeInsets
+    private var closeAction: () -> Void
+    private var observationGeneration = 0
+    private var state: ViewportPaneObservedState?
+    private var failureIdentity: String?
+    private var isPresentingExternalLink = false
+
+    private let rootStack = UIStackView()
+    private let pageArea = UIView()
+    private let webContainer = UIView()
+    private let railView = UIView()
+    private let railStack = UIStackView()
+    private let progressLine = UIView()
+    private var progressWidth: NSLayoutConstraint!
+    private var railLeading: NSLayoutConstraint!
+    private var railTrailing: NSLayoutConstraint!
+    private var railBottom: NSLayoutConstraint!
+    private(set) var failureOverlay: ViewportFailureOverlayView?
+
+    private(set) var backChip: UIKitChassisChip!
+    private(set) var reloadChip: UIKitChassisChip!
+    private(set) var urlButton = UIButton(type: .custom)
+    private(set) var reachBadge = ViewportBadgeView("")
+    private(set) var systemChip: UIKitChassisChip!
+    private(set) var closeChip: UIKitChassisChip!
+    private(set) var addressEditor: ViewportAddressEditorView?
+    private(set) var editingAddress = false
+
+    init(
+        controller: ViewportController,
+        contentSafeArea: UIEdgeInsets = .zero,
+        close: @escaping () -> Void
+    ) {
+        self.controller = controller
+        self.contentSafeArea = contentSafeArea
+        closeAction = close
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIKitChassis.bezel
+        buildHierarchy()
+        adoptWebView()
+        observationGeneration &+= 1
+        observeAndRender(generation: observationGeneration)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateProgressWidth()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        presentPendingExternalLinkIfPossible()
+    }
+
+    func update(contentSafeArea: UIEdgeInsets, close: @escaping () -> Void) {
+        closeAction = close
+        if self.contentSafeArea != contentSafeArea {
+            self.contentSafeArea = contentSafeArea
+            if isViewLoaded { updateRailInsets() }
         }
-        .background(Theme.bezel)
-        .alert(
-            "Clear Browsing Data",
-            isPresented: $confirmingClearBrowsingData
-        ) {
-            Button("Clear", role: .destructive) {
-                controller.clearBrowsingData()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "Clears cookies, caches, and site storage for every "
-                    + "viewport page — dev-server logins included. "
-                    + "This page reloads signed out."
-            )
+        if isViewLoaded, controller.webView.superview !== webContainer {
+            adoptWebView()
         }
-        // A page may navigate to something the gate refuses to render
-        // (mailto, a custom scheme). Same discipline as a pane press: the
-        // target is shown and confirmed, never followed.
-        .terminalLinkConfirmation(item: $controller.externalLink)
+    }
+
+    func prepareForRemoval() {
+        observationGeneration &+= 1
+        presentedViewController?.dismiss(animated: false)
+        addressEditor?.textField.resignFirstResponder()
+        // Never remove the WKWebView here: a new pane owner may already have
+        // adopted it during merge/split. `ViewportController.shutdown()` is
+        // the only close-for-real path.
+    }
+
+    func applyObservedState(_ state: ViewportPaneObservedState) {
+        render(state)
+    }
+
+    // MARK: Hierarchy + web-view adoption
+
+    private func buildHierarchy() {
+        rootStack.axis = .vertical
+        rootStack.alignment = .fill
+        rootStack.spacing = 0
+        view.addSubview(rootStack)
+        rootStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            rootStack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            rootStack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            rootStack.topAnchor.constraint(equalTo: view.topAnchor),
+            rootStack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+
+        pageArea.backgroundColor = UIKitChassis.screen
+        pageArea.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        webContainer.backgroundColor = .clear
+        pageArea.addSubview(webContainer)
+        webContainer.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            webContainer.leadingAnchor.constraint(equalTo: pageArea.leadingAnchor),
+            webContainer.trailingAnchor.constraint(equalTo: pageArea.trailingAnchor),
+            webContainer.topAnchor.constraint(equalTo: pageArea.topAnchor),
+            webContainer.bottomAnchor.constraint(equalTo: pageArea.bottomAnchor),
+        ])
+        rootStack.addArrangedSubview(pageArea)
+        buildRail()
+        rootStack.addArrangedSubview(railView)
+    }
+
+    func adoptWebView() {
+        guard let webView = controller.webView, webView.superview !== webContainer else { return }
+        webView.removeFromSuperview()
+        webContainer.addSubview(webView)
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            webView.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
+            webView.topAnchor.constraint(equalTo: webContainer.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
+        ])
+    }
+
+    // MARK: Observation
+
+    private func observeAndRender(generation: Int) {
+        guard generation == observationGeneration else { return }
+        let snapshot = withObservationTracking {
+            ViewportPaneObservedState(controller: controller)
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.observeAndRender(generation: generation)
+            }
+        }
+        render(snapshot)
+    }
+
+    private func render(_ state: ViewportPaneObservedState) {
+        self.state = state
+        updateRail(state)
+        updateFailure(state)
+        if state.externalLink != nil { presentPendingExternalLinkIfPossible() }
     }
 
     // MARK: Rail
 
-    private var rail: some View {
-        HStack(spacing: 9) {
-            ChassisChip("", systemImage: "chevron.left") { controller.goBack() }
-                .disabled(!controller.canGoBack)
-                .opacity(controller.canGoBack ? 1 : 0.45)
-                .accessibilityLabel("Back")
-            ChassisChip(
-                "",
-                systemImage: controller.isLoading ? "xmark" : "arrow.clockwise"
-            ) {
-                controller.isLoading ? controller.stopLoading() : controller.reload()
-            }
-            .accessibilityLabel(controller.isLoading ? "Stop loading" : "Reload")
-            urlReadout
-            ChassisBadge(controller.railTag)
-                .fixedSize()
-                .accessibilityLabel("Reach: \(controller.railTag)")
-            ChassisChip("SYSTEM") { controller.openInSystemBrowser() }
-                .fixedSize()
-                .accessibilityLabel("Open in the system browser")
-            ChassisChip("CLOSE", prominent: true, action: close)
-                .fixedSize()
-                .accessibilityLabel("Close viewport")
+    private func buildRail() {
+        railView.backgroundColor = UIKitChassis.bezel
+        railStack.axis = .horizontal
+        railStack.alignment = .center
+        railStack.spacing = 9
+        railView.addSubview(railStack)
+        railStack.translatesAutoresizingMaskIntoConstraints = false
+        railLeading = railStack.leadingAnchor.constraint(equalTo: railView.leadingAnchor)
+        railTrailing = railStack.trailingAnchor.constraint(equalTo: railView.trailingAnchor)
+        railBottom = railStack.bottomAnchor.constraint(equalTo: railView.bottomAnchor)
+        NSLayoutConstraint.activate([
+            railLeading,
+            railTrailing,
+            railStack.topAnchor.constraint(equalTo: railView.topAnchor, constant: 8),
+            railBottom,
+        ])
+        updateRailInsets()
+
+        let divider = UIView()
+        divider.backgroundColor = UIKitChassis.bezelHi
+        railView.addSubview(divider)
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            divider.leadingAnchor.constraint(equalTo: railView.leadingAnchor),
+            divider.trailingAnchor.constraint(equalTo: railView.trailingAnchor),
+            divider.topAnchor.constraint(equalTo: railView.topAnchor),
+            divider.heightAnchor.constraint(equalToConstant: 1),
+        ])
+        progressLine.backgroundColor = TallyPalette.caution
+        progressLine.isAccessibilityElement = false
+        railView.addSubview(progressLine)
+        progressLine.translatesAutoresizingMaskIntoConstraints = false
+        progressWidth = progressLine.widthAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            progressLine.leadingAnchor.constraint(equalTo: railView.leadingAnchor),
+            progressLine.topAnchor.constraint(equalTo: railView.topAnchor),
+            progressLine.heightAnchor.constraint(equalToConstant: 2),
+            progressWidth,
+        ])
+
+        backChip = chip(
+            "",
+            systemImage: "chevron.left",
+            accessibility: "Back"
+        ) { [weak controller] in controller?.goBack() }
+        backChip.accessibilityIdentifier = "viewport.back"
+        reloadChip = chip(
+            "",
+            systemImage: "arrow.clockwise",
+            accessibility: "Reload"
+        ) { [weak self] in
+            guard let self else { return }
+            self.state?.isLoading == true
+                ? self.controller.stopLoading() : self.controller.reload()
         }
-        .padding(.leading, 10 + contentSafeArea.leading)
-        .padding(.trailing, 10 + contentSafeArea.trailing)
-        .padding(.top, 8)
-        .padding(.bottom, 8 + contentSafeArea.bottom)
-        .background(Theme.bezel)
-        .overlay(alignment: .top) {
-            ZStack(alignment: .topLeading) {
-                Rectangle().fill(Theme.bezelHi).frame(height: 1)
-                if controller.isLoading {
-                    GeometryReader { geometry in
-                        Rectangle()
-                            .fill(Theme.caution)
-                            .frame(
-                                width: max(
-                                    0,
-                                    geometry.size.width * controller.progress
-                                ),
-                                height: 2
-                            )
-                    }
-                    .frame(height: 2)
-                    .accessibilityHidden(true)
-                }
-            }
+        reloadChip.accessibilityIdentifier = "viewport.reload"
+
+        urlButton.contentHorizontalAlignment = .leading
+        urlButton.titleLabel?.numberOfLines = 1
+        urlButton.titleLabel?.lineBreakMode = .byTruncatingMiddle
+        urlButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        urlButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        urlButton.hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        urlButton.accessibilityHint = "Edits the address"
+        urlButton.addAction(UIAction { [weak self] _ in self?.beginEditingAddress() }, for: .touchUpInside)
+        urlButton.showsMenuAsPrimaryAction = false
+        urlButton.menu = makeAddressMenu()
+        urlButton.accessibilityIdentifier = "viewport.address"
+
+        reachBadge.setContentHuggingPriority(.required, for: .horizontal)
+        systemChip = chip("SYSTEM", accessibility: "Open in the system browser") {
+            [weak controller] in controller?.openInSystemBrowser()
         }
+        systemChip.accessibilityIdentifier = "viewport.system"
+        closeChip = chip("CLOSE", prominent: true, accessibility: "Close viewport") {
+            [weak self] in self?.closeAction()
+        }
+        closeChip.accessibilityIdentifier = "viewport.close"
+        [backChip, reloadChip, urlButton, reachBadge, systemChip, closeChip]
+            .forEach { railStack.addArrangedSubview($0) }
     }
 
-    /// Monospace readout, host bright, the rest dim — the identity voice.
-    /// Tap opens the address editor in the pane's top-bar slot; a long
-    /// press copies. The readout itself never becomes a field — the rail
-    /// stays a monitor's frame, and the editor gets the keyboard-safe slot.
-    private var urlReadout: some View {
-        Button {
-            beginEditingAddress()
-        } label: {
-            Text(readoutText)
-                .font(.mono(10))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .chassisHover(2)
-        .contextMenu {
-            Button {
-                controller.copyURL()
-            } label: {
-                Label("Copy Address", systemImage: "doc.on.doc")
-            }
-            Button(role: .destructive) {
-                confirmingClearBrowsingData = true
-            } label: {
-                Label("Clear Browsing Data…", systemImage: "trash")
-            }
-        }
-        .accessibilityLabel(controller.displayURL.absoluteString)
-        .accessibilityHint("Edits the address")
+    private func updateRailInsets() {
+        railLeading.constant = 10 + contentSafeArea.left
+        railTrailing.constant = -(10 + contentSafeArea.right)
+        railBottom.constant = -(8 + contentSafeArea.bottom)
     }
 
-    // MARK: Address editor
-
-    private func beginEditingAddress() {
-        addressDraft = controller.displayURL.absoluteString
-        addressRejected = false
-        editingAddress = true
-        addressFieldFocused = true
-    }
-
-    private func submitAddress() {
-        if controller.navigate(toTyped: addressDraft) {
-            editingAddress = false
-        } else {
-            addressRejected = true
-        }
-    }
-
-    private var addressEditor: some View {
-        HStack(spacing: 12) {
-            ChassisLabel("ADDRESS", size: 9, color: Theme.signal3)
-            TextField("host:port or https://…", text: $addressDraft)
-                .font(.mono(12))
-                .foregroundStyle(Theme.signal)
-                .textFieldStyle(.plain)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.URL)
-                .submitLabel(.go)
-                .focused($addressFieldFocused)
-                .onSubmit(submitAddress)
-                .onChange(of: addressDraft) { addressRejected = false }
-                .frame(minWidth: 160, maxWidth: 420)
-            if addressRejected {
-                ChassisLabel("WEB ADDRESSES ONLY", size: 8, color: Theme.caution)
-                    .fixedSize()
-            }
-            ChassisChip("GO", prominent: true, action: submitAddress)
-                .fixedSize()
-            ChassisChip("CANCEL") { editingAddress = false }
-                .fixedSize()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(
-            Theme.bezel,
-            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+    private func updateRail(_ state: ViewportPaneObservedState) {
+        backChip.isUserInteractionEnabled = state.canGoBack
+        backChip.alpha = state.canGoBack ? 1 : 0.45
+        backChip.accessibilityTraits = state.canGoBack ? .button : [.button, .notEnabled]
+        reloadChip.setContent(
+            caption: "",
+            systemImage: state.isLoading ? "xmark" : "arrow.clockwise"
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Theme.bezelHi, lineWidth: 1)
+        reloadChip.accessibilityLabel = state.isLoading ? "Stop loading" : "Reload"
+        urlButton.setAttributedTitle(Self.readoutText(state.displayURL), for: .normal)
+        urlButton.accessibilityLabel = state.displayURL.absoluteString
+        reachBadge.setText(state.railTag)
+        reachBadge.accessibilityLabel = "Reach: \(state.railTag)"
+        progressLine.isHidden = !state.isLoading
+        updateProgressWidth()
+    }
+
+    private func updateProgressWidth() {
+        let rawProgress = state?.progress ?? 0
+        let progress = CGFloat(min(max(rawProgress, 0), 1))
+        progressWidth.constant = max(0, railView.bounds.width * progress)
+    }
+
+    static func readoutText(_ url: URL) -> NSAttributedString {
+        var host = url.host() ?? url.absoluteString
+        if let port = url.port { host += ":\(port)" }
+        let text = NSMutableAttributedString(
+            string: host,
+            attributes: [
+                .font: UIKitChassis.monoFont(10, weight: .semibold),
+                .foregroundColor: UIKitChassis.signal,
+            ]
         )
-        .accessibilityElement(children: .contain)
+        text.append(NSAttributedString(
+            string: pathAndQuery(of: url),
+            attributes: [
+                .font: UIKitChassis.monoFont(10),
+                .foregroundColor: UIKitChassis.signal2,
+            ]
+        ))
+        return text
     }
 
-    private var readoutText: AttributedString {
-        let url = controller.displayURL
-        var host = AttributedString(url.host() ?? url.absoluteString)
-        if let port = url.port { host += AttributedString(":\(port)") }
-        host.foregroundColor = Theme.signal
-        host.font = .mono(10, weight: .semibold)
-        var rest = AttributedString(pathAndQuery(of: url))
-        rest.foregroundColor = Theme.signal2
-        return host + rest
-    }
-
-    private func pathAndQuery(of url: URL) -> String {
+    static func pathAndQuery(of url: URL) -> String {
         var tail = url.path()
         if tail.isEmpty { tail = "/" }
         if let query = url.query() { tail += "?\(query)" }
         return tail
     }
 
-    // MARK: Failure
-
-    /// WebKit's blank error page never appears — the chassis says what
-    /// happened and, when the address lives on the host's network, whose
-    /// network that is.
-    private func failurePanel(_ message: String) -> some View {
-        ChassisPanel(caption: "NO ROUTE") {
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(Theme.signal2)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
-            if let hint = reachHint {
-                Text(hint)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.signal3)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 380)
-            }
-            HStack(spacing: 12) {
-                ChassisChip("RETRY", prominent: true) { controller.reload() }
-                ChassisChip("SYSTEM") { controller.openInSystemBrowser() }
-            }
-            .padding(.top, 4)
-        }
-        .padding(20)
+    private func makeAddressMenu() -> UIMenu {
+        UIMenu(children: [
+            UIAction(title: "Copy Address", image: UIImage(systemName: "doc.on.doc")) {
+                [weak controller] _ in controller?.copyURL()
+            },
+            UIAction(
+                title: "Clear Browsing Data…",
+                image: UIImage(systemName: "trash"),
+                attributes: .destructive
+            ) { [weak self] _ in self?.presentClearBrowsingDataConfirmation() },
+        ])
     }
 
-    private var reachHint: String? {
-        switch controller.currentReach {
+    private func chip(
+        _ caption: String,
+        systemImage: String? = nil,
+        prominent: Bool = false,
+        accessibility: String,
+        action: @escaping () -> Void
+    ) -> UIKitChassisChip {
+        let result = UIKitChassisChip(
+            caption,
+            systemImage: systemImage,
+            prominent: prominent,
+            accessibilityLabel: accessibility,
+            action: action
+        )
+        result.setContentHuggingPriority(.required, for: .horizontal)
+        result.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return result
+    }
+
+    // MARK: Address editor
+
+    func beginEditingAddress() {
+        if let addressEditor {
+            addressEditor.setText(controller.displayURL.absoluteString)
+            addressEditor.setRejected(false)
+            addressEditor.textField.becomeFirstResponder()
+            return
+        }
+        let editor = ViewportAddressEditorView(
+            text: controller.displayURL.absoluteString,
+            submit: { [weak self] in self?.submitAddress() },
+            cancel: { [weak self] in self?.endEditingAddress() }
+        )
+        addressEditor = editor
+        editingAddress = true
+        pageArea.addSubview(editor)
+        editor.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            editor.centerXAnchor.constraint(equalTo: pageArea.centerXAnchor),
+            editor.leadingAnchor.constraint(greaterThanOrEqualTo: pageArea.leadingAnchor, constant: 12),
+            editor.trailingAnchor.constraint(lessThanOrEqualTo: pageArea.trailingAnchor, constant: -12),
+            editor.topAnchor.constraint(equalTo: pageArea.topAnchor, constant: 12),
+        ])
+        pageArea.bringSubviewToFront(editor)
+        DispatchQueue.main.async { [weak editor] in editor?.textField.becomeFirstResponder() }
+    }
+
+    func submitAddress() {
+        guard let editor = addressEditor else { return }
+        if controller.navigate(toTyped: editor.textField.text ?? "") {
+            endEditingAddress()
+        } else {
+            editor.setRejected(true)
+        }
+    }
+
+    func endEditingAddress() {
+        addressEditor?.textField.resignFirstResponder()
+        addressEditor?.removeFromSuperview()
+        addressEditor = nil
+        editingAddress = false
+    }
+
+    // MARK: Failure state
+
+    private func updateFailure(_ state: ViewportPaneObservedState) {
+        let identity = state.failure.map {
+            "\($0)|\(state.currentReach)|\(state.hostName)"
+        }
+        guard identity != failureIdentity else { return }
+        failureIdentity = identity
+        failureOverlay?.removeFromSuperview()
+        failureOverlay = nil
+        guard let failure = state.failure else { return }
+        let overlay = ViewportFailureOverlayView(
+            message: failure,
+            hint: Self.reachHint(state.currentReach, hostName: state.hostName),
+            retry: { [weak controller] in controller?.reload() },
+            openSystem: { [weak controller] in controller?.openInSystemBrowser() }
+        )
+        failureOverlay = overlay
+        pageArea.addSubview(overlay)
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            overlay.leadingAnchor.constraint(equalTo: pageArea.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: pageArea.trailingAnchor),
+            overlay.topAnchor.constraint(equalTo: pageArea.topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: pageArea.bottomAnchor),
+        ])
+        if let addressEditor { pageArea.bringSubviewToFront(addressEditor) }
+    }
+
+    static func reachHint(_ reach: ViewportReach, hostName: String) -> String? {
+        switch reach {
         case .internet:
-            return nil
+            nil
         case .lan:
-            return "This address lives on \(controller.hostName)'s network — "
+            "This address lives on \(hostName)'s network — "
                 + "the device must share it to load the page."
         case .remoteLoopback:
-            return "This page rides \(controller.hostName)'s own address. "
+            "This page rides \(hostName)'s own address. "
                 + "The server must listen beyond loopback (vite --host, "
                 + "-H 0.0.0.0) for anything to answer."
         }
     }
+
+    // MARK: Native presentation
+
+    func makeClearBrowsingDataAlert() -> UIAlertController {
+        let alert = UIAlertController(
+            title: "Clear Browsing Data",
+            message: Self.clearBrowsingMessage,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) {
+            [weak self] _ in
+            self?.controller.clearBrowsingData()
+            self?.presentPendingExternalLinkIfPossible()
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) {
+            [weak self] _ in self?.presentPendingExternalLinkIfPossible()
+        })
+        return alert
+    }
+
+    func presentClearBrowsingDataConfirmation() {
+        guard presentedViewController == nil else { return }
+        present(makeClearBrowsingDataAlert(), animated: true)
+    }
+
+    private func presentPendingExternalLinkIfPossible() {
+        guard !isPresentingExternalLink,
+              presentedViewController == nil,
+              viewIfLoaded?.window != nil,
+              let link = controller.externalLink
+        else { return }
+        isPresentingExternalLink = true
+        let sheet = TerminalLinkSheetViewController(
+            link: link,
+            onOpen: { confirmed in
+                if let url = confirmed.openableURL { UIApplication.shared.open(url) }
+            },
+            onCopy: { UIPasteboard.general.string = $0 }
+        )
+        let navigation = UINavigationController(rootViewController: sheet)
+        navigation.presentationController?.delegate = self
+        sheet.onDismiss = { [weak self, weak navigation] in
+            self?.controller.externalLink = nil
+            self?.isPresentingExternalLink = false
+            navigation?.dismiss(animated: true)
+        }
+        present(navigation, animated: true)
+        // The presentation controller is created during presentation. Setting
+        // the delegate only before `present` can leave the interactive swipe
+        // dismissal unobserved, permanently suppressing later URL prompts.
+        navigation.presentationController?.delegate = self
+    }
+
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        controller.externalLink = nil
+        isPresentingExternalLink = false
+    }
 }
 
-/// Adopts the controller-owned WKWebView the way `SwiftTermView` adopts its
-/// terminal view: `removeFromSuperview` + re-pin, so a tab moving between
-/// windows (merge/split) keeps the live page, its scroll position, and any
-/// open sockets. The controller outlives every window the tab passes
-/// through; this representable only hosts.
-private struct ViewportWebHost: UIViewRepresentable {
-    let controller: ViewportController
+@MainActor
+final class ViewportBadgeView: UIKitTallyBorderedView {
+    private let label = UILabel()
 
-    func makeUIView(context: Context) -> UIView {
-        let container = UIView()
-        container.backgroundColor = .clear
-        adopt(into: container)
-        return container
-    }
-
-    func updateUIView(_ container: UIView, context: Context) {
-        if controller.webView.superview !== container {
-            adopt(into: container)
-        }
-    }
-
-    private func adopt(into container: UIView) {
-        guard let webView = controller.webView else { return }
-        webView.removeFromSuperview()
-        container.addSubview(webView)
-        webView.translatesAutoresizingMaskIntoConstraints = false
+    init(_ text: String) {
+        super.init(frame: .zero)
+        backgroundColor = UIKitChassis.chassis
+        addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            webView.topAnchor.constraint(equalTo: container.topAnchor),
-            webView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+        ])
+        isAccessibilityElement = true
+        setText(text)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func setText(_ text: String) {
+        label.attributedText = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: UIKitChassis.monoFont(9, weight: .semibold),
+                .kern: 1.1,
+                .foregroundColor: UIKitChassis.signal2,
+            ]
+        )
+    }
+}
+
+@MainActor
+final class ViewportAddressEditorView: UIKitTallyBorderedView, UITextFieldDelegate {
+    private(set) var textField = UITextField()
+    private(set) var rejectedLabel = UIKitChassisLabel(
+        "WEB ADDRESSES ONLY",
+        size: 8,
+        color: TallyPalette.caution
+    )
+    private let submit: () -> Void
+    private let cancel: () -> Void
+    private(set) var goChip: UIKitChassisChip!
+    private(set) var cancelChip: UIKitChassisChip!
+
+    init(text: String, submit: @escaping () -> Void, cancel: @escaping () -> Void) {
+        self.submit = submit
+        self.cancel = cancel
+        super.init(frame: .zero)
+        backgroundColor = UIKitChassis.bezel
+        layer.cornerRadius = 8
+        layer.cornerCurve = .continuous
+        clipsToBounds = true
+
+        let caption = UIKitChassisLabel("ADDRESS", size: 9, color: UIKitChassis.signal3)
+        textField.text = text
+        textField.placeholder = "host:port or https://…"
+        textField.font = UIKitChassis.monoFont(12)
+        textField.textColor = UIKitChassis.signal
+        textField.tintColor = UIKitChassis.signal
+        textField.borderStyle = .none
+        textField.autocapitalizationType = .none
+        textField.autocorrectionType = .no
+        textField.keyboardType = .URL
+        textField.returnKeyType = .go
+        textField.delegate = self
+        textField.addAction(UIAction { [weak self] _ in self?.setRejected(false) }, for: .editingChanged)
+        NSLayoutConstraint.activate([
+            textField.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
+            textField.widthAnchor.constraint(lessThanOrEqualToConstant: 420),
+        ])
+        rejectedLabel.isHidden = true
+        rejectedLabel.setContentHuggingPriority(.required, for: .horizontal)
+        goChip = UIKitChassisChip(
+            "GO",
+            prominent: true,
+            accessibilityLabel: "Go",
+            action: submit
+        )
+        cancelChip = UIKitChassisChip(
+            "CANCEL",
+            accessibilityLabel: "Cancel address edit",
+            action: cancel
+        )
+        let row = UIStackView(arrangedSubviews: [
+            caption, textField, rejectedLabel, goChip, cancelChip,
+        ])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 12
+        addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            row.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -9),
+        ])
+        accessibilityElements = [caption, textField, rejectedLabel, goChip!, cancelChip!]
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func setText(_ text: String) { textField.text = text }
+
+    func setRejected(_ rejected: Bool) {
+        rejectedLabel.isHidden = !rejected
+        rejectedLabel.accessibilityElementsHidden = !rejected
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        submit()
+        return false
+    }
+}
+
+@MainActor
+final class ViewportFailureOverlayView: UIView {
+    private(set) var retryChip: UIKitChassisChip!
+    private(set) var systemChip: UIKitChassisChip!
+    private let panel = UIKitTallyBorderedView()
+
+    init(
+        message: String,
+        hint: String?,
+        retry: @escaping () -> Void,
+        openSystem: @escaping () -> Void
+    ) {
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        panel.backgroundColor = UIKitChassis.bezel
+        panel.layer.cornerRadius = 12
+        panel.layer.cornerCurve = .continuous
+        panel.clipsToBounds = true
+
+        let lamp = UIKitTallyLamp(caption: "NO ROUTE", color: TallyPalette.caution)
+        let messageLabel = UILabel()
+        messageLabel.text = message
+        messageLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
+        messageLabel.adjustsFontForContentSizeCategory = true
+        messageLabel.textColor = UIKitChassis.signal2
+        messageLabel.numberOfLines = 0
+        messageLabel.textAlignment = .center
+        messageLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 380).isActive = true
+        let content = UIStackView(arrangedSubviews: [lamp, messageLabel])
+        content.axis = .vertical
+        content.alignment = .center
+        content.spacing = 14
+        if let hint {
+            let hintLabel = UILabel()
+            hintLabel.text = hint
+            hintLabel.font = UIFont.preferredFont(forTextStyle: .footnote)
+            hintLabel.adjustsFontForContentSizeCategory = true
+            hintLabel.textColor = UIKitChassis.signal3
+            hintLabel.numberOfLines = 0
+            hintLabel.textAlignment = .center
+            hintLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 380).isActive = true
+            content.addArrangedSubview(hintLabel)
+        }
+        retryChip = UIKitChassisChip(
+            "RETRY",
+            prominent: true,
+            accessibilityLabel: "Retry",
+            action: retry
+        )
+        systemChip = UIKitChassisChip(
+            "SYSTEM",
+            accessibilityLabel: "Open in the system browser",
+            action: openSystem
+        )
+        let actions = UIStackView(arrangedSubviews: [retryChip, systemChip])
+        actions.axis = .horizontal
+        actions.alignment = .center
+        actions.spacing = 12
+        let actionHost = UIView()
+        actionHost.addSubview(actions)
+        actions.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            actions.leadingAnchor.constraint(equalTo: actionHost.leadingAnchor),
+            actions.trailingAnchor.constraint(equalTo: actionHost.trailingAnchor),
+            actions.topAnchor.constraint(equalTo: actionHost.topAnchor, constant: 4),
+            actions.bottomAnchor.constraint(equalTo: actionHost.bottomAnchor),
+        ])
+        content.addArrangedSubview(actionHost)
+        panel.addSubview(content)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 30),
+            content.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -30),
+            content.topAnchor.constraint(equalTo: panel.topAnchor, constant: 30),
+            content.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -30),
+        ])
+        addSubview(panel)
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            panel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            panel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            panel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 20),
+            panel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -20),
+            panel.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 20),
+            panel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -20),
         ])
     }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        panel.frame.contains(point)
+    }
 }
 
-/// The window chrome while a viewport tab is on screen — the UMD's viewport
-/// face. A page needs none of the terminal's controls (keys, FILE, TMUX,
-/// DETACH), so the row carries only what a monitor's frame owes the window:
-/// DECK, the source label, MERGE (the road home for a split-out page), and
-/// CLOSE. The rail below the page owns everything page-scoped.
-struct ViewportUMD: View {
-    enum Style {
-        /// visionOS classic window's bottom ornament row.
-        case regular
-        /// The single-window shell's slim full-width top row.
-        case shell
-    }
+// MARK: - Native auxiliary-pane UMD
 
+enum ViewportUMDStyle: Equatable {
+    /// visionOS classic window's bottom ornament row.
+    case regular
+    /// The adaptive single-window shell's slim full-width top row.
+    case shell
+}
+
+@MainActor
+struct ViewportUMDConfiguration {
     var title: String
     var mergeSources: [TerminalWorkspace.WindowEntry]
     var showDeck: () -> Void
     var merge: (UUID) -> Void
     var close: () -> Void
-    var style: Style = .regular
-    var deckControlLabel = "DECK"
-    var contentSafeArea = EdgeInsets()
-    /// The file viewer shares this monitor face; only the close wording
-    /// differs.
-    var closeAccessibilityLabel = "Close viewport"
+    var style: ViewportUMDStyle
+    var deckControlLabel: String
+    var contentSafeArea: UIEdgeInsets
+    var closeAccessibilityLabel: String
+}
 
-    @ViewBuilder
-    var body: some View {
-        switch style {
-        case .regular: regularBar
-        case .shell: shellBar
-        }
-    }
+enum ViewportUMDAction: Equatable {
+    case showDeck
+    case merge(UUID)
+    case close
+}
 
-    private var regularBar: some View {
-        HStack(spacing: 14) {
-            ChassisChip("DECK", action: showDeck)
-            divider
-            ChassisLabel(title, size: 12)
-            if !mergeSources.isEmpty {
-                mergeMenu
-            }
-            divider
-            ChassisChip("CLOSE", prominent: true, action: close)
-                .accessibilityLabel(closeAccessibilityLabel)
+/// Native monitor face shared by viewport and file-viewer tabs. Page/file
+/// actions stay in the in-window rail; this bar owns only window-level roads.
+@MainActor
+final class ViewportUMDViewController: UIViewController {
+    private struct RenderKey: Equatable {
+        private struct MergeSource: Equatable {
+            let id: UUID
+            let label: String
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 11)
-        .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.bezelHi, lineWidth: 1))
-    }
 
-    private var shellBar: some View {
-        HStack(spacing: 9) {
-            ChassisChip(deckControlLabel, action: showDeck)
-                .fixedSize()
-            ChassisLabel(title, size: 11)
-                .layoutPriority(1)
-            Spacer(minLength: 4)
-            ChassisChip("CLOSE", prominent: true, action: close)
-                .fixedSize()
-                .accessibilityLabel(closeAccessibilityLabel)
-        }
-        .padding(.leading, 10 + contentSafeArea.leading)
-        .padding(.trailing, 10 + contentSafeArea.trailing)
-        .padding(.vertical, 8)
-        .background(Theme.bezel)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.bezelHi).frame(height: 1)
-        }
-    }
+        private let title: String
+        private let mergeSources: [MergeSource]
+        private let style: ViewportUMDStyle
+        private let deckControlLabel: String?
+        private let shellSafeAreaLeft: CGFloat?
+        private let shellSafeAreaRight: CGFloat?
+        private let closeAccessibilityLabel: String
 
-    private var mergeMenu: some View {
-        Menu {
-            ForEach(mergeSources) { entry in
-                Button {
-                    merge(entry.id)
-                } label: {
-                    Label(entry.label, systemImage: "macwindow")
+        init(_ configuration: ViewportUMDConfiguration) {
+            title = configuration.title
+            style = configuration.style
+            closeAccessibilityLabel = configuration.closeAccessibilityLabel
+            switch configuration.style {
+            case .regular:
+                mergeSources = configuration.mergeSources.map {
+                    MergeSource(id: $0.id, label: $0.label)
                 }
+                deckControlLabel = nil
+                shellSafeAreaLeft = nil
+                shellSafeAreaRight = nil
+            case .shell:
+                mergeSources = []
+                deckControlLabel = configuration.deckControlLabel
+                shellSafeAreaLeft = configuration.contentSafeArea.left
+                shellSafeAreaRight = configuration.contentSafeArea.right
             }
-        } label: {
-            ChassisBadge("MERGE")
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .chassisHover(2)
-        .accessibilityLabel("Merge another window into this one")
     }
 
-    private var divider: some View {
-        Rectangle().fill(Theme.bezelHi).frame(width: 1, height: 18)
+    private var configuration: ViewportUMDConfiguration
+    private(set) var rootView = ViewportUMDRootView()
+
+    private(set) var deckChip: UIKitChassisChip?
+    private(set) var titleLabel: UIKitChassisLabel?
+    private(set) var mergeButton: ViewportMenuButton?
+    private(set) var closeChip: UIKitChassisChip?
+
+    init(configuration: ViewportUMDConfiguration) {
+        self.configuration = configuration
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func loadView() {
+        view = rootView
+        render()
+    }
+
+    func update(configuration: ViewportUMDConfiguration) {
+        let needsRender = RenderKey(self.configuration) != RenderKey(configuration)
+        // Keep callbacks current even when the visible chrome is semantically unchanged.
+        self.configuration = configuration
+        if isViewLoaded, needsRender { render() }
+    }
+
+    func perform(_ action: ViewportUMDAction) {
+        switch action {
+        case .showDeck: configuration.showDeck()
+        case .merge(let id): configuration.merge(id)
+        case .close: configuration.close()
+        }
+    }
+
+    func fittingContentSize(for proposedWidth: CGFloat? = nil) -> CGSize {
+        loadViewIfNeeded()
+        return rootView.fittingSize(proposedWidth: proposedWidth)
+    }
+
+    private func render() {
+        deckChip = chip(
+            configuration.style == .shell ? configuration.deckControlLabel : "DECK",
+            accessibility: configuration.style == .shell
+                ? configuration.deckControlLabel.capitalized : "Deck",
+            action: .showDeck
+        )
+        let title = UIKitChassisLabel(
+            configuration.title,
+            size: configuration.style == .shell ? 11 : 12
+        )
+        title.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        titleLabel = title
+        closeChip = chip(
+            "CLOSE",
+            prominent: true,
+            accessibility: configuration.closeAccessibilityLabel,
+            action: .close
+        )
+
+        let row: UIStackView
+        switch configuration.style {
+        case .regular:
+            var views: [UIView] = [deckChip!, divider(), title]
+            if !configuration.mergeSources.isEmpty {
+                let menu = ViewportMenuButton(
+                    caption: "MERGE",
+                    accessibilityLabel: "Merge another window into this one",
+                    menu: makeMergeMenu()
+                )
+                mergeButton = menu
+                views.append(menu)
+            } else {
+                mergeButton = nil
+            }
+            views.append(divider())
+            views.append(closeChip!)
+            row = UIStackView(arrangedSubviews: views)
+            row.spacing = 14
+
+        case .shell:
+            mergeButton = nil
+            let spacer = UIView()
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            spacer.widthAnchor.constraint(greaterThanOrEqualToConstant: 4).isActive = true
+            row = UIStackView(arrangedSubviews: [deckChip!, title, spacer, closeChip!])
+            row.spacing = 9
+        }
+        row.axis = .horizontal
+        row.alignment = .center
+        rootView.apply(
+            content: row,
+            style: configuration.style,
+            safeArea: configuration.contentSafeArea
+        )
+        preferredContentSize = fittingContentSize()
+    }
+
+    private func chip(
+        _ caption: String,
+        prominent: Bool = false,
+        accessibility: String,
+        action: ViewportUMDAction
+    ) -> UIKitChassisChip {
+        UIKitChassisChip(
+            caption,
+            prominent: prominent,
+            accessibilityLabel: accessibility,
+            action: { [weak self] in self?.perform(action) }
+        )
+    }
+
+    private func divider() -> UIView {
+        let line = UIView()
+        line.backgroundColor = UIKitChassis.bezelHi
+        line.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            line.widthAnchor.constraint(equalToConstant: 1),
+            line.heightAnchor.constraint(equalToConstant: 18),
+        ])
+        return line
+    }
+
+    private func makeMergeMenu() -> UIMenu {
+        UIMenu(children: configuration.mergeSources.map { source in
+            UIAction(
+                title: source.label,
+                image: UIImage(systemName: "macwindow"),
+                identifier: UIAction.Identifier("viewportUMD.merge.\(source.id.uuidString)")
+            ) { [weak self] _ in self?.perform(.merge(source.id)) }
+        })
     }
 }
 
-#if DEBUG
-#Preview("Viewport UMD") {
-    VStack(spacing: 20) {
-        ViewportUMD(
-            title: "⌗ 5173 · devbox",
-            mergeSources: [],
-            showDeck: {},
-            merge: { _ in },
-            close: {}
-        )
-        ViewportUMD(
-            title: "⌗ 5173 · devbox",
-            mergeSources: [],
-            showDeck: {},
-            merge: { _ in },
-            close: {},
-            style: .shell,
-            deckControlLabel: "WALL"
-        )
-        .frame(width: 500)
+@MainActor
+final class ViewportUMDRootView: UIKitTallyBorderedView {
+    private(set) var contentInsets = UIEdgeInsets.zero
+    private weak var content: UIView?
+    private weak var bottomDivider: UIView?
+
+    func apply(content: UIView, style: ViewportUMDStyle, safeArea: UIEdgeInsets) {
+        self.content?.removeFromSuperview()
+        bottomDivider?.removeFromSuperview()
+        self.content = content
+        backgroundColor = UIKitChassis.bezel
+        switch style {
+        case .regular:
+            layer.borderWidth = 1
+            layer.cornerRadius = 12
+            layer.cornerCurve = .continuous
+            clipsToBounds = true
+            contentInsets = UIEdgeInsets(top: 11, left: 18, bottom: 11, right: 18)
+        case .shell:
+            layer.borderWidth = 0
+            layer.cornerRadius = 0
+            clipsToBounds = false
+            contentInsets = UIEdgeInsets(
+                top: 8,
+                left: 10 + safeArea.left,
+                bottom: 8,
+                right: 10 + safeArea.right
+            )
+            let divider = UIView()
+            divider.backgroundColor = UIKitChassis.bezelHi
+            addSubview(divider)
+            divider.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                divider.leadingAnchor.constraint(equalTo: leadingAnchor),
+                divider.trailingAnchor.constraint(equalTo: trailingAnchor),
+                divider.bottomAnchor.constraint(equalTo: bottomAnchor),
+                divider.heightAnchor.constraint(equalToConstant: 1),
+            ])
+            bottomDivider = divider
+        }
+        addSubview(content)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentInsets.left),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -contentInsets.right),
+            content.topAnchor.constraint(equalTo: topAnchor, constant: contentInsets.top),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -contentInsets.bottom),
+        ])
     }
-    .padding()
-    .background(Theme.chassis)
+
+    func fittingSize(proposedWidth: CGFloat?) -> CGSize {
+        let target = CGSize(
+            width: proposedWidth ?? UIView.layoutFittingCompressedSize.width,
+            height: UIView.layoutFittingCompressedSize.height
+        )
+        let horizontal: UILayoutPriority = proposedWidth == nil ? .fittingSizeLevel : .required
+        return systemLayoutSizeFitting(
+            target,
+            withHorizontalFittingPriority: horizontal,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+    }
 }
-#endif
+
+@MainActor
+final class ViewportMenuButton: UIButton {
+    private let captionLabel = UILabel()
+    private let caption: String
+
+    init(caption: String, accessibilityLabel: String, menu: UIMenu) {
+        self.caption = caption
+        super.init(frame: .zero)
+        configuration = nil
+        backgroundColor = UIKitChassis.chassis
+        layer.borderWidth = 1
+        captionLabel.isUserInteractionEnabled = false
+        addSubview(captionLabel)
+        captionLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            captionLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
+            captionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+            captionLabel.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            captionLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+        ])
+        captionLabel.setContentHuggingPriority(.required, for: .horizontal)
+        captionLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .vertical)
+        self.menu = menu
+        showsMenuAsPrimaryAction = true
+        self.accessibilityLabel = accessibilityLabel
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        refreshColors()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override var intrinsicContentSize: CGSize {
+        let content = captionLabel.systemLayoutSizeFitting(
+            UIView.layoutFittingCompressedSize
+        )
+        return CGSize(
+            width: ceil(content.width + 18),
+            height: ceil(content.height + 10)
+        )
+    }
+
+    override var isHighlighted: Bool {
+        didSet {
+            backgroundColor = isHighlighted ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        }
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        refreshColors()
+    }
+
+    private func refreshColors() {
+        layer.borderColor = UIKitChassis.bezelHi
+            .resolvedColor(with: traitCollection).cgColor
+        captionLabel.attributedText = NSAttributedString(
+            string: caption,
+            attributes: [
+                .font: UIKitChassis.monoFont(9, weight: .semibold),
+                .kern: 1.1,
+                .foregroundColor: UIKitChassis.signal2
+                    .resolvedColor(with: traitCollection),
+            ]
+        )
+    }
+}

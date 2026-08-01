@@ -1,5 +1,5 @@
 import XCTest
-import SwiftUI
+import UIKit
 @testable import Multiplex
 
 final class FleetTileGridSizingTests: XCTestCase {
@@ -7,19 +7,36 @@ final class FleetTileGridSizingTests: XCTestCase {
     func testVisionWindowBoundaryDoesNotExposeOverlayIdealSize() {
         #if os(visionOS)
         let proposal = CGSize(width: 500, height: 300)
-        let oversizedContent = Color.clear.frame(width: 900, height: 700)
-        let rawHost = UIHostingController(rootView: oversizedContent)
-        let boundedHost = UIHostingController(
-            rootView: oversizedContent.modifier(DeckWindowSizingBoundary())
+        let content = OversizedContentViewController()
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let themes = ThemeStore(
+            defaults: defaults,
+            directory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
         )
+        let root = UIKitSceneRootViewController(
+            content: content,
+            themes: themes,
+            appLock: AppLockStore(
+                defaults: UserDefaults(suiteName: UUID().uuidString)!,
+                authenticate: { _ in false }
+            ),
+            externalActions: ExternalActionRouter(),
+            bind: BindController(),
+            sceneWindows: SceneWindowRouting(
+                supportsMultipleWindows: false,
+                perform: { _ in }
+            )
+        )
+        let window = UIWindow(frame: CGRect(origin: .zero, size: proposal))
+        window.rootViewController = root
+        root.loadViewIfNeeded()
+        root.view.frame = window.bounds
+        root.view.layoutIfNeeded()
 
-        let rawSize = rawHost.sizeThatFits(in: proposal)
-        let boundedSize = boundedHost.sizeThatFits(in: proposal)
-
-        XCTAssertGreaterThan(rawSize.width, proposal.width)
-        XCTAssertGreaterThan(rawSize.height, proposal.height)
-        XCTAssertEqual(boundedSize.width, proposal.width, accuracy: 1)
-        XCTAssertEqual(boundedSize.height, proposal.height, accuracy: 1)
+        XCTAssertEqual(content.oversizedIntrinsicSize, CGSize(width: 900, height: 700))
+        XCTAssertEqual(content.view.frame.size.width, proposal.width, accuracy: 1)
+        XCTAssertEqual(content.view.frame.size.height, proposal.height, accuracy: 1)
         #endif
     }
 
@@ -273,4 +290,27 @@ final class FleetTileGridSizingTests: XCTestCase {
             1
         )
     }
+}
+
+@MainActor
+private final class OversizedContentViewController: UIViewController {
+    let oversizedIntrinsicSize = CGSize(width: 900, height: 700)
+
+    override func loadView() {
+        view = OversizedIntrinsicView(size: oversizedIntrinsicSize)
+    }
+}
+
+private final class OversizedIntrinsicView: UIView {
+    private let size: CGSize
+
+    init(size: CGSize) {
+        self.size = size
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override var intrinsicContentSize: CGSize { size }
 }

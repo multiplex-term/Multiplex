@@ -1,4 +1,5 @@
-import SwiftUI
+import Observation
+import UIKit
 
 /// Tracks the live deck window's scene plus one-shot state that must not
 /// repeat per window. The data-driven scene identity prevents new duplicates;
@@ -15,10 +16,6 @@ enum DeckScene {
             id: newSession.persistentIdentifier
         ) == .duplicate else { return }
 
-        // WindowGroup restoration can reconnect more than one old deck
-        // session before SwiftUI has enough value state to coalesce them.
-        // Permanently discard the later session so it cannot return on the
-        // next launch or remain in the system's window history.
         UIApplication.shared.requestSceneSessionDestruction(
             newSession,
             options: nil
@@ -28,8 +25,8 @@ enum DeckScene {
     #if DEBUG
     /// Launch automation is shared by deck and terminal roots. iPadOS may
     /// restore a terminal scene without constructing the deck, so keeping
-    /// this only on `DeckWindow` makes real-device verification silently
-    /// skip its requested attach.
+    /// this only on `DeckWindowViewController` makes real-device verification
+    /// silently skip its requested attach.
     static func autoAttachIfRequested(
         store: HostStore,
         workspace: TerminalWorkspace,
@@ -40,8 +37,6 @@ enum DeckScene {
               !list.isEmpty else { return }
         autoAttachFired = true
         try? await Task.sleep(for: .seconds(5))
-        // MULTIPLEX_AUTO_ATTACH_HOST names the target host — on devices with
-        // iCloud-synced real hosts, `hosts.first` is not the seeded devbox.
         let host: Host?
         if let name = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_ATTACH_HOST"] {
             host = store.hosts.first(where: { $0.name == name })
@@ -59,8 +54,6 @@ enum DeckScene {
             openTerminalWindow(TerminalWindowRoute(tabs: tabs))
             try? await Task.sleep(for: .seconds(1))
         }
-        // MULTIPLEX_AUTO_TMUX_COPY=1 enters through SwiftTerm's real
-        // send/delegate path; the harness observes `#{pane_in_mode}` = 1.
         if ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_TMUX_COPY"] == "1",
            let tabID = firstTabID {
             for _ in 0..<100 {
@@ -71,11 +64,6 @@ enum DeckScene {
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
-        // MULTIPLEX_AUTO_TMUX_CLOSE=pane|window runs the confirmed close
-        // action through the same controller entry point as the dropdown's
-        // second press. A physical-device proof can therefore attach only to
-        // a disposable session and observe its pane/window count from the
-        // host, without synthesizing a screen tap or entering tmux's prompt.
         if let closeTarget = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_TMUX_CLOSE"],
            let shortcut: TmuxShortcut = switch closeTarget {
                case "pane": .closePane
@@ -111,55 +99,179 @@ enum DeckScene {
     #endif
 }
 
-/// Reports the hosting window's scene session to `DeckScene`.
-private struct DeckSceneReporter: UIViewRepresentable {
-    final class ReporterView: UIView {
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            if let session = window?.windowScene?.session {
-                DeckScene.register(session)
+// MARK: - Native configuration
+
+/// The side effects whose lifetime used to be implicit in SwiftUI `.task`
+/// modifiers. Keeping them behind one native driver makes ownership explicit
+/// and gives lifecycle tests a deterministic seam that never opens sockets,
+/// touches Keychain, or starts StoreKit work.
+@MainActor
+struct DeckWindowLifecycleDriver {
+    var attachBind: () -> Void
+    var rotatePendingBindKeys: () async -> Void
+    var refreshHostsFromCloud: () async -> Void
+    var publishWidgetState: ([Host]) -> Void
+    var checkLocalNetwork: ([Host]) -> Void
+    var suspendLocalNetwork: () -> Void
+    var beginNetworkChanges: () -> Void
+    var suspendNetworkChanges: () -> Void
+    var reconnectAfterNetworkChange: () -> Void
+    var beginBindDiscovery: () -> Void
+    var endBindDiscovery: () -> Void
+    var flushSnapshots: () -> Void
+
+    static func live(
+        store: HostStore,
+        entitlements: EntitlementStore,
+        hub: ConnectionHub,
+        localNetworkAccess: LocalNetworkAccessMonitor,
+        networkChanges: NetworkChangeMonitor,
+        bind: BindController
+    ) -> Self {
+        Self(
+            attachBind: { bind.attach(store: store, entitlements: entitlements) },
+            rotatePendingBindKeys: { await bind.rotatePendingKeysIfNeeded() },
+            refreshHostsFromCloud: { await store.refreshFromCloud() },
+            publishWidgetState: { hub.publishWidgetState(hosts: $0) },
+            checkLocalNetwork: { localNetworkAccess.check(hosts: $0) },
+            suspendLocalNetwork: { localNetworkAccess.suspend() },
+            beginNetworkChanges: { networkChanges.begin() },
+            suspendNetworkChanges: { networkChanges.suspend() },
+            reconnectAfterNetworkChange: { hub.reconnectAfterNetworkChange() },
+            beginBindDiscovery: { bind.beginDiscovery() },
+            endBindDiscovery: { bind.endDiscovery() },
+            flushSnapshots: { hub.flushSnapshots() }
+        )
+    }
+}
+
+/// Complete native dependency/value snapshot for one deck owner. It contains
+/// no SwiftUI-only environment actions or scene-phase types, so UISceneDelegate
+/// and the native single-window shell can construct it directly.
+@MainActor
+struct DeckWindowConfiguration {
+    let store: HostStore
+    let entitlements: EntitlementStore
+    let hub: ConnectionHub
+    let workspace: TerminalWorkspace
+    let localNetworkAccess: LocalNetworkAccessMonitor
+    let networkChanges: NetworkChangeMonitor
+    let bind: BindController
+    let themes: ThemeStore
+    let attention: AttentionCenter
+    let appLock: AppLockStore
+    let externalActions: ExternalActionRouter
+    let sceneWindows: SceneWindowRouting
+    var openURL: (URL) -> Void
+    var terminalOpener: TerminalRouteOpener
+    var presentation: FleetWall.Presentation = .standard
+    var selectedTerminal: TerminalRoute?
+    var shellSafeArea = UIEdgeInsets.zero
+    var sceneIsActive: Bool
+    var reduceMotion: Bool
+    var lifecycleDriver: DeckWindowLifecycleDriver
+
+    init(
+        store: HostStore,
+        entitlements: EntitlementStore,
+        hub: ConnectionHub,
+        workspace: TerminalWorkspace,
+        localNetworkAccess: LocalNetworkAccessMonitor,
+        networkChanges: NetworkChangeMonitor,
+        bind: BindController,
+        themes: ThemeStore,
+        attention: AttentionCenter,
+        appLock: AppLockStore,
+        externalActions: ExternalActionRouter,
+        sceneWindows: SceneWindowRouting,
+        openURL: @escaping (URL) -> Void,
+        terminalOpener: TerminalRouteOpener,
+        presentation: FleetWall.Presentation = .standard,
+        selectedTerminal: TerminalRoute? = nil,
+        shellSafeArea: UIEdgeInsets = .zero,
+        sceneIsActive: Bool,
+        reduceMotion: Bool,
+        lifecycleDriver: DeckWindowLifecycleDriver? = nil
+    ) {
+        self.store = store
+        self.entitlements = entitlements
+        self.hub = hub
+        self.workspace = workspace
+        self.localNetworkAccess = localNetworkAccess
+        self.networkChanges = networkChanges
+        self.bind = bind
+        self.themes = themes
+        self.attention = attention
+        self.appLock = appLock
+        self.externalActions = externalActions
+        self.sceneWindows = sceneWindows
+        self.openURL = openURL
+        self.terminalOpener = terminalOpener
+        self.presentation = presentation
+        self.selectedTerminal = selectedTerminal
+        self.shellSafeArea = shellSafeArea
+        self.sceneIsActive = sceneIsActive
+        self.reduceMotion = reduceMotion
+        self.lifecycleDriver = lifecycleDriver ?? .live(
+            store: store,
+            entitlements: entitlements,
+            hub: hub,
+            localNetworkAccess: localNetworkAccess,
+            networkChanges: networkChanges,
+            bind: bind
+        )
+    }
+}
+
+// MARK: - Native deck owner
+
+@MainActor
+final class DeckWindowViewController: UIViewController {
+    enum PresentationKind: Equatable {
+        case addHost
+        case editHost(UUID)
+        case settings
+        case faq
+        case paywall
+        case localNetworkAlert
+    }
+
+    private enum PresentationRequest: Equatable {
+        case addHost
+        case editHost(Host)
+        case settings
+        case faq
+        case paywall
+        case localNetworkAlert
+
+        var kind: PresentationKind {
+            switch self {
+            case .addHost: .addHost
+            case .editHost(let host): .editHost(host.id)
+            case .settings: .settings
+            case .faq: .faq
+            case .paywall: .paywall
+            case .localNetworkAlert: .localNetworkAlert
             }
         }
     }
 
-    func makeUIView(context: Context) -> ReporterView { ReporterView() }
-    func updateUIView(_ view: ReporterView, context: Context) {}
-}
+    private struct ObservedState: Equatable {
+        let hosts: [Host]
+        let wantsBindSurface: Bool
+        let bindSurfaceOpen: Bool
+        let enrollmentInFlight: Bool
+        let reconnectRevision: Int
+        let denialRevision: Int
+        let localNetworkDenied: Bool
+    }
 
-/// The deck window: the fleet wall plus the sheets it opens (add/edit host,
-/// settings). Scene bookkeeping and the DEBUG auto-attach hook live here.
-struct DeckWindow: View {
-    @Environment(HostStore.self) private var store
-    @Environment(EntitlementStore.self) private var entitlements
-    @Environment(ConnectionHub.self) private var hub
-    @Environment(TerminalWorkspace.self) private var workspace
-    @Environment(LocalNetworkAccessMonitor.self) private var localNetworkAccess
-    @Environment(NetworkChangeMonitor.self) private var networkChanges
-    @Environment(BindController.self) private var bind
-    @Environment(\.openURL) private var openURL
-    @Environment(\.scenePhase) private var scenePhase
-
-    let terminalOpener: TerminalRouteOpener
-    var wallPresentation: FleetWall.Presentation = .standard
-    var selectedTerminal: TerminalRoute? = nil
-    var shellSafeArea = EdgeInsets()
-
-    @State private var addingHost = false
-    @State private var editingHost: Host?
-    @State private var showingSettings = false
-    @State private var showingFAQ = false
-    @State private var showingPaywall = false
-    @State private var showingLocalNetworkAlert = false
-
-    private struct LocalNetworkCheckID: Hashable {
+    private struct LocalNetworkCheckIdentity: Equatable {
         let hosts: [Host]
         let active: Bool
     }
 
-    /// What makes bind discovery start or stop. Any of these changing
-    /// re-evaluates the browser exactly once, and the policy is a property
-    /// of the same values so the task body and its restart key can't drift.
-    private struct BindBrowseID: Hashable {
+    private struct BindBrowseIdentity: Equatable {
         let surface: Bool
         let inFlight: Bool
         let active: Bool
@@ -167,271 +279,714 @@ struct DeckWindow: View {
         var wantsBrowsing: Bool { active && (surface || inFlight) }
     }
 
-    private var bindBrowseID: BindBrowseID {
-        BindBrowseID(
-            surface: bind.bindSurfaceOpen,
-            inFlight: bind.enrollmentInFlight,
-            active: scenePhase == .active
+    private var configuration: DeckWindowConfiguration
+    private(set) lazy var wallController = FleetWallContainerViewController(
+        configuration: makeWallConfiguration()
+    )
+    private let presentationDelegate = DeckWindowPresentationDelegate()
+    private weak var ownedPresentation: UIViewController?
+    private weak var activeAddHostController: AddHostViewController?
+    private var pendingPresentations: [PresentationRequest] = []
+    private(set) var activePresentationKind: PresentationKind?
+    private(set) var lifecycleStarted = false
+    private var lifecycleStopped = false
+    private var appLocked = false
+    private var deferredPresentationSupersession = false
+    private var observationGeneration = 0
+    private var latestObservedState: ObservedState?
+    private var lastPublishedHosts: [Host]?
+    private var localNetworkCheckIdentity: LocalNetworkCheckIdentity?
+    private var bindBrowseIdentity: BindBrowseIdentity?
+    private var networkMonitorActive: Bool?
+    private var lastReconnectRevision: Int?
+    private var lastDenialRevision: Int?
+    private var lastSceneActive: Bool?
+    private var lifecycleTasks: [Task<Void, Never>] = []
+    private var cloudRefreshTask: Task<Void, Never>?
+    private var externalActionCoordinator: ExternalActionUIKitCoordinator?
+    #if DEBUG
+    private var debugAutomationStarted = false
+    #endif
+
+    var pendingPresentationKinds: [PresentationKind] {
+        pendingPresentations.map(\.kind)
+    }
+
+    /// The adaptive shell owns the external-action coordinator, so a nested
+    /// deck builds none of its own (its opener destination is `.shell`). Its
+    /// sheets still occupy the shell's presenter, so the owner hears every
+    /// deck dismissal here and drains the queue the classic path drains
+    /// through `externalActionCoordinator` in `finishPresentation`.
+    var presentationDidEnd: (() -> Void)?
+
+    var sceneIsActive: Bool { configuration.sceneIsActive }
+    var isPreparedForRemoval: Bool { lifecycleStopped }
+
+    init(configuration: DeckWindowConfiguration) {
+        self.configuration = configuration
+        super.init(nibName: nil, bundle: nil)
+        presentationDelegate.owner = self
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func loadView() {
+        let root = DeckSceneRegistrationView()
+        root.backgroundColor = UIKitChassis.chassis
+        root.sceneConnected = { [weak self] session in
+            DeckScene.register(session)
+            self?.externalActionCoordinator?.presenterDidBecomeAvailable()
+            self?.presentNextIfPossible()
+        }
+        view = root
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        installWall()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if let session = view.window?.windowScene?.session {
+            DeckScene.register(session)
+        }
+        startLifecycleIfNeeded()
+        presentNextIfPossible()
+        externalActionCoordinator?.presenterDidBecomeAvailable()
+    }
+
+    deinit {
+        lifecycleTasks.forEach { $0.cancel() }
+        cloudRefreshTask?.cancel()
+    }
+
+    /// One update seam for classic scenes and the adaptive shell. Dependency
+    /// references are expected to remain app-lifetime stable, but replacing
+    /// them still re-arms Observation and the wall coherently.
+    func update(configuration: DeckWindowConfiguration) {
+        let previousConfiguration = self.configuration
+        let dependenciesChanged = self.configuration.store !== configuration.store
+            || self.configuration.entitlements !== configuration.entitlements
+            || self.configuration.hub !== configuration.hub
+            || self.configuration.workspace !== configuration.workspace
+            || self.configuration.localNetworkAccess !== configuration.localNetworkAccess
+            || self.configuration.networkChanges !== configuration.networkChanges
+            || self.configuration.bind !== configuration.bind
+            || self.configuration.themes !== configuration.themes
+            || self.configuration.attention !== configuration.attention
+            || self.configuration.appLock !== configuration.appLock
+            || self.configuration.externalActions !== configuration.externalActions
+        let destinationChanged = self.configuration.terminalOpener.destination
+            != configuration.terminalOpener.destination
+        let activeChanged = self.configuration.sceneIsActive != configuration.sceneIsActive
+        self.configuration = configuration
+
+        if isViewLoaded {
+            wallController.update(configuration: makeWallConfiguration())
+        }
+        guard lifecycleStarted, !lifecycleStopped else { return }
+        if dependenciesChanged {
+            restartLifecycleServices(previous: previousConfiguration)
+        } else if activeChanged {
+            sceneActivityChanged()
+        }
+        if destinationChanged || dependenciesChanged {
+            configureExternalActionCoordinator(replacingExisting: true)
+        }
+    }
+
+    func setSceneActive(_ active: Bool) {
+        guard configuration.sceneIsActive != active else { return }
+        var updated = configuration
+        updated.sceneIsActive = active
+        update(configuration: updated)
+    }
+
+    /// The scene-level shield preserves any presentation already on screen;
+    /// new deck-owned or external-action UI waits underneath until unlock so
+    /// no UIKit presentation can race above the privacy boundary.
+    func setAppLocked(_ locked: Bool) {
+        guard appLocked != locked else { return }
+        appLocked = locked
+        externalActionCoordinator?.setAppLocked(locked)
+        if !locked {
+            if deferredPresentationSupersession,
+               activePresentationKind != nil {
+                deferredPresentationSupersession = false
+                dismissActivePresentation()
+            } else {
+                deferredPresentationSupersession = false
+                presentNextIfPossible()
+            }
+            externalActionCoordinator?.presenterDidBecomeAvailable()
+        }
+    }
+
+    /// Explicit teardown for UISceneDelegate/shell removal. It cancels every
+    /// task and network watcher the old SwiftUI `.task` lifetimes owned.
+    func prepareForRemoval() {
+        guard !lifecycleStopped else { return }
+        lifecycleStopped = true
+        observationGeneration += 1
+        lifecycleTasks.forEach { $0.cancel() }
+        lifecycleTasks.removeAll()
+        cloudRefreshTask?.cancel()
+        cloudRefreshTask = nil
+        configuration.lifecycleDriver.suspendLocalNetwork()
+        configuration.lifecycleDriver.suspendNetworkChanges()
+        configuration.lifecycleDriver.endBindDiscovery()
+        configuration.lifecycleDriver.flushSnapshots()
+        externalActionCoordinator?.detach()
+        externalActionCoordinator = nil
+        activeAddHostController?.prepareForRemoval()
+        if let ownedPresentation, ownedPresentation.presentingViewController != nil {
+            ownedPresentation.dismiss(animated: false)
+        }
+        self.ownedPresentation = nil
+        activePresentationKind = nil
+        pendingPresentations.removeAll()
+        deferredPresentationSupersession = false
+    }
+
+    private func installWall() {
+        addChild(wallController)
+        view.addSubview(wallController.view)
+        wallController.view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            wallController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            wallController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            wallController.view.topAnchor.constraint(equalTo: view.topAnchor),
+            wallController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        wallController.didMove(toParent: self)
+    }
+
+    private func makeWallConfiguration() -> FleetWallConfiguration {
+        FleetWallConfiguration(
+            store: configuration.store,
+            hub: configuration.hub,
+            networkChanges: configuration.networkChanges,
+            workspace: configuration.workspace,
+            themes: configuration.themes,
+            terminalOpener: configuration.terminalOpener,
+            presentation: configuration.presentation,
+            selectedTerminal: configuration.selectedTerminal,
+            shellSafeArea: configuration.shellSafeArea,
+            reduceMotion: configuration.reduceMotion,
+            sceneIsActive: configuration.sceneIsActive,
+            addHost: { [weak self] in self?.requestAddHost() },
+            editHost: { [weak self] host in self?.requestEditHost(host) },
+            openSettings: { [weak self] in self?.requestSettings() },
+            openFAQ: { [weak self] in self?.requestFAQ() }
         )
     }
 
-    // The deck's body is split across these computed properties purely to
-    // keep each modifier chain short enough for the Swift type-checker: the
-    // combined chain (base + sheets + ~20 lifecycle tasks) exceeds its
-    // per-expression budget and fails to type-check on iOS. Slicing costs no
-    // plumbing — every property is on this struct, so all reach `self`
-    // directly. Order is preserved: chrome innermost, then core lifecycle,
-    // then the rest, then the DEBUG verification hooks outermost.
-    private var deckChrome: some View {
-        FleetWall(
-            terminalOpener: terminalOpener,
-            presentation: wallPresentation,
-            selectedTerminal: selectedTerminal,
-            shellSafeArea: shellSafeArea,
-            addHost: requestAddHost,
-            editHost: { editingHost = $0 },
-            openSettings: { showingSettings = true },
-            openFAQ: { showingFAQ = true }
+    // MARK: Lifecycle / Observation
+
+    private func startLifecycleIfNeeded() {
+        guard !lifecycleStarted else { return }
+        lifecycleStarted = true
+        lifecycleStopped = false
+        lastSceneActive = configuration.sceneIsActive
+        configuration.lifecycleDriver.attachBind()
+        configureExternalActionCoordinator(replacingExisting: false)
+        observeState()
+        startInitialLifecycleTasks()
+        #if DEBUG
+        startDebugAutomationIfNeeded()
+        #endif
+    }
+
+    private func startInitialLifecycleTasks() {
+        lifecycleTasks.append(Task { [weak self] in
+            guard let self else { return }
+            await self.configuration.lifecycleDriver.rotatePendingBindKeys()
+        })
+        refreshHostsFromCloud()
+    }
+
+    /// Every foreground refreshes, and the scene reports one for each system
+    /// alert, app-switcher peek, and Control Center pull. One replaceable
+    /// handle keeps that from retaining a finished task per activation for
+    /// the life of the deck.
+    private func refreshHostsFromCloud() {
+        cloudRefreshTask?.cancel()
+        cloudRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            await self.configuration.lifecycleDriver.refreshHostsFromCloud()
+        }
+    }
+
+    private func restartLifecycleServices(previous: DeckWindowConfiguration) {
+        previous.lifecycleDriver.suspendLocalNetwork()
+        previous.lifecycleDriver.suspendNetworkChanges()
+        previous.lifecycleDriver.endBindDiscovery()
+        lifecycleTasks.forEach { $0.cancel() }
+        lifecycleTasks.removeAll()
+
+        resetLifecycleTracking()
+        lastSceneActive = configuration.sceneIsActive
+        configuration.lifecycleDriver.attachBind()
+        observeState()
+        startInitialLifecycleTasks()
+    }
+
+    private func resetLifecycleTracking() {
+        lastPublishedHosts = nil
+        localNetworkCheckIdentity = nil
+        bindBrowseIdentity = nil
+        networkMonitorActive = nil
+        lastReconnectRevision = nil
+        lastDenialRevision = nil
+    }
+
+    private func observeState() {
+        guard lifecycleStarted, !lifecycleStopped else { return }
+        observationGeneration += 1
+        let generation = observationGeneration
+        let snapshot = withObservationTracking {
+            ObservedState(
+                hosts: configuration.store.hosts,
+                wantsBindSurface: configuration.bind.wantsBindSurface,
+                bindSurfaceOpen: configuration.bind.bindSurfaceOpen,
+                enrollmentInFlight: configuration.bind.enrollmentInFlight,
+                reconnectRevision: configuration.networkChanges.reconnectRevision,
+                denialRevision: configuration.localNetworkAccess.denialRevision,
+                localNetworkDenied: configuration.localNetworkAccess.isDenied
+            )
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      self.observationGeneration == generation,
+                      !self.lifecycleStopped
+                else { return }
+                self.observeState()
+            }
+        }
+        latestObservedState = snapshot
+        process(snapshot)
+    }
+
+    private func process(_ state: ObservedState) {
+        guard lifecycleStarted, !lifecycleStopped else { return }
+
+        if lastPublishedHosts != state.hosts {
+            lastPublishedHosts = state.hosts
+            configuration.lifecycleDriver.publishWidgetState(state.hosts)
+        }
+
+        let localIdentity = LocalNetworkCheckIdentity(
+            hosts: state.hosts,
+            active: configuration.sceneIsActive
         )
-        // Explicitly bridge Observation environments across the scene sheet
-        // boundary. iOS 27 can otherwise present this sheet from the shell's
-        // nested deck host without carrying HostStore, causing a fatal lookup.
-        .sheet(isPresented: $addingHost) {
-            AddHostSheet()
-                .environment(store)
-                .environment(entitlements)
-                .environment(bind)
+        if localNetworkCheckIdentity != localIdentity {
+            localNetworkCheckIdentity = localIdentity
+            if localIdentity.active {
+                configuration.lifecycleDriver.checkLocalNetwork(
+                    state.hosts.filter(\.isEnabled)
+                )
+            } else {
+                configuration.lifecycleDriver.suspendLocalNetwork()
+            }
         }
-        .sheet(item: $editingHost) { host in
-            AddHostSheet(editing: host)
-                .environment(store)
-                .environment(entitlements)
-                .environment(bind)
-        }
-        .sheet(isPresented: $showingSettings) { SettingsView() }
-        .sheet(isPresented: $showingFAQ) { FAQView() }
-        .sheet(isPresented: $showingPaywall) { ProPaywallView() }
-        .alert("Local Network Access Is Off", isPresented: $showingLocalNetworkAlert) {
-            Button("Open Settings") { openAppSettings() }
-            Button("Not Now", role: .cancel) {}
-        } message: {
-            Text("Multiplex can’t reach SSH hosts on your local network. Turn on Local Network access in Settings.")
-        }
-        .background(DeckSceneReporter())
-    }
 
-    private var deckCore: some View {
-        deckChrome
-        // The bind controller is app-level (onOpenURL fires on every scene
-        // root), but only the mounted deck can hand it the stores it needs
-        // and run its flows.
-        .task {
-            bind.attach(store: store, entitlements: entitlements)
-            // A bind URL may have arrived before this deck mounted (a cold
-            // start straight into the link): put its candidate on screen.
+        let browseIdentity = BindBrowseIdentity(
+            surface: state.bindSurfaceOpen,
+            inFlight: state.enrollmentInFlight,
+            active: configuration.sceneIsActive
+        )
+        if bindBrowseIdentity != browseIdentity {
+            bindBrowseIdentity = browseIdentity
+            if browseIdentity.wantsBrowsing {
+                configuration.lifecycleDriver.beginBindDiscovery()
+            } else {
+                configuration.lifecycleDriver.endBindDiscovery()
+            }
+        }
+
+        if networkMonitorActive != configuration.sceneIsActive {
+            networkMonitorActive = configuration.sceneIsActive
+            if configuration.sceneIsActive {
+                configuration.lifecycleDriver.beginNetworkChanges()
+            } else {
+                configuration.lifecycleDriver.suspendNetworkChanges()
+            }
+        }
+
+        if let lastReconnectRevision,
+           lastReconnectRevision != state.reconnectRevision,
+           configuration.sceneIsActive {
+            configuration.lifecycleDriver.reconnectAfterNetworkChange()
+        }
+        lastReconnectRevision = state.reconnectRevision
+
+        if let lastDenialRevision,
+           lastDenialRevision != state.denialRevision,
+           state.denialRevision > 0,
+           configuration.sceneIsActive {
+            requestPresentation(.localNetworkAlert)
+        }
+        lastDenialRevision = state.denialRevision
+        if !state.localNetworkDenied {
+            clearLocalNetworkPresentation()
+        }
+
+        if state.wantsBindSurface {
             presentBindSurfaceIfRequested()
-            await bind.rotatePendingKeysIfNeeded()
-        }
-        // A `multiplex://b/…` URL only ever adds a candidate row; this is
-        // where the deck answers it, by opening the one modal the whole bind
-        // flow lives on so that row is visible and waiting for ENROLL.
-        .onChange(of: bind.wantsBindSurface) { _, wants in
-            guard wants else { return }
-            presentBindSurfaceIfRequested()
-        }
-        // Browsing runs only while the Add Host modal's Bind pane is on
-        // screen — the wall has no bind surface, so nothing else consumes
-        // announcements — and never in the background. An enrollment already
-        // in flight keeps it up regardless of what is showing: the handshake
-        // resolves its endpoint through the live browser. Deliberately
-        // in-flight and not merely non-empty — a candidate parked on FAILED
-        // or waiting for its PIN would otherwise hold the browser open for
-        // the rest of the session behind a closed modal.
-        //
-        // Scoping it this tightly also means the local-network prompt can
-        // only ever follow an explicit tap on ADD HOST, on any launch.
-        .task(id: bindBrowseID) {
-            if bindBrowseID.wantsBrowsing {
-                bind.beginDiscovery()
-            } else {
-                bind.endDiscovery()
-            }
-        }
-        #if DEBUG
-        .task { await bind.runDebugAutomationIfRequested() }
-        #endif
-    }
-
-    private var deckWithLifecycle: some View {
-        deckCore
-        // Render the local cache first. Synchronizable Keychain reads may
-        // involve securityd/iCloud, so cloud reconciliation begins only once
-        // the deck exists instead of blocking App initialization.
-        .task { await store.refreshFromCloud() }
-        // Keep the widget process's App Group snapshot in step with the host
-        // list (adds, removes, renames — and the first appearance); settled
-        // probes republish it through the hub's snapshot hook.
-        .task(id: store.hosts) { hub.publishWidgetState(hosts: store.hosts) }
-        .task(
-            id: LocalNetworkCheckID(
-                hosts: store.hosts,
-                active: scenePhase == .active
-            )
-        ) {
-            if scenePhase == .active {
-                // Switched-off hosts are never dialled, and that includes
-                // this diagnostic socket — a host nobody is connecting to
-                // must not be what raises the local-network prompt.
-                localNetworkAccess.check(hosts: store.hosts.filter(\.isEnabled))
-            } else {
-                localNetworkAccess.suspend()
-            }
-        }
-        // Watch the network path while the deck is active. A settled change
-        // (Wi-Fi ↔ cellular, VPN toggle, connectivity returning — including
-        // one that happened while backgrounded) rebuilds every host's
-        // control link at once instead of letting each probe burn its exec
-        // deadline on a socket bound to the old path.
-        .task(id: scenePhase == .active) {
-            if scenePhase == .active {
-                networkChanges.begin()
-            } else {
-                networkChanges.suspend()
-            }
-        }
-        .onChange(of: networkChanges.reconnectRevision) { _, _ in
-            guard scenePhase == .active else { return }
-            hub.reconnectAfterNetworkChange()
-        }
-        .onChange(of: localNetworkAccess.denialRevision) { _, revision in
-            guard revision > 0, scenePhase == .active else { return }
-            showingLocalNetworkAlert = true
-        }
-        .onChange(of: localNetworkAccess.isDenied) { _, denied in
-            if !denied { showingLocalNetworkAlert = false }
-        }
-        // iCloud Keychain sync has no change notification; re-merge the host
-        // mirror whenever the deck comes back to the foreground. Leaving it,
-        // flush the wall snapshots — suspension freezes their debounce timer.
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                Task { await store.refreshFromCloud() }
-            } else {
-                hub.flushSnapshots()
-            }
         }
     }
 
-    var body: some View {
-        deckWithLifecycle
-        #if DEBUG
-        .task { presentPaywallForReviewCaptureIfRequested() }
-        .task { presentSettingsForVerificationIfRequested() }
-        .task { presentFAQForVerificationIfRequested() }
-        .task { presentAddHostForVerificationIfRequested() }
-        .task { await presentHostSettingsForVerificationIfRequested() }
-        .task {
-            await DeckScene.autoAttachIfRequested(
-                store: store,
-                workspace: workspace,
-                openTerminalWindow: { terminalOpener($0) }
-            )
-        }
-        #endif
-    }
-
-    /// The free tier may create up to two hosts; Pro may create any number.
-    /// This is intentionally only an add-flow intent check. HostStore stays
-    /// ungated so existing records and hosts arriving through Keychain sync
-    /// are never hidden, deleted, or prevented from connecting.
-    private var canAddHost: Bool {
-        entitlements.canAddHost(existingHostCount: store.hosts.count)
-    }
-
-    private func requestAddHost() {
-        if canAddHost {
-            addingHost = true
+    private func sceneActivityChanged() {
+        let active = configuration.sceneIsActive
+        defer { lastSceneActive = active }
+        guard lastSceneActive != active else { return }
+        if active {
+            refreshHostsFromCloud()
         } else {
-            showingPaywall = true
+            configuration.lifecycleDriver.flushSnapshots()
+        }
+        if let latestObservedState { process(latestObservedState) }
+    }
+
+    private func configureExternalActionCoordinator(replacingExisting: Bool) {
+        if replacingExisting {
+            externalActionCoordinator?.detach()
+            externalActionCoordinator = nil
+        }
+        guard externalActionCoordinator == nil,
+              configuration.terminalOpener.destination == .window
+        else { return }
+        let coordinator = ExternalActionUIKitCoordinator(
+            presenter: self,
+            store: configuration.store,
+            hub: configuration.hub,
+            workspace: configuration.workspace,
+            router: configuration.externalActions,
+            themes: configuration.themes,
+            terminalOpener: configuration.terminalOpener,
+            sceneWindows: configuration.sceneWindows
+        )
+        coordinator.presentationDidEnd = { [weak self] in self?.presentNextIfPossible() }
+        externalActionCoordinator = coordinator
+        coordinator.setAppLocked(appLocked)
+        coordinator.attach()
+    }
+
+    // MARK: Deck-owned presentations
+
+    func requestAddHost() {
+        if configuration.entitlements.canAddHost(
+            existingHostCount: configuration.store.hosts.count
+        ) {
+            requestPresentation(.addHost)
+        } else {
+            requestPresentation(.paywall)
         }
     }
 
-    private func openAppSettings() {
-        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-        openURL(url)
+    func requestEditHost(_ host: Host) {
+        requestPresentation(.editHost(host))
     }
 
-    /// Answers `BindController.wantsBindSurface` — a bind URL arrived, its
-    /// candidate row is in `pending`, and the Add Host modal (which opens on
-    /// its Bind pane) is where that row is visible and confirmable. A
-    /// production path (a real `multiplex://b/…` open), so it must live
-    /// OUTSIDE `#if DEBUG` — it is called unconditionally from `body`.
-    private func presentBindSurfaceIfRequested() {
-        guard bind.wantsBindSurface else { return }
-        bind.wantsBindSurface = false
-        // The URL's intent wins over an open edit sheet; both sheets on this
-        // view cannot present at once.
-        editingHost = nil
-        addingHost = true
+    func requestSettings() {
+        requestPresentation(.settings)
     }
+
+    func requestFAQ() {
+        requestPresentation(.faq)
+    }
+
+    private func requestPresentation(
+        _ request: PresentationRequest,
+        supersedingCurrent: Bool = false
+    ) {
+        guard !lifecycleStopped else { return }
+        if activePresentationKind == request.kind { return }
+        if !pendingPresentations.contains(where: { $0.kind == request.kind }) {
+            if supersedingCurrent {
+                pendingPresentations.insert(request, at: 0)
+            } else {
+                pendingPresentations.append(request)
+            }
+        }
+        if supersedingCurrent, activePresentationKind != nil {
+            if appLocked {
+                deferredPresentationSupersession = true
+            } else {
+                dismissActivePresentation()
+            }
+        } else {
+            presentNextIfPossible()
+        }
+    }
+
+    private func presentNextIfPossible() {
+        guard !lifecycleStopped,
+              !appLocked,
+              activePresentationKind == nil,
+              ownedPresentation == nil,
+              presentedViewController == nil,
+              viewIfLoaded?.window != nil,
+              !pendingPresentations.isEmpty
+        else { return }
+        let request = pendingPresentations.removeFirst()
+        switch request {
+        case .addHost:
+            presentAddHost(editing: nil)
+        case .editHost(let host):
+            presentAddHost(editing: host)
+        case .settings:
+            presentSettings()
+        case .faq:
+            presentFAQ()
+        case .paywall:
+            presentPaywall()
+        case .localNetworkAlert:
+            presentLocalNetworkAlert()
+        }
+    }
+
+    private func presentAddHost(editing host: Host?) {
+        let controller = AddHostViewController(
+            store: configuration.store,
+            entitlements: configuration.entitlements,
+            bind: configuration.bind,
+            editing: host
+        )
+        controller.followAppAppearance(configuration.themes)
+        controller.onDismiss = { [weak self] in self?.dismissActivePresentation() }
+        controller.onPresentationDismissed = { [weak self] in
+            self?.presentationEndedExternally()
+        }
+        let navigation = makeNavigation(root: controller)
+        activeAddHostController = controller
+        beginPresentation(
+            navigation,
+            kind: host.map { .editHost($0.id) } ?? .addHost,
+            usesOwnerDelegate: false
+        )
+    }
+
+    private func presentSettings() {
+        let controller = SettingsViewController(
+            themes: configuration.themes,
+            entitlements: configuration.entitlements,
+            attention: configuration.attention,
+            appLock: configuration.appLock
+        )
+        controller.onDone = { [weak self] in self?.dismissActivePresentation() }
+        controller.openPrivacyPolicy = { [weak self] url in self?.configuration.openURL(url) }
+        let navigation = makeNavigation(root: controller)
+        beginPresentation(navigation, kind: .settings, usesOwnerDelegate: true)
+    }
+
+    private func presentFAQ() {
+        let controller = FAQViewController()
+        controller.followAppAppearance(configuration.themes)
+        controller.onDone = { [weak self] in self?.dismissActivePresentation() }
+        let navigation = makeNavigation(root: controller)
+        beginPresentation(navigation, kind: .faq, usesOwnerDelegate: true)
+    }
+
+    private func presentPaywall() {
+        let controller = ProPaywallViewController(entitlements: configuration.entitlements)
+        controller.followAppAppearance(configuration.themes)
+        controller.onDone = { [weak self] in self?.dismissActivePresentation() }
+        let navigation = makeNavigation(root: controller)
+        beginPresentation(navigation, kind: .paywall, usesOwnerDelegate: true)
+    }
+
+    private func makeNavigation(root: UIViewController) -> UINavigationController {
+        let navigation = UINavigationController(rootViewController: root)
+        navigation.navigationBar.prefersLargeTitles = false
+        navigation.view.backgroundColor = UIKitChassis.chassis
+        UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
+        return navigation
+    }
+
+    private func beginPresentation(
+        _ controller: UIViewController,
+        kind: PresentationKind,
+        usesOwnerDelegate: Bool
+    ) {
+        ownedPresentation = controller
+        activePresentationKind = kind
+        present(controller, animated: true) { [weak self, weak controller] in
+            guard let self, let controller else { return }
+            if usesOwnerDelegate {
+                controller.presentationController?.delegate = self.presentationDelegate
+            }
+        }
+    }
+
+    private func presentLocalNetworkAlert() {
+        let alert = UIAlertController(
+            title: "Local Network Access Is Off",
+            message: "Multiplex can’t reach SSH hosts on your local network. Turn on Local Network access in Settings.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) {
+            [weak self] _ in
+            guard let self,
+                  let url = URL(string: UIApplication.openSettingsURLString)
+            else { return }
+            self.configuration.openURL(url)
+            self.alertActionEndedPresentation()
+        })
+        alert.addAction(UIAlertAction(title: "Not Now", style: .cancel) { [weak self] _ in
+            self?.alertActionEndedPresentation()
+        })
+        ownedPresentation = alert
+        activePresentationKind = .localNetworkAlert
+        present(alert, animated: true)
+    }
+
+    private func clearLocalNetworkPresentation() {
+        pendingPresentations.removeAll { $0.kind == .localNetworkAlert }
+        guard activePresentationKind == .localNetworkAlert else { return }
+        dismissActivePresentation()
+    }
+
+    private func dismissActivePresentation() {
+        guard let presentation = ownedPresentation else {
+            presentationEndedExternally()
+            return
+        }
+        activeAddHostController?.prepareForRemoval()
+        presentation.dismiss(animated: true) { [weak self] in
+            self?.finishPresentation()
+        }
+    }
+
+    fileprivate func presentationEndedExternally() {
+        finishPresentation()
+    }
+
+    private func alertActionEndedPresentation() {
+        finishPresentation()
+    }
+
+    private func finishPresentation() {
+        guard activePresentationKind != nil || ownedPresentation != nil else { return }
+        activeAddHostController = nil
+        ownedPresentation = nil
+        activePresentationKind = nil
+        schedulePresentationRetry()
+        externalActionCoordinator?.presenterDidBecomeAvailable()
+        presentationDidEnd?()
+    }
+
+    private func schedulePresentationRetry() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            for _ in 0..<8 where self.presentedViewController != nil {
+                try? await Task.sleep(for: .milliseconds(25))
+            }
+            self.presentNextIfPossible()
+        }
+    }
+
+    private func presentBindSurfaceIfRequested() {
+        guard configuration.bind.wantsBindSurface else { return }
+        configuration.bind.wantsBindSurface = false
+        let supersedesEdit: Bool
+        if case .some(.editHost) = activePresentationKind {
+            supersedesEdit = true
+        } else {
+            supersedesEdit = false
+        }
+        requestPresentation(.addHost, supersedingCurrent: supersedesEdit)
+    }
+
+    // MARK: DEBUG automation
 
     #if DEBUG
-    /// Launch with `MULTIPLEX_AUTO_SETTINGS=1|theme` to open the global
-    /// Settings sheet for deterministic layout and entitlement-gate screenshots.
+    private func startDebugAutomationIfNeeded() {
+        guard !debugAutomationStarted else { return }
+        debugAutomationStarted = true
+
+        lifecycleTasks.append(Task { [weak self] in
+            await self?.configuration.bind.runDebugAutomationIfRequested()
+        })
+        presentPaywallForReviewCaptureIfRequested()
+        presentSettingsForVerificationIfRequested()
+        presentFAQForVerificationIfRequested()
+        presentAddHostForVerificationIfRequested()
+        lifecycleTasks.append(Task { [weak self] in
+            await self?.presentHostSettingsForVerificationIfRequested()
+        })
+        lifecycleTasks.append(Task { [weak self] in
+            guard let self else { return }
+            await DeckScene.autoAttachIfRequested(
+                store: self.configuration.store,
+                workspace: self.configuration.workspace,
+                openTerminalWindow: { [weak self] route in
+                    self?.configuration.terminalOpener(route)
+                }
+            )
+        })
+    }
+
     private func presentSettingsForVerificationIfRequested() {
         guard let request = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_SETTINGS"],
               ["1", "theme"].contains(request) else { return }
-        showingSettings = true
+        requestPresentation(.settings)
     }
 
-    /// Launch with `MULTIPLEX_AUTO_ADD_HOST=bind|bind-elsewhere|manual` to
-    /// open the Add Host modal on either road — the whole bind flow lives on
-    /// its Bind pane now, and the simulator cannot tap a choice bar.
-    /// `bind-elsewhere` also scrolls to the scan/paste section, which sits
-    /// below one sheet height. Bypasses the free-tier gate deliberately:
-    /// this captures layout, not entitlement.
     private func presentAddHostForVerificationIfRequested() {
         guard AddHostAutoOpen.requested != nil else { return }
-        addingHost = true
+        requestPresentation(.addHost)
     }
 
-    /// Launch with `MULTIPLEX_AUTO_FAQ=1` to open the deck's FAQ sheet for
-    /// deterministic layout capture.
     private func presentFAQForVerificationIfRequested() {
         guard ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_FAQ"] == "1"
         else { return }
-        showingFAQ = true
+        requestPresentation(.faq)
     }
 
-    /// Headless regression hook for the Observation environment crossing the
-    /// deck's sheet boundary. A missing HostStore used to fatal as Host
-    /// Settings opened from the compact shell.
     private func presentHostSettingsForVerificationIfRequested() async {
-        // "models" also scrolls the sheet to the Agent launch models
-        // section (AddHostSheet reads the same variable) — the form is too
-        // tall for one headless frame and the sim cannot scroll.
         guard ["1", "models"].contains(ProcessInfo.processInfo.environment[
             "MULTIPLEX_AUTO_HOST_SETTINGS"
         ]) else { return }
         for _ in 0..<50 {
-            if let host = store.hosts.first {
-                editingHost = host
+            if let host = configuration.store.hosts.first {
+                requestPresentation(.editHost(host))
                 return
             }
             try? await Task.sleep(for: .milliseconds(100))
         }
     }
 
-    /// Launch with `MULTIPLEX_AUTO_PAYWALL=1` to render the real locked
-    /// paywall immediately for its App Review screenshot. simctl launches do
-    /// not inherit Xcode's StoreKit test session, so EntitlementStore supplies
-    /// the deterministic review price in this DEBUG-only path.
     private func presentPaywallForReviewCaptureIfRequested() {
         guard ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_PAYWALL"] == "1"
         else { return }
-        entitlements.prepareDebugPaywallPreview()
-        showingPaywall = true
+        configuration.entitlements.prepareDebugPaywallPreview()
+        requestPresentation(.paywall)
     }
-
     #endif
+}
+
+@MainActor
+private final class DeckSceneRegistrationView: UIView {
+    var sceneConnected: ((UISceneSession) -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if let session = window?.windowScene?.session {
+            sceneConnected?(session)
+        }
+    }
+}
+
+@MainActor
+private final class DeckWindowPresentationDelegate: NSObject,
+    UIAdaptivePresentationControllerDelegate
+{
+    weak var owner: DeckWindowViewController?
+
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        owner?.presentationEndedExternally()
+    }
 }
