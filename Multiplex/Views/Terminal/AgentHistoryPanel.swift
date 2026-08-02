@@ -6,7 +6,8 @@ import UIKit
 /// where supported, JUMP scrolls the live Claude transcript to that message.
 @MainActor
 final class AgentHistoryPanelViewController: UIViewController {
-    nonisolated static let preferredWidth: CGFloat = 380
+    nonisolated static let preferredWidth: CGFloat =
+        352 + 2 * UIKitChassis.popoverPanelInset
     nonisolated static let maximumListHeight: CGFloat = 420
 
     typealias HistoryStatus = TerminalSessionController.AgentHistoryStatus
@@ -164,9 +165,10 @@ final class AgentHistoryPanelViewController: UIViewController {
         let container = UIView()
         container.addSubview(row)
         row.translatesAutoresizingMaskIntoConstraints = false
+        let inset = UIKitChassis.popoverPanelInset
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
-            row.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+            row.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: inset),
+            row.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -inset),
             row.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
             row.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
         ])
@@ -277,7 +279,7 @@ final class AgentHistoryPanelViewController: UIViewController {
             let row = AgentHistoryMessageRowView(
                 message: message,
                 expanded: expandedOrdinal == message.ordinal,
-                availableWidth: panelWidth - 28,
+                availableWidth: panelWidth - 2 * UIKitChassis.popoverPanelInset,
                 showsJump: jumpAvailable && message.reachable,
                 toggle: { [weak self] ordinal in
                     self?.toggleMessage(ordinal)
@@ -372,6 +374,14 @@ final class AgentHistoryPanelViewController: UIViewController {
 
 @MainActor
 private final class AgentHistoryPanelRootView: UIView {
+    /// visionOS's rounded platter mask crowds the last row, so the list gets
+    /// a footer clearance there; iPad's square frame keeps the flush bottom.
+    #if os(visionOS)
+    private static let footerClearance: CGFloat = 10
+    #else
+    private static let footerClearance: CGFloat = 0
+    #endif
+
     private var width: CGFloat
     private weak var rootStack: UIStackView?
 
@@ -391,7 +401,10 @@ private final class AgentHistoryPanelRootView: UIView {
             rootStack.leadingAnchor.constraint(equalTo: leadingAnchor),
             rootStack.trailingAnchor.constraint(equalTo: trailingAnchor),
             rootStack.topAnchor.constraint(equalTo: topAnchor),
-            rootStack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            rootStack.bottomAnchor.constraint(
+                equalTo: bottomAnchor,
+                constant: -Self.footerClearance
+            ),
         ])
     }
 
@@ -406,7 +419,10 @@ private final class AgentHistoryPanelRootView: UIView {
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
-        return CGSize(width: proposedWidth, height: ceil(measured.height))
+        return CGSize(
+            width: proposedWidth,
+            height: ceil(measured.height) + Self.footerClearance
+        )
     }
 }
 
@@ -477,9 +493,10 @@ private final class AgentHistoryMessageRowView: UIView {
         row.spacing = 10
         addSubview(row)
         row.translatesAutoresizingMaskIntoConstraints = false
+        let inset = UIKitChassis.popoverPanelInset
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
             row.topAnchor.constraint(equalTo: topAnchor, constant: 9),
             row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -9),
         ])

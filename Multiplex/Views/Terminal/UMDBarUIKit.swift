@@ -1,5 +1,8 @@
 import Observation
 import UIKit
+#if DEBUG
+import notify
+#endif
 
 enum UMDBarStyle: Equatable {
     /// The visionOS classic window's title row. The terminal key cluster
@@ -106,7 +109,11 @@ final class UMDBarViewController: UIViewController,
     private let rootView = UMDBarRootView()
     private(set) var fileAttachController: FileAttachMenuViewController
     private weak var tmuxPopoverController: TmuxShortcutPanelViewController?
+    private weak var tmuxButtonView: UMDBarButton?
     private var resumesFocusAfterTmuxShortcuts = false
+    #if DEBUG && os(visionOS)
+    private var debugObservers: [NSObjectProtocol] = []
+    #endif
     private var observationGeneration = 0
     private var renderedKey: UMDBarRenderKey?
     private var currentObservedState = UMDBarObservedState(
@@ -132,6 +139,9 @@ final class UMDBarViewController: UIViewController,
         addChild(fileAttachController)
         rootView.parkFileAttachView(fileAttachController.view)
         fileAttachController.didMove(toParent: self)
+        #if DEBUG && os(visionOS)
+        installDebugObservers()
+        #endif
         renderAndObserve()
     }
 
@@ -158,6 +168,12 @@ final class UMDBarViewController: UIViewController,
         tmuxPopoverController?.dismiss(animated: false)
         tmuxPopoverController = nil
         resumeFocusAfterTmuxPresentationIfNeeded()
+        #if DEBUG && os(visionOS)
+        for observer in debugObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        debugObservers.removeAll()
+        #endif
     }
 
     /// One action router backs direct controls and every UIMenu item, making
@@ -523,6 +539,7 @@ final class UMDBarViewController: UIViewController,
             guard let self, let button else { return }
             self.showTmuxShortcuts(from: button)
         }, for: .touchUpInside)
+        tmuxButtonView = button
         return button
     }
 
@@ -874,7 +891,57 @@ final class UMDBarViewController: UIViewController,
         resumesFocusAfterTmuxShortcuts = false
         configuration.controller?.resumeFocusAfterPresentation()
     }
+
+    #if DEBUG && os(visionOS)
+    /// visionOS spelling of `debug.tmuxshortcuts` (the iPad key rail's hook
+    /// registers the same Darwin name there): opens the focused window's UMD
+    /// tmux popover for layout capture.
+    private func installDebugObservers() {
+        UMDTmuxShortcutsDebugHook.install()
+        debugObservers.append(NotificationCenter.default.addObserver(
+            forName: .multiplexDebugUMDTmuxShortcuts,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      let terminalView = self.configuration.controller?.terminalView,
+                      TerminalFocusArbiter.current === terminalView,
+                      let button = self.tmuxButtonView
+                else { return }
+                self.showTmuxShortcuts(from: button)
+            }
+        })
+    }
+    #endif
 }
+
+#if DEBUG && os(visionOS)
+extension Notification.Name {
+    static let multiplexDebugUMDTmuxShortcuts = Notification.Name(
+        "MultiplexDebugUMDTmuxShortcuts"
+    )
+}
+
+@MainActor
+private enum UMDTmuxShortcutsDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.tmuxshortcuts", &token, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugUMDTmuxShortcuts,
+                object: nil
+            )
+        }
+    }
+}
+#endif
 
 @MainActor
 final class UMDBarRootView: UIView {

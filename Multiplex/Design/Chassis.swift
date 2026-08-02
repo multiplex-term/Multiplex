@@ -31,6 +31,18 @@ enum UIKitChassis {
         GlassPrototype.enabled ? GlassPrototype.signal3 : TallyPalette.signal3
     }
 
+    /// Edge clearance between a popover-hosted panel's frame and its content
+    /// (tmux shortcuts, Command Setup, agent HISTORY). iPad popovers wear the
+    /// square TALLY frame, so the tight chassis inset reads correct; visionOS
+    /// hosts the same panels on the system's rounded glass platter, whose
+    /// corner mask crowds content sitting at 14 pt. Panels widen their
+    /// preferred width by the same delta so content never narrows.
+    #if os(visionOS)
+    nonisolated static let popoverPanelInset: CGFloat = 22
+    #else
+    nonisolated static let popoverPanelInset: CGFloat = 14
+    #endif
+
     static func uiFont(_ size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
         .systemFont(ofSize: size * Theme.typeScale, weight: weight)
     }
