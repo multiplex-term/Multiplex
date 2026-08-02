@@ -6,7 +6,8 @@ import UIKit
 /// is deliberately not involved.
 @MainActor
 final class TmuxShortcutPanelViewController: UIViewController {
-    nonisolated static let preferredWidth: CGFloat = 430
+    nonisolated static let preferredWidth: CGFloat =
+        402 + 2 * UIKitChassis.popoverPanelInset
     nonisolated static let confirmationWindow: UInt64 = 2_000_000_000
 
     private var panelWidth: CGFloat
@@ -314,11 +315,12 @@ private final class TmuxShortcutPanelRootView: UIKitTallyBorderedView {
         self.contentStack = contentStack
         addSubview(contentStack)
         contentStack.translatesAutoresizingMaskIntoConstraints = false
+        let inset = UIKitChassis.popoverPanelInset
         NSLayoutConstraint.activate([
-            contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            contentStack.topAnchor.constraint(equalTo: topAnchor, constant: 14),
-            contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
+            contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            contentStack.topAnchor.constraint(equalTo: topAnchor, constant: inset),
+            contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset),
         ])
     }
 
@@ -327,14 +329,15 @@ private final class TmuxShortcutPanelRootView: UIKitTallyBorderedView {
     }
 
     func fittingSize(for proposedWidth: CGFloat) -> CGSize {
-        guard let contentStack else { return CGSize(width: proposedWidth, height: 28) }
-        let contentWidth = max(0, proposedWidth - 28)
+        let insets = 2 * UIKitChassis.popoverPanelInset
+        guard let contentStack else { return CGSize(width: proposedWidth, height: insets) }
+        let contentWidth = max(0, proposedWidth - insets)
         let measured = contentStack.systemLayoutSizeFitting(
             CGSize(width: contentWidth, height: UIView.layoutFittingCompressedSize.height),
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
-        return CGSize(width: proposedWidth, height: ceil(measured.height + 28))
+        return CGSize(width: proposedWidth, height: ceil(measured.height + insets))
     }
 }
 

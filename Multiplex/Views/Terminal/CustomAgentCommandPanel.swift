@@ -51,8 +51,12 @@ final class CustomAgentCommandDrafts {
 /// once before handing the result to the host configuration.
 @MainActor
 final class CustomAgentCommandPanelViewController: UIViewController {
-    nonisolated static let preferredWidth: CGFloat = 500
+    nonisolated static let preferredWidth: CGFloat =
+        472 + 2 * UIKitChassis.popoverPanelInset
     nonisolated static let maximumEditorHeight: CGFloat = 430
+    /// The list viewport keeps its rows 2 pt inside the header/footer text
+    /// edge at every panel inset.
+    nonisolated static let listInset: CGFloat = UIKitChassis.popoverPanelInset - 2
     /// Below the footer legend's own resistance (see `legendRow`), so a
     /// shortened popover spends the scroll viewport before any chrome.
     private static let listHeightPriority = UILayoutPriority(650)
@@ -281,9 +285,9 @@ final class CustomAgentCommandPanelViewController: UIViewController {
         stack.isLayoutMarginsRelativeArrangement = true
         stack.directionalLayoutMargins = NSDirectionalEdgeInsets(
             top: 20,
-            leading: 14,
+            leading: UIKitChassis.popoverPanelInset,
             bottom: 14,
-            trailing: 14
+            trailing: UIKitChassis.popoverPanelInset
         )
         return stack
     }
@@ -304,11 +308,11 @@ final class CustomAgentCommandPanelViewController: UIViewController {
         NSLayoutConstraint.activate([
             listStack.leadingAnchor.constraint(
                 equalTo: listScrollView.contentLayoutGuide.leadingAnchor,
-                constant: 12
+                constant: Self.listInset
             ),
             listStack.trailingAnchor.constraint(
                 equalTo: listScrollView.contentLayoutGuide.trailingAnchor,
-                constant: -12
+                constant: -Self.listInset
             ),
             listStack.topAnchor.constraint(
                 equalTo: listScrollView.contentLayoutGuide.topAnchor,
@@ -320,7 +324,7 @@ final class CustomAgentCommandPanelViewController: UIViewController {
             ),
             listStack.widthAnchor.constraint(
                 equalTo: listScrollView.frameLayoutGuide.widthAnchor,
-                constant: -24
+                constant: -2 * Self.listInset
             ),
         ])
         // The viewport's height is a ceiling that must hold and a resting
@@ -402,9 +406,9 @@ final class CustomAgentCommandPanelViewController: UIViewController {
         stack.isLayoutMarginsRelativeArrangement = true
         stack.directionalLayoutMargins = NSDirectionalEdgeInsets(
             top: 14,
-            leading: 14,
-            bottom: 14,
-            trailing: 14
+            leading: UIKitChassis.popoverPanelInset,
+            bottom: UIKitChassis.popoverPanelInset,
+            trailing: UIKitChassis.popoverPanelInset
         )
         return stack
     }
@@ -559,7 +563,7 @@ final class CustomAgentCommandPanelViewController: UIViewController {
     }
 
     private func builtInColumnCount(for width: CGFloat) -> Int {
-        max(0, width - 24) >= 421 ? 2 : 1
+        max(0, width - 2 * Self.listInset) >= 421 ? 2 : 1
     }
 
     private func usesCompactControls(for width: CGFloat) -> Bool {
@@ -571,7 +575,7 @@ final class CustomAgentCommandPanelViewController: UIViewController {
         notifiesParent: Bool
     ) {
         guard isViewLoaded else { return }
-        let contentWidth = max(1, width - 24)
+        let contentWidth = max(1, width - 2 * Self.listInset)
         listStack.setNeedsLayout()
         listStack.layoutIfNeeded()
         let measured = listStack.systemLayoutSizeFitting(
