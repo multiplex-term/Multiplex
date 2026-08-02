@@ -322,3 +322,19 @@ the deck rail, the same way a mosh host wears MOSH. tmux hosts stay unbadged.
   soon as the sheet closes; flip back to TMUX and it goes away.
 - A host that is both mosh and herdr shows MOSH then HERDR, side by side.
 - On iPhone the badge sits with the address line and never pushes SHELL off.
+
+TILE CLICKS ON MAC — a session tile attaches again
+
+On a Mac (Multiplex on Apple silicon, "Designed for iPad"), clicking a session
+tile did nothing: the tile's reorder drag was arming the moment the mouse went
+down, so the click never became a press and only the right-click menu's Attach
+in New Window reached a session. A mouse press now has to be held before it
+becomes a drag, exactly as macOS expects.
+
+- On a Mac, click a session tile once: it attaches, or focuses the window
+  that already holds it.
+- Press, hold briefly, then drag a tile over another tile of the same host:
+  reordering still works, and right-click still opens Attach in New Window /
+  Delete Session.
+- On iPad and Vision Pro, tile drags still start as soon as you move past the
+  hysteresis — no added delay there.

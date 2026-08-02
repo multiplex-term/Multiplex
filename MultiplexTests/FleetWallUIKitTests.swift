@@ -534,6 +534,54 @@ final class FleetWallUIKitTests: XCTestCase {
         )
     }
 
+    func testSessionTilePressSurvivesThePointerDragOnIOSAppOnMac() throws {
+        XCTAssertTrue(
+            FleetTileDragPolicy.allowsPointerDragBeforeLiftDelay(isIOSAppOnMac: false)
+        )
+        XCTAssertFalse(
+            FleetTileDragPolicy.allowsPointerDragBeforeLiftDelay(isIOSAppOnMac: true),
+            "A drag armed at mouse-down fails the tile's tap recognizer, "
+                + "leaving the context menu as the only way to attach"
+        )
+
+        let tile = FleetSessionTileView()
+        var attached = 0
+        tile.configure(FleetSessionTileConfiguration(
+            hostID: UUID(),
+            session: makeSession(),
+            lines: ["$ tmux"],
+            attention: nil,
+            usesTmuxAttentionFallback: true,
+            hasOpenTab: false,
+            compact: false,
+            selected: false,
+            duplicateAttachTitle: "Attach in New Window",
+            openTabAccessibilityText: "",
+            attach: { attached += 1 },
+            attachNewWindow: {},
+            delete: {},
+            droppedSession: { _ in }
+        ))
+
+        XCTAssertTrue(
+            tile.gestureRecognizers?.contains { $0 is UITapGestureRecognizer } ?? false,
+            "The press is a tap recognizer, so the drag must not arm before its lift"
+        )
+        XCTAssertTrue(tile.accessibilityActivate())
+        XCTAssertEqual(attached, 1)
+
+        if #available(iOS 27.0, visionOS 27.0, *) {
+            let drag = try XCTUnwrap(
+                tile.interactions.compactMap { $0 as? UIDragInteraction }.first
+            )
+            // Unset on Mac, where UIKit's own default is already the safe one.
+            XCTAssertEqual(
+                drag.allowsPointerDragBeforeLiftDelay,
+                FleetTileDragPolicy.allowsPointerDragBeforeLiftDelay
+            )
+        }
+    }
+
     func testEmptyFleetWallMountsOnlyNativeControllersAndAwaitingAction() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("FleetWallUIKitTests-\(UUID().uuidString)")

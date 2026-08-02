@@ -2284,6 +2284,27 @@ struct FleetSessionTileConfiguration {
     }
 }
 
+/// Whether a session tile may start its reorder drag the moment a pointer
+/// crosses UIKit's hysteresis, instead of waiting out the lift delay.
+///
+/// UIKit itself defaults this to YES on iOS and **NO on macOS** — a mouse
+/// press that jitters a few points is not drag intent there. Forcing YES on
+/// iOS-app-on-Mac let the drag gesture fail the tile's own tap recognizer at
+/// mouse-down, so a plain click never attached and only the right-click menu
+/// (Attach in New Window) reached a session. The decision is pure so it can be
+/// tested on runners that are not themselves Designed for iPad.
+enum FleetTileDragPolicy {
+    static func allowsPointerDragBeforeLiftDelay(isIOSAppOnMac: Bool) -> Bool {
+        !isIOSAppOnMac
+    }
+
+    static var allowsPointerDragBeforeLiftDelay: Bool {
+        allowsPointerDragBeforeLiftDelay(
+            isIOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac
+        )
+    }
+}
+
 @MainActor
 final class FleetSessionTileView: FleetPressView,
     UIDragInteractionDelegate, UIDropInteractionDelegate
@@ -2322,7 +2343,8 @@ final class FleetSessionTileView: FleetPressView,
         // A gaze/pointer move past UIKit's hysteresis is already clear drag
         // intent. Waiting out the lift delay made spatial reordering feel
         // intermittent, especially beside the tile's long-press menu.
-        if #available(iOS 27.0, visionOS 27.0, *) {
+        if #available(iOS 27.0, visionOS 27.0, *),
+           FleetTileDragPolicy.allowsPointerDragBeforeLiftDelay {
             drag.allowsPointerDragBeforeLiftDelay = true
         }
         addInteraction(drag)
