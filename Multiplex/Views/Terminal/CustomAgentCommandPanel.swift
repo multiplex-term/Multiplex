@@ -232,7 +232,9 @@ final class CustomAgentCommandPanelViewController: UIViewController {
     // MARK: Construction
 
     private func buildView() {
-        panelView.backgroundColor = UIKitChassis.bezel
+        // PROTOTYPE(GLASS): the popover root's smoke is the one ground —
+        // a bezel wash here lightened the panel and crushed contrast.
+        panelView.backgroundColor = GlassPrototype.clearedBezel
         panelView.tallyBorderColor = UIKitChassis.bezelHi
 
         rootStack.axis = .vertical
@@ -512,7 +514,7 @@ final class CustomAgentCommandPanelViewController: UIViewController {
                 color: UIKitChassis.signal3
             )
             empty.textAlignment = .center
-            empty.backgroundColor = UIKitChassis.chassis
+            empty.backgroundColor = GlassPrototype.clearedChassis
             empty.accessibilityIdentifier = "customCommands.empty"
             empty.translatesAutoresizingMaskIntoConstraints = false
             empty.heightAnchor.constraint(greaterThanOrEqualToConstant: 90).isActive = true
@@ -765,7 +767,7 @@ private final class CustomBuiltInCommandRow: UIView {
         changed: @escaping (AgentCommandPlacement) -> Void
     ) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
         accessibilityIdentifier = "customCommands.builtIn.\(command.id)"
 
         let label = UILabel()
@@ -905,7 +907,10 @@ private final class CustomCommandChoiceSegment: UIControl {
     required init?(coder: NSCoder) { fatalError("unused") }
 
     func setSelected(_ selected: Bool) {
-        backgroundColor = selected ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): unselected segments rest on strata over the
+        // popover's smoke, never opaque chassis.
+        backgroundColor = selected
+            ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
         layer.borderColor = (selected ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
             .resolvedColor(with: traitCollection).cgColor
         label.setInk(selected ? UIKitChassis.signal : UIKitChassis.signal2)
@@ -953,7 +958,7 @@ private final class CustomCommandRowView: UIView, UITextViewDelegate {
         self.changed = changed
         self.heightChanged = heightChanged
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
         accessibilityIdentifier = "customCommands.row.\(command.id.uuidString)"
 
         let number = UILabel()
@@ -1368,7 +1373,7 @@ private final class CustomCommandRowActionButton: UIButton {
     ) {
         self.action = action
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         layer.borderWidth = 1
         layer.borderColor = UIKitChassis.bezelHi
             .resolvedColor(with: traitCollection).cgColor

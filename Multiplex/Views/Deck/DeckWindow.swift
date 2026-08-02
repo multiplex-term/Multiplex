@@ -336,7 +336,9 @@ final class DeckWindowViewController: UIViewController {
 
     override func loadView() {
         let root = DeckSceneRegistrationView()
-        root.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): the scene root paints the smoke; this layer clears.
+        root.backgroundColor =
+            GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         root.sceneConnected = { [weak self] session in
             DeckScene.register(session)
             self?.externalActionCoordinator?.presenterDidBecomeAvailable()
@@ -804,7 +806,10 @@ final class DeckWindowViewController: UIViewController {
     private func makeNavigation(root: UIViewController) -> UINavigationController {
         let navigation = UINavigationController(rootViewController: root)
         navigation.navigationBar.prefersLargeTitles = false
-        navigation.view.backgroundColor = UIKitChassis.chassis
+        // The child controller owns the one sheetGround smoke layer. This
+        // container sits behind it, so another smoke layer makes translucent
+        // forms — most visibly Host Settings — read as opaque DARK.
+        navigation.view.backgroundColor = GlassPrototype.clearedChassis
         UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
         return navigation
     }

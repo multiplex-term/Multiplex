@@ -1,4 +1,5 @@
 import Observation
+import SwiftUI
 import UIKit
 
 /// Controllers that own interaction surfaces outside the ordinary UIKit view
@@ -103,7 +104,17 @@ final class UIKitSceneRootViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = plainWindowBackground ? .clear : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): one smoke tint over the system platter is the
+        // whole window ground; every full-bleed layer above it goes clear.
+        // Plain (terminal) scenes stay clear HERE under every appearance:
+        // their smoke is painted inside `TerminalWindowUIKitRootView`'s own
+        // 24pt-clipped silhouette instead — this root spans the square scene
+        // rect, and the platter stays hidden (shipping geometry, user
+        // direction 2026-08-02), so a tint at this layer would poke square
+        // corners past the rounded chassis.
+        view.backgroundColor = plainWindowBackground
+            ? .clear
+            : GlassPrototype.enabled ? GlassPrototype.windowGround : UIKitChassis.chassis
         #if os(visionOS)
         // The window resolves the container style from its root view
         // controller, which is this one. The preference is fixed at init, so
@@ -111,24 +122,45 @@ final class UIKitSceneRootViewController: UIViewController {
         setNeedsUpdateOfPreferredContainerBackgroundStyle()
         #endif
         applyPlatformChrome()
-        addChild(contentViewController)
-        view.addSubview(contentViewController.view)
-        contentViewController.view.translatesAutoresizingMaskIntoConstraints = false
+        // PROTOTYPE(GLASS): real system glass renders only BEHIND content
+        // living INSIDE the SwiftUI hierarchy that owns the effect (a
+        // sibling `glassBackgroundEffect` composites OVER the window's 2D
+        // content — verified 2026-08-02), so a GLASS-capable plain scene
+        // mounts its terminal content through `TerminalGlassWindowShell`.
+        // The wrapped controller keeps its identity for lock propagation,
+        // external actions, and ornaments.
+        let mounted: UIViewController
+        #if os(visionOS)
+        if plainWindowBackground && GlassPrototype.enabled {
+            let shell = UIHostingController(
+                rootView: TerminalGlassWindowShell(content: contentViewController)
+            )
+            shell.view.backgroundColor = .clear
+            mounted = shell
+        } else {
+            mounted = contentViewController
+        }
+        #else
+        mounted = contentViewController
+        #endif
+        addChild(mounted)
+        view.addSubview(mounted.view)
+        mounted.view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            contentViewController.view.leadingAnchor.constraint(
+            mounted.view.leadingAnchor.constraint(
                 equalTo: view.leadingAnchor
             ),
-            contentViewController.view.trailingAnchor.constraint(
+            mounted.view.trailingAnchor.constraint(
                 equalTo: view.trailingAnchor
             ),
-            contentViewController.view.topAnchor.constraint(
+            mounted.view.topAnchor.constraint(
                 equalTo: view.topAnchor
             ),
-            contentViewController.view.bottomAnchor.constraint(
+            mounted.view.bottomAnchor.constraint(
                 equalTo: view.bottomAnchor
             ),
         ])
-        contentViewController.didMove(toParent: self)
+        mounted.didMove(toParent: self)
 
         installAppLockObserver()
         applyLock(appLock.isLocked)
@@ -232,6 +264,16 @@ final class UIKitSceneRootViewController: UIViewController {
         viewIfLoaded?.window?.overrideUserInterfaceStyle = style
         lockShieldWindow?.overrideUserInterfaceStyle = style
         lockViewController?.overrideUserInterfaceStyle = style
+        // PROTOTYPE(GLASS): the independent GLASS choice rides a custom
+        // color-affecting trait, so every material re-resolves live. Sheets
+        // receive it through `pinHostingWindow`; the app-lock shield never
+        // does (opaque privacy veil). Terminal scenes keep their shipping
+        // geometry (silhouette, gutter, hidden platter — user direction
+        // 2026-08-02); only their grounds resolve translucent.
+        let glassSelected = GlassPrototype.enabled && appearance == .glass
+        GlassSelectionState.shared.isGlass = glassSelected
+        traitOverrides[GlassAppearanceTrait.self] = glassSelected
+        viewIfLoaded?.window?.traitOverrides[GlassAppearanceTrait.self] = glassSelected
         refreshDynamicTextColorsAfterTraitPropagation()
         lockViewController?.refreshDynamicTextColorsAfterTraitPropagation()
         if platformChrome.appliesSignalTint {
@@ -427,3 +469,120 @@ final class UIKitSceneRootViewController: UIViewController {
         #endif
     }
 }
+
+#if os(visionOS)
+
+// MARK: - Glass window shell (PROTOTYPE(GLASS))
+
+/// The terminal window's real glass. Its platter stays hidden and its
+/// geometry stays exactly as shipped (24pt bordered silhouette, compact
+/// gutter — user direction 2026-08-02); the glass is app-supplied like the
+/// ornament slabs: smoke over `glassBackgroundEffect` in the silhouette's
+/// own shape. The UIKit window content is mounted INSIDE this hierarchy
+/// because that is the only place system glass renders behind it.
+/// `GlassSelectionState` is observable, so a live appearance flip swaps
+/// glass ⇄ nothing while the mounted UIKit content re-resolves its own
+/// materials through the scene's trait.
+struct TerminalGlassWindowShell: View {
+    let content: UIViewController
+
+    var body: some View {
+        // Read the observable selection HERE so a live flip re-renders the
+        // shell AND re-runs the mount update that hands the trait across
+        // the hosting boundary (SwiftUI re-vends traits to embedded
+        // controllers, dropping the scene's custom overrides — the
+        // ornament-mount lesson).
+        let isGlass = GlassPrototype.enabled && GlassSelectionState.shared.isGlass
+        TerminalGlassWindowMount(controller: content, isGlass: isGlass)
+            .modifier(TerminalGlassWindowGround(isGlass: isGlass))
+            .ignoresSafeArea()
+    }
+}
+
+private struct TerminalGlassWindowGround: ViewModifier {
+    let isGlass: Bool
+
+    func body(content: Content) -> some View {
+        if isGlass {
+            content
+                .background(
+                    Color(uiColor: GlassPrototype.smokeMaterial),
+                    in: RoundedRectangle(cornerRadius: 24)
+                )
+                .glassBackgroundEffect(
+                    in: RoundedRectangle(cornerRadius: 24)
+                )
+        } else {
+            content
+        }
+    }
+}
+
+private struct TerminalGlassWindowMount: UIViewControllerRepresentable {
+    let controller: UIViewController
+    let isGlass: Bool
+
+    func makeUIViewController(context _: Context) -> TerminalGlassWindowHost {
+        let host = TerminalGlassWindowHost()
+        host.view.traitOverrides[GlassAppearanceTrait.self] = isGlass
+        host.update(content: controller)
+        return host
+    }
+
+    func updateUIViewController(
+        _ host: TerminalGlassWindowHost,
+        context _: Context
+    ) {
+        host.view.traitOverrides[GlassAppearanceTrait.self] = isGlass
+        host.update(content: controller)
+    }
+
+    static func dismantleUIViewController(
+        _ host: TerminalGlassWindowHost,
+        coordinator: Void
+    ) {
+        host.update(content: nil)
+    }
+}
+
+/// Containment host mirroring the ornament controller mount: the mounted
+/// window controller becomes a real child, so presentation, ornaments, and
+/// lock propagation keep working from inside the SwiftUI shell.
+@MainActor
+final class TerminalGlassWindowHost: UIViewController {
+    private var content: UIViewController?
+
+    override func loadView() {
+        let view = UIView()
+        view.backgroundColor = .clear
+        self.view = view
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        content?.view.frame = view.bounds
+    }
+
+    func update(content replacement: UIViewController?) {
+        guard content !== replacement else { return }
+        if let content, content.parent === self {
+            content.willMove(toParent: nil)
+            content.view.removeFromSuperview()
+            content.removeFromParent()
+        }
+        content = replacement
+        guard let replacement else { return }
+        if replacement.parent != nil {
+            replacement.willMove(toParent: nil)
+            replacement.view.removeFromSuperview()
+            replacement.removeFromParent()
+        }
+        addChild(replacement)
+        view.addSubview(replacement.view)
+        replacement.view.frame = view.bounds
+        replacement.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        replacement.didMove(toParent: self)
+    }
+}
+
+#endif

@@ -116,7 +116,9 @@ final class AgentHistoryPanelViewController: UIViewController {
     }
 
     private func buildView() {
-        panelView.backgroundColor = UIKitChassis.bezel
+        // PROTOTYPE(GLASS): the popover root's smoke is the one ground —
+        // a bezel wash here lightened the panel and crushed contrast.
+        panelView.backgroundColor = GlassPrototype.clearedBezel
 
         rootStack.axis = .vertical
         rootStack.alignment = .fill

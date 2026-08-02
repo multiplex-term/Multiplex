@@ -8,12 +8,28 @@ import UIKit
 @MainActor
 enum UIKitChassis {
     static var chassis: UIColor { TallyPalette.chassis }
-    static var bezel: UIColor { TallyPalette.bezel }
-    static var bezelHi: UIColor { TallyPalette.bezelHi }
-    static var screen: UIColor { TallyPalette.screen }
+    // PROTOTYPE(GLASS): raised chrome and screens resolve to the smoke
+    // materials at this one switch point. `chassis` deliberately does not —
+    // sheets, forms, and the launch handoff stay opaque (plan §2); the few
+    // full-bleed chassis layers are gated at their own sites instead.
+    static var bezel: UIColor {
+        GlassPrototype.enabled ? GlassPrototype.strata : TallyPalette.bezel
+    }
+    static var bezelHi: UIColor {
+        GlassPrototype.enabled ? GlassPrototype.line : TallyPalette.bezelHi
+    }
+    static var screen: UIColor {
+        GlassPrototype.enabled ? GlassPrototype.screenGlass : TallyPalette.screen
+    }
     static var signal: UIColor { TallyPalette.signal }
-    static var signal2: UIColor { TallyPalette.signal2 }
-    static var signal3: UIColor { TallyPalette.signal3 }
+    // PROTOTYPE(GLASS): secondary inks ride the mock's alpha ramp on glass
+    // (light ink at 0.60 / 0.36); the primary ink stays as shipped.
+    static var signal2: UIColor {
+        GlassPrototype.enabled ? GlassPrototype.signal2 : TallyPalette.signal2
+    }
+    static var signal3: UIColor {
+        GlassPrototype.enabled ? GlassPrototype.signal3 : TallyPalette.signal3
+    }
 
     static func uiFont(_ size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
         .systemFont(ofSize: size * Theme.typeScale, weight: weight)
@@ -33,8 +49,14 @@ enum UIKitChassis {
 
     static func configureSheetNavigationBar(_ navigationBar: UINavigationBar) {
         let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = chassis
+        // PROTOTYPE(GLASS): on glass the sheet root carries the smoke and the
+        // bar goes transparent over it; opaque chassis otherwise.
+        if GlassPrototype.enabled && GlassSelectionState.shared.isGlass {
+            appearance.configureWithTransparentBackground()
+        } else {
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = chassis
+        }
         appearance.shadowColor = bezelHi
         appearance.titleTextAttributes = [.foregroundColor: signal]
         navigationBar.standardAppearance = appearance
@@ -131,6 +153,18 @@ final class UIKitChassisLabel: UILabel {
         refreshAttributedText()
     }
 
+    /// The ink is baked into the attributed string as a RESOLVED color, and
+    /// a label built before its window exists resolves against placeholder
+    /// traits — a popover panel's dim annotations shipped the LIGHT ink onto
+    /// a dark panel this way (trait-change delivery while detached is not
+    /// guaranteed). Window attach is the reliable moment the real traits
+    /// exist; one refresh there covers every presentation shape.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else { return }
+        refreshAttributedText()
+    }
+
     private func refreshAttributedText() {
         let scaled = pointSize * Theme.typeScale
         attributedText = NSAttributedString(
@@ -202,7 +236,14 @@ final class UIKitChassisChip: UIKitTallyBorderedView {
         self.action = action
         isProminent = prominent
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): chips are strata over the smoke, not chassis
+        // cuts; pinned LIGHT keeps the chassis ground (§8 v1).
+        backgroundColor = GlassPrototype.enabled
+            ? GlassPrototype.material(
+                GlassPrototype.strataMaterial,
+                fallback: TallyPalette.chassis
+            )
+            : UIKitChassis.chassis
         tallyBorderColor = prominent ? UIKitChassis.signal2 : UIKitChassis.bezelHi
         isAccessibilityElement = true
         accessibilityTraits = .button
@@ -434,7 +475,7 @@ final class UIKitTallyFormSectionView: UIView {
         divider.heightAnchor.constraint(equalToConstant: 1).isActive = true
 
         let row = UIView()
-        row.backgroundColor = UIKitChassis.chassis
+        row.backgroundColor = GlassPrototype.clearedChassis
         row.addSubview(contentView)
         contentView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -513,10 +554,10 @@ extension AppAppearance {
         }
     }
 
-    /// Reads the choice back off a scene window. The scene root writes exactly
-    /// the three styles above, so the mapping is exact in both directions —
-    /// which is what lets a presenter with no `ThemeStore` in hand still hand
-    /// a sheet the choice the scene is painting with.
+    /// Reads the style back off a scene window. Style alone cannot distinguish
+    /// DARK from GLASS — both pin dark traits — so a store-free presenter gets
+    /// `.dark`; `GlassAppearanceTrait` carries the independent material choice
+    /// onto its hosting window beside this style mapping.
     init(sceneWindowStyle style: UIUserInterfaceStyle) {
         switch style {
         case .light: self = .light
@@ -654,6 +695,14 @@ extension AppAppearanceFollowing where Self: UIViewController {
     /// override it does not own; the scene root writes that one.
     private func pinHostingWindow(to style: UIUserInterfaceStyle) {
         guard let window = viewIfLoaded?.window else { return }
+        // PROTOTYPE(GLASS): a sheet hosted in its OWN window carries the
+        // glass trait too ("all modals need apply"). A presentation sharing
+        // the scene's window must not write it — the scene root owns that
+        // trait, and terminal scenes deliberately never carry it.
+        if window !== presentingViewController?.viewIfLoaded?.window {
+            window.traitOverrides[GlassAppearanceTrait.self] =
+                GlassPrototype.enabled && GlassSelectionState.shared.isGlass
+        }
         guard style != .unspecified
             || window !== presentingViewController?.viewIfLoaded?.window
         else { return }

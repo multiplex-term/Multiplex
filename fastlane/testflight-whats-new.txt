@@ -287,3 +287,28 @@ tap, so remote double-clicks (tmux, vim, mouse-first TUIs) finally work.
   a line, exactly as before.
 - Hold Shift on a hardware keyboard over a mouse-on app: double-tap still
   makes a local word selection (the documented bypass).
+
+VISION PRO GLASS — now present in distribution builds
+
+Settings → Appearance includes GLASS beside SYSTEM, LIGHT, and DARK on
+Vision Pro. It applies smoked spatial material to the deck, terminals, forms,
+and popovers while keeping the app-lock veil opaque. GLASS and DARK share the
+same terminal-theme selection.
+
+- Switch DARK → GLASS with a deck, terminal, and sheet open: every surface
+  changes live, with no opaque panel or stale dark border left behind.
+- Relaunch in GLASS: the choice persists and Host Settings still shows one
+  translucent smoke layer rather than an opaque dark card.
+- iPhone and iPad remain SYSTEM / LIGHT / DARK only.
+
+SESSION TILE REORDERING — no bright lift flash
+
+Long-press and drag a session tile over another tile on the same host. The
+lift stays full-size and transparent instead of flashing a light platter, and
+the in-app drag identity now survives through the drop reliably.
+
+- Move a tile in both directions, several times: the destination gets a clear
+  outline and the order settles immediately after release.
+- Hover back over the source: it is not offered as a destination.
+- Hold without moving: the existing Attach in New Window / Delete menu still
+  opens normally.

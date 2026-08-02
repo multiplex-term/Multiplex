@@ -66,7 +66,7 @@ final class SettingsViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Settings"
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.sheetGround
         configureNavigation()
         configureContent()
         observeStores()
@@ -134,7 +134,7 @@ final class SettingsViewController: UIViewController {
 
     private func configureContent() {
         scrollView.alwaysBounceVertical = true
-        scrollView.backgroundColor = UIKitChassis.chassis
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
         view.addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -229,7 +229,11 @@ final class SettingsViewController: UIViewController {
 
         let sections = [
             makeAppearanceSection(state),
-            makeCurrentThemeSection(theme: selectedTheme, appearance: appearance),
+            makeCurrentThemeSection(
+                theme: selectedTheme,
+                choice: state.appearance,
+                resolvedAppearance: appearance
+            ),
             makeBuiltInThemesSection(selectedID: selectedTheme.id),
             makeCustomThemesSection(
                 state: state,
@@ -265,10 +269,19 @@ final class SettingsViewController: UIViewController {
             self?.themes.appearance = appearance
         }
         appearanceChoiceBar = bar
+        let appearanceDetail: String
+        if GlassPrototype.enabled {
+            appearanceDetail = "System follows the device. The deck, terminal chrome, "
+                + "and forms switch together. Dark and Glass share the dark terminal "
+                + "theme below."
+        } else {
+            appearanceDetail = "System follows the device. The deck, terminal chrome, "
+                + "and forms switch together; each appearance keeps its own terminal "
+                + "theme below."
+        }
         let section = SettingsSectionView(
             title: "Appearance",
-            detail: "System follows the device. The deck, terminal chrome, and forms "
-                + "switch together; each appearance keeps its own terminal theme below.",
+            detail: appearanceDetail,
             rows: [SettingsInsetRow(contentView: bar)]
         )
         appearanceSection = section
@@ -296,7 +309,8 @@ final class SettingsViewController: UIViewController {
 
     private func makeCurrentThemeSection(
         theme: TerminalTheme,
-        appearance: ResolvedAppearance
+        choice: AppAppearance,
+        resolvedAppearance: ResolvedAppearance
     ) -> UIView {
         let name = UIKitChassisLabel(theme.name, size: 12)
         let surface = settingsTrackedLabel(
@@ -321,10 +335,19 @@ final class SettingsViewController: UIViewController {
         let body = UIStackView(arrangedSubviews: [header, UIKitThemePreviewView(theme: theme)])
         body.axis = .vertical
         body.spacing = 12
+        let ownership: String
+        switch choice {
+        case .glass:
+            ownership = "Glass shares this dark terminal theme with Dark."
+        case .dark where GlassPrototype.enabled:
+            ownership = "Dark shares this terminal theme with Glass."
+        default:
+            ownership = "This is the \(resolvedAppearance == .light ? "light" : "dark") "
+                + "theme now on screen."
+        }
         return SettingsSectionView(
             title: "Current theme",
-            detail: "Selections apply to every terminal immediately and belong to the "
-                + "\(appearance == .light ? "light" : "dark") appearance now on screen.",
+            detail: "Selections apply to every terminal immediately. \(ownership)",
             rows: [SettingsInsetRow(contentView: body)]
         )
     }
@@ -755,7 +778,7 @@ final class SettingsSectionView: UIView {
 final class SettingsInsetRow: UIView {
     init(contentView: UIView) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
         addSubview(contentView)
         contentView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -778,6 +801,17 @@ enum SettingsAppearanceChoiceMetrics {
 }
 
 @MainActor
+private extension AppAppearance {
+    var settingsTitle: String {
+        switch self {
+        case .system: "SYSTEM"
+        case .light: "LIGHT"
+        case .dark: "DARK"
+        case .glass: "GLASS"
+        }
+    }
+}
+
 final class SettingsAppearanceChoiceBar: UIStackView {
     private(set) var selection: AppAppearance
     private let changed: (AppAppearance) -> Void
@@ -800,12 +834,12 @@ final class SettingsAppearanceChoiceBar: UIStackView {
         spacing = SettingsAppearanceChoiceMetrics.seam
         backgroundColor = UIKitChassis.bezelHi
 
-        for (title, appearance) in [
-            ("SYSTEM", AppAppearance.system),
-            ("LIGHT", AppAppearance.light),
-            ("DARK", AppAppearance.dark),
-        ] {
-            let button = SettingsChoiceButton(title: title, appearance: appearance)
+        // PROTOTYPE(GLASS): every visionOS build adds GLASS; iOS/iPadOS keep
+        // the three baseline choices.
+        for appearance in AppAppearance.availableCases {
+            let button = SettingsChoiceButton(
+                title: appearance.settingsTitle, appearance: appearance
+            )
             button.addTarget(self, action: #selector(choicePressed(_:)), for: .touchUpInside)
             addArrangedSubview(button)
             buttons.append(button)
@@ -888,7 +922,9 @@ private final class SettingsChoiceButton: UIButton {
     required init?(coder: NSCoder) { fatalError("unused") }
 
     func setSelected(_ selected: Bool) {
-        backgroundColor = selected ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): resting segments are strata over the smoke like
+        // every chassis control; opaque graphite otherwise.
+        backgroundColor = selected ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
         chassisTitle.attributedText = NSAttributedString(
             string: sourceTitle.uppercased(),
             attributes: [
@@ -938,7 +974,7 @@ final class SettingsBooleanRow: UIControl {
         self.changed = changed
         self.optimisticallyUpdates = optimisticallyUpdates
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
         self.accessibilityLabel = accessibilityLabel ?? title
         self.accessibilityHint = accessibilityHint
@@ -984,7 +1020,12 @@ final class SettingsBooleanRow: UIControl {
     required init?(coder: NSCoder) { fatalError("unused") }
 
     override var isHighlighted: Bool {
-        didSet { backgroundColor = isHighlighted ? UIKitChassis.bezel : UIKitChassis.chassis }
+        // PROTOTYPE(GLASS): rest on strataChassis — the ground the init
+        // chose — or the first tap permanently flips the row opaque.
+        didSet {
+            backgroundColor = isHighlighted
+                ? UIKitChassis.bezel : GlassPrototype.strataChassis
+        }
     }
 
     override func accessibilityActivate() -> Bool {
@@ -1020,7 +1061,7 @@ private final class SettingsSwitchIndicator: UIKitTallyBorderedView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         addSubview(thumb)
         thumb.translatesAutoresizingMaskIntoConstraints = false
         thumbLeading = thumb.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4)
@@ -1069,7 +1110,7 @@ final class SettingsBadgeView: UIKitTallyBorderedView {
 
     init(_ text: String, systemImage: String? = nil, prominent: Bool = false) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         tallyBorderColor = prominent ? UIKitChassis.signal2 : UIKitChassis.bezelHi
 
         if let systemImage {
@@ -1255,7 +1296,9 @@ private final class SettingsThemeRowView: UIView {
         super.init(frame: .zero)
         backgroundColor = UIKitChassis.bezelHi
 
-        selectControl.backgroundColor = isSelected ? UIKitChassis.bezel : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): theme rows rest on strata over the smoke.
+        selectControl.backgroundColor = isSelected
+            ? UIKitChassis.bezel : GlassPrototype.strataChassis
         selectControl.hoverStyle = UIHoverStyle(
             effect: .highlight,
             shape: .rect(cornerRadius: 2)

@@ -47,7 +47,7 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.sheetGround
         configureNavigation()
         configureLivePreview()
         configureEditor()
@@ -153,7 +153,7 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
 
     private func configureEditor() {
         scrollView.alwaysBounceVertical = true
-        scrollView.backgroundColor = UIKitChassis.chassis
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
         view.addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -414,7 +414,7 @@ final class ThemeEditorColorRow: UIView {
         self.colorChanged = colorChanged
         self.reset = reset
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
 
         let titleLabel = themeEditorLabel(
             label,

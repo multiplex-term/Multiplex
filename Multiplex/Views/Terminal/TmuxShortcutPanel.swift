@@ -117,7 +117,9 @@ final class TmuxShortcutPanelViewController: UIViewController {
     }
 
     private func buildContent() {
-        panelView.backgroundColor = UIKitChassis.bezel
+        // PROTOTYPE(GLASS): the popover root's smoke is the one ground —
+        // a bezel wash here lightened the panel and crushed contrast.
+        panelView.backgroundColor = GlassPrototype.clearedBezel
         panelView.tallyBorderColor = UIKitChassis.bezelHi
 
         contentStack.axis = .vertical
@@ -471,9 +473,11 @@ private final class TmuxShortcutButton: UIControl {
     }
 
     private func refreshBackground() {
+        // PROTOTYPE(GLASS): rest on strata over the popover's smoke, never
+        // opaque chassis.
         backgroundColor = isArmed || isHighlighted
             ? UIKitChassis.bezelHi
-            : UIKitChassis.chassis
+            : GlassPrototype.strataChassis
     }
 
     private func refreshBorder() {
@@ -574,7 +578,9 @@ private final class TmuxWindowButton: UIControl {
     }
 
     private func refreshBackground() {
-        backgroundColor = isHighlighted ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): rest on strata over the popover's smoke.
+        backgroundColor = isHighlighted
+            ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
     }
 }
 

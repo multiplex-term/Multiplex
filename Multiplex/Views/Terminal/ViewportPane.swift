@@ -513,7 +513,7 @@ final class ViewportBadgeView: UIKitTallyBorderedView {
 
     init(_ text: String) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         addSubview(label)
         label.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -998,7 +998,7 @@ final class ViewportMenuButton: UIButton {
         self.caption = caption
         super.init(frame: .zero)
         configuration = nil
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         layer.borderWidth = 1
         captionLabel.isUserInteractionEnabled = false
         addSubview(captionLabel)
@@ -1036,8 +1036,11 @@ final class ViewportMenuButton: UIButton {
     }
 
     override var isHighlighted: Bool {
+        // PROTOTYPE(GLASS): rest on strata over the smoke — an opaque
+        // chassis reset would stamp the control after its first press.
         didSet {
-            backgroundColor = isHighlighted ? UIKitChassis.bezelHi : UIKitChassis.chassis
+            backgroundColor = isHighlighted
+                ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
         }
     }
 

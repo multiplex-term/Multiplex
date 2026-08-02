@@ -1039,7 +1039,7 @@ final class FileViewerBadgeView: UIKitTallyBorderedView {
 
     init(_ text: String) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         isAccessibilityElement = true
         label.attributedText = NSAttributedString(
             string: text,
@@ -2013,7 +2013,7 @@ final class FileViewerMarkdownCodeFenceView: UIKitTallyBorderedView {
         fixedHeight = ceil(font.lineHeight * CGFloat(visualLines.count)) + 20
         fenceText = text
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         layer.cornerRadius = 6
         layer.cornerCurve = .continuous
         clipsToBounds = true

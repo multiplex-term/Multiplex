@@ -194,7 +194,7 @@ final class TerminalLinkSheetViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.sheetGround
         configureNavigation()
         configureContent()
         editor.onTextChange = { [weak self] _ in self?.refreshState() }
@@ -249,7 +249,7 @@ final class TerminalLinkSheetViewController: UIViewController {
 
     private func configureContent() {
         scrollView.alwaysBounceVertical = true
-        scrollView.backgroundColor = UIKitChassis.chassis
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
         view.addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([

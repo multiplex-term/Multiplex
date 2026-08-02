@@ -56,7 +56,7 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Pro"
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.sheetGround
 
         configureNavigation()
         configureContent()
@@ -96,7 +96,7 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
 
     private func configureContent() {
         scrollView.alwaysBounceVertical = true
-        scrollView.backgroundColor = UIKitChassis.chassis
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
         view.addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([

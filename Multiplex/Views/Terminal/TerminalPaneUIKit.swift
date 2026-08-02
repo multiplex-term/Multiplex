@@ -238,7 +238,11 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
     }
 
     private func applyBackgrounds() {
-        view.backgroundColor = UIColor(configuration.theme.background)
+        // PROTOTYPE(GLASS): the terminal surface carries the pane; this
+        // wrapper goes clear so the screen ground never double-tints.
+        view.backgroundColor = GlassPrototype.terminalWrapperGround(
+            themeBackground: UIColor(configuration.theme.background)
+        )
     }
 
     private func renderControllerlessState() {

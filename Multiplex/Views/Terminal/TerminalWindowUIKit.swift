@@ -328,7 +328,11 @@ final class TerminalWindowViewController: UIViewController,
 
     override func loadView() {
         view = rootView
-        view.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): the scene root's `TerminalGlassWindowShell`
+        // carries the smoked system glass; this silhouette goes clear
+        // over it.
+        view.backgroundColor = GlassPrototype.enabled
+            ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         #if os(visionOS)
         updateVisionOrnamentInstallation()
         #endif
@@ -2253,7 +2257,7 @@ extension TerminalWindowViewController {
     private func presentFeature(_ content: UIViewController) {
         let navigation = UINavigationController(rootViewController: content)
         navigation.navigationBar.prefersLargeTitles = false
-        navigation.view.backgroundColor = UIKitChassis.chassis
+        navigation.view.backgroundColor = GlassPrototype.sheetGround
         UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
         navigation.presentationController?.delegate = self
         presentedFeatureController = navigation
@@ -2518,9 +2522,18 @@ final class TerminalWindowUIKitRootView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIKitChassis.chassis
-        paneContainer.backgroundColor = UIKitChassis.screen
-        tabScrollView.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): the scene root's glass shell carries the
+        // window's smoke; chrome goes clear over it, and the terminal
+        // surface itself carries the screen pane (theme-tinted) — a pane
+        // ground here would double-tint it. Geometry is untouched: the
+        // 24pt bordered silhouette and compact gutter are the shipping
+        // ones (user direction 2026-08-02).
+        backgroundColor = GlassPrototype.enabled
+            ? GlassPrototype.clearedChassis : UIKitChassis.chassis
+        paneContainer.backgroundColor =
+            GlassPrototype.enabled ? GlassPrototype.clearedScreen : UIKitChassis.screen
+        tabScrollView.backgroundColor =
+            GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         tabScrollView.showsHorizontalScrollIndicator = false
         tabDivider.backgroundColor = UIKitChassis.bezelHi
         umdContainer.backgroundColor = .clear

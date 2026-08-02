@@ -56,7 +56,9 @@ final class FleetWallContainerViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): the scene root carries the smoke ground — every
+        // full-bleed deck layer above it goes clear so the tint never stacks.
+        view.backgroundColor = GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         installChildIfNeeded()
     }
 
@@ -270,7 +272,8 @@ final class FleetWallViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): full-bleed layer — clear over the smoke.
+        view.backgroundColor = GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         configureHierarchy()
         observeWall()
     }
@@ -332,7 +335,10 @@ final class FleetWallViewController: UIViewController {
             rootStack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
-        fixedHeaderContainer.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): header and wall are non-overlapping siblings in
+        // the root stack, so both clear without any ghosting underneath.
+        fixedHeaderContainer.backgroundColor =
+            GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         fixedHeaderContainer.addSubview(fixedHeader)
         fixedHeaderContainer.addSubview(fixedHeaderRule)
         fixedHeader.translatesAutoresizingMaskIntoConstraints = false
@@ -357,7 +363,8 @@ final class FleetWallViewController: UIViewController {
         rootStack.addArrangedSubview(fixedHeaderContainer)
 
         scrollView.alwaysBounceVertical = true
-        scrollView.backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): full-bleed layer — clear over the smoke.
+        scrollView.backgroundColor = GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         rootStack.addArrangedSubview(scrollView)
 
         contentStack.axis = .vertical
@@ -1918,11 +1925,16 @@ private final class FleetMenuBadgeButton: UIButton {
             for: .normal
         )
         tintColor = UIKitChassis.signal2
-        backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): a strata chip like SHELL beside it — a cleared
+        // ground made the pair read as two different controls.
+        backgroundColor = GlassPrototype.strataChassis
         layer.borderWidth = 1
         refreshBorder()
+        // The border is a CGColor snapshot: refresh on the glass trait too,
+        // or a button built before the trait lands keeps the baseline
+        // border forever (the first-launch "different style" report).
         registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
         ) { (button: FleetMenuBadgeButton, _: UITraitCollection) in
             button.refreshBorder()
         }
@@ -2086,8 +2098,45 @@ class FleetPressView: UIKitTallyBorderedView, UIContextMenuInteractionDelegate {
         _ interaction: UIContextMenuInteraction,
         previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
     ) -> UITargetedPreview? {
+        targetedPreview()
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
+    ) -> UITargetedPreview? {
+        targetedPreview()
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configuration: UIContextMenuConfiguration,
+        highlightPreviewForItemWithIdentifier identifier: NSCopying
+    ) -> UITargetedPreview? {
+        targetedPreview()
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configuration: UIContextMenuConfiguration,
+        dismissalPreviewForItemWithIdentifier identifier: NSCopying
+    ) -> UITargetedPreview? {
+        targetedPreview()
+    }
+
+    /// Preview windows do not inherit the app's glass trait. An explicit clear
+    /// background keeps UIKit from inserting its bright default platter around
+    /// the exact square tile during a menu highlight or drag lift.
+    func configurePreviewParameters(_ parameters: UIPreviewParameters) {
+        let path = UIBezierPath(rect: bounds)
+        parameters.backgroundColor = .clear
+        parameters.visiblePath = path
+        parameters.shadowPath = path
+    }
+
+    private func targetedPreview() -> UITargetedPreview {
         let parameters = UIPreviewParameters()
-        parameters.visiblePath = UIBezierPath(rect: bounds)
+        configurePreviewParameters(parameters)
         return UITargetedPreview(view: self, parameters: parameters)
     }
 
@@ -2100,7 +2149,8 @@ private final class FleetBadgeView: UIKitTallyBorderedView {
 
     init(caption: String) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): bordered badge on glass — no chassis cut.
+        backgroundColor = GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         label.font = UIKitChassis.monoFont(8, weight: .semibold)
         label.textColor = UIKitChassis.signal2
         label.numberOfLines = 1
@@ -2154,9 +2204,14 @@ private final class FleetColorDotView: UIView {
 private final class FleetHatchedView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = TallyPalette.screen
-        isOpaque = true
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: FleetHatchedView, _: UITraitCollection) in
+        // PROTOTYPE(GLASS): a dead monitor is still a glass pane — the same
+        // screen ground as live tiles, with an etched white hatch (plan §4).
+        backgroundColor = GlassPrototype.enabled
+            ? GlassPrototype.screenGlass : TallyPalette.screen
+        isOpaque = !GlassPrototype.enabled
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
+        ) { (view: FleetHatchedView, _: UITraitCollection) in
             view.setNeedsDisplay()
         }
     }
@@ -2166,9 +2221,9 @@ private final class FleetHatchedView: UIView {
 
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
-        context.setStrokeColor(
-            TallyPalette.screenHatch.resolvedColor(with: traitCollection).cgColor
-        )
+        let stripe = GlassPrototype.enabled
+            ? GlassPrototype.hatchStripe : TallyPalette.screenHatch
+        context.setStrokeColor(stripe.resolvedColor(with: traitCollection).cgColor)
         context.setLineWidth(5)
         var x = -bounds.height
         while x < bounds.width {
@@ -2255,6 +2310,12 @@ final class FleetSessionTileView: FleetPressView,
         ])
         let drag = UIDragInteraction(delegate: self)
         drag.isEnabled = true
+        // A gaze/pointer move past UIKit's hysteresis is already clear drag
+        // intent. Waiting out the lift delay made spatial reordering feel
+        // intermittent, especially beside the tile's long-press menu.
+        if #available(iOS 27.0, visionOS 27.0, *) {
+            drag.allowsPointerDragBeforeLiftDelay = true
+        }
         addInteraction(drag)
         addInteraction(UIDropInteraction(delegate: self))
         accessibilityIdentifier = "fleet.sessionTile"
@@ -2300,12 +2361,46 @@ final class FleetSessionTileView: FleetPressView,
     ) -> [UIDragItem] {
         guard let configuration else { return [] }
         let provider = NSItemProvider(object: configuration.session.name as NSString)
-        let item = UIDragItem(itemProvider: provider)
-        item.localObject = DragPayload(
+        let payload = DragPayload(
             hostID: configuration.hostID,
             sessionName: configuration.session.name
         )
+        session.localContext = payload
+        let item = UIDragItem(itemProvider: provider)
+        item.localObject = payload
+        // UIKit can ask for a fresh in-flight snapshot after the lift. Keep
+        // that snapshot transparent too; its default system background is the
+        // bright flash otherwise visible over the glass window.
+        item.previewProvider = { [weak self] in
+            guard let self else { return nil }
+            return UIDragPreview(
+                view: self,
+                parameters: self.dragPreviewParameters()
+            )
+        }
         return [item]
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        previewForLifting item: UIDragItem,
+        session: UIDragSession
+    ) -> UITargetedDragPreview? {
+        UITargetedDragPreview(view: self, parameters: dragPreviewParameters())
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        sessionIsRestrictedToDraggingApplication session: UIDragSession
+    ) -> Bool {
+        true
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        prefersFullSizePreviewsFor session: UIDragSession
+    ) -> Bool {
+        true
     }
 
     func dropInteraction(
@@ -2333,19 +2428,35 @@ final class FleetSessionTileView: FleetPressView,
     func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
         isDropTarget = false
         guard let configuration,
-              let item = session.items.first,
-              let payload = item.localObject as? DragPayload,
-              payload.hostID == configuration.hostID
+              let payload = dragPayload(from: session),
+              payload.hostID == configuration.hostID,
+              payload.sessionName != configuration.session.name
         else { return }
         configuration.droppedSession(payload.sessionName)
     }
 
-    /// Only this host's own session tiles reorder each other.
+    /// Only this host's own session tiles reorder each other. Session-level
+    /// local context is UIKit's durable in-app handoff; the item copy remains
+    /// a fallback for older drag implementations.
     private func accepts(_ session: UIDropSession) -> Bool {
-        guard let configuration else { return false }
-        return session.items.contains {
-            ($0.localObject as? DragPayload)?.hostID == configuration.hostID
+        guard let configuration,
+              let payload = dragPayload(from: session)
+        else { return false }
+        return payload.hostID == configuration.hostID
+            && payload.sessionName != configuration.session.name
+    }
+
+    private func dragPayload(from session: UIDropSession) -> DragPayload? {
+        if let payload = session.localDragSession?.localContext as? DragPayload {
+            return payload
         }
+        return session.items.lazy.compactMap { $0.localObject as? DragPayload }.first
+    }
+
+    private func dragPreviewParameters() -> UIDragPreviewParameters {
+        let parameters = UIDragPreviewParameters()
+        configurePreviewParameters(parameters)
+        return parameters
     }
 
     private func applyBorder() {
@@ -2382,7 +2493,9 @@ final class FleetSessionTileView: FleetPressView,
 
     private func makeScreen(_ configuration: FleetSessionTileConfiguration) -> UIView {
         let screen = UIView()
-        screen.backgroundColor = TallyPalette.screen
+        // PROTOTYPE(GLASS): the miniature is an open glass pane.
+        screen.backgroundColor = GlassPrototype.enabled
+            ? GlassPrototype.screenGlass : TallyPalette.screen
         let lines = UIStackView()
         lines.axis = .vertical
         lines.alignment = .fill
@@ -2679,7 +2792,7 @@ private final class FleetNewSessionTileView: FleetPressView {
         // A CALayer stroke is a resolved CGColor: it needs re-resolving on an
         // appearance flip, which alone changes no bounds and triggers no layout.
         registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
         ) { (tile: FleetNewSessionTileView, _: UITraitCollection) in
             tile.refreshDash()
         }
@@ -2805,7 +2918,9 @@ private final class FleetAcquiringTileView: UIKitTallyBorderedView {
         // Same chassis anatomy as every tile beside it: the screen sits inside
         // a five-point bezel frame, never painted out to the border.
         backgroundColor = UIKitChassis.bezel
-        screen.backgroundColor = TallyPalette.screen
+        // PROTOTYPE(GLASS): the acquiring screen is an open glass pane.
+        screen.backgroundColor = GlassPrototype.enabled
+            ? GlassPrototype.screenGlass : TallyPalette.screen
         addSubview(screen)
         screen.translatesAutoresizingMaskIntoConstraints = false
         let label = UIKitChassisLabel(
@@ -3224,7 +3339,7 @@ final class NewSessionViewController: UIViewController,
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "New Session"
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.sheetGround
         navigationItem.largeTitleDisplayMode = .never
         #if os(visionOS)
         navigationItem.titleView = UIKitChassisLabel("New Session", size: 12)
@@ -3261,7 +3376,7 @@ final class NewSessionViewController: UIViewController,
 
     private func configureContent() {
         scrollView.alwaysBounceVertical = true
-        scrollView.backgroundColor = UIKitChassis.chassis
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
         view.addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -3529,11 +3644,13 @@ final class NewSessionViewController: UIViewController,
             for: .normal
         )
         button.tintColor = UIKitChassis.signal2
-        button.backgroundColor = UIKitChassis.chassis
+        button.backgroundColor = GlassPrototype.strataChassis
         button.layer.borderWidth = 1
         button.layer.borderColor = UIKitChassis.bezelHi
             .resolvedColor(with: button.traitCollection).cgColor
-        button.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (button: UIButton, _: UITraitCollection) in
+        button.registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
+        ) { (button: UIButton, _: UITraitCollection) in
             button.layer.borderColor = UIKitChassis.bezelHi
                 .resolvedColor(with: button.traitCollection).cgColor
         }
@@ -3732,7 +3849,7 @@ private final class FleetFormSectionView: UIView {
                 rowDividers.append(divider)
             }
             let wrapper = UIView()
-            wrapper.backgroundColor = UIKitChassis.chassis
+            wrapper.backgroundColor = GlassPrototype.clearedChassis
             wrapper.addSubview(row)
             row.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
@@ -3909,7 +4026,9 @@ private final class FleetChoiceButton: UIButton {
         ])
         layer.borderWidth = 1
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (button: FleetChoiceButton, _: UITraitCollection) in
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
+        ) { (button: FleetChoiceButton, _: UITraitCollection) in
             button.render()
         }
     }
@@ -3957,7 +4076,10 @@ private final class FleetChoiceButton: UIButton {
             ]
         )
         chevron.tintColor = ink
-        backgroundColor = selectionActive ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): rest on strata over the smoke, never opaque
+        // chassis.
+        backgroundColor = selectionActive
+            ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
         layer.borderColor = (selectionActive ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
             .resolvedColor(with: traitCollection).cgColor
     }
@@ -4071,7 +4193,7 @@ private final class FleetMenuFieldButton: UIButton {
         ])
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
         registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
         ) { (button: FleetMenuFieldButton, _: UITraitCollection) in
             button.refreshBorder()
         }

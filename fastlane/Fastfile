@@ -89,17 +89,31 @@ def whats_new(external)
   body
 end
 
-# Deliver has one shared metadata path, so inject the one field that differs
-# between App Store platform versions instead of duplicating every locale.
-def platform_release_notes(platform)
-  pattern = File.expand_path("metadata/*/release_notes_#{platform}.txt", __dir__)
-  notes = Dir.glob(pattern).sort.each_with_object({}) do |path, localized|
-    body = File.read(path)
-    UI.user_error!("Release notes are empty: #{path}") if body.strip.empty?
-    localized[File.basename(File.dirname(path))] = body
+# Deliver has one shared metadata path, so inject the fields that differ
+# between App Store platform versions instead of duplicating every shared file.
+# App Store Connect caps both localized fields at 4,000 characters.
+PLATFORM_LOCALIZED_LIMITS = {
+  "description" => 4000,
+  "release_notes" => 4000,
+}.freeze
+
+def platform_localized_metadata(field, platform)
+  field = field.to_s
+  pattern = File.expand_path("metadata/*/#{field}_#{platform}.txt", __dir__)
+  localized = Dir.glob(pattern).sort.each_with_object({}) do |path, values|
+    body = File.read(path).strip
+    UI.user_error!("Platform metadata is empty: #{path}") if body.empty?
+    limit = PLATFORM_LOCALIZED_LIMITS.fetch(field)
+    if body.length > limit
+      UI.user_error!(
+        "Platform metadata is too long: #{path} is #{body.length} characters; " \
+        "App Store Connect allows #{limit}",
+      )
+    end
+    values[File.basename(File.dirname(path))] = body
   end
-  UI.user_error!("No release notes found for #{platform} (expected #{pattern})") if notes.empty?
-  notes
+  UI.user_error!("No #{field} found for #{platform} (expected #{pattern})") if localized.empty?
+  localized
 end
 
 # Review information is ONE record, read once and handed to both reviews:
@@ -376,7 +390,7 @@ lane :beta do |options|
   end
 end
 
-desc "Push shared metadata plus platform release notes. platform:ios|visionos or omit for both. Uploads no binary or screenshots."
+desc "Push shared metadata plus platform descriptions/release notes. platform:ios|visionos or omit for both. Uploads no binary or screenshots."
 lane :store_metadata do |options|
   platforms = options[:platform] ? [options[:platform]] : DESTINATIONS.keys
   platforms.each { |platform| DESTINATIONS.fetch(platform) }
@@ -385,7 +399,8 @@ lane :store_metadata do |options|
     deliver(
       api_key: api_key,
       platform: DESTINATIONS.fetch(platform)[:pilot],
-      release_notes: platform_release_notes(platform),
+      description: platform_localized_metadata(:description, platform),
+      release_notes: platform_localized_metadata(:release_notes, platform),
       # Passed explicitly rather than left to deliver's own file discovery, so
       # App Store review reads the exact record TestFlight's Beta App Review
       # gets — including the two values that live in .env, not in git.

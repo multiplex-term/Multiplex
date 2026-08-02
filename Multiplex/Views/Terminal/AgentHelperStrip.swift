@@ -445,7 +445,10 @@ final class AgentHelperStripViewController: UIViewController,
         )
         customPanelController = panel
         panel.modalPresentationStyle = .popover
-        panel.view.backgroundColor = UIKitChassis.bezel
+        // PROTOTYPE(GLASS): smoke over the popover's own platter.
+        panel.view.backgroundColor = GlassPrototype.popoverGround(
+            fallback: TallyPalette.bezel
+        )
         panel.preferredContentSize = panel.fittingContentSize()
         configurePopover(panel, sourceView: anchor)
         present(panel, animated: true)
@@ -472,7 +475,10 @@ final class AgentHelperStripViewController: UIViewController,
         )
         historyPanelController = panel
         panel.modalPresentationStyle = .popover
-        panel.view.backgroundColor = UIKitChassis.bezel
+        // PROTOTYPE(GLASS): smoke over the popover's own platter.
+        panel.view.backgroundColor = GlassPrototype.popoverGround(
+            fallback: TallyPalette.bezel
+        )
         panel.preferredContentSize = panel.fittingContentSize()
         configurePopover(panel, sourceView: anchor)
         present(panel, animated: true)
@@ -483,6 +489,10 @@ final class AgentHelperStripViewController: UIViewController,
         // ornament mount's appearance override across or a pinned LIGHT
         // presents dark panels. Inert wherever inheritance already works.
         panel.overrideUserInterfaceStyle = inheritedInterfaceStyleOverride
+        // PROTOTYPE(GLASS): mirror the glass selection across the popover's
+        // window the same way, so its materials resolve the smoke recipe.
+        panel.view.traitOverrides[GlassAppearanceTrait.self] =
+            view.traitCollection[GlassAppearanceTrait.self]
         guard let popover = panel.popoverPresentationController else { return }
         popover.sourceView = sourceView
         popover.sourceRect = sourceView.bounds
@@ -491,6 +501,10 @@ final class AgentHelperStripViewController: UIViewController,
         popover.backgroundColor = UIKitChassis.bezel
         #endif
         popover.delegate = self
+        // Labels built before the window attach can retain ink resolved
+        // against the wrong traits (the visionOS retained-ink defect);
+        // re-resolve once trait delivery has settled.
+        panel.refreshDynamicTextColorsAfterTraitPropagation()
     }
 
     private func dismissCustomPanel(animated: Bool) {
@@ -721,7 +735,7 @@ private final class AgentHelperStripButton: UIButton {
         self.prominent = prominent
         storedAction = action
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         layer.borderWidth = 1
         contentEdgeInsets = UIEdgeInsets(top: 5, left: 9, bottom: 5, right: 9)
         titleLabel?.numberOfLines = 1

@@ -225,6 +225,7 @@ private struct TerminalVisionTopOrnament: View {
                 interfaceStyle: state.interfaceStyle
             )
             .fixedSize()
+            .modifier(GlassPrototypeSlabGround(cornerRadius: 10))
         }
     }
 }
@@ -247,6 +248,7 @@ private struct TerminalVisionBottomOrnament: View {
                     interfaceStyle: state.interfaceStyle
                 )
                 .fixedSize()
+                .modifier(GlassPrototypeSlabGround())
                 .alignmentGuide(VerticalAlignment.center) { _ in
                     state.presentation.bottomCenterGuide
                 }
@@ -262,6 +264,7 @@ private struct TerminalVisionBottomOrnament: View {
                         interfaceStyle: state.interfaceStyle
                     )
                     .fixedSize()
+                    .modifier(GlassPrototypeSlabGround())
                 }
 
                 TerminalVisionOrnamentWidthClamp(
@@ -292,6 +295,7 @@ private struct TerminalVisionBottomOrnament: View {
                                 }
                             )
                             .fixedSize()
+                            .modifier(GlassPrototypeSlabGround())
                         }
                     }
                 }
@@ -370,11 +374,13 @@ private struct TerminalKeyClusterGroupRepresentable: UIViewRepresentable {
             context: context
         )
         view.overrideUserInterfaceStyle = interfaceStyle
+        applyGlassTrait(to: view)
         return view
     }
 
     func updateUIView(_ view: TerminalKeyClusterGroupView, context _: Context) {
         view.overrideUserInterfaceStyle = interfaceStyle
+        applyGlassTrait(to: view)
         view.update(controller: controller)
     }
 
@@ -452,6 +458,7 @@ struct TerminalKeyCluster<Center: View>: View {
                 controller: controller,
                 interfaceStyle: interfaceStyle
             )
+            .modifier(GlassPrototypeSlabGround())
         }
     }
 
@@ -473,6 +480,7 @@ struct TerminalKeyCluster<Center: View>: View {
                 controller: controller,
                 interfaceStyle: interfaceStyle
             )
+            .modifier(GlassPrototypeSlabGround())
             Color.clear
                 .frame(
                     width: normalizedCenterSize.width,
@@ -490,6 +498,7 @@ struct TerminalKeyCluster<Center: View>: View {
                 controller: controller,
                 interfaceStyle: interfaceStyle
             )
+            .modifier(GlassPrototypeSlabGround())
         }
     }
 }
@@ -508,6 +517,41 @@ extension TerminalKeyCluster where Center == EmptyView {
     }
 }
 
+/// PROTOTYPE(GLASS): each ornament bar is its own smoked-glass slab — UMD
+/// console, key clusters, the agent helper strip, and the tab strip — never
+/// one platter behind the whole ornament (user feedback: an area-wide glass
+/// background read as noise). Ornaments get no platter of their own; the
+/// app supplies one per bar.
+private struct GlassPrototypeSlabGround: ViewModifier {
+    var cornerRadius: CGFloat = 12
+
+    func body(content: Content) -> some View {
+        if GlassPrototype.enabled && GlassSelectionState.shared.isGlass {
+            content
+                .background(
+                    Color(uiColor: GlassPrototype.smokeMaterial),
+                    in: RoundedRectangle(cornerRadius: cornerRadius)
+                )
+                .glassBackgroundEffect(
+                    in: RoundedRectangle(cornerRadius: cornerRadius)
+                )
+        } else {
+            content
+        }
+    }
+}
+
+/// PROTOTYPE(GLASS): custom traits do not cross `UIHostingOrnament` — the
+/// mounted native chrome must be handed the glass trait explicitly, or its
+/// materials resolve to the opaque baseline (the "dark theme" bars).
+/// View-level on purpose, like the interface-style handoff beside it:
+/// SwiftUI clobbers controller-level overrides.
+@MainActor
+private func applyGlassTrait(to view: UIView) {
+    view.traitOverrides[GlassAppearanceTrait.self] =
+        GlassPrototype.enabled && GlassSelectionState.shared.isGlass
+}
+
 // MARK: - UIKit mounts
 
 @MainActor
@@ -517,7 +561,9 @@ final class TerminalVisionTabOrnamentHostView: UIView {
     init(tabStrip: TerminalTabStripView) {
         self.tabStrip = tabStrip
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        // PROTOTYPE(GLASS): the ornament's glass ground provides the slab.
+        backgroundColor =
+            GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
         layer.cornerRadius = 10
         layer.cornerCurve = .continuous
         accessibilityIdentifier = "terminal.vision.topOrnament"
@@ -574,6 +620,7 @@ private struct TerminalVisionTabOrnamentMount: UIViewRepresentable {
     func makeUIView(context: Context) -> TerminalVisionTabOrnamentHostView {
         hostView.removeFromSuperview()
         hostView.overrideUserInterfaceStyle = interfaceStyle
+        applyGlassTrait(to: hostView)
         return hostView
     }
 
@@ -583,6 +630,7 @@ private struct TerminalVisionTabOrnamentMount: UIViewRepresentable {
     ) {
         _ = revision
         view.overrideUserInterfaceStyle = interfaceStyle
+        applyGlassTrait(to: view)
         view.refreshFittingSize()
     }
 
@@ -613,6 +661,7 @@ private struct TerminalVisionControllerMount: UIViewControllerRepresentable {
         host.onContentSizeChange = onContentSizeChange
         host.update(content: controller, sizing: sizing)
         host.apply(interfaceStyle: interfaceStyle)
+        applyGlassTrait(to: host.view)
         return host
     }
 
@@ -622,6 +671,7 @@ private struct TerminalVisionControllerMount: UIViewControllerRepresentable {
     ) {
         _ = revision
         host.apply(interfaceStyle: interfaceStyle)
+        applyGlassTrait(to: host.view)
         host.onContentSizeChange = onContentSizeChange
         host.update(content: controller, sizing: sizing)
     }

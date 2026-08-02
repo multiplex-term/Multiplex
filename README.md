@@ -103,12 +103,14 @@ bake-off is recorded in [docs/landing/](docs/landing/).*
   re-summons a dismissed keyboard. The system keyboard preserves the user's
   selected language and multistage IMEs; a shell that (re)connects claims
   focus. Keystrokes flow through a single ordered AsyncStream per shell.
-- **Terminal themes** — Settings (chip on the wall) picks the terminal color
-  scheme: seven built-ins (Tally — the default, Multiplex amber, Gruvbox
-  Dark, Dracula, Nord, Solarized Dark/Light) plus user-created themes with a
-  full background / text / cursor / 16-ANSI editor. Applies to every open
-  terminal live; themes recolor the terminal surface only — the wall and
-  window chrome keep the Tally chassis.
+- **Appearance + terminal themes** — Settings switches the whole chassis
+  between System, Light, and Dark; Vision Pro also offers Glass, a smoked
+  spatial material that keeps the TALLY hierarchy while letting the room
+  through. The terminal scheme is independent: seven built-ins (Tally — the
+  default, Multiplex amber, Gruvbox Dark, Dracula, Nord, Solarized Dark/Light)
+  plus user-created themes with a full background / text / cursor / 16-ANSI
+  editor. Changes apply to every open window live; Glass shares Dark's
+  terminal-theme selection.
 
 ## Architecture
 

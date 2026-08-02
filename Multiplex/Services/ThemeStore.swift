@@ -14,14 +14,29 @@ enum ResolvedAppearance: String, CaseIterable {
 
 /// The app-wide appearance choice, persisted by `ThemeStore` and applied at
 /// every scene root by `PlatformChrome`. `.system` follows the device (and on
-/// visionOS keeps the platform's native appearance); the other two pin the
-/// chassis. Chassis tokens themselves are trait-dynamic (`Theme`), so the
-/// whole chrome — deck, terminal windows, sheets, launch handoff — flips
+/// visionOS keeps the platform's native appearance); the other choices pin the
+/// chassis (GLASS to dark traits). Chassis tokens themselves are trait-dynamic
+/// (`Theme`), so the whole chrome — deck, terminal windows, sheets, launch
+/// handoff — flips
 /// together.
 enum AppAppearance: String, CaseIterable {
     case system
     case light
     case dark
+    /// PROTOTYPE(GLASS): the SMOKE glass chassis as an independent choice —
+    /// visionOS only, derived from the dark palette (dark traits + the dark
+    /// terminal-theme slot). Available in every visionOS configuration.
+    case glass
+
+    /// The choices a platform's Settings bar offers and the DEBUG appearance
+    /// hook cycles. GLASS is visionOS-only, in both Debug and Release.
+    static var availableCases: [AppAppearance] {
+        #if os(visionOS)
+        allCases
+        #else
+        [.system, .light, .dark]
+        #endif
+    }
 
     /// The pinned appearance, when there is one. `nil` means follow the
     /// scene's UIKit traits.
@@ -29,7 +44,7 @@ enum AppAppearance: String, CaseIterable {
         switch self {
         case .system: return nil
         case .light: return .light
-        case .dark: return .dark
+        case .dark, .glass: return .dark
         }
     }
 }
@@ -77,8 +92,12 @@ final class ThemeStore {
             ?? TerminalTheme.tally.id
         selectedLightID = defaults.string(forKey: Self.selectedLightIDKey)
             ?? TerminalTheme.lightDefault.id
-        appearance = defaults.string(forKey: Self.appearanceKey)
+        let storedAppearance = defaults.string(forKey: Self.appearanceKey)
             .flatMap(AppAppearance.init(rawValue:)) ?? .system
+        // A persisted GLASS choice on a non-visionOS platform falls back to
+        // SYSTEM rather than acting as a hidden DARK.
+        appearance = AppAppearance.availableCases.contains(storedAppearance)
+            ? storedAppearance : .system
         load()
         #if DEBUG
         installDebugAppearanceHook()
@@ -89,8 +108,8 @@ final class ThemeStore {
     /// Headless-verification hook: the appearance choice bar can't be tapped
     /// from the CLI, so
     /// `xcrun simctl spawn <udid> notifyutil -p app.multiplexterm.multiplex.debug.appearance`
-    /// cycles SYSTEM → LIGHT → DARK through the exact property the Settings
-    /// bar sets — proving the live window-override flip (open sheets
+    /// cycles the platform's available choices through the exact property the
+    /// Settings bar sets — proving the live window-override flip (open sheets
     /// included) and the persisted choice.
     private func installDebugAppearanceHook() {
         var token: Int32 = 0
@@ -99,7 +118,7 @@ final class ThemeStore {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let all = AppAppearance.allCases
+                let all = AppAppearance.availableCases
                 let index = all.firstIndex(of: self.appearance) ?? 0
                 self.appearance = all[(index + 1) % all.count]
             }

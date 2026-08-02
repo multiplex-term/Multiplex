@@ -361,7 +361,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     override func viewDidLoad() {
         super.viewDidLoad()
         title = form.editing == nil ? "Add Host" : "Host Settings"
-        view.backgroundColor = UIKitChassis.chassis
+        view.backgroundColor = GlassPrototype.sheetGround
         configureNavigation()
         configureScrollView()
         buildManualForm()
@@ -466,7 +466,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         #if !os(visionOS)
         scrollView.keyboardDismissMode = .interactive
         #endif
-        scrollView.backgroundColor = UIKitChassis.chassis
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
         view.addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -1845,8 +1845,11 @@ final class AddHostSectionView: UIView {
         divider.heightAnchor.constraint(equalToConstant: 1).isActive = true
         rowsStack.axis = .vertical
         rowsStack.alignment = .fill
-        rowsStack.spacing = 1
-        rowsStack.backgroundColor = UIKitChassis.bezelHi
+        rowsStack.spacing = 0
+        // PROTOTYPE(GLASS): explicit hairline dividers, like the New
+        // Session form. The old gap trick painted this stack bezelHi
+        // behind the (cleared-on-glass) rows, washing the whole form
+        // body in an 11% white sheet.
         let cardStack = UIStackView(arrangedSubviews: [header, divider, rowsStack])
         cardStack.axis = .vertical
         cardStack.spacing = 0
@@ -1895,7 +1898,16 @@ final class AddHostSectionView: UIView {
             rowsStack.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
-        rows.forEach { rowsStack.addArrangedSubview($0) }
+        for (index, row) in rows.enumerated() {
+            if index > 0 {
+                let rowDivider = UIView()
+                rowDivider.backgroundColor = UIKitChassis.bezelHi
+                rowDivider.heightAnchor.constraint(equalToConstant: 1)
+                    .isActive = true
+                rowsStack.addArrangedSubview(rowDivider)
+            }
+            rowsStack.addArrangedSubview(row)
+        }
     }
 
     func setDetail(_ detail: String?) {
@@ -1908,7 +1920,7 @@ final class AddHostSectionView: UIView {
 final class AddHostInsetRow: UIView {
     init(contentView: UIView) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
         addSubview(contentView)
         contentView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -1927,7 +1939,7 @@ final class AddHostInsetRow: UIView {
 final class AddHostFieldRow: UIView {
     init(label: String, inputView: UIView) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.clearedChassis
         let caption = addHostLabel(
             label,
             font: UIKitChassis.uiFont(10, weight: .semibold),
@@ -2088,7 +2100,10 @@ private final class AddHostChoiceButton: UIButton {
     required init?(coder: NSCoder) { fatalError("unused") }
 
     func setSelected(_ selected: Bool) {
-        backgroundColor = selected ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): unselected segments rest on strata over the
+        // sheet's smoke, never opaque chassis.
+        backgroundColor = selected
+            ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
         visualLabel.attributedText = NSAttributedString(
             string: sourceTitle.uppercased(),
             attributes: [
@@ -2384,7 +2399,7 @@ private final class AddHostIconButton: UIButton {
             )
         ), for: .normal)
         tintColor = enabled ? UIKitChassis.signal2 : UIKitChassis.signal3
-        backgroundColor = UIKitChassis.chassis
+        backgroundColor = GlassPrototype.strataChassis
         layer.borderWidth = 1
         layer.borderColor = dynamicBorder.resolvedColor(with: traitCollection).cgColor
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))

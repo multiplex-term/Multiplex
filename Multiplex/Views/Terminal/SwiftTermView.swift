@@ -43,9 +43,25 @@ final class TerminalSurfaceView: UIView {
         self.configuration = configuration
         coordinator = Coordinator(controller: controller)
         super.init(frame: .zero)
-        backgroundColor = UIColor(configuration.theme.background)
-        isOpaque = true
+        // PROTOTYPE(GLASS): THIS wrapper carries the glass pane (theme
+        // background at `screenAlpha`) — it spans the whole silhouette, so
+        // the tint fills the compact gutter to the window border instead of
+        // leaving a bare-smoke band around the inset grid (user report
+        // 2026-08-02: "different border"). The grid's own layer goes clear.
+        backgroundColor = GlassPrototype.terminalGround(
+            themeBackground: UIColor(configuration.theme.background)
+        )
+        isOpaque = !GlassPrototype.enabled
         installTerminal()
+        // PROTOTYPE(GLASS): a live GLASS⇄DARK switch re-applies the theme so
+        // the fork's model ground follows the selection, not just the layer.
+        registerForTraitChanges(
+            [GlassAppearanceTrait.self]
+        ) { (surface: TerminalSurfaceView, _: UITraitCollection) in
+            guard let view = surface.coordinator.terminalView,
+                  view.isDescendant(of: surface) else { return }
+            surface.apply(surface.configuration.theme, to: view)
+        }
     }
 
     @available(*, unavailable)
@@ -249,7 +265,9 @@ final class TerminalSurfaceView: UIView {
 
     func update(configuration: Configuration) {
         self.configuration = configuration
-        backgroundColor = UIColor(configuration.theme.background)
+        backgroundColor = GlassPrototype.terminalGround(
+            themeBackground: UIColor(configuration.theme.background)
+        )
         // A moved tab's view may already belong to another window while this
         // (about to be torn down) surface gets one last update.
         guard let view = coordinator.terminalView,
@@ -306,7 +324,13 @@ final class TerminalSurfaceView: UIView {
     /// Colors change live — SwiftTerm's setters queue a full redraw, so an
     /// open session re-skins in place when the user switches themes.
     private func apply(_ theme: TerminalTheme, to view: TerminalView) {
-        view.nativeBackgroundColor = UIColor(theme.background)
+        // PROTOTYPE(GLASS): keep the fork's own non-opaque invariant — cells
+        // stay transparent (`nativeBackgroundColor = .clear` is exactly what
+        // its setupOptions chose) and the pane ground lives on the view's
+        // layer below, at `screenAlpha`, tinted by the selected theme.
+        view.nativeBackgroundColor = GlassPrototype.terminalNativeGround(
+            themeBackground: UIColor(theme.background)
+        )
         view.nativeForegroundColor = UIColor(theme.foreground)
         applyCaretColor(theme: theme, to: view)
         view.selectedTextBackgroundColor = UIColor(theme.cursor).withAlphaComponent(0.3)
@@ -323,7 +347,11 @@ final class TerminalSurfaceView: UIView {
                 )
             })
         }
-        view.backgroundColor = UIColor(theme.background)
+        // PROTOTYPE(GLASS): the surface wrapper above carries the pane
+        // tint edge-to-edge; the grid's own layer stays clear over it.
+        view.backgroundColor = GlassPrototype.terminalWrapperGround(
+            themeBackground: UIColor(theme.background)
+        )
         // The keyboard belongs to the chassis, not the terminal surface:
         // `.default` follows the window's appearance (the Settings choice via
         // `overrideUserInterfaceStyle`), so a light terminal theme under dark
