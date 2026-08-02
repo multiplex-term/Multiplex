@@ -907,8 +907,11 @@ final class TerminalWindowViewController: UIViewController,
         guard let activeTab, let host = store.host(id: activeTab.hostID) else { return }
         let anchorID = activeTab.id
         let hostID = activeTab.hostID
-        // The file viewer's fallback cwd query is a tmux command. Herdr and
-        // plain-shell summons honestly fall back to $HOME instead.
+        // A live tmux or herdr tab answers its own pane cwd below; this
+        // anchor only feeds the viewer's LATER re-query over its own
+        // connection, and that re-query is a tmux command — so mosh-tmux
+        // summons re-anchor while mosh-herdr and plain-shell summons
+        // honestly fall back to $HOME.
         let anchorSessionName = activeTab.usesTmux ? activeTab.sessionName : nil
         Task { [weak self] in
             guard let self else { return }

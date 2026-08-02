@@ -1078,8 +1078,9 @@ logic belongs — keep parsing/command-building out of views.
   `.shell` tabs list history (cwd via `readlink /proc`, `lsof` fallback)
   but never jump. Record: `local-plan/agent-message-history.md`.
 - **File attach/drop = SFTP upload + typed path, never Enter**:
-  SSH-backed tmux tabs carry one free FILE menu in the UMD / classic
-  iPad toolbar (Camera on iPad/iPhone; Photos + Files everywhere). On
+  SSH-backed tmux and herdr tabs carry one free FILE menu in the UMD /
+  classic iPad toolbar (Camera on iPad/iPhone; Photos + Files
+  everywhere). On
   compact widths FILE is a submenu of the terminal overflow: picker
   state and presentation modifiers must stay on the persistent OUTER
   menu, and presentation waits one main-queue turn — SwiftUI tears down
@@ -1087,8 +1088,15 @@ logic belongs — keep parsing/command-building out of views.
   becomes `[DroppedFile]` → `TerminalSessionController.deliverDrop`:
   upload over the tab's own connection (SFTP multiplexed beside the PTY;
   `.forceCreate` = O_EXCL makes collision renames race-free) into the
-  pane cwd (`#{pane_current_path}`; $HOME + absolute typed path only if
-  unresolvable). Inside a git worktree drops corral into
+  pane cwd ($HOME + absolute typed path only if unresolvable). tmux
+  answers the cwd in one exec (`#{pane_current_path}` + the git check on
+  a shell variable); herdr answers from a snapshot exec — strictly the
+  server-named focused pane, `foreground_cwd` (the `pane_current_path`
+  analog) before `cwd`, absolute + control-free only — then the corral
+  check runs as its own exec (`TmuxProbe.gitWorktreeCheckCommand`) since
+  the cwd came home as JSON; both print the marker
+  `parseDropDestination` reads, one wire format one parser. Inside a
+  git worktree drops corral into
   `.multiplex-drops/` (created with a `*` .gitignore; a user's existing
   .gitignore is never overwritten — O_EXCL again). ⚠ Query pane formats
   with **`list-panes -F`, never `display-message -p -t`** — 3.6a renders
@@ -1096,9 +1104,11 @@ logic belongs — keep parsing/command-building out of views.
   pane-target commands (`send-keys`, `capture-pane`) reject `=name`
   targets — use session *ids* (`$N`); `=name` works only for
   session/window targets. Typed text is sanitized/quoted (`DropText`,
-  pure + tested) so it stays inert at a shell prompt. tmux-over-SSH tabs
-  only: `.shell` tabs (no pane cwd) and mosh tabs (no SFTP) hide FILE;
-  direct drops refuse via the status pill. Picker URLs hold their
+  pure + tested) so it stays inert at a shell prompt. Session-backed SSH
+  tabs only: `.shell` tabs (no pane cwd) and mosh tabs (no SFTP) hide
+  FILE; direct drops refuse via the status pill. The same per-backend
+  cwd query anchors the file viewer's + TAB summon
+  (`paneWorkingDirectory`). Picker URLs hold their
   security-scoped grant during reads; camera captures are 0.9 JPEGs
   named by `DropText.photoName`. Plans: `local-plan/file-drop.md`,
   `local-plan/file-attach-button.md`.

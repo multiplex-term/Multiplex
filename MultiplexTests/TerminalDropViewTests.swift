@@ -13,11 +13,11 @@ final class TerminalDropViewTests: XCTestCase {
         XCTAssertGreaterThan(view.intrinsicContentSize.width, 0)
         XCTAssertGreaterThan(view.intrinsicContentSize.height, 0)
 
-        view.apply(.failed("File upload requires tmux over SSH"))
+        view.apply(.failed("File upload requires tmux or herdr over SSH"))
 
         XCTAssertEqual(
             view.accessibilityLabel,
-            "File upload requires tmux over SSH"
+            "File upload requires tmux or herdr over SSH"
         )
     }
 

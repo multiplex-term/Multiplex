@@ -406,6 +406,18 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertTrue(command.contains("echo MULTIPLEX_GIT"))
     }
 
+    func testGitWorktreeCheckCommandRequotesTheResolvedDirectory() {
+        // The herdr drop path resolves the cwd app-side (snapshot JSON), so
+        // the corral question is its own exec — same marker, same parser,
+        // the directory respliced shell-quoted.
+        let command = TmuxProbe.gitWorktreeCheckCommand(directory: "/home/dev/my repo")
+        XCTAssertTrue(command.contains(
+            "git -C '/home/dev/my repo' rev-parse --is-inside-work-tree"))
+        XCTAssertTrue(command.contains("echo MULTIPLEX_GIT"))
+        XCTAssertFalse(command.contains("list-panes"),
+                       "no pane query — the cwd is already known")
+    }
+
     func testParseDropDestinationReadsPathAndWorktreeMarker() {
         let inWorktree = TmuxProbe.parseDropDestination("/home/dev/repo\nMULTIPLEX_GIT\n")
         XCTAssertEqual(inWorktree.cwd, "/home/dev/repo")

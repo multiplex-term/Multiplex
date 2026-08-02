@@ -545,6 +545,71 @@ final class HerdrProbeTests: XCTestCase {
         XCTAssertNil(HerdrProbe.parseFocusedPane("Error: no server\n"))
     }
 
+    // MARK: File drops
+
+    /// A one-pane snapshot with the given pane fields spliced in — the
+    /// hand-reduced shape `workSnapshot` uses, varied per cwd case.
+    private func dropSnapshot(
+        _ paneFields: String, focusedPane: String? = "w1:p1"
+    ) -> String {
+        let focus = focusedPane.map { #""focused_pane_id":"\#($0)","# } ?? ""
+        return #"{"id":"cli:api:snapshot","result":{"snapshot":{"#
+            + #""version":"0.7.5","protocol":17,"agents":[],"#
+            + focus
+            + #""focused_workspace_id":"w1","focused_tab_id":"w1:t1","#
+            + #""workspaces":[{"workspace_id":"w1","number":1,"label":"api","#
+            + #""active_tab_id":"w1:t1"}],"#
+            + #""tabs":[{"tab_id":"w1:t1","workspace_id":"w1","number":1,"label":"1"}],"#
+            + #""panes":[{"pane_id":"w1:p1","workspace_id":"w1","tab_id":"w1:t1","#
+            + paneFields
+            + #","agent_status":"idle"}],"#
+            + #""layouts":[{"tab_id":"w1:t1","focused_pane_id":"w1:p1"}]}}}"#
+    }
+
+    func testParseFocusedPaneWorkingDirectoryPrefersTheForegroundProcess() throws {
+        // The fixture's focused pane (w1:p1) reports both cwd fields.
+        XCTAssertEqual(
+            HerdrProbe.parseFocusedPaneWorkingDirectory(try fixtureSnapshot()),
+            "/Users/jhen"
+        )
+        // foreground_cwd is `pane_current_path`'s analog — while an agent
+        // runs, the agent's own directory beats the pane's shell cwd.
+        XCTAssertEqual(
+            HerdrProbe.parseFocusedPaneWorkingDirectory(dropSnapshot(
+                #""cwd":"/home/dev","foreground_cwd":"/home/dev/repo""#)),
+            "/home/dev/repo"
+        )
+        // A snapshot without the cwd fields (workSnapshot's pre-cwd shape)
+        // answers nothing — the $HOME fallback, never a guess.
+        XCTAssertNil(HerdrProbe.parseFocusedPaneWorkingDirectory(workSnapshot))
+        XCTAssertNil(HerdrProbe.parseFocusedPaneWorkingDirectory("Error: no server\n"))
+    }
+
+    func testParseFocusedPaneWorkingDirectoryNeverGuessesWithoutFocus() {
+        // Typed paths land in the focused pane; a session that names no
+        // focus (or names a pane the snapshot doesn't carry) gets $HOME —
+        // `frontPaneID`'s miniature fallback deliberately does not apply.
+        XCTAssertNil(HerdrProbe.parseFocusedPaneWorkingDirectory(
+            dropSnapshot(#""cwd":"/home/dev""#, focusedPane: nil)))
+        XCTAssertNil(HerdrProbe.parseFocusedPaneWorkingDirectory(
+            dropSnapshot(#""cwd":"/home/dev""#, focusedPane: "w9:p9")))
+    }
+
+    func testParseFocusedPaneWorkingDirectoryOnlyAnswersSpliceablePaths() {
+        // The value is respliced into the git-corral exec and aimed at by
+        // SFTP: a relative or control-carrying candidate falls through to
+        // the next field, then to nil.
+        XCTAssertEqual(
+            HerdrProbe.parseFocusedPaneWorkingDirectory(dropSnapshot(
+                #""cwd":"/home/dev","foreground_cwd":"repo""#)),
+            "/home/dev"
+        )
+        XCTAssertNil(HerdrProbe.parseFocusedPaneWorkingDirectory(
+            dropSnapshot(#""cwd":"~/repo""#)))
+        XCTAssertNil(HerdrProbe.parseFocusedPaneWorkingDirectory(
+            dropSnapshot(#""cwd":"/home/dev\nfake""#)))
+    }
+
     func testParseSessionNamesReadsTheListEnvelope() {
         XCTAssertEqual(
             HerdrProbe.parseSessionNames("noise\n" + sessionList + "\n"),

@@ -359,6 +359,11 @@ enum HerdrProbe {
         var agent: String?
         var agentStatus: String
         var terminalTitleStripped: String?
+        /// The pane's shell cwd and the foreground process's cwd (0.7.5
+        /// reports both) — `foreground_cwd` is `pane_current_path`'s
+        /// analog: while an agent runs there, the agent's own directory.
+        var cwd: String?
+        var foregroundCwd: String?
 
         enum CodingKeys: String, CodingKey {
             case paneID = "pane_id"
@@ -366,6 +371,8 @@ enum HerdrProbe {
             case agent
             case agentStatus = "agent_status"
             case terminalTitleStripped = "terminal_title_stripped"
+            case cwd
+            case foregroundCwd = "foreground_cwd"
         }
     }
 
@@ -641,6 +648,36 @@ enum HerdrProbe {
     /// focused and first agree.
     static func parseFocusedPane(_ output: String) -> String? {
         firstDecodedLine(in: output, decodeSnapshot).flatMap(frontPaneID(of:))
+    }
+
+    // MARK: - File drops (and the file viewer's cwd anchor)
+
+    /// The focused pane's working directory out of one snapshot exec —
+    /// where a drop's typed path will land, so strictly the pane the
+    /// server names focused, never a guess (`parseFocusedCloseTarget`'s
+    /// discipline). Prefers the foreground process's cwd — tmux
+    /// `pane_current_path`'s analog: while an agent runs there, the
+    /// agent's own directory — over the pane's shell cwd. The value is
+    /// respliced into the git-corral check and aimed at by SFTP, so only
+    /// a clean absolute path may answer; nil falls back to $HOME with
+    /// absolute typed paths, the tmux path's own posture when no pane
+    /// answers.
+    static func parseFocusedPaneWorkingDirectory(_ output: String) -> String? {
+        guard let snapshot = firstDecodedLine(in: output, decodeSnapshot),
+              let focusedID = snapshot.focusedPaneID,
+              let pane = snapshot.panes.first(where: { $0.paneID == focusedID })
+        else { return nil }
+        return [pane.foregroundCwd, pane.cwd]
+            .compactMap { $0 }
+            .first(where: isSpliceablePath)
+    }
+
+    /// Absolute and control-free — the only directory shape safe to hand
+    /// SFTP and requote into a follow-up shell exec.
+    private static func isSpliceablePath(_ path: String) -> Bool {
+        path.hasPrefix("/") && !path.unicodeScalars.contains {
+            CharacterSet.controlCharacters.contains($0)
+        }
     }
 
     /// The first line of a (possibly noisy) exec response that decodes —

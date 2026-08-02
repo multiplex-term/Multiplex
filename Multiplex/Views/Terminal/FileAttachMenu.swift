@@ -4,8 +4,9 @@ import UIKit
 import UniformTypeIdentifiers
 
 /// Camera / Photos / Files entry point shared by terminal chrome on
-/// SSH-backed tmux tabs. Every selection becomes a `DroppedFile` and rejoins
-/// the same SFTP + typed-path pipeline as a drag onto the terminal pane.
+/// SSH-backed tmux and herdr tabs. Every selection becomes a `DroppedFile`
+/// and rejoins the same SFTP + typed-path pipeline as a drag onto the
+/// terminal pane.
 enum FileAttachPicker: Equatable {
     case camera
     case photoLibrary
@@ -13,10 +14,14 @@ enum FileAttachPicker: Equatable {
 }
 
 enum FileAttachAvailability {
+    /// Any session-backed tab over SSH: the backend answers the pane's cwd
+    /// (tmux `list-panes`, herdr snapshot) and SSH carries the SFTP upload.
+    /// Mosh has no SFTP channel; a plain shell has no pane to ask.
     @MainActor
     static func canOffer(for controller: TerminalSessionController?) -> Bool {
         guard let controller else { return false }
-        return !controller.host.useMosh && controller.route.usesTmux
+        return !controller.host.useMosh
+            && controller.route.sessionBackend != nil
     }
 
     #if !os(visionOS)

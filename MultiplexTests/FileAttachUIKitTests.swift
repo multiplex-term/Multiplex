@@ -6,20 +6,27 @@ import XCTest
 
 @MainActor
 final class FileAttachUIKitTests: XCTestCase {
-    func testEligibilityRequiresSSHTmuxSession() {
+    func testEligibilityRequiresASessionBackendOverSSH() {
         let sshTmux = makeController(useMosh: false, mode: .attach(sessionName: "main"))
         let moshTmux = makeController(useMosh: true, mode: .attach(sessionName: "main"))
         let plainShell = makeController(useMosh: false, mode: .shell)
-        let herdr = makeController(
+        let sshHerdr = makeController(
             useMosh: false,
+            mode: .herdrAttach(sessionName: "main")
+        )
+        let moshHerdr = makeController(
+            useMosh: true,
             mode: .herdrAttach(sessionName: "main")
         )
 
         XCTAssertTrue(FileAttachAvailability.canOffer(for: sshTmux))
         XCTAssertFalse(FileAttachAvailability.canOffer(for: moshTmux))
-        XCTAssertFalse(FileAttachAvailability.canOffer(for: plainShell))
-        XCTAssertFalse(FileAttachAvailability.canOffer(for: herdr),
-                       "a herdr session name is not a tmux pane target")
+        XCTAssertFalse(FileAttachAvailability.canOffer(for: plainShell),
+                       "no pane, no cwd to aim an upload at")
+        XCTAssertTrue(FileAttachAvailability.canOffer(for: sshHerdr),
+                      "the herdr snapshot answers the focused pane's cwd")
+        XCTAssertFalse(FileAttachAvailability.canOffer(for: moshHerdr),
+                       "mosh has no SFTP channel regardless of backend")
         XCTAssertFalse(FileAttachAvailability.canOffer(for: nil))
     }
 

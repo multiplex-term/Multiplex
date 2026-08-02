@@ -482,3 +482,22 @@ that session.
   and the tile won't claim what it can't check.
 - tmux tiles are unchanged: they keep counting every client on the host,
   yours and other people's, and still show "2 CLIENTS" telemetry.
+
+HERDR FILE ATTACH — send files to herdr sessions too
+
+The FILE menu (and drag-and-drop onto the pane) now works on herdr tabs
+exactly like tmux ones: upload over the tab's own SSH connection into the
+focused pane's directory, path typed at the prompt, never submitted. The
+earlier "FILE upload stays hidden on herdr tabs" note no longer applies.
+
+- Attach a herdr session: FILE sits in the toolbar/UMD where tmux tabs
+  have it; drop a file on the pane and the path types at the prompt with
+  no Enter.
+- cd somewhere in the focused pane (or let an agent run there) and attach
+  a file: it lands in THAT directory and the typed path is the bare name.
+- Inside a git repo the file lands in .multiplex-drops/ (ignored by git,
+  git status stays clean) and types as .multiplex-drops/name.
+- A shell outside any repo and any pane cwd oddity falls back to your
+  home directory with a full absolute path typed.
+- mosh hosts and plain SHELL tabs still refuse with the status pill —
+  now worded "File upload requires tmux or herdr over SSH".

@@ -438,9 +438,26 @@ enum TmuxProbe {
             + "p=$(\(tmuxCommand) list-panes -t \("=\(sessionName)".shellQuoted)"
             + " -F '#{?pane_active,#{pane_current_path},}' 2>/dev/null | grep -m1 .); "
             + "printf '%s\\n' \"$p\"; "
-            + "if [ -n \"$p\" ] && command -v git >/dev/null 2>&1"
-            + " && [ \"$(git -C \"$p\" rev-parse --is-inside-work-tree 2>/dev/null)\" = true ]; "
+            + "if [ -n \"$p\" ] && \(gitWorktreeCondition(target: "\"$p\"")); "
             + "then echo \(gitWorktreeMarker); fi"
+    }
+
+    /// The corral decision when the pane's cwd was already resolved
+    /// app-side — the herdr drop path, whose cwd comes home in snapshot
+    /// JSON instead of staying in a shell variable. Prints the same
+    /// MULTIPLEX_GIT marker so `parseDropDestination` stays the wire
+    /// format's one parser (its cwd line simply isn't there to find).
+    static func gitWorktreeCheckCommand(directory: String) -> String {
+        pathPrefix
+            + "if \(gitWorktreeCondition(target: directory.shellQuoted)); "
+            + "then echo \(gitWorktreeMarker); fi"
+    }
+
+    /// One spelling of "that directory sits inside a git worktree" for
+    /// both builders above; `target` arrives already shell-quoted.
+    private static func gitWorktreeCondition(target: String) -> String {
+        "command -v git >/dev/null 2>&1"
+            + " && [ \"$(git -C \(target) rev-parse --is-inside-work-tree 2>/dev/null)\" = true ]"
     }
 
     private static let gitWorktreeMarker = "MULTIPLEX_GIT"

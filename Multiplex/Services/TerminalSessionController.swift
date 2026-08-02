@@ -1466,13 +1466,13 @@ final class TerminalSessionController {
         // The jump search owns the pane's input while it pages; the FINDING
         // veil is visible over the drop target for its few seconds.
         if case .finding = historyJump { return }
-        if host.useMosh || !route.usesTmux,
+        if host.useMosh || route.sessionBackend == nil,
            status == .live, dropTask == nil, !files.isEmpty {
-            // Mosh has no SFTP channel, while a plain shell has no tmux pane
-            // whose foreground cwd can be resolved. Say so instead of
-            // silently discarding the user's attach/drop intent.
+            // Mosh has no SFTP channel, while a plain shell has no
+            // multiplexer pane whose foreground cwd can be resolved. Say so
+            // instead of silently discarding the user's attach/drop intent.
             dropClearTask?.cancel()
-            dropState = .failed("File upload requires tmux over SSH")
+            dropState = .failed("File upload requires tmux or herdr over SSH")
             dropClearTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled else { return }
@@ -1545,40 +1545,67 @@ final class TerminalSessionController {
         var prepareGitIgnoredDirectory: Bool
     }
 
-    /// The pane's cwd when tmux can tell us (it follows the foreground
-    /// process, i.e. the agent's own cwd) — corralled into a self-ignoring
-    /// `.multiplex-drops/` when that cwd is inside a git worktree, so drops
-    /// never clutter `git status`. Otherwise $HOME with absolute typed
-    /// paths. The query's first `/`-prefixed line is the path; a
-    /// MULTIPLEX_GIT line marks a worktree.
+    /// The pane's cwd when the session backend can tell us (both follow
+    /// the foreground process, i.e. the agent's own cwd) — corralled into
+    /// a self-ignoring `.multiplex-drops/` when that cwd is inside a git
+    /// worktree, so drops never clutter `git status`. Otherwise $HOME with
+    /// absolute typed paths.
     private func dropDestination(
         over connection: SSHConnection
     ) async throws -> DropDestination {
-        if route.usesTmux, let sessionName = route.sessionName {
-            let output = (try? await connection.exec(
-                TmuxProbe.dropDestinationCommand(sessionName: sessionName)
-            )) ?? ""
-            let destination = TmuxProbe.parseDropDestination(output)
-            if let path = destination.cwd {
-                if destination.insideGitWorktree {
-                    return DropDestination(
-                        directory: path + "/" + DropText.dropsDirectoryName,
-                        typedPrefix: DropText.dropsDirectoryName + "/",
-                        prepareGitIgnoredDirectory: true
-                    )
-                }
+        let anchor = await paneDropAnchor(over: connection)
+        if let path = anchor.cwd {
+            if anchor.insideGitWorktree {
                 return DropDestination(
-                    directory: path,
-                    typedPrefix: "",
-                    prepareGitIgnoredDirectory: false
+                    directory: path + "/" + DropText.dropsDirectoryName,
+                    typedPrefix: DropText.dropsDirectoryName + "/",
+                    prepareGitIgnoredDirectory: true
                 )
             }
+            return DropDestination(
+                directory: path,
+                typedPrefix: "",
+                prepareGitIgnoredDirectory: false
+            )
         }
         return DropDestination(
             directory: try await connection.remoteHomeDirectory(),
             typedPrefix: nil,
             prepareGitIgnoredDirectory: false
         )
+    }
+
+    /// The backend-dispatched cwd + git-worktree answer behind a drop.
+    /// tmux resolves both in one exec (the cwd stays in a shell variable
+    /// for the git check). herdr's cwd comes home in snapshot JSON —
+    /// strictly the focused pane, where this tab's typed paths land — so
+    /// the corral check is its own exec with the app-resolved path
+    /// respliced; both print the marker `TmuxProbe.parseDropDestination`
+    /// reads. Any failure is (nil, false): the $HOME fallback, never an
+    /// error.
+    private func paneDropAnchor(
+        over connection: SSHConnection
+    ) async -> (cwd: String?, insideGitWorktree: Bool) {
+        guard let sessionName = route.sessionName else { return (nil, false) }
+        switch route.sessionBackend {
+        case .tmux:
+            let output = (try? await connection.exec(
+                TmuxProbe.dropDestinationCommand(sessionName: sessionName)
+            )) ?? ""
+            return TmuxProbe.parseDropDestination(output)
+        case .herdr:
+            let snapshot = (try? await connection.exec(
+                HerdrProbe.snapshotCommand(sessionName: sessionName)
+            )) ?? ""
+            guard let cwd = HerdrProbe.parseFocusedPaneWorkingDirectory(snapshot)
+            else { return (nil, false) }
+            let check = (try? await connection.exec(
+                TmuxProbe.gitWorktreeCheckCommand(directory: cwd)
+            )) ?? ""
+            return (cwd, TmuxProbe.parseDropDestination(check).insideGitWorktree)
+        case nil:
+            return (nil, false)
+        }
     }
 
     // MARK: Links
@@ -1655,19 +1682,28 @@ final class TerminalSessionController {
         if case .path = pendingActivation { pendingActivation = nil }
     }
 
-    /// The pane's cwd for the file viewer's anchor — the same `list-panes`
-    /// truth drops resolve (the first `/`-prefixed line; the MULTIPLEX_GIT
-    /// marker is ignored here). nil when no pane can answer: a plain shell,
-    /// a mosh tab (no exec surface), or a dead transport.
+    /// The pane's cwd for the file viewer's anchor — the same per-backend
+    /// truth drops resolve (tmux's `list-panes` line or the herdr
+    /// snapshot's focused pane; the git-worktree question is not asked
+    /// here). nil when no pane can answer: a plain shell, a mosh tab (no
+    /// exec surface), or a dead transport.
     func paneWorkingDirectory() async -> String? {
-        guard route.usesTmux,
-              let sessionName = route.sessionName,
-              let connection
+        guard let sessionName = route.sessionName, let connection
         else { return nil }
-        let output = (try? await connection.exec(
-            TmuxProbe.dropDestinationCommand(sessionName: sessionName)
-        )) ?? ""
-        return TmuxProbe.parseDropDestination(output).cwd
+        switch route.sessionBackend {
+        case .tmux:
+            let output = (try? await connection.exec(
+                TmuxProbe.dropDestinationCommand(sessionName: sessionName)
+            )) ?? ""
+            return TmuxProbe.parseDropDestination(output).cwd
+        case .herdr:
+            let output = (try? await connection.exec(
+                HerdrProbe.snapshotCommand(sessionName: sessionName)
+            )) ?? ""
+            return HerdrProbe.parseFocusedPaneWorkingDirectory(output)
+        case nil:
+            return nil
+        }
     }
 
     // MARK: Actions
