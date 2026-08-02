@@ -1,8 +1,36 @@
+import CoreText
 import Observation
 import UIKit
 #if DEBUG
 import notify
 #endif
+
+/// App-wide collapse choice for the agent helper strip. Tapping the strip's
+/// agent title folds the whole strip into a small agent dot parked at the
+/// bottom-leading corner; tapping the dot restores it. Shared across windows
+/// like the keyboard lock — the choice is about chrome density, not one tab —
+/// and never persisted: a fresh launch starts expanded.
+@MainActor
+final class AgentHelperStripCollapse {
+    static let shared = AgentHelperStripCollapse()
+
+    private(set) var isCollapsed = false
+
+    func setCollapsed(_ collapsed: Bool) {
+        guard collapsed != isCollapsed else { return }
+        isCollapsed = collapsed
+        NotificationCenter.default.post(
+            name: .agentHelperStripCollapseDidChange,
+            object: nil
+        )
+    }
+}
+
+extension Notification.Name {
+    static let agentHelperStripCollapseDidChange = Notification.Name(
+        "MultiplexAgentHelperStripCollapseDidChange"
+    )
+}
 
 @MainActor
 struct AgentHelperStripConfiguration {
@@ -29,6 +57,8 @@ enum AgentHelperStripAction: Equatable {
     case openPaywall
     case customize
     case history
+    case collapse
+    case expand
 }
 
 /// Native quick-command bezel for the CLI agent detected in the attached
@@ -51,6 +81,7 @@ final class AgentHelperStripViewController: UIViewController,
         let floatingMaximumWidth: CGFloat
         let safeAreaLeft: CGFloat
         let safeAreaRight: CGFloat
+        let collapsed: Bool
     }
 
     /// What the live Observation registration is armed against. Everything
@@ -65,6 +96,11 @@ final class AgentHelperStripViewController: UIViewController,
     nonisolated static let chipHeight: CGFloat = 22
     nonisolated static let maximumFloatingWidth: CGFloat = 760
     nonisolated static let floatingEdgeClearance: CGFloat = 60
+    nonisolated static let collapsedDotDiameter: CGFloat = 30
+
+    /// The app-wide collapse choice, read live so a probe-tick re-render in
+    /// any window picks up a toggle made in another.
+    var isCollapsed: Bool { AgentHelperStripCollapse.shared.isCollapsed }
 
     private(set) var configuration: AgentHelperStripConfiguration
     private let rootView = AgentHelperStripRootView()
@@ -151,7 +187,22 @@ final class AgentHelperStripViewController: UIViewController,
             } else {
                 presentHistory()
             }
+        case .collapse:
+            setCollapsed(true)
+        case .expand:
+            setCollapsed(false)
         }
+    }
+
+    private func setCollapsed(_ collapsed: Bool) {
+        guard AgentHelperStripCollapse.shared.isCollapsed != collapsed else { return }
+        // Popovers anchor on chips the collapsed render removes.
+        dismissOpenPanels(animated: true)
+        // The post reaches every terminal window, whose animated re-render
+        // normally re-renders this strip too; the direct call covers a strip
+        // with no listening parent (focused tests) and no-ops otherwise.
+        AgentHelperStripCollapse.shared.setCollapsed(collapsed)
+        renderIfNeeded(available: historyAvailable)
     }
 
     var barBuiltInCommands: [AgentCommand] {
@@ -258,26 +309,59 @@ final class AgentHelperStripViewController: UIViewController,
             floatingMaximumWidth: configuration.floatingMaximumWidth
                 ?? Self.maximumFloatingWidth,
             safeAreaLeft: configuration.contentSafeArea.left,
-            safeAreaRight: configuration.contentSafeArea.right
+            safeAreaRight: configuration.contentSafeArea.right,
+            collapsed: isCollapsed
         )
-        guard key != renderedKey else { return }
+        let previous = renderedKey
+        guard key != previous else { return }
         renderedKey = key
-        render(available: available)
+        if let previous, previous.collapsed != key.collapsed, rootView.window != nil {
+            UIView.transition(
+                with: rootView,
+                duration: 0.22,
+                options: [.transitionCrossDissolve, .allowAnimatedContent]
+            ) {
+                self.render(available: available)
+            }
+        } else {
+            render(available: available)
+        }
     }
 
     private func render(available: Bool) {
         moreButton = nil
         historyButton = nil
 
+        if isCollapsed {
+            let dot = AgentHelperStripDotButton(
+                glyph: configuration.agent.dotGlyph,
+                accessibilityLabel: "Show \(configuration.agent.displayName) helpers",
+                action: { [weak self] in self?.perform(.expand) }
+            )
+            dot.accessibilityIdentifier = "agentHelpers.dot"
+            rootView.apply(
+                content: dot,
+                floating: configuration.floating,
+                floatingMaximumWidth: configuration.floatingMaximumWidth
+                    ?? Self.maximumFloatingWidth,
+                safeArea: configuration.contentSafeArea,
+                collapsed: true
+            )
+            rootView.setNeedsLayout()
+            rootView.layoutIfNeeded()
+            preferredContentSize = fittingContentSize()
+            return
+        }
+
         let row = UIStackView()
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 10
 
-        let agent = UIKitChassisLabel(
-            configuration.agent.displayName,
-            size: 10,
-            color: UIKitChassis.signal2
+        let agent = AgentHelperStripTitleButton(
+            title: configuration.agent.displayName,
+            accessibilityLabel: "Hide \(configuration.agent.displayName) helpers",
+            action: { [weak self] in self?.perform(.collapse) }
         )
         agent.accessibilityIdentifier = "agentHelpers.agent"
         agent.setContentHuggingPriority(.required, for: .horizontal)
@@ -323,7 +407,8 @@ final class AgentHelperStripViewController: UIViewController,
             floating: configuration.floating,
             floatingMaximumWidth: configuration.floatingMaximumWidth
                 ?? Self.maximumFloatingWidth,
-            safeArea: configuration.contentSafeArea
+            safeArea: configuration.contentSafeArea,
+            collapsed: false
         )
         rootView.setNeedsLayout()
         rootView.layoutIfNeeded()
@@ -593,6 +678,7 @@ private final class AgentHelperStripRootView: UIKitTallyBorderedView {
     private var floating = false
     private var floatingMaximumWidth = AgentHelperStripViewController.maximumFloatingWidth
     private var safeAreaInsetsForContent = UIEdgeInsets.zero
+    private var collapsed = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -616,24 +702,35 @@ private final class AgentHelperStripRootView: UIKitTallyBorderedView {
         content: UIView,
         floating: Bool,
         floatingMaximumWidth: CGFloat,
-        safeArea: UIEdgeInsets
+        safeArea: UIEdgeInsets,
+        collapsed: Bool
     ) {
         self.content?.removeFromSuperview()
         self.content = content
         self.floating = floating
         self.floatingMaximumWidth = floatingMaximumWidth
+        self.collapsed = collapsed
         safeAreaInsetsForContent = safeArea
         backgroundColor = UIKitChassis.bezel
-        layer.cornerRadius = floating ? 12 : 0
+        layer.cornerRadius = collapsed
+            ? AgentHelperStripViewController.collapsedDotDiameter / 2
+            : (floating ? 12 : 0)
         layer.cornerCurve = .continuous
-        layer.borderWidth = floating ? 1 : 0
+        // A collapsed dot floats over the terminal on every platform, so the
+        // docked strip's edge-to-edge treatment gives way to the bordered pill.
+        layer.borderWidth = (floating || collapsed) ? 1 : 0
         tallyBorderColor = UIKitChassis.bezelHi
-        topRule.isHidden = floating
+        topRule.isHidden = floating || collapsed
 
         addSubview(content)
         bringSubviewToFront(topRule)
         content.translatesAutoresizingMaskIntoConstraints = false
-        if floating {
+        if collapsed {
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: leadingAnchor),
+                content.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+        } else if floating {
             NSLayoutConstraint.activate([
                 content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
                 content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
@@ -662,6 +759,10 @@ private final class AgentHelperStripRootView: UIKitTallyBorderedView {
     }
 
     func fittingSize(proposedWidth: CGFloat?) -> CGSize {
+        if collapsed, content != nil {
+            let diameter = AgentHelperStripViewController.collapsedDotDiameter
+            return CGSize(width: diameter, height: diameter)
+        }
         guard let content else {
             return CGSize(
                 width: proposedWidth ?? UIView.noIntrinsicMetric,
@@ -689,6 +790,160 @@ private final class AgentHelperStripRootView: UIKitTallyBorderedView {
             width: proposedWidth ?? ceil(measured.width + horizontalInsets),
             height: AgentHelperStripViewController.dockedHeight
         )
+    }
+}
+
+/// The strip header's agent title, now also the collapse control. Keeps the
+/// exact `UIKitChassisLabel` rendering while growing an honest hit target.
+@MainActor
+private final class AgentHelperStripTitleButton: UIControl {
+    private let storedAction: () -> Void
+
+    init(title: String, accessibilityLabel: String, action: @escaping () -> Void) {
+        storedAction = action
+        super.init(frame: .zero)
+        let label = UIKitChassisLabel(title, size: 10, color: UIKitChassis.signal2)
+        label.isUserInteractionEnabled = false
+        addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor),
+            label.topAnchor.constraint(equalTo: topAnchor),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        self.accessibilityLabel = accessibilityLabel
+        accessibilityTraits = .button
+        addTarget(self, action: #selector(pressed), for: .touchUpInside)
+        #if os(visionOS)
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        #endif
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    @objc private func pressed() {
+        storedAction()
+    }
+
+    /// The label alone is ~12 points tall; answer presses for the strip's
+    /// whole vertical band around it.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        bounds.insetBy(dx: -10, dy: -14).contains(point)
+    }
+}
+
+/// The collapsed strip: one round agent badge parked at the bottom-leading
+/// corner. Tapping it restores the full strip.
+@MainActor
+private final class AgentHelperStripDotButton: UIButton {
+    private let storedAction: () -> Void
+
+    init(glyph: String, accessibilityLabel: String, action: @escaping () -> Void) {
+        storedAction = action
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        let glyphView = AgentHelperStripDotGlyphView(glyph: glyph)
+        addSubview(glyphView)
+        glyphView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            glyphView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            glyphView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            glyphView.topAnchor.constraint(equalTo: topAnchor),
+            glyphView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        self.accessibilityLabel = accessibilityLabel
+        accessibilityTraits = .button
+        addTarget(self, action: #selector(pressed), for: .touchUpInside)
+        translatesAutoresizingMaskIntoConstraints = false
+        let diameter = AgentHelperStripViewController.collapsedDotDiameter
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: diameter),
+            heightAnchor.constraint(equalToConstant: diameter),
+        ])
+        #if os(visionOS)
+        hoverStyle = UIHoverStyle(
+            effect: .highlight,
+            shape: .capsule
+        )
+        #endif
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    @objc private func pressed() {
+        storedAction()
+    }
+}
+
+/// Draws the dot's agent mark centered on its rendered ink bounds. ✳ and ◆
+/// are not in the mono face — they render through fallback fonts whose line
+/// metrics disagree with SF Mono's, so a label or button title centers the
+/// line box and leaves the visible glyph noticeably off the dot's center.
+@MainActor
+private final class AgentHelperStripDotGlyphView: UIView {
+    private let glyph: String
+
+    init(glyph: String) {
+        self.glyph = glyph
+        super.init(frame: .zero)
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+        contentMode = .redraw
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        setNeedsDisplay()
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        let attributed = NSAttributedString(
+            string: glyph,
+            attributes: [
+                .font: UIKitChassis.monoFont(12, weight: .semibold),
+                // Fill from the context: CoreText's own color key is the
+                // only spelling every fallback path honors.
+                kCTForegroundColorFromContextAttributeName
+                    as NSAttributedString.Key: true,
+            ]
+        )
+        let line = CTLineCreateWithAttributedString(attributed)
+        context.saveGState()
+        context.translateBy(x: 0, y: bounds.height)
+        context.scaleBy(x: 1, y: -1)
+        context.textMatrix = .identity
+        context.setFillColor(
+            UIKitChassis.signal2.resolvedColor(with: traitCollection).cgColor
+        )
+        context.textPosition = .zero
+        let inkBounds = CTLineGetImageBounds(line, context)
+        context.textPosition = CGPoint(
+            x: bounds.midX - inkBounds.midX,
+            y: bounds.midY - inkBounds.midY
+        )
+        CTLineDraw(line, context)
+        context.restoreGState()
+    }
+}
+
+private extension AgentKind {
+    /// The collapsed dot's face — each agent's own mark where it has one.
+    var dotGlyph: String {
+        switch self {
+        case .claudeCode: "✳"
+        case .codex: "◆"
+        case .pi: "π"
+        }
     }
 }
 

@@ -16,3 +16,4 @@
 - WIDGET & SHORTCUT AGENTS: work on herdr hosts, and gain a Session choice that launches into an EXISTING session (tmux window / herdr tab or workspace).
 - KEYBOARD LOCKED TIP: now sits top-center, clear of the window chrome, with LISTENING replacing it in place.
 - VISION PRO POPOVERS: TMUX shortcuts, Command Setup, and agent HISTORY clear the rounded platter's corners.
+- AGENT STRIP FOLDS AWAY: tap the strip's agent title (CLAUDE CODE / CODEX / PI) to fold the helper bar into a small agent dot in the bottom-left corner — the terminal reclaims the row; tap the dot to bring the bar back. One choice across all windows, reset on relaunch.

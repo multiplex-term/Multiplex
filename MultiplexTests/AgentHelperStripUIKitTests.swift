@@ -213,6 +213,71 @@ final class AgentHelperStripUIKitTests: XCTestCase {
         XCTAssertEqual(floating.view.layer.cornerRadius, 12)
     }
 
+    func testTitleTapCollapsesToDotAndDotTapRestoresTheRail() throws {
+        AgentHelperStripCollapse.shared.setCollapsed(false)
+        defer { AgentHelperStripCollapse.shared.setCollapsed(false) }
+        let controller = makeController(agent: .claudeCode)
+        controller.loadViewIfNeeded()
+
+        let title = try XCTUnwrap(
+            descendants(of: UIControl.self, in: controller.view).first {
+                $0.accessibilityIdentifier == "agentHelpers.agent"
+            }
+        )
+        XCTAssertEqual(title.accessibilityLabel, "Hide Claude Code helpers")
+        title.sendActions(for: .touchUpInside)
+
+        XCTAssertTrue(AgentHelperStripCollapse.shared.isCollapsed)
+        let dot = try XCTUnwrap(button("agentHelpers.dot", in: controller.view))
+        XCTAssertEqual(dot.accessibilityLabel, "Show Claude Code helpers")
+        XCTAssertNil(button("agentHelpers.more", in: controller.view))
+        let diameter = AgentHelperStripViewController.collapsedDotDiameter
+        XCTAssertEqual(
+            controller.fittingContentSize(),
+            CGSize(width: diameter, height: diameter)
+        )
+
+        dot.sendActions(for: .touchUpInside)
+        XCTAssertFalse(AgentHelperStripCollapse.shared.isCollapsed)
+        XCTAssertNotNil(button("agentHelpers.more", in: controller.view))
+        XCTAssertNil(button("agentHelpers.dot", in: controller.view))
+    }
+
+    /// ✳ and ◆ draw through fallback fonts whose line metrics disagree with
+    /// SF Mono's, so title/label centering visibly un-centered the mark.
+    /// The dot centers rendered ink bounds instead — prove it in pixels.
+    func testCollapsedDotCentersEveryAgentMarkOnItsInk() throws {
+        AgentHelperStripCollapse.shared.setCollapsed(true)
+        defer { AgentHelperStripCollapse.shared.setCollapsed(false) }
+        for agent in AgentKind.allCases {
+            let controller = makeController(agent: agent)
+            controller.loadViewIfNeeded()
+            let dot = try XCTUnwrap(button("agentHelpers.dot", in: controller.view))
+            let diameter = AgentHelperStripViewController.collapsedDotDiameter
+            dot.frame = CGRect(x: 0, y: 0, width: diameter, height: diameter)
+            dot.layoutIfNeeded()
+
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 2
+            let image = UIGraphicsImageRenderer(
+                size: dot.bounds.size,
+                format: format
+            ).image { dot.layer.render(in: $0.cgContext) }
+            let ink = try XCTUnwrap(
+                inkBoundingBox(in: image),
+                "\(agent) dot rendered no ink"
+            )
+            XCTAssertEqual(
+                ink.midX, diameter / 2, accuracy: 1.5,
+                "\(agent) mark off-center horizontally"
+            )
+            XCTAssertEqual(
+                ink.midY, diameter / 2, accuracy: 1.5,
+                "\(agent) mark off-center vertically"
+            )
+        }
+    }
+
     func testActionRouterForwardsCommandsPaywallAndSaveClosures() {
         var sent: AgentCommand?
         var paywall = false
@@ -288,6 +353,47 @@ final class AgentHelperStripUIKitTests: XCTestCase {
         descendants(of: UILabel.self, in: root).compactMap {
             $0.text ?? $0.attributedText?.string
         }
+    }
+
+    /// Bounding box, in points, of every pixel with visible alpha.
+    private func inkBoundingBox(in image: UIImage) -> CGRect? {
+        guard let cgImage = image.cgImage else { return nil }
+        let width = cgImage.width
+        let height = cgImage.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.draw(
+            cgImage,
+            in: CGRect(x: 0, y: 0, width: width, height: height)
+        )
+        var minX = width
+        var minY = height
+        var maxX = -1
+        var maxY = -1
+        for y in 0..<height {
+            for x in 0..<width where pixels[(y * width + x) * 4 + 3] > 16 {
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= 0 else { return nil }
+        let scale = image.scale
+        return CGRect(
+            x: CGFloat(minX) / scale,
+            y: CGFloat(minY) / scale,
+            width: CGFloat(maxX - minX + 1) / scale,
+            height: CGFloat(maxY - minY + 1) / scale
+        )
     }
 
     private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {

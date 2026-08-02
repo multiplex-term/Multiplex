@@ -255,7 +255,12 @@ private struct TerminalVisionBottomOrnament: View {
             }
 
         case .terminal(let showsHelper):
-            VStack(spacing: 10) {
+            // Collapsed, the helper is a small dot leaning on the console
+            // row's leading edge — the ornament analog of the flat platforms'
+            // bottom-left corner. Revision bumps re-evaluate this body, so
+            // the live read stays current across windows.
+            let helperCollapsed = state.helperController?.isCollapsed == true
+            VStack(alignment: helperCollapsed ? .leading : .center, spacing: 10) {
                 if showsHelper, let helper = state.helperController {
                     TerminalVisionControllerMount(
                         controller: helper,
@@ -264,7 +269,11 @@ private struct TerminalVisionBottomOrnament: View {
                         interfaceStyle: state.interfaceStyle
                     )
                     .fixedSize()
-                    .modifier(GlassPrototypeSlabGround())
+                    .modifier(GlassPrototypeSlabGround(
+                        cornerRadius: helperCollapsed
+                            ? AgentHelperStripViewController.collapsedDotDiameter / 2
+                            : 12
+                    ))
                 }
 
                 TerminalVisionOrnamentWidthClamp(

@@ -508,7 +508,10 @@ final class TerminalWindowViewController: UIViewController,
         #if os(visionOS)
         0
         #else
-        showsAgentHelper ? AgentHelperStripViewController.dockedHeight : 0
+        // A collapsed strip is a small dot floating over the terminal's
+        // bottom-leading corner; the pane reclaims the docked row.
+        showsAgentHelper && !AgentHelperStripCollapse.shared.isCollapsed
+            ? AgentHelperStripViewController.dockedHeight : 0
         #endif
     }
     private var mergeSources: [TerminalWorkspace.WindowEntry] {
@@ -1148,6 +1151,27 @@ final class TerminalWindowViewController: UIViewController,
                 self.restoreActiveTerminalFocusIfOwner()
                 for tab in self.route.tabs {
                     self.workspace.controller(for: tab.id)?.transportForegrounded()
+                }
+            }
+        })
+        lifecycleObservers.append(NotificationCenter.default.addObserver(
+            forName: .agentHelperStripCollapseDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, isViewLoaded, helperController != nil else { return }
+                // The strip cross-dissolves its own content; this animates
+                // the bar folding into (or out of) the corner dot and the
+                // terminal reclaiming or ceding the docked row.
+                UIView.animate(
+                    withDuration: 0.35,
+                    delay: 0,
+                    usingSpringWithDamping: 0.85,
+                    initialSpringVelocity: 0
+                ) {
+                    self.renderNow()
+                    self.rootView.layoutIfNeeded()
                 }
             }
         })
@@ -1805,18 +1829,35 @@ extension TerminalWindowViewController {
         if let helperController {
             #if !os(visionOS)
             let obstruction = activeController?.keyboardObstruction ?? 0
-            rootView.helperContainer.frame = CGRect(
-                x: 0,
-                y: max(
-                    rootView.paneContainer.frame.minY,
-                    rootView.paneContainer.frame.maxY
-                        - obstruction
-                        - TerminalKeyBar.barHeight
-                        - AgentHelperStripViewController.dockedHeight
-                ),
-                width: bounds.width,
-                height: AgentHelperStripViewController.dockedHeight
-            )
+            if AgentHelperStripCollapse.shared.isCollapsed {
+                let dotSize = helperController.fittingContentSize()
+                rootView.helperContainer.frame = CGRect(
+                    x: rootView.paneContainer.frame.minX + 10 + contentSafeArea.left,
+                    y: max(
+                        rootView.paneContainer.frame.minY,
+                        rootView.paneContainer.frame.maxY
+                            - obstruction
+                            - TerminalKeyBar.barHeight
+                            - dotSize.height
+                            - 8
+                    ),
+                    width: dotSize.width,
+                    height: dotSize.height
+                )
+            } else {
+                rootView.helperContainer.frame = CGRect(
+                    x: 0,
+                    y: max(
+                        rootView.paneContainer.frame.minY,
+                        rootView.paneContainer.frame.maxY
+                            - obstruction
+                            - TerminalKeyBar.barHeight
+                            - AgentHelperStripViewController.dockedHeight
+                    ),
+                    width: bounds.width,
+                    height: AgentHelperStripViewController.dockedHeight
+                )
+            }
             #else
             if shell != nil,
                !appLocked,
@@ -1845,8 +1886,13 @@ extension TerminalWindowViewController {
                     width: min(available, measured.width),
                     height: measured.height
                 )
+                // Collapsed, the dot parks at the pane's leading edge rather
+                // than centering over the key cluster.
+                let helperX = AgentHelperStripCollapse.shared.isCollapsed
+                    ? rootView.paneContainer.frame.minX + 12
+                    : rootView.paneContainer.frame.midX - helperSize.width / 2
                 rootView.helperContainer.frame = CGRect(
-                    x: rootView.paneContainer.frame.midX - helperSize.width / 2,
+                    x: helperX,
                     y: visionShellKeyCluster.frame.minY - 8 - helperSize.height,
                     width: helperSize.width,
                     height: helperSize.height
