@@ -165,9 +165,11 @@ unavailable in sim tests).
 
 **herdr path**: `./harness.sh herdr` seeds real herdr SESSIONS — one
 deck tile each (`brew install herdr`): mpx-demo RUNNING, mpx-blocked
-NEEDS YOU, mpx-done with an off-focus derived `done`, agent states via `pane
-report-agent` — corralled in `state/herdr-sessions` so `stop` retires
-exactly those (stop + delete) and never the developer's own sessions
+NEEDS YOU, mpx-done with an off-focus derived `done`; each pane paints an
+agent-labeled screen over an `exec -a <agent> cat` foreground fake, while
+states come via `pane report-agent` — corralled in `state/herdr-sessions`
+so `stop` retires exactly those (stop + delete) and never the developer's
+own sessions
 (whose tiles also appear — that is the product behavior); seed with
 `state/seed-herdr.json` (same host/UUID, `sessionBackend: "herdr"`).
 

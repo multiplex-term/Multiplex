@@ -11,8 +11,9 @@
 #                        optional seconds arg, default 8
 #   ./harness.sh ask     fake permission dialog in agent:cc (needs-you state)
 #   ./harness.sh herdr   seed real herdr SESSIONS (brew install herdr) —
-#                        one deck tile each — with deterministic agent
-#                        states via `pane report-agent`: mpx-demo RUNNING,
+#                        one deck tile each — with agent-shaped foreground
+#                        fakes + deterministic `pane report-agent` states:
+#                        mpx-demo RUNNING,
 #                        mpx-blocked NEEDS YOU, mpx-done carries an
 #                        off-focus derived `done`; the
 #                        herdr-mode analog of `demo`; point the app at
@@ -173,7 +174,8 @@ EOF
 # Seed the herdr-mode analog of `demo`: real herdr SESSIONS (the deck's
 # tiles — one tile per session, workspaces as its window lines) whose
 # agent states are reported through `pane report-agent`, herdr's own
-# integration door — deterministic, unlike OSC-title fakes. Everything
+# integration door; each state also gets a visible `exec -a … cat` process
+# so the harness never claims an agent over a plain shell. Everything
 # lives in harness-owned sessions recorded in state/herdr-sessions so
 # `stop` retires exactly those (stop + delete) and never the developer's
 # own sessions — default and friends are never touched, though their
@@ -226,7 +228,7 @@ herdr_demo() {
     # working → idle). Ids inside a session are deterministic — a fresh
     # session's first pane is always w1:p1.
     python3 - "$STATE" <<'PY'
-import json, pathlib, subprocess, sys, time
+import json, pathlib, shlex, subprocess, sys, time
 state = pathlib.Path(sys.argv[1])
 
 def herdr(session, *args, check=True, capture=False):
@@ -258,22 +260,73 @@ def report(session, pane, agent, status, extra=None):
           "--source", "multiplex-harness", "--agent", agent,
           "--state", status, *(extra or []))
 
+def foreground_argv0s(session, pane):
+    out = herdr(session, "pane", "process-info", "--pane", pane,
+                check=False, capture=True)
+    try:
+        info = json.loads(out.stdout)["result"]["process_info"]
+        processes = info["foreground_processes"]
+        return [str(process.get("argv0") or "") for process in processes]
+    except (KeyError, TypeError, ValueError):
+        return []
+
+def wait_for_shell(session, pane):
+    shells = {"sh", "bash", "zsh", "dash", "fish", "csh", "tcsh"}
+    for _ in range(30):
+        argv0s = foreground_argv0s(session, pane)
+        if len(argv0s) == 1:
+            name = pathlib.Path(argv0s[0].lstrip("-")).name
+            if name in shells:
+                return
+        time.sleep(0.2)
+
+def fake_agent(session, pane, argv0, title, screen):
+    # Keep the lifecycle fixture visually and structurally honest: the pane
+    # really has an agent-shaped foreground process, and its screen says so.
+    # `cat` makes it inert while `exec -a` gives herdr's own process detector
+    # the same argv[0] a real integration would own.
+    wait_for_shell(session, pane)
+    paint = "\\033[2J\\033[H\\033]0;" + title + "\\007" + screen + "\\n"
+    command = "printf '%b' " + shlex.quote(paint)
+    command += "; exec -a " + shlex.quote(argv0) + " cat"
+    herdr(session, "pane", "send-text", pane, command)
+    herdr(session, "pane", "send-keys", pane, "Enter")
+    # A login-shell update prompt can still steal one queued Enter after the
+    # process sweep looked quiet. Re-send only the key (the command remains in
+    # the editor), then require the foreground argv to prove the fake is live.
+    for attempt in range(20):
+        if argv0 in foreground_argv0s(session, pane):
+            return
+        if attempt == 5:
+            herdr(session, "pane", "send-keys", pane, "Enter")
+        time.sleep(0.2)
+    sys.exit(f"session {session} pane {pane} never launched fake {argv0}")
+
 sessions = ["mpx-demo", "mpx-blocked", "mpx-done"]
 # Record BEFORE creating: a failure mid-seed must still be retirable.
 (state / "herdr-sessions").write_text("\n".join(sessions) + "\n")
 for session in sessions:
     spawn(session)
 
+fake_agent(
+    "mpx-demo", "w1:p1", "claude", "✳ Claude Code",
+    "✳ Claude Code — harness\\n\\nWorking on the Multiplex review…")
 report("mpx-demo", "w1:p1", "claude", "working")
 create("mpx-demo", "web", "/tmp")
 create("mpx-demo", "scratch", "/tmp")
 
+fake_agent(
+    "mpx-blocked", "w1:p1", "codex", "Action Required | Codex",
+    "OpenAI Codex — harness\\n\\nWaiting for approval…")
 report("mpx-blocked", "w1:p1", "codex", "blocked",
        ["--message", "Allow command: npm run deploy?"])
 
 # herdr presents a settled foreground pane as idle; `done` is retained for
 # an agent that settles off-focus. Move focus to a second workspace first,
 # then the Pi working -> idle transition deterministically derives `done`.
+fake_agent(
+    "mpx-done", "w1:p1", "pi", "π - harness",
+    "Pi — harness\\n\\nTurn complete.")
 done_front, _ = create("mpx-done", "front", "/tmp")
 herdr("mpx-done", "workspace", "focus", done_front, capture=True)
 report("mpx-done", "w1:p1", "pi", "working")
