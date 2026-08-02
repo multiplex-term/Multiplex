@@ -305,19 +305,15 @@ final class HostConnectionModel {
         await task?.value
     }
 
-    /// Fast path for the terminal that currently owns keyboard focus. One
-    /// tiny list-panes exec identifies the pane receiving keystrokes. Direct
-    /// signals resolve most agents immediately; only a changed/expired
-    /// ambiguous pane runs a second query scoped to that pane's TTY.
+    /// Fast path for the terminal that currently owns keyboard focus. Tmux
+    /// uses one tiny list-panes exec, then a TTY-scoped process query only for
+    /// a changed/expired ambiguous pane. Herdr's `pane current` returns its
+    /// globally focused pane and canonical agent id directly.
     ///
     /// nil means the lightweight check itself was unavailable. A nonnil,
     /// non-definitive result still carries the new fingerprint so the UI can
     /// immediately retire helpers that belonged to a different pane.
     func detectActiveAgent(in sessionName: String) async -> ActivePaneAgentDetection? {
-        // herdr mode has no list-panes fast path; the snapshot's agent layer
-        // already answers at the probe cadence, and a nil here just means
-        // callers keep the probe's verdict (their documented fallback).
-        guard host.sessionBackend == .tmux else { return nil }
         guard !activePaneProbeInFlight,
               refreshTask == nil,
               phase == .connected,
@@ -326,6 +322,20 @@ final class HostConnectionModel {
 
         activePaneProbeInFlight = true
         defer { activePaneProbeInFlight = false }
+
+        if host.sessionBackend == .herdr {
+            // `pane current` carries no protocol field. Require a supported
+            // full probe first; that pass owns the version gate and proves
+            // the backend is serving sessions before the one-second path.
+            guard HerdrProbe.bakeableSessionName(sessionName),
+                  case .sessions = tmux,
+                  let output = try? await deadlined(seconds: 3, {
+                      try await connection.exec(
+                          HerdrProbe.activePaneCommand(sessionName: sessionName))
+                  })
+            else { return nil }
+            return HerdrProbe.parseActiveAgent(output)
+        }
 
         guard let output = try? await deadlined(seconds: 3, {
             try await connection.exec(TmuxProbe.activePaneCommand(sessionName: sessionName))

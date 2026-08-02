@@ -20,6 +20,8 @@ import Foundation
 /// - `herdr --session <s> api snapshot` is the per-session probe: version
 ///   + protocol + workspaces + tabs + panes + per-tab layouts (focused
 ///   pane) + the session's focused workspace/pane, in one round trip.
+///   Between full probes, `pane current` returns only that globally focused
+///   pane — including its canonical agent id — for the helper strip.
 /// - `herdr pane read <id> --source visible` prints RAW text, not an
 ///   envelope — the capture-pane analog feeding the wall miniatures.
 /// - API failures print an error envelope or a Rust error line and exit
@@ -386,6 +388,10 @@ enum HerdrProbe {
         }
     }
 
+    private struct CurrentPaneResult: Decodable {
+        var pane: Pane
+    }
+
     private struct Status: Decodable {
         var client: StatusClient
     }
@@ -407,6 +413,11 @@ enum HerdrProbe {
 
     private static func decodeSessionList(_ text: String) -> SessionList? {
         try? JSONDecoder().decode(SessionList.self, from: Data(text.utf8))
+    }
+
+    private static func decodeCurrentPane(_ text: String) -> Pane? {
+        (try? JSONDecoder().decode(
+            Envelope<CurrentPaneResult>.self, from: Data(text.utf8)))?.result.pane
     }
 
     private static func decodeStatus(_ text: String) -> Status? {
@@ -643,11 +654,39 @@ enum HerdrProbe {
         pathPrefix + snapshotInvocation(sessionName: sessionName) + " || true"
     }
 
+    /// The small between-probe query: unlike `api snapshot`, `pane current`
+    /// returns only the session's globally focused pane. That is enough to
+    /// move helper chips as soon as a herdr tab/workspace switch lands.
+    static func activePaneCommand(sessionName: String) -> String {
+        pathPrefix
+            + "herdr --session \(sessionName.shellQuoted) pane current 2>/dev/null || true"
+    }
+
     /// The focused pane out of a lone snapshot exec — where setup typing
     /// lands. A fresh session has exactly one workspace and pane, so
     /// focused and first agree.
     static func parseFocusedPane(_ output: String) -> String? {
         firstDecodedLine(in: output, decodeSnapshot).flatMap(frontPaneID(of:))
+    }
+
+    /// Lightweight helper-strip answer from one `pane current` envelope.
+    /// Herdr's current pane and canonical agent id are server authority, so a
+    /// decoded pane with no supported agent is definitive — unlike tmux, no
+    /// process fallback is needed. The synthetic process fingerprint lets the
+    /// shared terminal policy retire a previous pane's helpers immediately.
+    static func parseActiveAgent(_ output: String) -> ActivePaneAgentDetection? {
+        guard let pane = firstDecodedLine(in: output, decodeCurrentPane)
+        else { return nil }
+        return ActivePaneAgentDetection(
+            fingerprint: TmuxPaneFingerprint(
+                tmuxID: pane.paneID,
+                pid: 0,
+                tty: "",
+                command: pane.agent ?? ""
+            ),
+            agent: pane.agent.flatMap(AgentKind.init(herdrAgent:)),
+            isDefinitive: true
+        )
     }
 
     // MARK: - File drops (and the file viewer's cwd anchor)

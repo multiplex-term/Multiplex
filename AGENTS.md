@@ -946,9 +946,11 @@ logic belongs — keep parsing/command-building out of views.
   probe retains every pane, reuses its one `list-panes` result to root
   ONE subtree-clipped host-wide ps snapshot; FleetWall aggregates split
   panes, helper chips follow only the active pane. Between full probes
-  only `TerminalFocusArbiter.current` runs a 1 s current-window
-  `list-panes`; ambiguous wrappers get a cached single-TTY ps fallback;
-  settled full probes coalesce for 4 s. Plain `.shell` tabs use their own
+  only `TerminalFocusArbiter.current` runs a 1 s focused check: tmux uses
+  current-window `list-panes` (with a cached single-TTY ps fallback for
+  ambiguous wrappers), while herdr's small `pane current` response names
+  the globally focused pane and its canonical agent definitively. Settled
+  full probes coalesce for 4 s. Plain `.shell` tabs use their own
   PTY authority (`ShellAgentProbe`: exec channel's `$PPID` → sibling PTY
   under sshd → foreground pgid/tpgid only, so a suspended background
   agent leaves no helpers); title/visible-screen signatures are a narrow

@@ -78,6 +78,18 @@ final class HerdrProbeTests: XCTestCase {
         + #""agent":"codex","agent_status":"blocked"}],"#
         + #""layouts":[{"tab_id":"w1:t1","focused_pane_id":"w1:p1"}]}}}"#
 
+    /// Hand-reduced `herdr pane current` envelope. The real 0.7.5 response
+    /// carries the same pane fields as a snapshot plus a `pane_current` type.
+    private func currentPane(
+        paneID: String, tabID: String, agent: String?
+    ) -> String {
+        let agentField = agent.map { #""agent":"\#($0)","# } ?? ""
+        return #"{"id":"cli:pane:current","result":{"pane":{"#
+            + agentField
+            + #""agent_status":"idle","focused":true,"pane_id":"\#(paneID)","#
+            + #""tab_id":"\#(tabID)"},"type":"pane_current"}}"#
+    }
+
     private func transcript(
         status: String?,
         list: String?,
@@ -543,6 +555,48 @@ final class HerdrProbeTests: XCTestCase {
         let output = "login noise\n" + workSnapshot + "\n"
         XCTAssertEqual(HerdrProbe.parseFocusedPane(output), "w1:p1")
         XCTAssertNil(HerdrProbe.parseFocusedPane("Error: no server\n"))
+    }
+
+    func testFastAgentDetectionFollowsTheSessionFocusedTab() throws {
+        let command = HerdrProbe.activePaneCommand(sessionName: "mpx-demo")
+        XCTAssertTrue(command.contains(
+            "herdr --session 'mpx-demo' pane current 2>/dev/null || true"))
+        XCTAssertFalse(command.contains("api snapshot"),
+                       "the one-second path must not fetch the whole session")
+
+        let claude = try XCTUnwrap(HerdrProbe.parseActiveAgent(
+            "login noise\n" + currentPane(
+                paneID: "w1:p1", tabID: "w1:t1", agent: "claude")))
+        XCTAssertEqual(claude.fingerprint.tmuxID, "w1:p1")
+        XCTAssertEqual(claude.fingerprint.command, "claude")
+        XCTAssertEqual(claude.agent, .claudeCode)
+        XCTAssertTrue(claude.isDefinitive)
+
+        let pi = try XCTUnwrap(HerdrProbe.parseActiveAgent(currentPane(
+            paneID: "w1:p2", tabID: "w1:t2", agent: "pi")))
+        XCTAssertEqual(pi.fingerprint.tmuxID, "w1:p2")
+        XCTAssertEqual(pi.fingerprint.command, "pi")
+        XCTAssertEqual(pi.agent, .pi)
+        XCTAssertTrue(pi.isDefinitive)
+    }
+
+    func testFastAgentDetectionDefinitivelyClearsUnsupportedOrMissingAgents() throws {
+        let unsupported = try XCTUnwrap(HerdrProbe.parseActiveAgent(currentPane(
+            paneID: "w2:p1", tabID: "w2:t1", agent: "opencode")))
+        XCTAssertEqual(unsupported.fingerprint.command, "opencode")
+        XCTAssertNil(unsupported.agent)
+        XCTAssertTrue(unsupported.isDefinitive,
+                      "herdr named the pane's agent; no process fallback is pending")
+
+        let shell = try XCTUnwrap(HerdrProbe.parseActiveAgent(currentPane(
+            paneID: "w3:p1", tabID: "w3:t1", agent: nil)))
+        XCTAssertEqual(shell.fingerprint.command, "")
+        XCTAssertNil(shell.agent)
+        XCTAssertTrue(shell.isDefinitive)
+
+        XCTAssertNil(HerdrProbe.parseActiveAgent("Error: no server\n"))
+        XCTAssertNil(HerdrProbe.parseActiveAgent(workSnapshot),
+                     "a full snapshot is not the focused fast-path envelope")
     }
 
     // MARK: File drops

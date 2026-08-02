@@ -39,9 +39,10 @@ struct TmuxPaneFingerprint: Hashable {
     var command: String
 }
 
-/// Result of the terminal window's lightweight focused-pane check.
-/// `isDefinitive == false` means direct signals were inconclusive and the
-/// scoped process query failed; callers retain a result only while the pane
+/// Result of the terminal window's lightweight focused-pane check. Tmux may
+/// return `isDefinitive == false` when direct signals were inconclusive and
+/// the scoped process query failed; herdr's canonical agent field is always
+/// definitive. Callers retain an inconclusive result only while the pane
 /// fingerprint itself remains unchanged.
 struct ActivePaneAgentDetection: Equatable {
     var fingerprint: TmuxPaneFingerprint

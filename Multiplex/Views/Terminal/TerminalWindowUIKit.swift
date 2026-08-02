@@ -1073,16 +1073,21 @@ final class TerminalWindowViewController: UIViewController,
         await model.refreshAndWait(ifStaleFor: 4)
 
         if watchedTab.sessionBackend == .herdr {
-            // No list-panes fast path in herdr mode; the probe's snapshot is
-            // the authority and `detectedAgent` follows the session's live
-            // focused pane — re-read it each interval so a workspace switch
-            // inside the TUI moves the strip within a probe tick. Unlike
-            // the exec-driven siblings this read is free and in-memory, so
-            // it skips the focus gate (an unfocused window's strip should
-            // still track the TUI) but keeps the background gate.
+            // The five-second wall probe remains the broad session/attention
+            // authority. Between ticks, the one terminal that owns keyboard
+            // focus asks `pane current`: herdr's global focused pane identifies
+            // the agent now receiving helper-chip input without a full snapshot.
+            // Unfocused windows keep following the in-memory wall verdict,
+            // avoiding one fast SSH loop per visible spatial window.
             while !Task.isCancelled {
                 guard activeTab?.id == watchedTab.id else { return }
-                if UIApplication.shared.applicationState == .active {
+                if UIApplication.shared.applicationState == .active,
+                   let view = activeController?.terminalView,
+                   TerminalFocusArbiter.current === view {
+                    let detection = await model.detectActiveAgent(in: sessionName)
+                    guard !Task.isCancelled, activeTab?.id == watchedTab.id else { return }
+                    if let detection { apply(detection) }
+                } else if UIApplication.shared.applicationState == .active {
                     let nextAgent = detectedAgent
                     if shownAgent != nextAgent {
                         hideAgentTask?.cancel()
