@@ -834,8 +834,8 @@ final class SettingsAppearanceChoiceBar: UIStackView {
         spacing = SettingsAppearanceChoiceMetrics.seam
         backgroundColor = UIKitChassis.bezelHi
 
-        // PROTOTYPE(GLASS): GLASS joins the bar where the prototype is
-        // compiled in (visionOS DEBUG); other platforms keep the three.
+        // PROTOTYPE(GLASS): every visionOS build adds GLASS; iOS/iPadOS keep
+        // the three baseline choices.
         for appearance in AppAppearance.availableCases {
             let button = SettingsChoiceButton(
                 title: appearance.settingsTitle, appearance: appearance

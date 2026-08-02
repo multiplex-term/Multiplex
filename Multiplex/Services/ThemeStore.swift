@@ -25,13 +25,13 @@ enum AppAppearance: String, CaseIterable {
     case dark
     /// PROTOTYPE(GLASS): the SMOKE glass chassis as an independent choice —
     /// visionOS only, derived from the dark palette (dark traits + the dark
-    /// terminal-theme slot). Exists only where the prototype is compiled in.
+    /// terminal-theme slot). Available in every visionOS configuration.
     case glass
 
-    /// The choices a platform's Settings bar offers and the DEBUG
-    /// appearance hook cycles. GLASS is visionOS DEBUG only.
+    /// The choices a platform's Settings bar offers and the DEBUG appearance
+    /// hook cycles. GLASS is visionOS-only, in both Debug and Release.
     static var availableCases: [AppAppearance] {
-        #if os(visionOS) && DEBUG
+        #if os(visionOS)
         allCases
         #else
         [.system, .light, .dark]
@@ -94,8 +94,8 @@ final class ThemeStore {
             ?? TerminalTheme.lightDefault.id
         let storedAppearance = defaults.string(forKey: Self.appearanceKey)
             .flatMap(AppAppearance.init(rawValue:)) ?? .system
-        // A persisted GLASS choice on a platform/build without the prototype
-        // falls back to SYSTEM rather than acting as a hidden DARK.
+        // A persisted GLASS choice on a non-visionOS platform falls back to
+        // SYSTEM rather than acting as a hidden DARK.
         appearance = AppAppearance.availableCases.contains(storedAppearance)
             ? storedAppearance : .system
         load()

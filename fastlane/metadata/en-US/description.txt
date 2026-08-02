@@ -16,7 +16,7 @@ MOSH BUILT IN
 With Pro, switch a host to mosh and the session survives sleep, roaming, and IP changes — a native Swift mosh client, no companion app. Made for a headset that suspends and an iPad that hops networks.
 
 A REAL TERMINAL
-Full xterm-256color emulation, multilingual system-keyboard input, touch and pointer clicks for mouse-aware TUIs, hardware keyboards, live PTY resize, and a built-in menu for everyday tmux commands — windows, panes, copy mode, rename, zoom. Copy mode keeps text selection native, with a clear Done action. Light and dark appearance follow your device (or pin either), each remembering its own terminal theme — ten built-ins included. Pro adds a custom theme editor for background, text, cursor, and all 16 ANSI colors.
+Full xterm-256color emulation, multilingual system-keyboard input, touch and pointer clicks for mouse-aware TUIs, hardware keyboards, live PTY resize, and a built-in menu for everyday tmux commands — windows, panes, copy mode, rename, zoom. Copy mode keeps selection native; Done exits. System, Light, Dark, and Vision Pro’s smoked Glass switch the whole chassis. Glass shares Dark’s terminal theme — ten built-ins included. Pro adds a custom theme editor for background, text, cursor, and all 16 ANSI colors.
 
 PRIVATE BY DESIGN
 Hosts, agent-command setups, and secrets sync between your devices through iCloud Keychain, end-to-end encrypted. Nothing touches our servers — there are none. No account, no analytics, no tracking.

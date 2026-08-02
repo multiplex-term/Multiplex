@@ -1,4 +1,4 @@
-Multiplex is an SSH client: the live wall and persistent sessions need a remote host running tmux. A demo tmux server is provisioned for review — nothing to install on your side.
+Multiplex is an SSH client; its live wall needs a remote tmux host. A review server is ready — nothing to install.
 
 CONNECT
 1. Launch Multiplex and tap + HOST.
@@ -9,9 +9,10 @@ CORE FLOW
 - The free tier saves two hosts; Multiplex Pro removes the limit.
 - + NEW SESSION starts a plain tmux shell or launches Claude Code, Codex, or Pi with an optional first prompt, passed once as the CLI's first message and not retained.
 - Tap a tile to attach: the session opens in its own window with a red LIVE lamp. Attach a second and place them side by side (its own spatial window on Vision Pro; Stage Manager on iPad).
+- Vision Pro: Settings → Appearance → GLASS applies smoked spatial material live to the deck, terminals, and forms; SYSTEM/LIGHT/DARK remain available.
 - MERGE in a terminal's bottom bar pulls another window's session in as a tab; a tab's context menu moves it back out, still connected.
-- TMUX in the Vision Pro bottom bar or iPad/iPhone key bar opens the shortcut menu (top-right on narrow iPhones): New Window, Split, or Copy Mode send the displayed Ctrl-B binding. In Copy Mode, swipe history, hold to select/copy, press Done.
-- The dictation (microphone) key appears with a physical keyboard (including Simulator), or in the top-right KEYBOARD LOCKED tip after holding the keyboard key. Press it; speech is typed into the session, with STOP/CANCEL on its bar.
+- TMUX in the bottom/key bar (top-right on narrow iPhones) opens New Window, Split, and Copy Mode. In Copy Mode, swipe history, hold to select/copy, press Done.
+- The dictation key appears with a physical keyboard (including Simulator), or in the KEYBOARD LOCKED tip. Press it; speech is typed with STOP/CANCEL on its bar.
 - FILE attaches Photos/Files (Camera on iPad), uploads into the active pane's working directory, and types the remote path without Return. Drops use the same pipeline.
 - DETACH closes the window; tmux keeps the session running, so its tile stays on the wall.
 

@@ -174,9 +174,10 @@ app.multiplexterm.multiplex.<name>`:
   focused terminal.
 - `debug.hostenable` — toggle the FIRST host's deck switch through
   `HostStore.setEnabled` (watch `sshd.log` go silent and come back).
-- `debug.appearance` — cycle SYSTEM → LIGHT → DARK through
-  `ThemeStore.appearance` (persisted, flips every window live; pair with
-  `simctl ui <UDID> appearance` to prove SYSTEM).
+- `debug.appearance` — cycle SYSTEM → LIGHT → DARK → GLASS on visionOS
+  (the first three elsewhere) through `ThemeStore.appearance` (persisted,
+  flips every window live; pair with `simctl ui <UDID> appearance` to prove
+  SYSTEM).
 - `debug.agentchip` — tap the first slash chip (inject → pump → PTY → tmux).
 - `debug.newtab` — run the focused window's "+ TAB" New Session action.
 - `debug.tmuxshortcuts` / `debug.customcommands` / `debug.msghistory` — open
@@ -1163,10 +1164,13 @@ behavior change. Bake-off records stay here under `docs/landing/`.
   chassis `#E4E8EE`, screens *brighter* than frames (DESIGN.md
   "Daylight"). `chassis` stays an asset color so the launch screen hands
   off in either polarity. The appearance choice (`ThemeStore.appearance`:
-  SYSTEM/LIGHT/DARK) is applied by
-  `UIKitSceneRootViewController.applyAppearance` through each scene
-  window's `overrideUserInterfaceStyle` — never a mechanism that stops at
-  presentation boundaries (SwiftUI's `preferredColorScheme` did). Three
+  SYSTEM/LIGHT/DARK everywhere, plus GLASS on visionOS in every build) is
+  applied by `UIKitSceneRootViewController.applyAppearance` through each
+  scene window's `overrideUserInterfaceStyle` — never a mechanism that stops
+  at presentation boundaries (SwiftUI's `preferredColorScheme` did). GLASS
+  pins dark traits, shares DARK's terminal-theme slot, and independently
+  rides `GlassAppearanceTrait`; `GlassSelectionState` mirrors it only where
+  SwiftUI ornament/glass hosts cannot inherit that custom trait. Three
   traps: a visionOS sheet/popover hosts in its own window and misses an
   override already in place; a presented controller's own override beats
   its window's; and visionOS can retain a `UILabel`'s previously resolved
@@ -1209,11 +1213,11 @@ behavior change. Bake-off records stay here under `docs/landing/`.
   host UUID.
 - Platform splits use `#if os(visionOS)`; iPad sits on chassis with a
   neutral `signal` tint, visionOS keeps native glass for system controls.
-  Form sheets (Settings, host/session forms, FAQ, theme editor, paywall)
-  sit on opaque chassis on every platform via `chassisSheetGround()` — a
-  glass ground swallowed the pinned LIGHT appearance on visionOS. The
-  wall and terminal chrome are opaque chassis on both platforms by
-  design.
+  SYSTEM/LIGHT/DARK keep form sheets, wall, and terminal chrome on opaque
+  TALLY chassis. The visionOS-only GLASS choice instead paints exactly one
+  smoked material ground per window/sheet, clears full-bleed intermediates,
+  and uses strata/line/open-pane tokens above it; never stack smoke layers.
+  The app-lock veil remains opaque in every appearance.
 
 ## Known limits (v1)
 

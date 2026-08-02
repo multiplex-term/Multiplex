@@ -83,6 +83,19 @@ The App Group entitlement must exist on the App ID for device/TestFlight
 builds (automatic signing creates it on first device build; confirm in the
 developer portal before archiving).
 
+## visionOS Glass appearance
+
+Free surface shipping with the next binary:
+
+| Item | Facts |
+| --- | --- |
+| Availability | Vision Pro only, in every distribution configuration (App Store/TestFlight Release as well as development builds); iPhone and iPad retain SYSTEM/LIGHT/DARK |
+| Choice | Settings → Appearance adds GLASS beside SYSTEM/LIGHT/DARK; it updates every open deck, terminal, sheet, and popover live and persists like the other choices |
+| Material | Smoked native spatial glass with TALLY strata, lines, and open-pane hierarchy; DARK remains the separate opaque graphite choice |
+| Terminal themes | GLASS derives from dark traits and shares DARK's terminal-theme selection rather than adding a hidden third theme slot |
+| Privacy/accessibility | No data or permission impact. The app-lock veil remains opaque; state colors and captions are unchanged |
+| Tier | Free |
+
 ## Multiplex Pro
 
 Last remote readback: **2026-07-13 — `READY_TO_SUBMIT`**. The local review
@@ -131,8 +144,9 @@ Current product split:
   detection and wall
   telemetry with foreground-aware helpers in tmux panes and plain SSH
   shells (including direct-shell NEEDS YOU chrome), a System/Light/Dark
-  appearance setting (SYSTEM follows the device; the whole chassis, launch
-  screen, and keyboard flip together), New Session launches for Claude Code,
+  appearance setting plus smoked GLASS on Vision Pro (SYSTEM follows the
+  device; the whole chassis, launch screen, and keyboard flip together;
+  GLASS shares the dark terminal-theme slot), New Session launches for Claude Code,
   Codex, or Pi with optional per-host setup scripts and one-shot first
   prompts, per-host new-session tmux options (one option per line; defaults
   `mouse on` and `focus-events on`) applied when sessions are created from

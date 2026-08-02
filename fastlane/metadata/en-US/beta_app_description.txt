@@ -11,6 +11,9 @@ WHAT YOU NEED
 
 WHERE THINGS ARE
 - + HOST on the deck adds a host; probing starts immediately.
+- Settings → Appearance switches the chassis live. Vision Pro adds GLASS to
+  SYSTEM, LIGHT, and DARK; GLASS uses smoked spatial material and shares the
+  dark terminal-theme selection.
 - + NEW SESSION starts a plain tmux shell, or launches Claude Code, Codex, or Pi with an optional setup script, model, and first prompt.
 - TMUX (bottom bar on Vision Pro, key rail on iPad/iPhone, top-right on narrow iPhones) sends everyday tmux commands: new window, split, copy mode.
 - FILE uploads from Photos, Files, or the camera into the active pane's working directory and types the remote path without pressing Return. Dragging a file onto the terminal does the same.

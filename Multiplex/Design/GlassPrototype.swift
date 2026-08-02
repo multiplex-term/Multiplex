@@ -2,15 +2,15 @@ import Observation
 import UIKit
 
 /// PROTOTYPE(GLASS): the SMOKE winner of the visionOS TALLY-on-glass
-/// bake-off, staged as an **independent appearance choice** — GLASS sits
-/// beside SYSTEM/LIGHT/DARK in Settings on visionOS (DEBUG builds while
-/// prototyping), derives from the dark palette (dark traits, dark theme
-/// slots), and leaves DARK itself the shipping opaque graphite. Spec and
-/// rollout live in `local-plan/visionos-glass.md`; the frozen material
-/// numbers come from the REV 4 mock in `local-plan/visionos-glass-bakeoff/`.
-/// Every gated call site is marked `PROTOTYPE(GLASS)` so the experiment
-/// deletes as a unit — the TALLY-prototype discipline
-/// (docs/design-bakeoff.md).
+/// bake-off, offered as an **independent appearance choice** — GLASS sits
+/// beside SYSTEM/LIGHT/DARK in Settings on visionOS, derives from the dark
+/// palette (dark traits + dark terminal-theme slot), and leaves DARK itself
+/// as opaque graphite. The spec and rollout live in
+/// `local-plan/visionos-glass.md`; the frozen material numbers come from the
+/// REV 4 mock in `local-plan/visionos-glass-bakeoff/`. Every gated call site
+/// retains the `PROTOTYPE(GLASS)` lineage marker so the material system remains
+/// auditable as a unit — the TALLY-prototype discipline
+/// (`docs/design-bakeoff.md`).
 ///
 /// Selection rides a custom trait: `UIKitSceneRootViewController
 /// .applyAppearance` writes `GlassAppearanceTrait` onto the scene window,
@@ -45,11 +45,10 @@ final class GlassSelectionState {
 }
 
 enum GlassPrototype {
-    /// Whether the GLASS choice exists at all: visionOS DEBUG builds while
-    /// the prototype phase lasts. With it disabled (Release, iOS/iPadOS),
-    /// nothing here is reachable and the appearance bar offers three
-    /// choices, exactly as shipped.
-    #if os(visionOS) && DEBUG
+    /// Whether the GLASS choice exists at all: every visionOS build offers it.
+    /// iOS/iPadOS keep the three baseline choices and compile these materials
+    /// only as inert fallbacks for shared source.
+    #if os(visionOS)
     static let enabled = true
     #else
     static let enabled = false

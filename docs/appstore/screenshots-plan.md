@@ -46,7 +46,7 @@ uniform downscale, never a crop.
 | 7 | `widgets` | Home Screen widgets (iPad) / widget pinned in the room (visionOS 26) | THE WALL, ON YOUR HOME SCREEN *(visionOS: PINNED IN YOUR SPACE)* | `WIDGETS · APP SHORTCUTS` |
 | 8 | `mosh` | Host sheet with MOSH toggle on + attached session behind | MOSH BUILT IN — ROAM, SLEEP, RESUME | `UDP · PRO` ● LIVE |
 | 9 | `keys` | iPad: docked keyboard raised, TALLY key rail + helper strip above it / visionOS: ornament key cluster beside the UMD, floating keyboard below | REAL TERMINAL KEYS, ABOVE THE KEYBOARD *(visionOS: ESC, CTRL, TAB — ALWAYS IN REACH)* | `ESC · CTRL · TAB · ARROWS · RET · TMUX` / visionOS `ESC · CTRL · TAB` ● LIVE |
-| 10 | `themes` | iPad: LIGHT appearance, Frost chassis + Tally Frost / visionOS: Gruvbox dark | LIGHT OR DARK — TEN THEMES, PLUS YOUR OWN | `TALLY FROST · LIGHT` / `GRUVBOX DARK` |
+| 10 | `themes` | iPad: LIGHT appearance, Frost chassis + Tally Frost / visionOS: Settings on GLASS over the wall | iPad: LIGHT OR DARK — TEN THEMES, PLUS YOUR OWN / visionOS: GRAPHITE OR SMOKED GLASS | iPad `TALLY FROST · LIGHT` / visionOS `TALLY · GLASS` |
 
 Exactly 10 = the ASC cap. The 2026-07-18 re-plan (widgets/Shortcuts, agent
 history, file attach, the light appearance, iPhone) added `history`, `drop`,
@@ -86,9 +86,10 @@ is deliberately a one-window shell); `keys` moves up to slot 2:
   `xcrun simctl status_bar <UDID> override --time 9:41 --batteryState charged
   --batteryLevel 100 --cellularMode active --cellularBars 4 --operatorName ""`
   (visionOS has no status bar).
-- **Nothing behind the app** on visionOS — the Files window ghosting through
-  glass in `docs/visionos-deck.png` reads as clutter. One consistent
-  environment for the whole set (the day living room reads best).
+- **No other app windows behind Multiplex** on visionOS — Files ghosting
+  through GLASS reads as clutter. The room itself is intentional material;
+  use one consistent environment for the whole set (the day living room reads
+  best).
 - **No dev tells**: host must not read `jhen@127.0.0.1:2222`. Alias the
   harness: add `127.0.0.1 atlas.internal` to the Mac's `/etc/hosts` (the sim
   uses the Mac's resolver) and seed via `stage-sessions.sh`'s
@@ -110,8 +111,9 @@ is deliberately a one-window shell); `keys` moves up to slot 2:
   fleet first (the App Group `widget-state.json` publishes off the live
   probe), then add widgets on a **plain dark wallpaper** Home Screen. SEEN
   stamps in frame are honest and deliberate — widgets never claim liveness.
-- **Light-appearance shots** flip via the `debug.appearance` notification
-  (SYSTEM → LIGHT → DARK, persisted); flip back after the `themes` capture.
+- **Appearance shots** flip via the `debug.appearance` notification
+  (SYSTEM → LIGHT → DARK → GLASS on visionOS, persisted). Stage `themes` on
+  GLASS there, LIGHT on iPad, then restore SYSTEM after capture.
 - **Pro surfaces** (`mosh`, custom themes) are live by default in DEBUG
   builds (`isPro` defaults true); the telemetry marks them `PRO` honestly.
   The chip strip is free (10 taps/day) and carries no PRO mark, and the

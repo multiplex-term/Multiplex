@@ -43,7 +43,17 @@ final class ThemeStoreTests: XCTestCase {
         XCTAssertEqual(AppAppearance.glass.resolvedOverride, .dark)
     }
 
-    func testPersistedGlassFallsBackWhereThePrototypeIsUnavailable() {
+    func testGlassAvailabilityIsPlatformBased() {
+        #if os(visionOS)
+        XCTAssertTrue(GlassPrototype.enabled)
+        XCTAssertEqual(AppAppearance.availableCases, AppAppearance.allCases)
+        #else
+        XCTAssertFalse(GlassPrototype.enabled)
+        XCTAssertEqual(AppAppearance.availableCases, [.system, .light, .dark])
+        #endif
+    }
+
+    func testPersistedGlassFallsBackOffVisionOS() {
         defaults.set(AppAppearance.glass.rawValue, forKey: "MultiplexAppearance")
 
         XCTAssertEqual(

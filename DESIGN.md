@@ -75,14 +75,32 @@ hierarchy the dark chassis ships.
 | `miniText` | `#C8D2D6` | `#3A434E`     | 9.7:1 on `screen`         |
 
 The appearance is a Settings choice — SYSTEM (follows the device; the default),
-LIGHT, DARK — applied per window, so the wall, terminal chrome, forms, and
-keyboard flip together. Terminal surfaces stay user preference: each appearance
-keeps its own theme slot, dark defaulting to Tally and light to **Tally
+LIGHT, DARK, plus GLASS on visionOS — applied per window, so the wall, terminal
+chrome, forms, and keyboard flip together. Terminal surfaces stay user
+preference: light and dark keep independent theme slots, while GLASS derives
+from and shares the dark slot. Dark defaults to Tally and light to **Tally
 Frost**; **Tally Paper** (neutral, tally-red cursor) and **Tally Ivory** (warm,
 amber cursor quoting the retired Multiplex identity) ship alongside as the
 rest of the light trio. The keyboard follows the chassis appearance, never the
 terminal theme — a light theme in a dark studio is a lit monitor, not a lit
 room.
+
+### Spatial glass — the visionOS appearance
+
+GLASS is a fourth, shipping visionOS appearance, not the baseline identity and
+not a replacement for DARK. It keeps TALLY's monitor hierarchy while admitting
+the room as depth: exactly one `#141518` smoke layer at 55% sits over native
+system glass; raised strata use 5% white, lines 11% white, and open monitor
+panes use `#0A0B0C` at 10%. State colors keep their meaning. Secondary ink
+moves to an alpha ramp over the material instead of opaque graphite grays.
+
+One-ground is load-bearing: intermediate full-bleed views and navigation
+containers clear under GLASS, while tiles, chips, and headers add only their
+single strata step. Sheets carry the same smoke into their own presentation
+window; the app-lock veil alone stays opaque. Terminal windows retain their
+24-point bordered silhouette and gain app-hosted system glass behind it, while
+each ornament row is its own smoked slab. This prevents translucency from
+flattening the broadcast-console structure into an undifferentiated platter.
 
 ## Type
 
@@ -126,9 +144,12 @@ every session is a **tile** — a monitor on the wall:
 
 ## Composition
 
-**Deck window.** Full-bleed chassis (the wall is an object, not a glass
-panel). Header: `MULTIPLEX`, fleet stats (`2 HOSTS · 5 SESSIONS`), `+ HOST`
-and `SETTINGS` chips. Host rails carry a context menu (Edit/Remove Host).
+**Deck window.** Full-bleed chassis in SYSTEM/LIGHT/DARK (the wall remains a
+single authored object, never a collection of floating cards). GLASS replaces
+that one ground with smoked system material without changing the wall's grid
+or hierarchy. Header: `MULTIPLEX`, fleet stats (`2 HOSTS · 5 SESSIONS`),
+`+ HOST` and `SETTINGS` chips. Host rails carry a context menu (Edit/Remove
+Host).
 
 **Terminal windows.** A chassis-framed screen: `bezelHi` hairline border,
 terminal surface edge to edge in the user's theme. Below, the **UMD**
