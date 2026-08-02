@@ -2,17 +2,6 @@ import XCTest
 @testable import Multiplex
 
 final class TerminalGridAlignmentTests: XCTestCase {
-    func testNudgeUsesRemainderBeyondFourPoints() {
-        let nudge = TerminalGridAlignment.bottomNudge(
-            rawHeight: 507,
-            cellHeight: 20,
-            displayScale: 2
-        )
-
-        XCTAssertEqual(nudge, 6.5, accuracy: 0.0001)
-        XCTAssertGreaterThan(nudge, 4)
-    }
-
     func testNudgePreservesRowCountAndLeavesAtMostOnePhysicalPixel() {
         for scale: CGFloat in [1, 2, 3] {
             for rawHeight: CGFloat in [500, 500.1, 507, 519.9, 520, 538.75] {

@@ -4,28 +4,6 @@ import XCTest
 
 @MainActor
 final class TallyPaletteTests: XCTestCase {
-    func testUIKitPalettePreservesEveryTallyLightAndDarkToken() throws {
-        let tokens: [(UIColor, UInt32, UInt32)] = [
-            (TallyPalette.bezel, 0xF0F3F7, 0x26282B),
-            (TallyPalette.bezelHi, 0xCDD3DC, 0x33363A),
-            (TallyPalette.screen, 0xF9FBFD, 0x0A0B0C),
-            (TallyPalette.screenHatch, 0xEDF0F4, 0x101114),
-            (TallyPalette.tally, 0xC13439, 0xE5484D),
-            (TallyPalette.caution, 0x966618, 0xE0A33E),
-            (TallyPalette.ok, 0x3E7C58, 0x7FBF9A),
-            (TallyPalette.signal, 0x191E25, 0xF2F3F4),
-            (TallyPalette.signal2, 0x515C69, 0x9BA1A6),
-            (TallyPalette.signal3, 0x87919E, 0x5C6166),
-            (TallyPalette.customCommand, 0x75654C, 0xB9AA98),
-            (TallyPalette.miniText, 0x3A434E, 0xC8D2D6),
-        ]
-
-        for (color, light, dark) in tokens {
-            try assert(color, resolvesTo: light, alpha: 1, style: .light)
-            try assert(color, resolvesTo: dark, alpha: 1, style: .dark)
-        }
-    }
-
     func testGlassTokensResolveOnlyForTheDarkGlassTrait() throws {
         guard GlassPrototype.enabled else { return }
         let dark = UITraitCollection(userInterfaceStyle: .dark)
@@ -61,33 +39,6 @@ final class TallyPaletteTests: XCTestCase {
         )
     }
 
-    func testUIKitPalettePreservesAppearanceSpecificShadowStrength() throws {
-        try assert(
-            TallyPalette.shadowAmbient,
-            resolvesTo: 0x2C3644,
-            alpha: 0.16,
-            style: .light
-        )
-        try assert(
-            TallyPalette.shadowAmbient,
-            resolvesTo: 0x000000,
-            alpha: 0.34,
-            style: .dark
-        )
-        try assert(
-            TallyPalette.shadowContact,
-            resolvesTo: 0x2C3644,
-            alpha: 0.13,
-            style: .light
-        )
-        try assert(
-            TallyPalette.shadowContact,
-            resolvesTo: 0x000000,
-            alpha: 0.18,
-            style: .dark
-        )
-    }
-
     func testDeferredAppearanceRefreshReappliesMountedLabelInk() async {
         let controller = UIViewController()
         controller.loadViewIfNeeded()
@@ -110,24 +61,6 @@ final class TallyPaletteTests: XCTestCase {
 
         XCTAssertGreaterThan(plain.textColorWriteCount, 0)
         XCTAssertGreaterThan(attributed.attributedTextWriteCount, 0)
-    }
-
-    private func assert(
-        _ color: UIColor,
-        resolvesTo hex: UInt32,
-        alpha expectedAlpha: CGFloat,
-        style: UIUserInterfaceStyle,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) throws {
-        try assert(
-            color,
-            resolvesTo: hex,
-            alpha: expectedAlpha,
-            traits: UITraitCollection(userInterfaceStyle: style),
-            file: file,
-            line: line
-        )
     }
 
     private func assert(

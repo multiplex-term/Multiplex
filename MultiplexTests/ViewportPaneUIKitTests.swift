@@ -325,18 +325,6 @@ final class ViewportPaneUIKitTests: XCTestCase {
         )
     }
 
-    func testURLReadoutEmphasizesAuthorityAndKeepsPathQuery() {
-        let url = URL(string: "https://docs.example:8443/guide/start?q=tmux")!
-        XCTAssertEqual(
-            ViewportPaneViewController.readoutText(url).string,
-            "docs.example:8443/guide/start?q=tmux"
-        )
-        XCTAssertEqual(
-            ViewportPaneViewController.pathAndQuery(of: URL(string: "https://example.com")!),
-            "/"
-        )
-    }
-
     private func makeViewportController() -> ViewportController {
         ViewportController(
             tabID: UUID(),

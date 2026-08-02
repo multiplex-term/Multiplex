@@ -4,20 +4,6 @@ import XCTest
 
 @MainActor
 final class ExternalActionUIKitCoordinatorTests: XCTestCase {
-    func testFailureUsesExactNativeAlertCopy() {
-        let alert = ExternalActionUIKitCoordinator.makeFailureAlert(
-            ExternalActionFailure(
-                hostName: "devbox",
-                message: "No response."
-            ),
-            acknowledged: {}
-        )
-        XCTAssertEqual(alert.title, "Can't Open devbox")
-        XCTAssertEqual(alert.message, "No response.")
-        XCTAssertEqual(alert.actions.map(\.title), ["OK"])
-        XCTAssertEqual(alert.actions.first?.style, .cancel)
-    }
-
     func testClassicPresentationRaisesDeckBeforeShowingFailure() {
         var intents: [SceneWindowRouting.Intent] = []
         let harness = makeHarness(

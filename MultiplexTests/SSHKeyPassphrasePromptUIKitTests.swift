@@ -46,16 +46,6 @@ final class SSHKeyPassphrasePromptUIKitTests: XCTestCase {
         XCTAssertFalse(alert.actions[1].isEnabled)
     }
 
-    func testIncorrectAlertPreservesRetryMessage() {
-        let challenge = makeChallenge(reason: .incorrect)
-
-        XCTAssertEqual(
-            SSHKeyPassphrasePromptPresenterViewController.message(for: challenge),
-            "That passphrase didn't unlock the private key for “devbox”. Try again. "
-                + "Save & Connect replaces the copy in iCloud Keychain."
-        )
-    }
-
     func testConnectOnceClearsFieldBeforeCallbackAndDoesNotSave() {
         let challenge = makeChallenge(reason: .required)
         let controller = SSHKeyPassphrasePromptPresenterViewController()

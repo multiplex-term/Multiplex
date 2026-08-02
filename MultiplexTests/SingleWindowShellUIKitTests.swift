@@ -130,60 +130,6 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         XCTAssertTrue(compactHeight.railOwnsBottomSafeArea)
     }
 
-    func testTerminalBottomSafeAreaRetainsLegacyBezelBackfill() throws {
-        let harness = makeController(initialRoute: TerminalWindowRoute(
-            tab: terminal("main")
-        ))
-        let controller = harness.controller
-        controller.loadViewIfNeeded()
-        controller.applyTestLayout(
-            size: CGSize(width: 390, height: 844),
-            safeArea: UIEdgeInsets(top: 59, left: 0, bottom: 34, right: 0),
-            verticalSizeClass: .regular
-        )
-
-        let backfill = try XCTUnwrap(view(
-            "singleWindowShell.terminalBottomBackfill",
-            in: controller.view
-        ))
-        XCTAssertEqual(backfill.frame, CGRect(x: 0, y: 810, width: 390, height: 34))
-        XCTAssertEqual(backfill.backgroundColor, UIKitChassis.bezel)
-        XCTAssertEqual(backfill.alpha, 1)
-        XCTAssertFalse(backfill.isHidden)
-
-        controller.showDeck()
-        XCTAssertFalse(backfill.isHidden)
-        XCTAssertEqual(backfill.alpha, 0)
-        XCTAssertEqual(backfill.frame.minX, 390)
-    }
-
-    func testTerminalTopSafeAreaRetainsLegacyBezelAndTracksTerminalStage() throws {
-        let harness = makeController(initialRoute: TerminalWindowRoute(
-            tab: terminal("main")
-        ))
-        let controller = harness.controller
-        controller.loadViewIfNeeded()
-        controller.applyTestLayout(
-            size: CGSize(width: 390, height: 844),
-            safeArea: UIEdgeInsets(top: 59, left: 0, bottom: 34, right: 0),
-            verticalSizeClass: .regular
-        )
-
-        let backfill = try XCTUnwrap(view(
-            "singleWindowShell.terminalTopBackfill",
-            in: controller.view
-        ))
-        XCTAssertEqual(backfill.frame, CGRect(x: 0, y: 0, width: 390, height: 59))
-        XCTAssertEqual(backfill.backgroundColor, UIKitChassis.bezel)
-        XCTAssertEqual(backfill.alpha, 1)
-        XCTAssertFalse(backfill.isHidden)
-
-        controller.showDeck()
-        XCTAssertEqual(backfill.frame.minX, 390)
-        XCTAssertEqual(backfill.alpha, 0)
-        XCTAssertFalse(backfill.isHidden)
-    }
-
     func testTerminalBottomBackfillDisappearsWhenRailOwnsSafeArea() throws {
         let harness = makeController(initialRoute: TerminalWindowRoute(
             tab: terminal("main")

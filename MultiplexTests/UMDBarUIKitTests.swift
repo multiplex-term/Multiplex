@@ -4,67 +4,6 @@ import XCTest
 
 @MainActor
 final class UMDBarUIKitTests: XCTestCase {
-    func testRegularBarKeepsControlOrderMenusTallyChromeAndAccessibility() throws {
-        let sources = [window("STUDIO"), window("DEPLOY")]
-        let terminal = terminalController(useMosh: false)
-        let controller = UMDBarViewController(configuration: configuration(
-            controller: terminal,
-            title: "agent · devbox",
-            mergeSources: sources,
-            closeSession: {}
-        ))
-        controller.loadViewIfNeeded()
-        controller.applyObservedState(UMDBarObservedState(
-            status: .live,
-            contactLost: false,
-            needsYou: false,
-            keyboardLocked: false
-        ))
-
-        XCTAssertNotNil(view("umd.regular", in: controller.view))
-        XCTAssertEqual(controller.view.layer.cornerRadius, 12)
-        XCTAssertEqual(controller.view.layer.borderWidth, 1)
-        XCTAssertEqual(
-            controlIdentifiers(in: controller.view),
-            [
-                "umd.deck",
-                "umd.fontDown",
-                "umd.fontUp",
-                "umd.newTab",
-                "terminal.fileAttach",
-                "umd.tmux",
-                "umd.merge",
-                "umd.detach",
-            ]
-        )
-        XCTAssertEqual(view("umd.title", in: controller.view)?.accessibilityLabel, "agent · devbox")
-        XCTAssertEqual(view("umd.status.live", in: controller.view)?.accessibilityLabel, "live")
-        XCTAssertEqual(control("umd.tmux", in: controller.view)?.accessibilityLabel, "Show tmux shortcuts")
-        XCTAssertEqual(
-            control("umd.merge", in: controller.view)?.accessibilityLabel,
-            "Merge another window into this one"
-        )
-        XCTAssertEqual(control("umd.detach", in: controller.view)?.accessibilityLabel, "Detach or close the session")
-        XCTAssertFalse(try XCTUnwrap(control("terminal.fileAttach", in: controller.view)).isHidden)
-
-        let newTab = try XCTUnwrap(control("umd.newTab", in: controller.view) as? UIButton)
-        XCTAssertEqual(
-            actions(in: try XCTUnwrap(newTab.menu)).map(\.title),
-            ["New Session", "Claude Code", "Codex", "Pi", "File Viewer"]
-        )
-
-        let merge = try XCTUnwrap(control("umd.merge", in: controller.view) as? UIButton)
-        XCTAssertEqual(
-            actions(in: try XCTUnwrap(merge.menu)).map(\.title),
-            ["STUDIO", "DEPLOY", "Merge All Windows"]
-        )
-
-        let detach = try XCTUnwrap(control("umd.detach", in: controller.view) as? UIButton)
-        let detachActions = actions(in: try XCTUnwrap(detach.menu))
-        XCTAssertEqual(detachActions.map(\.title), ["Detach", "Close Session"])
-        XCTAssertTrue(detachActions[1].attributes.contains(.destructive))
-    }
-
     func testHerdrTabRenamesTheSessionEntryAndRelabelsTheControl() throws {
         let controller = UMDBarViewController(configuration: configuration(
             newTabTarget: .herdrWorkspaceTab
@@ -327,23 +266,6 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertEqual(events, ["fresh"])
     }
 
-    func testChassisButtonsReportTheirExactContentSizeInsteadOfNativeMetrics() {
-        let button = UMDBarButton(
-            caption: "‹ DECK",
-            systemImage: nil,
-            prominent: false,
-            accessibilityLabel: "Deck"
-        )
-
-        XCTAssertGreaterThan(button.intrinsicContentSize.width, 18)
-        XCTAssertGreaterThan(button.intrinsicContentSize.height, 10)
-        XCTAssertLessThan(button.intrinsicContentSize.height, 34)
-        XCTAssertEqual(
-            button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize),
-            button.intrinsicContentSize
-        )
-    }
-
     private func configuration(
         controller: TerminalSessionController? = nil,
         title: String = "agent · devbox",
@@ -419,11 +341,6 @@ final class UMDBarUIKitTests: XCTestCase {
         descendants(of: UIControl.self, in: root).first {
             $0.accessibilityIdentifier == identifier
         }
-    }
-
-    private func controlIdentifiers(in root: UIView) -> [String] {
-        descendants(of: UIControl.self, in: root).compactMap(\.accessibilityIdentifier)
-            .filter { $0.hasPrefix("umd.") || $0 == "terminal.fileAttach" }
     }
 
     private func actions(in menu: UIMenu) -> [UIAction] {

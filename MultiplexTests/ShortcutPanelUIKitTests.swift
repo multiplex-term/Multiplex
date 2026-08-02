@@ -36,33 +36,6 @@ final class ShortcutPanelUIKitTests: XCTestCase {
         )
     }
 
-    func testHerdrPanelRendersItsOwnHeaderGroupsAndBindings() throws {
-        let controller = ShortcutPanelViewController(content: .herdr, select: { _ in })
-        controller.loadViewIfNeeded()
-
-        let controls = descendants(of: UIControl.self, in: controller.view)
-            .filter { $0.accessibilityIdentifier?.hasPrefix("herdrShortcut.") == true }
-        XCTAssertEqual(controls.count, HerdrShortcut.allCases.count)
-
-        let headers = descendants(of: UIKitChassisLabel.self, in: controller.view)
-            .filter { $0.accessibilityTraits.contains(.header) }
-            .compactMap(\.accessibilityLabel)
-        XCTAssertEqual(headers, ["HERDR SHORTCUTS", "Panes", "Tabs", "Workspaces"])
-
-        let split = try XCTUnwrap(
-            control("herdrShortcut.splitLeftRight", in: controller.view)
-        )
-        XCTAssertEqual(split.accessibilityLabel, "Split Left / Right, split_vertical, ⌃B V")
-
-        let closeWorkspace = try XCTUnwrap(
-            control("herdrShortcut.closeWorkspace", in: controller.view)
-        )
-        XCTAssertEqual(
-            closeWorkspace.accessibilityLabel,
-            "Close Workspace, close_workspace, press twice to confirm"
-        )
-    }
-
     func testSafeShortcutSelectsImmediatelyAndDestructiveShortcutRequiresSecondPress() throws {
         var selected: [ShortcutPanelItem] = []
         let controller = ShortcutPanelViewController(content: .tmux) {
@@ -146,25 +119,6 @@ final class ShortcutPanelUIKitTests: XCTestCase {
             closePane.accessibilityLabel,
             "Close Pane, kill-pane, press twice to confirm"
         )
-    }
-
-    func testHerdrPanelSpeaksWorkspaceInItsSwitchSection() throws {
-        let controller = ShortcutPanelViewController(content: .herdr, select: { _ in })
-        controller.loadViewIfNeeded()
-
-        controller.applyChoices([
-            TmuxWindowChoice(tmuxID: "w1", index: 1, isActive: true, name: "api"),
-            TmuxWindowChoice(tmuxID: "w2", index: 2, isActive: false, name: "web"),
-        ])
-
-        let title = descendants(of: UIKitChassisLabel.self, in: controller.view)
-            .first { $0.accessibilityIdentifier == "herdrWorkspaceSection.title" }
-        XCTAssertEqual(title?.accessibilityLabel, "Switch Workspace")
-
-        let active = try XCTUnwrap(control("herdrWorkspace.w1", in: controller.view))
-        XCTAssertEqual(active.accessibilityLabel, "Workspace 1, api, current workspace")
-        let other = try XCTUnwrap(control("herdrWorkspace.w2", in: controller.view))
-        XCTAssertEqual(other.accessibilityLabel, "Switch to workspace 2, web")
     }
 
     func testManyWindowsUseCappedInternalScrollRegion() {

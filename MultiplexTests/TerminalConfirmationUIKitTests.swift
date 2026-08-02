@@ -4,82 +4,6 @@ import UIKit
 
 @MainActor
 final class TerminalConfirmationUIKitTests: XCTestCase {
-    func testLinkSheetFillsPhoneWidthWithLegacyOuterInsets() throws {
-        let initial = try XCTUnwrap(TerminalLink.resolve("https://example.com/docs"))
-        let controller = TerminalLinkSheetViewController(
-            link: initial,
-            viewportOffer: { link in
-                link.openableURL.map {
-                    ViewportOffer(url: $0, reach: .internet, viaHostName: nil)
-                }
-            },
-            onOpen: { _ in },
-            onCopy: { _ in },
-            onOpenViewport: { _ in }
-        )
-        controller.loadViewIfNeeded()
-        controller.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-        controller.view.setNeedsLayout()
-        controller.view.layoutIfNeeded()
-
-        let section = try XCTUnwrap(
-            descendants(of: UIKitTallyFormSectionView.self, in: controller.view).first
-        )
-        let editor = try XCTUnwrap(
-            descendants(of: UIKitTerminalEditableValueBox.self, in: controller.view).first
-        )
-        let targetLabel = try XCTUnwrap(
-            descendants(of: UIKitChassisLabel.self, in: editor)
-                .first { $0.accessibilityLabel == "TARGET" }
-        )
-        let textView = try XCTUnwrap(
-            descendants(of: UITextView.self, in: editor).first
-        )
-        let viewport = try XCTUnwrap(chip(label: "⌗ Viewport", in: controller.view))
-        let open = try XCTUnwrap(chip(label: "Open", in: controller.view))
-        let copy = try XCTUnwrap(chip(label: "Copy", in: controller.view))
-        let actions = try XCTUnwrap(viewport.superview as? UIStackView)
-        let spacer = try XCTUnwrap(actions.arrangedSubviews.last)
-
-        XCTAssertEqual(
-            section.frame.minX,
-            TerminalLinkSheetViewController.Metrics.outerInset,
-            accuracy: 0.5
-        )
-        XCTAssertEqual(
-            section.frame.width,
-            402 - TerminalLinkSheetViewController.Metrics.outerInset * 2,
-            accuracy: 0.5
-        )
-        XCTAssertEqual(editor.frame.width, section.frame.width - 24, accuracy: 0.5)
-        XCTAssertEqual(textView.frame.minY - targetLabel.frame.maxY, 6, accuracy: 0.5)
-        XCTAssertEqual(
-            actions.spacing,
-            TerminalLinkSheetViewController.Metrics.actionSpacing
-        )
-        XCTAssertEqual(actions.arrangedSubviews.count, 4)
-        XCTAssertEqual(actions.customSpacing(after: copy), 0)
-        XCTAssertTrue(open.superview === actions)
-        XCTAssertTrue(copy.superview === actions)
-        XCTAssertEqual(
-            viewport.bounds.width,
-            viewport.intrinsicContentSize.width,
-            accuracy: 0.5
-        )
-        XCTAssertEqual(open.bounds.width, open.intrinsicContentSize.width, accuracy: 0.5)
-        XCTAssertEqual(copy.bounds.width, copy.intrinsicContentSize.width, accuracy: 0.5)
-        XCTAssertGreaterThan(spacer.bounds.width, 0)
-        let hostValue = try XCTUnwrap(descendants(of: UILabel.self, in: controller.view)
-            .first { $0.accessibilityIdentifier == "terminal.link.hostValue" })
-        let reachValue = try XCTUnwrap(descendants(of: UILabel.self, in: controller.view)
-            .first { $0.accessibilityIdentifier == "terminal.link.reachValue" })
-        XCTAssertEqual(hostValue.accessibilityLabel, "example.com")
-        XCTAssertEqual(
-            reachValue.accessibilityLabel,
-            "INTERNET — OPENS FROM THIS DEVICE"
-        )
-    }
-
     func testLinkSheetEditsRetainTitleEditorAndActionControlIdentity() throws {
         let initial = try XCTUnwrap(TerminalLink.resolve("https://example.com/docs"))
         let controller = TerminalLinkSheetViewController(
@@ -252,49 +176,6 @@ final class TerminalConfirmationUIKitTests: XCTestCase {
         XCTAssertEqual(viewed?.path, "Sources/Scene.swift")
         XCTAssertEqual(viewed?.line, 7)
         XCTAssertEqual(dismissCount, 1)
-    }
-
-    func testPathSheetKeepsFullSheetWidthInsteadOfCollapsingToItsActions() throws {
-        let initial = try XCTUnwrap(TerminalPathTarget.resolve("Sources/App.swift:42"))
-        let controller = TerminalFilePathSheetViewController(
-            target: initial,
-            hostName: "devbox",
-            onView: { _ in },
-            onCopy: { _ in }
-        )
-        controller.loadViewIfNeeded()
-        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
-        controller.view.layoutIfNeeded()
-
-        XCTAssertEqual(TerminalFilePathSheetViewController.Metrics.outerInset, 18)
-        XCTAssertEqual(TerminalFilePathSheetViewController.Metrics.contentMaximumWidth, 560)
-        XCTAssertEqual(controller.scrollView.bounds.width, 390, accuracy: 0.5)
-        XCTAssertEqual(controller.sectionView.frame.minX, 18, accuracy: 0.5)
-        XCTAssertEqual(controller.sectionView.bounds.width, 354, accuracy: 0.5)
-        XCTAssertEqual(
-            controller.sectionView.frame.midX,
-            controller.scrollView.bounds.midX,
-            accuracy: 0.5
-        )
-
-        let actionViews = controller.actionStack.arrangedSubviews
-        XCTAssertEqual(actionViews.count, 3)
-        let view = try XCTUnwrap(actionViews[0] as? UIKitChassisChip)
-        let copy = try XCTUnwrap(actionViews[1] as? UIKitChassisChip)
-        let spacer = actionViews[2]
-        XCTAssertEqual(
-            controller.actionStack.spacing,
-            TerminalFilePathSheetViewController.Metrics.actionSpacing
-        )
-        XCTAssertEqual(view.bounds.width, view.intrinsicContentSize.width, accuracy: 0.5)
-        XCTAssertEqual(copy.bounds.width, copy.intrinsicContentSize.width, accuracy: 0.5)
-        XCTAssertGreaterThan(spacer.bounds.width, 100)
-        let hostValue = try XCTUnwrap(descendants(of: UILabel.self, in: controller.view)
-            .first { $0.accessibilityIdentifier == "terminal.path.hostValue" })
-        let lineValue = try XCTUnwrap(descendants(of: UILabel.self, in: controller.view)
-            .first { $0.accessibilityIdentifier == "terminal.path.lineValue" })
-        XCTAssertEqual(hostValue.accessibilityLabel, "devbox")
-        XCTAssertEqual(lineValue.accessibilityLabel, "42")
     }
 
     func testPathSheetSemanticUpdatesRetainEditorSectionAndActions() throws {

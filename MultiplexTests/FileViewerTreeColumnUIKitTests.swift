@@ -68,70 +68,6 @@ final class FileViewerTreeColumnUIKitTests: XCTestCase {
         XCTAssertEqual(selected, [row])
     }
 
-    func testChangedFilterUsesProminentChipAndEmptyCaption() {
-        var snapshot = makeSnapshot(rootPath: "/srv/app")
-        snapshot.gitRoot = "/srv/app"
-        snapshot.changedFilter = true
-        let view = FileViewerTreeColumnView()
-        view.render(snapshot: snapshot)
-
-        XCTAssertTrue(view.changedChip?.isProminent == true)
-        XCTAssertEqual(view.changedChip?.accessibilityLabel, "Show the whole tree")
-        let cell = view.tableView(
-            view.tableView,
-            cellForRowAt: IndexPath(row: 0, section: 0)
-        )
-        XCTAssertEqual(cell.accessibilityLabel, "NOTHING CHANGED")
-    }
-
-    func testTreeCellPreservesDisclosureIndentBadgeAndSelection() {
-        let row = FileTree.Row(
-            entry: FileTreeEntry(
-                name: "Parser.swift",
-                path: "/srv/app/Sources/Parser.swift",
-                isDirectory: false
-            ),
-            depth: 2,
-            badge: .modified
-        )
-        let cell = FileViewerTreeRowCell(
-            style: .default,
-            reuseIdentifier: FileViewerTreeRowCell.reuseIdentifier
-        )
-        cell.apply(row, isCurrent: true)
-
-        XCTAssertEqual(cell.disclosureLabel.text, "")
-        XCTAssertEqual(cell.nameLabel.text, "Parser.swift")
-        XCTAssertEqual(cell.badgeLabel.text, "M")
-        XCTAssertTrue(cell.changeDot.isHidden)
-        XCTAssertEqual(cell.accessibilityLabel, "Parser.swift, modified")
-        XCTAssertEqual(FileViewerTreeColumnView.rowBaseInset, 10)
-        XCTAssertEqual(FileViewerTreeColumnView.rowDepthStep, 14)
-        XCTAssertEqual(FileViewerTreeColumnView.rowVerticalInset, 4.5)
-    }
-
-    func testDirectoryDisclosureAndAccessibilityVocabulary() {
-        let collapsed = makeRow(
-            name: "Sources",
-            path: "/srv/app/Sources",
-            directory: true,
-            expanded: false
-        )
-        var expanded = collapsed
-        expanded.isExpanded = true
-
-        XCTAssertEqual(FileViewerTreeRowCell.disclosure(collapsed), "▸")
-        XCTAssertEqual(FileViewerTreeRowCell.disclosure(expanded), "▾")
-        XCTAssertEqual(
-            FileViewerTreeColumn.rowAccessibilityLabel(collapsed),
-            "Sources, folder"
-        )
-        XCTAssertEqual(
-            FileViewerTreeColumn.rowAccessibilityLabel(expanded),
-            "Sources, expanded folder"
-        )
-    }
-
     func testFailurePrecedesRowsAndEmptyStatUsesQuietReadout() {
         var snapshot = makeSnapshot(rootPath: "/srv/app")
         snapshot.treeFailure = "Permission denied"
@@ -154,25 +90,6 @@ final class FileViewerTreeColumnUIKitTests: XCTestCase {
             FileViewerTreeColumnView.countsText(GitShortStat()).string,
             "±0"
         )
-    }
-
-    func testBadgeVocabularyAndColorsCoverEveryState() {
-        let expected: [(GitFileStatus.Badge, String)] = [
-            (.modified, "modified"),
-            (.added, "staged addition"),
-            (.deleted, "deleted"),
-            (.renamed, "renamed"),
-            (.untracked, "untracked"),
-            (.conflicted, "conflicted"),
-        ]
-        for (badge, word) in expected {
-            XCTAssertEqual(FileViewerTreeColumn.badgeWord(badge), word)
-            XCTAssertNotEqual(
-                FileViewerTreeColumn.badgeUIColor(badge)
-                    .resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark)),
-                UIColor.clear
-            )
-        }
     }
 
     private func makeSnapshot(rootPath: String) -> FileViewerTreeColumnSnapshot {

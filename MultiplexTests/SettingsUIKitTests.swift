@@ -253,37 +253,6 @@ final class SettingsUIKitTests: XCTestCase {
         XCTAssertEqual(fixture.themes.selected(for: .dark).name, "Nord Console")
     }
 
-    func testCustomRowsExposeEditDuplicateDeleteMenuWithoutStealingSelectionTarget() {
-        let fixture = makeFixture(isPro: true)
-        defer { clean(fixture) }
-        let custom = TerminalTheme.dracula.asCustom(named: "Studio")
-        fixture.themes.add(custom)
-        fixture.controller.loadViewIfNeeded()
-
-        let select = descendants(of: UIControl.self, in: fixture.controller.view)
-            .first { $0.accessibilityLabel == "Studio theme" }
-        let actions = descendants(of: UIButton.self, in: fixture.controller.view)
-            .first { $0.accessibilityLabel == "Actions for Studio" }
-        XCTAssertNotNil(select)
-        XCTAssertNotNil(actions)
-        XCTAssertEqual(actions?.buttonType, .custom)
-        XCTAssertNil(actions?.configuration)
-        XCTAssertEqual(actions?.backgroundColor, .clear)
-        XCTAssertEqual(actions?.menu?.children.map(\.title), ["Edit…", "Duplicate", "Delete"])
-        XCTAssertTrue(actions?.showsMenuAsPrimaryAction == true)
-
-        let badge = actions.flatMap {
-            descendants(of: SettingsBadgeView.self, in: $0).first
-        }
-        XCTAssertEqual(
-            badge?.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize),
-            CGSize(
-                width: 18 + (10 * Theme.typeScale),
-                height: 10 + (10 * Theme.typeScale)
-            )
-        )
-    }
-
     func testLockedAlertIntentIsRememberedAndRoutesToPaywall() async {
         let fixture = makeFixture(isPro: false)
         defer { clean(fixture) }

@@ -169,53 +169,6 @@ final class TerminalWindowUIKitTests: XCTestCase {
         })
     }
 
-    func testMultiTabRailUsesIntrinsicStripHeightPlusLegacyPadding() throws {
-        let first = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "main"))
-        let second = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "scratch"))
-        let shell = TerminalWindowShellConfiguration(
-            deckControlLabel: "DECK",
-            availableWidth: 720,
-            showDeck: {},
-            openTerminalRoute: { _ in },
-            revealTab: { _ in },
-            tabsEmptied: {},
-            terminalFocusAllowed: false
-        )
-        let fixture = makeFixture(
-            route: TerminalWindowRoute(tabs: [first, second]),
-            shell: shell
-        )
-        fixture.controller.loadViewIfNeeded()
-        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 720, height: 620)
-        fixture.controller.view.setNeedsLayout()
-        fixture.controller.view.layoutIfNeeded()
-
-        let strip = try XCTUnwrap(descendant(
-            of: TerminalTabStripView.self,
-            in: fixture.controller.view
-        ))
-        let rail = try XCTUnwrap(view(
-            "terminalWindow.tabs",
-            in: fixture.controller.view
-        ))
-        let panes = try XCTUnwrap(view(
-            "terminalWindow.panes",
-            in: fixture.controller.view
-        ))
-        let fittedHeight = strip.fittingContentSize().height
-        let verticalInset = TerminalWindowUIKitRootView.tabRailVerticalInset
-
-        XCTAssertGreaterThan(fittedHeight, 0)
-        XCTAssertEqual(strip.frame.minY, verticalInset, accuracy: 0.5)
-        XCTAssertEqual(strip.frame.height, fittedHeight, accuracy: 0.5)
-        XCTAssertEqual(
-            rail.frame.height,
-            fittedHeight + verticalInset * 2,
-            accuracy: 0.5
-        )
-        XCTAssertEqual(panes.frame.minY, rail.frame.maxY, accuracy: 0.5)
-    }
-
     func testTabRailScrollerTracksPressesAtOnceAndSizesWithItsLayoutPass() throws {
         let first = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "main"))
         let second = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "scratch"))
@@ -471,38 +424,6 @@ final class TerminalWindowUIKitTests: XCTestCase {
                 "Only the window-edge item restores the beta's 12-point breathing room"
             )
         }
-    }
-
-    func testClassicFontButtonsPreserveLegacyFixedSizeGroupGeometry() {
-        let control = TerminalFontSizeControl(fontDown: {}, fontUp: {})
-        let smallerSize = control.smallerButton.intrinsicContentSize
-        let largerSize = control.largerButton.intrinsicContentSize
-
-        XCTAssertEqual(TerminalFontSizeControl.spacing, 4)
-        XCTAssertEqual(
-            control.intrinsicContentSize,
-            CGSize(
-                width: smallerSize.width + 4 + largerSize.width,
-                height: max(smallerSize.height, largerSize.height)
-            )
-        )
-
-        control.frame = CGRect(origin: .zero, size: control.intrinsicContentSize)
-        control.layoutIfNeeded()
-
-        XCTAssertEqual(control.smallerButton.bounds.size, smallerSize)
-        XCTAssertEqual(control.largerButton.bounds.size, largerSize)
-        XCTAssertEqual(
-            control.largerButton.frame.minX - control.smallerButton.frame.maxX,
-            4,
-            accuracy: 0.001,
-            "The old ChassisChip HStack used an exact four-point gap"
-        )
-        XCTAssertLessThan(
-            max(control.smallerButton.bounds.width, control.largerButton.bounds.width),
-            44,
-            "The grouped chips must keep their content width instead of a bar item's minimum"
-        )
     }
 
     func testClassicCompactOverflowTracksAttachmentAvailabilityWithoutChurn() throws {

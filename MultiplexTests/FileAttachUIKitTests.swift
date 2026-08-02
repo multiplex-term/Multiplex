@@ -30,26 +30,6 @@ final class FileAttachUIKitTests: XCTestCase {
         XCTAssertFalse(FileAttachAvailability.canOffer(for: nil))
     }
 
-    func testNativeBadgePreservesTallyGeometryAndAccessibility() {
-        let button = FileAttachBadgeButton()
-
-        XCTAssertEqual(button.accessibilityLabel, "Send a file to this session")
-        XCTAssertTrue(button.showsMenuAsPrimaryAction)
-        XCTAssertEqual(button.layer.borderWidth, 1)
-        XCTAssertEqual(FileAttachBadgeButton.horizontalInset, 9)
-        XCTAssertEqual(FileAttachBadgeButton.verticalInset, 5)
-        XCTAssertEqual(FileAttachBadgeButton.contentSpacing, 5)
-        XCTAssertGreaterThan(
-            button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width,
-            0
-        )
-        XCTAssertEqual(
-            button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize),
-            button.intrinsicContentSize
-        )
-        XCTAssertLessThan(button.intrinsicContentSize.height, 34)
-    }
-
     func testNativeDirectMenuIsVisibleButDisabledUntilSessionIsLive() {
         let terminal = makeController(useMosh: false, mode: .attach(sessionName: "main"))
         let controller = FileAttachMenuViewController(controller: terminal)

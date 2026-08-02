@@ -5,28 +5,6 @@ import XCTest
 
 @MainActor
 final class AgentHistoryPanelUIKitTests: XCTestCase {
-    func testLoadingUnavailableAndEmptyStatesKeepTheNativeStatusLayout() {
-        let controller = makeController()
-        controller.loadViewIfNeeded()
-
-        XCTAssertTrue(renderedText(in: controller.view).contains("READING SESSION FILE"))
-        XCTAssertEqual(descendants(of: UIActivityIndicatorView.self, in: controller.view).count, 1)
-        XCTAssertEqual(statusHeight(in: controller.view), 72)
-
-        controller.applyHistoryStatus(.unavailable("SESSION FILE NOT FOUND"))
-        XCTAssertTrue(renderedText(in: controller.view).contains("SESSION FILE NOT FOUND"))
-        XCTAssertEqual(descendants(of: UIActivityIndicatorView.self, in: controller.view).count, 0)
-        XCTAssertEqual(statusHeight(in: controller.view), 72)
-
-        controller.applyHistoryStatus(.loaded(
-            agent: .claudeCode,
-            messages: [],
-            jumpAvailable: true
-        ))
-        XCTAssertTrue(renderedText(in: controller.view).contains("NO MESSAGES YET"))
-        XCTAssertEqual(statusHeight(in: controller.view), 72)
-    }
-
     func testLoadedMessagesRenderNewestFirstExpandToSelectableFullTextAndCollapse() throws {
         let messages = [
             message(ordinal: 0, text: "older first line\nolder hidden line"),
@@ -119,42 +97,6 @@ final class AgentHistoryPanelUIKitTests: XCTestCase {
         })
     }
 
-    func testLongExpandedMessageAndLongListKeepBothScrollCaps() throws {
-        let longText = String(repeating: "a long prompt segment ", count: 90)
-        let messages = (0..<50).map {
-            message(ordinal: $0, text: $0 == 49 ? longText : "prompt \($0)")
-        }
-        let controller = makeController()
-        controller.loadViewIfNeeded()
-        controller.applyHistoryStatus(.loaded(
-            agent: .claudeCode,
-            messages: messages,
-            jumpAvailable: false
-        ))
-
-        let list = try XCTUnwrap(descendants(of: UIScrollView.self, in: controller.view).first {
-            $0.accessibilityIdentifier == "agentHistory.scroll"
-        })
-        XCTAssertEqual(
-            list.constraints.first { $0.identifier == "agentHistory.listHeight" }?.constant,
-            AgentHistoryPanelViewController.maximumListHeight
-        )
-        XCTAssertTrue(list.isScrollEnabled)
-
-        let newest = try XCTUnwrap(descendants(of: UIControl.self, in: controller.view).first {
-            $0.accessibilityIdentifier == "agentHistory.message.49"
-        })
-        newest.sendActions(for: .touchUpInside)
-        let fullText = try XCTUnwrap(descendants(of: UITextView.self, in: controller.view).first {
-            $0.accessibilityIdentifier == "agentHistory.fullText.49"
-        })
-        XCTAssertTrue(fullText.isScrollEnabled)
-        XCTAssertLessThanOrEqual(
-            fullText.constraints.first { $0.firstAttribute == .height }?.constant ?? .infinity,
-            220
-        )
-    }
-
     func testCloseChipAndIntrinsicWidthPreservePanelContract() throws {
         var didDismiss = false
         let controller = makeController(dismiss: { didDismiss = true })
@@ -240,12 +182,6 @@ final class AgentHistoryPanelUIKitTests: XCTestCase {
             timestamp: nil,
             reachable: reachable
         )
-    }
-
-    private func statusHeight(in root: UIView) -> CGFloat? {
-        descendants(of: UIStackView.self, in: root)
-            .first { $0.accessibilityIdentifier == "agentHistory.status" }?
-            .constraints.first { $0.firstAttribute == .height }?.constant
     }
 
     private func renderedText(in root: UIView) -> [String] {

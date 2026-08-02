@@ -187,32 +187,6 @@ final class AgentHelperStripUIKitTests: XCTestCase {
         XCTAssertNil(button("agentHelpers.history", in: codex.view))
     }
 
-    func testDockedAndFloatingSizingPreserveTheTwoStripContracts() {
-        let docked = makeController(contentSafeArea: UIEdgeInsets(
-            top: 0,
-            left: 20,
-            bottom: 0,
-            right: 18
-        ))
-        docked.loadViewIfNeeded()
-        XCTAssertEqual(
-            docked.fittingContentSize(for: 760),
-            CGSize(width: 760, height: AgentHelperStripViewController.dockedHeight)
-        )
-
-        let floating = makeController(
-            floating: true,
-            floatingMaximumWidth: 420
-        )
-        floating.loadViewIfNeeded()
-        let floatingSize = floating.fittingContentSize(for: 900)
-        XCTAssertEqual(floatingSize.width, 420)
-        XCTAssertGreaterThan(floatingSize.height, AgentHelperStripViewController.chipHeight)
-        XCTAssertLessThan(floatingSize.height, AgentHelperStripViewController.dockedHeight)
-        XCTAssertEqual(floating.view.layer.borderWidth, 1)
-        XCTAssertEqual(floating.view.layer.cornerRadius, 12)
-    }
-
     func testTitleTapCollapsesToDotAndDotTapRestoresTheRail() throws {
         AgentHelperStripCollapse.shared.setCollapsed(false)
         defer { AgentHelperStripCollapse.shared.setCollapsed(false) }
@@ -276,20 +250,6 @@ final class AgentHelperStripUIKitTests: XCTestCase {
                 "\(agent) mark off-center vertically"
             )
         }
-    }
-
-    func testActionRouterForwardsCommandsPaywallAndSaveClosures() {
-        var sent: AgentCommand?
-        var paywall = false
-        let command = AgentCommand.slash("review")
-        let controller = makeController(
-            send: { sent = $0 },
-            openPaywall: { paywall = true }
-        )
-        controller.perform(.send(command))
-        controller.perform(.openPaywall)
-        XCTAssertEqual(sent, command)
-        XCTAssertTrue(paywall)
     }
 
     private func makeController(

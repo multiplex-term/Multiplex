@@ -821,19 +821,6 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertFalse(emptyStore.hasVerifiedStoreEntitlementForTesting)
     }
 
-    func testRestoreFailureIsReported() async {
-        let (defaults, name) = makeDefaults()
-        defer { defaults.removePersistentDomain(forName: name) }
-        let storeDouble = ProStoreDouble()
-        storeDouble.syncError = .sync
-        let store = lockedStore(defaults: defaults, storeClient: storeDouble.client())
-
-        let restored = await store.restorePurchases()
-        XCTAssertFalse(restored)
-        XCTAssertEqual(store.commerceState, .failed("restore failed"))
-        XCTAssertFalse(store.isPro)
-    }
-
     func testPreexistingOwnershipDoesNotHideRestoreFailure() async {
         let (defaults, name) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: name) }

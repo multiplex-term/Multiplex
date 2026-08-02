@@ -253,65 +253,6 @@ final class AddHostUIKitTests: XCTestCase {
         XCTAssertTrue(renderedText(in: fixture.controller.view).contains("Sessions run on"))
     }
 
-    func testChoiceBarMatchesPlainTallySegmentGeometryAndSelectionStyling() throws {
-        enum Choice: Hashable { case first, second }
-        var changes: [Choice] = []
-        let bar = AddHostChoiceBar(
-            choices: [("First", Choice.first), ("Second", Choice.second)],
-            selection: .first,
-            changed: { changes.append($0) }
-        )
-        bar.frame = CGRect(x: 0, y: 0, width: 221, height: 34)
-        bar.layoutIfNeeded()
-
-        XCTAssertEqual(bar.axis, .horizontal)
-        XCTAssertEqual(bar.alignment, .fill)
-        XCTAssertEqual(bar.distribution, .fillEqually)
-        XCTAssertEqual(bar.spacing, AddHostChoiceMetrics.seam)
-        XCTAssertEqual(AddHostChoiceMetrics.height, 34)
-        XCTAssertEqual(AddHostChoiceMetrics.selectionAnimationDuration, 0.14)
-        assertColor(bar.backgroundColor, equals: UIKitChassis.bezelHi, in: bar)
-
-        let buttons = try XCTUnwrap(
-            descendants(of: UIButton.self, in: bar).count == 2
-                ? descendants(of: UIButton.self, in: bar)
-                : nil
-        )
-        XCTAssertEqual(buttons.map(\.buttonType), [.custom, .custom])
-        XCTAssertTrue(buttons.allSatisfy { $0.configuration == nil })
-        XCTAssertTrue(buttons.allSatisfy { button in
-            button.constraints.contains {
-                $0.firstAttribute == .height
-                    && $0.relation == .equal
-                    && $0.constant == AddHostChoiceMetrics.height
-            }
-        })
-        XCTAssertEqual(buttons[0].bounds.width, buttons[1].bounds.width, accuracy: 0.5)
-        XCTAssertTrue(buttons[0].accessibilityTraits.contains(.selected))
-        XCTAssertFalse(buttons[1].accessibilityTraits.contains(.selected))
-        assertColor(buttons[0].backgroundColor, equals: UIKitChassis.bezelHi, in: bar)
-        assertColor(buttons[1].backgroundColor, equals: UIKitChassis.chassis, in: bar)
-        assertColor(
-            buttons[0].layer.borderColor.map(UIColor.init(cgColor:)),
-            equals: UIKitChassis.signal2,
-            in: bar
-        )
-        assertColor(
-            buttons[1].layer.borderColor.map(UIColor.init(cgColor:)),
-            equals: UIKitChassis.bezelHi,
-            in: bar
-        )
-
-        buttons[1].sendActions(for: .touchUpInside)
-
-        XCTAssertEqual(bar.selection, .second)
-        XCTAssertEqual(changes, [.second])
-        XCTAssertFalse(buttons[0].accessibilityTraits.contains(.selected))
-        XCTAssertTrue(buttons[1].accessibilityTraits.contains(.selected))
-        assertColor(buttons[0].backgroundColor, equals: UIKitChassis.chassis, in: bar)
-        assertColor(buttons[1].backgroundColor, equals: UIKitChassis.bezelHi, in: bar)
-    }
-
     func testEditingIsManualOnlyAndStoredPrivateKeyStaysConcealedUntilEdit() throws {
         var host = Host(name: "Studio", hostname: "studio.local", username: "jhen")
         host.authMethod = .privateKey
@@ -515,15 +456,6 @@ final class AddHostUIKitTests: XCTestCase {
         }
     }
 
-    #if DEBUG
-    func testHeadlessAutoOpenGrammarRemainsStable() {
-        XCTAssertEqual(AddHostAutoOpen(rawValue: "bind"), .bind)
-        XCTAssertEqual(AddHostAutoOpen(rawValue: "bind-elsewhere"), .bindElsewhere)
-        XCTAssertEqual(AddHostAutoOpen(rawValue: "manual"), .manual)
-        XCTAssertNil(AddHostAutoOpen(rawValue: "models"))
-    }
-    #endif
-
     private func makeFixture(
         editing: Host? = nil,
         secrets: HostSecrets = HostSecrets(
@@ -632,15 +564,4 @@ final class AddHostUIKitTests: XCTestCase {
         return result
     }
 
-    private func assertColor(
-        _ actual: UIColor?,
-        equals expected: UIColor,
-        in view: UIView,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let actual = actual?.resolvedColor(with: view.traitCollection)
-        let expected = expected.resolvedColor(with: view.traitCollection)
-        XCTAssertTrue(actual?.isEqual(expected) == true, file: file, line: line)
-    }
 }

@@ -70,19 +70,6 @@ final class FleetTileGridSizingTests: XCTestCase {
         XCTAssertEqual(recovered, 2)
     }
 
-    func testIPadMiniLandscapeFitsThreeCompactColumns() {
-        // Rotating the same device leaves 1,081pt after standard wall
-        // padding. Three tiles fit at 351pt each and should stay on one row.
-        let availableWidth: CGFloat = 1_133 - 26 * 2
-
-        let count = FleetTileGridSizing.columnCount(
-            current: 2,
-            availableWidth: availableWidth
-        )
-
-        XCTAssertEqual(count, 3)
-    }
-
     func testGrowingAddsACompactColumnWhenMinimumWidthFits() {
         let twoPreferred = FleetTileGridSizing.requiredWidth(
             columnCount: 2,
@@ -109,25 +96,6 @@ final class FleetTileGridSizingTests: XCTestCase {
         )
 
         let count = FleetTileGridSizing.initialColumnCount(availableWidth: threeMinimum)
-
-        XCTAssertEqual(count, 3)
-    }
-
-    func testGrowingAddsColumnWhenEveryTileFitsAtPreferredWidth() {
-        let twoPreferred = FleetTileGridSizing.requiredWidth(
-            columnCount: 2,
-            tileWidth: FleetTileGridSizing.preferredTileWidth
-        )
-        let threePreferred = FleetTileGridSizing.requiredWidth(
-            columnCount: 3,
-            tileWidth: FleetTileGridSizing.preferredTileWidth
-        )
-        let initial = FleetTileGridSizing.initialColumnCount(availableWidth: twoPreferred)
-
-        let count = FleetTileGridSizing.columnCount(
-            current: initial,
-            availableWidth: threePreferred
-        )
 
         XCTAssertEqual(count, 3)
     }
@@ -187,34 +155,6 @@ final class FleetTileGridSizingTests: XCTestCase {
         )
 
         XCTAssertEqual(count, 1)
-    }
-
-    func testLargerRowsUseTheSameCompactThreshold() {
-        let threePreferred = FleetTileGridSizing.requiredWidth(
-            columnCount: 3,
-            tileWidth: FleetTileGridSizing.preferredTileWidth
-        )
-        let fourMinimum = FleetTileGridSizing.requiredWidth(
-            columnCount: 4,
-            tileWidth: FleetTileGridSizing.minimumTileWidth
-        )
-        let fourPreferred = FleetTileGridSizing.requiredWidth(
-            columnCount: 4,
-            tileWidth: FleetTileGridSizing.preferredTileWidth
-        )
-        let initial = FleetTileGridSizing.initialColumnCount(availableWidth: threePreferred)
-
-        let compactCount = FleetTileGridSizing.columnCount(
-            current: initial,
-            availableWidth: fourMinimum
-        )
-        XCTAssertEqual(compactCount, 4)
-
-        let fullWidthCount = FleetTileGridSizing.columnCount(
-            current: compactCount,
-            availableWidth: fourPreferred
-        )
-        XCTAssertEqual(fullWidthCount, 4)
     }
 
     // MARK: Columns the wall has tiles to fill

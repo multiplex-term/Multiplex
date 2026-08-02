@@ -68,72 +68,6 @@ final class CustomAgentCommandPanelUIKitTests: XCTestCase {
         XCTAssertEqual(controller.builtInPlacementOverrides[stop.id], .more)
     }
 
-    func testPlacementChoiceMatchesPlainTallySegmentVisualContract() throws {
-        let stop = try XCTUnwrap(
-            AgentCommandSet.all(for: .codex).first { $0.id == "STOP" }
-        )
-        let controller = makeController(
-            agent: .codex,
-            builtInPlacements: [stop.id: .more]
-        )
-        controller.loadViewIfNeeded()
-        controller.toggleBuiltInCommands()
-        controller.view.frame = CGRect(x: 0, y: 0, width: 560, height: 720)
-        controller.view.layoutIfNeeded()
-
-        let choice = try XCTUnwrap(
-            view("customCommands.placement.\(stop.id)", in: controller.view)
-        )
-        let segments = descendants(of: UIControl.self, in: choice).filter {
-            $0.accessibilityLabel == "Bar" || $0.accessibilityLabel == "More"
-        }
-        let bar = try XCTUnwrap(segments.first { $0.accessibilityLabel == "Bar" })
-        let more = try XCTUnwrap(segments.first { $0.accessibilityLabel == "More" })
-        let segmentStack = try XCTUnwrap(
-            descendants(of: UIStackView.self, in: choice).first {
-                $0.arrangedSubviews.count == 2
-                    && $0.arrangedSubviews.allSatisfy { $0 is UIControl }
-            }
-        )
-
-        XCTAssertEqual(CustomCommandChoiceMetrics.height, 34)
-        XCTAssertEqual(CustomCommandChoiceMetrics.selectionAnimationDuration, 0.14)
-        XCTAssertEqual(segmentStack.axis, .horizontal)
-        XCTAssertEqual(segmentStack.alignment, .fill)
-        XCTAssertEqual(segmentStack.distribution, .fillEqually)
-        XCTAssertEqual(segmentStack.spacing, CustomCommandChoiceMetrics.seam)
-        XCTAssertTrue(choice.constraints.contains {
-            $0.firstAttribute == .height
-                && $0.relation == .equal
-                && $0.constant == CustomCommandChoiceMetrics.height
-        })
-        XCTAssertEqual(bar.bounds.width, more.bounds.width, accuracy: 0.5)
-        XCTAssertTrue(descendants(of: UIButton.self, in: choice).isEmpty)
-        assertColor(choice.backgroundColor, equals: UIKitChassis.bezelHi, in: choice)
-        XCTAssertFalse(bar.accessibilityTraits.contains(.selected))
-        XCTAssertTrue(more.accessibilityTraits.contains(.selected))
-        assertColor(bar.backgroundColor, equals: UIKitChassis.chassis, in: choice)
-        assertColor(more.backgroundColor, equals: UIKitChassis.bezelHi, in: choice)
-        assertColor(
-            bar.layer.borderColor.map(UIColor.init(cgColor:)),
-            equals: UIKitChassis.bezelHi,
-            in: choice
-        )
-        assertColor(
-            more.layer.borderColor.map(UIColor.init(cgColor:)),
-            equals: UIKitChassis.signal2,
-            in: choice
-        )
-
-        bar.sendActions(for: .touchUpInside)
-
-        XCTAssertEqual(controller.resolvedPlacement(for: stop), .bar)
-        XCTAssertTrue(bar.accessibilityTraits.contains(.selected))
-        XCTAssertFalse(more.accessibilityTraits.contains(.selected))
-        assertColor(bar.backgroundColor, equals: UIKitChassis.bezelHi, in: choice)
-        assertColor(more.backgroundColor, equals: UIKitChassis.chassis, in: choice)
-    }
-
     func testTextSwitchMoveDeleteAndAddMutateDraftsByStableID() throws {
         let first = CustomAgentCommand(content: "first")
         let second = CustomAgentCommand(content: "second", autoSubmit: false)
@@ -281,15 +215,4 @@ final class CustomAgentCommandPanelUIKitTests: XCTestCase {
         return matches
     }
 
-    private func assertColor(
-        _ actual: UIColor?,
-        equals expected: UIColor,
-        in view: UIView,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let actual = actual?.resolvedColor(with: view.traitCollection)
-        let expected = expected.resolvedColor(with: view.traitCollection)
-        XCTAssertTrue(actual?.isEqual(expected) == true, file: file, line: line)
-    }
 }

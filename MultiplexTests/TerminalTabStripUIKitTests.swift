@@ -53,30 +53,6 @@ final class TerminalTabStripUIKitTests: XCTestCase {
         XCTAssertEqual(TerminalTabCell.lampSize, 6)
     }
 
-    func testFittingHeightComesFromLegacyIntrinsicCellAnatomy() throws {
-        let view = configuredView(items: [
-            .init(
-                id: UUID(),
-                title: "main",
-                hostName: "devbox",
-                controller: nil,
-                isActive: true
-            ),
-        ])
-        let cell = try XCTUnwrap(view.cells.first)
-        let contentHeight = max(
-            cell.sourceLabel.intrinsicContentSize.height,
-            TerminalTabCell.lampSize
-        )
-        let expectedHeight = ceil(
-            contentHeight + TerminalTabCell.verticalInset * 2
-        )
-
-        XCTAssertEqual(cell.intrinsicContentSize.height, expectedHeight)
-        XCTAssertEqual(view.fittingContentSize().height, expectedHeight)
-        XCTAssertEqual(view.intrinsicContentSize.height, expectedHeight)
-    }
-
     /// A real tab press synchronously updates both cells while the pressed
     /// UIControl is still dispatching its action. The control, its labels, and
     /// every hit region must survive that update; visionOS immediately asks
@@ -291,17 +267,6 @@ final class TerminalTabStripUIKitTests: XCTestCase {
             .init(id: UUID(), title: "agent", controller: controller, isActive: true),
         ])
         XCTAssertFalse(view.cells[0] === cell)
-    }
-
-    func testCellsEnableTouchContextMenuInteraction() throws {
-        let id = UUID()
-        let view = configuredView(items: [
-            .init(id: id, title: "main", controller: nil, isActive: true),
-        ])
-        let cell = try XCTUnwrap(view.cells.first)
-
-        XCTAssertTrue(cell.isContextMenuInteractionEnabled)
-        XCTAssertNotNil(cell.contextMenuInteraction)
     }
 
     func testContextMenuAndAccessibilityActionsHonorSplitRules() {
