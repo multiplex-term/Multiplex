@@ -170,7 +170,7 @@ source label, lamp, then
 toggle lives on the bottom key rail. On iPad that rail always places a dedicated
 `RET` immediately to the right of the arrow keys. On iPhone it joins the rail
 while keyboard lock is held, replacing the Return key that disappeared with
-the software keyboard. The pane's top-right `KEYBOARD LOCKED` tip then gains a
+the software keyboard. The pane's top-center `KEYBOARD LOCKED` tip then gains a
 mic action too, restoring app-owned Dictation without reopening the keyboard;
 once the microphone opens, the `LISTENING` bar takes that top slot so the two
 controls cannot overlap at phone width. On an SSH-backed tmux tab, `FILE` opens

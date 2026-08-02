@@ -353,10 +353,10 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             }
             bar.accessibilityIdentifier = "terminalPane.context.copyMode"
             topCenterStack.addArrangedSubview(bar)
-            return
         }
         #if !os(visionOS)
         if let dictation = state.dictation {
+            guard !state.tmuxCopyModeUIActive else { return }
             let bar = TerminalContextBarView.dictation(
                 dictation,
                 stop: { [weak controller] in controller?.stopDictation() },
@@ -364,6 +364,15 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             )
             bar.accessibilityIdentifier = "terminalPane.context.dictation"
             topCenterStack.addArrangedSubview(bar)
+        } else if state.keyboardLocked {
+            // Top-center, not top-trailing: the trailing slot carries the
+            // window's own chrome (the backend switch), which the tip covered.
+            let locked = TerminalKeyboardLockedView(
+                isDictating: state.isDictating,
+                toggleDictation: { [weak controller] in controller?.toggleDictation() }
+            )
+            locked.accessibilityIdentifier = "terminalPane.keyboardLocked"
+            topCenterStack.addArrangedSubview(locked)
         }
         #endif
     }
@@ -374,16 +383,6 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
     ) {
         removeArrangedSubviews(from: topTrailingStack)
         guard configuration.isActive else { return }
-        #if !os(visionOS)
-        if state.keyboardLocked, state.dictation == nil {
-            let locked = TerminalKeyboardLockedView(
-                isDictating: state.isDictating,
-                toggleDictation: { [weak controller] in controller?.toggleDictation() }
-            )
-            locked.accessibilityIdentifier = "terminalPane.keyboardLocked"
-            topTrailingStack.addArrangedSubview(locked)
-        }
-        #endif
         if !state.tmuxCopyModeUIActive, let phase = state.historyJump {
             let jump = TerminalContextBarView.historyJump(
                 phase,

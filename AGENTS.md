@@ -442,8 +442,10 @@ logic belongs — keep parsing/command-building out of views.
   (~0.5 s) into the **keyboard lock** (`TerminalFocusArbiter.lock` — a
   zero-size custom `inputView`, so the input session, rail, and hardware
   keys stay live while taps stop summoning); a KEYBOARD LOCKED tip
-  top-trailing carries the dictation action, latching while permissions
-  resolve then yielding to the LISTENING bar. The lock is also a named
+  top-center carries the dictation action, latching while permissions
+  resolve then yielding to the LISTENING bar (it shares the dictation
+  bar's slot — the top-trailing slot belongs to window chrome the tip
+  used to cover). The lock is also a named
   action in the `⋯` menu at every width (`toggleKeyboardLock`; wide chrome
   passes `displacesDirectActions: false` so it never duplicates chips).
   State is app-wide (`KeyboardLock.shared`, arbiter-written, never
