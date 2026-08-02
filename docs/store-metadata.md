@@ -80,7 +80,7 @@ Free surface added 2026-08-02 (unreleased; ships with the next binary):
 
 | Item | Facts |
 | --- | --- |
-| Selection | Per host in manual Add / Host Settings: `TMUX | HERDR`; the synced host record carries the choice. A NO TMUX tile may offer an explicit USE HERDR action only after the host proves herdr is installed; nothing switches automatically |
+| Selection | Per host in manual Add / Host Settings: `TMUX | HERDR`; the synced host record carries the choice. Add Host ▸ BIND carries the same choice for the machines bound from that pane (default TMUX, reset when the pane closes — binding proves identity, not what a machine runs). A NO TMUX tile may offer an explicit USE HERDR action only after the host proves herdr is installed; nothing switches automatically |
 | Wall model | One tile per herdr **session**, with that session's workspaces adapted onto the existing window spine. Live miniatures come from `pane read`; herdr's pane lifecycle states drive agent RUNNING / NEEDS YOU and Pro alerts, including Pi |
 | Attach/create/close | A tile attaches the full herdr client. Attach creates missing sessions and restarts stopped ones. New Session can type the selected setup script and agent launch into the fresh pane before attach; close stops then deletes (herdr keeps its protected default session on disk, stopped) |
 | Requirements | herdr 0.7.5+ / protocol 17 on the SSH host. Homebrew and herdr's installer are offered in-app. Plain SSH shells remain available without either multiplexer |

@@ -15,7 +15,7 @@ final class BindPaneUIKitTests: XCTestCase {
             .filter { $0.accessibilityTraits.contains(.header) }
             .compactMap(\.accessibilityLabel)
         XCTAssertEqual(headers, [
-            "On the machine", "Asking to bind", "Key passphrase", "Somewhere else",
+            "On the machine", "Asking to bind", "Backend", "Key passphrase", "Somewhere else",
         ])
 
         let commands = descendants(of: UITextView.self, in: controller.view)
@@ -125,6 +125,45 @@ final class BindPaneUIKitTests: XCTestCase {
         controller.prepareForRemoval()
         XCTAssertFalse(bind.bindSurfaceOpen)
         XCTAssertEqual(bind.keyPassphrase, "")
+    }
+
+    /// The pane's backend choice is what the host record is minted with, so
+    /// it has to write straight through to the controller, say which backend
+    /// it means, and — like the passphrase — never survive the pane closing.
+    func testBackendBarWritesControllerSaysWhatItMeansAndResetsOnRemoval() async throws {
+        let bind = BindController()
+        bind.bindSurfaceOpen = true
+        let controller = BindPaneViewController(bind: bind)
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 640, height: 1_600)
+        controller.view.layoutIfNeeded()
+
+        let bar = try XCTUnwrap(
+            descendants(of: AddHostChoiceBar<Host.SessionBackend>.self, in: controller.view)
+                .first { $0.accessibilityIdentifier == "bind.backendBar" }
+        )
+        XCTAssertEqual(bar.selection, .tmux)
+        let buttons = descendants(of: UIButton.self, in: bar)
+        XCTAssertEqual(buttons.compactMap(\.accessibilityLabel), ["tmux", "herdr"])
+        XCTAssertTrue(renderedText(in: controller.view).contains(
+            BindPaneViewController.backendDetail(for: .tmux)
+        ))
+
+        buttons[1].sendActions(for: .touchUpInside)
+        XCTAssertEqual(bind.sessionBackend, .herdr)
+        await waitUntil("herdr detail renders") {
+            self.renderedText(in: controller.view).contains(
+                BindPaneViewController.backendDetail(for: .herdr)
+            )
+        }
+
+        // A controller-side change (the DEBUG preset, a reset) reaches the bar.
+        bind.sessionBackend = .tmux
+        await waitUntil("bar follows the controller") { bar.selection == .tmux }
+
+        bind.sessionBackend = .herdr
+        controller.prepareForRemoval()
+        XCTAssertEqual(bind.sessionBackend, .tmux)
     }
 
     func testCandidateRowKeepsPINFieldAndRendersEveryStage() throws {

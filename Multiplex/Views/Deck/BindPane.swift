@@ -13,6 +13,14 @@ private enum BindPaneCopy {
     static let incomingDiscoveredDetail = "Heard on your network. Check the address and "
         + "fingerprint against the terminal, then type its PIN."
     static let incomingPayloadDetail = "From a scanned or pasted bind code."
+    static let backendTmuxDetail = "Every machine bound from this pane is added on this "
+        + "backend — binding proves who a machine is, not what it runs. tmux is the remote "
+        + "server the deck monitors: sessions, windows, and agent panes. Change it later in "
+        + "Host Settings."
+    static let backendHerdrDetail = "Every machine bound from this pane is added on this "
+        + "backend — binding proves who a machine is, not what it runs. The deck monitors "
+        + "herdr (herdr.dev) sessions and their agents through the herdr CLI, one tile per "
+        + "session. Change it later in Host Settings."
     static let passphraseDetail = "Optional, for every machine bound from this pane: its "
         + "SSH key is generated sealed with this passphrase, which is then saved in the "
         + "host's settings so connecting keeps working. Clear it in Host Settings to be "
@@ -75,6 +83,7 @@ final class BindPaneViewController: UIViewController {
     private struct Snapshot: Equatable {
         var pending: [BindController.Pending]
         var keyPassphrase: String
+        var sessionBackend: Host.SessionBackend
     }
 
     private let bind: BindController
@@ -84,6 +93,8 @@ final class BindPaneViewController: UIViewController {
     private let pasteFailureLabel = UILabel()
     private let pasteSlot = UIView()
     private var elsewhereSection: UIView!
+    private var backendSection: UIKitTallyFormSectionView!
+    private var backendBar: AddHostChoiceBar<Host.SessionBackend>!
     private var candidateRows: [String: BindCandidateRowView] = [:]
     private var orderedCandidateIDs: [String] = []
     private var observesBind = true
@@ -135,6 +146,7 @@ final class BindPaneViewController: UIViewController {
 
         contentStack.addArrangedSubview(makeMachineSection())
         contentStack.addArrangedSubview(incomingSection)
+        contentStack.addArrangedSubview(makeBackendSection())
         contentStack.addArrangedSubview(makePassphraseSection())
         elsewhereSection = makeElsewhereSection()
         elsewhereSection.accessibilityIdentifier = "bind.section.elsewhere"
@@ -194,7 +206,8 @@ final class BindPaneViewController: UIViewController {
         let snapshot = withObservationTracking {
             Snapshot(
                 pending: bind.pending,
-                keyPassphrase: bind.keyPassphrase
+                keyPassphrase: bind.keyPassphrase,
+                sessionBackend: bind.sessionBackend
             )
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -206,6 +219,8 @@ final class BindPaneViewController: UIViewController {
 
     private func render(_ snapshot: Snapshot) {
         passphraseField.setText(snapshot.keyPassphrase)
+        backendBar.setSelection(snapshot.sessionBackend)
+        backendSection.setDetail(Self.backendDetail(for: snapshot.sessionBackend))
         incomingSection.setDetail(Self.incomingDetail(for: snapshot.pending))
         updateCandidateRows(snapshot.pending)
         paneView.contentDidChange()
@@ -273,6 +288,33 @@ final class BindPaneViewController: UIViewController {
             contentView: commands
         )
         section.accessibilityIdentifier = "bind.section.machine"
+        return section
+    }
+
+    static func backendDetail(for backend: Host.SessionBackend) -> String {
+        switch backend {
+        case .tmux: BindPaneCopy.backendTmuxDetail
+        case .herdr: BindPaneCopy.backendHerdrDetail
+        }
+    }
+
+    private func makeBackendSection() -> UIView {
+        backendBar = AddHostChoiceBar<Host.SessionBackend>(
+            // The button face uppercases; pass the natural spelling so
+            // VoiceOver reads "tmux", not the letters T-M-U-X.
+            choices: Host.SessionBackend.allCases.map { ($0.rawValue, $0) },
+            selection: bind.sessionBackend
+        ) { [weak bind] backend in
+            bind?.sessionBackend = backend
+        }
+        backendBar.accessibilityIdentifier = "bind.backendBar"
+        let section = UIKitTallyFormSectionView(
+            title: "Backend",
+            detail: Self.backendDetail(for: bind.sessionBackend),
+            contentView: backendBar
+        )
+        section.accessibilityIdentifier = "bind.section.backend"
+        backendSection = section
         return section
     }
 

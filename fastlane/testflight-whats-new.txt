@@ -338,3 +338,21 @@ becomes a drag, exactly as macOS expects.
   Delete Session.
 - On iPad and Vision Pro, tile drags still start as soon as you move past the
   hysteresis — no added delay there.
+
+BACKEND ON THE BIND SCREEN — bind a herdr machine as a herdr host
+
+Add Host ▸ BIND now carries a Backend choice (tmux | herdr) beside the key
+passphrase. Every machine bound from that pane is added on the chosen
+backend, so a herdr machine no longer arrives as a tmux host that has to be
+fixed in Host Settings afterwards. Binding still proves only who a machine
+is — the choice is yours, never guessed.
+
+- Open Add Host ▸ BIND: Backend reads TMUX, and the copy under it describes
+  what the deck will monitor. Tap HERDR and the copy changes with it.
+- Run `mpx bind` on a machine with herdr installed, pick HERDR, enroll it:
+  the new host's tile lists herdr sessions, and Host Settings ▸ Backend shows
+  HERDR.
+- Bind another machine with TMUX selected: it comes in as a tmux host as
+  before.
+- Close the sheet and reopen BIND: Backend is back to TMUX (like the key
+  passphrase, the pane never carries a silent choice over).

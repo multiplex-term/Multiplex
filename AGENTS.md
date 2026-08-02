@@ -104,7 +104,9 @@ app.multiplexterm.multiplex`):
   `state/bind.log`). Proof is host-side: a `multiplex:bind:<id>:<device>`
   line in `state/authorized_keys`, then `Accepted publickey` in `sshd.log`.
   `MULTIPLEX_BIND_PASSPHRASE=<text>` presets KEY PASSPHRASE so a headless
-  bind stores its key sealed. ⚠ These are `DeckWindow` tasks — a restored
+  bind stores its key sealed; `MULTIPLEX_BIND_BACKEND=tmux|herdr` presets the
+  pane's Backend choice, so the minted host record carries that backend
+  (proof: the deck tile probes herdr, not tmux). ⚠ These are `DeckWindow` tasks — a restored
   terminal-only scene never runs them; `simctl uninstall` + `simctl
   keychain <udid> reset` first (or the mirror re-adopts the old host and
   the free host limit blocks the bind).
