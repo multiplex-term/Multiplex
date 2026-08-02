@@ -117,7 +117,9 @@ final class TmuxShortcutPanelViewController: UIViewController {
     }
 
     private func buildContent() {
-        panelView.backgroundColor = UIKitChassis.bezel
+        // PROTOTYPE(GLASS): the popover root's smoke is the one ground —
+        // a bezel wash here lightened the panel and crushed contrast.
+        panelView.backgroundColor = GlassPrototype.clearedBezel
         panelView.tallyBorderColor = UIKitChassis.bezelHi
 
         contentStack.axis = .vertical

@@ -118,6 +118,12 @@ enum GlassPrototype {
     /// clear on glass, their original opaque paint everywhere else.
     static let clearedChassis = material(.clear, fallback: TallyPalette.chassis)
     static let clearedScreen = material(.clear, fallback: TallyPalette.screen)
+    /// Full-panel interior washes whose baseline is bezel (popover panel
+    /// bodies): clear on glass so the root's smoke is the ONE ground and
+    /// controls sit exactly one strata step above it — the Settings-sheet
+    /// contrast the deck established. A bezel wash between smoke and
+    /// controls lightened the whole panel and crushed button contrast.
+    static let clearedBezel = material(.clear, fallback: TallyPalette.bezel)
     /// Sheets and modal hosts (user direction 2026-08-01: "all modals need
     /// apply"): each presented window's own platter carries the glass — the
     /// root paints one smoke layer, interiors clear over it.
