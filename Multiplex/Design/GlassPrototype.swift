@@ -89,6 +89,16 @@ enum GlassPrototype {
     /// NO SIGNAL / AWAITING SIGNAL hatch: etched white stripes on the shared
     /// pane — coldness is the hatch and the absent lamp, not the material.
     static let hatchStripeMaterial = UIColor(white: 1, alpha: 0.04)
+    /// Secondary-ink alpha ramp (the mock's §2 `--signal2`/`--signal3`):
+    /// the light ink at reduced alpha over the smoke. The opaque dim grays
+    /// were tuned for opaque chassis and go muddy-warm on glass (first
+    /// seen on Command Setup's annotations).
+    static let signal2Material = UIColor(
+        red: 238 / 255, green: 242 / 255, blue: 245 / 255, alpha: 0.60
+    )
+    static let signal3Material = UIColor(
+        red: 238 / 255, green: 242 / 255, blue: 245 / 255, alpha: 0.36
+    )
     /// The terminal ground is the *selected theme's* background at this
     /// alpha, so a Gruvbox screen becomes Gruvbox-tinted smoke.
     static let screenAlpha: CGFloat = 0.10
@@ -102,6 +112,8 @@ enum GlassPrototype {
     static let hatchStripe = material(
         hatchStripeMaterial, fallback: TallyPalette.screenHatch
     )
+    static let signal2 = material(signal2Material, fallback: TallyPalette.signal2)
+    static let signal3 = material(signal3Material, fallback: TallyPalette.signal3)
     /// Full-bleed layers above the window ground and bordered-only controls:
     /// clear on glass, their original opaque paint everywhere else.
     static let clearedChassis = material(.clear, fallback: TallyPalette.chassis)
@@ -113,6 +125,15 @@ enum GlassPrototype {
     /// Chassis-grounded controls (buttons, badges, switch tracks, pills)
     /// become strata over the smoke, like chips.
     static let strataChassis = material(strataMaterial, fallback: TallyPalette.chassis)
+
+    /// Popover content roots (tmux shortcuts, Command Setup, agent HISTORY,
+    /// the ctrl-combo slab): a popover hosts in its own window over its own
+    /// bright platter, so the root paints the smoke there — the sheet
+    /// recipe, popover-shaped — and interiors resolve strata over it once
+    /// the presenter mirrors the trait across. Exact baseline otherwise.
+    static func popoverGround(fallback: UIColor) -> UIColor {
+        enabled ? material(smokeMaterial, fallback: fallback) : fallback
+    }
 
     /// Terminal layers that must NOT tint: the pane wrapper below the
     /// surface and the grid's own layer go clear on glass (the surface

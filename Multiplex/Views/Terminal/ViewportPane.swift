@@ -1036,8 +1036,11 @@ final class ViewportMenuButton: UIButton {
     }
 
     override var isHighlighted: Bool {
+        // PROTOTYPE(GLASS): rest on strata over the smoke — an opaque
+        // chassis reset would stamp the control after its first press.
         didSet {
-            backgroundColor = isHighlighted ? UIKitChassis.bezelHi : UIKitChassis.chassis
+            backgroundColor = isHighlighted
+                ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
         }
     }
 

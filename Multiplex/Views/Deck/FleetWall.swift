@@ -3900,7 +3900,10 @@ private final class FleetChoiceButton: UIButton {
             ]
         )
         chevron.tintColor = ink
-        backgroundColor = selectionActive ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): rest on strata over the smoke, never opaque
+        // chassis.
+        backgroundColor = selectionActive
+            ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
         layer.borderColor = (selectionActive ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
             .resolvedColor(with: traitCollection).cgColor
     }

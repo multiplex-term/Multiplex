@@ -471,9 +471,11 @@ private final class TmuxShortcutButton: UIControl {
     }
 
     private func refreshBackground() {
+        // PROTOTYPE(GLASS): rest on strata over the popover's smoke, never
+        // opaque chassis.
         backgroundColor = isArmed || isHighlighted
             ? UIKitChassis.bezelHi
-            : UIKitChassis.chassis
+            : GlassPrototype.strataChassis
     }
 
     private func refreshBorder() {
@@ -574,7 +576,9 @@ private final class TmuxWindowButton: UIControl {
     }
 
     private func refreshBackground() {
-        backgroundColor = isHighlighted ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): rest on strata over the popover's smoke.
+        backgroundColor = isHighlighted
+            ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
     }
 }
 

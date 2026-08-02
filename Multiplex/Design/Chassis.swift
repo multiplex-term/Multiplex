@@ -22,8 +22,14 @@ enum UIKitChassis {
         GlassPrototype.enabled ? GlassPrototype.screenGlass : TallyPalette.screen
     }
     static var signal: UIColor { TallyPalette.signal }
-    static var signal2: UIColor { TallyPalette.signal2 }
-    static var signal3: UIColor { TallyPalette.signal3 }
+    // PROTOTYPE(GLASS): secondary inks ride the mock's alpha ramp on glass
+    // (light ink at 0.60 / 0.36); the primary ink stays as shipped.
+    static var signal2: UIColor {
+        GlassPrototype.enabled ? GlassPrototype.signal2 : TallyPalette.signal2
+    }
+    static var signal3: UIColor {
+        GlassPrototype.enabled ? GlassPrototype.signal3 : TallyPalette.signal3
+    }
 
     static func uiFont(_ size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
         .systemFont(ofSize: size * Theme.typeScale, weight: weight)
@@ -144,6 +150,18 @@ final class UIKitChassisLabel: UILabel {
         super.traitCollectionDidChange(previousTraitCollection)
         guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
         else { return }
+        refreshAttributedText()
+    }
+
+    /// The ink is baked into the attributed string as a RESOLVED color, and
+    /// a label built before its window exists resolves against placeholder
+    /// traits — a popover panel's dim annotations shipped the LIGHT ink onto
+    /// a dark panel this way (trait-change delivery while detached is not
+    /// guaranteed). Window attach is the reliable moment the real traits
+    /// exist; one refresh there covers every presentation shape.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else { return }
         refreshAttributedText()
     }
 

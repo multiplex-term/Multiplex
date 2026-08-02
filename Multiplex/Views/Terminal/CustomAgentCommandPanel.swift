@@ -905,7 +905,10 @@ private final class CustomCommandChoiceSegment: UIControl {
     required init?(coder: NSCoder) { fatalError("unused") }
 
     func setSelected(_ selected: Bool) {
-        backgroundColor = selected ? UIKitChassis.bezelHi : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): unselected segments rest on strata over the
+        // popover's smoke, never opaque chassis.
+        backgroundColor = selected
+            ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
         layer.borderColor = (selected ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
             .resolvedColor(with: traitCollection).cgColor
         label.setInk(selected ? UIKitChassis.signal : UIKitChassis.signal2)

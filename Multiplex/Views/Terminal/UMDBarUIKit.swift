@@ -817,7 +817,14 @@ final class UMDBarViewController: UIViewController,
         // presents a dark panel. Inert wherever inheritance already works.
         panel.overrideUserInterfaceStyle = inheritedInterfaceStyleOverride
         panel.loadViewIfNeeded()
-        panel.view.backgroundColor = UIKitChassis.bezel
+        // PROTOTYPE(GLASS): mirror the glass selection across the popover's
+        // window like the style above, and ground the panel in smoke over
+        // the popover's own platter.
+        panel.view.traitOverrides[GlassAppearanceTrait.self] =
+            view.traitCollection[GlassAppearanceTrait.self]
+        panel.view.backgroundColor = GlassPrototype.popoverGround(
+            fallback: TallyPalette.bezel
+        )
         panel.preferredContentSize = panel.fittingContentSize()
 
         if let popover = panel.popoverPresentationController {
@@ -831,6 +838,10 @@ final class UMDBarViewController: UIViewController,
             popover.delegate = self
         }
         present(panel, animated: true)
+        // Labels built before the window attach can retain ink resolved
+        // against the wrong traits (the visionOS retained-ink defect);
+        // re-resolve once trait delivery has settled.
+        panel.refreshDynamicTextColorsAfterTraitPropagation()
     }
 
     func presentationControllerDidDismiss(
@@ -1101,8 +1112,12 @@ final class UMDBarButton: UIButton {
     }
 
     override var isHighlighted: Bool {
+        // PROTOTYPE(GLASS): rest on strataChassis — the ground the init
+        // chose — or the first press permanently flips the chip opaque on
+        // the glass bar (user report: "press TMUX breaks the button").
         didSet {
-            backgroundColor = isHighlighted ? UIKitChassis.bezelHi : UIKitChassis.chassis
+            backgroundColor = isHighlighted
+                ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
         }
     }
 

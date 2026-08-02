@@ -280,7 +280,13 @@ final class TerminalCtrlComboView: UIKitTallyBorderedView {
         self.faceHeight = faceHeight
         self.padding = padding
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.bezel
+        // PROTOTYPE(GLASS): on visionOS this slab presents in a popover
+        // over the popover's own bright platter — ground it in smoke so
+        // the strata key faces read (iPad hosts it in-window and keeps the
+        // baseline bezel via the fallback).
+        backgroundColor = GlassPrototype.popoverGround(
+            fallback: TallyPalette.bezel
+        )
         tallyBorderColor = UIKitChassis.bezelHi
         accessibilityIdentifier = "terminal.ctrlCombos"
 
