@@ -1901,12 +1901,16 @@ private final class FleetMenuBadgeButton: UIButton {
             for: .normal
         )
         tintColor = UIKitChassis.signal2
-        // PROTOTYPE(GLASS): bordered control on glass — no chassis cut.
-        backgroundColor = GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
+        // PROTOTYPE(GLASS): a strata chip like SHELL beside it — a cleared
+        // ground made the pair read as two different controls.
+        backgroundColor = GlassPrototype.strataChassis
         layer.borderWidth = 1
         refreshBorder()
+        // The border is a CGColor snapshot: refresh on the glass trait too,
+        // or a button built before the trait lands keeps the baseline
+        // border forever (the first-launch "different style" report).
         registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
         ) { (button: FleetMenuBadgeButton, _: UITraitCollection) in
             button.refreshBorder()
         }

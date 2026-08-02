@@ -1797,8 +1797,11 @@ final class AddHostSectionView: UIView {
         divider.heightAnchor.constraint(equalToConstant: 1).isActive = true
         rowsStack.axis = .vertical
         rowsStack.alignment = .fill
-        rowsStack.spacing = 1
-        rowsStack.backgroundColor = UIKitChassis.bezelHi
+        rowsStack.spacing = 0
+        // PROTOTYPE(GLASS): explicit hairline dividers, like the New
+        // Session form. The old gap trick painted this stack bezelHi
+        // behind the (cleared-on-glass) rows, washing the whole form
+        // body in an 11% white sheet.
         let cardStack = UIStackView(arrangedSubviews: [header, divider, rowsStack])
         cardStack.axis = .vertical
         cardStack.spacing = 0
@@ -1847,7 +1850,16 @@ final class AddHostSectionView: UIView {
             rowsStack.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
-        rows.forEach { rowsStack.addArrangedSubview($0) }
+        for (index, row) in rows.enumerated() {
+            if index > 0 {
+                let rowDivider = UIView()
+                rowDivider.backgroundColor = UIKitChassis.bezelHi
+                rowDivider.heightAnchor.constraint(equalToConstant: 1)
+                    .isActive = true
+                rowsStack.addArrangedSubview(rowDivider)
+            }
+            rowsStack.addArrangedSubview(row)
+        }
     }
 
     func setDetail(_ detail: String?) {
