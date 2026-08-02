@@ -427,7 +427,7 @@ final class FleetWallUIKitTests: XCTestCase {
             session: session,
             lines: ["$ codex", "Waiting for approval…"],
             attention: .needsYou(.permission),
-            hasLiveAgentState: true,
+            usesTmuxAttentionFallback: true,
             hasOpenTab: true,
             compact: false,
             selected: true,

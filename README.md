@@ -1,7 +1,8 @@
 # Multiplex
 
-A spatial SSH terminal for people who live inside remote tmux sessions.
-**visionOS first, iPadOS alongside.** Every tmux session gets its own window
+A spatial SSH terminal for people who live inside remote tmux sessions —
+with [herdr](https://herdr.dev) available as a per-host session backend.
+**visionOS first, iPadOS alongside.** Every session gets its own window
 you can place around the room; the deck is a fleet-wide **monitor wall** that
 shows every session live — its actual last lines, window spine, and a tally
 lamp when it's attached — before you ever attach.
@@ -38,7 +39,14 @@ bake-off is recorded in [docs/landing/](docs/landing/).*
   in its fresh shell before starting Claude Code, Codex, or Pi with an
   optional first prompt. The Open Agent Shortcut offers the same directory,
   setup-script, and prompt choices. **Shell** opens a plain login
-  shell, no tmux.
+  shell, no multiplexer.
+- **herdr mode** — set a host's BACKEND to HERDR and the same wall shows one
+  tile per herdr session, with its workspaces as the window spine. Live
+  miniatures and agent RUNNING / NEEDS YOU state come from herdr's own
+  protocol; a tile attaches the full client, stopped sessions restart on
+  press, and New Session can type the selected setup script and agent launch
+  before the window attaches. Requires herdr 0.7.5+ (protocol 17). tmux-only
+  controls, file upload, and Claude HISTORY stay hidden on herdr tabs.
 - **Terminal windows & tabs** — each terminal is its own SwiftUI scene
   (`WindowGroup(for: TerminalWindowRoute.self)` + `openWindow`): independent
   placement on visionOS, real multiple scenes on iPadOS (Stage Manager /
@@ -113,7 +121,8 @@ SwiftUI (Deck window + N Terminal windows, each an ordered set of tabs)
    ├── ThemeStore           terminal color schemes: built-ins + custom
    │                        (themes.json), selection in UserDefaults
    ├── ConnectionHub        one HostConnectionModel per host (probe connection)
-   │      └── TmuxProbe     list-sessions/-windows format strings + parser
+   │      ├── TmuxProbe     list-sessions/-windows format strings + parser
+   │      └── HerdrProbe    session snapshots + pane lifecycle adapter
    ├── TerminalWorkspace    tab controllers keyed by tab id + window directory;
    │                        merge/split move tabs across windows, shells stay live
    └── TerminalSessionController   one per tab
@@ -163,7 +172,7 @@ xcodebuild -project Multiplex.xcodeproj -scheme Multiplex \
 ```
 
 The `Multiplex` scheme also builds for iPad (`platform=iOS Simulator,name=iPad
-Pro 13-inch (M5)`). Unit tests cover the tmux probe parser and route commands:
+Pro 13-inch (M5)`). Unit tests cover both backend probes and route commands:
 
 ```sh
 xcodebuild -project Multiplex.xcodeproj -scheme MultiplexTests \
@@ -179,6 +188,7 @@ never touching `~/.ssh`) and seeds demo tmux sessions:
 ```sh
 ./Tools/dev-sshd/harness.sh start   # keys + sshd + writes state/seed.json
 ./Tools/dev-sshd/harness.sh demo    # tmux sessions: main, scratch, deploy
+./Tools/dev-sshd/harness.sh herdr   # herdr sessions + deterministic agent states
 ./Tools/dev-sshd/harness.sh stop
 ```
 

@@ -163,6 +163,9 @@ binary as a standalone macOS executable (deliberately outside
 `MultiplexTests`: the app target has no macOS destination and `Process` is
 unavailable in sim tests).
 
+**herdr path**: `./harness.sh herdr` seeds three real lifecycle fixtures
+(`brew install herdr`); use `state/seed-herdr.json`. `stop` removes only them.
+
 Simulator caveat: Xcode 27's DeviceHub always bridges the Mac keyboard as
 *hardware*, so the software keyboard never auto-shows (Device → Keyboard →
 Toggle Software Keyboard).
@@ -717,6 +720,14 @@ logic belongs — keep parsing/command-building out of views.
   sealed key is never rotated, and `save()` skips the probe for a sealed
   key with no passphrase on file. The CLI knows nothing about passphrases
   (a CLI-side variant shipped and was reverted 2026-07-29).
+- **herdr is an explicit per-host backend** (`Host.sessionBackend`,
+  `HerdrProbe`; 0.7.5 / protocol 17), adapted as session→tile,
+  workspace→window, pane→pane. Identity is `(backend, session, pane)` because
+  pane ids collide; routes and snapshots retain the backend. Gate tmux-only
+  behavior on `route.usesTmux`; never auto-switch. Attach may create/restart,
+  close is stop+delete, and creation validates the live list/name before
+  typing setup. herdr reports no client count or creation time. Keep the
+  Agent Gallery withdrawn until transcript support exists.
 - **A disabled host is one the app never dials on its own**
   (`Host.isEnabled`; deck rail menu / DISABLED tile / Host Settings →
   Monitoring): the wall skips it in `runFeed`, never asks `ConnectionHub`

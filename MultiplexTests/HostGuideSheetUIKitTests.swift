@@ -62,6 +62,22 @@ final class HostGuideSheetUIKitTests: XCTestCase {
         XCTAssertEqual(navigation.overrideUserInterfaceStyle, .dark)
     }
 
+    func testHerdrControllerUsesBackendSpecificTitleCopyAndCommands() {
+        var host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        host.sessionBackend = .herdr
+        let controller = TmuxInstallViewController(host: host)
+        controller.loadViewIfNeeded()
+
+        XCTAssertEqual(controller.title, "Install herdr")
+        let rendered = renderedText(in: controller.view)
+        XCTAssertTrue(rendered.contains("THE DECK RUNS ON HERDR"))
+        XCTAssertTrue(rendered.contains(controller.intro))
+        XCTAssertEqual(
+            descendants(of: UITextView.self, in: controller.view).map(\.text),
+            HostGuide.herdrInstall.map(\.command)
+        )
+    }
+
     func testKeychainControllerPreservesHostInterpolationSessionsAndCommand() {
         let host = Host(name: "studio", hostname: "studio.local", username: "jhen")
         let controller = KeychainUnlockViewController(

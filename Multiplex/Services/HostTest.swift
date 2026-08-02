@@ -8,7 +8,9 @@ import Foundation
 enum HostTest {
     /// What a successful sign-in found on the host.
     struct Report: Equatable {
-        var tmuxFound = false
+        /// Whether the host's explicitly selected session backend is on the
+        /// same exec PATH the deck will use.
+        var multiplexerFound = false
         /// nil when the host doesn't use mosh (nothing to check).
         var moshServerFound: Bool?
     }
@@ -32,7 +34,11 @@ enum HostTest {
             let output = try await deadlined(seconds: execDeadline) {
                 try await connection.exec(checkCommand(for: host))
             }
-            return .connected(parseReport(output, checksMosh: host.useMosh))
+            return .connected(parseReport(
+                output,
+                backend: host.sessionBackend,
+                checksMosh: host.useMosh
+            ))
         } catch {
             return .failed(failureMessage(for: error, host: host))
         }
@@ -40,14 +46,18 @@ enum HostTest {
 
     // MARK: Tool sweep (pure)
 
-    /// tmux always (the deck's session wall needs it); mosh-server when the
-    /// host uses mosh — at its configured path if one is set (`command -v`
+    /// The selected multiplexer (tmux or herdr); mosh-server when the host
+    /// uses mosh — at its configured path if one is set (`command -v`
     /// accepts a pathname and checks it's executable). Always exits 0:
     /// Citadel throws on a non-zero exit status, and "tool missing" must
     /// read as a report line, not a failed connection.
     static func checkCommand(for host: Host) -> String {
-        var command = TmuxProbe.pathPrefix
-            + "command -v tmux >/dev/null 2>&1 && echo MPXT_TMUX_OK || echo MPXT_TMUX_MISSING; "
+        let pathPrefix = host.sessionBackend == .herdr
+            ? HerdrProbe.pathPrefix : TmuxProbe.pathPrefix
+        let marker = host.sessionBackend == .herdr ? "HERDR" : "TMUX"
+        var command = pathPrefix
+            + "command -v \(host.sessionBackend.rawValue) >/dev/null 2>&1"
+            + " && echo MPXT_\(marker)_OK || echo MPXT_\(marker)_MISSING; "
         if host.useMosh {
             let configured = host.moshServerPath?.trimmingCharacters(in: .whitespaces) ?? ""
             let server = configured.isEmpty ? "mosh-server" : configured
@@ -58,9 +68,14 @@ enum HostTest {
         return command
     }
 
-    static func parseReport(_ output: String, checksMosh: Bool) -> Report {
-        Report(
-            tmuxFound: output.contains("MPXT_TMUX_OK"),
+    static func parseReport(
+        _ output: String,
+        backend: Host.SessionBackend,
+        checksMosh: Bool
+    ) -> Report {
+        let marker = backend == .herdr ? "MPXT_HERDR_OK" : "MPXT_TMUX_OK"
+        return Report(
+            multiplexerFound: output.contains(marker),
             moshServerFound: checksMosh ? output.contains("MPXT_MOSH_OK") : nil
         )
     }

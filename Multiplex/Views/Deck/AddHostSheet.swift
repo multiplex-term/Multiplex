@@ -50,6 +50,7 @@ struct AddHostFormState {
     var privateKeyConcealed = false
     var passphrase = ""
     var isEnabled = true
+    var sessionBackend = Host.SessionBackend.tmux
     var useMosh = false
     var moshServerPath = ""
     var moshPorts = ""
@@ -79,6 +80,7 @@ struct AddHostFormState {
         privateKeyConcealed = !privateKey.isEmpty
         passphrase = secrets.passphrase ?? ""
         isEnabled = host.isEnabled
+        sessionBackend = host.sessionBackend
         useMosh = host.useMosh
         moshServerPath = host.moshServerPath ?? ""
         moshPorts = host.moshPorts ?? ""
@@ -119,6 +121,7 @@ struct AddHostFormState {
             hostname, port, username, authMethod.rawValue,
             password, privateKey, passphrase,
             useMosh ? "mosh" : "ssh", moshServerPath,
+            sessionBackend.rawValue,
         ]
     }
 
@@ -156,6 +159,7 @@ struct AddHostFormState {
         host.username = username.trimmingCharacters(in: .whitespaces)
         host.authMethod = authMethod
         host.isEnabled = isEnabled
+        host.sessionBackend = sessionBackend
         host.useMosh = useMosh
         let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
@@ -291,6 +295,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private var scriptsSection: AddHostSectionView!
     private var agentModelsSection: AddHostSectionView!
     private var transportSection: AddHostSectionView!
+    private var backendSection: AddHostSectionView!
 
     private var workingDirectoryFields: [UUID: UITextField] = [:]
     private var scriptNameFields: [UUID: UITextField] = [:]
@@ -698,10 +703,13 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         agentModelsSection = makeAgentModelsSection()
         transportSection = AddHostSectionView(title: "Transport", detail: nil, rows: [])
         transportSection.accessibilityIdentifier = "addhost.section.transport"
+        backendSection = AddHostSectionView(title: "Backend", detail: nil, rows: [])
+        backendSection.accessibilityIdentifier = "addhost.section.backend"
 
         [
             hostSection,
             monitoringSection,
+            backendSection,
             credentialsSection,
             testSection,
             workingDirectoriesSection,
@@ -716,6 +724,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         renderWorkingDirectories()
         renderScripts()
         renderTransport()
+        renderBackend()
     }
 
     private func makeHostSection() -> AddHostSectionView {
@@ -982,10 +991,12 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     // MARK: Signal check
 
     private var testDetail: String {
-        form.useMosh
-            ? "Signs in over SSH with the settings above, then looks for tmux and "
+        let backend = form.sessionBackend.rawValue
+        return form.useMosh
+            ? "Signs in over SSH with the settings above, then looks for \(backend) and "
                 + "mosh-server on the host."
-            : "Signs in over SSH with the settings above, then looks for tmux on the host."
+            : "Signs in over SSH with the settings above, then looks for \(backend) "
+                + "on the host."
     }
 
     private func renderTestSection() {
@@ -1084,9 +1095,10 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             switch outcome {
             case .connected(let report):
                 var warnings: [String] = []
-                if !report.tmuxFound {
+                if !report.multiplexerFound {
+                    let backend = host.sessionBackend.rawValue
                     warnings.append(
-                        "tmux wasn't found on the host — the deck can't list sessions "
+                        "\(backend) wasn't found on the host — the deck can't list sessions "
                             + "there. Plain shells still work."
                     )
                 }
@@ -1363,6 +1375,42 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         rows.append(AddHostInsetRow(contentView: addHostLeadingView(add)))
         scriptsSection.setDetail(scriptsDetail)
         scriptsSection.setRows(rows)
+    }
+
+    // MARK: Backend
+
+    private var backendDetail: String {
+        if form.sessionBackend == .herdr {
+            return "The deck monitors herdr (herdr.dev) sessions and their "
+                + "agents through the herdr CLI — one tile per session, its "
+                + "workspaces as the tile's window lines; a tile attaches "
+                + "the full herdr client. The tmux options editor doesn't "
+                + "apply here."
+        }
+        return "The deck monitors a remote tmux server — sessions, windows, "
+            + "and agent panes. herdr (herdr.dev) is the alternative for "
+            + "hosts that run it."
+    }
+
+    private func renderBackend() {
+        let bar = AddHostChoiceBar<Host.SessionBackend>(
+            choices: Host.SessionBackend.allCases.map { ($0.rawValue.uppercased(), $0) },
+            selection: form.sessionBackend
+        ) { [weak self] backend in
+            guard let self else { return }
+            self.updateTestSensitive { $0.sessionBackend = backend }
+            self.renderBackend()
+            self.renderTestSection()
+        }
+        bar.accessibilityIdentifier = "addhost.backendBar"
+        backendSection.setDetail(backendDetail)
+        backendSection.setRows([bar])
+        // Herdr owns a session's world and has no analog of tmux's targeted
+        // options. Keep both stored values for a later switch back; hide the
+        // editors rather than claiming they affect herdr sessions.
+        let usesHerdr = form.sessionBackend == .herdr
+        workingDirectoriesSection.isHidden = usesHerdr
+        tmuxConfSection.isHidden = usesHerdr
     }
 
     // MARK: Transport
