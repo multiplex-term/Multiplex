@@ -10,6 +10,13 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         case create(sessionName: String, directory: String?)
         /// Plain login shell, no tmux.
         case shell
+        /// Attach the full herdr client to one herdr session — the tile
+        /// press on a herdr-backend host. The session name is both target
+        /// and identity (herdr keeps them unique — they're directories),
+        /// and attach auto-creates/restarts, so a spine-less stopped tile
+        /// presses too. A real terminal like `.attach`: restores across
+        /// launches, resumes per `SessionResumePolicy`.
+        case herdrAttach(sessionName: String)
         /// The viewport — an inline browser tab, docked beside the sessions
         /// that produced its URL and moved with the same merge/split
         /// machinery. Not a terminal: no remote command, no tmux session, no
@@ -29,6 +36,22 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         static func create(sessionName: String) -> Mode {
             .create(sessionName: sessionName, directory: nil)
         }
+
+        /// The attach mode for one session on this host — the tmux attach
+        /// or the herdr client, decided by the host's backend in exactly
+        /// one place so no mint site can disagree. Name-based on purpose:
+        /// callers holding only a name (auto-attach entries, widget
+        /// targets) must not fabricate a session record to qualify.
+        static func attach(host: Host, sessionName: String) -> Mode {
+            switch host.sessionBackend {
+            case .tmux: .attach(sessionName: sessionName)
+            case .herdr: .herdrAttach(sessionName: sessionName)
+            }
+        }
+
+        static func attach(host: Host, session: TmuxSession) -> Mode {
+            attach(host: host, sessionName: session.name)
+        }
     }
 
     var id: UUID = UUID()
@@ -45,6 +68,8 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
                 sessionName: name,
                 directory: directory
             )
+        case .herdrAttach(let sessionName):
+            return HerdrSessionLaunch.attachCommand(sessionName: sessionName)
         case .shell, .viewport, .fileViewer:
             return nil
         }
@@ -68,6 +93,10 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
                 command += " -c \(directory.shellQuotedDirectory)"
             }
             return command
+        case .herdrAttach(let sessionName):
+            // The attach line needs a shell (PATH export before the exec);
+            // execvp gets that shell as its argv.
+            return "sh -c \(HerdrSessionLaunch.attachCommand(sessionName: sessionName).shellQuoted)"
         case .shell, .viewport, .fileViewer:
             return nil
         }
@@ -76,19 +105,45 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
     var displayName: String {
         switch mode {
         case .attach(let name), .create(let name, _): name
+        case .herdrAttach(let sessionName): sessionName
         case .shell: "shell"
         case .viewport(let urlString): Self.viewportLabel(urlString)
         case .fileViewer(let path): Self.fileViewerLabel(path)
         }
     }
 
-    /// The tmux session this tab is bound to; nil for a plain shell (which
-    /// has no probe entry, so no agent detection) and for the viewport and
-    /// file viewer.
+    /// The multiplexer session this tab is bound to (a herdr tab answers
+    /// its herdr session name — the probe's session records use it, so
+    /// agent detection and focus dedupe match the same way); nil for a
+    /// plain shell (which has no probe entry, so no agent detection) and
+    /// for the viewport and file viewer.
     var sessionName: String? {
         switch mode {
         case .attach(let name), .create(let name, _): name
+        case .herdrAttach(let sessionName): sessionName
         case .shell, .viewport, .fileViewer: nil
+        }
+    }
+
+    /// The remote session namespace this route belongs to. Unlike
+    /// `Host.sessionBackend`, this stays fixed for the lifetime of an open
+    /// tab, so switching a host's deck backend can never make a restored tmux
+    /// tab focus or close a same-named herdr session (or vice versa).
+    var sessionBackend: Host.SessionBackend? {
+        switch mode {
+        case .attach, .create: .tmux
+        case .herdrAttach: .herdr
+        case .shell, .viewport, .fileViewer: nil
+        }
+    }
+
+    /// The tab speaks tmux itself — the gate for tmux-specific chrome (the
+    /// TMUX shortcut popover, Copy Mode's app-owned state). A herdr tab is
+    /// a probe-backed session too, but its client owns those interactions.
+    var usesTmux: Bool {
+        switch mode {
+        case .attach, .create: true
+        case .herdrAttach, .shell, .viewport, .fileViewer: false
         }
     }
 
@@ -134,6 +189,30 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
     /// file on screen, which is not a path. The ▤ mark lives here only.
     static func fileViewerLabel(name: String) -> String {
         name.isEmpty ? "▤" : "▤ \(name)"
+    }
+}
+
+/// PATH setup shared by pure route builders and the remote probe/services.
+/// Keeping it in the model layer lets services depend inward while
+/// `TerminalRoute` never reaches outward into a probe service just to build
+/// its persisted route's PTY command.
+enum RemoteCommandEnvironment {
+    static let pathPrefix =
+        "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin\"; export PATH; "
+    static let herdrPathPrefix =
+        pathPrefix + "PATH=\"$PATH:$HOME/.cargo/bin\"; export PATH; "
+}
+
+/// The PTY handoff for a full herdr client. Session actions that don't belong
+/// to a persisted terminal route remain in `HerdrProbe`; attach lives here for
+/// the same reason tmux's legacy create-and-attach builder does below.
+enum HerdrSessionLaunch {
+    static let primarySessionName = "default"
+
+    static func attachCommand(sessionName: String) -> String {
+        let name = sessionName.isEmpty ? primarySessionName : sessionName
+        return RemoteCommandEnvironment.herdrPathPrefix
+            + "exec herdr session attach \(name.shellQuoted)"
     }
 }
 

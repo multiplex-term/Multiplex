@@ -1,12 +1,12 @@
-Multiplex is a spatial SSH terminal built around remote tmux — native for Apple Vision Pro, iPad, and iPhone.
+Multiplex is a spatial SSH terminal built around remote tmux, with herdr as a per-host alternative — native for Apple Vision Pro, iPad, and iPhone.
 
-The deck is a live wall: every host you add probes concurrently, and each tmux session renders as a tile showing that session's real last screen lines. Tap a tile to attach and the session opens in its own window — a spatial window on Vision Pro, a Stage Manager scene on iPad, a full-screen pane on iPhone. Windows merge into tabs and split back out without dropping the shell.
+The deck is a live wall: every host you add probes concurrently, and each session renders as a tile showing that session's real last screen lines. Tap a tile to attach and the session opens in its own window — a spatial window on Vision Pro, a Stage Manager scene on iPad, a full-screen pane on iPhone. Windows merge into tabs and split back out without dropping the shell. In HERDR mode, one tile is one herdr session and its workspaces become the tile's spine; agent state comes from herdr itself.
 
 Multiplex also spots Claude Code, Codex, and Pi running in a pane and puts a command strip under the terminal. Multiplex Pro adds alerts when an unwatched agent finishes a turn or asks a question, Claude Code prompt history with one-tap jump to any message, mosh, unlimited hosts, and a custom terminal theme editor.
 
 WHAT YOU NEED
 - A host you can reach over SSH (password, or an OpenSSH ed25519/RSA key).
-- tmux 1.8 or newer on that host for the wall and persistent sessions. Plain SSH shells work without tmux, but have no tiles.
+- tmux 1.8+ or herdr 0.7.5+ on that host for the wall and persistent sessions. Plain SSH shells work without either, but have no tiles.
 - mosh-server on the host if you want to try the mosh transport (Pro).
 
 WHERE THINGS ARE
@@ -14,10 +14,11 @@ WHERE THINGS ARE
 - Settings → Appearance switches the chassis live. Vision Pro adds GLASS to
   SYSTEM, LIGHT, and DARK; GLASS uses smoked spatial material and shares the
   dark terminal-theme selection.
-- + NEW SESSION starts a plain tmux shell, or launches Claude Code, Codex, or Pi with an optional setup script, model, and first prompt.
+- Host Settings → BACKEND switches a host between TMUX and HERDR.
+- + NEW SESSION starts a persistent session, or launches Claude Code, Codex, or Pi with an optional setup script, model, and first prompt. Widget/Shortcut agent launch is tmux-only in this build.
 - TMUX (bottom bar on Vision Pro, key rail on iPad/iPhone, top-right on narrow iPhones) sends everyday tmux commands: new window, split, copy mode.
 - FILE uploads from Photos, Files, or the camera into the active pane's working directory and types the remote path without pressing Return. Dragging a file onto the terminal does the same.
-- DETACH closes the window; the tmux session keeps running on the host and its tile stays on the wall.
+- DETACH closes the window; the remote session keeps running on the host and its tile stays on the wall.
 - Home Screen widgets show a host's last-known sessions plus SHELL and AGENT keys; Shortcuts and Siri can open a shell or launch an agent.
 
 Hosts, agent command setups, and secrets sync between your devices through iCloud Keychain, end-to-end encrypted. There is no Multiplex server, no account, and no analytics.

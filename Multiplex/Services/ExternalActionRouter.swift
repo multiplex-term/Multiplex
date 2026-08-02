@@ -167,8 +167,12 @@ enum ExternalActionPerformer {
             sessions.first { $0.name == name }?.name
         }
         if let target = requested ?? ExternalActionPlan.mostRecentSessionName(in: sessions) {
-            if context.workspace.focusTab(hostID: host.id, sessionName: target) { return }
-            open(sessionName: target, on: host, context: context)
+            if context.workspace.focusTab(
+                hostID: host.id,
+                sessionName: target,
+                backend: host.sessionBackend
+            ) { return }
+            open(mode: .attach(host: host, sessionName: target), on: host, context: context)
         } else {
             // Headless creation inherits the New Session sheet's remembered
             // setup script (nil unless its REMEMBER opt-in is on) — a widget
@@ -184,7 +188,7 @@ enum ExternalActionPerformer {
                 presentCreateFailure(for: model, host: host, context: context)
                 return
             }
-            open(sessionName: created, on: host, context: context)
+            open(mode: created, on: host, context: context)
         }
     }
 
@@ -197,6 +201,17 @@ enum ExternalActionPerformer {
         on host: Host,
         context: ExternalActionRouter.Context
     ) async {
+        // v1.3 fence: a widget/Shortcut agent launch on a herdr-backend
+        // host refuses with its own sentence instead of half-working —
+        // attach and focus flows above stay live.
+        guard host.sessionBackend == .tmux else {
+            context.presentFailure(ExternalActionFailure(
+                hostName: host.name,
+                message: "Agent launch isn't available on herdr hosts yet — "
+                    + "attach and start the agent in its workspace."
+            ))
+            return
+        }
         guard let model = await connectedModel(for: host, context: context) else { return }
         // nil = the host's default working dir; the sheet's explicit Home
         // choice arrives as "~", which the quoting layer expands to $HOME.
@@ -220,7 +235,7 @@ enum ExternalActionPerformer {
             presentCreateFailure(for: model, host: host, context: context)
             return
         }
-        open(sessionName: created, on: host, context: context)
+        open(mode: created, on: host, context: context)
     }
 
     /// The status guard: one fresh (or joined in-flight) probe, then the
@@ -243,12 +258,9 @@ enum ExternalActionPerformer {
     }
 
     private static func open(
-        sessionName: String, on host: Host, context: ExternalActionRouter.Context
+        mode: TerminalRoute.Mode, on host: Host, context: ExternalActionRouter.Context
     ) {
-        context.open(TerminalWindowRoute(tab: TerminalRoute(
-            hostID: host.id,
-            mode: .attach(sessionName: sessionName)
-        )))
+        context.open(TerminalWindowRoute(tab: TerminalRoute(hostID: host.id, mode: mode)))
     }
 
     private static func presentCreateFailure(

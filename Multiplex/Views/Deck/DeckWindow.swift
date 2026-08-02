@@ -46,8 +46,11 @@ enum DeckScene {
         guard let host else { return }
         var firstTabID: UUID?
         for entry in list.split(separator: ",") {
-            let tabs = entry.split(separator: "+").map {
-                TerminalRoute(hostID: host.id, mode: .attach(sessionName: String($0)))
+            let tabs = entry.split(separator: "+").map { name in
+                TerminalRoute(
+                    hostID: host.id,
+                    mode: .attach(host: host, sessionName: String(name))
+                )
             }
             guard !tabs.isEmpty else { continue }
             if firstTabID == nil { firstTabID = tabs.first?.id }

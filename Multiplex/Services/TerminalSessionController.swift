@@ -815,7 +815,9 @@ final class TerminalSessionController {
     /// were already confirmed by the panel's second press and use an SSH exec
     /// channel, which avoids the timing-sensitive tmux `:` prompt entirely.
     func performTmuxShortcut(_ shortcut: TmuxShortcut) {
-        guard status == .live, let sessionName = route.sessionName else { return }
+        guard status == .live, route.usesTmux,
+              let sessionName = route.sessionName
+        else { return }
         // The jump search owns the pane while it pages; a shortcut now would
         // either be dropped by the input lock (leaving copy-mode UI stuck
         // half-armed) or race the remote script.
@@ -842,7 +844,9 @@ final class TerminalSessionController {
     /// SSH and mosh tabs answer alike. A failure returns nil and the panel
     /// simply shows no window section — the shortcut grid stays useful.
     func loadTmuxWindowList() async -> [TmuxWindowChoice]? {
-        guard status == .live, let sessionName = route.sessionName else { return nil }
+        guard status == .live, route.usesTmux,
+              let sessionName = route.sessionName
+        else { return nil }
         let command = TmuxProbe.windowListCommand(sessionName: sessionName)
         guard let output = try? await withControlConnection({
             try await $0.exec(command)
@@ -854,7 +858,7 @@ final class TerminalSessionController {
     /// path like the confirmed close actions: no terminal input, no `:`
     /// prompt, and the attached client follows tmux's own state change.
     func selectTmuxWindow(_ window: TmuxWindowChoice) {
-        guard status == .live, route.sessionName != nil else { return }
+        guard status == .live, route.usesTmux else { return }
         if case .finding = historyJump { return }
         let command = TmuxProbe.selectWindowCommand(windowID: window.tmuxID)
         Task { await executeTmuxControlCommand(command) }
@@ -1037,7 +1041,10 @@ final class TerminalSessionController {
     /// its own exec surface (direct mosh shells have neither).
     var canOfferAgentHistory: Bool {
         guard status == .live else { return false }
-        if route.sessionName != nil { return true }
+        if route.usesTmux { return true }
+        // Herdr does not expose the transcript identity this stack needs;
+        // only a true plain shell may use its own process-discovered cwd.
+        guard route.sessionName == nil else { return false }
         return connection != nil && directShellWorkingDirectory != nil
     }
 
@@ -1046,7 +1053,7 @@ final class TerminalSessionController {
     /// bounded tail read is cheap. Claude Code only: the session-file
     /// surface concentrates on the one agent whose pager jump is exact.
     func openAgentHistory(for agent: AgentKind) {
-        guard status == .live, agent == .claudeCode else { return }
+        guard canOfferAgentHistory, agent == .claudeCode else { return }
         historyLoadTask?.cancel()
         agentHistory = .loading
         historyLoadTask = Task { [weak self] in
@@ -1068,7 +1075,7 @@ final class TerminalSessionController {
                     let cwd: String?
                     let preferredSessionID: String?
                     let configDir: String?
-                    if let sessionName = route.sessionName {
+                    if route.usesTmux, let sessionName = route.sessionName {
                         let output = try await connection.exec(
                             AgentSessionHistory.paneContextCommand(
                                 sessionName: sessionName
@@ -1105,7 +1112,7 @@ final class TerminalSessionController {
             agentHistory = .loaded(
                 agent: agent,
                 messages: result.messages,
-                jumpAvailable: route.sessionName != nil && agent == .claudeCode
+                jumpAvailable: route.usesTmux && agent == .claudeCode
             )
         } catch {
             guard !Task.isCancelled, agentHistory != nil else { return }
@@ -1126,6 +1133,7 @@ final class TerminalSessionController {
     /// pager shows is matched against it, so each step is directed.
     func startHistoryJump(to message: AgentUserMessage) {
         guard status == .live,
+              route.usesTmux,
               let sessionName = route.sessionName,
               !tmuxCopyModeUIActive,
               case .loaded(let agent, let messages, true) = agentHistory,
@@ -1334,7 +1342,7 @@ final class TerminalSessionController {
     @discardableResult
     func debugSendTmuxShortcutThroughTerminal(_ shortcut: TmuxShortcut) -> Bool {
         guard status == .live,
-              route.sessionName != nil,
+              route.usesTmux,
               shortcut.bindingInput != nil,
               terminalView != nil
         else { return false }
@@ -1369,7 +1377,7 @@ final class TerminalSessionController {
         // The jump search owns the pane's input while it pages; the FINDING
         // veil is visible over the drop target for its few seconds.
         if case .finding = historyJump { return }
-        if host.useMosh || route.sessionName == nil,
+        if host.useMosh || !route.usesTmux,
            status == .live, dropTask == nil, !files.isEmpty {
             // Mosh has no SFTP channel, while a plain shell has no tmux pane
             // whose foreground cwd can be resolved. Say so instead of
@@ -1457,7 +1465,7 @@ final class TerminalSessionController {
     private func dropDestination(
         over connection: SSHConnection
     ) async throws -> DropDestination {
-        if let sessionName = route.sessionName {
+        if route.usesTmux, let sessionName = route.sessionName {
             let output = (try? await connection.exec(
                 TmuxProbe.dropDestinationCommand(sessionName: sessionName)
             )) ?? ""
@@ -1563,7 +1571,10 @@ final class TerminalSessionController {
     /// marker is ignored here). nil when no pane can answer: a plain shell,
     /// a mosh tab (no exec surface), or a dead transport.
     func paneWorkingDirectory() async -> String? {
-        guard let sessionName = route.sessionName, let connection else { return nil }
+        guard route.usesTmux,
+              let sessionName = route.sessionName,
+              let connection
+        else { return nil }
         let output = (try? await connection.exec(
             TmuxProbe.dropDestinationCommand(sessionName: sessionName)
         )) ?? ""

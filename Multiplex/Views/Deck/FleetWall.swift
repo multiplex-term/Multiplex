@@ -603,7 +603,7 @@ final class FleetWallViewController: UIViewController {
             openDuplicateSession: { [weak self] session in
                 self?.open(TerminalRoute(
                     hostID: host.id,
-                    mode: .attach(sessionName: session.name)
+                    mode: .attach(host: host, session: session)
                 ))
             },
             requestNewSession: { [weak self] in self?.presentNewSession(on: host) },
@@ -725,10 +725,14 @@ final class FleetWallViewController: UIViewController {
     }
 
     private func focusOrAttach(_ host: Host, session: TmuxSession) {
-        if configuration.workspace.focusTab(hostID: host.id, sessionName: session.name) {
+        if configuration.workspace.focusTab(
+            hostID: host.id,
+            sessionName: session.name,
+            backend: host.sessionBackend
+        ) {
             return
         }
-        open(TerminalRoute(hostID: host.id, mode: .attach(sessionName: session.name)))
+        open(TerminalRoute(hostID: host.id, mode: .attach(host: host, session: session)))
     }
 
     private func presentNewSession(on host: Host) {
@@ -747,11 +751,13 @@ final class FleetWallViewController: UIViewController {
     }
 
     private func createSession(on host: Host, submission: NewSessionSubmission) {
-        let name = TmuxProbe.sanitizedSessionName(submission.name)
         let model = configuration.hub.model(for: host)
         Task { [weak self] in
+            // The name rides raw: `createSession` picks the backend's own
+            // sanitizer + uniquer (they run on `base:` regardless), so the
+            // view never second-guesses the naming rules.
             guard let created = await model.createSession(
-                base: name,
+                base: submission.name,
                 inDirectoryOf: nil,
                 startingIn: submission.directory,
                 applying: host.newSessionTmuxConf,
@@ -761,17 +767,22 @@ final class FleetWallViewController: UIViewController {
                     initialPrompt: submission.initialPrompt
                 )
             ) else { return }
-            self?.open(TerminalRoute(
-                hostID: host.id,
-                mode: .attach(sessionName: created)
-            ))
+            self?.open(TerminalRoute(hostID: host.id, mode: created))
         }
     }
 
     private func confirmDelete(session: TmuxSession, on host: Host) {
+        // herdr: stop + delete — except the default session, which herdr
+        // itself refuses to delete (it parks as a stopped tile instead).
+        // The copy carries both truths because the app deliberately
+        // doesn't know which session is the default.
+        let message = host.sessionBackend == .herdr
+            ? "Stops “\(session.name)” on \(host.name) and everything running in it, "
+                + "and deletes its saved state (herdr keeps its default session on disk, stopped)."
+            : "Kills “\(session.name)” on \(host.name) and everything running in it."
         let alert = UIAlertController(
             title: "Delete Session",
-            message: "Kills “\(session.name)” on \(host.name) and everything running in it.",
+            message: message,
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
@@ -1105,6 +1116,7 @@ private final class FleetHostSectionView: UIView {
         let keychainNotice: KeychainLockNotice?
         let openSessionNames: Set<String>
         let orderedSessions: [TmuxSession]
+        let herdrPresent: Bool
     }
 
     private enum GridIdentity: Equatable {
@@ -1112,7 +1124,8 @@ private final class FleetHostSectionView: UIView {
         case probing
         case sessions([String])
         case noServer
-        case tmuxMissing
+        // The hint chip is tile content, so its arrival must re-render.
+        case tmuxMissing(herdrHint: Bool)
         case failed
     }
 
@@ -1216,13 +1229,15 @@ private final class FleetHostSectionView: UIView {
                 openSessionNames: Set(sessions.compactMap { session in
                     configuration.workspace.hasTab(
                         hostID: host.id,
-                        sessionName: session.name
+                        sessionName: session.name,
+                        backend: host.sessionBackend
                     ) ? session.name : nil
                 }),
                 orderedSessions: configuration.store.orderedSessions(
                     sessions,
                     for: host.id
-                )
+                ),
+                herdrPresent: model.herdrPresent
             )
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -1230,9 +1245,9 @@ private final class FleetHostSectionView: UIView {
                 self.observeModel()
             }
         }
-        let previousIdentity = currentSnapshot.map { gridIdentity(for: $0.tmux) }
+        let previousIdentity = currentSnapshot.map(gridIdentity(for:))
         currentSnapshot = snapshot
-        let identity = gridIdentity(for: snapshot.tmux)
+        let identity = gridIdentity(for: snapshot)
         if !configuration.reduceMotion,
            let previousIdentity,
            previousIdentity != identity {
@@ -1251,13 +1266,13 @@ private final class FleetHostSectionView: UIView {
         configuration.modelDidChange()
     }
 
-    private func gridIdentity(for state: TmuxState) -> GridIdentity {
-        switch state {
+    private func gridIdentity(for snapshot: Snapshot) -> GridIdentity {
+        switch snapshot.tmux {
         case .unknown: .unknown
         case .probing: .probing
         case .sessions(let sessions): .sessions(sessions.map(\.name))
         case .noServer: .noServer
-        case .tmuxMissing: .tmuxMissing
+        case .tmuxMissing: .tmuxMissing(herdrHint: snapshot.herdrPresent)
         case .failed: .failed
         }
     }
@@ -1364,11 +1379,14 @@ private final class FleetHostSectionView: UIView {
                     session: session,
                     lines: snapshot.miniatures[session.name] ?? [],
                     attention: snapshot.attention[session.name],
-                    hasLiveAgentState: snapshot.hasLiveProbe,
+                    usesTmuxAttentionFallback: snapshot.hasLiveProbe
+                        && host.sessionBackend == .tmux,
                     hasOpenTab: snapshot.openSessionNames.contains(session.name),
                     compact: configuration.presentation == .shellRail,
                     selected: configuration.selectedTerminal?.hostID == host.id
-                        && configuration.selectedTerminal?.sessionName == session.name,
+                        && configuration.selectedTerminal?.sessionName == session.name
+                        && configuration.selectedTerminal?.sessionBackend
+                            == host.sessionBackend,
                     duplicateAttachTitle: configuration.duplicateAttachTitle,
                     openTabAccessibilityText: configuration.openTabAccessibilityText,
                     attach: { [weak self] in self?.configuration.openSession(session) },
@@ -1421,8 +1439,14 @@ private final class FleetHostSectionView: UIView {
         case .tmuxMissing:
             let tile = reusableSpecialTile(key: "tmux") { FleetTmuxMissingTileView() }
             tile.configure(
+                backend: host.sessionBackend,
+                herdrHint: snapshot.herdrPresent,
                 compact: configuration.presentation == .shellRail,
-                action: configuration.showTmuxGuide
+                action: configuration.showTmuxGuide,
+                switchToHerdr: { [weak self] in
+                    guard let self else { return }
+                    self.configuration.store.setSessionBackend(.herdr, for: self.host.id)
+                }
             )
             grid.setItems([FleetGridItem(id: "tmux", view: tile)])
             pruneTiles(keeping: ["tmux"])
@@ -2220,7 +2244,10 @@ struct FleetSessionTileConfiguration {
     let session: TmuxSession
     let lines: [String]
     let attention: PaneAgentState?
-    let hasLiveAgentState: Bool
+    /// tmux's aggregate wall state covers only the front pane, so tiles also
+    /// inspect other pane titles. Herdr already folds authoritative statuses
+    /// across every pane and must never fall back to title heuristics.
+    let usesTmuxAttentionFallback: Bool
     let hasOpenTab: Bool
     let compact: Bool
     let selected: Bool
@@ -2239,7 +2266,7 @@ struct FleetSessionTileConfiguration {
             && session == other.session
             && lines == other.lines
             && attention == other.attention
-            && hasLiveAgentState == other.hasLiveAgentState
+            && usesTmuxAttentionFallback == other.usesTmuxAttentionFallback
             && hasOpenTab == other.hasOpenTab
             && compact == other.compact
             && selected == other.selected
@@ -2593,7 +2620,7 @@ final class FleetSessionTileView: FleetPressView,
 
     private func agentRunning(_ configuration: FleetSessionTileConfiguration) -> Bool {
         if configuration.attention == .busy { return true }
-        guard configuration.hasLiveAgentState else { return false }
+        guard configuration.usesTmuxAttentionFallback else { return false }
         return configuration.session.agentPanes.contains {
             AgentAttention.classifyVerified(
                 title: $0.title,
@@ -2605,7 +2632,7 @@ final class FleetSessionTileView: FleetPressView,
 
     private func agentNeedsYou(_ configuration: FleetSessionTileConfiguration) -> Bool {
         if case .needsYou = configuration.attention { return true }
-        guard configuration.hasLiveAgentState else { return false }
+        guard configuration.usesTmuxAttentionFallback else { return false }
         return configuration.session.agentPanes.contains {
             if case .some(.needsYou) = AgentAttention.classifyVerified(
                 title: $0.title,
@@ -2633,11 +2660,15 @@ final class FleetSessionTileView: FleetPressView,
             parts.append(count > 1 ? "\(count)×\(agent.telemetryLabel)" : agent.telemetryLabel)
         }
         if agentRunning { parts.append("RUNNING") }
-        parts.append(sessionAge(session))
+        if let age = sessionAge(session) { parts.append(age) }
         return parts.joined(separator: " · ")
     }
 
-    private func sessionAge(_ session: TmuxSession) -> String {
+    /// nil for a synthetic creation date: herdr reports no creation time,
+    /// so its adapter seeds `created` near the epoch purely for ordering —
+    /// rendering that as "20666d" would be a claim nothing made.
+    private func sessionAge(_ session: TmuxSession) -> String? {
+        guard !HerdrProbe.isSyntheticCreated(session.created) else { return nil }
         let seconds = max(0, Date().timeIntervalSince(session.created))
         if seconds >= 86_400 { return "\(Int(seconds / 86_400))d" }
         if seconds >= 3_600 { return "\(Int(seconds / 3_600))h" }
@@ -2929,7 +2960,10 @@ private final class FleetAcquiringTileView: UIKitTallyBorderedView {
 @MainActor
 private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
     private var installChip: UIKitChassisChip!
+    private var switchChip: UIKitChassisChip!
+    private var title: UIKitChassisLabel!
     private var action: (() -> Void)?
+    private var switchAction: (() -> Void)?
     private var heightConstraint: NSLayoutConstraint?
 
     override init(frame: CGRect) {
@@ -2938,7 +2972,14 @@ private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
             "INSTALL GUIDE",
             accessibilityLabel: "Install guide"
         ) { [weak self] in self?.action?() }
-        let title = UIKitChassisLabel(
+        // The one-tap side of decision "explicit + detect hint": shown only
+        // when the probe saw herdr installed while tmux is missing. A tap
+        // rewrites the host record; nothing ever flips it automatically.
+        switchChip = UIKitChassisChip(
+            "USE HERDR",
+            accessibilityLabel: "Switch this host to the herdr backend"
+        ) { [weak self] in self?.switchAction?() }
+        title = UIKitChassisLabel(
             "No tmux on host", size: 11, color: UIKitChassis.signal3
         )
         let body = UILabel()
@@ -2951,7 +2992,7 @@ private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
         body.text = "You can still use a plain shell — press SHELL."
         body.numberOfLines = 0
         body.textAlignment = .center
-        let stack = UIStackView(arrangedSubviews: [title, body, installChip])
+        let stack = UIStackView(arrangedSubviews: [title, body, installChip, switchChip])
         stack.axis = .vertical
         stack.alignment = .center
         stack.spacing = 8
@@ -2969,8 +3010,16 @@ private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
         isAccessibilityElement = false
     }
 
-    func configure(compact: Bool, action: @escaping () -> Void) {
+    func configure(
+        backend: Host.SessionBackend, herdrHint: Bool, compact: Bool,
+        action: @escaping () -> Void, switchToHerdr: @escaping () -> Void
+    ) {
         self.action = action
+        switchAction = switchToHerdr
+        title.setText("No \(backend.rawValue) on host")
+        // The hint only ever means "tmux is dead but herdr is installed" —
+        // the tmux probe is the sole writer — so it alone decides the chip.
+        switchChip.isHidden = !herdrHint
         heightConstraint?.constant = compact ? 92 : 138
     }
 }
@@ -3114,10 +3163,28 @@ struct NewSessionFormState {
         initialPrompt = ""
         directory = host.workingDirs.first
         script = preferences.rememberedScript(for: host)
-        name = TmuxProbe.uniqueSessionName(
-            base: agent?.launchCommand ?? "main",
-            existing: existingNames
-        )
+        name = Self.suggestedName(for: host, agent: agent, existing: existingNames)
+    }
+
+    /// What an empty name means for this backend — the field placeholder
+    /// and the prefill base when no agent is chosen.
+    var defaultNameBase: String { Self.defaultNameBase(for: host) }
+
+    private static func defaultNameBase(for host: Host) -> String {
+        host.sessionBackend == .herdr ? "session" : "main"
+    }
+
+    /// The backend's own namer: the prefill must match what the mint will
+    /// do downstream, or the sheet suggests a spelling the create then
+    /// respells.
+    private static func suggestedName(
+        for host: Host, agent: AgentKind?, existing: [String]
+    ) -> String {
+        let base = agent?.launchCommand ?? defaultNameBase(for: host)
+        return switch host.sessionBackend {
+        case .tmux: TmuxProbe.uniqueSessionName(base: base, existing: existing)
+        case .herdr: HerdrProbe.uniqueSessionName(base: base, existing: existing)
+        }
     }
 
     var agentToLaunch: AgentKind? {
@@ -3187,7 +3254,8 @@ struct NewSessionFormState {
             ? "REMEMBER saves only the launch choice."
             : "REMEMBER saves the launch and setup-script choices."
         guard let agentToLaunch else {
-            return "Creates the tmux session, then attaches to its login shell. \(remembers)"
+            return "Creates the \(host.sessionBackend.rawValue) session, then attaches "
+                + "to its login shell. \(remembers)"
         }
         return "Starts \(agentToLaunch.displayName) in the fresh shell. The optional prompt becomes its first message; \(remembers)"
     }
@@ -3210,10 +3278,7 @@ struct NewSessionFormState {
     }
 
     private func prefill(for agent: AgentKind?) -> String {
-        TmuxProbe.uniqueSessionName(
-            base: agent?.launchCommand ?? "main",
-            existing: existingNames
-        )
+        Self.suggestedName(for: host, agent: agent, existing: existingNames)
     }
 
     private func modelPrefill(for agent: AgentKind?) -> String {
@@ -3367,9 +3432,13 @@ final class NewSessionViewController: UIViewController,
             scriptSection = section
             contentStack.addArrangedSubview(section)
         }
-        let directory = makeDirectorySection()
-        directorySection = directory
-        contentStack.addArrangedSubview(directory)
+        // A herdr session has no start directory — herdr owns each
+        // session's world — so the picker would be a lie there.
+        if form.host.sessionBackend == .tmux {
+            let directory = makeDirectorySection()
+            directorySection = directory
+            contentStack.addArrangedSubview(directory)
+        }
 
         let dismissTap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         dismissTap.cancelsTouchesInView = false
@@ -3398,7 +3467,11 @@ final class NewSessionViewController: UIViewController,
     }
 
     private func makeIdentitySection() -> UIView {
-        configureTextField(nameField, placeholder: "main", accessibilityLabel: "Name")
+        configureTextField(
+            nameField,
+            placeholder: form.defaultNameBase,
+            accessibilityLabel: "Name"
+        )
         nameField.text = form.name
         nameField.returnKeyType = .next
         nameField.addTarget(self, action: #selector(nameChanged), for: .editingChanged)

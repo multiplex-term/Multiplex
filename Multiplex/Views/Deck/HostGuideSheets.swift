@@ -250,15 +250,30 @@ class UIKitHostGuideSheetViewController: UIViewController, AppAppearanceFollowin
     }
 }
 
-/// The NO TMUX tile's INSTALL GUIDE dialog: why the wall needs tmux, the
-/// per-OS one-liners, and the reminder that a plain shell already works.
+/// The NO TMUX / NO HERDR tile's INSTALL GUIDE dialog: why the wall needs
+/// the host's chosen multiplexer, the install one-liners, and the reminder
+/// that a plain shell already works.
 @MainActor
 final class TmuxInstallViewController: UIKitHostGuideSheetViewController {
     let host: Host
 
+    private var multiplexer: String {
+        host.sessionBackend.rawValue
+    }
+
+    private var probePathDetail: String {
+        switch host.sessionBackend {
+        case .tmux:
+            "Homebrew and /usr/local installs are already on the probe's PATH."
+        case .herdr:
+            "Homebrew, ~/.local/bin, and ~/.cargo/bin installs are already on "
+                + "the probe's PATH."
+        }
+    }
+
     init(host: Host) {
         self.host = host
-        super.init(title: "Install tmux")
+        super.init(title: "Install \(host.sessionBackend.rawValue)")
     }
 
     @available(*, unavailable)
@@ -270,7 +285,7 @@ final class TmuxInstallViewController: UIKitHostGuideSheetViewController {
         let rowStack = UIStackView(arrangedSubviews: [makeBodyLabel(intro)])
         rowStack.axis = .vertical
         rowStack.spacing = 12
-        for entry in HostGuide.tmuxInstall {
+        for entry in HostGuide.multiplexerInstall(for: host.sessionBackend) {
             rowStack.addArrangedSubview(UIKitCopyableCommandField(
                 label: entry.label,
                 command: entry.command
@@ -278,20 +293,20 @@ final class TmuxInstallViewController: UIKitHostGuideSheetViewController {
         }
 
         addSection(UIKitTallyFormSectionView(
-            title: "The deck runs on tmux",
+            title: "The deck runs on \(multiplexer)",
             detail: "The deck re-probes every few seconds — "
-                + "session tiles light up as soon as tmux is on "
-                + "the host. Homebrew and /usr/local installs "
-                + "are already on the probe's PATH.",
+                + "session tiles light up as soon as \(multiplexer) is on "
+                + "the host. \(probePathDetail)",
             contentView: rowStack
         ))
     }
 
     var intro: String {
-        "Sessions, live tiles, and attach all come from a tmux server on "
-            + "each host, and \(host.name) doesn't have tmux yet. You can "
-            + "still use a plain shell — the SHELL chip on the host's rail "
-            + "opens one. For the full deck, install tmux on the host:"
+        "Sessions, live tiles, and attach all come from a \(multiplexer) "
+            + "server on each host, and \(host.name) doesn't have "
+            + "\(multiplexer) yet. You can still use a plain shell — the "
+            + "SHELL chip on the host's rail opens one. For the full deck, "
+            + "install \(multiplexer) on the host:"
     }
 }
 

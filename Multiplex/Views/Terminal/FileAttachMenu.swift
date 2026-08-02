@@ -16,7 +16,7 @@ enum FileAttachAvailability {
     @MainActor
     static func canOffer(for controller: TerminalSessionController?) -> Bool {
         guard let controller else { return false }
-        return !controller.host.useMosh && controller.route.sessionName != nil
+        return !controller.host.useMosh && controller.route.usesTmux
     }
 
     #if !os(visionOS)

@@ -498,7 +498,7 @@ final class TerminalSurfaceView: UIView {
         /// a tmux status line hugs the lower chrome. One physical pixel stays
         /// below the grid to keep the PTY safely in the same row-count bucket.
         private func alignTerminalGridTowardBottom() {
-            guard controller.route.sessionName != nil,
+            guard controller.route.usesTmux,
                   let view = terminalView,
                   let topConstraint = terminalTopConstraint,
                   view.bounds.height > 0
