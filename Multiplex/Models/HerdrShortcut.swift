@@ -1,9 +1,13 @@
 /// Familiar herdr commands exposed by the terminal chrome — the herdr-backend
 /// sibling of `TmuxShortcut`. herdr's default prefix is Control-B like tmux's,
 /// and non-destructive rows send the stock prefix binding through SwiftTerm.
-/// Defaults were read from `herdr --default-config` and the split/zoom/detach
+/// Defaults were read from `herdr --default-config` and the split/detach
 /// bindings exercised against a real 0.7.5 TUI attach (2026-08-02); a
 /// same-burst prefix+key registers once the client is interactive.
+/// Deliberately curated small (user-trimmed 2026-08-02): zoom, scrollback,
+/// rename-tab, the workspace picker, and the sidebar toggle are herdr UI the
+/// TUI already surfaces — the panel carries only the commands touch actually
+/// needs.
 /// Destructive commands are confirmed by our UI, then resolved and executed
 /// over the SSH control connection (`HerdrProbe.closeShortcutCommand`), so
 /// they follow herdr's server truth instead of a rebindable key and never
@@ -25,31 +29,24 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
     case splitLeftRight
     case splitTopBottom
     case nextPane
-    case togglePaneZoom
-    case editScrollback
     case closePane
     case newTab
     case nextTab
     case previousTab
-    case renameTab
     case closeTab
     case newWorkspace
-    case workspacePicker
     case renameWorkspace
-    case toggleSidebar
     case closeWorkspace
 
     var id: Self { self }
 
     var group: Group {
         switch self {
-        case .splitLeftRight, .splitTopBottom, .nextPane, .togglePaneZoom,
-             .editScrollback, .closePane:
+        case .splitLeftRight, .splitTopBottom, .nextPane, .closePane:
             .panes
-        case .newTab, .nextTab, .previousTab, .renameTab, .closeTab:
+        case .newTab, .nextTab, .previousTab, .closeTab:
             .tabs
-        case .newWorkspace, .workspacePicker, .renameWorkspace, .toggleSidebar,
-             .closeWorkspace:
+        case .newWorkspace, .renameWorkspace, .closeWorkspace:
             .workspaces
         }
     }
@@ -59,18 +56,13 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
         case .splitLeftRight: "Split Left / Right"
         case .splitTopBottom: "Split Top / Bottom"
         case .nextPane: "Next Pane"
-        case .togglePaneZoom: "Toggle Pane Zoom"
-        case .editScrollback: "Edit Scrollback"
         case .closePane: "Close Pane"
         case .newTab: "New Tab"
         case .nextTab: "Next Tab"
         case .previousTab: "Previous Tab"
-        case .renameTab: "Rename Tab"
         case .closeTab: "Close Tab"
         case .newWorkspace: "New Workspace"
-        case .workspacePicker: "Workspace Picker"
         case .renameWorkspace: "Rename Workspace"
-        case .toggleSidebar: "Toggle Sidebar"
         case .closeWorkspace: "Close Workspace"
         }
     }
@@ -83,18 +75,13 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
         case .splitLeftRight: "split_vertical"
         case .splitTopBottom: "split_horizontal"
         case .nextPane: "cycle_pane_next"
-        case .togglePaneZoom: "zoom"
-        case .editScrollback: "edit_scrollback"
         case .closePane: "close_pane"
         case .newTab: "new_tab"
         case .nextTab: "next_tab"
         case .previousTab: "previous_tab"
-        case .renameTab: "rename_tab"
         case .closeTab: "close_tab"
         case .newWorkspace: "new_workspace"
-        case .workspacePicker: "workspace_picker"
         case .renameWorkspace: "rename_workspace"
-        case .toggleSidebar: "toggle_sidebar"
         case .closeWorkspace: "close_workspace"
         }
     }
@@ -107,16 +94,11 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
         case .splitLeftRight: "v"
         case .splitTopBottom: "-"
         case .nextPane: "\t"
-        case .togglePaneZoom: "z"
-        case .editScrollback: "e"
         case .newTab: "c"
         case .nextTab: "n"
         case .previousTab: "p"
-        case .renameTab: "T"
         case .newWorkspace: "N"
-        case .workspacePicker: "w"
         case .renameWorkspace: "W"
-        case .toggleSidebar: "b"
         case .closePane, .closeTab, .closeWorkspace: nil
         }
     }
@@ -136,7 +118,6 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
         guard !requiresDoubleActivation else { return "2×" }
         switch self {
         case .nextPane: return "⌃B ⇥"
-        case .renameTab: return "⌃B ⇧T"
         case .newWorkspace: return "⌃B ⇧N"
         case .renameWorkspace: return "⌃B ⇧W"
         default: return "⌃B \(binding.map { String($0).uppercased() } ?? "")"

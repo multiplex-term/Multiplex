@@ -446,10 +446,10 @@ HRDR SHORTCUTS — the TMUX panel's herdr sibling
 A herdr tab now has the shortcut panel tmux tabs always had: the rail key
 (and the top-bar chip) reads HRDR and opens HERDR SHORTCUTS — herdr's
 stock ⌃B defaults, with the config action names as the rebinding
-reference. Splits (⌃B V left/right, ⌃B − top/bottom), Next Pane, Toggle
-Pane Zoom, Edit Scrollback, tab commands, workspace commands, Toggle
-Sidebar. The three closes take a second press, then close exactly what
-the server says is focused — no keybinding involved, so a rebound prefix
+reference. A deliberately small set: Splits (⌃B V left/right, ⌃B −
+top/bottom), Next Pane, New/Next/Previous Tab, New/Rename Workspace.
+The three closes take a second press, then close exactly what the
+server says is focused — no keybinding involved, so a rebound prefix
 can't misfire them. A Switch Workspace section lists the session's
 workspaces; tapping one moves the whole session's focus (every attached
 client follows — that is herdr).
@@ -457,7 +457,7 @@ client follows — that is herdr).
 - Attach a herdr session on iPad: HRDR sits exactly where TMUX does on a
   tmux tab, same width; press it.
 - Split Left / Right, then Split Top / Bottom: panes land side by side,
-  then stacked. Toggle Pane Zoom fills and restores.
+  then stacked.
 - Close Pane once: the row arms ("press again to close"); press again and
   the focused pane closes. Same shape for Close Tab / Close Workspace.
 - With two or more workspaces, Switch Workspace lists them numbered, the

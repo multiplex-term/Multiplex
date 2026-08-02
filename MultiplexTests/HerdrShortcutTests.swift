@@ -11,16 +11,11 @@ final class HerdrShortcutTests: XCTestCase {
             .splitLeftRight: Character("v").asciiValue!,
             .splitTopBottom: Character("-").asciiValue!,
             .nextPane: 0x09,
-            .togglePaneZoom: Character("z").asciiValue!,
-            .editScrollback: Character("e").asciiValue!,
             .newTab: Character("c").asciiValue!,
             .nextTab: Character("n").asciiValue!,
             .previousTab: Character("p").asciiValue!,
-            .renameTab: Character("T").asciiValue!,
             .newWorkspace: Character("N").asciiValue!,
-            .workspacePicker: Character("w").asciiValue!,
             .renameWorkspace: Character("W").asciiValue!,
-            .toggleSidebar: Character("b").asciiValue!,
         ]
 
         let safeShortcuts = HerdrShortcut.allCases.filter { !$0.requiresDoubleActivation }
@@ -37,7 +32,6 @@ final class HerdrShortcutTests: XCTestCase {
         XCTAssertEqual(HerdrShortcut.splitTopBottom.bindingLabel, "⌃B -")
         XCTAssertEqual(HerdrShortcut.nextPane.bindingLabel, "⌃B ⇥")
         XCTAssertEqual(HerdrShortcut.newWorkspace.bindingLabel, "⌃B ⇧N")
-        XCTAssertEqual(HerdrShortcut.renameTab.bindingLabel, "⌃B ⇧T")
         XCTAssertEqual(HerdrShortcut.renameWorkspace.bindingLabel, "⌃B ⇧W")
     }
 
@@ -61,7 +55,7 @@ final class HerdrShortcutTests: XCTestCase {
         XCTAssertEqual(HerdrShortcut.splitLeftRight.command, "split_vertical")
         XCTAssertEqual(HerdrShortcut.splitTopBottom.command, "split_horizontal")
         XCTAssertEqual(HerdrShortcut.nextPane.command, "cycle_pane_next")
-        XCTAssertEqual(HerdrShortcut.workspacePicker.command, "workspace_picker")
+        XCTAssertEqual(HerdrShortcut.renameWorkspace.command, "rename_workspace")
         XCTAssertEqual(HerdrShortcut.closeWorkspace.command, "close_workspace")
     }
 
@@ -71,8 +65,8 @@ final class HerdrShortcutTests: XCTestCase {
         XCTAssertEqual(HerdrShortcut.Group.allCases, [.panes, .tabs, .workspaces])
         XCTAssertEqual(grouped.count, HerdrShortcut.allCases.count)
         XCTAssertEqual(Set(grouped), Set(HerdrShortcut.allCases))
-        XCTAssertEqual(HerdrShortcut.togglePaneZoom.group, .panes)
+        XCTAssertEqual(HerdrShortcut.splitLeftRight.group, .panes)
         XCTAssertEqual(HerdrShortcut.newTab.group, .tabs)
-        XCTAssertEqual(HerdrShortcut.toggleSidebar.group, .workspaces)
+        XCTAssertEqual(HerdrShortcut.renameWorkspace.group, .workspaces)
     }
 }

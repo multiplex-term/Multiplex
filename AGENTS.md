@@ -753,9 +753,11 @@ logic belongs — keep parsing/command-building out of views.
   target name falls back to the fresh-session mint; a failed in-session
   create is a visible failure, never a fallback mint. herdr reports no client count or creation time.
   The shortcut panel has a herdr variant (`HerdrShortcut`, pure + tested;
-  the rail key face reads HRDR): non-destructive rows send herdr's stock
+  the rail key face reads HRDR; deliberately curated small — zoom,
+  scrollback, rename-tab, picker, and sidebar rows were trimmed
+  2026-08-02): non-destructive rows send herdr's stock
   ⌃B defaults through SwiftTerm (read from `herdr --default-config`,
-  split/zoom exercised against a real 0.7.5 TUI attach 2026-08-02 —
+  splits exercised against a real 0.7.5 TUI attach 2026-08-02 —
   `split_vertical` ⌃B V is left/right, `split_horizontal` ⌃B − is
   top/bottom; a same-burst prefix+key registers), while the confirmed
   closes resolve the focused pane/tab/workspace from ONE snapshot exec
