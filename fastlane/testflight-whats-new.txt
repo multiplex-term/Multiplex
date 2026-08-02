@@ -3,6 +3,7 @@
   - Bind: Add Host ▸ BIND carries a TMUX | HERDR choice, so a herdr machine arrives as a herdr host instead of needing a fix in Host Settings.
   - FAQ: the "no sessions on the deck" answer switches its install commands between TMUX and HERDR in place.
   - + TAB: leads with New Session on herdr tabs too — a new session as its own Multiplex tab, agents included, starting in the pane's directory, same as tmux; a second entry, New Tab in Workspace, instead adds a tab to the workspace you're in (same directory rule, herdr moves you to it) with no new Multiplex tab. The deck's New Session Working Directory choice lands on herdr now too.
+  - Host Settings: the New session defaults working-directories editor now shows on herdr hosts as well — paths added there feed New Session, the Host widget, and the Open Agent Shortcut.
   - HRDR shortcuts: herdr tabs get their own shortcut panel (splits, tabs, workspaces, confirmed closes, Switch Workspace); tall panels scroll on iPhone.
   - LIVE lamp: a herdr tile reads ● LIVE while one of your own terminal windows is attached to it.
   - FILE attach: FILE and drag-and-drop work on herdr tabs — upload into the focused pane's directory, path typed, never submitted.

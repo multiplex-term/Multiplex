@@ -122,10 +122,14 @@ app.multiplexterm.multiplex`):
   session).
 - `MULTIPLEX_AUTO_SETTINGS=1|theme` / `MULTIPLEX_AUTO_FAQ=1` — open those
   sheets for headless capture (`theme` pushes the theme editor).
-- `MULTIPLEX_AUTO_HOST_SETTINGS=1|models|backend` — opens the first host's
-  edit sheet (regression-checks the Observation environment across the sheet
-  boundary — a missing HostStore is a fatal error); `models` scrolls to the
-  Agent launch models section, `backend` to the tmux/herdr Backend section.
+- `MULTIPLEX_AUTO_HOST_SETTINGS=1|models|backend|directories` — opens the
+  first host's edit sheet (regression-checks the Observation environment
+  across the sheet boundary — a missing HostStore is a fatal error);
+  `models` scrolls to the Agent launch models section, `backend` to the
+  tmux/herdr Backend section, `directories` to the New session defaults
+  working-directories editor (shown for BOTH backends — the herdr mint
+  roots a session's world with these; only the tmux options editor stays
+  tmux-scoped).
 - `MULTIPLEX_KEYCHAIN_TIP=locked|unlocked|missing` — forces the keychain
   verdict. The sign-in-screen gate still applies: inject a needle first
   (e.g. `tmux send-keys -t agent:cc 'Select login method:' Enter`).

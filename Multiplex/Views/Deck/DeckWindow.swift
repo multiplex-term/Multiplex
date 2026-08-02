@@ -954,9 +954,9 @@ final class DeckWindowViewController: UIViewController {
     }
 
     private func presentHostSettingsForVerificationIfRequested() async {
-        guard ["1", "models", "backend"].contains(ProcessInfo.processInfo.environment[
-            "MULTIPLEX_AUTO_HOST_SETTINGS"
-        ]) else { return }
+        guard ["1", "models", "backend", "directories"].contains(
+            ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_HOST_SETTINGS"]
+        ) else { return }
         for _ in 0..<50 {
             if let host = configuration.store.hosts.first {
                 requestPresentation(.editHost(host))

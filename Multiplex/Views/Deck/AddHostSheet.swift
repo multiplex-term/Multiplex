@@ -1416,12 +1416,13 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         stack.spacing = 8
         backendSection.setDetail(backendDetail)
         backendSection.setRows([AddHostInsetRow(contentView: stack)])
-        // Herdr owns a session's world and has no analog of tmux's targeted
-        // options. Keep both stored values for a later switch back; hide the
-        // editors rather than claiming they affect herdr sessions.
-        let usesHerdr = form.sessionBackend == .herdr
-        workingDirectoriesSection.isHidden = usesHerdr
-        tmuxConfSection.isHidden = usesHerdr
+        // Only the tmux options editor is tmux-scoped (herdr has no analog
+        // of tmux's targeted set-option calls; keep the stored value for a
+        // later switch back rather than claiming it affects herdr).
+        // Working directories apply to BOTH backends: the herdr mint roots
+        // a fresh session's world by cd'ing the headless spawn, so the
+        // paths here feed New Session, widgets, and Shortcuts either way.
+        tmuxConfSection.isHidden = form.sessionBackend == .herdr
     }
 
     // MARK: Transport
@@ -1798,8 +1799,10 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         ]
         let shouldScrollModels = requestedSection == "models"
         let shouldScrollBackend = requestedSection == "backend"
+        let shouldScrollDirectories = requestedSection == "directories"
         let shouldScrollElsewhere = AddHostAutoOpen.requested == .bindElsewhere
-        guard shouldScrollModels || shouldScrollBackend || shouldScrollElsewhere
+        guard shouldScrollModels || shouldScrollBackend || shouldScrollDirectories
+            || shouldScrollElsewhere
         else { return }
         didScheduleDebugScroll = true
         debugScrollTask = Task { @MainActor [weak self] in
@@ -1812,6 +1815,10 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 // Back off the navigation bar's inset so the section header
                 // and its caption clear the translucent bar in a capture.
                 targetY = self.backendSection.convert(.zero, to: self.scrollView).y
+                    - self.scrollView.adjustedContentInset.top
+            } else if shouldScrollDirectories {
+                targetY = self.workingDirectoriesSection
+                    .convert(.zero, to: self.scrollView).y
                     - self.scrollView.adjustedContentInset.top
             } else if let bindContainer = self.bindContainer {
                 targetY = bindContainer.convert(

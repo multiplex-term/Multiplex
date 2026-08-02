@@ -206,7 +206,7 @@ final class AddHostUIKitTests: XCTestCase {
         } ?? false)
     }
 
-    func testHerdrBackendUpdatesSignalCopyAndHidesTmuxOnlyDefaults() throws {
+    func testHerdrBackendUpdatesSignalCopyAndHidesOnlyTheTmuxOptionsEditor() throws {
         let fixture = makeFixture()
         defer { clean(fixture) }
         fixture.controller.loadViewIfNeeded()
@@ -228,7 +228,11 @@ final class AddHostUIKitTests: XCTestCase {
             .first { $0.accessibilityIdentifier == "addhost.section.directories" }
         let tmuxConf = descendants(of: UIView.self, in: fixture.controller.view)
             .first { $0.accessibilityIdentifier == "addhost.section.tmuxConf" }
-        XCTAssertTrue(directories?.isHidden == true)
+        XCTAssertTrue(
+            directories?.isHidden == false,
+            "working directories root a herdr session's world too — "
+                + "only the tmux options editor is tmux-scoped"
+        )
         XCTAssertTrue(tmuxConf?.isHidden == true)
     }
 
