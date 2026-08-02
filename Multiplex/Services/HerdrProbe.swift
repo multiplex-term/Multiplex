@@ -33,9 +33,14 @@ import Foundation
 /// - `session delete` requires `session stop` first, and herdr itself
 ///   refuses to delete the default session — the app never needs to know
 ///   which one that is.
-/// - No API surface reports attached clients, so herdr sessions never
-///   claim the ATTACHED lamp: `clientCount` stays 0 and the tile simply
-///   doesn't say what nothing can verify.
+/// - No API surface reports attached clients (re-verified 2026-08-02
+///   across `session list --json`, `api snapshot`, `status --json`, and
+///   the bundled `api schema`: only the socket-only `client.window_title`
+///   reply leaks a `no_foreground_client` reason, and no CLI verb reaches
+///   it), so `clientCount` stays 0 here and the tile's telemetry says
+///   nothing about clients. The LIVE lamp instead answers for the one
+///   client the app can verify — its own open terminal tab — through
+///   `Host.SessionBackend.isSessionLive`.
 ///
 /// The parser maps herdr's model onto the existing tmux records —
 /// **session → `TmuxSession`, workspace → `TmuxWindow`** (represented by
