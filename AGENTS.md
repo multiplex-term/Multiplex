@@ -189,8 +189,8 @@ app.multiplexterm.multiplex.<name>`:
   host-side: `herdr --session <name> api snapshot` gains a tab in the
   focused workspace and no session is minted).
 - `debug.tmuxshortcuts` / `debug.customcommands` / `debug.msghistory` — open
-  the tmux-shortcut popover / Command Setup editor / agent HISTORY panel for
-  layout capture.
+  the focused tab's shortcut popover (TMUX content, or HRDR on a herdr
+  tab) / Command Setup editor / agent HISTORY panel for layout capture.
 - `debug.link` — activate the first visible link through the resolve →
   policy → confirmation path (URL → link sheet, path → file-viewer sheet;
   text both resolvers decline must present nothing). `debug.linkopen` runs
@@ -454,7 +454,12 @@ logic belongs — keep parsing/command-building out of views.
   390/420 pt cutoffs must stay in lockstep with the measured `KeyBarRow`
   tiers (375 pt locked floor keeps RET; narrow locked phones move TMUX to
   a top-right button, and the overflow deliberately has no duplicate tmux
-  entry). The top popover opens downward; while presented, the arbiter
+  entry). "TMUX" names the shortcut-key SLOT: a herdr tab fills it with
+  HRDR — four mono characters, so every tier and cutoff holds unchanged —
+  and both open the shared `ShortcutPanelViewController`, whose content
+  (`ShortcutPanelContent.tmux`/`.herdr`) is the ONE place a backend's
+  shortcut set lives. The panel root scrolls when a phone popover clamps
+  its height — never clip rows. The top popover opens downward; while presented, the arbiter
   resigns the terminal (a docked keyboard would clip the grid) and
   restores only if that tab still owns focus. Every key sends through
   `TerminalView.send` → delegate → ordered pump — never a side channel;
@@ -747,6 +752,20 @@ logic belongs — keep parsing/command-building out of views.
   session's world: tmux active-pane cwd / herdr server default). A dead
   target name falls back to the fresh-session mint; a failed in-session
   create is a visible failure, never a fallback mint. herdr reports no client count or creation time.
+  The shortcut panel has a herdr variant (`HerdrShortcut`, pure + tested;
+  the rail key face reads HRDR; deliberately curated small — zoom,
+  scrollback, rename-tab, picker, and sidebar rows were trimmed
+  2026-08-02): non-destructive rows send herdr's stock
+  ⌃B defaults through SwiftTerm (read from `herdr --default-config`,
+  splits exercised against a real 0.7.5 TUI attach 2026-08-02 —
+  `split_vertical` ⌃B V is left/right, `split_horizontal` ⌃B − is
+  top/bottom; a same-burst prefix+key registers), while the confirmed
+  closes resolve the focused pane/tab/workspace from ONE snapshot exec
+  and close by id (`HerdrProbe.parseFocusedCloseTarget` — strictly what
+  the server names focused, never a guess) so a rebound key can't
+  misfire them. The panel's Switch Workspace section rides
+  `workspace list` → `workspace focus <id>` on the control connection;
+  response-derived ids pass the bake vet before splicing.
   Keep the Agent Gallery withdrawn until transcript support exists.
   A terminal window's `+ TAB` session press changes shape the same way
   (`TerminalRoute.newTabTarget` — the one place the entry's name, the

@@ -17,7 +17,9 @@ final class TerminalSurfaceView: UIView {
         var contentSafeArea: UIEdgeInsets = .zero
         var railOwnsBottomSafeArea = false
         var isActive = true
-        var showsTmuxShortcuts = true
+        /// Which multiplexer owns the rail's shortcut key (TMUX/HRDR); nil
+        /// drops the key — plain shells and auxiliary panes have no panel.
+        var shortcutBackend: Host.SessionBackend?
     }
 
     private static let focusTapName = "multiplex.focus-tap"
@@ -181,13 +183,13 @@ final class TerminalSurfaceView: UIView {
         let keyBar = TerminalKeyBar(
             terminal: view,
             controller: controller,
-            performTmuxShortcut: { [weak controller] shortcut in
-                controller?.performTmuxShortcut(shortcut)
+            performShortcut: { [weak controller] item in
+                controller?.performPanelShortcut(item)
             },
             finishTmuxCopyMode: { [weak controller] in
                 controller?.finishTmuxCopyMode()
             },
-            showsTmuxShortcuts: configuration.showsTmuxShortcuts
+            shortcutBackend: configuration.shortcutBackend
         )
         keyBar.contentSafeArea = configuration.contentSafeArea
         coordinator.keyBar = keyBar

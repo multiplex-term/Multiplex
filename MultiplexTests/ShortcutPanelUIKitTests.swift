@@ -3,9 +3,9 @@ import XCTest
 @testable import Multiplex
 
 @MainActor
-final class TmuxShortcutPanelUIKitTests: XCTestCase {
+final class ShortcutPanelUIKitTests: XCTestCase {
     func testNativePanelRendersEveryGroupedShortcutWithTallySizingAndAccessibility() throws {
-        let controller = TmuxShortcutPanelViewController(select: { _ in })
+        let controller = ShortcutPanelViewController(content: .tmux, select: { _ in })
         controller.loadViewIfNeeded()
 
         let controls = descendants(of: UIControl.self, in: controller.view)
@@ -18,7 +18,7 @@ final class TmuxShortcutPanelUIKitTests: XCTestCase {
         XCTAssertEqual(headers, ["TMUX SHORTCUTS", "Panes", "Windows"])
 
         let size = controller.fittingContentSize()
-        XCTAssertEqual(size.width, TmuxShortcutPanelViewController.preferredWidth)
+        XCTAssertEqual(size.width, ShortcutPanelViewController.preferredWidth)
         XCTAssertGreaterThan(size.height, 0)
         XCTAssertEqual(controller.preferredContentSize, size)
 
@@ -36,22 +36,49 @@ final class TmuxShortcutPanelUIKitTests: XCTestCase {
         )
     }
 
+    func testHerdrPanelRendersItsOwnHeaderGroupsAndBindings() throws {
+        let controller = ShortcutPanelViewController(content: .herdr, select: { _ in })
+        controller.loadViewIfNeeded()
+
+        let controls = descendants(of: UIControl.self, in: controller.view)
+            .filter { $0.accessibilityIdentifier?.hasPrefix("herdrShortcut.") == true }
+        XCTAssertEqual(controls.count, HerdrShortcut.allCases.count)
+
+        let headers = descendants(of: UIKitChassisLabel.self, in: controller.view)
+            .filter { $0.accessibilityTraits.contains(.header) }
+            .compactMap(\.accessibilityLabel)
+        XCTAssertEqual(headers, ["HERDR SHORTCUTS", "Panes", "Tabs", "Workspaces"])
+
+        let split = try XCTUnwrap(
+            control("herdrShortcut.splitLeftRight", in: controller.view)
+        )
+        XCTAssertEqual(split.accessibilityLabel, "Split Left / Right, split_vertical, ⌃B V")
+
+        let closeWorkspace = try XCTUnwrap(
+            control("herdrShortcut.closeWorkspace", in: controller.view)
+        )
+        XCTAssertEqual(
+            closeWorkspace.accessibilityLabel,
+            "Close Workspace, close_workspace, press twice to confirm"
+        )
+    }
+
     func testSafeShortcutSelectsImmediatelyAndDestructiveShortcutRequiresSecondPress() throws {
-        var selected: [TmuxShortcut] = []
-        let controller = TmuxShortcutPanelViewController {
+        var selected: [ShortcutPanelItem] = []
+        let controller = ShortcutPanelViewController(content: .tmux) {
             selected.append($0)
         }
         controller.loadViewIfNeeded()
 
         let copyMode = try XCTUnwrap(control("tmuxShortcut.copyMode", in: controller.view))
         copyMode.sendActions(for: .touchUpInside)
-        XCTAssertEqual(selected, [.copyMode])
+        XCTAssertEqual(selected.map(\.payload), [.tmux(.copyMode)])
 
         let closeWindow = try XCTUnwrap(
             control("tmuxShortcut.closeWindow", in: controller.view)
         )
         closeWindow.sendActions(for: .touchUpInside)
-        XCTAssertEqual(selected, [.copyMode])
+        XCTAssertEqual(selected.map(\.payload), [.tmux(.copyMode)])
         XCTAssertEqual(
             closeWindow.accessibilityLabel,
             "Close Window, press again to close"
@@ -60,23 +87,38 @@ final class TmuxShortcutPanelUIKitTests: XCTestCase {
         XCTAssertTrue(renderedText(in: closeWindow).contains("AGAIN"))
 
         closeWindow.sendActions(for: .touchUpInside)
-        XCTAssertEqual(selected, [.copyMode, .closeWindow])
+        XCTAssertEqual(selected.map(\.payload), [.tmux(.copyMode), .tmux(.closeWindow)])
         XCTAssertEqual(
             closeWindow.accessibilityLabel,
             "Close Window, kill-window, press twice to confirm"
         )
     }
 
+    func testHerdrCloseRowsCarryTheirPayloadThroughTheSameConfirmation() throws {
+        var selected: [ShortcutPanelItem] = []
+        let controller = ShortcutPanelViewController(content: .herdr) {
+            selected.append($0)
+        }
+        controller.loadViewIfNeeded()
+
+        let closeTab = try XCTUnwrap(control("herdrShortcut.closeTab", in: controller.view))
+        closeTab.sendActions(for: .touchUpInside)
+        XCTAssertEqual(selected, [])
+        closeTab.sendActions(for: .touchUpInside)
+        XCTAssertEqual(selected.map(\.payload), [.herdr(.closeTab)])
+    }
+
     func testWindowChoicesOnlyRenderWhenSwitchingIsUsefulAndSelectionDisarmsClose() throws {
-        var selectedWindow: TmuxWindowChoice?
-        let controller = TmuxShortcutPanelViewController(
+        var selectedChoice: TmuxWindowChoice?
+        let controller = ShortcutPanelViewController(
+            content: .tmux,
             select: { _ in },
-            selectWindow: { selectedWindow = $0 }
+            selectChoice: { selectedChoice = $0 }
         )
         controller.loadViewIfNeeded()
         let baseHeight = controller.fittingContentSize().height
 
-        controller.applyWindows([
+        controller.applyChoices([
             TmuxWindowChoice(tmuxID: "@1", index: 0, isActive: true, name: "main")
         ])
         XCTAssertNil(control("tmuxWindow.@1", in: controller.view))
@@ -86,7 +128,7 @@ final class TmuxShortcutPanelUIKitTests: XCTestCase {
             TmuxWindowChoice(tmuxID: "@1", index: 0, isActive: true, name: "main"),
             TmuxWindowChoice(tmuxID: "@2", index: 1, isActive: false, name: "deploy"),
         ]
-        controller.applyWindows(choices)
+        controller.applyChoices(choices)
         XCTAssertGreaterThan(controller.fittingContentSize().height, baseHeight)
 
         let active = try XCTUnwrap(control("tmuxWindow.@1", in: controller.view))
@@ -99,17 +141,36 @@ final class TmuxShortcutPanelUIKitTests: XCTestCase {
         XCTAssertEqual(closePane.accessibilityLabel, "Close Pane, press again to close")
 
         deploy.sendActions(for: .touchUpInside)
-        XCTAssertEqual(selectedWindow, choices[1])
+        XCTAssertEqual(selectedChoice, choices[1])
         XCTAssertEqual(
             closePane.accessibilityLabel,
             "Close Pane, kill-pane, press twice to confirm"
         )
     }
 
-    func testManyWindowsUseCappedInternalScrollRegion() {
-        let controller = TmuxShortcutPanelViewController(select: { _ in })
+    func testHerdrPanelSpeaksWorkspaceInItsSwitchSection() throws {
+        let controller = ShortcutPanelViewController(content: .herdr, select: { _ in })
         controller.loadViewIfNeeded()
-        controller.applyWindows((0..<9).map {
+
+        controller.applyChoices([
+            TmuxWindowChoice(tmuxID: "w1", index: 1, isActive: true, name: "api"),
+            TmuxWindowChoice(tmuxID: "w2", index: 2, isActive: false, name: "web"),
+        ])
+
+        let title = descendants(of: UIKitChassisLabel.self, in: controller.view)
+            .first { $0.accessibilityIdentifier == "herdrWorkspaceSection.title" }
+        XCTAssertEqual(title?.accessibilityLabel, "Switch Workspace")
+
+        let active = try XCTUnwrap(control("herdrWorkspace.w1", in: controller.view))
+        XCTAssertEqual(active.accessibilityLabel, "Workspace 1, api, current workspace")
+        let other = try XCTUnwrap(control("herdrWorkspace.w2", in: controller.view))
+        XCTAssertEqual(other.accessibilityLabel, "Switch to workspace 2, web")
+    }
+
+    func testManyWindowsUseCappedInternalScrollRegion() {
+        let controller = ShortcutPanelViewController(content: .tmux, select: { _ in })
+        controller.loadViewIfNeeded()
+        controller.applyChoices((0..<9).map {
             TmuxWindowChoice(
                 tmuxID: "@\($0)",
                 index: $0,

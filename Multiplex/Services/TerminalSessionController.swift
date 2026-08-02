@@ -810,6 +810,16 @@ final class TerminalSessionController {
         }
     }
 
+    /// One entry point for the shared shortcut panel: dispatch by the row's
+    /// own payload. A payload mismatched to this tab's backend fails closed
+    /// on the per-backend route guards below.
+    func performPanelShortcut(_ item: ShortcutPanelItem) {
+        switch item.payload {
+        case .tmux(let shortcut): performTmuxShortcut(shortcut)
+        case .herdr(let shortcut): performHerdrShortcut(shortcut)
+        }
+    }
+
     /// Run one command from the shared tmux panel. Ordinary shortcuts enter
     /// through SwiftTerm exactly like keyboard input. Destructive shortcuts
     /// were already confirmed by the panel's second press and use an SSH exec
@@ -837,7 +847,61 @@ final class TerminalSessionController {
         guard let command = TmuxProbe.directShortcutCommand(
             shortcut, sessionName: sessionName
         ) else { return }
-        Task { await executeTmuxControlCommand(command) }
+        Task { await executeControlCommand(command) }
+    }
+
+    /// Run one command from the herdr panel (HRDR) — `performTmuxShortcut`'s
+    /// herdr-backend sibling. Non-destructive rows send herdr's stock ⌃B
+    /// binding through SwiftTerm; the confirmed closes resolve the focused
+    /// target from one snapshot exec and close it by id, so they follow the
+    /// server's truth rather than a rebindable key.
+    func performHerdrShortcut(_ shortcut: HerdrShortcut) {
+        guard status == .live, route.sessionBackend == .herdr,
+              let sessionName = route.sessionName
+        else { return }
+        if case .finding = historyJump { return }
+        if let input = shortcut.bindingInput {
+            terminalView?.send(input)
+            return
+        }
+        guard let scope = shortcut.closeScope else { return }
+        Task { await closeHerdrFocusedTarget(scope, sessionName: sessionName) }
+    }
+
+    /// Snapshot → focused id → close, two control execs. An unreadable
+    /// snapshot or an unnamed focus declines silently — the tmux closes'
+    /// `[ -n "$target" ]` posture: a close must never guess its target.
+    private func closeHerdrFocusedTarget(
+        _ scope: HerdrShortcut.CloseScope, sessionName: String
+    ) async {
+        let snapshot = HerdrProbe.snapshotCommand(sessionName: sessionName)
+        guard let output = try? await withControlConnection({
+            try await $0.exec(snapshot)
+        }),
+            let target = HerdrProbe.parseFocusedCloseTarget(output, scope: scope),
+            let close = HerdrProbe.closeShortcutCommand(
+                sessionName: sessionName, scope: scope, targetID: target
+            )
+        else { return }
+        await executeControlCommand(close)
+    }
+
+    /// The shortcut panel's switch list — tmux windows or herdr workspaces,
+    /// decided by this tab's backend so the panel never learns one.
+    func loadShortcutSwitchChoices() async -> [TmuxWindowChoice]? {
+        switch route.sessionBackend {
+        case .tmux: await loadTmuxWindowList()
+        case .herdr: await loadHerdrWorkspaceList()
+        case nil: nil
+        }
+    }
+
+    func selectShortcutSwitchChoice(_ choice: TmuxWindowChoice) {
+        switch route.sessionBackend {
+        case .tmux: selectTmuxWindow(choice)
+        case .herdr: selectHerdrWorkspace(choice)
+        case nil: break
+        }
     }
 
     /// The shortcut panel's window list, read through the control path so
@@ -861,7 +925,32 @@ final class TerminalSessionController {
         guard status == .live, route.usesTmux else { return }
         if case .finding = historyJump { return }
         let command = TmuxProbe.selectWindowCommand(windowID: window.tmuxID)
-        Task { await executeTmuxControlCommand(command) }
+        Task { await executeControlCommand(command) }
+    }
+
+    /// The herdr panel's workspace rows, through the same control path.
+    func loadHerdrWorkspaceList() async -> [TmuxWindowChoice]? {
+        guard status == .live, route.sessionBackend == .herdr,
+              let sessionName = route.sessionName
+        else { return nil }
+        let command = HerdrProbe.workspaceListCommand(sessionName: sessionName)
+        guard let output = try? await withControlConnection({
+            try await $0.exec(command)
+        }) else { return nil }
+        return HerdrProbe.parseWorkspaceChoices(output)
+    }
+
+    /// Focus one workspace of the attached herdr session — the session's ONE
+    /// global focus moves, and the attached client follows on its own.
+    func selectHerdrWorkspace(_ choice: TmuxWindowChoice) {
+        guard status == .live, route.sessionBackend == .herdr,
+              let sessionName = route.sessionName
+        else { return }
+        if case .finding = historyJump { return }
+        guard let command = HerdrProbe.focusWorkspaceCommand(
+            sessionName: sessionName, workspaceID: choice.tmuxID
+        ) else { return }
+        Task { await executeControlCommand(command) }
     }
 
     /// Leave the contextual copy UI and tmux copy mode together. Escape is
@@ -987,7 +1076,7 @@ final class TerminalSessionController {
     /// SSH tabs already own an exec-capable connection next to their PTY.
     /// Mosh tabs deliberately do not, so a destructive user action opens a
     /// short-lived SSH control connection and closes it after the command.
-    private func executeTmuxControlCommand(_ command: String) async {
+    private func executeControlCommand(_ command: String) async {
         if let connection {
             _ = try? await connection.exec(command)
             return

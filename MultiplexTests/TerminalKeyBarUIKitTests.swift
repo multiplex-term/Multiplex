@@ -94,9 +94,9 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
         let bar = TerminalKeyBar(
             terminal: terminal,
             controller: nil,
-            performTmuxShortcut: { _ in },
+            performShortcut: { _ in },
             finishTmuxCopyMode: {},
-            showsTmuxShortcuts: true
+            shortcutBackend: .tmux
         )
         bar.frame = CGRect(x: 0, y: 0, width: 420, height: TerminalKeyBar.barHeight)
         bar.layoutIfNeeded()
