@@ -59,6 +59,78 @@ struct AttentionAlert {
     /// What the blocking dialog asks (`AgentAttention.dialogSummary`),
     /// when the event is needs-input and the tail yielded readable copy.
     var dialogSummary: String?
+
+    /// What this alert's banner should get back to when pressed.
+    var tapTarget: AttentionTapTarget {
+        AttentionTapTarget(
+            hostID: host.id,
+            sessionName: sessionName,
+            backend: host.sessionBackend,
+            tabID: tabID
+        )
+    }
+}
+
+/// The identity a posted banner carries into its own press, encoded into
+/// the notification's `userInfo` as strings only — a pressed banner may
+/// outlive the process that posted it, so nothing here can be a live
+/// reference. Backend is part of the identity for the same reason it is in
+/// `TerminalWorkspace.focusTab`: both namespaces may legally contain `main`.
+struct AttentionTapTarget: Equatable {
+    var hostID: UUID
+    var sessionName: String
+    var backend: Host.SessionBackend
+    /// The exact open tab for tab-scoped alerts (plain shells, in-band
+    /// bells); nil for session-scoped probe alerts.
+    var tabID: UUID?
+
+    /// Only a session-scoped probe alert names a real multiplexer session
+    /// that could be attached fresh. A tab-scoped alert's session name is
+    /// display copy ("shell") — pressing its banner after the tab closed
+    /// must never mint an attach to a namesake.
+    var sessionIsAttachable: Bool { tabID == nil }
+
+    private enum Key {
+        static let host = "attentionHostID"
+        static let session = "attentionSession"
+        static let backend = "attentionBackend"
+        static let tab = "attentionTabID"
+    }
+
+    init(
+        hostID: UUID, sessionName: String,
+        backend: Host.SessionBackend, tabID: UUID? = nil
+    ) {
+        self.hostID = hostID
+        self.sessionName = sessionName
+        self.backend = backend
+        self.tabID = tabID
+    }
+
+    var userInfo: [String: String] {
+        var info = [
+            Key.host: hostID.uuidString,
+            Key.session: sessionName,
+            Key.backend: backend.rawValue,
+        ]
+        if let tabID { info[Key.tab] = tabID.uuidString }
+        return info
+    }
+
+    /// Fail-soft: a banner from a build with a different payload shape
+    /// decodes to nil and the press just foregrounds the app.
+    init?(userInfo: [AnyHashable: Any]) {
+        guard let hostString = userInfo[Key.host] as? String,
+              let hostID = UUID(uuidString: hostString),
+              let sessionName = userInfo[Key.session] as? String,
+              let backendRaw = userInfo[Key.backend] as? String,
+              let backend = Host.SessionBackend(rawValue: backendRaw)
+        else { return nil }
+        self.hostID = hostID
+        self.sessionName = sessionName
+        self.backend = backend
+        tabID = (userInfo[Key.tab] as? String).flatMap(UUID.init(uuidString:))
+    }
 }
 
 /// The state classifier. Everything here matches *structure*, not prose —
