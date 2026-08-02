@@ -455,6 +455,85 @@ final class FleetWallUIKitTests: XCTestCase {
         XCTAssertTrue(copy.contains("LIVE"))
     }
 
+    func testSessionTileDragIsLocalStableAndHasNoBrightPreviewPlatter() throws {
+        let hostID = UUID()
+        let sourceSession = makeSession(name: "agent")
+        let targetSession = makeSession(name: "deploy")
+        var dropped: [String] = []
+
+        func makeTile(
+            session: TmuxSession,
+            droppedSession: @escaping (String) -> Void
+        ) -> FleetSessionTileView {
+            let tile = FleetSessionTileView()
+            tile.configure(FleetSessionTileConfiguration(
+                hostID: hostID,
+                session: session,
+                lines: ["$ tmux"],
+                attention: nil,
+                hasLiveAgentState: true,
+                hasOpenTab: false,
+                compact: false,
+                selected: false,
+                duplicateAttachTitle: "Attach in New Window",
+                openTabAccessibilityText: "",
+                attach: {},
+                attachNewWindow: {},
+                delete: {},
+                droppedSession: droppedSession
+            ))
+            tile.frame = CGRect(x: 0, y: 0, width: 360, height: 190)
+            tile.layoutIfNeeded()
+            return tile
+        }
+
+        let source = makeTile(session: sourceSession, droppedSession: { _ in })
+        let target = makeTile(session: targetSession, droppedSession: { dropped.append($0) })
+        let drag = try XCTUnwrap(
+            source.interactions.compactMap { $0 as? UIDragInteraction }.first
+        )
+        let dragSession = FleetDragSessionStub()
+        let items = source.dragInteraction(drag, itemsForBeginning: dragSession)
+        dragSession.items = items
+        let item = try XCTUnwrap(items.first)
+        let preview = try XCTUnwrap(item.previewProvider?())
+
+        XCTAssertEqual(preview.parameters.backgroundColor, UIColor.clear)
+        XCTAssertEqual(preview.parameters.visiblePath?.bounds, source.bounds)
+        XCTAssertEqual(preview.parameters.shadowPath?.bounds, source.bounds)
+        XCTAssertTrue(source.dragInteraction(
+            drag,
+            sessionIsRestrictedToDraggingApplication: dragSession
+        ))
+        XCTAssertTrue(source.dragInteraction(
+            drag,
+            prefersFullSizePreviewsFor: dragSession
+        ))
+
+        let drop = try XCTUnwrap(
+            target.interactions.compactMap { $0 as? UIDropInteraction }.first
+        )
+        let dropSession = FleetDropSessionStub(
+            items: items,
+            localDragSession: dragSession
+        )
+        XCTAssertEqual(
+            target.dropInteraction(drop, sessionDidUpdate: dropSession).operation,
+            .move
+        )
+        target.dropInteraction(drop, performDrop: dropSession)
+        XCTAssertEqual(dropped, [sourceSession.name])
+
+        let sourceDrop = try XCTUnwrap(
+            source.interactions.compactMap { $0 as? UIDropInteraction }.first
+        )
+        XCTAssertEqual(
+            source.dropInteraction(sourceDrop, sessionDidUpdate: dropSession).operation,
+            .forbidden,
+            "The source tile is not a destination"
+        )
+    }
+
     func testEmptyFleetWallMountsOnlyNativeControllersAndAwaitingAction() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("FleetWallUIKitTests-\(UUID().uuidString)")
@@ -598,9 +677,9 @@ final class FleetWallUIKitTests: XCTestCase {
         )
     }
 
-    private func makeSession() -> TmuxSession {
+    private func makeSession(name: String = "agent") -> TmuxSession {
         TmuxSession(
-            name: "agent",
+            name: name,
             windows: [
                 TmuxWindow(
                     index: 0,
@@ -668,5 +747,55 @@ final class FleetWallUIKitTests: XCTestCase {
             result.append(contentsOf: descendants(of: type, in: child))
         }
         return result
+    }
+}
+
+@MainActor
+private final class FleetDragSessionStub: NSObject, UIDragSession {
+    var localContext: Any?
+    var items: [UIDragItem] = []
+    let allowsMoveOperation = true
+    let isRestrictedToDraggingApplication = true
+
+    func location(in view: UIView) -> CGPoint { .zero }
+
+    func hasItemsConforming(toTypeIdentifiers typeIdentifiers: [String]) -> Bool {
+        false
+    }
+
+    func canLoadObjects(ofClass aClass: NSItemProviderReading.Type) -> Bool {
+        false
+    }
+}
+
+@MainActor
+private final class FleetDropSessionStub: NSObject, UIDropSession {
+    let items: [UIDragItem]
+    let localDragSession: UIDragSession?
+    let allowsMoveOperation = true
+    let isRestrictedToDraggingApplication = true
+    var progressIndicatorStyle = UIDropSessionProgressIndicatorStyle.none
+    let progress = Progress(totalUnitCount: 1)
+
+    init(items: [UIDragItem], localDragSession: UIDragSession?) {
+        self.items = items
+        self.localDragSession = localDragSession
+    }
+
+    func location(in view: UIView) -> CGPoint { .zero }
+
+    func hasItemsConforming(toTypeIdentifiers typeIdentifiers: [String]) -> Bool {
+        false
+    }
+
+    func canLoadObjects(ofClass aClass: NSItemProviderReading.Type) -> Bool {
+        false
+    }
+
+    func loadObjects(
+        ofClass aClass: NSItemProviderReading.Type,
+        completion: @escaping ([NSItemProviderReading]) -> Void
+    ) -> Progress {
+        progress
     }
 }

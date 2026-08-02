@@ -2074,8 +2074,45 @@ class FleetPressView: UIKitTallyBorderedView, UIContextMenuInteractionDelegate {
         _ interaction: UIContextMenuInteraction,
         previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
     ) -> UITargetedPreview? {
+        targetedPreview()
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
+    ) -> UITargetedPreview? {
+        targetedPreview()
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configuration: UIContextMenuConfiguration,
+        highlightPreviewForItemWithIdentifier identifier: NSCopying
+    ) -> UITargetedPreview? {
+        targetedPreview()
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configuration: UIContextMenuConfiguration,
+        dismissalPreviewForItemWithIdentifier identifier: NSCopying
+    ) -> UITargetedPreview? {
+        targetedPreview()
+    }
+
+    /// Preview windows do not inherit the app's glass trait. An explicit clear
+    /// background keeps UIKit from inserting its bright default platter around
+    /// the exact square tile during a menu highlight or drag lift.
+    func configurePreviewParameters(_ parameters: UIPreviewParameters) {
+        let path = UIBezierPath(rect: bounds)
+        parameters.backgroundColor = .clear
+        parameters.visiblePath = path
+        parameters.shadowPath = path
+    }
+
+    private func targetedPreview() -> UITargetedPreview {
         let parameters = UIPreviewParameters()
-        parameters.visiblePath = UIBezierPath(rect: bounds)
+        configurePreviewParameters(parameters)
         return UITargetedPreview(view: self, parameters: parameters)
     }
 
@@ -2246,6 +2283,12 @@ final class FleetSessionTileView: FleetPressView,
         ])
         let drag = UIDragInteraction(delegate: self)
         drag.isEnabled = true
+        // A gaze/pointer move past UIKit's hysteresis is already clear drag
+        // intent. Waiting out the lift delay made spatial reordering feel
+        // intermittent, especially beside the tile's long-press menu.
+        if #available(iOS 27.0, visionOS 27.0, *) {
+            drag.allowsPointerDragBeforeLiftDelay = true
+        }
         addInteraction(drag)
         addInteraction(UIDropInteraction(delegate: self))
         accessibilityIdentifier = "fleet.sessionTile"
@@ -2291,12 +2334,46 @@ final class FleetSessionTileView: FleetPressView,
     ) -> [UIDragItem] {
         guard let configuration else { return [] }
         let provider = NSItemProvider(object: configuration.session.name as NSString)
-        let item = UIDragItem(itemProvider: provider)
-        item.localObject = DragPayload(
+        let payload = DragPayload(
             hostID: configuration.hostID,
             sessionName: configuration.session.name
         )
+        session.localContext = payload
+        let item = UIDragItem(itemProvider: provider)
+        item.localObject = payload
+        // UIKit can ask for a fresh in-flight snapshot after the lift. Keep
+        // that snapshot transparent too; its default system background is the
+        // bright flash otherwise visible over the glass window.
+        item.previewProvider = { [weak self] in
+            guard let self else { return nil }
+            return UIDragPreview(
+                view: self,
+                parameters: self.dragPreviewParameters()
+            )
+        }
         return [item]
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        previewForLifting item: UIDragItem,
+        session: UIDragSession
+    ) -> UITargetedDragPreview? {
+        UITargetedDragPreview(view: self, parameters: dragPreviewParameters())
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        sessionIsRestrictedToDraggingApplication session: UIDragSession
+    ) -> Bool {
+        true
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        prefersFullSizePreviewsFor session: UIDragSession
+    ) -> Bool {
+        true
     }
 
     func dropInteraction(
@@ -2324,19 +2401,35 @@ final class FleetSessionTileView: FleetPressView,
     func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
         isDropTarget = false
         guard let configuration,
-              let item = session.items.first,
-              let payload = item.localObject as? DragPayload,
-              payload.hostID == configuration.hostID
+              let payload = dragPayload(from: session),
+              payload.hostID == configuration.hostID,
+              payload.sessionName != configuration.session.name
         else { return }
         configuration.droppedSession(payload.sessionName)
     }
 
-    /// Only this host's own session tiles reorder each other.
+    /// Only this host's own session tiles reorder each other. Session-level
+    /// local context is UIKit's durable in-app handoff; the item copy remains
+    /// a fallback for older drag implementations.
     private func accepts(_ session: UIDropSession) -> Bool {
-        guard let configuration else { return false }
-        return session.items.contains {
-            ($0.localObject as? DragPayload)?.hostID == configuration.hostID
+        guard let configuration,
+              let payload = dragPayload(from: session)
+        else { return false }
+        return payload.hostID == configuration.hostID
+            && payload.sessionName != configuration.session.name
+    }
+
+    private func dragPayload(from session: UIDropSession) -> DragPayload? {
+        if let payload = session.localDragSession?.localContext as? DragPayload {
+            return payload
         }
+        return session.items.lazy.compactMap { $0.localObject as? DragPayload }.first
+    }
+
+    private func dragPreviewParameters() -> UIDragPreviewParameters {
+        let parameters = UIDragPreviewParameters()
+        configurePreviewParameters(parameters)
+        return parameters
     }
 
     private func applyBorder() {
