@@ -312,3 +312,13 @@ the in-app drag identity now survives through the drop reliably.
 - Hover back over the source: it is not offered as a destination.
 - Hold without moving: the existing Attach in New Window / Delete menu still
   opens normally.
+
+HERDR BADGE ON THE DECK — see which hosts are not on tmux
+
+A host running the herdr backend wears a HERDR badge beside its address on
+the deck rail, the same way a mosh host wears MOSH. tmux hosts stay unbadged.
+
+- Flip a host to HERDR in Host Settings: the badge appears on its rail as
+  soon as the sheet closes; flip back to TMUX and it goes away.
+- A host that is both mosh and herdr shows MOSH then HERDR, side by side.
+- On iPhone the badge sits with the address line and never pushes SHELL off.

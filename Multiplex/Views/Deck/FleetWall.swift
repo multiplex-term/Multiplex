@@ -1134,6 +1134,7 @@ private final class FleetHostSectionView: UIView {
         let hostName: String
         let hostAddress: String
         let hostUsesMosh: Bool
+        let hostBackend: Host.SessionBackend
         let hostIsEnabled: Bool
         let phase: HostConnectionModel.Phase?
         let keyPassphraseRequired: Bool
@@ -1286,6 +1287,7 @@ private final class FleetHostSectionView: UIView {
             hostName: host.name,
             hostAddress: host.address,
             hostUsesMosh: host.useMosh,
+            hostBackend: host.sessionBackend,
             hostIsEnabled: host.isEnabled,
             phase: snapshot?.phase,
             keyPassphraseRequired: snapshot?.keyPassphraseChallenge != nil,
@@ -1532,6 +1534,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         let hostName: String
         let hostAddress: String
         let hostUsesMosh: Bool
+        let hostBackend: Host.SessionBackend
         let hostIsEnabled: Bool
         let phase: HostConnectionModel.Phase?
         let keyPassphraseRequired: Bool
@@ -1596,6 +1599,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
             hostName: host.name,
             hostAddress: host.address,
             hostUsesMosh: host.useMosh,
+            hostBackend: host.sessionBackend,
             hostIsEnabled: host.isEnabled,
             phase: phase,
             keyPassphraseRequired: keyPassphraseRequired,
@@ -1638,6 +1642,11 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         let mosh = FleetBadgeView(caption: "MOSH")
         mosh.accessibilityLabel = "Connects over mosh"
         mosh.isHidden = !host.useMosh
+        // tmux is the app's premise, so only the deviation is badged —
+        // the same rule the mosh badge follows for SSH.
+        let backend = FleetBadgeView(caption: "HERDR")
+        backend.accessibilityLabel = "Sessions run under herdr"
+        backend.isHidden = host.sessionBackend != .herdr
         let status = makeStatus(
             host: host,
             phase: phase,
@@ -1667,7 +1676,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
             first.axis = .horizontal
             first.alignment = .center
             first.spacing = 8
-            let second = UIStackView(arrangedSubviews: [address, mosh, UIView(), shell])
+            let second = UIStackView(arrangedSubviews: [address, mosh, backend, UIView(), shell])
             second.axis = .horizontal
             second.alignment = .center
             second.spacing = 8
@@ -1680,7 +1689,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
                 menuButton: menuButton
             )
             let row = UIStackView(arrangedSubviews: [
-                name, address, mosh, UIView(), controls,
+                name, address, mosh, backend, UIView(), controls,
             ])
             row.axis = .horizontal
             row.alignment = .firstBaseline
