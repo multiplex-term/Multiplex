@@ -33,8 +33,7 @@ enum TmuxProbe {
     /// locations (Homebrew, /usr/local) are appended before any command.
     /// Shared with the mosh bootstrap, which has the same problem for
     /// mosh-server (and for the tmux it wraps).
-    static let pathPrefix =
-        "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin\"; export PATH; "
+    static let pathPrefix = RemoteCommandEnvironment.pathPrefix
 
     /// Every tmux invocation the app makes over an exec channel. An SSH *exec*
     /// channel inherits no locale — `LANG` and `LC_ALL` are both empty — so
@@ -63,6 +62,13 @@ enum TmuxProbe {
             + "#{window_bell_flag} #{window_activity_flag} #{window_name}"
         let paneLineFormat = paneFormat(tag: "P")
         return pathPrefix
+            // One extra `command -v` per tick so a dead-tmux tile can offer
+            // the herdr switch only when herdr is actually installed
+            // (`Host.SessionBackend` — the hint is one tap, never an
+            // auto-flip). Before the tmux guard on purpose: the guard exits.
+            + "{ command -v herdr >/dev/null 2>&1"
+            + " || [ -x \"$HOME/.cargo/bin/herdr\" ]; }"
+            + " && echo \(herdrPresentMarker); "
             + "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
             // The server's own hostname — the exact string tmux seeded every
             // untouched pane title with (see `PaneTitleDisplay`). Its own
@@ -95,18 +101,36 @@ enum TmuxProbe {
         var state: TmuxState
         var tails: [String: [String]]
         var miniatures: [String: [String]]
+        /// herdr is installed on this host — the dead-tmux tile's switch
+        /// hint. Presence only; nothing reads it while tmux is healthy.
+        var herdrPresent: Bool = false
     }
 
+    private static let herdrPresentMarker = "MULTIPLEX_HERDR_PRESENT"
+
     static func parseProbe(_ output: String) -> ParsedProbe {
+        // The presence marker prints before the tmux guard, so it can only
+        // live in the record region — scan up to the tails marker, never
+        // the capture section (the bulk of every response, re-walked each
+        // 5 s tick otherwise).
+        let head = tailsMarker(in: output).map { output[..<$0.lowerBound] }
+            ?? Substring(output)
+        let herdrPresent = head.hasPrefix(herdrPresentMarker + "\n")
+            || head.contains("\n" + herdrPresentMarker + "\n")
+            || head.hasSuffix("\n" + herdrPresentMarker)
         let state = parse(output)
         guard case .sessions(let sessions) = state else {
-            return ParsedProbe(state: state, tails: [:], miniatures: [:])
+            return ParsedProbe(
+                state: state, tails: [:], miniatures: [:],
+                herdrPresent: herdrPresent
+            )
         }
         let tails = parseTails(output, sessions: sessions)
         return ParsedProbe(
             state: state,
             tails: tails,
-            miniatures: tails.mapValues(miniatureTail)
+            miniatures: tails.mapValues(miniatureTail),
+            herdrPresent: herdrPresent
         )
     }
 
@@ -709,7 +733,9 @@ enum TmuxProbe {
         lines.suffix(miniatureLines).map { String($0.prefix(miniatureWidth)) }
     }
 
-    private static func visibleTail(_ lines: [String]) -> [String] {
+    /// Internal, not private: `HerdrProbe` trims its pane reads with the
+    /// same rules, so what counts as a blank tail row is decided once.
+    static func visibleTail(_ lines: [String]) -> [String] {
         var trimmed = lines.map(rightTrim)
         while let last = trimmed.last, last.isEmpty { trimmed.removeLast() }
         return trimmed

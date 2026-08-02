@@ -10,10 +10,16 @@ final class FileAttachUIKitTests: XCTestCase {
         let sshTmux = makeController(useMosh: false, mode: .attach(sessionName: "main"))
         let moshTmux = makeController(useMosh: true, mode: .attach(sessionName: "main"))
         let plainShell = makeController(useMosh: false, mode: .shell)
+        let herdr = makeController(
+            useMosh: false,
+            mode: .herdrAttach(sessionName: "main")
+        )
 
         XCTAssertTrue(FileAttachAvailability.canOffer(for: sshTmux))
         XCTAssertFalse(FileAttachAvailability.canOffer(for: moshTmux))
         XCTAssertFalse(FileAttachAvailability.canOffer(for: plainShell))
+        XCTAssertFalse(FileAttachAvailability.canOffer(for: herdr),
+                       "a herdr session name is not a tmux pane target")
         XCTAssertFalse(FileAttachAvailability.canOffer(for: nil))
     }
 

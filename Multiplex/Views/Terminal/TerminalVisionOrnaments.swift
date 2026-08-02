@@ -68,6 +68,11 @@ final class TerminalVisionOrnamentState {
     /// NO LINK lamp) that the window's render pass never sees, and a stale
     /// reservation squeezes the bar the UMD must never compress.
     private(set) var umdContentSize: CGSize = .zero
+    /// The applied appearance choice. Ornaments host in their own UIKit
+    /// windows, so the scene window's `overrideUserInterfaceStyle` never
+    /// reaches this content on its own — without re-applying it at every
+    /// mount, a pinned LIGHT leaves the whole bottom bar dark.
+    private(set) var interfaceStyle: UIUserInterfaceStyle = .unspecified
 
     let topHostView: TerminalVisionTabOrnamentHostView
     /// One key-cluster owner per ornament — the latch state and the DEBUG
@@ -85,8 +90,10 @@ final class TerminalVisionOrnamentState {
         umdController: UIViewController?,
         helperController: AgentHelperStripViewController?,
         windowWidth: CGFloat,
+        interfaceStyle: UIUserInterfaceStyle,
         forceRevision: Bool
     ) {
+        self.interfaceStyle = interfaceStyle
         let nextHelper = isAuxiliary ? nil : helperController
         let nextPresentation = TerminalVisionOrnamentPresentation.resolve(
             tabCount: tabCount,
@@ -177,6 +184,7 @@ final class TerminalVisionOrnamentCoordinator {
         umdController: UIViewController?,
         helperController: AgentHelperStripViewController?,
         windowWidth: CGFloat,
+        interfaceStyle: UIUserInterfaceStyle,
         forceRevision: Bool = false
     ) {
         state.update(
@@ -186,6 +194,7 @@ final class TerminalVisionOrnamentCoordinator {
             umdController: umdController,
             helperController: helperController,
             windowWidth: windowWidth,
+            interfaceStyle: interfaceStyle,
             forceRevision: forceRevision
         )
     }
@@ -212,7 +221,8 @@ private struct TerminalVisionTopOrnament: View {
         if state.presentation.showsTopSourceLabels {
             TerminalVisionTabOrnamentMount(
                 hostView: state.topHostView,
-                revision: state.revision
+                revision: state.revision,
+                interfaceStyle: state.interfaceStyle
             )
             .fixedSize()
         }
@@ -233,7 +243,8 @@ private struct TerminalVisionBottomOrnament: View {
                 TerminalVisionControllerMount(
                     controller: umd,
                     sizing: .auxiliaryUMD,
-                    revision: state.revision
+                    revision: state.revision,
+                    interfaceStyle: state.interfaceStyle
                 )
                 .fixedSize()
                 .alignmentGuide(VerticalAlignment.center) { _ in
@@ -247,7 +258,8 @@ private struct TerminalVisionBottomOrnament: View {
                     TerminalVisionControllerMount(
                         controller: helper,
                         sizing: .helper,
-                        revision: state.revision
+                        revision: state.revision,
+                        interfaceStyle: state.interfaceStyle
                     )
                     .fixedSize()
                 }
@@ -260,13 +272,15 @@ private struct TerminalVisionBottomOrnament: View {
                     TerminalKeyCluster(
                         controller: state.activeTerminalController,
                         centerSize: state.umdContentSize,
-                        context: state.keyClusterContext
+                        context: state.keyClusterContext,
+                        interfaceStyle: state.interfaceStyle
                     ) {
                         if let umd = state.umdController {
                             TerminalVisionControllerMount(
                                 controller: umd,
                                 sizing: .terminalUMD,
                                 revision: state.revision,
+                                interfaceStyle: state.interfaceStyle,
                                 onContentSizeChange: { [state] in
                                     // The bar reports mid-layout; take the
                                     // new reservation on the next turn so
@@ -347,12 +361,20 @@ private struct TerminalKeyClusterGroupRepresentable: UIViewRepresentable {
     var metric: TerminalKeyClusterMetric
     var context: TerminalKeyClusterContext
     var controller: TerminalSessionController?
+    var interfaceStyle: UIUserInterfaceStyle = .unspecified
 
     func makeUIView(context _: Context) -> TerminalKeyClusterGroupView {
-        TerminalKeyClusterGroupView(role: role, metric: metric, context: context)
+        let view = TerminalKeyClusterGroupView(
+            role: role,
+            metric: metric,
+            context: context
+        )
+        view.overrideUserInterfaceStyle = interfaceStyle
+        return view
     }
 
     func updateUIView(_ view: TerminalKeyClusterGroupView, context _: Context) {
+        view.overrideUserInterfaceStyle = interfaceStyle
         view.update(controller: controller)
     }
 
@@ -376,16 +398,22 @@ struct TerminalKeyCluster<Center: View>: View {
     /// the CTRL latch and the DEBUG proof hook single-owner, as the shell
     /// layout's own long-lived context does.
     private let context: TerminalKeyClusterContext
+    /// See `TerminalVisionOrnamentState.interfaceStyle` — the ornament window
+    /// never inherits the scene's appearance override, so every UIKit mount
+    /// carries it explicitly.
+    private let interfaceStyle: UIUserInterfaceStyle
 
     init(
         controller: TerminalSessionController?,
         centerSize: CGSize,
         context: TerminalKeyClusterContext? = nil,
+        interfaceStyle: UIUserInterfaceStyle = .unspecified,
         @ViewBuilder center: () -> Center
     ) {
         self.controller = controller
         self.centerSize = centerSize
         self.context = context ?? TerminalKeyClusterContext()
+        self.interfaceStyle = interfaceStyle
         self.center = center()
     }
 
@@ -421,7 +449,8 @@ struct TerminalKeyCluster<Center: View>: View {
                 role: .standalone,
                 metric: .regular,
                 context: context,
-                controller: controller
+                controller: controller,
+                interfaceStyle: interfaceStyle
             )
         }
     }
@@ -441,7 +470,8 @@ struct TerminalKeyCluster<Center: View>: View {
                 role: .leading,
                 metric: metric,
                 context: context,
-                controller: controller
+                controller: controller,
+                interfaceStyle: interfaceStyle
             )
             Color.clear
                 .frame(
@@ -457,7 +487,8 @@ struct TerminalKeyCluster<Center: View>: View {
                 role: .trailing,
                 metric: metric,
                 context: context,
-                controller: controller
+                controller: controller,
+                interfaceStyle: interfaceStyle
             )
         }
     }
@@ -466,10 +497,12 @@ struct TerminalKeyCluster<Center: View>: View {
 extension TerminalKeyCluster where Center == EmptyView {
     init(
         controller: TerminalSessionController?,
-        context: TerminalKeyClusterContext? = nil
+        context: TerminalKeyClusterContext? = nil,
+        interfaceStyle: UIUserInterfaceStyle = .unspecified
     ) {
         self.controller = controller
         self.context = context ?? TerminalKeyClusterContext()
+        self.interfaceStyle = interfaceStyle
         centerSize = .zero
         center = nil
     }
@@ -536,9 +569,11 @@ final class TerminalVisionTabOrnamentHostView: UIView {
 private struct TerminalVisionTabOrnamentMount: UIViewRepresentable {
     let hostView: TerminalVisionTabOrnamentHostView
     let revision: Int
+    let interfaceStyle: UIUserInterfaceStyle
 
     func makeUIView(context: Context) -> TerminalVisionTabOrnamentHostView {
         hostView.removeFromSuperview()
+        hostView.overrideUserInterfaceStyle = interfaceStyle
         return hostView
     }
 
@@ -547,6 +582,7 @@ private struct TerminalVisionTabOrnamentMount: UIViewRepresentable {
         context: Context
     ) {
         _ = revision
+        view.overrideUserInterfaceStyle = interfaceStyle
         view.refreshFittingSize()
     }
 
@@ -569,12 +605,14 @@ private struct TerminalVisionControllerMount: UIViewControllerRepresentable {
     let controller: UIViewController
     let sizing: TerminalVisionControllerSizing
     let revision: Int
+    var interfaceStyle: UIUserInterfaceStyle = .unspecified
     var onContentSizeChange: (() -> Void)?
 
     func makeUIViewController(context: Context) -> TerminalVisionControllerHost {
         let host = TerminalVisionControllerHost()
         host.onContentSizeChange = onContentSizeChange
         host.update(content: controller, sizing: sizing)
+        host.apply(interfaceStyle: interfaceStyle)
         return host
     }
 
@@ -583,6 +621,7 @@ private struct TerminalVisionControllerMount: UIViewControllerRepresentable {
         context: Context
     ) {
         _ = revision
+        host.apply(interfaceStyle: interfaceStyle)
         host.onContentSizeChange = onContentSizeChange
         host.update(content: controller, sizing: sizing)
     }
@@ -617,6 +656,18 @@ private final class TerminalVisionControllerHost: UIViewController {
         let view = UIView()
         view.backgroundColor = .clear
         self.view = view
+    }
+
+    /// Both levels on purpose. SwiftUI re-asserts the traits it vends to an
+    /// embedded controller, which can leave a controller-level override
+    /// unapplied to the mounted subtree — the view-level write is the one the
+    /// content reliably inherits (the key-cluster mounts flip through exactly
+    /// this mechanism). The controller-level write stays because
+    /// `inheritedInterfaceStyleOverride` walks the controller chain for
+    /// popovers presented from this content.
+    func apply(interfaceStyle: UIUserInterfaceStyle) {
+        overrideUserInterfaceStyle = interfaceStyle
+        viewIfLoaded?.overrideUserInterfaceStyle = interfaceStyle
     }
 
     override func viewDidLayoutSubviews() {
