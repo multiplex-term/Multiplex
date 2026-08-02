@@ -51,7 +51,8 @@ final class AgentPromptSheetUIKitTests: XCTestCase {
                 askForPrompt: false,
                 directory: "~",
                 setupScript: .id(scriptID),
-                model: "gpt-5.1-codex"
+                model: "gpt-5.1-codex",
+                target: .newSession
             )
         )
 
@@ -66,8 +67,26 @@ final class AgentPromptSheetUIKitTests: XCTestCase {
                 askForPrompt: false,
                 directory: "~",
                 setupScript: .id(scriptID),
-                model: nil
+                model: nil,
+                target: .newSession
             )
+        )
+    }
+
+    func testSessionTargetRidesResubmitAndNamesItselfInTheTitle() {
+        var request = makeRequest(directory: nil, model: nil)
+        request.target = .existingSession(name: "main", placement: .workspace)
+        let state = AgentPromptFormState(request: request)
+
+        // Where the launch types is part of what the person approves here.
+        XCTAssertEqual(state.title, "Codex on devbox · main")
+        guard case .openAgent(_, _, _, _, _, _, _, let target) = state.launchAction
+        else { return XCTFail("expected openAgent") }
+        XCTAssertEqual(target, .existingSession(name: "main", placement: .workspace))
+
+        XCTAssertEqual(
+            AgentPromptFormState(request: makeRequest(directory: nil, model: nil)).title,
+            "Codex on devbox"
         )
     }
 
@@ -149,7 +168,8 @@ final class AgentPromptSheetUIKitTests: XCTestCase {
                 askForPrompt: false,
                 directory: "~",
                 setupScript: .remembered,
-                model: "o3"
+                model: "o3",
+                target: .newSession
             ),
         ])
         XCTAssertEqual(dismissCount, 1)

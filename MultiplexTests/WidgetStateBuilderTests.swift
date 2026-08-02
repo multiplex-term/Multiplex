@@ -58,6 +58,23 @@ final class WidgetStateBuilderTests: XCTestCase {
             host: Host(name: "b", hostname: "h", username: "u"),
             sessions: [], miniatures: [:], probedAt: nil
         ).agentModels)
+        // The backend rides the projection so the widget configuration's
+        // placement picker can speak the host's vocabulary.
+        XCTAssertEqual(state.backendRaw, "tmux")
+        var herdrHost = Host(name: "c", hostname: "h", username: "u")
+        herdrHost.sessionBackend = .herdr
+        XCTAssertEqual(WidgetStateBuilder.hostState(
+            host: herdrHost, sessions: [], miniatures: [:], probedAt: nil
+        ).backendRaw, "herdr")
+        // Configured working dirs feed the widget's directory picker; a
+        // host with none stays nil so legacy-file shape and no-config
+        // shape read the same (paths only — script names never ride).
+        XCTAssertNil(state.workingDirs)
+        var dirHost = Host(name: "d", hostname: "h", username: "u")
+        dirHost.workingDirs = ["~/srv", "/tmp"]
+        XCTAssertEqual(WidgetStateBuilder.hostState(
+            host: dirHost, sessions: [], miniatures: [:], probedAt: nil
+        ).workingDirs, ["~/srv", "/tmp"])
         XCTAssertEqual(state.sessions.count, 1)
         let main = state.sessions[0]
         XCTAssertEqual(main.name, "main")

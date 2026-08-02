@@ -75,7 +75,8 @@ final class AppRuntime {
                             displayName: $0.displayName
                         )
                     },
-                    agentModels: $0.agentLaunchModels
+                    agentModels: $0.agentLaunchModels,
+                    backendRaw: $0.sessionBackend.rawValue
                 )
             }
         }

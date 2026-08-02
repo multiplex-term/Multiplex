@@ -72,7 +72,9 @@ enum WidgetStateBuilder {
                 sessionState($0, miniatureLines: miniatures[$0.name] ?? [])
             },
             probedAt: probedAt,
-            agentModels: host.agentLaunchModels.isEmpty ? nil : host.agentLaunchModels
+            agentModels: host.agentLaunchModels.isEmpty ? nil : host.agentLaunchModels,
+            backendRaw: host.sessionBackend.rawValue,
+            workingDirs: host.workingDirs.isEmpty ? nil : host.workingDirs
         )
     }
 

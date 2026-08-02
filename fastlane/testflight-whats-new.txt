@@ -269,8 +269,8 @@ Needs herdr 0.7.5+ on the host (brew install herdr).
   only stops (herdr refuses deleting it) and stays as a quiet tile that
   restarts on press. A stopped session is a spine-less tile — press it
   and it comes back.
-- Widget/Shortcut agent launches on herdr hosts refuse with a clear
-  message for now; attach works. TMUX, FILE upload, and Claude HISTORY stay
+- Widget/Shortcut agent launches work on herdr hosts too (see WIDGET &
+  SHORTCUT AGENTS below). TMUX, FILE upload, and Claude HISTORY stay
   hidden on herdr tabs rather than issuing tmux commands into that session.
 
 FASTER TAPS — clicks reach tmux immediately
@@ -389,3 +389,37 @@ one, connecting first like a widget tap would.
 - With the app lock on, press a banner: the veil asks first; the session
   opens only after unlock.
 - Swiping a banner away (not pressing it) must not open anything.
+
+WIDGET & SHORTCUT AGENTS — herdr hosts, and launches into EXISTING sessions
+
+The Host widget's AGENT key and the Open Agent Shortcut now work on herdr
+hosts, and both grow a Session choice: leave it on New Session for the old
+behavior, or pick an existing session and the agent opens INSIDE it — a
+new window on tmux; on herdr, Open In chooses a new tab in the focused
+workspace or a whole new workspace. The new pane starts in the Working
+Directory you picked, else the host's default working dir — the same
+meaning the field has for fresh sessions.
+
+- herdr host, widget AGENT key with Session unset: a fresh herdr session
+  appears on the deck, setup script and launch typed into its first pane.
+- Widget settings ▸ Session: the picker lists the host's last-known
+  sessions under New Session; Open In says New Window on a tmux host,
+  New Tab (Focused Workspace) / New Workspace on a herdr host. Session
+  and Open In sit right after Agent, before Model.
+- Widget settings ▸ Working Directory: Host Default, the host's
+  configured dirs, and Home — the launch starts there, fresh sessions
+  and in-session placements alike.
+- With Host left unset, the pickers describe the FIRST host — the one
+  the widget actually monitors. If they come up empty on a widget placed
+  by an older build, remove and re-add the widget once.
+- tmux host, Session = an existing session: the launch opens a NEW window
+  in that session (never types into what you had running), the session's
+  window spine grows by one, and the attach fronts the agent.
+- herdr host, Session + New Workspace: the tile's spine gains a workspace
+  named after the agent; New Tab adds a tab where the session is looking.
+- Pick a session, kill it host-side, then fire the shortcut: the launch
+  falls back to a fresh session instead of failing.
+- Ask for Prompt still works with a session picked — the sheet's title
+  names the target session.
+- Automation URLs: add &session=NAME and optionally &in=tab|workspace|
+  window to action=agent.

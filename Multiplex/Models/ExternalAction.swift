@@ -52,6 +52,40 @@ enum ExternalSetupScriptSelection: Hashable {
     }
 }
 
+/// Where an external agent launch lands. The default mints a fresh session
+/// (the original behavior); an existing-session target opens the agent
+/// *inside* that session instead — tmux as a new window, herdr as a new tab
+/// in the focused workspace or a new workspace, per the placement. The name
+/// is resolved against the host's probe list at perform time: a session that
+/// died since the widget/Shortcut was configured falls back to the fresh-
+/// session mint (fail-soft, the openShell rule), while an in-session create
+/// that fails stays a visible failure — minting a surprise second session
+/// would hide it.
+enum ExternalSessionTarget: Hashable {
+    case newSession
+    case existingSession(name: String, placement: ExternalSessionPlacement)
+}
+
+/// How an agent lands inside an existing session. tmux has exactly one
+/// granularity below a session — both spellings open a new window — while
+/// herdr distinguishes a new tab in the session's focused workspace from a
+/// whole new workspace. Tokens ride URLs and Shortcut values: `tab` (the
+/// omitted default), `workspace`, and `window` — the adapter maps herdr
+/// workspace → window, so the tmux-natural spelling lands on the workspace
+/// branch.
+enum ExternalSessionPlacement: String, Hashable {
+    case tab
+    case workspace
+
+    init?(token: String) {
+        switch token.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "", Self.tab.rawValue: self = .tab
+        case Self.workspace.rawValue, "window": self = .workspace
+        default: return nil
+        }
+    }
+}
+
 /// An externally requested app action — the payload behind the `multiplex://`
 /// URL scheme (widget taps, automation) and the App Intents. The queue and
 /// execution live in `ExternalActionRouter`; this file stays pure so the URL
@@ -73,10 +107,13 @@ enum ExternalAction: Hashable {
     /// value `AgentKind.normalizedLaunchModel` rejects — means the agent's
     /// own default, never the New Session sheet's remembered choice (an
     /// automation without a model must behave the same on every device).
+    /// `target` picks where the launch lands (`ExternalSessionTarget`):
+    /// a fresh session, or inside an existing one.
     case openAgent(
         host: ExternalHostRef, agent: AgentKind, prompt: String?,
         askForPrompt: Bool, directory: String?,
-        setupScript: ExternalSetupScriptSelection, model: String?)
+        setupScript: ExternalSetupScriptSelection, model: String?,
+        target: ExternalSessionTarget)
 
     /// Whether an untrusted (non-widget) URL has to be confirmed before this
     /// runs. The widget's ASK mode is exempt: it presents the prompt sheet,
@@ -85,25 +122,30 @@ enum ExternalAction: Hashable {
     var needsOriginConfirmation: Bool {
         switch self {
         case .openShell: true
-        case .openAgent(_, _, _, let askForPrompt, _, _, _): !askForPrompt
+        case .openAgent(_, _, _, let askForPrompt, _, _, _, _): !askForPrompt
         }
     }
 
     var hostRef: ExternalHostRef {
         switch self {
         case .openShell(let host, _): host
-        case .openAgent(let host, _, _, _, _, _, _): host
+        case .openAgent(let host, _, _, _, _, _, _, _): host
         }
     }
 }
 
 /// `multiplex://open?host=<uuid|name>&action=shell|agent[&agent=<kind>]
-/// [&prompt=<text>][&ask=1][&dir=<path>][&script=<uuid|none>][&model=<id>]`
+/// [&prompt=<text>][&ask=1][&dir=<path>][&script=<uuid|none>][&model=<id>]
+/// [&session=<name>][&in=tab|workspace|window]`
 /// — built by widgets, parsed by `onOpenURL`. Omitting `script` uses the
 /// remembered New Session choice; omitting `model` uses the agent's own
 /// default (a malformed model token also parses as omitted — fail-soft, the
 /// setup-script id stays the one strict token because a wrong script runs
-/// arbitrary text).
+/// arbitrary text). On `action=agent`, `session` targets an existing
+/// session (omitted = mint a fresh one) and `in` picks the placement
+/// inside it — a malformed token reads as the tab default, fail-soft like
+/// `model`, because the performer validates the name against the live
+/// session list anyway.
 enum ExternalActionURL {
     static let scheme = "multiplex"
     static let authority = "open"
@@ -121,7 +163,7 @@ enum ExternalActionURL {
             }
         case .openAgent(
             _, let agent, let prompt, let askForPrompt, let directory,
-            let setupScript, let model
+            let setupScript, let model, let target
         ):
             items.append(URLQueryItem(name: "action", value: "agent"))
             items.append(URLQueryItem(name: "agent", value: agent.rawValue))
@@ -139,6 +181,10 @@ enum ExternalActionURL {
             }
             if let model, !model.isEmpty {
                 items.append(URLQueryItem(name: "model", value: model))
+            }
+            if case .existingSession(let name, let placement) = target {
+                items.append(URLQueryItem(name: "session", value: name))
+                items.append(URLQueryItem(name: "in", value: placement.rawValue))
             }
         }
         components.queryItems = items
@@ -198,10 +244,19 @@ enum ExternalActionURL {
                 setupScript = .remembered
             }
             let model = value("model").flatMap(AgentKind.normalizedLaunchModel)
+            let target: ExternalSessionTarget
+            if let session = value("session"), !session.isEmpty {
+                target = .existingSession(
+                    name: session,
+                    placement: value("in")
+                        .flatMap(ExternalSessionPlacement.init(token:)) ?? .tab)
+            } else {
+                target = .newSession
+            }
             return .openAgent(
                 host: hostRef, agent: agent, prompt: prompt,
                 askForPrompt: ask, directory: directory,
-                setupScript: setupScript, model: model)
+                setupScript: setupScript, model: model, target: target)
         default:
             return nil
         }
@@ -256,7 +311,9 @@ enum ExternalActionPlan {
 
 /// The in-app "ask for the first prompt" sheet's payload (widget ASK mode).
 /// `directory` and `model` seed the sheet's fields with whatever the
-/// originating action carried (same nil/`"~"`/path semantics as the action).
+/// originating action carried (same nil/`"~"`/path semantics as the action);
+/// `target` rides through untouched and the sheet's title names it, so an
+/// existing-session launch is visible in what the person approves.
 struct AgentPromptRequest: Identifiable {
     let id = UUID()
     var host: Host
@@ -264,6 +321,7 @@ struct AgentPromptRequest: Identifiable {
     var directory: String?
     var setupScript: ExternalSetupScriptSelection
     var model: String?
+    var target: ExternalSessionTarget = .newSession
 }
 
 /// Whether a parsed `multiplex://` URL may run without asking. Pure so the
@@ -300,10 +358,16 @@ struct ExternalActionConfirmation: Equatable {
                     """,
                 action: action
             )
-        case .openAgent(_, let agent, let prompt, _, _, _, _):
+        case .openAgent(_, let agent, let prompt, _, _, _, _, let target):
+            // An existing-session target is part of what the person approves:
+            // the launch types into that session, not a fresh one.
+            var location = hostName
+            if case .existingSession(let name, _) = target {
+                location = "\(hostName) in session \(name)"
+            }
             var message = """
                 Something outside Multiplex asked to launch \
-                \(agent.displayName) on \(hostName)
+                \(agent.displayName) on \(location)
                 """
             if let prompt, !prompt.isEmpty {
                 message += " with this first prompt:\n\n\(prompt)"

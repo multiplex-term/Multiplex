@@ -22,8 +22,16 @@ enum WidgetLink {
     /// `model` travels raw — the app-side parser owns validation (a value
     /// the launch grammar rejects reads as "agent default"), so the widget
     /// target never compiles the grammar it would need to pre-validate.
+    /// `sessionName`/`placementRaw` follow the same rule: an empty session
+    /// means a fresh one (the sentinel `SessionTargetChoices` hands back),
+    /// and the placement token is only ever emitted alongside a session —
+    /// the app-side parser defaults a bad or missing one to the tab
+    /// placement and revalidates the name against the live session list.
+    /// An empty `directory` is the Host Default sentinel and stays home.
     static func agentURL(
-        hostID: UUID, agentRaw: String, askForPrompt: Bool, model: String? = nil
+        hostID: UUID, agentRaw: String, askForPrompt: Bool, model: String? = nil,
+        sessionName: String? = nil, placementRaw: String? = nil,
+        directory: String? = nil
     ) -> URL {
         var items = [
             URLQueryItem(name: "host", value: hostID.uuidString),
@@ -35,6 +43,15 @@ enum WidgetLink {
         }
         if let model, !model.isEmpty {
             items.append(URLQueryItem(name: "model", value: model))
+        }
+        if let directory, !directory.isEmpty {
+            items.append(URLQueryItem(name: "dir", value: directory))
+        }
+        if let sessionName, !sessionName.isEmpty {
+            items.append(URLQueryItem(name: "session", value: sessionName))
+            if let placementRaw, !placementRaw.isEmpty {
+                items.append(URLQueryItem(name: "in", value: placementRaw))
+            }
         }
         return url(queryItems: items)
     }

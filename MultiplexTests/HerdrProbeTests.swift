@@ -573,6 +573,57 @@ final class HerdrProbeTests: XCTestCase {
             sessionName: "api", paneID: "w1:p1", lines: [""]))
     }
 
+    // MARK: In-session placement (external agent launches)
+
+    func testCreateTabAndWorkspaceCommandsShareOneFocusedShape() {
+        XCTAssertEqual(
+            HerdrProbe.createTabCommand(
+                sessionName: "api", label: "claude", directory: nil),
+            HerdrProbe.pathPrefix
+                + "herdr --session 'api' tab create --label 'claude'"
+                + " --focus 2>/dev/null || true"
+        )
+        // `--focus` is explicit — 0.7.5 creates unfocused by default, and
+        // the attach that follows must front the fresh pane. `--cwd` rides
+        // the shell's own $HOME expansion; herdr fails a missing directory
+        // soft to $HOME itself, so there is no [ -d ] guard to test.
+        XCTAssertEqual(
+            HerdrProbe.createWorkspaceCommand(
+                sessionName: "api", label: "codex", directory: "~/work dir"),
+            HerdrProbe.pathPrefix
+                + "herdr --session 'api' workspace create --label 'codex'"
+                + " --cwd \"$HOME\"/'work dir' --focus 2>/dev/null || true"
+        )
+    }
+
+    func testParseCreatedPaneReadsBothCreateEnvelopes() {
+        // Captured verbatim from herdr 0.7.5 (2026-08-02), trimmed only of
+        // sibling pane fields the decoder ignores.
+        let tab = """
+        {"id":"cli:tab:create","result":{"root_pane":{"agent_status":"unknown",\
+        "cwd":"/private/tmp","focused":true,"pane_id":"w1:p3","revision":0,\
+        "tab_id":"w1:t3","workspace_id":"w1"},"tab":{"focused":true,\
+        "label":"probe-b","number":3,"tab_id":"w1:t3","workspace_id":"w1"},\
+        "type":"tab_created"}}
+        """
+        let workspace = """
+        {"id":"cli:workspace:create","result":{"root_pane":{"agent_status":"unknown",\
+        "cwd":"/private/tmp","focused":true,"pane_id":"w2:p1","revision":0,\
+        "tab_id":"w2:t1","workspace_id":"w2"},"tab":{"focused":true,"label":"1",\
+        "number":1,"tab_id":"w2:t1","workspace_id":"w2"},"type":"workspace_created",\
+        "workspace":{"active_tab_id":"w2:t1","focused":true,"label":"probe-ws",\
+        "number":2,"workspace_id":"w2"}}}
+        """
+        XCTAssertEqual(
+            HerdrProbe.parseCreatedPane("login noise\n" + tab + "\n"), "w1:p3")
+        XCTAssertEqual(HerdrProbe.parseCreatedPane(workspace), "w2:p1")
+        // A stopped session's create answers a Rust error line, not an
+        // envelope — the launch must fail visibly, never type blind.
+        XCTAssertNil(HerdrProbe.parseCreatedPane(
+            "Error: Os { code: 2, kind: NotFound, message: \"No such file or directory\" }\n"))
+        XCTAssertNil(HerdrProbe.parseCreatedPane(""))
+    }
+
     // MARK: Session names
 
     func testSessionNameArgumentReducesToDirectorySafety() {

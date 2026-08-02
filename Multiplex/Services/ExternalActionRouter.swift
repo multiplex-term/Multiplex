@@ -154,7 +154,7 @@ enum ExternalActionPerformer {
             await openShell(on: host, requestedSession: sessionName, context: context)
         case .openAgent(
             _, let agent, let prompt, let askForPrompt, let directory,
-            let setupScript, let model
+            let setupScript, let model, let target
         ):
             if askForPrompt {
                 context.presentAgentPrompt(AgentPromptRequest(
@@ -162,7 +162,8 @@ enum ExternalActionPerformer {
                     agent: agent,
                     directory: directory,
                     setupScript: setupScript,
-                    model: model
+                    model: model,
+                    target: target
                 ))
                 return
             }
@@ -172,6 +173,7 @@ enum ExternalActionPerformer {
                 directory: directory,
                 setupScript: setupScript,
                 model: model,
+                target: target,
                 on: host,
                 context: context
             )
@@ -232,20 +234,10 @@ enum ExternalActionPerformer {
         directory: String?,
         setupScript: ExternalSetupScriptSelection,
         model launchModel: String?,
+        target: ExternalSessionTarget,
         on host: Host,
         context: ExternalActionRouter.Context
     ) async {
-        // v1.3 fence: a widget/Shortcut agent launch on a herdr-backend
-        // host refuses with its own sentence instead of half-working —
-        // attach and focus flows above stay live.
-        guard host.sessionBackend == .tmux else {
-            context.presentFailure(ExternalActionFailure(
-                hostName: host.name,
-                message: "Agent launch isn't available on herdr hosts yet — "
-                    + "attach and start the agent in its workspace."
-            ))
-            return
-        }
         guard let model = await connectedModel(for: host, context: context) else { return }
         // nil = the host's default working dir; the sheet's explicit Home
         // choice arrives as "~", which the quoting layer expands to $HOME.
@@ -258,13 +250,48 @@ enum ExternalActionPerformer {
             available: host.sessionScripts,
             remembered: NewSessionPreferences().rememberedScript(for: host)
         )
+        let launch = agent.launchCommand(model: launchModel, initialPrompt: prompt ?? "")
+        // A configured target names the exact session it was set up with; a
+        // session that died since falls through to the fresh-session mint
+        // (fail-soft, openShell's rule). An in-session create that FAILS
+        // stays a visible failure instead — a fallback mint there would
+        // hide it behind a surprise second session.
+        if case .existingSession(let name, let placement) = target,
+           let session = model.tmux.sessions.first(where: { $0.name == name }) {
+            guard let mode = await model.launchInSession(
+                named: session.name,
+                placement: placement,
+                // Same rule as the fresh-session mint below: the Working
+                // Directory field, else the host's first configured dir —
+                // one field, one meaning, wherever the agent lands.
+                directory: directory ?? host.workingDirs.first,
+                label: agent.launchCommand,
+                running: script?.normalizedBody,
+                typing: launch
+            ) else {
+                presentLaunchInSessionFailure(
+                    session: session.name, placement: placement,
+                    for: model, host: host, context: context)
+                return
+            }
+            // Created first, revealed second: the fresh pane is already the
+            // session's current window/focus, so an existing tab needs only
+            // the reveal and a missing one attaches straight onto it.
+            if context.workspace.focusTab(
+                hostID: host.id,
+                sessionName: session.name,
+                backend: host.sessionBackend
+            ) { return }
+            open(mode: mode, on: host, context: context)
+            return
+        }
         guard let created = await model.createSession(
             base: agent.launchCommand,
             inDirectoryOf: nil,
             startingIn: directory ?? host.workingDirs.first,
             applying: host.newSessionTmuxConf,
             running: script?.normalizedBody,
-            typing: agent.launchCommand(model: launchModel, initialPrompt: prompt ?? "")
+            typing: launch
         ) else {
             presentCreateFailure(for: model, host: host, context: context)
             return
@@ -295,6 +322,29 @@ enum ExternalActionPerformer {
         mode: TerminalRoute.Mode, on host: Host, context: ExternalActionRouter.Context
     ) {
         context.open(TerminalWindowRoute(tab: TerminalRoute(hostID: host.id, mode: mode)))
+    }
+
+    /// Failure copy for an in-session launch, in the backend's own noun —
+    /// the person configured "New Tab"/"New Workspace"/"New Window" and the
+    /// alert should say which one didn't happen.
+    private static func presentLaunchInSessionFailure(
+        session: String, placement: ExternalSessionPlacement,
+        for model: HostConnectionModel, host: Host,
+        context: ExternalActionRouter.Context
+    ) {
+        let noun: String
+        switch (host.sessionBackend, placement) {
+        case (.tmux, _): noun = "window"
+        case (.herdr, .tab): noun = "tab"
+        case (.herdr, .workspace): noun = "workspace"
+        }
+        let message: String
+        if case .failed(let reason) = model.phase {
+            message = reason
+        } else {
+            message = "Couldn't open a new \(noun) in session \(session) on \(host.name)."
+        }
+        context.presentFailure(ExternalActionFailure(hostName: host.name, message: message))
     }
 
     private static func presentCreateFailure(

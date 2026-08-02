@@ -662,6 +662,78 @@ enum HerdrProbe {
         return command
     }
 
+    /// Create a new tab in the session's FOCUSED workspace — where the
+    /// session is looking right now (0.7.5 defaults `tab create` to the
+    /// focused workspace, so no snapshot parse races the create). The
+    /// external action's "open in the existing workspace" placement.
+    static func createTabCommand(
+        sessionName: String, label: String, directory: String?
+    ) -> String {
+        createCommand(
+            verb: "tab", sessionName: sessionName, label: label,
+            directory: directory)
+    }
+
+    /// Create a whole new workspace in the session — the external action's
+    /// "create new" placement; its label becomes a deck spine line.
+    static func createWorkspaceCommand(
+        sessionName: String, label: String, directory: String?
+    ) -> String {
+        createCommand(
+            verb: "workspace", sessionName: sessionName, label: label,
+            directory: directory)
+    }
+
+    /// Both create verbs share one shape and answer one envelope. `--focus`
+    /// is explicit — 0.7.5 creates unfocused by default, and the point is
+    /// that the attach which follows (and every already-attached client,
+    /// via the session's ONE focus) fronts the fresh pane. `--cwd` rides
+    /// the shell's own `$HOME` expansion; a missing directory fails soft to
+    /// $HOME host-side (herdr's behavior, verified 0.7.5), so no `[ -d ]`
+    /// guard. Callers pass app-authored labels only.
+    private static func createCommand(
+        verb: String, sessionName: String, label: String, directory: String?
+    ) -> String {
+        var command = pathPrefix
+            + "herdr --session \(sessionName.shellQuoted) \(verb) create"
+            + " --label \(label.shellQuoted)"
+        if let directory, !directory.isEmpty {
+            command += " --cwd \(directory.shellQuotedDirectory)"
+        }
+        command += " --focus 2>/dev/null || true"
+        return command
+    }
+
+    /// The fresh pane out of a `tab create` / `workspace create` envelope —
+    /// where the placement's setup typing lands. Both verbs answer
+    /// `result.root_pane.pane_id` (verified 0.7.5); nil means the create
+    /// didn't happen and the launch must fail visibly, never type blind.
+    static func parseCreatedPane(_ output: String) -> String? {
+        firstDecodedLine(in: output, decodeCreatedPane)
+    }
+
+    private struct CreatedResult: Decodable {
+        var rootPane: CreatedPane
+
+        enum CodingKeys: String, CodingKey {
+            case rootPane = "root_pane"
+        }
+    }
+
+    private struct CreatedPane: Decodable {
+        var paneID: String
+
+        enum CodingKeys: String, CodingKey {
+            case paneID = "pane_id"
+        }
+    }
+
+    private static func decodeCreatedPane(_ text: String) -> String? {
+        (try? JSONDecoder().decode(
+            Envelope<CreatedResult>.self, from: Data(text.utf8)))?
+            .result.rootPane.paneID
+    }
+
     /// A user-entered name reduced to what a herdr session (a directory
     /// on the host) can safely be called: ASCII alphanumerics plus `._-`,
     /// runs of anything else collapse to one `-`, leading dots/dashes

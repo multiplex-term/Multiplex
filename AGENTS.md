@@ -729,8 +729,20 @@ logic belongs — keep parsing/command-building out of views.
   pane ids collide; routes and snapshots retain the backend. Gate tmux-only
   behavior on `route.usesTmux`; never auto-switch. Attach may create/restart,
   close is stop+delete, and creation validates the live list/name before
-  typing setup. herdr reports no client count or creation time. Keep the
-  Agent Gallery withdrawn until transcript support exists.
+  typing setup. External agent launches (widget/Shortcut/URL `session=` +
+  `in=tab|workspace|window`) can land INSIDE an existing session: tmux is
+  one `new-window -t '=name'` exec typing at the printed pane id; herdr
+  spawns (attach revives a stopped session), then `tab create` (0.7.5
+  defaults to the FOCUSED workspace) or `workspace create` — `--focus`
+  explicit (creates are unfocused by default), a missing `--cwd` fails soft
+  to $HOME host-side, and typing aims at the envelope's `root_pane`, so
+  there is no stale-name window. In-session launches carry the Working
+  Directory semantics (explicit choice, else the host's first configured
+  dir — one field, one meaning; an unconfigured host falls to the
+  session's world: tmux active-pane cwd / herdr server default). A dead
+  target name falls back to the fresh-session mint; a failed in-session
+  create is a visible failure, never a fallback mint. herdr reports no client count or creation time.
+  Keep the Agent Gallery withdrawn until transcript support exists.
 - **A disabled host is one the app never dials on its own**
   (`Host.isEnabled`; deck rail menu / DISABLED tile / Host Settings →
   Monitoring): the wall skips it in `runFeed`, never asks `ConnectionHub`
@@ -1100,8 +1112,9 @@ logic belongs — keep parsing/command-building out of views.
   timelines are `.never` with app-pushed, hash-gated reloads; probe
   loops gate network work on `applicationState == .active`. The
   Shortcuts host picker and widget config read `SharedStateStore`; Open
-  Agent's dependent pickers re-resolve against the live `HostStore`
-  (nothing publishes paths, script names, or bodies into widget state).
+  Agent's dependent pickers re-resolve against the live `HostStore`.
+  Configured working-dir paths ride widget state for the widget's own
+  directory picker; setup-script names and bodies never do.
   Directory stays a String for variables (unset = host default, `"~"` =
   Home); the setup-script String is validated DEFAULT/NONE/UUID; the
   Model String is gated by `normalizedLaunchModel`. `SharedStateTests`

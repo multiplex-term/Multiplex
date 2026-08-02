@@ -70,6 +70,15 @@ struct WidgetHostState: Codable, Hashable, Identifiable {
     /// Names only, no secrets. Optional-typed so files written before the
     /// field existed keep decoding (synthesized decoder; nil = none).
     var agentModels: [String: [String]]?
+    /// `Host.SessionBackend` raw value ("tmux"/"herdr") — what the widget
+    /// configuration's placement picker labels its rows with. Optional for
+    /// the same legacy-file reason; nil reads as tmux, the app's default.
+    var backendRaw: String?
+    /// The host's configured working directories, in the user's order —
+    /// what the widget configuration's directory picker offers. Paths only
+    /// (setup-script names and bodies still never ride widget state);
+    /// optional for the same legacy-file reason.
+    var workingDirs: [String]?
 
     /// The session the per-host widget features and a bare shell deep link
     /// attaches — newest by creation, name-ordered on a tie. Must mirror

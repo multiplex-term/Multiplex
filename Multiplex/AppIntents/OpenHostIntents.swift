@@ -42,11 +42,36 @@ struct OpenHostAgentIntent: AppIntent {
 
     @Parameter(title: "Host") var host: HostEntity
     @Parameter(title: "Agent", default: .claudeCode) var agent: AgentChoice
+    /// A free String so Shortcuts variables keep working; suggestions are
+    /// the published snapshot's last-known session names. The app resolves
+    /// the name against the live probe — a session that no longer exists
+    /// falls back to the fresh-session launch. Declared (and summarized)
+    /// before Model: where the agent lands reads before how it launches.
+    @Parameter(
+        title: "Session",
+        // Literal for the same reason as the other descriptions here.
+        // swiftlint:disable:next line_length
+        description: "Launches the agent inside this existing session instead of creating one. Leave empty for a fresh session.",
+        optionsProvider: AgentSessionOptionsProvider()
+    ) var session: String?
+    /// Placement inside an existing session, as the URL grammar's token —
+    /// a new window on tmux; a new tab in the focused workspace (default)
+    /// or a new workspace on herdr. Ignored for fresh-session launches.
+    @Parameter(
+        title: "Open In",
+        // Literal for the same reason as the other descriptions here.
+        // swiftlint:disable:next line_length
+        description: "Where an existing-session launch opens: a new window on tmux; a new tab in the focused workspace or a new workspace on herdr.",
+        optionsProvider: AgentPlacementOptionsProvider()
+    ) var placement: String?
     /// Options follow the selected host's configured paths. An unset value
-    /// uses its first configured directory (or Home when it has none).
+    /// uses its first configured directory (or Home when it has none) —
+    /// for fresh sessions and in-session launches alike.
     @Parameter(
         title: "Working Directory",
-        description: "Where the new session starts. Leave empty for the host default.",
+        // Literal for the same reason as the other descriptions here.
+        // swiftlint:disable:next line_length
+        description: "Where the new session — or the new window, tab, or workspace inside an existing session — starts. Leave empty for the host default.",
         optionsProvider: AgentWorkingDirectoryOptionsProvider()
     ) var directory: String?
     /// Host-dependent stable ids keep a configured Shortcut working when a
@@ -65,7 +90,7 @@ struct OpenHostAgentIntent: AppIntent {
     /// shell malformed.
     @Parameter(
         title: "Model",
-        // Literal for the same reason as `description` above.
+        // Literal for the same reason as the other descriptions here.
         // swiftlint:disable:next line_length
         description: "Launches the agent with --model set to this value. Configure choices in Multiplex's Host Settings; leave empty for the agent's default model.",
         optionsProvider: AgentModelOptionsProvider()
@@ -76,9 +101,11 @@ struct OpenHostAgentIntent: AppIntent {
 
     static var parameterSummary: some ParameterSummary {
         Summary("Start \(\.$agent) on \(\.$host)") {
-            \.$model
+            \.$session
+            \.$placement
             \.$directory
             \.$setupScript
+            \.$model
             \.$prompt
         }
     }
@@ -92,6 +119,13 @@ struct OpenHostAgentIntent: AppIntent {
         let path = directory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let script = ShortcutSetupScriptOptions.selection(for: setupScript)
         let launchModel = model.flatMap(AgentKind.normalizedLaunchModel)
+        let sessionName = session?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let target: ExternalSessionTarget = sessionName.isEmpty
+            ? .newSession
+            : .existingSession(
+                name: sessionName,
+                placement: placement
+                    .flatMap(ExternalSessionPlacement.init(token:)) ?? .tab)
         router.submit(.openAgent(
             host: .id(host.id),
             agent: kind,
@@ -99,7 +133,8 @@ struct OpenHostAgentIntent: AppIntent {
             askForPrompt: false,
             directory: path.isEmpty ? nil : path,
             setupScript: script,
-            model: launchModel
+            model: launchModel,
+            target: target
         ))
         return .result()
     }
@@ -126,21 +161,6 @@ struct AgentWorkingDirectoryOptionsProvider: DynamicOptionsProvider {
     }
 }
 
-/// Pure ordering/normalization behind the dynamic provider.
-enum ShortcutWorkingDirectoryOptions {
-    static func values(configured: [String]) -> [String] {
-        var seen = Set<String>()
-        var values: [String] = []
-        for raw in configured {
-            let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !path.isEmpty, path != "~", seen.insert(path).inserted else { continue }
-            values.append(path)
-        }
-        values.append("~")
-        return values
-    }
-}
-
 /// The host's pre-configured launch models for the selected agent, as
 /// Shortcut suggestions. Same shared choice builder as the widget's Model
 /// setting, so both surfaces offer identical rows.
@@ -161,6 +181,47 @@ struct AgentModelOptionsProvider: DynamicOptionsProvider {
             .map { IntentItem($0.value, title: "\($0.title)") }
         return IntentItemCollection(
             promptLabel: "Choose a model",
+            sections: [IntentItemSection(items: items)]
+        )
+    }
+}
+
+/// The host's last-known sessions from the published App Group snapshot —
+/// the same list the widget renders (sessions are probe state, so the
+/// snapshot is the one store both processes can read). Names only; the
+/// performer revalidates against the live probe before anything types.
+struct AgentSessionOptionsProvider: DynamicOptionsProvider {
+    @IntentParameterDependency<OpenHostAgentIntent>(\.$host)
+    private var intent
+
+    func results() async throws -> IntentItemCollection<String> {
+        let names = (SharedStateStore.load()?.hosts ?? [])
+            .first { $0.id == intent?.host.id }?
+            .sessions.map(\.name) ?? []
+        // Same never-empty rule as every provider here: New Session leads.
+        let items = SessionTargetChoices.sessionChoices(names: names)
+            .map { IntentItem($0.value, title: "\($0.title)") }
+        return IntentItemCollection(
+            promptLabel: "Choose a session",
+            sections: [IntentItemSection(items: items)]
+        )
+    }
+}
+
+/// Placement rows in the selected host's backend vocabulary — tmux's one
+/// honest "New Window" row, or herdr's tab/workspace split. Shared builder
+/// with the widget's provider so both surfaces offer identical rows.
+struct AgentPlacementOptionsProvider: DynamicOptionsProvider {
+    @IntentParameterDependency<OpenHostAgentIntent>(\.$host)
+    private var intent
+
+    func results() async throws -> IntentItemCollection<String> {
+        let hosts = await HostEntityProvider.all()
+        let backend = hosts.first { $0.id == intent?.host.id }?.backendRaw
+        let items = SessionTargetChoices.placementChoices(backendRaw: backend)
+            .map { IntentItem($0.value, title: "\($0.title)") }
+        return IntentItemCollection(
+            promptLabel: "Choose where the agent opens",
             sections: [IntentItemSection(items: items)]
         )
     }

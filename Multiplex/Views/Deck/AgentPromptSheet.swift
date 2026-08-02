@@ -48,8 +48,19 @@ struct AgentPromptFormState {
             askForPrompt: false,
             directory: directory,
             setupScript: request.setupScript,
-            model: launchModel.isEmpty ? nil : launchModel
+            model: launchModel.isEmpty ? nil : launchModel,
+            target: request.target
         )
+    }
+
+    /// The sheet's title names an existing-session target — where the
+    /// launch types is part of what the person approves here.
+    var title: String {
+        var title = "\(request.agent.displayName) on \(request.host.name)"
+        if case .existingSession(let name, _) = request.target {
+            title += " · \(name)"
+        }
+        return title
     }
 }
 
@@ -100,7 +111,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        let title = "\(form.request.agent.displayName) on \(form.request.host.name)"
+        let title = form.title
         self.title = title
         view.backgroundColor = GlassPrototype.sheetGround
 

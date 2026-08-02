@@ -1009,6 +1009,97 @@ final class HostConnectionModel {
         }
     }
 
+    /// Launch inside an EXISTING session — the external action's session
+    /// target. tmux: one exec opens a new window in the session and types
+    /// `script` then `launch` into its fresh pane. herdr: make sure the
+    /// session's server is up (attach auto-restarts a stopped one — the
+    /// tile list keeps stopped sessions pressable, and this path honors
+    /// that), create a new tab in the focused workspace or a new workspace
+    /// per `placement`, then type into the pane the create envelope named.
+    /// `label` names the herdr tab/workspace (tmux windows name themselves
+    /// from the running command); `directory` carries the Working Directory
+    /// semantics — callers pass the explicit choice or the host's first
+    /// configured dir, exactly like the fresh-session mint, so the one
+    /// field means the same thing wherever the agent lands. Only a host
+    /// with nothing configured reaches nil, which falls to the session's
+    /// own world (tmux: the active-pane cwd; herdr: the server default).
+    /// Returns the session's attach mode (the fresh pane is now what the
+    /// session fronts); nil on failure — never a fallback mint, which
+    /// would hide the failure behind a surprise second session.
+    func launchInSession(
+        named sessionName: String,
+        placement: ExternalSessionPlacement,
+        directory: String?,
+        label: String,
+        running script: String? = nil,
+        typing launch: String?
+    ) async -> TerminalRoute.Mode? {
+        resetConnectRetryBackoff()
+        let reusedLink = connection != nil && phase == .connected
+        do {
+            let connection = try await ensureConnection()
+            if host.sessionBackend == .herdr {
+                return await launchInHerdrSession(
+                    named: sessionName, placement: placement,
+                    directory: directory, label: label,
+                    running: script, typing: launch,
+                    over: connection)
+            }
+            let command = TmuxProbe.newWindowCommand(
+                sessionName: sessionName,
+                startDirectory: directory,
+                script: script,
+                launch: launch
+            )
+            guard TmuxProbe.parseNewWindow(
+                try await deadlined { try await connection.exec(command) }
+            ) != nil else { return nil }
+            refresh()
+            return .attach(sessionName: sessionName)
+        } catch {
+            markFailed(error, registerConnectFailure: !reusedLink)
+            return nil
+        }
+    }
+
+    /// The herdr side of `launchInSession`. The spawn is the liveness step,
+    /// not a mint: `session attach` no-ops on a running server and revives
+    /// a stopped one, and the create verbs need the socket answering. The
+    /// typed lines aim at the pane id the CREATE itself returned, so —
+    /// unlike the mint, whose attach auto-creates — there is no stale-name
+    /// window where typing could land in somebody else's shell.
+    private func launchInHerdrSession(
+        named sessionName: String, placement: ExternalSessionPlacement,
+        directory: String?, label: String,
+        running script: String?, typing launch: String?,
+        over connection: SSHConnection
+    ) async -> TerminalRoute.Mode? {
+        // The name arrived from a URL/Shortcut value. Callers match it
+        // against the probe list first, but only a name herdr itself could
+        // list may ever be spliced into a shell line.
+        guard HerdrProbe.bakeableSessionName(sessionName) else { return nil }
+        _ = try? await deadlined {
+            try await connection.exec(
+                HerdrProbe.spawnSessionCommand(sessionName: sessionName))
+        }
+        let create = placement == .workspace
+            ? HerdrProbe.createWorkspaceCommand(
+                sessionName: sessionName, label: label, directory: directory)
+            : HerdrProbe.createTabCommand(
+                sessionName: sessionName, label: label, directory: directory)
+        guard let output = try? await deadlined({
+            try await connection.exec(create)
+        }), let pane = HerdrProbe.parseCreatedPane(output)
+        else { return nil }
+        let lines = [script, launch].compactMap { $0 }
+        if let typing = HerdrProbe.typeCommand(
+            sessionName: sessionName, paneID: pane, lines: lines) {
+            _ = try? await deadlined { try await connection.exec(typing) }
+        }
+        refresh()
+        return .herdrAttach(sessionName: sessionName)
+    }
+
     /// Kill a tmux session on the host over the control connection, then
     /// re-probe. The tile drops as soon as the kill lands; the follow-up
     /// probe is the truth and resurrects it if the kill failed. Fail-soft

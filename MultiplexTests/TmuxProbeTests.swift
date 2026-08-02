@@ -528,6 +528,51 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertTrue(command.contains("MULTIPLEX_NEW"))
     }
 
+    func testNewWindowCommandDefaultsToTheSessionsOwnDirectoryAndTypes() {
+        let command = TmuxProbe.newWindowCommand(
+            sessionName: "my project", script: "nvm use 20", launch: "claude 'go'")
+        // Callers pass the Working Directory choice (or the host's first
+        // configured dir); nil only reaches here when the host configures
+        // nothing, and then the target session's ACTIVE pane cwd beats a
+        // bare $HOME. Same list-panes resolution as the mint's
+        // source-session branch.
+        XCTAssertTrue(command.contains("tmux -u list-panes -t '=my project'"))
+        XCTAssertTrue(command.contains("d=\"${p:-$HOME}\""))
+        // No -d: the window becomes the session's current window, so the
+        // reveal/attach that follows fronts the agent. `=name` exact-match
+        // is fine for a WINDOW target; the typing below switches to the
+        // printed pane id (3.6a rejects `=name` for pane targets). The
+        // server already exists, so no systemd-scope runner here.
+        XCTAssertTrue(command.contains(
+            "i=$(tmux -u new-window -t '=my project' -P -F '#{pane_id}' -c \"$d\" 2>/dev/null)"))
+        XCTAssertFalse(command.contains("multiplex_tmux"))
+        XCTAssertTrue(command.contains(
+            "tmux -u send-keys -t \"$i\" -l -- 'nvm use 20'; "
+                + "tmux -u send-keys -t \"$i\" Enter; "
+                + "tmux -u send-keys -t \"$i\" -l -- 'claude '\\''go'\\'''"))
+        XCTAssertTrue(command.contains("printf 'MULTIPLEX_NEWWIN %s\\n' \"$i\""))
+        // Citadel throws on non-zero exit: a failed create must read as a
+        // missing sentinel, never a torn-down control connection.
+        XCTAssertTrue(command.hasSuffix("; true"))
+    }
+
+    func testNewWindowCommandStartsInExplicitDirectoryWithHomeFallback() {
+        let command = TmuxProbe.newWindowCommand(
+            sessionName: "main", startDirectory: "~/srv/app", launch: "claude")
+        XCTAssertTrue(command.contains("d=\"$HOME\"/'srv/app'; [ -d \"$d\" ] || d=\"$HOME\"; "))
+        XCTAssertFalse(command.contains("list-panes"))
+    }
+
+    func testParseNewWindowReadsThePaneIDSentinel() {
+        XCTAssertEqual(
+            TmuxProbe.parseNewWindow("login noise\nMULTIPLEX_NEWWIN %41\n"), "%41")
+        XCTAssertNil(TmuxProbe.parseNewWindow("MULTIPLEX_NEWWIN \n"))
+        XCTAssertNil(TmuxProbe.parseNewWindow("no window today"))
+        // A new-WINDOW response can never satisfy the new-SESSION parser
+        // and vice versa — different execs, but keep the sentinels honest.
+        XCTAssertNil(TmuxProbe.parseNewSession("MULTIPLEX_NEWWIN %41\n"))
+    }
+
     func testNewSessionCommandWithoutSourceOrLaunch() {
         let command = TmuxProbe.newSessionCommand(
             name: "main", sourceSessionName: nil, launch: nil)

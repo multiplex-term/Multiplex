@@ -561,6 +561,55 @@ enum TmuxProbe {
         return nil
     }
 
+    /// Open a new window in an EXISTING session over the control connection
+    /// — the external action's "launch inside this session" placement (a
+    /// window is tmux's one granularity below a session, so herdr's
+    /// tab/workspace split both land here). Same discipline as
+    /// `newSessionCommand`: `-c` comes from the explicit directory (falling
+    /// back to $HOME when it doesn't exist) or from the target session's own
+    /// active-pane cwd; `-P` prints the fresh pane id and script/launch
+    /// lines are typed at that id (3.6a rejects `=name` for *pane* targets).
+    /// No `-d`: the window becomes the session's current window, so clients
+    /// already attached — and the attach this triggers — front the agent.
+    /// The session's server already exists, so the systemd-scope runner and
+    /// the tmux-conf riders deliberately don't apply here. Always exits 0
+    /// (Citadel throws on nonzero); failure reads as "no sentinel".
+    static func newWindowCommand(
+        sessionName: String, startDirectory: String? = nil,
+        script: String? = nil, launch: String?
+    ) -> String {
+        var command = pathPrefix
+        let target = "=\(sessionName)".shellQuoted
+        if let directory = startDirectory {
+            command += "d=\(directory.shellQuotedDirectory); [ -d \"$d\" ] || d=\"$HOME\"; "
+        } else {
+            command += "p=$(\(tmuxCommand) list-panes -t \(target)"
+                + " -F '#{?pane_active,#{pane_current_path},}' 2>/dev/null | grep -m1 .); "
+                + "d=\"${p:-$HOME}\"; "
+        }
+        command += "i=$(\(tmuxCommand) new-window -t \(target)"
+            + " -P -F '#{pane_id}' -c \"$d\" 2>/dev/null); "
+        var onSuccess = ""
+        for typed in [script, launch].compactMap({ $0 }) {
+            onSuccess += "\(tmuxCommand) send-keys -t \"$i\" -l -- \(typed.shellQuoted); "
+                + "\(tmuxCommand) send-keys -t \"$i\" Enter; "
+        }
+        onSuccess += "printf 'MULTIPLEX_NEWWIN %s\\n' \"$i\""
+        command += "[ -n \"$i\" ] && { \(onSuccess); }; true"
+        return command
+    }
+
+    /// The pane id minted by `newWindowCommand`, or nil when the window
+    /// wasn't created (session gone, tmux gone, control link noise).
+    static func parseNewWindow(_ output: String) -> String? {
+        let sentinel = "MULTIPLEX_NEWWIN "
+        for line in output.split(separator: "\n") where line.hasPrefix(sentinel) {
+            let pane = String(line.dropFirst(sentinel.count))
+            if !pane.isEmpty { return pane }
+        }
+        return nil
+    }
+
     /// One parsed new-session conf line, applied as
     /// `set-option -t <session id> -- name [value]`. A nil value is a
     /// deliberate emission: tmux toggles boolean options given no value.
