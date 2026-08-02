@@ -19,3 +19,4 @@
 - KEYBOARD LOCKED TIP: now sits top-center, clear of the window chrome, with LISTENING replacing it in place.
 - VISION PRO POPOVERS: TMUX shortcuts, Command Setup, and agent HISTORY clear the rounded platter's corners.
 - AGENT STRIP FOLDS AWAY: tap the strip's agent title (CLAUDE CODE / CODEX / PI) to fold the helper bar into a small agent dot in the bottom-left corner — the terminal reclaims the row; tap the dot to bring the bar back. One choice across all windows, reset on relaunch.
+- FILE LINKS: long-press a file:///… address in terminal output; the path sheet should show its decoded path on that SSH host, and ▤ VIEW should open it beside the session in File Viewer. Try a %20 space and a :line suffix.

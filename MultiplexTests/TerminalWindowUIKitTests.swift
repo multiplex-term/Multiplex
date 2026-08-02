@@ -54,6 +54,33 @@ final class TerminalWindowUIKitTests: XCTestCase {
         )
     }
 
+    func testTerminalActivationRoutesFileURLsBeforeLinksAndOrdinaryPaths() {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        let controller = TerminalSessionController(
+            route: TerminalRoute(hostID: host.id, mode: .attach(sessionName: "main")),
+            host: host
+        )
+
+        XCTAssertTrue(controller.activateLink(
+            "file:///tmp/My%20Folder/Release%20Notes.swift:42"
+        ))
+        XCTAssertNil(controller.pendingLink)
+        XCTAssertEqual(controller.pendingPath?.path, "/tmp/My Folder/Release Notes.swift")
+        XCTAssertEqual(controller.pendingPath?.line, 42)
+
+        controller.dismissPendingPath()
+        XCTAssertTrue(controller.activateLink("example.com/docs"))
+        XCTAssertNil(controller.pendingPath)
+        XCTAssertEqual(controller.pendingLink?.raw, "https://example.com/docs")
+
+        controller.dismissPendingLink()
+        XCTAssertTrue(controller.activateLink("file://fileserver/etc/hosts"))
+        guard case .blockedScheme("file")? = controller.pendingLink?.kind else {
+            return XCTFail("A non-local file URI must stay copy-only")
+        }
+        XCTAssertNil(controller.pendingPath)
+    }
+
     func testAgentHelperReuseIsKeyedByHostNotOnlyAgentKind() {
         let firstHost = UUID()
         let secondHost = UUID()

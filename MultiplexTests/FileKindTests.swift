@@ -114,6 +114,60 @@ final class TerminalPathTargetTests: XCTestCase {
         XCTAssertEqual(TerminalPathTarget.resolve("src/foo.ts")?.base, .workingDirectory)
     }
 
+    func testFileURLsResolveToAbsoluteHostPaths() {
+        let direct = TerminalPathTarget.resolve("file:///etc/hosts")
+        XCTAssertEqual(direct?.raw, "file:///etc/hosts")
+        XCTAssertEqual(direct?.path, "/etc/hosts")
+        XCTAssertEqual(direct?.base, .absolute)
+        XCTAssertEqual(direct?.spelling, "/etc/hosts")
+
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("file://localhost/var/log/system.log")?.path,
+            "/var/log/system.log"
+        )
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("FILE:/var/log/system.log")?.path,
+            "/var/log/system.log"
+        )
+    }
+
+    func testFileURLDecodingKeepsSpacesAndLineTarget() {
+        let target = TerminalPathTarget.resolve(
+            "file:///tmp/My%20Folder/Release%20Notes.swift:42"
+        )
+        XCTAssertEqual(target?.path, "/tmp/My Folder/Release Notes.swift")
+        XCTAssertEqual(target?.line, 42)
+        XCTAssertEqual(target?.spelling, "/tmp/My Folder/Release Notes.swift:42")
+
+        // URI syntax proves the markerless final chunk is filename text, not
+        // the trailing prose cleanup used for an implicit spaced-path match.
+        XCTAssertEqual(
+            TerminalPathTarget.resolve("file:///tmp/My%20Folder/Release%20Notes")?.path,
+            "/tmp/My Folder/Release Notes"
+        )
+
+        // An escaped colon is filename data, not a line suffix. Literal
+        // `:42` remains the compiler-style line convention tested above.
+        let escapedColon = TerminalPathTarget.resolve("file:///tmp/report%3A42")
+        XCTAssertEqual(escapedColon?.path, "/tmp/report:42")
+        XCTAssertNil(escapedColon?.line)
+    }
+
+    func testFileURLDeclinesAmbiguousOrUnsafeShapes() {
+        for target in [
+            "file://fileserver/etc/hosts",
+            "file:relative/path",
+            "file:///tmp/report?format=raw",
+            "file:///tmp/report#section",
+            "file:///tmp/%ZZ",
+            "file:///tmp/a%0Ab",
+            "file:///tmp/a%7Fb",
+            "file:///",
+        ] {
+            XCTAssertNil(TerminalPathTarget.resolveFileURL(target), target)
+        }
+    }
+
     func testRelativePart() {
         XCTAssertEqual(TerminalPathTarget.resolve("~/notes/todo.md")?.relativePart, "notes/todo.md")
         XCTAssertEqual(TerminalPathTarget.resolve("$HOME/notes.md")?.relativePart, "notes.md")
@@ -132,7 +186,7 @@ final class TerminalPathTargetTests: XCTestCase {
     }
 
     func testDeclines() {
-        // URLs belong to TerminalLink.
+        // Web URLs belong to TerminalLink; `file:` is the viewer exception.
         XCTAssertNil(TerminalPathTarget.resolve("https://example.com/a/b"))
         // Unknown environment variables can't be resolved from here.
         XCTAssertNil(TerminalPathTarget.resolve("$WORKDIR/src/main.rs"))

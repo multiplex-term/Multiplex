@@ -554,12 +554,17 @@ logic belongs — keep parsing/command-building out of views.
   tested; `TerminalLinkSheet`). Long press is the activation route on
   every platform — it is local at any mouse mode, while a tap belongs to
   the remote under mouse tracking (tap activates only without it). Rules:
-  the scheme allowlist is `http`/`https`/`mailto` and nothing else —
-  notably NOT `multiplex:`, which `ExternalActionRouter` would accept, so
-  pane output can't launch an agent on another host; filesystem-path
-  matches resolve to nil here (they confirm through the file-viewer sheet);
-  interior whitespace disqualifies (`warning: unused variable` is not a
-  `warning:` link). **Schemeless URLs resolve as links too**
+  the scheme allowlist handed to the system is `http`/`https`/`mailto`
+  and nothing else — notably NOT `multiplex:`, which
+  `ExternalActionRouter` would accept, so pane output can't launch an
+  agent on another host. A valid local-authority `file:` URI is the one
+  terminal-only handoff: activation asks `TerminalPathTarget` FIRST and
+  confirms the decoded absolute path through the file-viewer sheet;
+  malformed/non-local file URIs remain blocked + copy-only here.
+  Filesystem-path matches otherwise resolve to nil here (they confirm
+  through that same path sheet); interior whitespace disqualifies
+  (`warning: unused variable` is not a `warning:` link). **Schemeless URLs
+  resolve as links too**
   (`TerminalLink.schemelessLink`): the authority must be domain-shaped
   (≥2 ASCII labels, alphabetic ≥2-char TLD) or dotted-quad IPv4
   (`ViewportReach.isIPv4Literal`, the one parser), with URL evidence
@@ -618,10 +623,16 @@ logic belongs — keep parsing/command-building out of views.
   summons: + TAB ▸ File Viewer roots at the pane cwd ($HOME when no pane
   answers), and a long-pressed path (`TerminalPathTarget`; `:12[:col]`
   suffixes ride as a scroll target) raises `TerminalFilePathSheet` → ▤
-  VIEW. Only text BOTH resolvers decline ($VAR/…, colon prose, whitespace
-  in a bare-relative shape) still falls to selection. Paths with spaces
-  resolve when rooted by a base marker (`/`, `~/`, `./`, `$HOME/`); bare
-  relatives keep the prose guard. `trimmingProseTail` sheds trailing
+  VIEW. `file:///absolute/path` and `file://localhost/absolute/path` take
+  the same road: percent escapes decode to the REMOTE path, URI syntax
+  proves spaces/trailing marks are filename bytes (no prose trimming),
+  and query/fragment/non-local-authority shapes stay blocked + copy-only.
+  This file-URI check MUST precede `TerminalLink`, while ordinary links
+  MUST precede ordinary paths so `example.com/docs` stays a URL. Only text
+  BOTH resolvers decline ($VAR/…, colon prose, whitespace in a
+  bare-relative shape) still falls to selection. Paths with spaces resolve
+  when rooted by a base marker (`/`, `~/`, `./`, `$HOME/`); bare relatives
+  keep the prose guard. `trimmingProseTail` sheds trailing
   chunks carrying neither `/` nor `.` — hence the sheet's OPENS row
   (verbatim mono) whenever the resolved spelling differs from the field.
   Wrapped-row glue: hard wraps leave no seam space, so `LinkMatch

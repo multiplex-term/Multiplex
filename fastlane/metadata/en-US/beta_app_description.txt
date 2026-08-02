@@ -18,6 +18,7 @@ WHERE THINGS ARE
 - + NEW SESSION starts a persistent session, or launches Claude Code, Codex, or Pi with an optional setup script, model, and first prompt. Widget/Shortcut agent launch is tmux-only in this build.
 - TMUX (bottom bar on Vision Pro, key rail on iPad/iPhone, top-right on narrow iPhones) sends everyday tmux commands: new window, split, copy mode.
 - FILE uploads from Photos, Files, or the camera into the active pane's working directory and types the remote path without pressing Return. Dragging a file onto the terminal does the same.
+- + TAB → File Viewer browses host files and git diffs. Long-press a path or file:///… address in terminal output to confirm and open that remote file beside the session.
 - DETACH closes the window; the remote session keeps running on the host and its tile stays on the wall.
 - Home Screen widgets show a host's last-known sessions plus SHELL and AGENT keys; Shortcuts and Siri can open a shell or launch an agent.
 

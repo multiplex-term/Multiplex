@@ -113,7 +113,9 @@ final class TerminalConfirmationUIKitTests: XCTestCase {
     }
 
     func testLinkSheetKeepsBlockedTargetsCopyableButNotOpenable() throws {
-        let initial = try XCTUnwrap(TerminalLink.resolve("file:///etc/shadow"))
+        // A file URI for another authority cannot honestly use this SSH
+        // host's viewer, so it keeps the blocked-link COPY fallback.
+        let initial = try XCTUnwrap(TerminalLink.resolve("file://fileserver/etc/shadow"))
         var copied: String?
         var opened = false
         let controller = TerminalLinkSheetViewController(
@@ -128,7 +130,7 @@ final class TerminalConfirmationUIKitTests: XCTestCase {
         let copy = try XCTUnwrap(chip(label: "Copy", in: controller.view))
         XCTAssertTrue(open.isHidden)
         XCTAssertTrue(copy.accessibilityActivate())
-        XCTAssertEqual(copied, "file:///etc/shadow")
+        XCTAssertEqual(copied, "file://fileserver/etc/shadow")
         XCTAssertFalse(opened)
     }
 

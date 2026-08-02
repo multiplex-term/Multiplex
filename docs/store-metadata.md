@@ -184,10 +184,14 @@ Current product split:
   the user's other devices, built-in terminal themes with independent light/dark
   selections (GLASS shares dark; light adds Tally Frost/Paper/Ivory),
   free file attachment on SSH-backed tmux tabs from Files/Photos (plus camera
-  on iPad) and drag-and-drop through the same SSH upload path, opening web and
-  mail links found in terminal output (long press, or tap where the remote is
-  not tracking the mouse; the confirmation shows the resolved target and its
-  host, and other schemes are shown for copying rather than followed), an
+  on iPad) and drag-and-drop through the same SSH upload path, a read-only
+  File Viewer (code, rendered Markdown, images, and git diffs) summoned from
+  + TAB or a confirmed path in terminal output (a percent-decoded,
+  local-authority `file:` URI naming that SSH host takes the same road),
+  opening web and mail links found in terminal output (long press, or tap
+  where the remote is not tracking the mouse; the confirmation shows the
+  resolved target and its host, and unsupported schemes are shown for copying
+  rather than followed), an
   inline viewport browser for confirmed web links (⌗): the page docks as a
   tab beside the session that printed it, splits into its own window and
   merges back like any tab with the live page riding along, the sheet's

@@ -74,9 +74,13 @@ bake-off is recorded in [docs/landing/](docs/landing/).*
   then press **Done** to return to the shell. On SSH-backed tmux tabs,
   **FILE** attaches from Photos or Files (plus Camera on iPad), uploads into
   the active pane's working directory, and types the remote path without
-  submitting; dropping a file on the terminal uses the same path. SwiftTerm
-  renders xterm-256color, sends taps and pointer clicks to mouse-aware TUIs as
-  primary-button events, and reports window resizing to the remote PTY.
+  submitting; dropping a file on the terminal uses the same path. Long-press a
+  host path — including a percent-encoded `file:///…` URI — to confirm its
+  decoded remote path, then open it read-only in a **File Viewer** tab with
+  source, rendered Markdown, images, and git diffs; + TAB opens the same viewer
+  for browsing. SwiftTerm renders xterm-256color, sends taps and pointer clicks
+  to mouse-aware TUIs as primary-button events, and reports window resizing to
+  the remote PTY.
   **Detach** closes the active tab's channel — tmux keeps the session; the wall
   still shows it.
 - **Agent helpers** — when the active tmux pane **or a plain SSH shell** runs

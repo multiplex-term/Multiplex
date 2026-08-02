@@ -1634,6 +1634,16 @@ final class TerminalSessionController {
     }
 
     private func claimResolved(_ target: String) -> Bool {
+        // `file:` is URI-shaped, but in a remote pane it names a file on the
+        // SSH host, never this device. Give the strict local-authority file
+        // parser first refusal so it reaches the viewer; malformed/non-local
+        // file URIs then fall through to TerminalLink's blocked, copy-only
+        // confirmation. Ordinary links must still precede ordinary paths — a
+        // schemeless domain such as example.com/docs is legal path syntax too.
+        if let file = TerminalPathTarget.resolveFileURL(target) {
+            pendingActivation = .path(file)
+            return true
+        }
         if let link = TerminalLink.resolve(target) {
             pendingActivation = .link(link)
             return true
