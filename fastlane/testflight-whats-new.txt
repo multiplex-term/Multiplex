@@ -370,3 +370,22 @@ install commands sit behind a TMUX | HERDR bar you switch in place.
   holds that exact line.
 - A dead tile's own INSTALL GUIDE is unchanged — it still shows only the
   backend that host is set to.
+
+NOTIFICATION TAPS LAND — the banner press goes to the session
+
+Pressing an agent alert banner (Pro: finished / wants permission / has a
+question, tmux and herdr alike) now takes you to that session instead of
+just foregrounding the app: the window already holding it comes forward
+with that tab active, and a session with no open window attaches in a new
+one, connecting first like a widget tap would.
+
+- Let an agent finish in an unfocused window, press the banner: that
+  window comes forward with the right tab active — no duplicate window.
+- Close the session's window, let the next alert arrive, press it: the
+  app connects and attaches that exact session afresh, herdr sessions
+  included.
+- Press a banner for a host you have since deleted or disabled: a clear
+  deck alert says so instead of silently doing nothing.
+- With the app lock on, press a banner: the veil asks first; the session
+  opens only after unlock.
+- Swiping a banner away (not pressing it) must not open anything.

@@ -220,6 +220,19 @@ final class TerminalWorkspace {
         return true
     }
 
+    /// Bring the window holding this exact tab forward and make it active —
+    /// a notification tap's route back to a tab-scoped alert (a plain shell
+    /// has no session identity for `focusTab(hostID:sessionName:backend:)`
+    /// to match).
+    @discardableResult
+    func focusTab(id tabID: UUID) -> Bool {
+        guard let entry = windows.first(where: { entry in
+            entry.tabs.contains { $0.id == tabID }
+        }) else { return false }
+        entry.reveal(tabID)
+        return true
+    }
+
     /// First-registered window holding a tab for this session — attach and
     /// create tabs alike; plain shells have no session name/backend and never
     /// match.

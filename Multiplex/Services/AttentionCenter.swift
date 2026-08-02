@@ -53,6 +53,7 @@ final class AttentionCenter {
         // Banners must show while the app is frontmost — the whole point is
         // pinging the user about a window they're not looking at.
         UNUserNotificationCenter.current().delegate = banner
+        banner.onTap = { [weak self] target in self?.handleTap(target) }
     }
 
     // MARK: Events
@@ -136,6 +137,37 @@ final class AttentionCenter {
         }
     }
 
+    // MARK: Tap
+
+    /// The fallback's seam, overridable by tests. Live wiring submits to
+    /// the process-wide router — the same queue widget taps ride, which
+    /// waits behind the app lock and raises the deck scene when the press
+    /// launched a fresh process with no context mounted yet.
+    @ObservationIgnored var performExternalAction: (ExternalAction) -> Void = {
+        ExternalActionRouter.shared.submit($0)
+    }
+
+    /// A banner's press gets the user back to the session that pinged them.
+    /// An already-open tab reveals directly — tab-scoped alerts by tab id,
+    /// session alerts through the same (host, session, backend) identity a
+    /// deck tile press uses; tmux and herdr tabs match alike. A session
+    /// alert with no open window rides the external-action seam instead:
+    /// the widget's status-guarded reveal-or-attach, so the tap still lands
+    /// after the window was closed or the process died. Not Pro-gated —
+    /// the banner only existed because Pro was active when it posted, and
+    /// attach itself is a free surface.
+    func handleTap(_ target: AttentionTapTarget) {
+        if let tabID = target.tabID, workspace?.focusTab(id: tabID) == true { return }
+        if workspace?.focusTab(
+            hostID: target.hostID,
+            sessionName: target.sessionName,
+            backend: target.backend
+        ) == true { return }
+        guard target.sessionIsAttachable else { return }
+        performExternalAction(
+            .openShell(host: .id(target.hostID), sessionName: target.sessionName))
+    }
+
     // MARK: Delivery
 
     private func post(_ alert: AttentionAlert) {
@@ -149,6 +181,9 @@ final class AttentionCenter {
         if let subtitle = copy.subtitle { content.subtitle = subtitle }
         content.body = copy.body
         content.sound = .default
+        // The press decodes this to focus the alert's window (or attach it
+        // afresh) — see `handleTap`.
+        content.userInfo = alert.tapTarget.userInfo
         let sourceID = alert.tabID?.uuidString ?? alert.sessionName
         content.threadIdentifier = "\(alert.host.id)-\(sourceID)"
         // One live banner per tmux session or plain-shell tab: a newer event
@@ -214,13 +249,33 @@ final class AttentionCenter {
     }
 }
 
-/// Presents banners while the app is foreground (the default is silence).
+/// Presents banners while the app is foreground (the default is silence)
+/// and routes a banner's press back into the center.
 private final class ForegroundBanner: NSObject, UNUserNotificationCenterDelegate {
+    /// Set once at composition. Delegate callbacks arrive on system queues,
+    /// so the hop onto the main actor happens here.
+    var onTap: (@MainActor (AttentionTapTarget) -> Void)?
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        // Only the default press is intent — a dismissed banner is not.
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+           let target = AttentionTapTarget(
+               userInfo: response.notification.request.content.userInfo) {
+            let onTap = onTap
+            Task { @MainActor in onTap?(target) }
+        }
+        completionHandler()
     }
 }
