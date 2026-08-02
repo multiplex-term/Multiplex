@@ -665,9 +665,12 @@ enum HerdrProbe {
     /// Create a new tab in the session's FOCUSED workspace — where the
     /// session is looking right now (0.7.5 defaults `tab create` to the
     /// focused workspace, so no snapshot parse races the create). The
-    /// external action's "open in the existing workspace" placement.
+    /// external action's "open in the existing workspace" placement, and
+    /// the terminal window's own `+ TAB` press — which passes neither
+    /// rider, so herdr numbers the tab and starts it in the focused pane's
+    /// directory (a press means "another one here").
     static func createTabCommand(
-        sessionName: String, label: String, directory: String?
+        sessionName: String, label: String?, directory: String?
     ) -> String {
         createCommand(
             verb: "tab", sessionName: sessionName, label: label,
@@ -690,13 +693,17 @@ enum HerdrProbe {
     /// via the session's ONE focus) fronts the fresh pane. `--cwd` rides
     /// the shell's own `$HOME` expansion; a missing directory fails soft to
     /// $HOME host-side (herdr's behavior, verified 0.7.5), so no `[ -d ]`
-    /// guard. Callers pass app-authored labels only.
+    /// guard — and an omitted one inherits the focused pane's directory.
+    /// An omitted label leaves herdr's own numbering; callers that pass one
+    /// pass app-authored text only.
     private static func createCommand(
-        verb: String, sessionName: String, label: String, directory: String?
+        verb: String, sessionName: String, label: String?, directory: String?
     ) -> String {
         var command = pathPrefix
             + "herdr --session \(sessionName.shellQuoted) \(verb) create"
-            + " --label \(label.shellQuoted)"
+        if let label, !label.isEmpty {
+            command += " --label \(label.shellQuoted)"
+        }
         if let directory, !directory.isEmpty {
             command += " --cwd \(directory.shellQuotedDirectory)"
         }

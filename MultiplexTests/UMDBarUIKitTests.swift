@@ -65,6 +65,24 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertTrue(detachActions[1].attributes.contains(.destructive))
     }
 
+    func testHerdrTabRenamesTheSessionEntryAndRelabelsTheControl() throws {
+        let controller = UMDBarViewController(configuration: configuration(
+            newTabTarget: .herdrWorkspaceTab
+        ))
+        controller.loadViewIfNeeded()
+
+        let newTab = try XCTUnwrap(control("umd.newTab", in: controller.view) as? UIButton)
+        XCTAssertEqual(
+            actions(in: try XCTUnwrap(newTab.menu)).map(\.title),
+            ["New Tab in Workspace", "Claude Code", "Codex", "Pi", "File Viewer"],
+            "the press mints a tab in the herdr workspace — it must not promise a session"
+        )
+        XCTAssertEqual(
+            newTab.accessibilityLabel,
+            "New tab: another tab in this herdr workspace or the file viewer"
+        )
+    }
+
     func testRegularActionRouterAndDirectButtonsPreserveEveryCallback() throws {
         let first = UUID()
         let second = UUID()
@@ -316,6 +334,7 @@ final class UMDBarUIKitTests: XCTestCase {
         detach: @escaping () -> Void = {},
         closeSession: (() -> Void)? = nil,
         keychainTip: (() -> Void)? = nil,
+        newTabTarget: TerminalRoute.NewTabTarget = .session,
         style: UMDBarStyle = .regular,
         deckControlLabel: String = "DECK",
         availableWidth: CGFloat? = nil,
@@ -334,6 +353,7 @@ final class UMDBarUIKitTests: XCTestCase {
             detach: detach,
             closeSession: closeSession,
             keychainTip: keychainTip,
+            newTabTarget: newTabTarget,
             showsTmuxShortcuts: true,
             style: style,
             deckControlLabel: deckControlLabel,

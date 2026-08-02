@@ -983,6 +983,53 @@ final class HostConnectionModel {
         return .herdrAttach(sessionName: name)
     }
 
+    /// Create a tab in `session`'s focused workspace, typing the same
+    /// setup `script` and agent `launch` a freshly minted session gets —
+    /// the terminal window's `+ TAB` on a herdr tab. The already-attached
+    /// client renders it, so nothing here mints a route.
+    ///
+    /// The backend is the caller's, read off the tab's own route rather
+    /// than `host.sessionBackend` (same rule as `killSession(named:
+    /// backend:)`): an open herdr tab keeps meaning herdr after Host
+    /// Settings switches the deck's backend, and these are herdr commands
+    /// either way. Connects on demand like `createSession`, and returns
+    /// false when the create answered with no pane — a stopped session,
+    /// or a herdr too old for `tab create`.
+    ///
+    /// Unlike `launchInHerdrSession` this does NOT spawn first: an external
+    /// launch names a session it may have to revive, while a press means
+    /// "another tab in what I'm looking at". A session that isn't running
+    /// fails the create, and the window says so — reviving it headlessly
+    /// would put the new tab somewhere nobody is attached.
+    func createHerdrTab(
+        inSession session: String, running script: String?, typing launch: String?
+    ) async -> Bool {
+        guard HerdrProbe.bakeableSessionName(session) else { return false }
+        resetConnectRetryBackoff()
+        let reusedLink = connection != nil && phase == .connected
+        do {
+            let connection = try await ensureConnection()
+            let created = try await deadlined {
+                try await connection.exec(HerdrProbe.createTabCommand(
+                    sessionName: session, label: nil, directory: nil))
+            }
+            guard let pane = HerdrProbe.parseCreatedPane(created) else { return false }
+            if let typing = HerdrProbe.typeCommand(
+                sessionName: session,
+                paneID: pane,
+                lines: [script, launch].compactMap { $0 }
+            ) {
+                _ = try? await deadlined { try await connection.exec(typing) }
+            }
+            // The wall's miniature and pane counts moved with the press.
+            refresh()
+            return true
+        } catch {
+            markFailed(error, registerConnectFailure: !reusedLink)
+            return false
+        }
+    }
+
     /// Setup lines waiting for a pane: the PTY attach is creating the
     /// session, so poll its snapshot over the control connection and type
     /// once. Bounded — a session that never comes up types nothing, and
