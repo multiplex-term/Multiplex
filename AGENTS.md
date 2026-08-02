@@ -450,11 +450,13 @@ logic belongs — keep parsing/command-building out of views.
   top-center carries the dictation action, latching while permissions
   resolve then yielding to the LISTENING bar (it shares the dictation
   bar's slot — the top-trailing slot belongs to window chrome the tip
-  used to cover). The lock is also a named
+  used to cover). Without a physical keyboard, the lock is also a named
   action in the `⋯` menu at every width (`toggleKeyboardLock`; wide chrome
   passes `displacesDirectActions: false` so it never duplicates chips).
-  State is app-wide (`KeyboardLock.shared`, arbiter-written, never
-  persisted); `claim` re-applies it to whichever terminal takes focus.
+  `HardwareKeyboardMonitor` hides the redundant LOCK action while a keyboard
+  is connected (an already-held lock keeps UNLOCK reachable). State is
+  app-wide (`KeyboardLock.shared`, arbiter-written, never persisted); `claim`
+  re-applies it to whichever terminal takes focus.
   Narrow tiers drop page keys, then symbols; `SingleWindowShellLayout`'s
   390/420 pt cutoffs must stay in lockstep with the measured `KeyBarRow`
   tiers (375 pt locked floor keeps RET; narrow locked phones move TMUX to

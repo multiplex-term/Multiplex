@@ -453,7 +453,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
         }
     }
 
-    func testClassicCompactOverflowTracksAttachmentAvailabilityWithoutChurn() throws {
+    func testClassicCompactOverflowTracksAttachmentAndKeyboardAvailabilityWithoutChurn() throws {
         var host = Host(
             name: "devbox",
             hostname: "127.0.0.1",
@@ -562,6 +562,37 @@ final class TerminalWindowUIKitTests: XCTestCase {
         ))
         XCTAssertTrue(retainedLiveOverflow === liveOverflow)
         XCTAssertTrue(retainedLiveOverflow.menu === liveMenu)
+
+        fixture.controller.renderCompactNavigationChromeForTesting(
+            attachmentAvailability: FileAttachMenuAvailability(
+                canOffer: true,
+                isLive: true
+            ),
+            hardwareKeyboardConnected: false
+        )
+        let disconnectedMenu = try XCTUnwrap(navigationButton(
+            accessibilityLabel: "Terminal actions",
+            in: fixture.controller
+        )?.menu)
+        let keyboardLockTitle = "Lock Keyboard Closed"
+        XCTAssertTrue(menuActions(in: disconnectedMenu).contains {
+            $0.title == keyboardLockTitle
+        })
+
+        fixture.controller.renderCompactNavigationChromeForTesting(
+            attachmentAvailability: FileAttachMenuAvailability(
+                canOffer: true,
+                isLive: true
+            ),
+            hardwareKeyboardConnected: true
+        )
+        let connectedMenu = try XCTUnwrap(navigationButton(
+            accessibilityLabel: "Terminal actions",
+            in: fixture.controller
+        )?.menu)
+        XCTAssertFalse(menuActions(in: connectedMenu).contains {
+            $0.title == keyboardLockTitle
+        })
     }
     #endif
 

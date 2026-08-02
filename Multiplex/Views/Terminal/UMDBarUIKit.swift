@@ -46,6 +46,7 @@ struct UMDBarObservedState: Equatable {
     var contactLost: Bool
     var needsYou: Bool
     var keyboardLocked: Bool
+    var hardwareKeyboardConnected: Bool
 }
 
 private struct UMDBarMergeSourceKey: Equatable {
@@ -126,7 +127,8 @@ final class UMDBarViewController: UIViewController,
         status: nil,
         contactLost: false,
         needsYou: false,
-        keyboardLocked: false
+        keyboardLocked: false,
+        hardwareKeyboardConnected: false
     )
 
     init(configuration: UMDBarConfiguration) {
@@ -142,6 +144,9 @@ final class UMDBarViewController: UIViewController,
 
     override func loadView() {
         view = rootView
+        #if !os(visionOS)
+        HardwareKeyboardMonitor.shared.startIfNeeded()
+        #endif
         addChild(fileAttachController)
         rootView.parkFileAttachView(fileAttachController.view)
         fileAttachController.didMove(toParent: self)
@@ -244,7 +249,14 @@ final class UMDBarViewController: UIViewController,
                     }
                     return false
                 }(),
-                keyboardLocked: KeyboardLock.shared.isLocked
+                keyboardLocked: KeyboardLock.shared.isLocked,
+                hardwareKeyboardConnected: {
+                    #if os(visionOS)
+                    false
+                    #else
+                    HardwareKeyboardMonitor.shared.isConnected
+                    #endif
+                }()
             )
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -710,7 +722,9 @@ final class UMDBarViewController: UIViewController,
     private func makeOverflowMenu(displacesDirectActions: Bool) -> UIMenu {
         var children: [UIMenuElement] = []
         #if !os(visionOS)
-        if configuration.controller != nil {
+        let offersKeyboardLock = currentObservedState.keyboardLocked
+            || !currentObservedState.hardwareKeyboardConnected
+        if configuration.controller != nil, offersKeyboardLock {
             children.append(menuAction(
                 title: currentObservedState.keyboardLocked
                     ? "Unlock Keyboard" : "Lock Keyboard Closed",

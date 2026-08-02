@@ -148,6 +148,13 @@ final class UMDBarUIKitTests: XCTestCase {
             availableWidth: 375
         ))
         controller.loadViewIfNeeded()
+        controller.applyObservedState(UMDBarObservedState(
+            status: .connecting,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: false,
+            hardwareKeyboardConnected: false
+        ))
 
         let overflow = try XCTUnwrap(control("umd.overflow", in: controller.view) as? UIButton)
         let menu = try XCTUnwrap(overflow.menu)
@@ -174,6 +181,40 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertTrue(close.attributes.contains(.destructive))
         let files = try XCTUnwrap(allActions.first { $0.title == "Files…" })
         XCTAssertTrue(files.attributes.contains(.disabled))
+
+        #if !os(visionOS)
+        controller.applyObservedState(UMDBarObservedState(
+            status: .connecting,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: false,
+            hardwareKeyboardConnected: true
+        ))
+        let connectedOverflow = try XCTUnwrap(
+            control("umd.overflow", in: controller.view) as? UIButton
+        )
+        XCTAssertFalse(
+            actions(in: try XCTUnwrap(connectedOverflow.menu))
+                .map(\.title)
+                .contains("Lock Keyboard Closed")
+        )
+
+        controller.applyObservedState(UMDBarObservedState(
+            status: .connecting,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: true,
+            hardwareKeyboardConnected: true
+        ))
+        let lockedOverflow = try XCTUnwrap(
+            control("umd.overflow", in: controller.view) as? UIButton
+        )
+        XCTAssertTrue(
+            actions(in: try XCTUnwrap(lockedOverflow.menu))
+                .map(\.title)
+                .contains("Unlock Keyboard")
+        )
+        #endif
     }
 
     func testStatusClusterPreservesMoshConnectionAttentionAndKeychainSemantics() throws {
@@ -189,7 +230,8 @@ final class UMDBarUIKitTests: XCTestCase {
             status: .connecting,
             contactLost: false,
             needsYou: true,
-            keyboardLocked: false
+            keyboardLocked: false,
+            hardwareKeyboardConnected: false
         ))
         XCTAssertEqual(view("umd.status.mosh", in: controller.view)?.accessibilityLabel, "Connects over mosh")
         XCTAssertEqual(view("umd.status.link", in: controller.view)?.accessibilityLabel, "link")
@@ -207,7 +249,8 @@ final class UMDBarUIKitTests: XCTestCase {
             status: .live,
             contactLost: true,
             needsYou: false,
-            keyboardLocked: false
+            keyboardLocked: false,
+            hardwareKeyboardConnected: false
         ))
         XCTAssertEqual(view("umd.status.noLink", in: controller.view)?.accessibilityLabel, "no link")
         XCTAssertNil(view("umd.status.needsYou", in: controller.view))
@@ -216,7 +259,8 @@ final class UMDBarUIKitTests: XCTestCase {
             status: .ended("closed"),
             contactLost: false,
             needsYou: false,
-            keyboardLocked: false
+            keyboardLocked: false,
+            hardwareKeyboardConnected: false
         ))
         XCTAssertEqual(view("umd.status.ended", in: controller.view)?.accessibilityLabel, "ended")
     }
@@ -234,7 +278,8 @@ final class UMDBarUIKitTests: XCTestCase {
             status: .live,
             contactLost: false,
             needsYou: false,
-            keyboardLocked: false
+            keyboardLocked: false,
+            hardwareKeyboardConnected: false
         ))
         controller.update(configuration: configuration(
             controller: terminal,
@@ -255,7 +300,8 @@ final class UMDBarUIKitTests: XCTestCase {
             status: .live,
             contactLost: false,
             needsYou: false,
-            keyboardLocked: false
+            keyboardLocked: false,
+            hardwareKeyboardConnected: false
         )
         let controller = UMDBarViewController(configuration: configuration(
             showDeck: { events.append("old") },
