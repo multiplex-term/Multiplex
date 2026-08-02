@@ -740,13 +740,13 @@ final class FleetWallViewController: UIViewController {
     }
 
     private func createSession(on host: Host, submission: NewSessionSubmission) {
-        let name = host.sessionBackend == .herdr
-            ? HerdrProbe.sessionNameArgument(submission.name)
-            : TmuxProbe.sanitizedSessionName(submission.name)
         let model = configuration.hub.model(for: host)
         Task { [weak self] in
+            // The name rides raw: `createSession` picks the backend's own
+            // sanitizer + uniquer (they run on `base:` regardless), so the
+            // view never second-guesses the naming rules.
             guard let created = await model.createSession(
-                base: name,
+                base: submission.name,
                 inDirectoryOf: nil,
                 startingIn: submission.directory,
                 applying: host.newSessionTmuxConf,
@@ -2544,7 +2544,7 @@ final class FleetSessionTileView: FleetPressView,
     /// so its adapter seeds `created` near the epoch purely for ordering —
     /// rendering that as "20666d" would be a claim nothing made.
     private func sessionAge(_ session: TmuxSession) -> String? {
-        guard session.created.timeIntervalSince1970 > 86_400 else { return nil }
+        guard !HerdrProbe.isSyntheticCreated(session.created) else { return nil }
         let seconds = max(0, Date().timeIntervalSince(session.created))
         if seconds >= 86_400 { return "\(Int(seconds / 86_400))d" }
         if seconds >= 3_600 { return "\(Int(seconds / 3_600))h" }
@@ -2886,12 +2886,14 @@ private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
 
     func configure(
         backend: Host.SessionBackend, herdrHint: Bool, compact: Bool,
-        action: @escaping () -> Void, switchToHerdr: (() -> Void)? = nil
+        action: @escaping () -> Void, switchToHerdr: @escaping () -> Void
     ) {
         self.action = action
         switchAction = switchToHerdr
-        title.setText(backend == .herdr ? "No herdr on host" : "No tmux on host")
-        switchChip.isHidden = !(backend == .tmux && herdrHint && switchToHerdr != nil)
+        title.setText("No \(backend.rawValue) on host")
+        // The hint only ever means "tmux is dead but herdr is installed" —
+        // the tmux probe is the sole writer — so it alone decides the chip.
+        switchChip.isHidden = !herdrHint
         heightConstraint?.constant = compact ? 92 : 138
     }
 }
@@ -3035,10 +3037,28 @@ struct NewSessionFormState {
         initialPrompt = ""
         directory = host.workingDirs.first
         script = preferences.rememberedScript(for: host)
-        name = TmuxProbe.uniqueSessionName(
-            base: agent?.launchCommand ?? "main",
-            existing: existingNames
-        )
+        name = Self.suggestedName(for: host, agent: agent, existing: existingNames)
+    }
+
+    /// What an empty name means for this backend — the field placeholder
+    /// and the prefill base when no agent is chosen.
+    var defaultNameBase: String { Self.defaultNameBase(for: host) }
+
+    private static func defaultNameBase(for host: Host) -> String {
+        host.sessionBackend == .herdr ? "session" : "main"
+    }
+
+    /// The backend's own namer: the prefill must match what the mint will
+    /// do downstream, or the sheet suggests a spelling the create then
+    /// respells.
+    private static func suggestedName(
+        for host: Host, agent: AgentKind?, existing: [String]
+    ) -> String {
+        let base = agent?.launchCommand ?? defaultNameBase(for: host)
+        return switch host.sessionBackend {
+        case .tmux: TmuxProbe.uniqueSessionName(base: base, existing: existing)
+        case .herdr: HerdrProbe.uniqueSessionName(base: base, existing: existing)
+        }
     }
 
     var agentToLaunch: AgentKind? {
@@ -3131,10 +3151,7 @@ struct NewSessionFormState {
     }
 
     private func prefill(for agent: AgentKind?) -> String {
-        TmuxProbe.uniqueSessionName(
-            base: agent?.launchCommand ?? "main",
-            existing: existingNames
-        )
+        Self.suggestedName(for: host, agent: agent, existing: existingNames)
     }
 
     private func modelPrefill(for agent: AgentKind?) -> String {
@@ -3325,7 +3342,7 @@ final class NewSessionViewController: UIViewController,
     private func makeIdentitySection() -> UIView {
         configureTextField(
             nameField,
-            placeholder: form.host.sessionBackend == .herdr ? "session" : "main",
+            placeholder: form.defaultNameBase,
             accessibilityLabel: "Name"
         )
         nameField.text = form.name

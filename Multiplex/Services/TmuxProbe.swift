@@ -67,7 +67,7 @@ enum TmuxProbe {
             // the herdr switch only when herdr is actually installed
             // (`Host.SessionBackend` — the hint is one tap, never an
             // auto-flip). Before the tmux guard on purpose: the guard exits.
-            + "command -v herdr >/dev/null 2>&1 && echo MULTIPLEX_HERDR_PRESENT; "
+            + "command -v herdr >/dev/null 2>&1 && echo \(herdrPresentMarker); "
             + "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
             // The server's own hostname — the exact string tmux seeded every
             // untouched pane title with (see `PaneTitleDisplay`). Its own
@@ -105,9 +105,18 @@ enum TmuxProbe {
         var herdrPresent: Bool = false
     }
 
+    private static let herdrPresentMarker = "MULTIPLEX_HERDR_PRESENT"
+
     static func parseProbe(_ output: String) -> ParsedProbe {
-        let herdrPresent = output.hasPrefix("MULTIPLEX_HERDR_PRESENT\n")
-            || output.contains("\nMULTIPLEX_HERDR_PRESENT\n")
+        // The presence marker prints before the tmux guard, so it can only
+        // live in the record region — scan up to the tails marker, never
+        // the capture section (the bulk of every response, re-walked each
+        // 5 s tick otherwise).
+        let head = tailsMarker(in: output).map { output[..<$0.lowerBound] }
+            ?? Substring(output)
+        let herdrPresent = head.hasPrefix(herdrPresentMarker + "\n")
+            || head.contains("\n" + herdrPresentMarker + "\n")
+            || head.hasSuffix("\n" + herdrPresentMarker)
         let state = parse(output)
         guard case .sessions(let sessions) = state else {
             return ParsedProbe(
@@ -723,7 +732,9 @@ enum TmuxProbe {
         lines.suffix(miniatureLines).map { String($0.prefix(miniatureWidth)) }
     }
 
-    private static func visibleTail(_ lines: [String]) -> [String] {
+    /// Internal, not private: `HerdrProbe` trims its pane reads with the
+    /// same rules, so what counts as a blank tail row is decided once.
+    static func visibleTail(_ lines: [String]) -> [String] {
         var trimmed = lines.map(rightTrim)
         while let last = trimmed.last, last.isEmpty { trimmed.removeLast() }
         return trimmed

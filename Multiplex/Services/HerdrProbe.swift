@@ -47,18 +47,25 @@ import Foundation
 /// multi-window story. herdr's agent layer replaces the ps-table walk:
 /// `pane.agent` is authoritative, so the probe carries no process table.
 enum HerdrProbe {
-    /// Non-interactive SSH exec often has a minimal PATH. herdr's install
-    /// homes are tmux's usual suspects plus `~/.cargo/bin` (cargo installs
-    /// a Rust binary where tmux would never live).
-    static let pathPrefix =
-        "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.cargo/bin\"; "
-        + "export PATH; "
+    /// Non-interactive SSH exec often has a minimal PATH. herdr shares
+    /// tmux's install homes plus `~/.cargo/bin` (cargo installs a Rust
+    /// binary where tmux would never live) — composed from the one shared
+    /// list so a directory added for every other remote command reaches
+    /// herdr commands too.
+    static let pathPrefix = TmuxProbe.pathPrefix
+        + "PATH=\"$PATH:$HOME/.cargo/bin\"; export PATH; "
 
     /// The socket protocol this parser was written against. Pre-1.0 herdr
     /// churns; anything older renders an honest UPDATE-NEEDED tile instead
     /// of garbage, while newer protocols pass — decoding ignores unknown
     /// fields, herdr's own forward-compat advice.
-    static let minimumProtocol = 17
+    private static let minimumProtocol = 17
+
+    /// herdr's primary session — the blind-attach fallback and the one
+    /// snapshot a cold first tick takes before any list has been baked.
+    /// Nothing else may branch on a session being "the default": the
+    /// server owns that rule (it alone refuses deleting it).
+    static let primarySessionName = "default"
 
     // MARK: - Probe command
 
@@ -67,6 +74,8 @@ enum HerdrProbe {
     private static let sessionsMarker = "MULTIPLEX_HERDR_SESSIONS"
     private static let snapshotMarker = "MULTIPLEX_HERDR_SNAP"
     private static let tailsMarker = "MULTIPLEX_TAILS"
+    private static let tailFrameMarker = "MPXS"
+    private static let tailEndMarker = "MPXE"
 
     /// One miniature read the next probe should run: a session and the
     /// pane it fronts. Pane ids (`w1:p1`) are per-session namespaces and
@@ -82,20 +91,24 @@ enum HerdrProbe {
     /// visible-screen reads for the wall miniatures.
     ///
     /// A shell can't join JSON, so both dynamic sets are baked from the
-    /// PREVIOUS tick's parse: `sessionNames` names the snapshots to take
-    /// (`default` is always tried — it's herdr's primary session, so a
-    /// cold first tick still paints its spine), `tailTargets` names the
-    /// pane reads. Snapshots of new sessions and miniatures therefore lag
-    /// topology changes by one tick — the wall already tolerates 5 s of
-    /// staleness by design, and a baked target that vanished mid-tick just
-    /// yields an empty frame the parser drops.
+    /// PREVIOUS tick's parse: `sessionNames` names the snapshots to take,
+    /// `tailTargets` names the pane reads. Snapshots of new sessions and
+    /// miniatures therefore lag topology changes by one tick — the wall
+    /// already tolerates 5 s of staleness by design, and a baked target
+    /// that vanished mid-tick just yields an empty frame the parser drops.
+    /// This is also the ONE place the bake guards apply: what the parser
+    /// reports is truth, what gets spliced into a shell line is vetted.
     static func probeCommand(sessionNames: [String], tailTargets: [TailTarget]) -> String {
         var command = pathPrefix
             + "command -v herdr >/dev/null 2>&1 || { echo \(noHerdrMarker); exit 0; }; "
             + "echo \(statusMarker); herdr status --json 2>/dev/null || true; "
             + "echo \(sessionsMarker); herdr session list --json 2>/dev/null || true; "
         var snapshotSet = sessionNames.filter(bakeableSessionName)
-        if !snapshotSet.contains("default") { snapshotSet.append("default") }
+        // A cold first tick has no baked names yet — snapshot the primary
+        // session so the wall paints a spine immediately. Once names are
+        // baked, the list is the truth: unconditionally probing a stopped
+        // default would spawn a failed remote exec every tick forever.
+        if snapshotSet.isEmpty { snapshotSet.append(primarySessionName) }
         for name in snapshotSet {
             command += "echo \("\(snapshotMarker) \(name)".shellQuoted); "
                 + "herdr --session \(name.shellQuoted) api snapshot 2>/dev/null || true; "
@@ -103,12 +116,12 @@ enum HerdrProbe {
         command += "echo \(tailsMarker); "
         for target in tailTargets
         where bakeableSessionName(target.sessionName) && bakeablePaneID(target.paneID) {
-            command += "echo \("MPXS \(target.sessionName) \(target.paneID)".shellQuoted); "
+            command += "echo \("\(tailFrameMarker) \(target.sessionName) \(target.paneID)".shellQuoted); "
                 + "herdr --session \(target.sessionName.shellQuoted)"
                 + " pane read \(target.paneID.shellQuoted) --source visible"
                 + " 2>/dev/null || true; "
         }
-        command += "echo MPXE"
+        command += "echo \(tailEndMarker)"
         return command
     }
 
@@ -124,15 +137,12 @@ enum HerdrProbe {
         }
     }
 
-    /// Pane ids are server-minted (`w1:p1`) — whitespace-free by shape.
-    /// The MPXS sentinel separates session from pane on the LAST space,
-    /// which only stays unambiguous while that holds.
+    /// Pane ids are server-minted (`w1:p1`) — bakeable like a session
+    /// name, plus whitespace-free: the MPXS sentinel separates session
+    /// from pane on the LAST space, which only stays unambiguous while
+    /// that holds.
     static func bakeablePaneID(_ paneID: String) -> Bool {
-        guard !paneID.isEmpty, !paneID.hasPrefix("-") else { return false }
-        return paneID.unicodeScalars.allSatisfy {
-            !CharacterSet.whitespacesAndNewlines.contains($0)
-                && !CharacterSet.controlCharacters.contains($0)
-        }
+        bakeableSessionName(paneID) && !paneID.contains(where: \.isWhitespace)
     }
 
     // MARK: - Parsed result
@@ -175,24 +185,28 @@ enum HerdrProbe {
         var tailTargets: [TailTarget]
         /// Running sessions to snapshot next tick.
         var sessionNames: [String]
-        var serverVersion: String?
     }
 
     static func parseProbe(_ output: String) -> ParsedProbe {
         var result = ParsedProbe(
             state: .failed("unreadable herdr probe response"),
             tails: [:], miniatures: [:], paneStatuses: [:],
-            tailTargets: [], sessionNames: [], serverVersion: nil
+            tailTargets: [], sessionNames: []
         )
-        let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+        // Slice at the tails marker first: everything structural lives in
+        // the head, and the tail region — one visible screen per session,
+        // the bulk of every response — is walked exactly once, by
+        // `parseTails`.
+        let tailsRange = output.range(of: "\n" + tailsMarker + "\n")
+        let head = output[..<(tailsRange?.lowerBound ?? output.endIndex)]
+        let lines = head.split(separator: "\n", omittingEmptySubsequences: false)
         if lines.contains(where: { $0 == noHerdrMarker }) {
             result.state = .herdrMissing
             return result
         }
 
-        let status = section(in: output, from: statusMarker, to: sessionsMarker)
+        let status = section(in: head, from: statusMarker, to: sessionsMarker)
             .flatMap(decodeStatus)
-        result.serverVersion = status?.server.version ?? status?.client.version
 
         // Version-gate on the client protocol: one binary serves every
         // session, so an old client is an old host — and pre-17 has no
@@ -223,11 +237,7 @@ enum HerdrProbe {
         }
         if let stale = snapshots.values.first(where: { $0.protocolVersion < minimumProtocol }) {
             result.state = .updateNeeded(installedVersion: stale.version)
-            result.serverVersion = stale.version
             return result
-        }
-        if result.serverVersion == nil {
-            result.serverVersion = snapshots.values.first?.version
         }
 
         guard !list.sessions.isEmpty else {
@@ -235,34 +245,29 @@ enum HerdrProbe {
             return result
         }
 
-        let mapped = list.sessions.enumerated().map { index, entry in
+        result.state = .sessions(list.sessions.enumerated().map { index, entry in
             session(entry: entry, index: index, snapshot: snapshots[entry.name])
-        }
-        var paneStatuses: [String: [String: AgentStatus]] = [:]
-        var validPanes: [String: Set<String>] = [:]
-        var tailTargets: [TailTarget] = []
+        })
         for entry in list.sessions where entry.running {
             guard let snapshot = snapshots[entry.name] else { continue }
-            paneStatuses[entry.name] = Dictionary(
+            result.paneStatuses[entry.name] = Dictionary(
                 snapshot.panes.map { ($0.paneID, AgentStatus(tolerant: $0.agentStatus)) },
                 uniquingKeysWith: { first, _ in first }
             )
-            validPanes[entry.name] = Set(snapshot.panes.map(\.paneID))
-            if let pane = frontPaneID(of: snapshot), bakeablePaneID(pane) {
-                tailTargets.append(TailTarget(sessionName: entry.name, paneID: pane))
+            if let pane = frontPaneID(of: snapshot) {
+                result.tailTargets.append(
+                    TailTarget(sessionName: entry.name, paneID: pane))
             }
         }
-        let tails = parseTails(output, validPanes: validPanes)
-        return ParsedProbe(
-            state: .sessions(mapped),
-            tails: tails,
-            miniatures: tails.mapValues(TmuxProbe.miniatureTail),
-            paneStatuses: paneStatuses,
-            tailTargets: tailTargets,
-            sessionNames: list.sessions.filter(\.running).map(\.name)
-                .filter(bakeableSessionName),
-            serverVersion: result.serverVersion
-        )
+        result.sessionNames = list.sessions.filter(\.running).map(\.name)
+        if let tailsRange {
+            result.tails = parseTails(
+                output[tailsRange.upperBound...],
+                paneStatuses: result.paneStatuses
+            )
+            result.miniatures = result.tails.mapValues(TmuxProbe.miniatureTail)
+        }
+        return result
     }
 
     // MARK: - Wire types (decoded tolerantly — unknown fields ignored)
@@ -276,22 +281,24 @@ enum HerdrProbe {
     }
 
     /// `herdr session list --json` — a client verb, so plain JSON with no
-    /// envelope. Which session is the default is deliberately not decoded:
-    /// nothing app-side may branch on it (the server owns that rule).
+    /// envelope. `running` is the classifier (a stopped session is still
+    /// a tile; `herdr status`'s server state deliberately is NOT — it
+    /// speaks only for the default session's server). Which session is
+    /// the default is deliberately not decoded: nothing app-side may
+    /// branch on it.
     private struct SessionList: Decodable {
         var sessions: [SessionEntry]
     }
 
-    struct SessionEntry: Decodable {
+    private struct SessionEntry: Decodable {
         var name: String
         var running: Bool
     }
 
-    struct Snapshot: Decodable {
+    private struct Snapshot: Decodable {
         var version: String
         var protocolVersion: Int
         var workspaces: [Workspace]
-        var tabs: [Tab]
         var panes: [Pane]
         var layouts: [Layout]
         /// The session's ONE focus — what every attached client shows.
@@ -301,13 +308,13 @@ enum HerdrProbe {
         enum CodingKeys: String, CodingKey {
             case version
             case protocolVersion = "protocol"
-            case workspaces, tabs, panes, layouts
+            case workspaces, panes, layouts
             case focusedWorkspaceID = "focused_workspace_id"
             case focusedPaneID = "focused_pane_id"
         }
     }
 
-    struct Workspace: Decodable {
+    private struct Workspace: Decodable {
         var workspaceID: String
         var number: Int
         var label: String
@@ -320,22 +327,8 @@ enum HerdrProbe {
         }
     }
 
-    struct Tab: Decodable {
-        var tabID: String
-        var workspaceID: String
-        var number: Int
-        var label: String
-
-        enum CodingKeys: String, CodingKey {
-            case tabID = "tab_id"
-            case workspaceID = "workspace_id"
-            case number, label
-        }
-    }
-
-    struct Pane: Decodable {
+    private struct Pane: Decodable {
         var paneID: String
-        var workspaceID: String
         var tabID: String
         var agent: String?
         var agentStatus: String
@@ -343,7 +336,6 @@ enum HerdrProbe {
 
         enum CodingKeys: String, CodingKey {
             case paneID = "pane_id"
-            case workspaceID = "workspace_id"
             case tabID = "tab_id"
             case agent
             case agentStatus = "agent_status"
@@ -351,7 +343,7 @@ enum HerdrProbe {
         }
     }
 
-    struct Layout: Decodable {
+    private struct Layout: Decodable {
         var tabID: String
         var focusedPaneID: String?
 
@@ -363,7 +355,6 @@ enum HerdrProbe {
 
     private struct Status: Decodable {
         var client: StatusClient
-        var server: StatusServer
     }
 
     private struct StatusClient: Decodable {
@@ -376,25 +367,17 @@ enum HerdrProbe {
         }
     }
 
-    private struct StatusServer: Decodable {
-        var running: Bool?
-        var version: String?
-    }
-
     private static func decodeSnapshot(_ text: String) -> Snapshot? {
-        guard let data = text.data(using: .utf8) else { return nil }
-        return (try? JSONDecoder().decode(
-            Envelope<SnapshotResult>.self, from: data))?.result.snapshot
+        (try? JSONDecoder().decode(
+            Envelope<SnapshotResult>.self, from: Data(text.utf8)))?.result.snapshot
     }
 
     private static func decodeSessionList(_ text: String) -> SessionList? {
-        guard let data = text.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(SessionList.self, from: data)
+        try? JSONDecoder().decode(SessionList.self, from: Data(text.utf8))
     }
 
     private static func decodeStatus(_ text: String) -> Status? {
-        guard let data = text.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(Status.self, from: data)
+        try? JSONDecoder().decode(Status.self, from: Data(text.utf8))
     }
 
     /// The text between two sentinel lines, nil when the opening sentinel
@@ -402,7 +385,7 @@ enum HerdrProbe {
     /// script itself, but a truncated response still parses as "everything
     /// after the opener".
     private static func section(
-        in output: String, from opener: String, to closer: String
+        in output: Substring, from opener: String, to closer: String
     ) -> String? {
         guard let start = output.range(of: opener + "\n") else { return nil }
         let rest = output[start.upperBound...]
@@ -415,8 +398,9 @@ enum HerdrProbe {
     /// sessions marker is the list; `MULTIPLEX_HERDR_SNAP <name>` lines
     /// (the name may contain spaces — the whole remainder is the name)
     /// open per-session candidate lines, decoded first-that-parses the way
-    /// login-shell noise has always been skipped. Bounded by the tails
-    /// marker, so raw pane text can never forge a snapshot.
+    /// login-shell noise has always been skipped. The head slice already
+    /// ends at the tails marker, so raw pane text can never forge a
+    /// snapshot.
     private static func sessionsRegion(
         _ lines: [Substring]
     ) -> (list: SessionList?, snapshotLines: [String: [String]]) {
@@ -424,21 +408,17 @@ enum HerdrProbe {
         var snapshotLines: [String: [String]] = [:]
         var currentName: String?
         var inRegion = false
-        for raw in lines {
-            let line = String(raw)
+        for line in lines {
             if line == sessionsMarker { inRegion = true; continue }
-            guard inRegion else { continue }
-            if line == tailsMarker { break }
+            guard inRegion, !line.isEmpty else { continue }
             if line.hasPrefix(snapshotMarker + " ") {
                 currentName = String(line.dropFirst(snapshotMarker.count + 1))
                 continue
             }
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else { continue }
             if let name = currentName {
-                snapshotLines[name, default: []].append(trimmed)
+                snapshotLines[name, default: []].append(String(line))
             } else if list == nil {
-                list = decodeSessionList(trimmed)
+                list = decodeSessionList(String(line))
             }
         }
         return (list, snapshotLines)
@@ -457,14 +437,22 @@ enum HerdrProbe {
             // stays pressable.
             windows: snapshot.map(windows(from:)) ?? [],
             clientCount: 0,
-            // Synthesized from the list position: nothing renders this as
-            // a date (the tile hides sub-day ages), but external actions
-            // and the widget sort "most recent" by it, and herdr's own
-            // list order is the only order it states.
+            // Synthesized from the list position: `isSyntheticCreated`
+            // is how a tile knows not to render this as an age, while
+            // external actions and the widget still sort "most recent"
+            // by it — herdr's own list order is the only order it states.
             created: Date(timeIntervalSince1970: TimeInterval(index)),
             tmuxID: entry.name,
             serverHost: ""
         )
+    }
+
+    /// True for the near-epoch stand-ins `session(entry:index:snapshot:)`
+    /// mints — herdr states no creation time, so a tile must render these
+    /// as no age at all. The one decoder of that encoding; keep them in
+    /// step.
+    static func isSyntheticCreated(_ date: Date) -> Bool {
+        date.timeIntervalSince1970 <= 86_400
     }
 
     private static func windows(from snapshot: Snapshot) -> [TmuxWindow] {
@@ -544,7 +532,7 @@ enum HerdrProbe {
     /// through the focused workspace's active-tab layout to that tab's
     /// first pane: the read the next probe bakes in for the tile's
     /// miniature.
-    static func frontPaneID(of snapshot: Snapshot) -> String? {
+    private static func frontPaneID(of snapshot: Snapshot) -> String? {
         if let focused = snapshot.focusedPaneID { return focused }
         let ordered = snapshot.workspaces.sorted { $0.number < $1.number }
         guard let workspace = ordered.first(where: {
@@ -565,9 +553,9 @@ enum HerdrProbe {
     /// session and restarts a stopped one (verified 0.7.5), so a
     /// spine-less tile press and a fresh mint ride the same line. An
     /// empty name (a blind attach from the debug auto-attach hook) lands
-    /// on the default session.
+    /// on the primary session.
     static func attachCommand(sessionName: String) -> String {
-        let name = sessionName.isEmpty ? "default" : sessionName
+        let name = sessionName.isEmpty ? primarySessionName : sessionName
         return pathPrefix + "exec herdr session attach \(name.shellQuoted)"
     }
 
@@ -590,12 +578,13 @@ enum HerdrProbe {
         pathPrefix + "herdr session list --json 2>/dev/null || true"
 
     static func parseSessionNames(_ output: String) -> [String] {
-        for line in output.split(separator: "\n") {
-            if let list = decodeSessionList(String(line)) {
-                return list.sessions.map(\.name)
-            }
-        }
-        return []
+        firstDecodedLine(in: output, decodeSessionList)?.sessions.map(\.name) ?? []
+    }
+
+    /// One snapshot invocation, spelled once: the spawn's verify loop and
+    /// the mint's poll must stay the same exec.
+    private static func snapshotInvocation(sessionName: String) -> String {
+        "herdr --session \(sessionName.shellQuoted) api snapshot 2>/dev/null"
     }
 
     /// Bring a session up WITHOUT a PTY: the client panics once its TUI
@@ -606,11 +595,10 @@ enum HerdrProbe {
     /// the target for setup typing, so create-and-type is two execs with
     /// no window racing the user's own keyboard.
     static func spawnSessionCommand(sessionName: String) -> String {
-        let name = sessionName.shellQuoted
-        return pathPrefix
-            + "herdr session attach \(name) >/dev/null 2>&1 </dev/null; "
+        pathPrefix
+            + "herdr session attach \(sessionName.shellQuoted) >/dev/null 2>&1 </dev/null; "
             + "i=0; while [ \"$i\" -lt 4 ]; do "
-            + "herdr --session \(name) api snapshot 2>/dev/null && exit 0; "
+            + snapshotInvocation(sessionName: sessionName) + " && exit 0; "
             + "i=$((i+1)); sleep 1; done; true"
     }
 
@@ -618,18 +606,23 @@ enum HerdrProbe {
     /// spawn didn't answer (a PTY attach may be bringing the server up
     /// instead).
     static func snapshotCommand(sessionName: String) -> String {
-        pathPrefix
-            + "herdr --session \(sessionName.shellQuoted) api snapshot 2>/dev/null || true"
+        pathPrefix + snapshotInvocation(sessionName: sessionName) + " || true"
     }
 
     /// The focused pane out of a lone snapshot exec — where setup typing
     /// lands. A fresh session has exactly one workspace and pane, so
     /// focused and first agree.
     static func parseFocusedPane(_ output: String) -> String? {
+        firstDecodedLine(in: output, decodeSnapshot).flatMap(frontPaneID(of:))
+    }
+
+    /// The first line of a (possibly noisy) exec response that decodes —
+    /// login shells print around the one envelope line.
+    private static func firstDecodedLine<T>(
+        in output: String, _ decode: (String) -> T?
+    ) -> T? {
         for line in output.split(separator: "\n") {
-            if let snapshot = decodeSnapshot(String(line)) {
-                return frontPaneID(of: snapshot)
-            }
+            if let value = decode(String(line)) { return value }
         }
         return nil
     }
@@ -701,62 +694,48 @@ enum HerdrProbe {
 
     // MARK: - Tails (the deck wall's live miniatures)
 
-    /// Parse the sentinel-framed pane reads into session name → trailing
-    /// lines. MPXS markers carry `<session> <pane>` — the app itself baked
-    /// both, and the pane id (whitespace-free by the bake guard) sits
-    /// after the LAST space, so session names with spaces still frame.
-    /// A frame is accepted only when this tick's snapshot still owns that
-    /// pane — raw pane text can echo "MPXS …" lines, and an unverifiable
-    /// frame is dropped rather than believed. When two frames land on one
-    /// session the newer read wins.
+    /// Parse the sentinel-framed pane reads (the region after the tails
+    /// marker) into session name → trailing lines. MPXS markers carry
+    /// `<session> <pane>` — the app itself baked both, and the pane id
+    /// (whitespace-free by the bake guard) sits after the LAST space, so
+    /// session names with spaces still frame. A frame is accepted only
+    /// when this tick's snapshot still owns that pane — raw pane text can
+    /// echo "MPXS …" lines, and an unverifiable frame is dropped rather
+    /// than believed. When two frames land on one session the newer read
+    /// wins.
     private static func parseTails(
-        _ output: String, validPanes: [String: Set<String>]
+        _ region: Substring, paneStatuses: [String: [String: AgentStatus]]
     ) -> [String: [String]] {
-        guard let marker = output.range(of: "\n" + tailsMarker + "\n") else { return [:] }
         var result: [String: [String]] = [:]
         var currentName: String?
         var lines: [String] = []
         func flush() {
             if let name = currentName {
-                let tail = visibleTail(lines)
+                let tail = TmuxProbe.visibleTail(lines)
                 if !tail.isEmpty || result[name] == nil { result[name] = tail }
             }
             currentName = nil
             lines = []
         }
-        for raw in output[marker.upperBound...]
-            .split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = String(raw)
-            if line.hasPrefix("MPXS ") {
+        for raw in region.split(separator: "\n", omittingEmptySubsequences: false) {
+            if raw.hasPrefix(tailFrameMarker + " ") {
                 flush()
-                let payload = line.dropFirst(5)
+                let payload = raw.dropFirst(tailFrameMarker.count + 1)
                 if let separator = payload.lastIndex(of: " ") {
                     let session = String(payload[..<separator])
                     let pane = String(payload[payload.index(after: separator)...])
-                    if validPanes[session]?.contains(pane) == true {
+                    if paneStatuses[session]?[pane] != nil {
                         currentName = session
                     }
                 }
-            } else if line == "MPXE" {
+            } else if raw == tailEndMarker {
                 flush()
             } else if currentName != nil {
-                lines.append(line)
+                lines.append(String(raw))
             }
         }
         flush() // tolerate a truncated response missing its trailing MPXE
         return result
-    }
-
-    private static func visibleTail(_ lines: [String]) -> [String] {
-        var trimmed = lines.map(rightTrim)
-        while let last = trimmed.last, last.isEmpty { trimmed.removeLast() }
-        return trimmed
-    }
-
-    private static func rightTrim(_ line: String) -> String {
-        var slice = Substring(line)
-        while let last = slice.last, last == " " || last == "\t" { slice = slice.dropLast() }
-        return String(slice)
     }
 }
 

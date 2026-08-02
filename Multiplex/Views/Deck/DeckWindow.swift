@@ -47,11 +47,10 @@ enum DeckScene {
         var firstTabID: UUID?
         for entry in list.split(separator: ",") {
             let tabs = entry.split(separator: "+").map { name in
-                // On a herdr host the entry names a herdr session directly
-                // (attach auto-creates, so even a fresh harness works).
-                TerminalRoute(hostID: host.id, mode: host.sessionBackend == .herdr
-                    ? .herdrAttach(sessionName: String(name))
-                    : .attach(sessionName: String(name)))
+                TerminalRoute(
+                    hostID: host.id,
+                    mode: .attach(host: host, sessionName: String(name))
+                )
             }
             guard !tabs.isEmpty else { continue }
             if firstTabID == nil { firstTabID = tabs.first?.id }

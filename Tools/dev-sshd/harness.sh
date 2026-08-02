@@ -209,14 +209,7 @@ herdr_demo() {
         echo "herdr server started (pid $(cat "$STATE/herdr-server.pid"))"
     fi
 
-    # Re-runs recreate the demo topology from scratch (legacy runs parked
-    # workspaces in the default session — retire those too).
-    if [ -f "$STATE/herdr-workspaces" ]; then
-        while IFS= read -r ws; do
-            herdr workspace close "$ws" >/dev/null 2>&1 || true
-        done < "$STATE/herdr-workspaces"
-        rm -f "$STATE/herdr-workspaces"
-    fi
+    # Re-runs recreate the demo topology from scratch.
     if [ -f "$STATE/herdr-sessions" ]; then
         while IFS= read -r sess; do
             herdr session stop "$sess" --json >/dev/null 2>&1 || true
@@ -287,16 +280,8 @@ PY
 }
 
 stop() {
-    # Retire only the sessions/workspaces this harness created; stop the
-    # server only if this harness started it. A developer's own herdr
-    # stays untouched. (herdr-workspaces is the legacy corral — old runs
-    # parked demo workspaces in the default session.)
-    if [ -f "$STATE/herdr-workspaces" ]; then
-        while IFS= read -r ws; do
-            herdr workspace close "$ws" >/dev/null 2>&1 || true
-        done < "$STATE/herdr-workspaces"
-        rm -f "$STATE/herdr-workspaces"
-    fi
+    # Retire only the sessions this harness created; stop the server only
+    # if this harness started it. A developer's own herdr stays untouched.
     if [ -f "$STATE/herdr-sessions" ]; then
         while IFS= read -r sess; do
             herdr session stop "$sess" --json >/dev/null 2>&1 || true

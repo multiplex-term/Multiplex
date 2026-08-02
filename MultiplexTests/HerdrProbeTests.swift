@@ -118,7 +118,6 @@ final class HerdrProbeTests: XCTestCase {
         XCTAssertEqual(sessions.map(\.name), ["default", "work", "parked"])
         XCTAssertEqual(sessions.map(\.tmuxID), ["default", "work", "parked"],
                        "session names are herdr's own unique identity")
-        XCTAssertEqual(parsed.serverVersion, "0.7.5")
 
         // No API surface reports attached clients, so herdr sessions never
         // claim the lamp.
@@ -311,8 +310,6 @@ final class HerdrProbeTests: XCTestCase {
             transcript(status: statusDown, list: #"{"sessions":[]}"#)
         )
         XCTAssertEqual(parsed.state, .noServer)
-        XCTAssertEqual(parsed.serverVersion, "0.7.5",
-                       "the client version still rides status for the tile")
     }
 
     func testOldProtocolInSnapshotIsUpdateNeeded() throws {
@@ -376,17 +373,21 @@ final class HerdrProbeTests: XCTestCase {
         XCTAssertTrue(command.hasSuffix("echo MPXE"))
     }
 
-    func testProbeCommandAlwaysTriesDefault() {
-        // A cold first tick has no baked names yet — the default session
-        // still gets its snapshot so the wall paints a spine on tick one.
+    func testProbeCommandTriesDefaultOnlyOnAColdTick() {
+        // A cold first tick has no baked names yet — the primary session
+        // gets a snapshot so the wall paints a spine on tick one.
         let command = HerdrProbe.probeCommand(sessionNames: [], tailTargets: [])
         XCTAssertTrue(command.contains("echo 'MULTIPLEX_HERDR_SNAP default'"))
         XCTAssertTrue(command.contains("echo MULTIPLEX_TAILS; echo MPXE"))
         XCTAssertFalse(command.contains("pane read"))
-        // And never twice when it's already baked.
-        let baked = HerdrProbe.probeCommand(sessionNames: ["default"], tailTargets: [])
+        // Once names are baked the list is the truth — a stopped default
+        // must not cost a failed remote exec every tick forever.
+        let baked = HerdrProbe.probeCommand(sessionNames: ["work"], tailTargets: [])
+        XCTAssertFalse(baked.contains("MULTIPLEX_HERDR_SNAP default"))
+        // And never twice when it IS baked.
+        let rebaked = HerdrProbe.probeCommand(sessionNames: ["default"], tailTargets: [])
         XCTAssertEqual(
-            baked.components(separatedBy: "MULTIPLEX_HERDR_SNAP default").count, 2)
+            rebaked.components(separatedBy: "MULTIPLEX_HERDR_SNAP default").count, 2)
     }
 
     func testProbeCommandRefusesUnbakeableNames() {
@@ -627,6 +628,12 @@ final class HerdrRouteTests: XCTestCase {
         host.sessionBackend = .herdr
         XCTAssertEqual(
             TerminalRoute.Mode.attach(host: host, session: session),
+            .herdrAttach(sessionName: "work")
+        )
+        // The name-based overload serves callers holding only a name
+        // (auto-attach entries, widget targets) — no fabricated session.
+        XCTAssertEqual(
+            TerminalRoute.Mode.attach(host: host, sessionName: "work"),
             .herdrAttach(sessionName: "work")
         )
     }

@@ -20,17 +20,11 @@ struct Host: Identifiable, Codable, Hashable {
     /// host, chosen explicitly in Host Settings / manual Add; the dead-tmux
     /// tile may *offer* a switch when it sees herdr installed, but nothing
     /// ever flips this automatically.
-    enum SessionBackend: String, Codable, CaseIterable, Identifiable {
+    /// The raw value doubles as the user-facing noun ("tmux"/"herdr") —
+    /// wire format and vocabulary are the same word on purpose.
+    enum SessionBackend: String, Codable, CaseIterable {
         case tmux
         case herdr
-
-        var id: String { rawValue }
-        var label: String {
-            switch self {
-            case .tmux: "tmux"
-            case .herdr: "herdr"
-            }
-        }
     }
 
     var id: UUID = UUID()

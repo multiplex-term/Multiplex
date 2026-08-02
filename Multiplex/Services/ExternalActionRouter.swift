@@ -168,9 +168,7 @@ enum ExternalActionPerformer {
         }
         if let target = requested ?? ExternalActionPlan.mostRecentSessionName(in: sessions) {
             if context.workspace.focusTab(hostID: host.id, sessionName: target) { return }
-            let session = sessions.first { $0.name == target }
-                ?? TmuxSession(name: target, windows: [], created: .distantPast)
-            open(mode: .attach(host: host, session: session), on: host, context: context)
+            open(mode: .attach(host: host, sessionName: target), on: host, context: context)
         } else {
             // Headless creation inherits the New Session sheet's remembered
             // setup script (nil unless its REMEMBER opt-in is on) — a widget

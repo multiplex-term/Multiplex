@@ -1378,9 +1378,11 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private var backendDetail: String {
         if form.sessionBackend == .herdr {
-            return "The deck monitors herdr (herdr.dev) workspaces and their "
-                + "agents through the herdr CLI; tiles attach the full herdr "
-                + "client. The tmux options editor doesn't apply here."
+            return "The deck monitors herdr (herdr.dev) sessions and their "
+                + "agents through the herdr CLI — one tile per session, its "
+                + "workspaces as the tile's window lines; a tile attaches "
+                + "the full herdr client. The tmux options editor doesn't "
+                + "apply here."
         }
         return "The deck monitors a remote tmux server — sessions, windows, "
             + "and agent panes. herdr (herdr.dev) is the alternative for "
@@ -1389,7 +1391,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private func renderBackend() {
         let bar = AddHostChoiceBar<Host.SessionBackend>(
-            choices: [("TMUX", .tmux), ("HERDR", .herdr)],
+            choices: Host.SessionBackend.allCases.map { ($0.rawValue.uppercased(), $0) },
             selection: form.sessionBackend
         ) { [weak self] backend in
             guard let self else { return }

@@ -37,14 +37,20 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
             .create(sessionName: sessionName, directory: nil)
         }
 
-        /// The attach mode for one probed session on this host — the tmux
-        /// attach or the herdr client, decided by the host's backend in
-        /// exactly one place so no mint site can disagree.
-        static func attach(host: Host, session: TmuxSession) -> Mode {
+        /// The attach mode for one session on this host — the tmux attach
+        /// or the herdr client, decided by the host's backend in exactly
+        /// one place so no mint site can disagree. Name-based on purpose:
+        /// callers holding only a name (auto-attach entries, widget
+        /// targets) must not fabricate a session record to qualify.
+        static func attach(host: Host, sessionName: String) -> Mode {
             switch host.sessionBackend {
-            case .tmux: .attach(sessionName: session.name)
-            case .herdr: .herdrAttach(sessionName: session.name)
+            case .tmux: .attach(sessionName: sessionName)
+            case .herdr: .herdrAttach(sessionName: sessionName)
             }
+        }
+
+        static func attach(host: Host, session: TmuxSession) -> Mode {
+            attach(host: host, sessionName: session.name)
         }
     }
 

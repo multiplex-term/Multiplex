@@ -673,45 +673,32 @@ final class HostConnectionModel {
             attentionTracker.reset()
             return
         }
-        if host.sessionBackend == .herdr {
-            evaluateHerdrAttention(sessions: sessions)
-            return
-        }
         var next: [String: PaneAgentState] = [:]
         for session in sessions {
-            let window = session.activeWindow
-            let activeAgent = window?.activeAgent
-            let activeTitle = window?.activePane?.title ?? window?.paneTitle ?? ""
-            // No detected agent, or an agent without verified attention
-            // signals, means no state (bells are still tracked below).
-            let state = AgentAttention.classifyVerified(
-                title: activeTitle,
-                tail: attentionTails[session.name] ?? [],
-                agent: activeAgent
-            )
-            if let state {
+            let verdict = sessionAttentionVerdict(for: session)
+            if let state = verdict.state {
                 next[session.name] = state
             }
             let events = attentionTracker.update(
                 session: session.name,
-                state: state,
-                hasBell: session.windows.contains(where: \.hasBell)
+                state: verdict.state,
+                hasBell: verdict.hasBell
             )
             // One banner per session per tick — the most actionable edge
             // wins (they share a notification slot, and delivery order
             // across independent posts isn't guaranteed).
             if let event = events.max(by: { $0.priority < $1.priority }) {
                 var dialogSummary: String?
-                if case .needsInput(let kind) = event {
+                if verdict.offersDialogSummary, case .needsInput(let kind) = event {
                     dialogSummary = AgentAttention.dialogSummary(
                         in: attentionTails[session.name] ?? [], kind: kind)
                 }
                 onAttentionAlert?(AttentionAlert(
                     host: host,
                     sessionName: session.name,
-                    agent: activeAgent,
+                    agent: verdict.agent,
                     event: event,
-                    paneTitle: activeTitle,
+                    paneTitle: verdict.paneTitle,
                     dialogSummary: dialogSummary
                 ))
             }
@@ -720,50 +707,61 @@ final class HostConnectionModel {
         if attention != next { attention = next }
     }
 
-    /// herdr mode: the reported lifecycle status is the pane's attention
-    /// authority — needle heuristics bypassed, so Pi's alerts are real
-    /// here and a foreign agent kind still carries its honest state. The
-    /// same tracker turns the status stream into edges: herdr's derived
-    /// `done` arrives as busy → idle, which is exactly the turn-ended
-    /// shape. No dialog summary yet — 0.7.5 surfaces the blocked message
-    /// nowhere readable (verified 2026-08-01), and the banner must stand
-    /// without one.
-    private func evaluateHerdrAttention(sessions: [TmuxSession]) {
-        var next: [String: PaneAgentState] = [:]
-        for session in sessions {
+    private struct AttentionVerdict {
+        var state: PaneAgentState?
+        var agent: AgentKind?
+        var paneTitle: String
+        var hasBell: Bool
+        var offersDialogSummary: Bool
+    }
+
+    /// The ONE per-backend step of `evaluateAttention` — everything
+    /// downstream (tracker edges, one-banner-per-tick selection, pruning)
+    /// is shared so alert policy can't drift by backend. tmux classifies
+    /// the fronted pane's title + capture through the needle heuristics.
+    /// herdr's reported lifecycle statuses are authoritative instead —
+    /// which is what makes Pi's alerts real there — and fold across EVERY
+    /// pane in the session, background tabs included: a blocked agent the
+    /// session isn't fronting still needs you. herdr offers no dialog
+    /// summary (0.7.5 surfaces the blocked message nowhere readable,
+    /// verified 2026-08-01) and no bells; its derived `done` arrives as
+    /// the busy → idle edge, exactly the turn-ended shape.
+    private func sessionAttentionVerdict(for session: TmuxSession) -> AttentionVerdict {
+        switch host.sessionBackend {
+        case .tmux:
+            let window = session.activeWindow
+            let agent = window?.activeAgent
+            let title = window?.activePane?.title ?? window?.paneTitle ?? ""
+            return AttentionVerdict(
+                // No detected agent, or an agent without verified attention
+                // signals, means no state (bells are still tracked).
+                state: AgentAttention.classifyVerified(
+                    title: title,
+                    tail: attentionTails[session.name] ?? [],
+                    agent: agent
+                ),
+                agent: agent,
+                paneTitle: title,
+                hasBell: session.windows.contains(where: \.hasBell),
+                offersDialogSummary: true
+            )
+        case .herdr:
             let statuses = herdrPaneStatuses[session.name] ?? [:]
-            // The tile folds EVERY pane in the session — background tabs
-            // included: a blocked agent the session isn't fronting still
-            // needs you.
             let state = HerdrProbe.sessionAgentState(statuses.values)
-            if let state {
-                next[session.name] = state
-            }
             // Alert metadata speaks for the fronted pane only when its own
             // status produced the session's verdict — a blocked background
             // tab must not borrow the front pane's agent name.
             let pane = session.activeWindow?.activePane
-            let frontState = HerdrProbe.paneAgentState(
-                pane.flatMap { statuses[$0.tmuxID] })
-            let front = frontState == state ? pane : nil
-            let events = attentionTracker.update(
-                session: session.name,
+            let front = HerdrProbe.paneAgentState(
+                pane.flatMap { statuses[$0.tmuxID] }) == state ? pane : nil
+            return AttentionVerdict(
                 state: state,
-                hasBell: false
+                agent: front?.agent,
+                paneTitle: front?.title ?? "",
+                hasBell: false,
+                offersDialogSummary: false
             )
-            if let event = events.max(by: { $0.priority < $1.priority }) {
-                onAttentionAlert?(AttentionAlert(
-                    host: host,
-                    sessionName: session.name,
-                    agent: front?.agent,
-                    event: event,
-                    paneTitle: front?.title ?? "",
-                    dialogSummary: nil
-                ))
-            }
         }
-        attentionTracker.prune(keeping: Set(sessions.map(\.name)))
-        if attention != next { attention = next }
     }
 
     /// Re-derive the wall's KEYCHAIN LOCKED tip after a settled probe.

@@ -258,13 +258,12 @@ final class TmuxInstallViewController: UIKitHostGuideSheetViewController {
     let host: Host
 
     private var multiplexer: String {
-        host.sessionBackend == .herdr ? "herdr" : "tmux"
+        host.sessionBackend.rawValue
     }
 
     init(host: Host) {
         self.host = host
-        super.init(
-            title: host.sessionBackend == .herdr ? "Install herdr" : "Install tmux")
+        super.init(title: "Install \(host.sessionBackend.rawValue)")
     }
 
     @available(*, unavailable)

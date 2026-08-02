@@ -743,8 +743,10 @@ logic belongs — keep parsing/command-building out of views.
   EMPTY list = noServer, stopped sessions stay as spine-less pressable
   tiles), per-session `api snapshot` + sentinel-framed `pane read`
   tails, both sets baked from the PREVIOUS tick (a shell can't join
-  JSON; `default` is always snapshotted so tick one paints; one tick of
-  lag sits inside the wall's staleness budget). Pane ids (`w1:p1`)
+  JSON; a cold tick with nothing baked snapshots `default` so tick one
+  paints — never unconditionally, or a stopped default costs a failed
+  exec every tick; one tick of lag sits inside the wall's staleness
+  budget). Pane ids (`w1:p1`)
   COLLIDE across sessions — everything keys (session, pane), and MPXS
   frames split on the LAST space (pane ids are whitespace-free by the
   bake guard; session names may carry spaces but never control chars or

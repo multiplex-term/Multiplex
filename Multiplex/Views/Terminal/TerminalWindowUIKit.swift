@@ -1011,14 +1011,19 @@ final class TerminalWindowViewController: UIViewController,
             // No list-panes fast path in herdr mode; the probe's snapshot is
             // the authority and `detectedAgent` follows the session's live
             // focused pane — re-read it each interval so a workspace switch
-            // inside the TUI moves the strip within a probe tick.
+            // inside the TUI moves the strip within a probe tick. Unlike
+            // the exec-driven siblings this read is free and in-memory, so
+            // it skips the focus gate (an unfocused window's strip should
+            // still track the TUI) but keeps the background gate.
             while !Task.isCancelled {
                 guard activeTab?.id == watchedTab.id else { return }
-                let nextAgent = detectedAgent
-                if shownAgent != nextAgent {
-                    hideAgentTask?.cancel()
-                    shownAgent = nextAgent
-                    renderNow()
+                if UIApplication.shared.applicationState == .active {
+                    let nextAgent = detectedAgent
+                    if shownAgent != nextAgent {
+                        hideAgentTask?.cancel()
+                        shownAgent = nextAgent
+                        renderNow()
+                    }
                 }
                 try? await Task.sleep(for: Self.focusedPaneProbeInterval)
             }
