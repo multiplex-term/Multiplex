@@ -277,4 +277,61 @@ final class SharedStateTests: XCTestCase {
             .appendingPathComponent("shared-state-missing-\(UUID().uuidString)")
         XCTAssertNil(SharedStateStore.load(directory: directory))
     }
+    // MARK: Widget-link origin token
+
+    /// The scheme is public, so a link's only claim to being a widget tap is
+    /// this install's App Group token. Foreign links are confirmed, not run.
+    func testWidgetLinksCarryTheInstallTokenAndForeignLinksDoNot() {
+        let defaults = UserDefaults(suiteName: "SharedStateTests.\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.description) }
+        let token = SharedStateStore.ensureLinkToken(defaults: defaults)
+        XCTAssertNotNil(token)
+        XCTAssertEqual(SharedStateStore.ensureLinkToken(defaults: defaults), token,
+                       "the token must be stable: rendered widget links carry it")
+
+        let hostID = UUID()
+        let widgetLink = ExternalActionURL.url(
+            for: .openShell(host: .id(hostID), sessionName: nil))
+        var components = URLComponents(url: widgetLink, resolvingAgainstBaseURL: false)!
+        components.queryItems = (components.queryItems ?? [])
+            + [URLQueryItem(name: WidgetLink.tokenItemName, value: token)]
+
+        let carried = ExternalActionURL.request(from: components.url!)
+        XCTAssertEqual(carried?.token, token)
+        XCTAssertTrue(ExternalActionTrust.isTrusted(token: carried?.token, expected: token))
+
+        let foreign = ExternalActionURL.request(from: widgetLink)
+        XCTAssertNil(foreign?.token)
+        XCTAssertFalse(ExternalActionTrust.isTrusted(token: foreign?.token, expected: token))
+        XCTAssertFalse(ExternalActionTrust.isTrusted(token: "not-the-token", expected: token))
+        // An app that has not minted a token yet trusts nothing.
+        XCTAssertFalse(ExternalActionTrust.isTrusted(token: token, expected: nil))
+    }
+
+    /// The prompt an attacker-suppliable link carries has to be visible in
+    /// what the person is asked to approve.
+    func testConfirmationNamesTheHostAndShowsThePrompt() {
+        let confirmation = ExternalActionConfirmation.make(
+            for: .openAgent(
+                host: .named("devbox"), agent: .claudeCode,
+                prompt: "delete every branch", askForPrompt: false,
+                directory: nil, setupScript: .remembered, model: nil),
+            hostName: "devbox"
+        )
+        XCTAssertTrue(confirmation.title.contains("devbox"))
+        XCTAssertTrue(confirmation.message.contains("delete every branch"))
+    }
+
+    /// ASK mode is its own confirmation — the sheet names host and agent and
+    /// the person types the prompt, so a link's prompt never runs unseen.
+    func testAskModeNeedsNoOriginConfirmation() {
+        let ask = ExternalAction.openAgent(
+            host: .named("devbox"), agent: .claudeCode, prompt: "ignored",
+            askForPrompt: true, directory: nil, setupScript: .remembered, model: nil)
+        XCTAssertFalse(ask.needsOriginConfirmation)
+        XCTAssertTrue(
+            ExternalAction.openShell(host: .named("devbox"), sessionName: nil)
+                .needsOriginConfirmation)
+    }
+
 }

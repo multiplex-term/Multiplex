@@ -39,10 +39,20 @@ enum WidgetLink {
         return url(queryItems: items)
     }
 
+    /// The query item that says "this link came from this install's own
+    /// widget". See `SharedStateStore.linkToken` — without it the app
+    /// confirms the action before running it, because the scheme is open to
+    /// anything that can ask iOS to open a URL.
+    static let tokenItemName = "t"
+
     private static func url(queryItems: [URLQueryItem]) -> URL {
         var components = URLComponents()
         components.scheme = scheme
         components.host = authority
+        var queryItems = queryItems
+        if let token = SharedStateStore.linkToken() {
+            queryItems.append(URLQueryItem(name: tokenItemName, value: token))
+        }
         components.queryItems = queryItems
         // These components always form a valid URL; the fallback is inert.
         return components.url ?? URL(string: "\(scheme)://\(authority)")!

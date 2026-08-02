@@ -48,29 +48,36 @@ enum MoshProto {
             index = data.startIndex
         }
 
+        /// Skipping an unknown fixed-width field used to recurse, so a
+        /// message packed with them (the peer decides how many fit in one
+        /// instruction) walked the stack over; the skip loops instead. The
+        /// length is likewise range-checked before it becomes an `Int` — a
+        /// legal ten-byte varint above `Int.max` trapped on the conversion.
         mutating func next() throws -> (field: Int, value: Value)? {
-            guard index < bytes.endIndex else { return nil }
-            let tag = try varint()
-            let field = Int(tag >> 3)
-            switch tag & 7 {
-            case 0:
-                return (field, .varint(try varint()))
-            case 1: // fixed64 — mosh never sends one; skip for robustness
-                try skip(8)
-                return try next()
-            case 2:
-                let length = Int(try varint())
-                guard length <= bytes.distance(from: index, to: bytes.endIndex)
-                else { throw Failure.truncated }
-                let end = bytes.index(index, offsetBy: length)
-                let value = bytes[index ..< end]
-                index = end
-                return (field, .bytes(value))
-            case 5: // fixed32 — likewise skip
-                try skip(4)
-                return try next()
-            default: // groups and reserved wire types
-                throw Failure.unsupportedWireType
+            while true {
+                guard index < bytes.endIndex else { return nil }
+                let tag = try varint()
+                let field = Int(tag >> 3)
+                switch tag & 7 {
+                case 0:
+                    return (field, .varint(try varint()))
+                case 1: // fixed64 — mosh never sends one; skip for robustness
+                    try skip(8)
+                    continue
+                case 2:
+                    guard let length = Int(exactly: try varint()),
+                          length <= bytes.distance(from: index, to: bytes.endIndex)
+                    else { throw Failure.truncated }
+                    let end = bytes.index(index, offsetBy: length)
+                    let value = bytes[index ..< end]
+                    index = end
+                    return (field, .bytes(value))
+                case 5: // fixed32 — likewise skip
+                    try skip(4)
+                    continue
+                default: // groups and reserved wire types
+                    throw Failure.unsupportedWireType
+                }
             }
         }
 

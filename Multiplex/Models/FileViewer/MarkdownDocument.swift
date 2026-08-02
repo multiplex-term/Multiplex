@@ -50,7 +50,17 @@ enum MarkdownDocument {
         return parseLines(lines)
     }
 
-    private static func parseLines(_ lines: [String]) -> [MarkdownBlock] {
+    /// A quoted line can carry one `>` per column, and the file is remote
+    /// bytes, so nesting is bounded — past the limit the run renders as the
+    /// plain text it is rather than walking the stack over.
+    static let maxQuoteDepth = 16
+    /// Table budgets — see the table branch below.
+    static let maxTableRows = 500
+    static let maxTableColumns = 32
+
+    private static func parseLines(
+        _ lines: [String], quoteDepth: Int = 0
+    ) -> [MarkdownBlock] {
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
         var index = 0
@@ -125,7 +135,7 @@ enum MarkdownDocument {
             }
 
             // Block quote: collect the run, strip one marker, recurse.
-            if trimmed.hasPrefix(">") {
+            if trimmed.hasPrefix(">"), quoteDepth < maxQuoteDepth {
                 flushParagraph()
                 var inner: [String] = []
                 while index < lines.count {
@@ -136,7 +146,8 @@ enum MarkdownDocument {
                     inner.append(stripped)
                     index += 1
                 }
-                blocks.append(.quote(blocks: parseLines(inner)))
+                blocks.append(.quote(
+                    blocks: parseLines(inner, quoteDepth: quoteDepth + 1)))
                 continue
             }
 
@@ -144,13 +155,19 @@ enum MarkdownDocument {
             if trimmed.contains("|"), index + 1 < lines.count,
                isTableSeparator(lines[index + 1].trimmingCharacters(in: .whitespaces)) {
                 flushParagraph()
-                let header = tableCells(trimmed).map(parseInlines)
+                // The renderer builds real views per cell, so the table's
+                // cardinality — not just the file's byte count — decides how
+                // much work a remote document can ask for. Rows past the cap
+                // are left to render as the paragraphs they came from.
+                let header = Array(tableCells(trimmed).prefix(maxTableColumns))
+                    .map(parseInlines)
                 index += 2
                 var rows: [[[MarkdownInline]]] = []
-                while index < lines.count {
+                while index < lines.count, rows.count < maxTableRows {
                     let rowLine = lines[index].trimmingCharacters(in: .whitespaces)
                     guard rowLine.contains("|"), !rowLine.isEmpty else { break }
-                    rows.append(tableCells(rowLine).map(parseInlines))
+                    rows.append(Array(tableCells(rowLine).prefix(maxTableColumns))
+                        .map(parseInlines))
                     index += 1
                 }
                 blocks.append(.table(header: header, rows: rows))

@@ -25,13 +25,14 @@ final class ExternalActionRouter {
         var open: (TerminalWindowRoute) -> Void
         var presentAgentPrompt: (AgentPromptRequest) -> Void
         var presentFailure: (ExternalActionFailure) -> Void
+        var presentConfirmation: (ExternalActionConfirmation) -> Void
     }
 
     /// Bumped on every submit — the scene roots' raise-the-deck trigger.
     private(set) var pendingSignal = 0
     private(set) var hasContext = false
 
-    @ObservationIgnored private var queue: [ExternalAction] = []
+    @ObservationIgnored private var queue: [(action: ExternalAction, trusted: Bool)] = []
     @ObservationIgnored private var context: Context?
     @ObservationIgnored private var contextToken: UUID?
     @ObservationIgnored private var drainTask: Task<Void, Never>?
@@ -42,8 +43,27 @@ final class ExternalActionRouter {
     /// from an action a Deck already drained.
     var hasPendingActions: Bool { !queue.isEmpty }
 
-    func submit(_ action: ExternalAction) {
-        queue.append(action)
+    /// The app lock holds the queue. Actions arrive from outside the app —
+    /// a widget tap, a Shortcut, a `multiplex://` URL any other app can
+    /// open — and performing one connects to a host, mints a tmux session,
+    /// runs the host's setup script, and types an agent prompt. None of that
+    /// may happen behind the veil: the veil's promise is that the device
+    /// owner authenticates before this app acts on their hosts. Work waits
+    /// (it is not dropped) and drains on unlock.
+    var isHeldByAppLock = false {
+        didSet {
+            guard isHeldByAppLock != oldValue, !isHeldByAppLock else { return }
+            drainIfReady()
+        }
+    }
+
+    /// `trusted` is the URL-origin verdict (`ExternalActionTrust`). App
+    /// Intents, the agent-prompt sheet's resubmit, and the confirmation's own
+    /// approval are trusted by construction — the person ran them from inside
+    /// the app. A `multiplex://` URL is trusted only when it carries this
+    /// install's widget token; everything else is confirmed first.
+    func submit(_ action: ExternalAction, trusted: Bool = true) {
+        queue.append((action, trusted))
         pendingSignal &+= 1
         drainIfReady()
     }
@@ -70,7 +90,8 @@ final class ExternalActionRouter {
     }
 
     private func drainIfReady() {
-        guard drainTask == nil, context != nil, !queue.isEmpty else { return }
+        guard drainTask == nil, context != nil, !queue.isEmpty,
+              !isHeldByAppLock else { return }
         drainTask = Task { [weak self] in
             await self?.drain()
             guard let self else { return }
@@ -82,9 +103,10 @@ final class ExternalActionRouter {
     }
 
     private func drain() async {
-        while let context, !queue.isEmpty {
-            let action = queue.removeFirst()
-            await ExternalActionPerformer.perform(action, context: context)
+        while let context, !queue.isEmpty, !isHeldByAppLock {
+            let entry = queue.removeFirst()
+            await ExternalActionPerformer.perform(
+                entry.action, trusted: entry.trusted, context: context)
         }
     }
 }
@@ -96,7 +118,11 @@ final class ExternalActionRouter {
 /// sheet's path) for minting shell and agent sessions.
 @MainActor
 enum ExternalActionPerformer {
-    static func perform(_ action: ExternalAction, context: ExternalActionRouter.Context) async {
+    static func perform(
+        _ action: ExternalAction,
+        trusted: Bool = true,
+        context: ExternalActionRouter.Context
+    ) async {
         guard let host = resolveHost(action.hostRef, in: context.store) else {
             context.presentFailure(ExternalActionFailure(
                 hostName: action.hostRef.displayName,
@@ -113,6 +139,14 @@ enum ExternalActionPerformer {
                 hostName: host.name,
                 message: "\(host.name) is disabled. Enable it on the deck to open sessions on it."
             ))
+            return
+        }
+        // Host resolution and the enabled check run first so the
+        // confirmation can name the machine and never appears for a link
+        // that could not have run anyway.
+        guard trusted || !action.needsOriginConfirmation else {
+            context.presentConfirmation(
+                ExternalActionConfirmation.make(for: action, hostName: host.name))
             return
         }
         switch action {

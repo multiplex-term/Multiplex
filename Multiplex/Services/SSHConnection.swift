@@ -391,9 +391,22 @@ actor SSHConnection {
 
     // MARK: Exec (tmux probing)
 
-    func exec(_ command: String) async throws -> String {
+    /// Every exec answer is buffered whole before it is decoded, and the
+    /// server writes it — a host that streams without end (hostile, or just
+    /// a command that went wrong) would otherwise grow this until the app is
+    /// killed. The ceiling is far above what any caller here produces (probe
+    /// records, git output, a framed history tail); Citadel throws
+    /// `commandOutputTooLarge` past it, which callers already treat as a
+    /// failed command.
+    static let maxExecResponseBytes = 16 << 20
+
+    func exec(
+        _ command: String,
+        maxResponseBytes: Int = SSHConnection.maxExecResponseBytes
+    ) async throws -> String {
         guard let client else { throw SSHConnectionError.notConnected }
-        let buffer = try await client.executeCommand(command)
+        let buffer = try await client.executeCommand(
+            command, maxResponseSize: maxResponseBytes)
         return String(decoding: buffer.readableBytesView, as: UTF8.self)
     }
 
@@ -512,11 +525,16 @@ actor SSHConnection {
         permissions.map { ($0 & 0o170000) == 0o040000 } ?? false
     }
 
+    /// The server decides how many names come back, and the tree maps and
+    /// sorts every one of them. A directory past this is not something the
+    /// column can show anyway — the excess is dropped rather than retained.
+    static let maxDirectoryEntries = 20_000
+
     func listDirectory(atPath path: String) async throws -> [DirectoryEntry] {
         guard let client else { throw SSHConnectionError.notConnected }
         return try await client.withSFTP { sftp in
             var entries: [DirectoryEntry] = []
-            for name in try await sftp.listDirectory(atPath: path) {
+            outer: for name in try await sftp.listDirectory(atPath: path) {
                 for component in name.components {
                     let filename = component.filename
                     guard filename != "." && filename != ".." else { continue }
@@ -524,6 +542,9 @@ actor SSHConnection {
                         name: filename,
                         permissions: component.attributes.permissions
                     ))
+                    if entries.count >= SSHConnection.maxDirectoryEntries {
+                        break outer
+                    }
                 }
             }
             return entries

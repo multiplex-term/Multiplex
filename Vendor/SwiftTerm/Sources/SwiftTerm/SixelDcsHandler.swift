@@ -24,10 +24,19 @@ class SixelDcsHandler : DcsHandler {
         data = []
     }
     
+    /// Multiplex patch: an unterminated DCS sequence otherwise buffers every
+    /// byte the remote sends for the lifetime of the session. Real sixel
+    /// images are far under this; the excess is dropped rather than retained.
+    static let maxSixelPayload = 4 << 20
+    /// Multiplex patch: a repeat count is remote-controlled and drives a
+    /// per-pixel loop in both passes, so it is clamped to a plausible image
+    /// width instead of running to `Int.max`.
+    static let maxSixelRepeat = 4096
+
     func put (data : ArraySlice<UInt8>) {
-        for x in data {
-            self.data.append(x)
-        }
+        guard self.data.count < SixelDcsHandler.maxSixelPayload else { return }
+        let room = SixelDcsHandler.maxSixelPayload - self.data.count
+        self.data.append (contentsOf: data.prefix (room))
     }
     
     private func nextInt(_ p: inout Int) -> Int? {
@@ -38,13 +47,14 @@ class SixelDcsHandler : DcsHandler {
                 return result
             }
             
-            let digit = Int(c) - 48
-            if let existing = result {
-                result = 10 * existing + digit
-            } else {
-                result = digit
-            }
-            
+            // Multiplex patch: remote Sixel data controls how long these
+            // decimal fields are, and `10 * existing + digit` trapped on
+            // overflow. Saturate at the parser ceiling instead of crashing —
+            // every consumer already range-checks what it gets from here.
+            let existing = result ?? 0
+            result = EscapeSequenceParser.appendingDecimalDigit (existing, c)
+                ?? Int(UInt16.max)
+
             p += 1
         }
         return nil
@@ -112,6 +122,24 @@ class SixelDcsHandler : DcsHandler {
             }
         }
         
+        // Multiplex patch: the sizing pass only widened maxX at a line
+        // terminator, so data ending mid-row sized the buffer for fewer
+        // columns than the plotting pass then writes.
+        maxX = max (maxX, x)
+
+        // Multiplex patch: remote data alone decides these dimensions (one
+        // `!` repeat count can push x arbitrarily far), so the allocation is
+        // bounded before it is made — a hostile image must not trap the
+        // multiplication or exhaust memory on a phone.
+        let maxSixelPixels = 4_000_000
+        guard maxX > 0, maxY > 0,
+              maxX <= Int(UInt16.max), maxY <= Int(UInt16.max),
+              maxX * maxY <= maxSixelPixels
+        else {
+            data = []
+            return
+        }
+
         // Allocate the buffer, and parse again, this time
         // plotting the data into the pixels buffer
         pixels = Array.init(repeating: 0, count: maxX*maxY*4)
@@ -219,7 +247,8 @@ class SixelDcsHandler : DcsHandler {
                     // ignore repeat
                     continue
                 }
-                reps = value
+                // Multiplex patch: clamp the remote's repeat count.
+                reps = max (0, min (value, SixelDcsHandler.maxSixelRepeat))
 
             // "$"  (dollar sign) character moves the sixel "cursor" to the "beginning of the current (same) line
             case 36:
@@ -270,8 +299,15 @@ class SixelDcsHandler : DcsHandler {
             var k = 0
             while k < 6 {
                 let on = (sixel & (1 << k)) != 0
+                // Multiplex patch: the plotting pass trusted the sizing pass
+                // for its bounds. Remote data can make the two disagree, so
+                // the write is range-checked rather than trapping.
                 if on {
-                    let s = ((y &+ k)*maxX &+ x) * 4
+                    let s = ((y &+ k)&*maxX &+ x) &* 4
+                    guard s >= 0, s &+ 3 < pixels.count else {
+                        k = k &+ 1
+                        continue
+                    }
                     pixels[s]   = UInt8 (rgba >> 24)
                     pixels[s &+ 1] = UInt8 ((rgba >> 16) & 0xff)
                     pixels[s &+ 2] = UInt8 ((rgba >> 8) & 0xff)
@@ -294,7 +330,8 @@ class SixelDcsHandler : DcsHandler {
                     // ignore repeat
                     continue
                 }
-                reps = value
+                // Multiplex patch: clamp the remote's repeat count.
+                reps = max (0, min (value, SixelDcsHandler.maxSixelRepeat))
 
             // "$"  (dollar sign) character moves the sixel "cursor" to the "beginning of the current (same) line
             case 36:

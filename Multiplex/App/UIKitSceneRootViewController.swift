@@ -190,10 +190,19 @@ final class UIKitSceneRootViewController: UIViewController {
             }
             return true
         }
-        guard let action = ExternalActionURL.action(from: url) else {
+        guard let request = ExternalActionURL.request(from: url) else {
             return false
         }
-        externalActions.submit(action)
+        // The scheme is public: anything that can ask iOS to open a URL can
+        // reach this, prompt and all. Only a link carrying this install's own
+        // widget token runs silently; the rest is confirmed in-app first.
+        externalActions.submit(
+            request.action,
+            trusted: ExternalActionTrust.isTrusted(
+                token: request.token,
+                expected: SharedStateStore.linkToken()
+            )
+        )
         return true
     }
 
@@ -385,6 +394,22 @@ final class UIKitSceneRootViewController: UIViewController {
         sceneWindows.openDeck()
     }
 
+    #if DEBUG
+    /// Appends this install's widget-link token unless the URL already
+    /// carries one (see `submitAutoActionIfNeeded`).
+    static func tokenized(_ url: URL) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let token = SharedStateStore.linkToken(),
+              !(components.queryItems ?? []).contains(where: {
+                  $0.name == WidgetLink.tokenItemName
+              })
+        else { return url }
+        components.queryItems = (components.queryItems ?? [])
+            + [URLQueryItem(name: WidgetLink.tokenItemName, value: token)]
+        return components.url ?? url
+    }
+    #endif
+
     private func submitAutoActionIfNeeded() {
         #if DEBUG
         guard handlesExternalActions,
@@ -395,7 +420,10 @@ final class UIKitSceneRootViewController: UIViewController {
               let url = URL(string: raw)
         else { return }
         Self.autoActionFired = true
-        _ = receive(url)
+        // Stand-in for a widget tap, so it carries the widget's token and
+        // rides the trusted path — the same seam, no confirmation alert
+        // parked in front of a headless run.
+        _ = receive(Self.tokenized(url))
         #endif
     }
 }

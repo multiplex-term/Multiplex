@@ -78,6 +78,17 @@ enum ExternalAction: Hashable {
         askForPrompt: Bool, directory: String?,
         setupScript: ExternalSetupScriptSelection, model: String?)
 
+    /// Whether an untrusted (non-widget) URL has to be confirmed before this
+    /// runs. The widget's ASK mode is exempt: it presents the prompt sheet,
+    /// which names the host and agent and discards the URL's own prompt in
+    /// favour of what the person types — an in-app confirmation already.
+    var needsOriginConfirmation: Bool {
+        switch self {
+        case .openShell: true
+        case .openAgent(_, _, _, let askForPrompt, _, _, _): !askForPrompt
+        }
+    }
+
     var hostRef: ExternalHostRef {
         switch self {
         case .openShell(let host, _): host
@@ -133,6 +144,26 @@ enum ExternalActionURL {
         components.queryItems = items
         // These components always form a valid URL; the fallback is inert.
         return components.url ?? URL(string: "\(scheme)://\(authority)")!
+    }
+
+    /// One parsed URL: what it asks for, and whether it proved it came from
+    /// this install's own widget (`WidgetLink.tokenItemName`). The scheme is
+    /// public and a URL carries no origin, so the token is the only thing
+    /// that distinguishes a widget tap from a link another app, a web page,
+    /// or a message composed — `ExternalActionTrust` makes that call and the
+    /// untrusted case is confirmed in-app before it runs.
+    struct Request: Equatable {
+        var action: ExternalAction
+        var token: String?
+    }
+
+    static func request(from url: URL) -> Request? {
+        guard let action = action(from: url) else { return nil }
+        let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first { $0.name == WidgetLink.tokenItemName }?
+            .value
+        return Request(action: action, token: token?.isEmpty == true ? nil : token)
     }
 
     static func action(from url: URL) -> ExternalAction? {
@@ -233,6 +264,60 @@ struct AgentPromptRequest: Identifiable {
     var directory: String?
     var setupScript: ExternalSetupScriptSelection
     var model: String?
+}
+
+/// Whether a parsed `multiplex://` URL may run without asking. Pure so the
+/// rule is unit-testable: a link is trusted exactly when it carries this
+/// install's App Group token. No token, a stale token, or an app with no
+/// token yet all mean "ask" — never "refuse", because the URL may well be
+/// the user's own automation.
+enum ExternalActionTrust {
+    static func isTrusted(token: String?, expected: String?) -> Bool {
+        guard let token, let expected, !expected.isEmpty else { return false }
+        return token == expected
+    }
+}
+
+/// The in-app confirmation an untrusted external action raises before it
+/// touches a host. Pure text so the wording is unit-testable; the action it
+/// carries is resubmitted (trusted) when the person approves.
+struct ExternalActionConfirmation: Equatable {
+    var title: String
+    var message: String
+    var action: ExternalAction
+
+    /// `host` is the resolved record — the confirmation names the machine
+    /// this will actually run on, never the token the URL used for it.
+    static func make(for action: ExternalAction, hostName: String) -> ExternalActionConfirmation {
+        switch action {
+        case .openShell(_, let sessionName):
+            let target = sessionName.map { "session \($0)" } ?? "a session"
+            return ExternalActionConfirmation(
+                title: "Open \(hostName)?",
+                message: """
+                    Something outside Multiplex asked to open \(target) on \
+                    \(hostName). Open it only if you started this.
+                    """,
+                action: action
+            )
+        case .openAgent(_, let agent, let prompt, _, _, _, _):
+            var message = """
+                Something outside Multiplex asked to launch \
+                \(agent.displayName) on \(hostName)
+                """
+            if let prompt, !prompt.isEmpty {
+                message += " with this first prompt:\n\n\(prompt)"
+            } else {
+                message += "."
+            }
+            message += "\n\nRun it only if you started this."
+            return ExternalActionConfirmation(
+                title: "Launch \(agent.displayName) on \(hostName)?",
+                message: message,
+                action: action
+            )
+        }
+    }
 }
 
 /// What the deck's failure alert shows when an external action can't run.

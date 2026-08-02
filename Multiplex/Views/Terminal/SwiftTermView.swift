@@ -692,15 +692,28 @@ final class TerminalSurfaceView: UIView {
             }
         }
 
+        /// OSC 52 write. The remote naming the device clipboard is the
+        /// mechanism `mpx bind --copy` rides (and tmux's own `set-clipboard`),
+        /// so it stays — bounded, because the payload is remote bytes and a
+        /// clipboard entry nobody can read back is not worth a megabyte.
         func clipboardCopy(source: TerminalView, content: Data) {
-            if let text = String(data: content, encoding: .utf8) {
-                UIPasteboard.general.string = text
-            }
+            guard content.count <= Coordinator.maxClipboardWriteBytes,
+                  let text = String(data: content, encoding: .utf8)
+            else { return }
+            UIPasteboard.general.string = text
         }
 
+        /// OSC 52 read is deliberately unanswered. The query is pane output —
+        /// any remote process that can print can send it — and answering it
+        /// hands the device pasteboard (passwords, tokens, whatever was last
+        /// copied) back over the wire with nothing on screen to show for it.
+        /// Paste stays a user action: the key bar, the selection menu, and the
+        /// system paste control all still work.
         func clipboardRead(source: TerminalView) -> Data? {
-            UIPasteboard.general.string.map { Data($0.utf8) }
+            nil
         }
+
+        static let maxClipboardWriteBytes = 256 * 1024
 
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
         func scrolled(source: TerminalView, position: Double) {

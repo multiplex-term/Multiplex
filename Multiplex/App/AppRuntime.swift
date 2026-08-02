@@ -35,6 +35,28 @@ final class AppRuntime {
         self.workspace = workspace
         hub = ConnectionHub(attention: attention)
 
+        // Mint the widget-link token once per install: the widget process
+        // reads it from the App Group to mark its own deep links, and
+        // `receive(_ url:)` confirms anything that arrives without it.
+        SharedStateStore.ensureLinkToken()
+
+        // The lock holds the external-action queue: nothing that connects to
+        // a host, mints a session, or types an agent prompt runs behind the
+        // veil. The store posts this notification synchronously as it flips,
+        // and the queue drains itself when the hold lifts.
+        let externalActions = self.externalActions
+        let appLock = self.appLock
+        externalActions.isHeldByAppLock = appLock.isLocked
+        NotificationCenter.default.addObserver(
+            forName: AppLockStore.stateDidChangeNotification,
+            object: appLock,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                externalActions.isHeldByAppLock = appLock.isLocked
+            }
+        }
+
         // App Intents run in this process: the router must be resolvable
         // before any perform() (a cold intent launch performs right after
         // app initialization), and the Shortcuts host picker reads the live

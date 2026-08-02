@@ -116,6 +116,45 @@ enum SharedStateStore {
         }
     }
 
+    /// Per-install secret that marks a `multiplex://` URL as one of THIS
+    /// app's own widget links. The scheme itself is public — any app or web
+    /// page can open `multiplex://open?host=…&action=agent&prompt=…`, and a
+    /// URL carries no origin — so the token is what separates a widget tap
+    /// (silent, one-tap, as designed) from a link somebody else composed
+    /// (confirmed in-app before anything runs). It lives in the App Group,
+    /// which only this app and its widget extension can read; it is not a
+    /// credential for anything else and never leaves the device.
+    ///
+    /// Stored in App Group defaults rather than `widget-state.json` so a
+    /// republish can never drop it and stale widget timelines keep working.
+    static let linkTokenKey = "MultiplexWidgetLinkToken"
+
+    static func groupDefaults(groupID: String = appGroupID) -> UserDefaults? {
+        UserDefaults(suiteName: groupID)
+    }
+
+    /// Read-only — what the widget builds links with, and what the app
+    /// compares an incoming URL against.
+    static func linkToken(defaults: UserDefaults? = groupDefaults()) -> String? {
+        guard let value = defaults?.string(forKey: linkTokenKey), !value.isEmpty
+        else { return nil }
+        return value
+    }
+
+    /// App-side: mint the token once per install. Returns the existing one
+    /// when there is one, so links already rendered into widget timelines
+    /// stay valid.
+    @discardableResult
+    static func ensureLinkToken(defaults: UserDefaults? = groupDefaults()) -> String? {
+        guard let defaults else { return nil }
+        if let existing = linkToken(defaults: defaults) { return existing }
+        var bytes = [UInt8](repeating: 0, count: 16)
+        for index in bytes.indices { bytes[index] = UInt8.random(in: .min ... .max) }
+        let token = bytes.map { String(format: "%02x", $0) }.joined()
+        defaults.set(token, forKey: linkTokenKey)
+        return token
+    }
+
     /// Deck telemetry token for an `agentRaw` value ("CLAUDE" / "CODEX" /
     /// "PI") — the widget's agent badge text. Kept in lockstep with
     /// `AgentKind.telemetryLabel` by a unit test.
