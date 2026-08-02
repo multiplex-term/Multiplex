@@ -673,6 +673,94 @@ final class HerdrProbeTests: XCTestCase {
         XCTAssertTrue(suffixed.hasSuffix("-2"),
                       "the uniqueness suffix must stay inside herdr's 64-byte limit")
     }
+
+    // MARK: Shortcut panel (HRDR)
+
+    /// Captured `herdr workspace list` envelope shape (0.7.5, 2026-08-02);
+    /// extra fields prove tolerant decoding.
+    private let workspaceList = #"{"id":"cli:workspace:list","result":{"#
+        + #""type":"workspace_list","workspaces":["#
+        + #"{"active_tab_id":"w2:t1","agent_status":"unknown","focused":false,"#
+        + #""label":"demo","number":2,"pane_count":1,"tab_count":1,"#
+        + #""workspace_id":"w2"},"#
+        + #"{"active_tab_id":"w1:t1","agent_status":"working","focused":true,"#
+        + #""label":"api","number":1,"pane_count":2,"tab_count":2,"#
+        + #""workspace_id":"w1"}"#
+        + #"]}}"#
+
+    func testWorkspaceListCommandScopesToTheSession() {
+        XCTAssertEqual(
+            HerdrProbe.workspaceListCommand(sessionName: "work"),
+            HerdrProbe.pathPrefix
+                + "herdr --session 'work' workspace list 2>/dev/null || true"
+        )
+    }
+
+    func testParseWorkspaceChoicesOrdersByNumberAndMarksTheFocusedRow() {
+        let choices = HerdrProbe.parseWorkspaceChoices("noise\n" + workspaceList + "\n")
+        XCTAssertEqual(choices, [
+            TmuxWindowChoice(tmuxID: "w1", index: 1, isActive: true, name: "api"),
+            TmuxWindowChoice(tmuxID: "w2", index: 2, isActive: false, name: "demo"),
+        ])
+        XCTAssertNil(HerdrProbe.parseWorkspaceChoices("Error: no server\n"),
+                     "unreadable is not the same as a valid empty list")
+    }
+
+    func testFocusWorkspaceCommandVetsTheResponseDerivedID() {
+        XCTAssertEqual(
+            HerdrProbe.focusWorkspaceCommand(sessionName: "work", workspaceID: "w2"),
+            HerdrProbe.pathPrefix
+                + "herdr --session 'work' workspace focus 'w2' 2>/dev/null || true"
+        )
+        XCTAssertNil(HerdrProbe.focusWorkspaceCommand(
+            sessionName: "work", workspaceID: "w2 evil"),
+            "an id with whitespace must never be spliced into a shell line")
+        XCTAssertNil(HerdrProbe.focusWorkspaceCommand(sessionName: "work", workspaceID: ""))
+    }
+
+    func testParseFocusedCloseTargetReadsExactlyWhatTheServerNamesFocused() {
+        let output = "login noise\n" + workSnapshot + "\n"
+        XCTAssertEqual(
+            HerdrProbe.parseFocusedCloseTarget(output, scope: .pane), "w1:p1")
+        XCTAssertEqual(
+            HerdrProbe.parseFocusedCloseTarget(output, scope: .tab), "w1:t1")
+        XCTAssertEqual(
+            HerdrProbe.parseFocusedCloseTarget(output, scope: .workspace), "w1")
+        XCTAssertNil(HerdrProbe.parseFocusedCloseTarget("garbage", scope: .pane),
+                     "a close must never guess its target")
+    }
+
+    func testParseFocusedCloseTargetFallsBackToTheFocusedWorkspacesActiveTab() {
+        // Same snapshot minus focused_tab_id: the focused workspace's
+        // active tab IS the focused tab, stated the other way.
+        let trimmed = workSnapshot.replacingOccurrences(
+            of: #""focused_tab_id":"w1:t1","#, with: "")
+        XCTAssertEqual(
+            HerdrProbe.parseFocusedCloseTarget(trimmed, scope: .tab), "w1:t1")
+    }
+
+    func testCloseShortcutCommandSpeaksEachScopeAndVetsTheID() {
+        XCTAssertEqual(
+            HerdrProbe.closeShortcutCommand(
+                sessionName: "work", scope: .pane, targetID: "w1:p2"),
+            HerdrProbe.pathPrefix
+                + "herdr --session 'work' pane close 'w1:p2' 2>/dev/null || true"
+        )
+        XCTAssertEqual(
+            HerdrProbe.closeShortcutCommand(
+                sessionName: "work", scope: .tab, targetID: "w1:t2"),
+            HerdrProbe.pathPrefix
+                + "herdr --session 'work' tab close 'w1:t2' 2>/dev/null || true"
+        )
+        XCTAssertEqual(
+            HerdrProbe.closeShortcutCommand(
+                sessionName: "work", scope: .workspace, targetID: "w2"),
+            HerdrProbe.pathPrefix
+                + "herdr --session 'work' workspace close 'w2' 2>/dev/null || true"
+        )
+        XCTAssertNil(HerdrProbe.closeShortcutCommand(
+            sessionName: "work", scope: .pane, targetID: "bad id"))
+    }
 }
 
 /// The tmux probe's herdr-presence line — the dead-tile switch hint's

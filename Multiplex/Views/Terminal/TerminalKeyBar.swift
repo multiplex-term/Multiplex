@@ -365,6 +365,8 @@ final class TerminalCtrlComboViewController: UIViewController {
 /// Pure layout ladder for the native rail. Its last two exact floors are
 /// load-bearing: 420 points keeps RET + TMUX on iPhone Air, while 375 points
 /// keeps every essential terminal key when TMUX moves to the shell bar.
+/// "tmux" here names the shortcut-key SLOT — a herdr tab fills it with HRDR,
+/// four mono characters like TMUX, so every tier holds for both backends.
 enum TerminalKeyBarLayout {
     enum Tier: Equatable {
         case full
@@ -534,9 +536,12 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
 
     private weak var terminal: TerminalView?
     private weak var controller: TerminalSessionController?
-    private let performTmuxShortcut: (TmuxShortcut) -> Void
+    private let performShortcut: (ShortcutPanelItem) -> Void
     private let finishTmuxCopyMode: () -> Void
-    private let showsTmuxShortcuts: Bool
+    /// Which multiplexer owns this tab's shortcut key: TMUX, HRDR, or none.
+    /// Both faces are four mono characters, so every layout tier below is
+    /// backend-independent by construction.
+    private let shortcutBackend: Host.SessionBackend?
     private let showsReturnKey: Bool
     private let topBorder = UIView()
     private var ctrlLatched = false
@@ -545,7 +550,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     private var renderedSignature: RenderSignature?
     private(set) var renderedKeys: [TerminalTallyKeyControl] = []
     private weak var ctrlKeyControl: TerminalTallyKeyControl?
-    private weak var tmuxPopoverController: UIViewController?
+    private weak var shortcutPopoverController: UIViewController?
     private var ctrlComboView: TerminalCtrlComboView?
 
     private struct RenderSignature: Equatable {
@@ -556,15 +561,15 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     init(
         terminal: TerminalView,
         controller: TerminalSessionController?,
-        performTmuxShortcut: @escaping (TmuxShortcut) -> Void,
+        performShortcut: @escaping (ShortcutPanelItem) -> Void,
         finishTmuxCopyMode: @escaping () -> Void,
-        showsTmuxShortcuts: Bool
+        shortcutBackend: Host.SessionBackend?
     ) {
         self.terminal = terminal
         self.controller = controller
-        self.performTmuxShortcut = performTmuxShortcut
+        self.performShortcut = performShortcut
         self.finishTmuxCopyMode = finishTmuxCopyMode
-        self.showsTmuxShortcuts = showsTmuxShortcuts
+        self.shortcutBackend = shortcutBackend
         showsReturnKey = UIDevice.current.userInterfaceIdiom == .pad
         ctrlLatched = terminal.controlModifier
         super.init(frame: .zero)
@@ -606,7 +611,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         let specification = TerminalKeyBarLayout.specification(
             width: bounds.width,
             contentSafeArea: contentSafeArea,
-            showsTmux: showsTmuxShortcuts,
+            showsTmux: shortcutBackend != nil,
             includesReturn: includesReturn
         )
         let signature = RenderSignature(tier: specification.tier, state: state)
@@ -724,15 +729,19 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                 longPressKey: state.keyboardLocked ? nil : .lockKeyboard
             ))
         }
-        if specification.tmux {
+        if specification.tmux, let backend = shortcutBackend {
+            // The identifier names the slot, not the occupant — debug hooks
+            // and tests address "tmux" for either backend's key.
             right.append(RailKey(
-                key: .showTmuxShortcuts,
+                key: .showShortcutPanel,
                 face: .text(
-                    "TMUX",
+                    backend == .herdr ? "HRDR" : "TMUX",
                     font: UIKitChassis.monoFont(9, weight: .semibold),
                     kerning: 0.7
                 ),
-                accessibility: "Show tmux shortcuts",
+                accessibility: backend == .herdr
+                    ? "Show herdr shortcuts"
+                    : "Show tmux shortcuts",
                 identifier: "tmux"
             ))
         }
@@ -846,39 +855,41 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             TerminalFocusArbiter.lock(terminal)
         case .dictation:
             controller?.toggleDictation()
-        case .showTmuxShortcuts:
-            showTmuxShortcuts()
-        case .tmux(let shortcut):
+        case .showShortcutPanel:
+            showShortcutPanel()
+        case .shortcut(let item):
             click()
-            performTmuxShortcut(shortcut)
+            performShortcut(item)
         }
     }
 
-    private func showTmuxShortcuts() {
-        guard tmuxPopoverController == nil,
+    private func showShortcutPanel() {
+        guard shortcutPopoverController == nil,
+              let content = ShortcutPanelContent.content(for: shortcutBackend),
               let presenter = presentingViewController
         else { return }
         let sceneWidth = window?.bounds.width ?? presenter.view.bounds.width
         let panelWidth = min(
-            TmuxShortcutPanelViewController.preferredWidth,
+            ShortcutPanelViewController.preferredWidth,
             max(280, sceneWidth - 24)
         )
-        let controller = TmuxShortcutPanelViewController(
+        let controller = ShortcutPanelViewController(
+            content: content,
             width: panelWidth,
-            select: { [weak self] shortcut in
-                self?.tmuxPopoverController?.dismiss(animated: true)
-                self?.press(.tmux(shortcut))
+            select: { [weak self] item in
+                self?.shortcutPopoverController?.dismiss(animated: true)
+                self?.press(.shortcut(item))
             },
-            loadWindows: { [weak self] in
-                await self?.controller?.loadTmuxWindowList()
+            loadChoices: { [weak self] in
+                await self?.controller?.loadShortcutSwitchChoices()
             },
-            selectWindow: { [weak self] window in
-                self?.tmuxPopoverController?.dismiss(animated: true)
+            selectChoice: { [weak self] choice in
+                self?.shortcutPopoverController?.dismiss(animated: true)
                 self?.click()
-                self?.controller?.selectTmuxWindow(window)
+                self?.controller?.selectShortcutSwitchChoice(choice)
             }
         )
-        tmuxPopoverController = controller
+        shortcutPopoverController = controller
         controller.modalPresentationStyle = .popover
         controller.loadViewIfNeeded()
         controller.view.backgroundColor = UIKitChassis.bezel
@@ -1001,12 +1012,12 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     #if DEBUG
     func debugShowTmuxShortcuts() {
         guard let terminal, TerminalFocusArbiter.current === terminal else { return }
-        showTmuxShortcuts()
+        showShortcutPanel()
     }
 
     func debugSendTmuxCopyMode() {
         guard let terminal, TerminalFocusArbiter.current === terminal else { return }
-        press(.tmux(.copyMode))
+        press(.shortcut(ShortcutPanelItem(TmuxShortcut.copyMode)))
     }
 
     func debugFinishTmuxCopyMode() {
@@ -1019,7 +1030,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
               TerminalFocusArbiter.current === terminal,
               shortcut.requiresDoubleActivation
         else { return }
-        press(.tmux(shortcut))
+        press(.shortcut(ShortcutPanelItem(shortcut)))
     }
 
     func debugToggleDictation() {
@@ -1061,8 +1072,8 @@ private enum TerminalKey {
     case keyboard
     case lockKeyboard
     case dictation
-    case showTmuxShortcuts
-    case tmux(TmuxShortcut)
+    case showShortcutPanel
+    case shortcut(ShortcutPanelItem)
 }
 
 extension TerminalKeyBar: UIPopoverPresentationControllerDelegate {

@@ -208,7 +208,7 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             contentSafeArea: configuration.contentSafeArea,
             railOwnsBottomSafeArea: configuration.railOwnsBottomSafeArea,
             isActive: configuration.isActive && configuration.focusAllowed,
-            showsTmuxShortcuts: configuration.controller?.route.usesTmux == true
+            shortcutBackend: configuration.controller?.route.sessionBackend
         )
     }
 

@@ -1422,7 +1422,7 @@ extension TerminalWindowViewController {
             keychainTip: activeTabKeychainNotice != nil
                 ? { [weak self] in self?.presentKeychainTip() } : nil,
             newTabTarget: newTabTarget,
-            showsTmuxShortcuts: activeTab?.usesTmux == true,
+            shortcutBackend: activeTab?.sessionBackend,
             style: shell == nil ? .regular : .shell,
             deckControlLabel: shell?.deckControlLabel ?? "DECK",
             availableWidth: shell?.availableWidth,

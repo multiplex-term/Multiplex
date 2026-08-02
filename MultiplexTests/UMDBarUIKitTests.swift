@@ -83,6 +83,29 @@ final class UMDBarUIKitTests: XCTestCase {
         )
     }
 
+    func testHerdrBackendRelabelsTheShortcutChipAtTheSameSlot() throws {
+        let controller = UMDBarViewController(configuration: configuration(
+            newTabTarget: .herdrWorkspaceTab,
+            shortcutBackend: .herdr
+        ))
+        controller.loadViewIfNeeded()
+
+        let chip = try XCTUnwrap(control("umd.tmux", in: controller.view))
+        XCTAssertEqual(chip.accessibilityLabel, "Show herdr shortcuts")
+        XCTAssertTrue(
+            descendants(of: UILabel.self, in: chip).contains {
+                ($0.text ?? $0.attributedText?.string)?.contains("HRDR") == true
+            },
+            "the chip face reads HRDR — four mono characters, TMUX's width"
+        )
+
+        let none = UMDBarViewController(configuration: configuration(
+            shortcutBackend: nil
+        ))
+        none.loadViewIfNeeded()
+        XCTAssertNil(control("umd.tmux", in: none.view))
+    }
+
     func testRegularActionRouterAndDirectButtonsPreserveEveryCallback() throws {
         let first = UUID()
         let second = UUID()
@@ -335,6 +358,7 @@ final class UMDBarUIKitTests: XCTestCase {
         closeSession: (() -> Void)? = nil,
         keychainTip: (() -> Void)? = nil,
         newTabTarget: TerminalRoute.NewTabTarget = .session,
+        shortcutBackend: Host.SessionBackend? = .tmux,
         style: UMDBarStyle = .regular,
         deckControlLabel: String = "DECK",
         availableWidth: CGFloat? = nil,
@@ -354,7 +378,7 @@ final class UMDBarUIKitTests: XCTestCase {
             closeSession: closeSession,
             keychainTip: keychainTip,
             newTabTarget: newTabTarget,
-            showsTmuxShortcuts: true,
+            shortcutBackend: shortcutBackend,
             style: style,
             deckControlLabel: deckControlLabel,
             availableWidth: availableWidth,

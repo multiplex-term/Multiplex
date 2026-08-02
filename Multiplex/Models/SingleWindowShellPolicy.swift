@@ -43,6 +43,8 @@ enum SingleWindowShellLayout {
     /// An unlocked compact key rail retains TMUX at 390 points. Keyboard lock
     /// adds RET on iPhone; its slightly tighter Air tier keeps both controls at
     /// 420 points, while narrower locked phones move TMUX to the top bar.
+    /// "TMUX" names the shortcut-key slot — herdr tabs fill it with HRDR at
+    /// the same four-character width, so both cutoffs hold for both backends.
     static let keyBarTmuxMinimumWidth: CGFloat = 390
     static let keyBarTmuxWithReturnMinimumWidth: CGFloat = 420
 

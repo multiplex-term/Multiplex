@@ -1,39 +1,43 @@
 import UIKit
 
 /// UIKit implementation of the custom TALLY dropdown shared by the iPad key
-/// rail and the visionOS UMD. Commands live in a compact square grid with the
-/// human label, tmux command, and stock binding; the system Menu row treatment
+/// rail and the visionOS UMD, rendering one backend's `ShortcutPanelContent`
+/// (TMUX or HRDR). Commands live in a compact square grid with the human
+/// label, command reference, and stock binding; the system Menu row treatment
 /// is deliberately not involved.
 @MainActor
-final class TmuxShortcutPanelViewController: UIViewController {
+final class ShortcutPanelViewController: UIViewController {
     nonisolated static let preferredWidth: CGFloat = 430
     nonisolated static let confirmationWindow: UInt64 = 2_000_000_000
 
+    private let content: ShortcutPanelContent
     private var panelWidth: CGFloat
-    private var select: (TmuxShortcut) -> Void
-    private var loadWindows: (() async -> [TmuxWindowChoice]?)?
-    private var selectWindow: ((TmuxWindowChoice) -> Void)?
+    private var select: (ShortcutPanelItem) -> Void
+    private var loadChoices: (() async -> [TmuxWindowChoice]?)?
+    private var selectChoice: ((TmuxWindowChoice) -> Void)?
 
-    private let panelView: TmuxShortcutPanelRootView
+    private let panelView: ShortcutPanelRootView
     private let contentStack = UIStackView()
-    private let windowSection = UIStackView()
-    private var shortcutButtons: [TmuxShortcut: TmuxShortcutButton] = [:]
-    private var windowLoadTask: Task<Void, Never>?
+    private let switchSection = UIStackView()
+    private var itemButtons: [String: ShortcutItemButton] = [:]
+    private var choiceLoadTask: Task<Void, Never>?
     private var disarmTask: Task<Void, Never>?
-    private var armedShortcut: TmuxShortcut?
-    private var didRequestWindows = false
+    private var armedItemID: String?
+    private var didRequestChoices = false
 
     init(
-        width: CGFloat = TmuxShortcutPanelViewController.preferredWidth,
-        select: @escaping (TmuxShortcut) -> Void,
-        loadWindows: (() async -> [TmuxWindowChoice]?)? = nil,
-        selectWindow: ((TmuxWindowChoice) -> Void)? = nil
+        content: ShortcutPanelContent,
+        width: CGFloat = ShortcutPanelViewController.preferredWidth,
+        select: @escaping (ShortcutPanelItem) -> Void,
+        loadChoices: (() async -> [TmuxWindowChoice]?)? = nil,
+        selectChoice: ((TmuxWindowChoice) -> Void)? = nil
     ) {
+        self.content = content
         panelWidth = width
         self.select = select
-        self.loadWindows = loadWindows
-        self.selectWindow = selectWindow
-        panelView = TmuxShortcutPanelRootView(width: width)
+        self.loadChoices = loadChoices
+        self.selectChoice = selectChoice
+        panelView = ShortcutPanelRootView(width: width)
         super.init(nibName: nil, bundle: nil)
         preferredContentSize = panelView.intrinsicContentSize
     }
@@ -49,14 +53,14 @@ final class TmuxShortcutPanelViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        requestWindowsIfNeeded()
+        requestChoicesIfNeeded()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         disarm()
-        windowLoadTask?.cancel()
-        windowLoadTask = nil
+        choiceLoadTask?.cancel()
+        choiceLoadTask = nil
     }
 
     /// The view controller owns an intrinsic height so UIKit popovers follow
@@ -67,36 +71,38 @@ final class TmuxShortcutPanelViewController: UIViewController {
     }
 
     /// Internal by design: it is the single render path used by the async
-    /// loader and by UIKit-focused tests. A single window has no useful switch
-    /// action and therefore earns no section.
-    func applyWindows(_ windows: [TmuxWindowChoice]) {
-        windowSection.arrangedSubviews.forEach {
-            windowSection.removeArrangedSubview($0)
+    /// loader and by UIKit-focused tests. A single window/workspace has no
+    /// useful switch action and therefore earns no section.
+    func applyChoices(_ choices: [TmuxWindowChoice]) {
+        switchSection.arrangedSubviews.forEach {
+            switchSection.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
 
-        guard windows.count > 1 else {
-            windowSection.isHidden = true
+        guard choices.count > 1 else {
+            switchSection.isHidden = true
             refreshPreferredContentSize()
             return
         }
 
         let title = UIKitChassisLabel(
-            "Switch Window",
+            content.switchSectionTitle,
             size: 9,
             color: UIKitChassis.signal2
         )
         title.accessibilityTraits.insert(.header)
-        title.accessibilityIdentifier = "tmuxWindowSection.title"
-        windowSection.addArrangedSubview(title)
+        title.accessibilityIdentifier =
+            "\(content.switchSectionAccessibilityIdentifier).title"
+        switchSection.addArrangedSubview(title)
 
-        let grid = makeWindowGrid(windows)
-        if windows.count > 8 {
+        let grid = makeChoiceGrid(choices)
+        if choices.count > 8 {
             let scrollView = UIScrollView()
             scrollView.backgroundColor = UIKitChassis.bezelHi
             scrollView.showsVerticalScrollIndicator = true
             scrollView.alwaysBounceVertical = false
-            scrollView.accessibilityIdentifier = "tmuxWindowSection.scroll"
+            scrollView.accessibilityIdentifier =
+                "\(content.switchSectionAccessibilityIdentifier).scroll"
             scrollView.addSubview(grid)
             grid.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
@@ -107,12 +113,12 @@ final class TmuxShortcutPanelViewController: UIViewController {
                 grid.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
                 scrollView.heightAnchor.constraint(equalToConstant: 200),
             ])
-            windowSection.addArrangedSubview(scrollView)
+            switchSection.addArrangedSubview(scrollView)
         } else {
-            windowSection.addArrangedSubview(grid)
+            switchSection.addArrangedSubview(grid)
         }
 
-        windowSection.isHidden = false
+        switchSection.isHidden = false
         refreshPreferredContentSize()
     }
 
@@ -128,23 +134,24 @@ final class TmuxShortcutPanelViewController: UIViewController {
         panelView.install(contentStack: contentStack)
 
         contentStack.addArrangedSubview(makeHeader())
-        for group in TmuxShortcut.Group.allCases {
-            contentStack.addArrangedSubview(makeShortcutSection(group))
+        for section in content.sections {
+            contentStack.addArrangedSubview(makeShortcutSection(section))
         }
 
-        windowSection.axis = .vertical
-        windowSection.alignment = .fill
-        windowSection.spacing = 6
-        windowSection.isHidden = true
-        windowSection.accessibilityIdentifier = "tmuxWindowSection"
-        contentStack.addArrangedSubview(windowSection)
+        switchSection.axis = .vertical
+        switchSection.alignment = .fill
+        switchSection.spacing = 6
+        switchSection.isHidden = true
+        switchSection.accessibilityIdentifier =
+            content.switchSectionAccessibilityIdentifier
+        contentStack.addArrangedSubview(switchSection)
     }
 
     private func makeHeader() -> UIView {
-        let title = UIKitChassisLabel("TMUX SHORTCUTS", size: 13)
+        let title = UIKitChassisLabel(content.headerTitle, size: 13)
         title.accessibilityTraits.insert(.header)
-        let prefix = TmuxPanelLabel(
-            "DEFAULT PREFIX  ⌃B",
+        let prefix = ShortcutPanelLabel(
+            content.prefixLabel,
             font: UIKitChassis.monoFont(9, weight: .semibold),
             color: UIKitChassis.signal2,
             kern: 0.8
@@ -172,34 +179,37 @@ final class TmuxShortcutPanelViewController: UIViewController {
         return container
     }
 
-    private func makeShortcutSection(_ group: TmuxShortcut.Group) -> UIView {
+    private func makeShortcutSection(_ section: ShortcutPanelSection) -> UIView {
         let title = UIKitChassisLabel(
-            group.rawValue,
+            section.title,
             size: 9,
             color: UIKitChassis.signal2
         )
         title.accessibilityTraits.insert(.header)
-        title.accessibilityIdentifier = "tmuxGroup.\(group.rawValue)"
+        title.accessibilityIdentifier = section.accessibilityIdentifier
 
-        let shortcuts = TmuxShortcut.shortcuts(in: group)
-        let grid = makeTwoColumnGrid(shortcuts.map { shortcut in
-            let button = TmuxShortcutButton(shortcut: shortcut)
-            button.addTarget(self, action: #selector(shortcutPressed(_:)), for: .touchUpInside)
-            shortcutButtons[shortcut] = button
+        let grid = makeTwoColumnGrid(section.items.map { item in
+            let button = ShortcutItemButton(item: item)
+            button.addTarget(self, action: #selector(itemPressed(_:)), for: .touchUpInside)
+            itemButtons[item.id] = button
             return button
         })
 
-        let section = UIStackView(arrangedSubviews: [title, grid])
-        section.axis = .vertical
-        section.alignment = .fill
-        section.spacing = 6
-        return section
+        let stack = UIStackView(arrangedSubviews: [title, grid])
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 6
+        return stack
     }
 
-    private func makeWindowGrid(_ windows: [TmuxWindowChoice]) -> UIView {
-        makeTwoColumnGrid(windows.map { window in
-            let button = TmuxWindowButton(window: window)
-            button.addTarget(self, action: #selector(windowPressed(_:)), for: .touchUpInside)
+    private func makeChoiceGrid(_ choices: [TmuxWindowChoice]) -> UIView {
+        makeTwoColumnGrid(choices.map { choice in
+            let button = ShortcutChoiceButton(
+                choice: choice,
+                noun: content.switchNoun,
+                accessibilityPrefix: content.switchChoiceAccessibilityPrefix
+            )
+            button.addTarget(self, action: #selector(choicePressed(_:)), for: .touchUpInside)
             return button
         })
     }
@@ -232,34 +242,34 @@ final class TmuxShortcutPanelViewController: UIViewController {
         return grid
     }
 
-    @objc private func shortcutPressed(_ sender: TmuxShortcutButton) {
-        activate(sender.shortcut)
+    @objc private func itemPressed(_ sender: ShortcutItemButton) {
+        activate(sender.item)
     }
 
-    @objc private func windowPressed(_ sender: TmuxWindowButton) {
+    @objc private func choicePressed(_ sender: ShortcutChoiceButton) {
         disarm()
-        selectWindow?(sender.windowChoice)
+        selectChoice?(sender.choice)
     }
 
-    private func activate(_ shortcut: TmuxShortcut) {
-        guard shortcut.requiresDoubleActivation else {
+    private func activate(_ item: ShortcutPanelItem) {
+        guard item.requiresDoubleActivation else {
             disarm()
-            select(shortcut)
+            select(item)
             return
         }
 
-        if armedShortcut == shortcut {
+        if armedItemID == item.id {
             disarm()
-            select(shortcut)
+            select(item)
             return
         }
 
         disarmTask?.cancel()
-        setArmedShortcut(shortcut)
+        setArmedItemID(item.id)
         disarmTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: Self.confirmationWindow)
-            guard !Task.isCancelled, self?.armedShortcut == shortcut else { return }
-            self?.setArmedShortcut(nil)
+            guard !Task.isCancelled, self?.armedItemID == item.id else { return }
+            self?.setArmedItemID(nil)
             self?.disarmTask = nil
         }
     }
@@ -267,24 +277,24 @@ final class TmuxShortcutPanelViewController: UIViewController {
     private func disarm() {
         disarmTask?.cancel()
         disarmTask = nil
-        setArmedShortcut(nil)
+        setArmedItemID(nil)
     }
 
-    private func setArmedShortcut(_ shortcut: TmuxShortcut?) {
-        armedShortcut = shortcut
-        for (candidate, button) in shortcutButtons {
-            button.setArmed(candidate == shortcut)
+    private func setArmedItemID(_ id: String?) {
+        armedItemID = id
+        for (candidate, button) in itemButtons {
+            button.setArmed(candidate == id)
         }
     }
 
-    private func requestWindowsIfNeeded() {
-        guard !didRequestWindows, let loadWindows else { return }
-        didRequestWindows = true
-        windowLoadTask = Task { @MainActor [weak self] in
-            let windows = await loadWindows() ?? []
+    private func requestChoicesIfNeeded() {
+        guard !didRequestChoices, let loadChoices else { return }
+        didRequestChoices = true
+        choiceLoadTask = Task { @MainActor [weak self] in
+            let choices = await loadChoices() ?? []
             guard !Task.isCancelled else { return }
-            self?.applyWindows(windows)
-            self?.windowLoadTask = nil
+            self?.applyChoices(choices)
+            self?.choiceLoadTask = nil
         }
     }
 
@@ -301,8 +311,9 @@ final class TmuxShortcutPanelViewController: UIViewController {
 }
 
 @MainActor
-private final class TmuxShortcutPanelRootView: UIKitTallyBorderedView {
+private final class ShortcutPanelRootView: UIKitTallyBorderedView {
     private var width: CGFloat
+    private let scrollView = UIScrollView()
     private weak var contentStack: UIStackView?
 
     init(width: CGFloat) {
@@ -310,15 +321,33 @@ private final class TmuxShortcutPanelRootView: UIKitTallyBorderedView {
         super.init(frame: .zero)
     }
 
+    /// The content lives in a scroll view: `preferredContentSize` asks for
+    /// the full grid, but an iPhone popover clamps tall content to the
+    /// screen (the herdr set plus a workspace grid overflows one), and a
+    /// clamped panel must scroll — never clip rows mid-face.
     func install(contentStack: UIStackView) {
         self.contentStack = contentStack
-        addSubview(contentStack)
+        scrollView.alwaysBounceVertical = false
+        scrollView.showsVerticalScrollIndicator = true
+        addSubview(scrollView)
+        scrollView.addSubview(contentStack)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            contentStack.topAnchor.constraint(equalTo: topAnchor, constant: 14),
-            contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            contentStack.leadingAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 14),
+            contentStack.trailingAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -14),
+            contentStack.topAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 14),
+            contentStack.bottomAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -14),
+            contentStack.widthAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.widthAnchor, constant: -28),
         ])
     }
 
@@ -339,32 +368,32 @@ private final class TmuxShortcutPanelRootView: UIKitTallyBorderedView {
 }
 
 @MainActor
-private final class TmuxShortcutButton: UIControl {
-    let shortcut: TmuxShortcut
+private final class ShortcutItemButton: UIControl {
+    let item: ShortcutPanelItem
 
-    private let titleLabel = TmuxPanelLabel()
-    private let commandLabel = TmuxPanelLabel()
-    private let bindingLabel = TmuxPanelLabel()
+    private let titleLabel = ShortcutPanelLabel()
+    private let commandLabel = ShortcutPanelLabel()
+    private let bindingLabel = ShortcutPanelLabel()
     private let bindingBorder = UIKitTallyBorderedView()
     private var isArmed = false
 
-    init(shortcut: TmuxShortcut) {
-        self.shortcut = shortcut
+    init(item: ShortcutPanelItem) {
+        self.item = item
         super.init(frame: .zero)
         minimumHeight(48)
-        accessibilityIdentifier = "tmuxShortcut.\(shortcut.rawValue)"
+        accessibilityIdentifier = item.accessibilityIdentifier
         isAccessibilityElement = true
         accessibilityTraits = .button
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
 
         titleLabel.configure(
-            shortcut.title.uppercased(),
+            item.title.uppercased(),
             font: UIKitChassis.compressedLabelFont(10),
             color: UIKitChassis.signal,
             kern: 0.8
         )
         commandLabel.configure(
-            shortcut.command,
+            item.command,
             font: UIKitChassis.monoFont(8),
             color: UIKitChassis.signal2
         )
@@ -423,15 +452,15 @@ private final class TmuxShortcutButton: UIControl {
 
     func setArmed(_ armed: Bool) {
         isArmed = armed
-        commandLabel.setText(armed ? "press again to close" : shortcut.command)
+        commandLabel.setText(armed ? "press again to close" : item.command)
         bindingLabel.configure(
-            armed ? "AGAIN" : shortcut.bindingLabel,
+            armed ? "AGAIN" : item.bindingLabel,
             font: UIKitChassis.monoFont(9, weight: .semibold),
             color: UIKitChassis.signal2
         )
         layer.borderWidth = armed ? 1 : 0
         refreshBorder()
-        accessibilityLabel = Self.accessibilityLabel(for: shortcut, isArmed: armed)
+        accessibilityLabel = Self.accessibilityLabel(for: item, isArmed: armed)
         refreshBackground()
     }
 
@@ -452,16 +481,16 @@ private final class TmuxShortcutButton: UIControl {
     }
 
     private static func accessibilityLabel(
-        for shortcut: TmuxShortcut,
+        for item: ShortcutPanelItem,
         isArmed: Bool
     ) -> String {
         if isArmed {
-            return "\(shortcut.title), press again to close"
+            return "\(item.title), press again to close"
         }
-        if shortcut.requiresDoubleActivation {
-            return "\(shortcut.title), \(shortcut.command), press twice to confirm"
+        if item.requiresDoubleActivation {
+            return "\(item.title), \(item.command), press twice to confirm"
         }
-        return "\(shortcut.title), \(shortcut.command), \(shortcut.bindingLabel)"
+        return "\(item.title), \(item.command), \(item.bindingLabel)"
     }
 
     @objc private func beginPress() {
@@ -486,29 +515,29 @@ private final class TmuxShortcutButton: UIControl {
 }
 
 @MainActor
-private final class TmuxWindowButton: UIControl {
-    let windowChoice: TmuxWindowChoice
+private final class ShortcutChoiceButton: UIControl {
+    let choice: TmuxWindowChoice
 
-    init(window: TmuxWindowChoice) {
-        windowChoice = window
+    init(choice: TmuxWindowChoice, noun: String, accessibilityPrefix: String) {
+        self.choice = choice
         super.init(frame: .zero)
         minimumHeight(40)
-        accessibilityIdentifier = "tmuxWindow.\(window.tmuxID)"
+        accessibilityIdentifier = accessibilityPrefix + choice.tmuxID
         isAccessibilityElement = true
         accessibilityTraits = .button
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
-        accessibilityLabel = window.isActive
-            ? "Window \(window.index), \(window.name), current window"
-            : "Switch to window \(window.index), \(window.name)"
+        accessibilityLabel = choice.isActive
+            ? "\(noun.capitalized) \(choice.index), \(choice.name), current \(noun)"
+            : "Switch to \(noun) \(choice.index), \(choice.name)"
 
-        let index = TmuxPanelLabel(
-            "\(window.index)",
+        let index = ShortcutPanelLabel(
+            "\(choice.index)",
             font: UIKitChassis.monoFont(9, weight: .semibold),
             color: UIKitChassis.signal2
         )
         index.setContentHuggingPriority(.required, for: .horizontal)
-        let name = TmuxPanelLabel(
-            window.name.uppercased(),
+        let name = ShortcutPanelLabel(
+            choice.name.uppercased(),
             font: UIKitChassis.compressedLabelFont(10),
             color: UIKitChassis.signal,
             kern: 0.8
@@ -519,8 +548,8 @@ private final class TmuxWindowButton: UIControl {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         var content: [UIView] = [index, name, spacer]
-        if window.isActive {
-            let active = TmuxPanelLabel(
+        if choice.isActive {
+            let active = ShortcutPanelLabel(
                 "ACTIVE",
                 font: UIKitChassis.monoFont(9, weight: .semibold),
                 color: UIKitChassis.signal2
@@ -585,7 +614,7 @@ private final class TmuxWindowButton: UIControl {
 }
 
 @MainActor
-private final class TmuxPanelLabel: UILabel {
+private final class ShortcutPanelLabel: UILabel {
     private var sourceText = ""
     private var sourceFont = UIFont.systemFont(ofSize: 10)
     private var sourceColor = UIKitChassis.signal

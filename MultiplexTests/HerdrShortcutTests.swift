@@ -1,0 +1,78 @@
+import XCTest
+@testable import Multiplex
+
+/// Pins the HRDR panel's shortcut set to herdr 0.7.5's default keybindings
+/// (`herdr --default-config`; split/zoom/detach exercised against a real TUI
+/// attach 2026-08-02). herdr's default prefix is Control-B — the same 0x02
+/// tmux uses — and Shift-modified defaults ride as the uppercase byte.
+final class HerdrShortcutTests: XCTestCase {
+    func testShortcutsUseTheDefaultPrefixAndVerifiedBindings() {
+        let expected: [HerdrShortcut: UInt8] = [
+            .splitLeftRight: Character("v").asciiValue!,
+            .splitTopBottom: Character("-").asciiValue!,
+            .nextPane: 0x09,
+            .togglePaneZoom: Character("z").asciiValue!,
+            .editScrollback: Character("e").asciiValue!,
+            .newTab: Character("c").asciiValue!,
+            .nextTab: Character("n").asciiValue!,
+            .previousTab: Character("p").asciiValue!,
+            .renameTab: Character("T").asciiValue!,
+            .newWorkspace: Character("N").asciiValue!,
+            .workspacePicker: Character("w").asciiValue!,
+            .renameWorkspace: Character("W").asciiValue!,
+            .toggleSidebar: Character("b").asciiValue!,
+        ]
+
+        let safeShortcuts = HerdrShortcut.allCases.filter { !$0.requiresDoubleActivation }
+        XCTAssertEqual(safeShortcuts.count, expected.count)
+        for shortcut in safeShortcuts {
+            XCTAssertEqual(shortcut.bindingInput, [0x02, expected[shortcut]!],
+                           "\(shortcut) must send prefix + its stock key")
+            XCTAssertFalse(shortcut.command.isEmpty)
+        }
+    }
+
+    func testBindingLabelsSpellShiftAndTabHonestly() {
+        XCTAssertEqual(HerdrShortcut.splitLeftRight.bindingLabel, "⌃B V")
+        XCTAssertEqual(HerdrShortcut.splitTopBottom.bindingLabel, "⌃B -")
+        XCTAssertEqual(HerdrShortcut.nextPane.bindingLabel, "⌃B ⇥")
+        XCTAssertEqual(HerdrShortcut.newWorkspace.bindingLabel, "⌃B ⇧N")
+        XCTAssertEqual(HerdrShortcut.renameTab.bindingLabel, "⌃B ⇧T")
+        XCTAssertEqual(HerdrShortcut.renameWorkspace.bindingLabel, "⌃B ⇧W")
+    }
+
+    func testCloseActionsHaveNoTerminalInputAfterUIConfirmation() {
+        for (shortcut, scope) in [
+            (HerdrShortcut.closePane, HerdrShortcut.CloseScope.pane),
+            (.closeTab, .tab),
+            (.closeWorkspace, .workspace),
+        ] {
+            XCTAssertNil(shortcut.bindingInput)
+            XCTAssertTrue(shortcut.requiresDoubleActivation)
+            XCTAssertEqual(shortcut.bindingLabel, "2×")
+            XCTAssertEqual(shortcut.closeScope, scope)
+        }
+        XCTAssertNil(HerdrShortcut.splitLeftRight.closeScope)
+    }
+
+    func testCommandsAreTheConfigActionNames() {
+        // The subtext doubles as the `[keys]` rebinding reference — it must
+        // spell herdr's own action names, not invented prose.
+        XCTAssertEqual(HerdrShortcut.splitLeftRight.command, "split_vertical")
+        XCTAssertEqual(HerdrShortcut.splitTopBottom.command, "split_horizontal")
+        XCTAssertEqual(HerdrShortcut.nextPane.command, "cycle_pane_next")
+        XCTAssertEqual(HerdrShortcut.workspacePicker.command, "workspace_picker")
+        XCTAssertEqual(HerdrShortcut.closeWorkspace.command, "close_workspace")
+    }
+
+    func testEveryShortcutAppearsInExactlyOneMenuGroup() {
+        let grouped = HerdrShortcut.Group.allCases.flatMap(HerdrShortcut.shortcuts(in:))
+
+        XCTAssertEqual(HerdrShortcut.Group.allCases, [.panes, .tabs, .workspaces])
+        XCTAssertEqual(grouped.count, HerdrShortcut.allCases.count)
+        XCTAssertEqual(Set(grouped), Set(HerdrShortcut.allCases))
+        XCTAssertEqual(HerdrShortcut.togglePaneZoom.group, .panes)
+        XCTAssertEqual(HerdrShortcut.newTab.group, .tabs)
+        XCTAssertEqual(HerdrShortcut.toggleSidebar.group, .workspaces)
+    }
+}

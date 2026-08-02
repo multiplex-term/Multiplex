@@ -318,6 +318,7 @@ enum HerdrProbe {
         var layouts: [Layout]
         /// The session's ONE focus — what every attached client shows.
         var focusedWorkspaceID: String?
+        var focusedTabID: String?
         var focusedPaneID: String?
 
         enum CodingKeys: String, CodingKey {
@@ -325,6 +326,7 @@ enum HerdrProbe {
             case protocolVersion = "protocol"
             case workspaces, panes, layouts
             case focusedWorkspaceID = "focused_workspace_id"
+            case focusedTabID = "focused_tab_id"
             case focusedPaneID = "focused_pane_id"
         }
     }
@@ -334,11 +336,15 @@ enum HerdrProbe {
         var number: Int
         var label: String
         var activeTabID: String
+        /// Present in `workspace list` entries (and snapshots); the snapshot
+        /// path keeps deciding focus by `focusedWorkspaceID`.
+        var focused: Bool?
 
         enum CodingKeys: String, CodingKey {
             case workspaceID = "workspace_id"
             case number, label
             case activeTabID = "active_tab_id"
+            case focused
         }
     }
 
@@ -739,6 +745,91 @@ enum HerdrProbe {
         (try? JSONDecoder().decode(
             Envelope<CreatedResult>.self, from: Data(text.utf8)))?
             .result.rootPane.paneID
+    }
+
+    // MARK: - Shortcut panel (HRDR)
+
+    /// The shortcut panel's workspace list for one session — the herdr
+    /// analog of `TmuxProbe.windowListCommand`, one envelope exec.
+    static func workspaceListCommand(sessionName: String) -> String {
+        pathPrefix
+            + "herdr --session \(sessionName.shellQuoted) workspace list"
+            + " 2>/dev/null || true"
+    }
+
+    /// Workspaces as the panel's switch rows, reusing the tmux choice record
+    /// the way the probe reuses `TmuxSession` — `tmuxID` carries herdr's
+    /// workspace id. nil when nothing decodes; the panel then simply shows
+    /// no switch section.
+    static func parseWorkspaceChoices(_ output: String) -> [TmuxWindowChoice]? {
+        guard let list = firstDecodedLine(in: output, decodeWorkspaceList)
+        else { return nil }
+        return list.workspaces
+            .sorted { $0.number < $1.number }
+            .map { workspace in
+                TmuxWindowChoice(
+                    tmuxID: workspace.workspaceID,
+                    index: workspace.number,
+                    isActive: workspace.focused ?? false,
+                    name: displayLabel(workspace)
+                )
+            }
+    }
+
+    private struct WorkspaceListResult: Decodable {
+        var workspaces: [Workspace]
+    }
+
+    private static func decodeWorkspaceList(_ text: String) -> WorkspaceListResult? {
+        (try? JSONDecoder().decode(
+            Envelope<WorkspaceListResult>.self, from: Data(text.utf8)))?.result
+    }
+
+    /// Switch the session's ONE global focus to a workspace — every attached
+    /// client follows, exactly like the panel's tmux `select-window`. The id
+    /// is response-derived, so it passes the same framing vet as pane ids;
+    /// nil means the row is not actionable.
+    static func focusWorkspaceCommand(
+        sessionName: String, workspaceID: String
+    ) -> String? {
+        guard bakeablePaneID(workspaceID) else { return nil }
+        return pathPrefix
+            + "herdr --session \(sessionName.shellQuoted)"
+            + " workspace focus \(workspaceID.shellQuoted) 2>/dev/null || true"
+    }
+
+    /// The target a confirmed destructive close aims at, resolved from one
+    /// snapshot exec: strictly what the server names focused — a close must
+    /// never guess. The focused tab falls back to the focused workspace's
+    /// active tab (the same tab by definition, stated two ways).
+    static func parseFocusedCloseTarget(
+        _ output: String, scope: HerdrShortcut.CloseScope
+    ) -> String? {
+        guard let snapshot = firstDecodedLine(in: output, decodeSnapshot)
+        else { return nil }
+        let target: String? = switch scope {
+        case .pane:
+            snapshot.focusedPaneID
+        case .tab:
+            snapshot.focusedTabID ?? snapshot.workspaces.first {
+                $0.workspaceID == snapshot.focusedWorkspaceID
+            }?.activeTabID
+        case .workspace:
+            snapshot.focusedWorkspaceID
+        }
+        return target.flatMap { bakeablePaneID($0) ? $0 : nil }
+    }
+
+    /// Close one resolved target. The UI has already required the second
+    /// press, and the CLI verbs close without their own confirmation.
+    static func closeShortcutCommand(
+        sessionName: String, scope: HerdrShortcut.CloseScope, targetID: String
+    ) -> String? {
+        guard bakeablePaneID(targetID) else { return nil }
+        return pathPrefix
+            + "herdr --session \(sessionName.shellQuoted)"
+            + " \(scope.rawValue) close \(targetID.shellQuoted)"
+            + " 2>/dev/null || true"
     }
 
     /// A user-entered name reduced to what a herdr session (a directory

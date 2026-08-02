@@ -26,7 +26,8 @@ struct UMDBarConfiguration {
     /// What `newSession` actually mints — a herdr tab renames the entry
     /// and relabels the control (see `TerminalRoute.NewTabTarget`).
     var newTabTarget: TerminalRoute.NewTabTarget
-    var showsTmuxShortcuts: Bool
+    /// Which multiplexer owns the shortcut chip (TMUX/HRDR); nil hides it.
+    var shortcutBackend: Host.SessionBackend?
     var style: UMDBarStyle
     var deckControlLabel: String
     var availableWidth: CGFloat?
@@ -52,7 +53,7 @@ private struct UMDBarPresentationKey: Equatable {
     var hasCloseSession: Bool
     var hasKeychainTip: Bool
     var newTabTarget: TerminalRoute.NewTabTarget
-    var showsTmuxShortcuts: Bool
+    var shortcutBackend: Host.SessionBackend?
     var style: UMDBarStyle
     var deckControlLabel: String
     var availableWidth: CGFloat?
@@ -68,7 +69,7 @@ private struct UMDBarPresentationKey: Equatable {
         hasCloseSession = configuration.closeSession != nil
         hasKeychainTip = configuration.keychainTip != nil
         newTabTarget = configuration.newTabTarget
-        showsTmuxShortcuts = configuration.showsTmuxShortcuts
+        shortcutBackend = configuration.shortcutBackend
         style = configuration.style
         deckControlLabel = configuration.deckControlLabel
         availableWidth = configuration.availableWidth
@@ -105,8 +106,8 @@ final class UMDBarViewController: UIViewController,
     private var configuration: UMDBarConfiguration
     private let rootView = UMDBarRootView()
     private(set) var fileAttachController: FileAttachMenuViewController
-    private weak var tmuxPopoverController: TmuxShortcutPanelViewController?
-    private var resumesFocusAfterTmuxShortcuts = false
+    private weak var shortcutPopoverController: ShortcutPanelViewController?
+    private var resumesFocusAfterShortcutPanel = false
     private var observationGeneration = 0
     private var renderedKey: UMDBarRenderKey?
     private var currentObservedState = UMDBarObservedState(
@@ -155,9 +156,9 @@ final class UMDBarViewController: UIViewController,
 
     func prepareForRemoval() {
         observationGeneration &+= 1
-        tmuxPopoverController?.dismiss(animated: false)
-        tmuxPopoverController = nil
-        resumeFocusAfterTmuxPresentationIfNeeded()
+        shortcutPopoverController?.dismiss(animated: false)
+        shortcutPopoverController = nil
+        resumeFocusAfterShortcutPresentationIfNeeded()
     }
 
     /// One action router backs direct controls and every UIMenu item, making
@@ -286,8 +287,8 @@ final class UMDBarViewController: UIViewController,
         ]
 
         views.append(fileAttachController.takeAttachButton())
-        if configuration.showsTmuxShortcuts {
-            views.append(tmuxButton())
+        if let backend = configuration.shortcutBackend {
+            views.append(shortcutButton(backend))
         }
         if !configuration.mergeSources.isEmpty {
             views.append(mergeButton())
@@ -363,8 +364,8 @@ final class UMDBarViewController: UIViewController,
             ))
             views.append(newTabButton())
             views.append(fileAttachController.takeAttachButton())
-            if configuration.showsTmuxShortcuts {
-                views.append(tmuxButton())
+            if let backend = configuration.shortcutBackend {
+                views.append(shortcutButton(backend))
             }
             if showsChipCompanionMenu {
                 views.append(overflowButton(displacesDirectActions: false))
@@ -372,8 +373,9 @@ final class UMDBarViewController: UIViewController,
             views.append(detachButton())
         } else {
             views.append(overflowButton(displacesDirectActions: true))
-            if showsCompactTopBarTmuxShortcut(state: state) {
-                views.append(tmuxButton())
+            if let backend = configuration.shortcutBackend,
+               showsCompactTopBarShortcut(state: state) {
+                views.append(shortcutButton(backend))
             }
         }
 
@@ -392,13 +394,13 @@ final class UMDBarViewController: UIViewController,
         #endif
     }
 
-    private func showsCompactTopBarTmuxShortcut(
+    private func showsCompactTopBarShortcut(
         state: UMDBarObservedState
     ) -> Bool {
         guard let availableWidth = configuration.availableWidth else { return false }
         return SingleWindowShellLayout.showsTopBarTmuxShortcut(
             availableWidth: availableWidth,
-            supportsTmuxShortcuts: configuration.showsTmuxShortcuts,
+            supportsTmuxShortcuts: configuration.shortcutBackend != nil,
             keyBarIncludesReturnKey: state.keyboardLocked
         )
     }
@@ -510,18 +512,22 @@ final class UMDBarViewController: UIViewController,
         )
     }
 
-    private func tmuxButton() -> UMDBarButton {
+    /// The identifier names the chip's slot, not its occupant — tests and
+    /// hooks address "umd.tmux" for either backend's shortcut chip.
+    private func shortcutButton(_ backend: Host.SessionBackend) -> UMDBarButton {
         let button = UMDBarButton(
-            caption: "TMUX",
+            caption: backend == .herdr ? "HRDR" : "TMUX",
             systemImage: "command",
             prominent: false,
-            accessibilityLabel: "Show tmux shortcuts"
+            accessibilityLabel: backend == .herdr
+                ? "Show herdr shortcuts"
+                : "Show tmux shortcuts"
         )
         button.accessibilityIdentifier = "umd.tmux"
         button.isEnabled = currentObservedState.status == .live
         button.addAction(UIAction { [weak self, weak button] _ in
             guard let self, let button else { return }
-            self.showTmuxShortcuts(from: button)
+            self.showShortcutPanel(from: button)
         }, for: .touchUpInside)
         return button
     }
@@ -777,45 +783,49 @@ final class UMDBarViewController: UIViewController,
         }
     }
 
-    private func showTmuxShortcuts(from source: UIView) {
-        guard tmuxPopoverController == nil,
+    private func showShortcutPanel(from source: UIView) {
+        guard shortcutPopoverController == nil,
+              let content = ShortcutPanelContent.content(
+                for: configuration.shortcutBackend
+              ),
               configuration.controller?.status == .live
         else { return }
 
         if configuration.style == .shell {
-            resumesFocusAfterTmuxShortcuts =
+            resumesFocusAfterShortcutPanel =
                 configuration.controller?.suspendFocusForPresentation() == true
         }
 
         let panelWidth = min(
-            TmuxShortcutPanelViewController.preferredWidth,
+            ShortcutPanelViewController.preferredWidth,
             max(
                 280,
                 (configuration.availableWidth
-                    ?? TmuxShortcutPanelViewController.preferredWidth + 24) - 24
+                    ?? ShortcutPanelViewController.preferredWidth + 24) - 24
             )
         )
-        let panel = TmuxShortcutPanelViewController(
+        let panel = ShortcutPanelViewController(
+            content: content,
             width: panelWidth,
-            select: { [weak self] shortcut in
+            select: { [weak self] item in
                 guard let self else { return }
-                self.tmuxPopoverController?.dismiss(animated: true) {
-                    self.resumeFocusAfterTmuxPresentationIfNeeded()
+                self.shortcutPopoverController?.dismiss(animated: true) {
+                    self.resumeFocusAfterShortcutPresentationIfNeeded()
                 }
-                self.configuration.controller?.performTmuxShortcut(shortcut)
+                self.configuration.controller?.performPanelShortcut(item)
             },
-            loadWindows: { [weak controller = configuration.controller] in
-                await controller?.loadTmuxWindowList()
+            loadChoices: { [weak controller = configuration.controller] in
+                await controller?.loadShortcutSwitchChoices()
             },
-            selectWindow: { [weak self] window in
+            selectChoice: { [weak self] choice in
                 guard let self else { return }
-                self.tmuxPopoverController?.dismiss(animated: true) {
-                    self.resumeFocusAfterTmuxPresentationIfNeeded()
+                self.shortcutPopoverController?.dismiss(animated: true) {
+                    self.resumeFocusAfterShortcutPresentationIfNeeded()
                 }
-                self.configuration.controller?.selectTmuxWindow(window)
+                self.configuration.controller?.selectShortcutSwitchChoice(choice)
             }
         )
-        tmuxPopoverController = panel
+        shortcutPopoverController = panel
         panel.modalPresentationStyle = .popover
         // visionOS hosts this popover in a window of its own; carry the
         // ornament mount's appearance override across or a pinned LIGHT
@@ -852,8 +862,8 @@ final class UMDBarViewController: UIViewController,
     func presentationControllerDidDismiss(
         _ presentationController: UIPresentationController
     ) {
-        tmuxPopoverController = nil
-        resumeFocusAfterTmuxPresentationIfNeeded()
+        shortcutPopoverController = nil
+        resumeFocusAfterShortcutPresentationIfNeeded()
     }
 
     func adaptivePresentationStyle(
@@ -869,9 +879,9 @@ final class UMDBarViewController: UIViewController,
         .none
     }
 
-    private func resumeFocusAfterTmuxPresentationIfNeeded() {
-        guard resumesFocusAfterTmuxShortcuts else { return }
-        resumesFocusAfterTmuxShortcuts = false
+    private func resumeFocusAfterShortcutPresentationIfNeeded() {
+        guard resumesFocusAfterShortcutPanel else { return }
+        resumesFocusAfterShortcutPanel = false
         configuration.controller?.resumeFocusAfterPresentation()
     }
 }
