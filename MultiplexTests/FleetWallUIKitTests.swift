@@ -460,6 +460,27 @@ final class FleetWallUIKitTests: XCTestCase {
     /// one client the app can verify: its own open terminal tab. Without one
     /// the tile keeps offering ATTACH rather than claiming a state nothing
     /// reported.
+    func testHerdrNewSessionSheetOffersTheDirectoryChoice() throws {
+        var host = makeHost()
+        host.sessionBackend = .herdr
+        host.workingDirs = ["/srv/app"]
+        let controller = NewSessionViewController(
+            host: host,
+            existingNames: []
+        ) { _ in }
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 680, height: 760)
+        controller.view.layoutIfNeeded()
+
+        let headers = descendants(of: UIKitChassisLabel.self, in: controller.view)
+            .filter { $0.accessibilityTraits.contains(.header) }
+        XCTAssertTrue(
+            headers.compactMap(\.accessibilityLabel).contains("Directory"),
+            "the herdr mint roots a session's world — the picker is truthful "
+                + "on both backends"
+        )
+    }
+
     func testHerdrSessionTileLampFollowsThisAppsOwnOpenTab() {
         // The record herdr's adapter produces: no clients, ever.
         var session = makeSession(name: "main")

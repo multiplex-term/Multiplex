@@ -3478,13 +3478,12 @@ final class NewSessionViewController: UIViewController,
             scriptSection = section
             contentStack.addArrangedSubview(section)
         }
-        // A herdr session has no start directory — herdr owns each
-        // session's world — so the picker would be a lie there.
-        if form.host.sessionBackend == .tmux {
-            let directory = makeDirectorySection()
-            directorySection = directory
-            contentStack.addArrangedSubview(directory)
-        }
+        // Both backends honor the choice: tmux as `new-session -c`, herdr
+        // by rooting the spawned session's world (the session server
+        // inherits the spawn's cwd).
+        let directory = makeDirectorySection()
+        directorySection = directory
+        contentStack.addArrangedSubview(directory)
 
         let dismissTap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         dismissTap.cancelsTouchesInView = false
