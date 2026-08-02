@@ -229,7 +229,11 @@ final class SettingsViewController: UIViewController {
 
         let sections = [
             makeAppearanceSection(state),
-            makeCurrentThemeSection(theme: selectedTheme, appearance: appearance),
+            makeCurrentThemeSection(
+                theme: selectedTheme,
+                choice: state.appearance,
+                resolvedAppearance: appearance
+            ),
             makeBuiltInThemesSection(selectedID: selectedTheme.id),
             makeCustomThemesSection(
                 state: state,
@@ -265,10 +269,19 @@ final class SettingsViewController: UIViewController {
             self?.themes.appearance = appearance
         }
         appearanceChoiceBar = bar
+        let appearanceDetail: String
+        if GlassPrototype.enabled {
+            appearanceDetail = "System follows the device. The deck, terminal chrome, "
+                + "and forms switch together. Dark and Glass share the dark terminal "
+                + "theme below."
+        } else {
+            appearanceDetail = "System follows the device. The deck, terminal chrome, "
+                + "and forms switch together; each appearance keeps its own terminal "
+                + "theme below."
+        }
         let section = SettingsSectionView(
             title: "Appearance",
-            detail: "System follows the device. The deck, terminal chrome, and forms "
-                + "switch together; each appearance keeps its own terminal theme below.",
+            detail: appearanceDetail,
             rows: [SettingsInsetRow(contentView: bar)]
         )
         appearanceSection = section
@@ -296,7 +309,8 @@ final class SettingsViewController: UIViewController {
 
     private func makeCurrentThemeSection(
         theme: TerminalTheme,
-        appearance: ResolvedAppearance
+        choice: AppAppearance,
+        resolvedAppearance: ResolvedAppearance
     ) -> UIView {
         let name = UIKitChassisLabel(theme.name, size: 12)
         let surface = settingsTrackedLabel(
@@ -321,10 +335,19 @@ final class SettingsViewController: UIViewController {
         let body = UIStackView(arrangedSubviews: [header, UIKitThemePreviewView(theme: theme)])
         body.axis = .vertical
         body.spacing = 12
+        let ownership: String
+        switch choice {
+        case .glass:
+            ownership = "Glass shares this dark terminal theme with Dark."
+        case .dark where GlassPrototype.enabled:
+            ownership = "Dark shares this terminal theme with Glass."
+        default:
+            ownership = "This is the \(resolvedAppearance == .light ? "light" : "dark") "
+                + "theme now on screen."
+        }
         return SettingsSectionView(
             title: "Current theme",
-            detail: "Selections apply to every terminal immediately and belong to the "
-                + "\(appearance == .light ? "light" : "dark") appearance now on screen.",
+            detail: "Selections apply to every terminal immediately. \(ownership)",
             rows: [SettingsInsetRow(contentView: body)]
         )
     }

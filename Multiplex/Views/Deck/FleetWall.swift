@@ -2148,7 +2148,9 @@ private final class FleetHatchedView: UIView {
         backgroundColor = GlassPrototype.enabled
             ? GlassPrototype.screenGlass : TallyPalette.screen
         isOpaque = !GlassPrototype.enabled
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: FleetHatchedView, _: UITraitCollection) in
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
+        ) { (view: FleetHatchedView, _: UITraitCollection) in
             view.setNeedsDisplay()
         }
     }
@@ -2666,7 +2668,7 @@ private final class FleetNewSessionTileView: FleetPressView {
         // A CALayer stroke is a resolved CGColor: it needs re-resolving on an
         // appearance flip, which alone changes no bounds and triggers no layout.
         registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
         ) { (tile: FleetNewSessionTileView, _: UITraitCollection) in
             tile.refreshDash()
         }
@@ -3480,7 +3482,9 @@ final class NewSessionViewController: UIViewController,
         button.layer.borderWidth = 1
         button.layer.borderColor = UIKitChassis.bezelHi
             .resolvedColor(with: button.traitCollection).cgColor
-        button.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (button: UIButton, _: UITraitCollection) in
+        button.registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
+        ) { (button: UIButton, _: UITraitCollection) in
             button.layer.borderColor = UIKitChassis.bezelHi
                 .resolvedColor(with: button.traitCollection).cgColor
         }
@@ -3856,7 +3860,9 @@ private final class FleetChoiceButton: UIButton {
         ])
         layer.borderWidth = 1
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (button: FleetChoiceButton, _: UITraitCollection) in
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
+        ) { (button: FleetChoiceButton, _: UITraitCollection) in
             button.render()
         }
     }
@@ -4021,7 +4027,7 @@ private final class FleetMenuFieldButton: UIButton {
         ])
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
         registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
         ) { (button: FleetMenuFieldButton, _: UITraitCollection) in
             button.refreshBorder()
         }

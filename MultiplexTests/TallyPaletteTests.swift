@@ -26,6 +26,41 @@ final class TallyPaletteTests: XCTestCase {
         }
     }
 
+    func testGlassTokensResolveOnlyForTheDarkGlassTrait() throws {
+        guard GlassPrototype.enabled else { return }
+        let dark = UITraitCollection(userInterfaceStyle: .dark)
+        let darkGlass = dark.replacing(GlassAppearanceTrait.self, value: true)
+
+        try assert(
+            UIKitChassis.bezel,
+            resolvesTo: 0xFFFFFF,
+            alpha: 0.05,
+            traits: darkGlass
+        )
+        try assert(
+            UIKitChassis.signal2,
+            resolvesTo: 0xEEF2F5,
+            alpha: 0.60,
+            traits: darkGlass
+        )
+
+        try assert(
+            UIKitChassis.bezel,
+            resolvesTo: 0x26282B,
+            alpha: 1,
+            traits: dark
+        )
+
+        let lightGlass = UITraitCollection(userInterfaceStyle: .light)
+            .replacing(GlassAppearanceTrait.self, value: true)
+        try assert(
+            UIKitChassis.bezel,
+            resolvesTo: 0xF0F3F7,
+            alpha: 1,
+            traits: lightGlass
+        )
+    }
+
     func testUIKitPalettePreservesAppearanceSpecificShadowStrength() throws {
         try assert(
             TallyPalette.shadowAmbient,
@@ -85,9 +120,25 @@ final class TallyPaletteTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) throws {
-        let resolved = color.resolvedColor(
-            with: UITraitCollection(userInterfaceStyle: style)
+        try assert(
+            color,
+            resolvesTo: hex,
+            alpha: expectedAlpha,
+            traits: UITraitCollection(userInterfaceStyle: style),
+            file: file,
+            line: line
         )
+    }
+
+    private func assert(
+        _ color: UIColor,
+        resolvesTo hex: UInt32,
+        alpha expectedAlpha: CGFloat,
+        traits: UITraitCollection,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let resolved = color.resolvedColor(with: traits)
         var red: CGFloat = 0
         var green: CGFloat = 0
         var blue: CGFloat = 0

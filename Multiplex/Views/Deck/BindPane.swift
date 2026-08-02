@@ -327,7 +327,7 @@ final class BindPaneViewController: UIViewController {
         pasteSlot.setContentCompressionResistancePriority(.required, for: .horizontal)
         installPasteControl()
         pasteSlot.registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
         ) { [weak self] (_: UIView, _: UITraitCollection) in
             self?.installPasteControl()
         }
@@ -357,8 +357,8 @@ final class BindPaneViewController: UIViewController {
 
     /// `UIPasteControl` consumes its configuration at init and offers no way to
     /// re-apply one, so the chassis colors it is built with are baked for the
-    /// control's lifetime — a LIGHT/DARK flip would otherwise leave the chip's
-    /// ink from the old polarity. Rebuilding the control in its slot is the
+    /// control's lifetime — an appearance flip would otherwise leave the chip's
+    /// ink from the old material or polarity. Rebuilding it in place is the
     /// heal path, driven by the same trait registration the file's hand-drawn
     /// chrome uses.
     private func installPasteControl() {

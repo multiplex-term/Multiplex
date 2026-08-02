@@ -64,6 +64,11 @@ final class SettingsUIKitTests: XCTestCase {
         XCTAssertTrue(rendered.contains("AGENT ALERTS"))
         XCTAssertTrue(rendered.contains("CUSTOM THEMES"))
         XCTAssertTrue(rendered.contains("PRIVACY POLICY"))
+        if GlassPrototype.enabled {
+            XCTAssertTrue(rendered.contains {
+                $0.contains("Dark and Glass share the dark terminal theme")
+            })
+        }
 
         XCTAssertEqual(
             fixture.controller.appearanceChoiceBar?.arrangedSubviews.count,

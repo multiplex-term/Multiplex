@@ -19,6 +19,23 @@ final class UIKitSceneRootViewControllerTests: XCTestCase {
         XCTAssertEqual(harness.window.overrideUserInterfaceStyle, .light)
     }
 
+    func testGlassAppearanceAppliesAndClearsTheMaterialTraitLive() {
+        guard GlassPrototype.enabled else { return }
+        let harness = makeHarness(appearance: .glass)
+        harness.window.makeKeyAndVisible()
+        harness.root.loadViewIfNeeded()
+        harness.root.viewDidAppear(false)
+
+        XCTAssertEqual(harness.root.overrideUserInterfaceStyle, .dark)
+        XCTAssertTrue(harness.root.traitCollection[GlassAppearanceTrait.self])
+        XCTAssertTrue(harness.window.traitCollection[GlassAppearanceTrait.self])
+
+        harness.themes.appearance = .dark
+        drainObservation()
+        XCTAssertFalse(harness.root.traitCollection[GlassAppearanceTrait.self])
+        XCTAssertFalse(harness.window.traitCollection[GlassAppearanceTrait.self])
+    }
+
     func testIOSPlatformChromeUsesSignalTint() {
         let harness = makeHarness(platformChrome: .iOS(isIOSAppOnMac: false))
         harness.window.makeKeyAndVisible()

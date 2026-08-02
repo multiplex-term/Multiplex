@@ -554,10 +554,10 @@ extension AppAppearance {
         }
     }
 
-    /// Reads the choice back off a scene window. The scene root writes exactly
-    /// the three styles above, so the mapping is exact in both directions —
-    /// which is what lets a presenter with no `ThemeStore` in hand still hand
-    /// a sheet the choice the scene is painting with.
+    /// Reads the style back off a scene window. Style alone cannot distinguish
+    /// DARK from GLASS — both pin dark traits — so a store-free presenter gets
+    /// `.dark`; `GlassAppearanceTrait` carries the independent material choice
+    /// onto its hosting window beside this style mapping.
     init(sceneWindowStyle style: UIUserInterfaceStyle) {
         switch style {
         case .light: self = .light

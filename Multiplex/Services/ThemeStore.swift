@@ -14,9 +14,10 @@ enum ResolvedAppearance: String, CaseIterable {
 
 /// The app-wide appearance choice, persisted by `ThemeStore` and applied at
 /// every scene root by `PlatformChrome`. `.system` follows the device (and on
-/// visionOS keeps the platform's native appearance); the other two pin the
-/// chassis. Chassis tokens themselves are trait-dynamic (`Theme`), so the
-/// whole chrome — deck, terminal windows, sheets, launch handoff — flips
+/// visionOS keeps the platform's native appearance); the other choices pin the
+/// chassis (GLASS to dark traits). Chassis tokens themselves are trait-dynamic
+/// (`Theme`), so the whole chrome — deck, terminal windows, sheets, launch
+/// handoff — flips
 /// together.
 enum AppAppearance: String, CaseIterable {
     case system
@@ -107,8 +108,8 @@ final class ThemeStore {
     /// Headless-verification hook: the appearance choice bar can't be tapped
     /// from the CLI, so
     /// `xcrun simctl spawn <udid> notifyutil -p app.multiplexterm.multiplex.debug.appearance`
-    /// cycles SYSTEM → LIGHT → DARK through the exact property the Settings
-    /// bar sets — proving the live window-override flip (open sheets
+    /// cycles the platform's available choices through the exact property the
+    /// Settings bar sets — proving the live window-override flip (open sheets
     /// included) and the persisted choice.
     private func installDebugAppearanceHook() {
         var token: Int32 = 0

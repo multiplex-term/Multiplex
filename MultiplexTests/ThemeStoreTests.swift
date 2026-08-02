@@ -40,6 +40,16 @@ final class ThemeStoreTests: XCTestCase {
         XCTAssertNil(AppAppearance.system.resolvedOverride, "system follows the device")
         XCTAssertEqual(AppAppearance.light.resolvedOverride, .light)
         XCTAssertEqual(AppAppearance.dark.resolvedOverride, .dark)
+        XCTAssertEqual(AppAppearance.glass.resolvedOverride, .dark)
+    }
+
+    func testPersistedGlassFallsBackWhereThePrototypeIsUnavailable() {
+        defaults.set(AppAppearance.glass.rawValue, forKey: "MultiplexAppearance")
+
+        XCTAssertEqual(
+            makeStore().appearance,
+            GlassPrototype.enabled ? .glass : .system
+        )
     }
 
     // MARK: Per-appearance selection
