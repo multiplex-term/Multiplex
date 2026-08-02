@@ -23,6 +23,9 @@ struct UMDBarConfiguration {
     var detach: () -> Void
     var closeSession: (() -> Void)?
     var keychainTip: (() -> Void)?
+    /// What `newSession` actually mints — a herdr tab renames the entry
+    /// and relabels the control (see `TerminalRoute.NewTabTarget`).
+    var newTabTarget: TerminalRoute.NewTabTarget
     var showsTmuxShortcuts: Bool
     var style: UMDBarStyle
     var deckControlLabel: String
@@ -48,6 +51,7 @@ private struct UMDBarPresentationKey: Equatable {
     var mergeSources: [UMDBarMergeSourceKey]
     var hasCloseSession: Bool
     var hasKeychainTip: Bool
+    var newTabTarget: TerminalRoute.NewTabTarget
     var showsTmuxShortcuts: Bool
     var style: UMDBarStyle
     var deckControlLabel: String
@@ -63,6 +67,7 @@ private struct UMDBarPresentationKey: Equatable {
         }
         hasCloseSession = configuration.closeSession != nil
         hasKeychainTip = configuration.keychainTip != nil
+        newTabTarget = configuration.newTabTarget
         showsTmuxShortcuts = configuration.showsTmuxShortcuts
         style = configuration.style
         deckControlLabel = configuration.deckControlLabel
@@ -460,7 +465,7 @@ final class UMDBarViewController: UIViewController,
             caption: "TAB",
             systemImage: "plus",
             identifier: "umd.newTab",
-            accessibilityLabel: "New tab: another session or the file viewer",
+            accessibilityLabel: configuration.newTabTarget.controlAccessibilityLabel,
             menu: makeNewTabMenu()
         )
     }
@@ -587,7 +592,7 @@ final class UMDBarViewController: UIViewController,
     private func makeNewTabMenu() -> UIMenu {
         var sessionActions: [UIMenuElement] = [
             menuAction(
-                title: "New Session",
+                title: configuration.newTabTarget.menuTitle,
                 identifier: "umd.newTab.session",
                 action: .newSession(nil)
             ),

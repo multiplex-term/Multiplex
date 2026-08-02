@@ -423,3 +423,20 @@ meaning the field has for fresh sessions.
   names the target session.
 - Automation URLs: add &session=NAME and optionally &in=tab|workspace|
   window to action=agent.
+
+HERDR: + TAB ADDS A TAB TO THE WORKSPACE YOU'RE IN
+
+On a herdr session, the terminal's + TAB no longer starts a whole new
+session. It opens a tab inside the workspace you're looking at, in that
+pane's directory, and herdr moves you to it — the entry is named "New Tab
+in Workspace" so the menu says what it does. tmux hosts are unchanged.
+
+- Attach a herdr session, then + TAB ▸ New Tab in Workspace: the herdr
+  tab bar gains a tab, it takes focus, and the shell starts in the same
+  directory. No second Multiplex tab appears — you're already attached.
+- Check the deck: the tile still lists the same sessions, with the new tab
+  counted under the workspace you were in.
+- Pick an agent from the same menu instead: it launches in the new herdr
+  tab (with your remembered model), not in a new session.
+- Attach a tmux session and + TAB: still "New Session", still opens its
+  own Multiplex tab.

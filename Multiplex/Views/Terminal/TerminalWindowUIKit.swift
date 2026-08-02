@@ -824,6 +824,10 @@ final class TerminalWindowViewController: UIViewController,
               let activeTab,
               let host = store.host(id: activeTab.hostID)
         else { return }
+        if case .herdrAttach(let sessionName) = activeTab.mode {
+            openNewHerdrTab(in: sessionName, on: host, launching: agent)
+            return
+        }
         creatingTab = true
         // A host backend can change while this tab stays live. Only inherit a
         // source session from the namespace the new tab will actually use.
@@ -846,7 +850,7 @@ final class TerminalWindowViewController: UIViewController,
                     )
                 }
             ) else {
-                presentNewTabFailure(hostName: host.name)
+                presentNewTabFailure(hostName: host.name, target: .session)
                 return
             }
             let tab = TerminalRoute(hostID: host.id, mode: created)
@@ -857,10 +861,41 @@ final class TerminalWindowViewController: UIViewController,
         }
     }
 
-    private func presentNewTabFailure(hostName: String) {
+    /// The herdr shape of the same press: a tab in the session's focused
+    /// workspace, typed into over the control connection. No Multiplex tab
+    /// is added — this window is already attached to that session, and its
+    /// client is what shows the new tab (herdr focuses it).
+    private func openNewHerdrTab(
+        in sessionName: String, on host: Host, launching agent: AgentKind?
+    ) {
+        creatingTab = true
+        let preferences = NewSessionPreferences()
+        let script = preferences.rememberedScript(for: host)
+        Task { [weak self] in
+            guard let self else { return }
+            defer { creatingTab = false }
+            let created = await hub.model(for: host).createHerdrTab(
+                inSession: sessionName,
+                running: script?.normalizedBody,
+                typing: agent.map {
+                    $0.launchCommand(
+                        model: preferences.rememberedModel(for: $0),
+                        initialPrompt: ""
+                    )
+                }
+            )
+            if !created {
+                presentNewTabFailure(hostName: host.name, target: .herdrWorkspaceTab)
+            }
+        }
+    }
+
+    private func presentNewTabFailure(
+        hostName: String, target: TerminalRoute.NewTabTarget
+    ) {
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(
-            title: "Couldn't Create Session",
+            title: target.failureTitle,
             message: "Check the connection to \(hostName) and try again.",
             preferredStyle: .alert
         )
@@ -1331,6 +1366,12 @@ extension TerminalWindowViewController {
         activeTab?.isFileViewer == true ? "Close file viewer" : "Close viewport"
     }
 
+    /// What `+ TAB` mints beside the active tab — the one place the menu
+    /// entry, the control's label, and the failure alert read it from.
+    private var newTabTarget: TerminalRoute.NewTabTarget {
+        activeTab?.newTabTarget ?? .session
+    }
+
     private func renderUMD() {
         #if os(visionOS)
         let needsUMD = true
@@ -1380,6 +1421,7 @@ extension TerminalWindowViewController {
                 ? { [weak self] in self?.confirmCloseActiveSession() } : nil,
             keychainTip: activeTabKeychainNotice != nil
                 ? { [weak self] in self?.presentKeychainTip() } : nil,
+            newTabTarget: newTabTarget,
             showsTmuxShortcuts: activeTab?.usesTmux == true,
             style: shell == nil ? .regular : .shell,
             deckControlLabel: shell?.deckControlLabel ?? "DECK",
@@ -1968,7 +2010,7 @@ extension TerminalWindowViewController {
             trailing.append(makeNavigationBarItem(customView: makeMenuButton(
                 caption: "TAB",
                 systemImage: "plus",
-                accessibilityLabel: "New tab: another session or the file viewer",
+                accessibilityLabel: newTabTarget.controlAccessibilityLabel,
                 menu: makeNewTabMenu()
             )))
             if let activeController {
@@ -2111,7 +2153,7 @@ extension TerminalWindowViewController {
 
     private func makeNewTabMenu() -> UIMenu {
         var actions: [UIMenuElement] = [
-            UIAction(title: "New Session") { [weak self] _ in
+            UIAction(title: newTabTarget.menuTitle) { [weak self] _ in
                 self?.openNewTab(launching: nil)
             },
         ]

@@ -594,6 +594,16 @@ final class HerdrProbeTests: XCTestCase {
                 + "herdr --session 'api' workspace create --label 'codex'"
                 + " --cwd \"$HOME\"/'work dir' --focus 2>/dev/null || true"
         )
+        // The terminal window's own + TAB press passes neither rider: a
+        // press means "another one here", so herdr numbers the tab and
+        // starts it in the focused pane's directory (the tmux mint's
+        // inDirectoryOf, without an exec to ask for it).
+        XCTAssertEqual(
+            HerdrProbe.createTabCommand(
+                sessionName: "api", label: nil, directory: nil),
+            HerdrProbe.pathPrefix
+                + "herdr --session 'api' tab create --focus 2>/dev/null || true"
+        )
     }
 
     func testParseCreatedPaneReadsBothCreateEnvelopes() {
@@ -750,6 +760,32 @@ final class HerdrRouteTests: XCTestCase {
         XCTAssertEqual(tmuxRoute.sessionBackend, .tmux)
         let shellRoute = TerminalRoute(hostID: UUID(), mode: .shell)
         XCTAssertFalse(shellRoute.usesTmux)
+    }
+
+    func testPlusTabMintsAWorkspaceTabForHerdrAndASessionEverywhereElse() {
+        XCTAssertEqual(route.newTabTarget, .herdrWorkspaceTab)
+        XCTAssertEqual(
+            TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "main"))
+                .newTabTarget,
+            .session
+        )
+        XCTAssertEqual(
+            TerminalRoute(hostID: UUID(), mode: .shell).newTabTarget, .session)
+        XCTAssertEqual(
+            TerminalRoute(hostID: UUID(), mode: .fileViewer(path: "~"))
+                .newTabTarget,
+            .session,
+            "an auxiliary pane names no session — the press keeps minting one"
+        )
+        XCTAssertEqual(
+            TerminalRoute.NewTabTarget.herdrWorkspaceTab.menuTitle,
+            "New Tab in Workspace"
+        )
+        XCTAssertEqual(TerminalRoute.NewTabTarget.session.menuTitle, "New Session")
+        XCTAssertEqual(
+            TerminalRoute.NewTabTarget.herdrWorkspaceTab.failureTitle,
+            "Couldn't Create Tab"
+        )
     }
 }
 

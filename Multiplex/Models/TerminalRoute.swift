@@ -137,6 +137,50 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         }
     }
 
+    /// What the terminal's `+ TAB` press mints beside this tab.
+    ///
+    /// A tmux (or plain-shell) tab gets another session, attached as a
+    /// second Multiplex tab. A herdr tab instead gets a tab inside its
+    /// session's focused workspace: herdr's focus is session-wide, so a
+    /// second client attached to the same session would only mirror the
+    /// first — the herdr client already on screen is what renders the new
+    /// tab, and no Multiplex tab is added at all.
+    var newTabTarget: NewTabTarget {
+        sessionBackend == .herdr ? .herdrWorkspaceTab : .session
+    }
+
+    /// The two shapes of a `+ TAB` session press, holding the copy each
+    /// surface (the menu entry, the control's label, the failure alert)
+    /// must agree on.
+    enum NewTabTarget: Hashable {
+        case session
+        case herdrWorkspaceTab
+
+        /// The `+ TAB` menu's leading entry — the one that mints a plain
+        /// shell. The agent entries below it keep their own names.
+        var menuTitle: String {
+            switch self {
+            case .session: "New Session"
+            case .herdrWorkspaceTab: "New Tab in Workspace"
+            }
+        }
+
+        var controlAccessibilityLabel: String {
+            switch self {
+            case .session: "New tab: another session or the file viewer"
+            case .herdrWorkspaceTab:
+                "New tab: another tab in this herdr workspace or the file viewer"
+            }
+        }
+
+        var failureTitle: String {
+            switch self {
+            case .session: "Couldn't Create Session"
+            case .herdrWorkspaceTab: "Couldn't Create Tab"
+            }
+        }
+    }
+
     /// The tab speaks tmux itself — the gate for tmux-specific chrome (the
     /// TMUX shortcut popover, Copy Mode's app-owned state). A herdr tab is
     /// a probe-backed session too, but its client owns those interactions.

@@ -184,7 +184,10 @@ app.multiplexterm.multiplex.<name>`:
   flips every window live; pair with `simctl ui <UDID> appearance` to prove
   SYSTEM).
 - `debug.agentchip` — tap the first slash chip (inject → pump → PTY → tmux).
-- `debug.newtab` — run the focused window's "+ TAB" New Session action.
+- `debug.newtab` — run the focused window's "+ TAB" session action (New
+  Session on a tmux tab; on a herdr tab, New Tab in Workspace — proof is
+  host-side: `herdr --session <name> api snapshot` gains a tab in the
+  focused workspace and no session is minted).
 - `debug.tmuxshortcuts` / `debug.customcommands` / `debug.msghistory` — open
   the tmux-shortcut popover / Command Setup editor / agent HISTORY panel for
   layout capture.
@@ -743,6 +746,18 @@ logic belongs — keep parsing/command-building out of views.
   target name falls back to the fresh-session mint; a failed in-session
   create is a visible failure, never a fallback mint. herdr reports no client count or creation time.
   Keep the Agent Gallery withdrawn until transcript support exists.
+  A terminal window's `+ TAB` session press changes shape the same way
+  (`TerminalRoute.newTabTarget` — the one place the entry's name, the
+  control's label, and the failure alert read it from, so the classic
+  toolbar and the UMD bar cannot drift): on a herdr tab it mints a TAB IN
+  THE SESSION'S FOCUSED WORKSPACE through the same `createTabCommand` +
+  `typeCommand` pair, label and `--cwd` both omitted (herdr numbers the
+  tab and inherits the focused pane's directory — the tmux mint's
+  `inDirectoryOf` without an exec to ask for it), and adds no Multiplex
+  tab at all: herdr's focus is session-wide, so a second client on the
+  same session would only mirror the first, and the client already on
+  screen is what renders it. The deck's own `+ New Session` still mints
+  sessions — a tile IS a session.
 - **A disabled host is one the app never dials on its own**
   (`Host.isEnabled`; deck rail menu / DISABLED tile / Host Settings →
   Monitoring): the wall skips it in `runFeed`, never asks `ConnectionHub`
