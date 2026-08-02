@@ -36,6 +36,51 @@ final class DeckWindowUIKitTests: XCTestCase {
         XCTAssertEqual(unlocked.controller.pendingPresentationKinds, [.addHost])
     }
 
+    func testHostSettingsDoesNotStackNavigationSmokeInGlass() async throws {
+        guard GlassPrototype.enabled else { return }
+        let host = makeHost(name: "devbox")
+        let harness = try makeHarness(hosts: [host])
+        let controller = harness.controller
+        harness.themes.appearance = .glass
+        let scene = try XCTUnwrap(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.loadViewIfNeeded()
+        defer {
+            controller.prepareForRemoval()
+            window.isHidden = true
+        }
+
+        controller.requestEditHost(host)
+        await drainTasks()
+
+        let navigation = try XCTUnwrap(
+            controller.presentedViewController as? UINavigationController
+        )
+        let editor = try XCTUnwrap(
+            navigation.topViewController as? AddHostViewController
+        )
+        navigation.loadViewIfNeeded()
+        editor.loadViewIfNeeded()
+        let darkGlass = UITraitCollection(userInterfaceStyle: .dark)
+            .replacing(GlassAppearanceTrait.self, value: true)
+        XCTAssertEqual(
+            navigation.view.backgroundColor?.resolvedColor(with: darkGlass),
+            UIColor.clear,
+            "The navigation container must not paint a second smoke layer"
+        )
+        XCTAssertEqual(
+            editor.view.backgroundColor?.resolvedColor(with: darkGlass),
+            GlassPrototype.smokeMaterial,
+            "The Host Settings root owns the sheet's single smoke layer"
+        )
+
+    }
+
     func testPresentationRoutingQueuesDistinctNativeDestinationsInOrder() throws {
         let harness = try makeHarness()
         let controller = harness.controller
@@ -165,6 +210,7 @@ final class DeckWindowUIKitTests: XCTestCase {
     private struct Harness {
         let controller: DeckWindowViewController
         let bind: BindController
+        let themes: ThemeStore
     }
 
     private func makeHarness(
@@ -230,7 +276,8 @@ final class DeckWindowUIKitTests: XCTestCase {
         )
         return Harness(
             controller: DeckWindowViewController(configuration: configuration),
-            bind: bind
+            bind: bind,
+            themes: themes
         )
     }
 
