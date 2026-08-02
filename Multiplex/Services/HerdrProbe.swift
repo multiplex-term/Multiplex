@@ -52,8 +52,7 @@ enum HerdrProbe {
     /// binary where tmux would never live) — composed from the one shared
     /// list so a directory added for every other remote command reaches
     /// herdr commands too.
-    static let pathPrefix = TmuxProbe.pathPrefix
-        + "PATH=\"$PATH:$HOME/.cargo/bin\"; export PATH; "
+    static let pathPrefix = RemoteCommandEnvironment.herdrPathPrefix
 
     /// The socket protocol this parser was written against. Pre-1.0 herdr
     /// churns; anything older renders an honest UPDATE-NEEDED tile instead
@@ -65,7 +64,7 @@ enum HerdrProbe {
     /// snapshot a cold first tick takes before any list has been baked.
     /// Nothing else may branch on a session being "the default": the
     /// server owns that rule (it alone refuses deleting it).
-    static let primarySessionName = "default"
+    static let primarySessionName = HerdrSessionLaunch.primarySessionName
 
     // MARK: - Probe command
 
@@ -98,25 +97,31 @@ enum HerdrProbe {
     /// that vanished mid-tick just yields an empty frame the parser drops.
     /// This is also the ONE place the bake guards apply: what the parser
     /// reports is truth, what gets spliced into a shell line is vetted.
-    static func probeCommand(sessionNames: [String], tailTargets: [TailTarget]) -> String {
+    static func probeCommand(
+        sessionNames: [String]?, tailTargets: [TailTarget]
+    ) -> String {
         var command = pathPrefix
             + "command -v herdr >/dev/null 2>&1 || { echo \(noHerdrMarker); exit 0; }; "
             + "echo \(statusMarker); herdr status --json 2>/dev/null || true; "
             + "echo \(sessionsMarker); herdr session list --json 2>/dev/null || true; "
-        var snapshotSet = sessionNames.filter(bakeableSessionName)
-        // A cold first tick has no baked names yet — snapshot the primary
-        // session so the wall paints a spine immediately. Once names are
-        // baked, the list is the truth: unconditionally probing a stopped
-        // default would spawn a failed remote exec every tick forever.
-        if snapshotSet.isEmpty { snapshotSet.append(primarySessionName) }
+        // nil means the model has never parsed a list. Snapshot the primary
+        // session on that cold tick so it can paint immediately. An empty
+        // nonnil list means the previous tick proved that no session is
+        // running; probing default there would pay for a known failure every
+        // five seconds forever.
+        let candidates = sessionNames ?? [primarySessionName]
+        var seen = Set<String>()
+        let snapshotSet = candidates.filter {
+            bakeableSessionName($0) && seen.insert($0).inserted
+        }
         for name in snapshotSet {
-            command += "echo \("\(snapshotMarker) \(name)".shellQuoted); "
+            command += "printf '%s\\n' \("\(snapshotMarker) \(name)".shellQuoted); "
                 + "herdr --session \(name.shellQuoted) api snapshot 2>/dev/null || true; "
         }
         command += "echo \(tailsMarker); "
         for target in tailTargets
         where bakeableSessionName(target.sessionName) && bakeablePaneID(target.paneID) {
-            command += "echo \("\(tailFrameMarker) \(target.sessionName) \(target.paneID)".shellQuoted); "
+            command += "printf '%s\\n' \("\(tailFrameMarker) \(target.sessionName) \(target.paneID)".shellQuoted); "
                 + "herdr --session \(target.sessionName.shellQuoted)"
                 + " pane read \(target.paneID.shellQuoted) --source visible"
                 + " 2>/dev/null || true; "
@@ -125,24 +130,33 @@ enum HerdrProbe {
         return command
     }
 
-    /// A name the probe may bake into a shell command and a sentinel line:
-    /// no control characters (a newline would forge framing through
-    /// `echo`) and no leading `-` (clap would read it as a flag even
-    /// quoted). Session names are directory names, so real ones pass;
-    /// a pathological one just keeps a spine-less tile until renamed.
+    /// A session name the probe may splice into a command and sentinel.
+    /// herdr 0.7.5 enforces this exact ASCII grammar and a 64-byte ceiling;
+    /// validating the wire fact here keeps framing inert even if a future or
+    /// corrupted session-list response tries to hand us shell prose. Leading
+    /// dots/dashes are legal for host-created sessions (the app's own namer
+    /// avoids them as a UX choice), and herdr accepts them as option values.
     static func bakeableSessionName(_ name: String) -> Bool {
-        guard !name.isEmpty, !name.hasPrefix("-") else { return false }
-        return name.unicodeScalars.allSatisfy {
-            !CharacterSet.controlCharacters.contains($0)
+        guard !name.isEmpty, name != ".", name != "..",
+              name.utf8.count <= 64
+        else { return false }
+        return name.unicodeScalars.allSatisfy { scalar in
+            (scalar >= "a" && scalar <= "z")
+                || (scalar >= "A" && scalar <= "Z")
+                || (scalar >= "0" && scalar <= "9")
+                || scalar == "." || scalar == "_" || scalar == "-"
         }
     }
 
-    /// Pane ids are server-minted (`w1:p1`) — bakeable like a session
-    /// name, plus whitespace-free: the MPXS sentinel separates session
-    /// from pane on the LAST space, which only stays unambiguous while
-    /// that holds.
+    /// Pane ids are server-minted (`w1:p1`). They are not session names, so
+    /// validate only the framing invariants: nonempty, no controls or
+    /// whitespace, and no unbounded response-derived argument.
     static func bakeablePaneID(_ paneID: String) -> Bool {
-        bakeableSessionName(paneID) && !paneID.contains(where: \.isWhitespace)
+        guard !paneID.isEmpty, paneID.utf8.count <= 128 else { return false }
+        return paneID.unicodeScalars.allSatisfy {
+            !CharacterSet.controlCharacters.contains($0)
+                && !CharacterSet.whitespacesAndNewlines.contains($0)
+        }
     }
 
     // MARK: - Parsed result
@@ -161,9 +175,10 @@ enum HerdrProbe {
         case failed(String)
     }
 
-    /// herdr's agent lifecycle states. `done` is derived server-side from
-    /// a working → idle report (integrations report only idle/working/
-    /// blocked/unknown). Unrecognized future states decode as `.unknown`
+    /// herdr's agent lifecycle states. Integrations report only idle/
+    /// working/blocked/unknown; the server may retain a settled off-focus
+    /// pane as `done` (a focused pane settles as `idle`). Unrecognized future
+    /// states decode as `.unknown`
     /// rather than failing the pane.
     enum AgentStatus: String, Equatable {
         case idle, working, blocked, done, unknown
@@ -206,7 +221,7 @@ enum HerdrProbe {
         }
 
         let status = section(in: head, from: statusMarker, to: sessionsMarker)
-            .flatMap(decodeStatus)
+            .flatMap { firstDecodedLine(in: $0, decodeStatus) }
 
         // Version-gate on the client protocol: one binary serves every
         // session, so an old client is an old host — and pre-17 has no
@@ -396,7 +411,8 @@ enum HerdrProbe {
 
     /// The list-and-snapshots region: the first decodable line after the
     /// sessions marker is the list; `MULTIPLEX_HERDR_SNAP <name>` lines
-    /// (the name may contain spaces — the whole remainder is the name)
+    /// (the whole remainder is retained defensively, though 0.7.5 names are
+    /// whitespace-free ASCII tokens)
     /// open per-session candidate lines, decoded first-that-parses the way
     /// login-shell noise has always been skipped. The head slice already
     /// ends at the tails marker, so raw pane text can never forge a
@@ -548,17 +564,6 @@ enum HerdrProbe {
 
     // MARK: - Session actions
 
-    /// The PTY attach line `ShellHandoff` injects for a herdr tab: the
-    /// full client on the tile's session. Attach auto-creates a missing
-    /// session and restarts a stopped one (verified 0.7.5), so a
-    /// spine-less tile press and a fresh mint ride the same line. An
-    /// empty name (a blind attach from the debug auto-attach hook) lands
-    /// on the primary session.
-    static func attachCommand(sessionName: String) -> String {
-        let name = sessionName.isEmpty ? primarySessionName : sessionName
-        return pathPrefix + "exec herdr session attach \(name.shellQuoted)"
-    }
-
     /// The deck tile's destructive close: stop the session's server (every
     /// process in it dies — kill-session's analog), then delete its state
     /// dir. herdr itself refuses deleting the default session, so that
@@ -571,14 +576,25 @@ enum HerdrProbe {
             + "true"
     }
 
+    /// Probe records carry the name in `tmuxID`, but a restored or not-yet-
+    /// probed terminal route may only have `name`. Herdr's session name is
+    /// its identity, so closing by name must keep working in that state.
+    static func closeSessionCommand(for session: TmuxSession) -> String {
+        closeSessionCommand(
+            sessionName: session.tmuxID.isEmpty ? session.name : session.tmuxID)
+    }
+
     /// The mint's live existence check — attach auto-creates, so setup
     /// typing must only ever aim at a session THIS mint brought into
     /// being, and the probe's tile list can be a tick stale.
     static let sessionListCommand =
         pathPrefix + "herdr session list --json 2>/dev/null || true"
 
-    static func parseSessionNames(_ output: String) -> [String] {
-        firstDecodedLine(in: output, decodeSessionList)?.sessions.map(\.name) ?? []
+    /// nil distinguishes an unreadable list from a valid empty one. The mint
+    /// must prove absence before it may type setup lines into a name: treating
+    /// garbage as [] could attach to an existing session and type into it.
+    static func parseSessionNames(_ output: String) -> [String]? {
+        firstDecodedLine(in: output, decodeSessionList)?.sessions.map(\.name)
     }
 
     /// One snapshot invocation, spelled once: the spawn's verify loop and
@@ -676,6 +692,10 @@ enum HerdrProbe {
         if collapsed.count > 64 {
             collapsed = String(collapsed.prefix(64))
         }
+        // Truncation can expose a dot/dash that was interior before the cap.
+        while let last = collapsed.last, last == "-" || last == "." {
+            collapsed.removeLast()
+        }
         return collapsed.isEmpty ? "session" : collapsed
     }
 
@@ -688,8 +708,17 @@ enum HerdrProbe {
         let taken = Set(existing)
         guard taken.contains(base) else { return base }
         var suffix = 2
-        while taken.contains("\(base)-\(suffix)") { suffix += 1 }
-        return "\(base)-\(suffix)"
+        while true {
+            let ending = "-\(suffix)"
+            var stem = String(base.prefix(max(1, 64 - ending.count)))
+            while let last = stem.last, last == "-" || last == "." {
+                stem.removeLast()
+            }
+            if stem.isEmpty { stem = "session" }
+            let candidate = stem + ending
+            if !taken.contains(candidate) { return candidate }
+            suffix += 1
+        }
     }
 
     // MARK: - Tails (the deck wall's live miniatures)
@@ -698,7 +727,8 @@ enum HerdrProbe {
     /// marker) into session name → trailing lines. MPXS markers carry
     /// `<session> <pane>` — the app itself baked both, and the pane id
     /// (whitespace-free by the bake guard) sits after the LAST space, so
-    /// session names with spaces still frame. A frame is accepted only
+    /// even a future session-name grammar with spaces would frame. A frame
+    /// is accepted only
     /// when this tick's snapshot still owns that pane — raw pane text can
     /// echo "MPXS …" lines, and an unverifiable frame is dropped rather
     /// than believed. When two frames land on one session the newer read
@@ -751,8 +781,8 @@ extension HerdrProbe {
     /// In herdr mode the reported lifecycle status IS the pane's attention
     /// authority — the needle heuristics (spinner titles, dialog shapes)
     /// are bypassed, which is what makes Pi's states real here. `done`
-    /// maps to `.idle` on purpose: herdr derives it from a working → idle
-    /// report, and handing the tracker that same busy → idle edge is what
+    /// maps to `.idle` on purpose: it is herdr's settled off-focus state,
+    /// and handing the tracker that same busy → idle edge is what
     /// produces the turn-ended alert exactly once. `unknown` (herdr can't
     /// say, or a state this build predates) is no claim at all, matching
     /// the tmux path's unverified-agent posture.
@@ -767,6 +797,27 @@ extension HerdrProbe {
         case .blocked: .needsYou(.permission)
         case .done, .idle: .idle
         case .unknown, nil: nil
+        }
+    }
+
+    /// Whether the front pane itself produced the session-level verdict.
+    /// This is alert metadata only: aggregate attention still folds every
+    /// pane. In particular, idle is not enough to claim a turn-end — a
+    /// background pane may have finished while the front stayed idle.
+    static func paneProducedSessionState(
+        _ state: PaneAgentState?,
+        current: AgentStatus?,
+        previous: AgentStatus?
+    ) -> Bool {
+        switch state {
+        case .busy:
+            current == .working
+        case .needsYou:
+            current == .blocked
+        case .idle:
+            current == .done || (previous == .working && current == .idle)
+        case nil:
+            false
         }
     }
 

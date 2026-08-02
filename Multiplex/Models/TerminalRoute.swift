@@ -69,7 +69,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
                 directory: directory
             )
         case .herdrAttach(let sessionName):
-            return HerdrProbe.attachCommand(sessionName: sessionName)
+            return HerdrSessionLaunch.attachCommand(sessionName: sessionName)
         case .shell, .viewport, .fileViewer:
             return nil
         }
@@ -96,7 +96,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         case .herdrAttach(let sessionName):
             // The attach line needs a shell (PATH export before the exec);
             // execvp gets that shell as its argv.
-            return "sh -c \(HerdrProbe.attachCommand(sessionName: sessionName).shellQuoted)"
+            return "sh -c \(HerdrSessionLaunch.attachCommand(sessionName: sessionName).shellQuoted)"
         case .shell, .viewport, .fileViewer:
             return nil
         }
@@ -121,6 +121,18 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         switch mode {
         case .attach(let name), .create(let name, _): name
         case .herdrAttach(let sessionName): sessionName
+        case .shell, .viewport, .fileViewer: nil
+        }
+    }
+
+    /// The remote session namespace this route belongs to. Unlike
+    /// `Host.sessionBackend`, this stays fixed for the lifetime of an open
+    /// tab, so switching a host's deck backend can never make a restored tmux
+    /// tab focus or close a same-named herdr session (or vice versa).
+    var sessionBackend: Host.SessionBackend? {
+        switch mode {
+        case .attach, .create: .tmux
+        case .herdrAttach: .herdr
         case .shell, .viewport, .fileViewer: nil
         }
     }
@@ -177,6 +189,30 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
     /// file on screen, which is not a path. The ▤ mark lives here only.
     static func fileViewerLabel(name: String) -> String {
         name.isEmpty ? "▤" : "▤ \(name)"
+    }
+}
+
+/// PATH setup shared by pure route builders and the remote probe/services.
+/// Keeping it in the model layer lets services depend inward while
+/// `TerminalRoute` never reaches outward into a probe service just to build
+/// its persisted route's PTY command.
+enum RemoteCommandEnvironment {
+    static let pathPrefix =
+        "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin\"; export PATH; "
+    static let herdrPathPrefix =
+        pathPrefix + "PATH=\"$PATH:$HOME/.cargo/bin\"; export PATH; "
+}
+
+/// The PTY handoff for a full herdr client. Session actions that don't belong
+/// to a persisted terminal route remain in `HerdrProbe`; attach lives here for
+/// the same reason tmux's legacy create-and-attach builder does below.
+enum HerdrSessionLaunch {
+    static let primarySessionName = "default"
+
+    static func attachCommand(sessionName: String) -> String {
+        let name = sessionName.isEmpty ? primarySessionName : sessionName
+        return RemoteCommandEnvironment.herdrPathPrefix
+            + "exec herdr session attach \(name.shellQuoted)"
     }
 }
 

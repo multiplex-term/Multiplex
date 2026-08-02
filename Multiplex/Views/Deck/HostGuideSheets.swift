@@ -261,6 +261,16 @@ final class TmuxInstallViewController: UIKitHostGuideSheetViewController {
         host.sessionBackend.rawValue
     }
 
+    private var probePathDetail: String {
+        switch host.sessionBackend {
+        case .tmux:
+            "Homebrew and /usr/local installs are already on the probe's PATH."
+        case .herdr:
+            "Homebrew, ~/.local/bin, and ~/.cargo/bin installs are already on "
+                + "the probe's PATH."
+        }
+    }
+
     init(host: Host) {
         self.host = host
         super.init(title: "Install \(host.sessionBackend.rawValue)")
@@ -286,8 +296,7 @@ final class TmuxInstallViewController: UIKitHostGuideSheetViewController {
             title: "The deck runs on \(multiplexer)",
             detail: "The deck re-probes every few seconds — "
                 + "session tiles light up as soon as \(multiplexer) is on "
-                + "the host. Homebrew and /usr/local installs "
-                + "are already on the probe's PATH.",
+                + "the host. \(probePathDetail)",
             contentView: rowStack
         ))
     }

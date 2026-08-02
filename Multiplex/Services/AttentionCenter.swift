@@ -60,7 +60,11 @@ final class AttentionCenter {
     /// Probe-plane event — any session on any host, attached or not.
     func handle(_ alert: AttentionAlert) {
         guard isActive,
-              !isFocused(hostID: alert.host.id, sessionName: alert.sessionName)
+              !isFocused(
+                hostID: alert.host.id,
+                sessionName: alert.sessionName,
+                backend: alert.host.sessionBackend
+              )
         else { return }
         post(alert)
     }
@@ -117,12 +121,16 @@ final class AttentionCenter {
     /// arbiter's single app-wide focus owner is exactly "the window the
     /// user is engaged with"; every other surface (unfocused window,
     /// background tab, deck-only, detached session) gets the banner.
-    private func isFocused(hostID: UUID, sessionName: String) -> Bool {
+    private func isFocused(
+        hostID: UUID, sessionName: String,
+        backend: Host.SessionBackend
+    ) -> Bool {
         guard let workspace, let focused = TerminalFocusArbiter.current else { return false }
         return workspace.windows.contains { entry in
             entry.tabs.contains { tab in
                 tab.hostID == hostID
                     && tab.sessionName == sessionName
+                    && tab.sessionBackend == backend
                     && workspace.controller(for: tab.id)?.terminalView === focused
             }
         }

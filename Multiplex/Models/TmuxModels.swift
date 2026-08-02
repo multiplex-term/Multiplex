@@ -265,6 +265,25 @@ enum SessionOrdering {
 struct DeckSnapshot: Codable, Equatable {
     var sessions: [TmuxSession]
     var miniatures: [String: [String]]
+    /// The namespace these adapted session records came from. A host can
+    /// switch between tmux and herdr while this device is offline; tagging
+    /// the presentation cache prevents a cold launch from painting the old
+    /// backend's same-named sessions under the new one.
+    var sessionBackend: Host.SessionBackend = .tmux
+}
+
+extension DeckSnapshot {
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            sessions: try container.decode([TmuxSession].self, forKey: .sessions),
+            miniatures: try container.decode(
+                [String: [String]].self, forKey: .miniatures),
+            // Every snapshot written before herdr support is a tmux snapshot.
+            sessionBackend: try container.decodeIfPresent(
+                Host.SessionBackend.self, forKey: .sessionBackend) ?? .tmux
+        )
+    }
 }
 
 /// What a host's tmux server currently looks like.

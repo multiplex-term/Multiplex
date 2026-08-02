@@ -718,7 +718,11 @@ final class FleetWallViewController: UIViewController {
     }
 
     private func focusOrAttach(_ host: Host, session: TmuxSession) {
-        if configuration.workspace.focusTab(hostID: host.id, sessionName: session.name) {
+        if configuration.workspace.focusTab(
+            hostID: host.id,
+            sessionName: session.name,
+            backend: host.sessionBackend
+        ) {
             return
         }
         open(TerminalRoute(hostID: host.id, mode: .attach(host: host, session: session)))
@@ -1218,7 +1222,8 @@ private final class FleetHostSectionView: UIView {
                 openSessionNames: Set(sessions.compactMap { session in
                     configuration.workspace.hasTab(
                         hostID: host.id,
-                        sessionName: session.name
+                        sessionName: session.name,
+                        backend: host.sessionBackend
                     ) ? session.name : nil
                 }),
                 orderedSessions: configuration.store.orderedSessions(
@@ -1367,11 +1372,14 @@ private final class FleetHostSectionView: UIView {
                     session: session,
                     lines: snapshot.miniatures[session.name] ?? [],
                     attention: snapshot.attention[session.name],
-                    hasLiveAgentState: snapshot.hasLiveProbe,
+                    usesTmuxAttentionFallback: snapshot.hasLiveProbe
+                        && host.sessionBackend == .tmux,
                     hasOpenTab: snapshot.openSessionNames.contains(session.name),
                     compact: configuration.presentation == .shellRail,
                     selected: configuration.selectedTerminal?.hostID == host.id
-                        && configuration.selectedTerminal?.sessionName == session.name,
+                        && configuration.selectedTerminal?.sessionName == session.name
+                        && configuration.selectedTerminal?.sessionBackend
+                            == host.sessionBackend,
                     duplicateAttachTitle: configuration.duplicateAttachTitle,
                     openTabAccessibilityText: configuration.openTabAccessibilityText,
                     attach: { [weak self] in self?.configuration.openSession(session) },
@@ -2181,7 +2189,10 @@ struct FleetSessionTileConfiguration {
     let session: TmuxSession
     let lines: [String]
     let attention: PaneAgentState?
-    let hasLiveAgentState: Bool
+    /// tmux's aggregate wall state covers only the front pane, so tiles also
+    /// inspect other pane titles. Herdr already folds authoritative statuses
+    /// across every pane and must never fall back to title heuristics.
+    let usesTmuxAttentionFallback: Bool
     let hasOpenTab: Bool
     let compact: Bool
     let selected: Bool
@@ -2200,7 +2211,7 @@ struct FleetSessionTileConfiguration {
             && session == other.session
             && lines == other.lines
             && attention == other.attention
-            && hasLiveAgentState == other.hasLiveAgentState
+            && usesTmuxAttentionFallback == other.usesTmuxAttentionFallback
             && hasOpenTab == other.hasOpenTab
             && compact == other.compact
             && selected == other.selected
@@ -2496,7 +2507,7 @@ final class FleetSessionTileView: FleetPressView,
 
     private func agentRunning(_ configuration: FleetSessionTileConfiguration) -> Bool {
         if configuration.attention == .busy { return true }
-        guard configuration.hasLiveAgentState else { return false }
+        guard configuration.usesTmuxAttentionFallback else { return false }
         return configuration.session.agentPanes.contains {
             AgentAttention.classifyVerified(
                 title: $0.title,
@@ -2508,7 +2519,7 @@ final class FleetSessionTileView: FleetPressView,
 
     private func agentNeedsYou(_ configuration: FleetSessionTileConfiguration) -> Bool {
         if case .needsYou = configuration.attention { return true }
-        guard configuration.hasLiveAgentState else { return false }
+        guard configuration.usesTmuxAttentionFallback else { return false }
         return configuration.session.agentPanes.contains {
             if case .some(.needsYou) = AgentAttention.classifyVerified(
                 title: $0.title,
@@ -3128,7 +3139,8 @@ struct NewSessionFormState {
             ? "REMEMBER saves only the launch choice."
             : "REMEMBER saves the launch and setup-script choices."
         guard let agentToLaunch else {
-            return "Creates the tmux session, then attaches to its login shell. \(remembers)"
+            return "Creates the \(host.sessionBackend.rawValue) session, then attaches "
+                + "to its login shell. \(remembers)"
         }
         return "Starts \(agentToLaunch.displayName) in the fresh shell. The optional prompt becomes its first message; \(remembers)"
     }

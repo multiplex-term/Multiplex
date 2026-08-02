@@ -33,8 +33,7 @@ enum TmuxProbe {
     /// locations (Homebrew, /usr/local) are appended before any command.
     /// Shared with the mosh bootstrap, which has the same problem for
     /// mosh-server (and for the tmux it wraps).
-    static let pathPrefix =
-        "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin\"; export PATH; "
+    static let pathPrefix = RemoteCommandEnvironment.pathPrefix
 
     /// Every tmux invocation the app makes over an exec channel. An SSH *exec*
     /// channel inherits no locale — `LANG` and `LC_ALL` are both empty — so
@@ -67,7 +66,9 @@ enum TmuxProbe {
             // the herdr switch only when herdr is actually installed
             // (`Host.SessionBackend` — the hint is one tap, never an
             // auto-flip). Before the tmux guard on purpose: the guard exits.
-            + "command -v herdr >/dev/null 2>&1 && echo \(herdrPresentMarker); "
+            + "{ command -v herdr >/dev/null 2>&1"
+            + " || [ -x \"$HOME/.cargo/bin/herdr\" ]; }"
+            + " && echo \(herdrPresentMarker); "
             + "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
             // The server's own hostname — the exact string tmux seeded every
             // untouched pane title with (see `PaneTitleDisplay`). Its own

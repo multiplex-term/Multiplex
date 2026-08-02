@@ -6,10 +6,14 @@ import XCTest
 /// shapes — the classifier is substring-based on purpose).
 final class HostTestTests: XCTestCase {
     private func host(
-        auth: Host.AuthMethod = .password, useMosh: Bool = false, moshServerPath: String? = nil
+        auth: Host.AuthMethod = .password,
+        backend: Host.SessionBackend = .tmux,
+        useMosh: Bool = false,
+        moshServerPath: String? = nil
     ) -> Host {
         var host = Host(name: "devbox", hostname: "devbox.example.com", username: "dev")
         host.authMethod = auth
+        host.sessionBackend = backend
         host.useMosh = useMosh
         host.moshServerPath = moshServerPath
         return host
@@ -27,6 +31,14 @@ final class HostTestTests: XCTestCase {
         XCTAssertTrue(command.hasSuffix("true"))
     }
 
+    func testCheckCommandUsesTheSelectedBackendAndHerdrCargoPath() {
+        let command = HostTest.checkCommand(for: host(backend: .herdr))
+        XCTAssertTrue(command.contains("command -v herdr"))
+        XCTAssertTrue(command.contains("MPXT_HERDR_OK"))
+        XCTAssertTrue(command.contains("$HOME/.cargo/bin"))
+        XCTAssertFalse(command.contains("command -v tmux"))
+    }
+
     func testCheckCommandChecksMoshServerAtConfiguredPath() {
         let plain = HostTest.checkCommand(for: host(useMosh: true))
         XCTAssertTrue(plain.contains("command -v 'mosh-server'"))
@@ -38,14 +50,21 @@ final class HostTestTests: XCTestCase {
 
     func testParseReport() {
         XCTAssertEqual(
-            HostTest.parseReport("MPXT_TMUX_OK\n", checksMosh: false),
-            HostTest.Report(tmuxFound: true, moshServerFound: nil))
+            HostTest.parseReport(
+                "MPXT_TMUX_OK\n", backend: .tmux, checksMosh: false),
+            HostTest.Report(multiplexerFound: true, moshServerFound: nil))
         XCTAssertEqual(
-            HostTest.parseReport("MPXT_TMUX_MISSING\nMPXT_MOSH_OK\n", checksMosh: true),
-            HostTest.Report(tmuxFound: false, moshServerFound: true))
+            HostTest.parseReport(
+                "MPXT_HERDR_OK\nMPXT_MOSH_OK\n",
+                backend: .herdr,
+                checksMosh: true
+            ),
+            HostTest.Report(multiplexerFound: true, moshServerFound: true))
         XCTAssertEqual(
-            HostTest.parseReport("garbage\n", checksMosh: true),
-            HostTest.Report(tmuxFound: false, moshServerFound: false))
+            HostTest.parseReport(
+                "MPXT_TMUX_OK\n", backend: .herdr, checksMosh: true),
+            HostTest.Report(multiplexerFound: false, moshServerFound: false),
+            "a tmux marker cannot satisfy a herdr form")
     }
 
     // MARK: Failure wording

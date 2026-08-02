@@ -14,6 +14,23 @@ final class HostGuideTests: XCTestCase {
         )
     }
 
+    func testHerdrInstallCatalogAndBackendSelection() {
+        XCTAssertEqual(
+            HostGuide.herdrInstall.map { [$0.label, $0.command] },
+            [
+                ["Homebrew", "brew install herdr"],
+                [
+                    "Or, macOS or Linux",
+                    "curl -fsSL https://herdr.dev/install.sh | sh",
+                ],
+            ]
+        )
+        XCTAssertEqual(
+            HostGuide.multiplexerInstall(for: .tmux), HostGuide.tmuxInstall)
+        XCTAssertEqual(
+            HostGuide.multiplexerInstall(for: .herdr), HostGuide.herdrInstall)
+    }
+
     func testKeychainUnlockCommandKeepsExactShellLine() {
         XCTAssertEqual(HostGuide.keychainUnlock.label, "")
         XCTAssertEqual(

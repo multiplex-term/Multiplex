@@ -282,9 +282,10 @@ final class HerdrProbeTests: XCTestCase {
         XCTAssertEqual(parsed.tails.count, 2)
     }
 
-    func testSessionNamesWithSpacesStillFrame() throws {
-        // The MPXS separator is the LAST space: pane ids are
-        // whitespace-free by the bake guard, names may contain spaces.
+    func testTailParserSplitsAtTheLastSpaceDefensively() throws {
+        // 0.7.5 restricts names to ASCII token characters, but keep the tail
+        // parser forward-tolerant: the pane id is the last whitespace-free
+        // field, so a future list grammar growing spaces stays unambiguous.
         let spacedList = sessionList.replacingOccurrences(
             of: #""name":"work""#, with: #""name":"my work""#)
         let parsed = HerdrProbe.parseProbe(transcript(
@@ -332,6 +333,17 @@ final class HerdrProbeTests: XCTestCase {
         XCTAssertEqual(parsed.state, .updateNeeded(installedVersion: "0.4.0"))
     }
 
+    func testLoginNoiseDoesNotHideTheClientProtocol() {
+        let old = statusDown
+            .replacingOccurrences(of: #""protocol":17"#, with: #""protocol":3"#)
+            .replacingOccurrences(of: #""version":"0.7.5""#, with: #""version":"0.4.0""#)
+        let parsed = HerdrProbe.parseProbe(transcript(
+            status: "welcome from zsh\n" + old,
+            list: nil
+        ))
+        XCTAssertEqual(parsed.state, .updateNeeded(installedVersion: "0.4.0"))
+    }
+
     func testStatusWithoutSessionListFails() {
         let parsed = HerdrProbe.parseProbe(
             transcript(status: statusUp, list: nil)
@@ -364,10 +376,10 @@ final class HerdrProbeTests: XCTestCase {
             "command -v herdr >/dev/null 2>&1 || { echo MULTIPLEX_NO_HERDR; exit 0; }"))
         XCTAssertTrue(command.contains("herdr status --json 2>/dev/null || true"))
         XCTAssertTrue(command.contains("herdr session list --json 2>/dev/null || true"))
-        XCTAssertTrue(command.contains("echo 'MULTIPLEX_HERDR_SNAP work'"))
+        XCTAssertTrue(command.contains("printf '%s\\n' 'MULTIPLEX_HERDR_SNAP work'"))
         XCTAssertTrue(command.contains(
             "herdr --session 'work' api snapshot 2>/dev/null || true"))
-        XCTAssertTrue(command.contains("echo 'MPXS work w1:p1'"))
+        XCTAssertTrue(command.contains("printf '%s\\n' 'MPXS work w1:p1'"))
         XCTAssertTrue(command.contains(
             "herdr --session 'work' pane read 'w1:p1' --source visible 2>/dev/null || true"))
         XCTAssertTrue(command.hasSuffix("echo MPXE"))
@@ -376,12 +388,15 @@ final class HerdrProbeTests: XCTestCase {
     func testProbeCommandTriesDefaultOnlyOnAColdTick() {
         // A cold first tick has no baked names yet — the primary session
         // gets a snapshot so the wall paints a spine on tick one.
-        let command = HerdrProbe.probeCommand(sessionNames: [], tailTargets: [])
-        XCTAssertTrue(command.contains("echo 'MULTIPLEX_HERDR_SNAP default'"))
+        let command = HerdrProbe.probeCommand(sessionNames: nil, tailTargets: [])
+        XCTAssertTrue(command.contains("MULTIPLEX_HERDR_SNAP default"))
         XCTAssertTrue(command.contains("echo MULTIPLEX_TAILS; echo MPXE"))
         XCTAssertFalse(command.contains("pane read"))
-        // Once names are baked the list is the truth — a stopped default
-        // must not cost a failed remote exec every tick forever.
+        // Once a list has been parsed, [] is real knowledge — every session
+        // may be stopped. It must not be mistaken for the cold sentinel or a
+        // failed default snapshot is paid every tick forever.
+        let stopped = HerdrProbe.probeCommand(sessionNames: [], tailTargets: [])
+        XCTAssertFalse(stopped.contains("MULTIPLEX_HERDR_SNAP default"))
         let baked = HerdrProbe.probeCommand(sessionNames: ["work"], tailTargets: [])
         XCTAssertFalse(baked.contains("MULTIPLEX_HERDR_SNAP default"))
         // And never twice when it IS baked.
@@ -390,18 +405,23 @@ final class HerdrProbeTests: XCTestCase {
             rebaked.components(separatedBy: "MULTIPLEX_HERDR_SNAP default").count, 2)
     }
 
-    func testProbeCommandRefusesUnbakeableNames() {
+    func testProbeCommandEnforcesTheHerdrNameAndFrameGrammar() {
+        let tooLong = String(repeating: "a", count: 65)
         let command = HerdrProbe.probeCommand(
-            sessionNames: ["ok", "-flag", "new\nline"],
+            sessionNames: ["ok", "-flag", ".", "my work", tooLong],
             tailTargets: [
                 HerdrProbe.TailTarget(sessionName: "ok", paneID: "w1 p1"),
                 HerdrProbe.TailTarget(sessionName: "-flag", paneID: "w1:p1"),
             ]
         )
         XCTAssertTrue(command.contains("MULTIPLEX_HERDR_SNAP ok"))
-        XCTAssertFalse(command.contains("-flag"))
-        XCTAssertFalse(command.contains("new\nline"))
-        XCTAssertFalse(command.contains("MPXS"),
+        XCTAssertTrue(command.contains("MULTIPLEX_HERDR_SNAP -flag"),
+                      "0.7.5 accepts leading-dash names as option values")
+        XCTAssertFalse(HerdrProbe.bakeableSessionName("."))
+        XCTAssertFalse(command.contains("my work"))
+        XCTAssertFalse(command.contains(tooLong))
+        XCTAssertTrue(command.contains("MPXS -flag w1:p1"))
+        XCTAssertFalse(command.contains("MPXS ok w1 p1"),
                        "a whitespace pane id would break the last-space framing")
     }
 
@@ -425,6 +445,21 @@ final class HerdrProbeTests: XCTestCase {
         XCTAssertEqual(HerdrProbe.paneAgentState(.idle), .idle)
         XCTAssertNil(HerdrProbe.paneAgentState(.unknown))
         XCTAssertNil(HerdrProbe.paneAgentState(nil))
+    }
+
+    func testFrontPaneAlertAttributionNeedsItsOwnVerdictOrTransition() {
+        XCTAssertTrue(HerdrProbe.paneProducedSessionState(
+            .busy, current: .working, previous: .idle))
+        XCTAssertTrue(HerdrProbe.paneProducedSessionState(
+            .needsYou(.permission), current: .blocked, previous: .working))
+        XCTAssertTrue(HerdrProbe.paneProducedSessionState(
+            .idle, current: .done, previous: .working))
+        XCTAssertTrue(HerdrProbe.paneProducedSessionState(
+            .idle, current: .idle, previous: .working),
+            "a focused agent settles as idle rather than retaining done")
+        XCTAssertFalse(HerdrProbe.paneProducedSessionState(
+            .idle, current: .idle, previous: .idle),
+            "do not borrow an idle front agent when a background pane finished")
     }
 
     func testSessionAgentStateFoldsEveryPane() {
@@ -457,13 +492,13 @@ final class HerdrProbeTests: XCTestCase {
     // MARK: Session actions
 
     func testAttachCommandTargetsTheSession() {
-        let command = HerdrProbe.attachCommand(sessionName: "work")
+        let command = HerdrSessionLaunch.attachCommand(sessionName: "work")
         XCTAssertTrue(command.hasSuffix("exec herdr session attach 'work'"))
         XCTAssertFalse(command.contains("workspace focus"),
                        "the tile is the whole session — nothing to pre-focus")
         // The blind form (debug auto-attach before any probe) lands on
         // the default session.
-        XCTAssertTrue(HerdrProbe.attachCommand(sessionName: "")
+        XCTAssertTrue(HerdrSessionLaunch.attachCommand(sessionName: "")
             .hasSuffix("exec herdr session attach 'default'"))
     }
 
@@ -479,6 +514,14 @@ final class HerdrProbeTests: XCTestCase {
         }
         XCTAssertTrue(command.hasSuffix("true"),
                       "herdr refuses deleting the default session; the exec must not throw")
+    }
+
+    func testCloseSessionFallsBackToTheRouteNameBeforeAProbe() {
+        let restored = TmuxSession(
+            name: "restored", windows: [], created: .distantPast)
+        let command = HerdrProbe.closeSessionCommand(for: restored)
+        XCTAssertTrue(command.contains("herdr session stop 'restored'"))
+        XCTAssertTrue(command.contains("herdr session delete 'restored'"))
     }
 
     func testSpawnSessionCommandCreatesHeadlesslyThenVerifies() {
@@ -507,7 +550,8 @@ final class HerdrProbeTests: XCTestCase {
             HerdrProbe.parseSessionNames("noise\n" + sessionList + "\n"),
             ["default", "work", "parked"]
         )
-        XCTAssertEqual(HerdrProbe.parseSessionNames("garbage"), [])
+        XCTAssertNil(HerdrProbe.parseSessionNames("garbage"),
+                     "unreadable is not the same as a valid empty list")
     }
 
     func testTypeCommandScopesToTheSessionAndTypesLinesThenEnter() {
@@ -545,6 +589,9 @@ final class HerdrProbeTests: XCTestCase {
         XCTAssertEqual(HerdrProbe.sessionNameArgument("🚀🚀"), "session")
         XCTAssertEqual(
             HerdrProbe.sessionNameArgument(String(repeating: "a", count: 80)).count, 64)
+        let exposedTrailingDot = String(repeating: "a", count: 63) + ".z"
+        XCTAssertFalse(HerdrProbe.sessionNameArgument(exposedTrailingDot).hasSuffix("."),
+                       "truncation must re-apply the trailing dot/dash rule")
     }
 
     func testUniqueSessionNameSuffixesWithinHerdrRules() {
@@ -559,6 +606,11 @@ final class HerdrProbeTests: XCTestCase {
             HerdrProbe.uniqueSessionName(base: "v1.3 fix", existing: ["v1.3-fix"]),
             "v1.3-fix-2",
             "sanitized first, then uniqued — dots survive where tmux's rules wouldn't")
+        let long = String(repeating: "a", count: 64)
+        let suffixed = HerdrProbe.uniqueSessionName(base: long, existing: [long])
+        XCTAssertEqual(suffixed.count, 64)
+        XCTAssertTrue(suffixed.hasSuffix("-2"),
+                      "the uniqueness suffix must stay inside herdr's 64-byte limit")
     }
 }
 
@@ -567,8 +619,7 @@ final class HerdrProbeTests: XCTestCase {
 final class TmuxProbeHerdrPresenceTests: XCTestCase {
     func testProbeCommandChecksHerdrBeforeTheTmuxGuard() {
         let command = TmuxProbe.probeCommand
-        let herdrCheck = command.range(
-            of: "command -v herdr >/dev/null 2>&1 && echo MULTIPLEX_HERDR_PRESENT")
+        let herdrCheck = command.range(of: "command -v herdr")
         let tmuxGuard = command.range(of: "command -v tmux")
         XCTAssertNotNil(herdrCheck)
         XCTAssertNotNil(tmuxGuard)
@@ -576,6 +627,8 @@ final class TmuxProbeHerdrPresenceTests: XCTestCase {
             XCTAssertLessThan(herdrCheck.lowerBound, tmuxGuard.lowerBound,
                               "the tmux guard exits; herdr must be checked first")
         }
+        XCTAssertTrue(command.contains("$HOME/.cargo/bin/herdr"),
+                      "the hint must see the same Cargo install the herdr probe can run")
     }
 
     func testParseProbeReadsThePresenceMarker() {
@@ -613,6 +666,7 @@ final class HerdrRouteTests: XCTestCase {
         XCTAssertEqual(route.displayName, "work")
         XCTAssertEqual(route.sessionName, "work")
         XCTAssertFalse(route.usesTmux)
+        XCTAssertEqual(route.sessionBackend, .herdr)
         XCTAssertFalse(route.isAuxiliaryPane)
     }
 
@@ -642,6 +696,7 @@ final class HerdrRouteTests: XCTestCase {
         let tmuxRoute = TerminalRoute(
             hostID: UUID(), mode: .attach(sessionName: "main"))
         XCTAssertTrue(tmuxRoute.usesTmux)
+        XCTAssertEqual(tmuxRoute.sessionBackend, .tmux)
         let shellRoute = TerminalRoute(hostID: UUID(), mode: .shell)
         XCTAssertFalse(shellRoute.usesTmux)
     }

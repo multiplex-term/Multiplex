@@ -991,10 +991,12 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     // MARK: Signal check
 
     private var testDetail: String {
-        form.useMosh
-            ? "Signs in over SSH with the settings above, then looks for tmux and "
+        let backend = form.sessionBackend.rawValue
+        return form.useMosh
+            ? "Signs in over SSH with the settings above, then looks for \(backend) and "
                 + "mosh-server on the host."
-            : "Signs in over SSH with the settings above, then looks for tmux on the host."
+            : "Signs in over SSH with the settings above, then looks for \(backend) "
+                + "on the host."
     }
 
     private func renderTestSection() {
@@ -1093,9 +1095,10 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             switch outcome {
             case .connected(let report):
                 var warnings: [String] = []
-                if !report.tmuxFound {
+                if !report.multiplexerFound {
+                    let backend = host.sessionBackend.rawValue
                     warnings.append(
-                        "tmux wasn't found on the host — the deck can't list sessions "
+                        "\(backend) wasn't found on the host — the deck can't list sessions "
                             + "there. Plain shells still work."
                     )
                 }
@@ -1397,13 +1400,17 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             guard let self else { return }
             self.updateTestSensitive { $0.sessionBackend = backend }
             self.renderBackend()
+            self.renderTestSection()
         }
         bar.accessibilityIdentifier = "addhost.backendBar"
         backendSection.setDetail(backendDetail)
         backendSection.setRows([bar])
-        // herdr has no analog of the new-session tmux options; the record
-        // keeps whatever is stored, the editor just stops claiming it runs.
-        tmuxConfSection.isHidden = form.sessionBackend == .herdr
+        // Herdr owns a session's world and has no analog of tmux's targeted
+        // options. Keep both stored values for a later switch back; hide the
+        // editors rather than claiming they affect herdr sessions.
+        let usesHerdr = form.sessionBackend == .herdr
+        workingDirectoriesSection.isHidden = usesHerdr
+        tmuxConfSection.isHidden = usesHerdr
     }
 
     // MARK: Transport

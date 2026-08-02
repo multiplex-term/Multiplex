@@ -196,28 +196,42 @@ final class TerminalWorkspace {
     }
 
     /// True when an open terminal window already has a tab bound to this
-    /// tmux session — pressing that session's deck tile focuses it.
-    func hasTab(hostID: UUID, sessionName: String) -> Bool {
-        openTab(hostID: hostID, sessionName: sessionName) != nil
+    /// backend's session — pressing that session's deck tile focuses it.
+    func hasTab(
+        hostID: UUID, sessionName: String,
+        backend: Host.SessionBackend
+    ) -> Bool {
+        openTab(hostID: hostID, sessionName: sessionName, backend: backend) != nil
     }
 
-    /// Bring the window already attached to (host, session) forward and make
-    /// that tab active — the deck tile's press. False when no open window
-    /// has such a tab (the deck then attaches in a new window).
+    /// Bring the window already attached to (host, backend, session) forward
+    /// and make that tab active — the deck tile's press. Backend is part of
+    /// identity because an open tmux tab survives a host being switched to
+    /// herdr, and both namespaces may legally contain `main`.
     @discardableResult
-    func focusTab(hostID: UUID, sessionName: String) -> Bool {
-        guard let (entry, tabID) = openTab(hostID: hostID, sessionName: sessionName)
+    func focusTab(
+        hostID: UUID, sessionName: String,
+        backend: Host.SessionBackend
+    ) -> Bool {
+        guard let (entry, tabID) = openTab(
+            hostID: hostID, sessionName: sessionName, backend: backend)
         else { return false }
         entry.reveal(tabID)
         return true
     }
 
     /// First-registered window holding a tab for this session — attach and
-    /// create tabs alike; plain shells have no session name and never match.
-    private func openTab(hostID: UUID, sessionName: String) -> (WindowEntry, UUID)? {
+    /// create tabs alike; plain shells have no session name/backend and never
+    /// match.
+    private func openTab(
+        hostID: UUID, sessionName: String,
+        backend: Host.SessionBackend
+    ) -> (WindowEntry, UUID)? {
         for entry in windows {
             if let tab = entry.tabs.first(where: {
-                $0.hostID == hostID && $0.sessionName == sessionName
+                $0.hostID == hostID
+                    && $0.sessionName == sessionName
+                    && $0.sessionBackend == backend
             }) {
                 return (entry, tab.id)
             }

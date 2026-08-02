@@ -52,6 +52,7 @@ final class DeckSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.sessions[0].paneCount, 3)
         XCTAssertTrue(decoded.sessions[0].isAttached)
         XCTAssertEqual(decoded.miniatures["main"], ["$ make test", "ok"])
+        XCTAssertEqual(decoded.sessionBackend, .tmux)
         // A cold launch must still be able to tell a real pane title from
         // tmux's seeded hostname, so the server host rides the snapshot.
         XCTAssertEqual(decoded.sessions[0].serverHost, "Jhen-MBPr14.local")
@@ -86,6 +87,8 @@ final class DeckSnapshotTests: XCTestCase {
         }
         """
         let decoded = try JSONDecoder().decode(DeckSnapshot.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.sessionBackend, .tmux,
+                       "snapshots from before herdr support are tmux caches")
         XCTAssertEqual(decoded.sessions[0].activeAgent, .codex)
         XCTAssertEqual(decoded.sessions[0].detectedAgents, [.codex])
         XCTAssertEqual(decoded.sessions[0].paneCount, 1)
@@ -130,6 +133,18 @@ final class DeckSnapshotTests: XCTestCase {
         store.remove(for: hostID)
         store.flush()
         XCTAssertNil(DeckSnapshotStore(fileURL: file).snapshot(for: hostID))
+    }
+
+    @MainActor
+    func testModelNeverRestoresAnotherBackendsCache() {
+        var host = Host(name: "devbox", hostname: "example.test", username: "dev")
+        host.sessionBackend = .herdr
+        let model = HostConnectionModel(host: host)
+
+        model.restore(from: sampleSnapshot())
+
+        XCTAssertEqual(model.tmux, .unknown)
+        XCTAssertTrue(model.miniatures.isEmpty)
     }
 
     @MainActor

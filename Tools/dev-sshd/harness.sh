@@ -13,7 +13,8 @@
 #   ./harness.sh herdr   seed real herdr SESSIONS (brew install herdr) —
 #                        one deck tile each — with deterministic agent
 #                        states via `pane report-agent`: mpx-demo RUNNING,
-#                        mpx-blocked NEEDS YOU, mpx-done turn-ended; the
+#                        mpx-blocked NEEDS YOU, mpx-done carries an
+#                        off-focus derived `done`; the
 #                        herdr-mode analog of `demo`; point the app at
 #                        state/seed-herdr.json
 #   ./harness.sh bind    run the real `mpx bind` against this sshd with a
@@ -183,7 +184,8 @@ EOF
 # client dies AFTER the session server daemonizes (the same trick the
 # app's mint uses); every socket verb scopes with the global `--session`
 # flag; reportable states are idle|working|blocked|unknown; `done` is
-# derived server-side from a working → idle report; kinds canonicalize
+# derived server-side when an off-focus pane moves working → idle;
+# kinds canonicalize
 # (claude-code → claude); a fresh session labels its first workspace
 # after the attach cwd's directory name.
 herdr_demo() {
@@ -220,7 +222,7 @@ herdr_demo() {
 
     # Three tiles, three attention states: mpx-demo RUNNING (claude
     # working + extra workspaces on the spine), mpx-blocked NEEDS YOU
-    # (codex blocked), mpx-done idle after a derived turn-end (pi
+    # (codex blocked), mpx-done with an off-focus derived done (pi
     # working → idle). Ids inside a session are deterministic — a fresh
     # session's first pane is always w1:p1.
     python3 - "$STATE" <<'PY'
@@ -249,7 +251,7 @@ def create(session, label, cwd):
     out = herdr(session, "workspace", "create",
                 "--cwd", cwd, "--label", label, capture=True).stdout
     result = json.loads(out)["result"]
-    return result["root_pane"]["pane_id"]
+    return result["workspace"]["workspace_id"], result["root_pane"]["pane_id"]
 
 def report(session, pane, agent, status, extra=None):
     herdr(session, "pane", "report-agent", pane,
@@ -269,7 +271,11 @@ create("mpx-demo", "scratch", "/tmp")
 report("mpx-blocked", "w1:p1", "codex", "blocked",
        ["--message", "Allow command: npm run deploy?"])
 
-# pi rides working -> idle so the server derives `done` (turn ended).
+# herdr presents a settled foreground pane as idle; `done` is retained for
+# an agent that settles off-focus. Move focus to a second workspace first,
+# then the Pi working -> idle transition deterministically derives `done`.
+done_front, _ = create("mpx-done", "front", "/tmp")
+herdr("mpx-done", "workspace", "focus", done_front, capture=True)
 report("mpx-done", "w1:p1", "pi", "working")
 report("mpx-done", "w1:p1", "pi", "idle")
 

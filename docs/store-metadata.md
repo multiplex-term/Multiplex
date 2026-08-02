@@ -66,6 +66,19 @@ Free surface added 2026-07-27 (unreleased; ships with the next binary):
 | Privacy impact | None new: bind traffic is a direct connection between the user's device and the user's own machine; no telemetry, nothing leaves the local pair. The host's SSH key fingerprints it reports are stored in the app's existing synced host record |
 | Review note | Reviewers do not need the CLI: Add Host ▸ MANUAL still adds hosts, and the demo host in review notes is reached that way |
 
+## herdr session backend
+
+Free surface added 2026-08-02 (unreleased; ships with the next binary):
+
+| Item | Facts |
+| --- | --- |
+| Selection | Per host in manual Add / Host Settings: `TMUX | HERDR`; the synced host record carries the choice. A NO TMUX tile may offer an explicit USE HERDR action only after the host proves herdr is installed; nothing switches automatically |
+| Wall model | One tile per herdr **session**, with that session's workspaces adapted onto the existing window spine. Live miniatures come from `pane read`; herdr's pane lifecycle states drive agent RUNNING / NEEDS YOU and Pro alerts, including Pi |
+| Attach/create/close | A tile attaches the full herdr client. Attach creates missing sessions and restarts stopped ones. New Session can type the selected setup script and agent launch into the fresh pane before attach; close stops then deletes (herdr keeps its protected default session on disk, stopped) |
+| Requirements | herdr 0.7.5+ / protocol 17 on the SSH host. Homebrew and herdr's installer are offered in-app. Plain SSH shells remain available without either multiplexer |
+| Honest limits | No herdr API reports attached-client count or creation time, so those claims are omitted. tmux-only controls, FILE upload, and Claude HISTORY are hidden on herdr tabs. Widget/Shortcut shell attach works; Open Agent refuses on a herdr host for this release rather than half-launching |
+| Tier / privacy | Free, like tmux. No new permission or collection: probes and attaches still travel directly over the user's SSH connection. This does not change the Pro allocation, StoreKit catalog, paywall, IAP screenshot, or public screenshot set |
+
 ## Widgets, Shortcuts, and the URL scheme
 
 Free surfaces added 2026-07-18 (unreleased; ships with the next binary):
@@ -75,7 +88,7 @@ Free surfaces added 2026-07-18 (unreleased; ships with the next binary):
 | Widget extension | `MultiplexWidgets` (`app.multiplexterm.multiplex.widgets`), embedded in the app; iPadOS 17.0+, visionOS 26.0+ (WidgetKit does not exist on earlier visionOS — the app itself stays 1.0) |
 | Widgets | "Host Monitor" (small/medium, configurable: host, small-tap action, agent, optional model picked from the host's configured launch models, ask-for-prompt) and "Fleet Wall" (medium/large, host order follows the deck) |
 | Widget data | Last-known sessions/miniatures plus configured agent model names from an App Group snapshot (`group.app.multiplexterm.multiplex`, `widget-state.json`, secret-free). Widgets never open connections and show no liveness claims — a relative SEEN stamp only |
-| App Shortcuts | "Open Shell" (attach most recent tmux session or create) and "Open Agent" (Claude Code/Codex/Pi, host-configured working-directory, setup-script, and launch-model pickers — models passed as `--model` — optional first prompt) — run in-app with a connection status guard; failures surface as an in-app alert |
+| App Shortcuts | "Open Shell" (attach the selected backend's most recent session or create) and "Open Agent" (Claude Code/Codex/Pi, host-configured working-directory, setup-script, and launch-model pickers — models passed as `--model` — optional first prompt; this release refuses Open Agent on herdr hosts) — run in-app with a connection status guard; failures surface as an in-app alert |
 | URL scheme | `multiplex://open?host=<uuid|name>&action=shell\|agent[&session=…][&agent=…][&prompt=…][&ask=1][&dir=…][&script=<uuid\|none>][&model=…]` — widget taps and user automation; omitting `script` uses the remembered New Session choice, omitting `model` uses the agent's default |
 | Privacy impact | None: the App Group snapshot stays on-device, contains no credentials, and adds no new data collection; setup-script bodies remain in the app's host record and never become Shortcut parameter values |
 
@@ -129,8 +142,12 @@ Current product split:
   typed into the session as it settles and never submitted),
   and primary-button touch/pointer input for mouse-aware TUIs, all-pane agent
   detection and wall
-  telemetry with foreground-aware helpers in tmux panes and plain SSH
-  shells (including direct-shell NEEDS YOU chrome), a System/Light/Dark
+  telemetry with foreground-aware helpers in tmux panes, herdr sessions,
+  and plain SSH shells (including direct-shell NEEDS YOU chrome), a per-host
+  TMUX / HERDR backend choice (herdr 0.7.5+; one tile per session, workspaces
+  on its spine, lifecycle-backed RUNNING / NEEDS YOU, attach/create/restart/
+  close; tmux-only FILE/HISTORY/shortcut controls stay hidden there), a
+  System/Light/Dark
   appearance setting (SYSTEM follows the device; the whole chassis, launch
   screen, and keyboard flip together), New Session launches for Claude Code,
   Codex, or Pi with optional per-host setup scripts and one-shot first
@@ -173,7 +190,8 @@ Current product split:
   Claude Code, Codex, and Pi strips), and
   ten built-in or custom agent-command chip taps per local calendar day.
 - Pro: unlimited hosts, mosh, unmetered built-in and custom agent command
-  chips, Claude Code/Codex agent alerts from tmux sessions and plain shells,
+  chips, Claude Code/Codex agent alerts from tmux sessions and plain shells
+  plus lifecycle-backed Claude Code/Codex/Pi alerts from herdr sessions,
   the HISTORY panel (a Claude Code session's prompt history read from
   Claude's own session file, with full text where the TUI truncates, plus
   jump-back-to-message on tmux tabs — Claude Code only; Codex/Pi history

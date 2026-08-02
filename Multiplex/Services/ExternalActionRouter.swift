@@ -167,7 +167,11 @@ enum ExternalActionPerformer {
             sessions.first { $0.name == name }?.name
         }
         if let target = requested ?? ExternalActionPlan.mostRecentSessionName(in: sessions) {
-            if context.workspace.focusTab(hostID: host.id, sessionName: target) { return }
+            if context.workspace.focusTab(
+                hostID: host.id,
+                sessionName: target,
+                backend: host.sessionBackend
+            ) { return }
             open(mode: .attach(host: host, sessionName: target), on: host, context: context)
         } else {
             // Headless creation inherits the New Session sheet's remembered

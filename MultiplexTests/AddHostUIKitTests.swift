@@ -206,6 +206,30 @@ final class AddHostUIKitTests: XCTestCase {
         } ?? false)
     }
 
+    func testHerdrBackendUpdatesSignalCopyAndHidesTmuxOnlyDefaults() throws {
+        let fixture = makeFixture()
+        defer { clean(fixture) }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.setMode(.manual)
+
+        let herdr = try XCTUnwrap(
+            descendants(of: UIButton.self, in: fixture.controller.view)
+                .first { $0.accessibilityLabel == "HERDR" }
+        )
+        herdr.sendActions(for: .touchUpInside)
+
+        XCTAssertEqual(fixture.controller.form.sessionBackend, .herdr)
+        XCTAssertTrue(renderedText(in: fixture.controller.view).contains(
+            "Signs in over SSH with the settings above, then looks for herdr on the host."
+        ))
+        let directories = descendants(of: UIView.self, in: fixture.controller.view)
+            .first { $0.accessibilityIdentifier == "addhost.section.directories" }
+        let tmuxConf = descendants(of: UIView.self, in: fixture.controller.view)
+            .first { $0.accessibilityIdentifier == "addhost.section.tmuxConf" }
+        XCTAssertTrue(directories?.isHidden == true)
+        XCTAssertTrue(tmuxConf?.isHidden == true)
+    }
+
     func testChoiceBarMatchesPlainTallySegmentGeometryAndSelectionStyling() throws {
         enum Choice: Hashable { case first, second }
         var changes: [Choice] = []
@@ -422,7 +446,10 @@ final class AddHostUIKitTests: XCTestCase {
 
     func testSignalCheckRendersWarningsAndRelevantEditRetiresResult() async throws {
         let fixture = makeFixture(isPro: true, testRunner: { _, _ in
-            .connected(HostTest.Report(tmuxFound: false, moshServerFound: false))
+            .connected(HostTest.Report(
+                multiplexerFound: false,
+                moshServerFound: false
+            ))
         })
         defer { clean(fixture) }
         fixture.controller.loadViewIfNeeded()

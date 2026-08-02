@@ -527,6 +527,7 @@ final class TerminalWindowViewController: UIViewController,
         guard let activeTab,
               let sessionName = activeTab.sessionName,
               let host = store.host(id: activeTab.hostID),
+              activeTab.sessionBackend == host.sessionBackend,
               let notice = hub.model(for: host).keychainNotice,
               notice.sessionNames.contains(sessionName)
         else { return nil }
@@ -537,7 +538,9 @@ final class TerminalWindowViewController: UIViewController,
         guard let sessionName = activeTab.sessionName else {
             return activeController?.directShellAgent
         }
-        guard let host = store.host(id: activeTab.hostID) else { return nil }
+        guard let host = store.host(id: activeTab.hostID),
+              activeTab.sessionBackend == host.sessionBackend
+        else { return nil }
         let model = hub.model(for: host)
         // One expression serves both backends on purpose: a herdr tile IS
         // a whole session, and the probe writes its live focus into the
@@ -783,9 +786,14 @@ final class TerminalWindowViewController: UIViewController,
               let sessionName = activeTab.sessionName,
               let host = store.host(id: activeTab.hostID)
         else { return }
+        let message = activeTab.sessionBackend == .herdr
+            ? "Stops “\(sessionName)” on \(host.name), deletes its saved state when "
+                + "herdr allows it, then closes the tab."
+            : "Kills “\(sessionName)” on \(host.name) and everything running in it, "
+                + "then closes the tab."
         let alert = UIAlertController(
             title: "Close Session",
-            message: "Kills “\(sessionName)” on \(host.name) and everything running in it, then closes the tab.",
+            message: message,
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Close Session", style: .destructive) { [weak self] _ in
@@ -797,10 +805,11 @@ final class TerminalWindowViewController: UIViewController,
 
     private func closeSession(_ tab: TerminalRoute) {
         guard let sessionName = tab.sessionName,
+              let backend = tab.sessionBackend,
               let host = store.host(id: tab.hostID)
         else { return }
         let model = hub.model(for: host)
-        Task { await model.killSession(named: sessionName) }
+        Task { await model.killSession(named: sessionName, backend: backend) }
         closeTab(tab.id)
     }
 
@@ -812,7 +821,10 @@ final class TerminalWindowViewController: UIViewController,
               let host = store.host(id: activeTab.hostID)
         else { return }
         creatingTab = true
-        let source = activeTab.sessionName
+        // A host backend can change while this tab stays live. Only inherit a
+        // source session from the namespace the new tab will actually use.
+        let source = activeTab.sessionBackend == host.sessionBackend
+            ? activeTab.sessionName : nil
         let preferences = NewSessionPreferences()
         let script = preferences.rememberedScript(for: host)
         Task { [weak self] in
@@ -856,7 +868,9 @@ final class TerminalWindowViewController: UIViewController,
         guard let activeTab, let host = store.host(id: activeTab.hostID) else { return }
         let anchorID = activeTab.id
         let hostID = activeTab.hostID
-        let anchorSessionName = activeTab.sessionName
+        // The file viewer's fallback cwd query is a tmux command. Herdr and
+        // plain-shell summons honestly fall back to $HOME instead.
+        let anchorSessionName = activeTab.usesTmux ? activeTab.sessionName : nil
         Task { [weak self] in
             guard let self else { return }
             let cwd = await workspace.controller(for: anchorID)?.paneWorkingDirectory()
@@ -996,6 +1010,12 @@ final class TerminalWindowViewController: UIViewController,
         }
 
         let model = hub.model(for: host)
+        guard watchedTab.sessionBackend == host.sessionBackend else {
+            activePaneFingerprint = nil
+            shownAgent = nil
+            renderNow()
+            return
+        }
         let initialAgent = detectedAgent
         let agentChanged = shownAgent != initialAgent
         shownAgent = initialAgent
@@ -1007,7 +1027,7 @@ final class TerminalWindowViewController: UIViewController,
         if agentChanged { renderNow() }
         await model.refreshAndWait(ifStaleFor: 4)
 
-        if host.sessionBackend == .herdr {
+        if watchedTab.sessionBackend == .herdr {
             // No list-panes fast path in herdr mode; the probe's snapshot is
             // the authority and `detectedAgent` follows the session's live
             // focused pane — re-read it each interval so a workspace switch
