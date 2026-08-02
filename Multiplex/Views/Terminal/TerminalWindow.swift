@@ -6,6 +6,7 @@ import notify
 #if DEBUG
 extension Notification.Name {
     static let multiplexDebugNewTab = Notification.Name("MultiplexDebugNewTab")
+    static let multiplexDebugHerdrTab = Notification.Name("MultiplexDebugHerdrTab")
     static let multiplexDebugMessageJump = Notification.Name("MultiplexDebugMessageJump")
     static let multiplexDebugMessageJumpBack = Notification.Name(
         "MultiplexDebugMessageJumpBack"
@@ -108,11 +109,13 @@ enum TerminalLinkDebugHook {
     }
 }
 
-/// Headless-verification hook, same shape as `AgentChipDebugHook`:
+/// Headless-verification hooks, same shape as `AgentChipDebugHook`:
 /// `xcrun simctl spawn <udid> notifyutil -p app.multiplexterm.multiplex.debug.newtab`
 /// runs the focused window's + TAB New Session action — control-connection
-/// exec → new-session in the pane's cwd → tab append → attach, without
-/// touching the screen.
+/// exec → mint → tab append → attach, on either backend, without touching
+/// the screen. `….debug.herdrtab` runs the herdr-only New Tab in Workspace
+/// entry; proof is host-side (the session's snapshot gains a tab, no
+/// session is minted) and no Multiplex tab appears.
 @MainActor
 enum NewTabDebugHook {
     private static var installed = false
@@ -125,6 +128,12 @@ enum NewTabDebugHook {
             "app.multiplexterm.multiplex.debug.newtab", &token, .main
         ) { _ in
             NotificationCenter.default.post(name: .multiplexDebugNewTab, object: nil)
+        }
+        var herdrToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.herdrtab", &herdrToken, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugHerdrTab, object: nil)
         }
     }
 }

@@ -919,11 +919,12 @@ final class HostConnectionModel {
         do {
             let connection = try await ensureConnection()
             if host.sessionBackend == .herdr {
-                // Sessions have no start directory (herdr owns each
-                // session's world) and no tmux conf — those two riders
-                // apply to the tmux path only.
+                // The tmux conf rider applies to the tmux path only; the
+                // two directory riders resolve inside the herdr mint (the
+                // session server inherits the spawn's cwd).
                 return await createHerdrSession(
-                    base: base, running: script, typing: launch,
+                    base: base, inDirectoryOf: sourceSession,
+                    startingIn: directory, running: script, typing: launch,
                     over: connection
                 )
             }
@@ -957,12 +958,22 @@ final class HostConnectionModel {
     /// first, the tmux mint's own ordering. If the spawn can't confirm a
     /// pane (a future herdr may die before daemonizing), the route still
     /// attaches — the PTY client creates the session — and a short poll
-    /// types the setup lines once a pane exists. A live list is read first
-    /// and the requested name is uniqued against it: typing must only ever
-    /// aim at a session this mint brought into being.
+    /// types the setup lines once a pane exists (that fallback spawns at
+    /// the PTY's login $HOME: the directory riders are best-effort). A
+    /// live list is read first and the requested name is uniqued against
+    /// it: typing must only ever aim at a session this mint brought into
+    /// being.
+    ///
+    /// The directory riders are the tmux mint's, one exec louder: a
+    /// source session's focused-pane cwd is asked from the snapshot the
+    /// drop path already reads (tmux gets it server-side in the create),
+    /// and an explicit directory is consulted only without a source —
+    /// `newSessionCommand`'s own precedence. Either rides the spawn as a
+    /// guarded cd; every miss is $HOME, never a failed mint.
     private func createHerdrSession(
-        base: String, running script: String?, typing launch: String?,
-        over connection: SSHConnection
+        base: String, inDirectoryOf sourceSession: String?,
+        startingIn directory: String?, running script: String?,
+        typing launch: String?, over connection: SSHConnection
     ) async -> TerminalRoute.Mode? {
         let lines = [script, launch].compactMap { $0 }
         // The probe's tile list can be a tick stale. Read the live list and
@@ -977,8 +988,20 @@ final class HostConnectionModel {
               let existing = HerdrProbe.parseSessionNames(listOutput)
         else { return nil }
         let name = HerdrProbe.uniqueSessionName(base: base, existing: existing)
+        var startDirectory: String?
+        if let sourceSession {
+            let snapshot = try? await deadlined {
+                try await connection.exec(
+                    HerdrProbe.snapshotCommand(sessionName: sourceSession))
+            }
+            startDirectory = snapshot.flatMap(
+                HerdrProbe.parseFocusedPaneWorkingDirectory)
+        } else {
+            startDirectory = directory
+        }
         let spawn = try? await deadlined {
-            try await connection.exec(HerdrProbe.spawnSessionCommand(sessionName: name))
+            try await connection.exec(HerdrProbe.spawnSessionCommand(
+                sessionName: name, directory: startDirectory))
         }
         if !lines.isEmpty {
             if let pane = spawn.flatMap(HerdrProbe.parseFocusedPane),
@@ -994,9 +1017,13 @@ final class HostConnectionModel {
     }
 
     /// Create a tab in `session`'s focused workspace, typing the same
-    /// setup `script` and agent `launch` a freshly minted session gets —
-    /// the terminal window's `+ TAB` on a herdr tab. The already-attached
-    /// client renders it, so nothing here mints a route.
+    /// setup `script` a freshly minted session gets — the `+ TAB` menu's
+    /// herdr-only New Tab in Workspace entry. The already-attached client
+    /// renders it, so nothing here mints a route; the entries that DO mint
+    /// one (New Session and the agents, the menu's leading rows on every
+    /// backend) go through `createSession`, which is also the agent road —
+    /// this row types no launch (external `in=tab` launches keep
+    /// `launchInHerdrSession`).
     ///
     /// The backend is the caller's, read off the tab's own route rather
     /// than `host.sessionBackend` (same rule as `killSession(named:
@@ -1012,7 +1039,7 @@ final class HostConnectionModel {
     /// fails the create, and the window says so — reviving it headlessly
     /// would put the new tab somewhere nobody is attached.
     func createHerdrTab(
-        inSession session: String, running script: String?, typing launch: String?
+        inSession session: String, running script: String?
     ) async -> Bool {
         guard HerdrProbe.bakeableSessionName(session) else { return false }
         resetConnectRetryBackoff()
@@ -1027,7 +1054,7 @@ final class HostConnectionModel {
             if let typing = HerdrProbe.typeCommand(
                 sessionName: session,
                 paneID: pane,
-                lines: [script, launch].compactMap { $0 }
+                lines: [script].compactMap { $0 }
             ) {
                 _ = try? await deadlined { try await connection.exec(typing) }
             }

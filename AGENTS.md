@@ -184,10 +184,11 @@ app.multiplexterm.multiplex.<name>`:
   flips every window live; pair with `simctl ui <UDID> appearance` to prove
   SYSTEM).
 - `debug.agentchip` — tap the first slash chip (inject → pump → PTY → tmux).
-- `debug.newtab` — run the focused window's "+ TAB" session action (New
-  Session on a tmux tab; on a herdr tab, New Tab in Workspace — proof is
+- `debug.newtab` — run the focused window's "+ TAB" leading New Session
+  action (mints a session on either backend, attached as a new tab).
+  `debug.herdrtab` — the herdr-only New Tab in Workspace entry; proof is
   host-side: `herdr --session <name> api snapshot` gains a tab in the
-  focused workspace and no session is minted).
+  focused workspace, no session is minted, and no Multiplex tab appears.
 - `debug.tmuxshortcuts` / `debug.customcommands` / `debug.msghistory` — open
   the focused tab's shortcut popover (TMUX content, or HRDR on a herdr
   tab) / Command Setup editor / agent HISTORY panel for layout capture.
@@ -739,7 +740,14 @@ logic belongs — keep parsing/command-building out of views.
   pane ids collide; routes and snapshots retain the backend. Gate tmux-only
   behavior on `route.usesTmux`; never auto-switch. Attach may create/restart,
   close is stop+delete, and creation validates the live list/name before
-  typing setup. External agent launches (widget/Shortcut/URL `session=` +
+  typing setup. A fresh mint roots the session's world by cd'ing the
+  headless spawn (herdr has no start-directory flag, but the session
+  server inherits the spawning process's cwd — verified 0.7.5): the tmux
+  mint's two directory riders both land this way, a source session's
+  focused-pane cwd asked from one snapshot exec, an explicit Working
+  Directory (deck sheet, external launches) consulted only without a
+  source, every miss $HOME, never a failed mint (the rare PTY-creates
+  fallback stays $HOME). External agent launches (widget/Shortcut/URL `session=` +
   `in=tab|workspace|window`) can land INSIDE an existing session: tmux is
   one `new-window -t '=name'` exec typing at the printed pane id; herdr
   spawns (attach revives a stopped session), then `tab create` (0.7.5
@@ -773,18 +781,29 @@ logic belongs — keep parsing/command-building out of views.
   `workspace list` → `workspace focus <id>` on the control connection;
   response-derived ids pass the bake vet before splicing.
   Keep the Agent Gallery withdrawn until transcript support exists.
-  A terminal window's `+ TAB` session press changes shape the same way
-  (`TerminalRoute.newTabTarget` — the one place the entry's name, the
+  A terminal window's `+ TAB` leads with NEW SESSION on every backend —
+  another session minted in the host's current backend and attached as a
+  sibling Multiplex tab, agent entries included, starting in the source
+  pane's directory (tmux asks server-side in the create; herdr asks the
+  source session's snapshot and cds the spawn). A Multiplex tab IS a
+  session attach, and app chrome is the only surface that can mint one;
+  remote-level structure (tmux windows, herdr tabs) belongs to the
+  backend's own prefix keys and the shortcut panel. A herdr tab appends
+  the one remote-level row that earns chrome, NEW TAB IN WORKSPACE
+  (`TerminalRoute.extraNewTabTarget` — the one place the row, the
   control's label, and the failure alert read it from, so the classic
-  toolbar and the UMD bar cannot drift): on a herdr tab it mints a TAB IN
-  THE SESSION'S FOCUSED WORKSPACE through the same `createTabCommand` +
+  toolbar and the UMD bar cannot drift; it carries the setup-script
+  rider the HRDR panel's stock ⌃B New Tab cannot): a tab in the
+  session's focused workspace through the same `createTabCommand` +
   `typeCommand` pair, label and `--cwd` both omitted (herdr numbers the
-  tab and inherits the focused pane's directory — the tmux mint's
-  `inDirectoryOf` without an exec to ask for it), and adds no Multiplex
-  tab at all: herdr's focus is session-wide, so a second client on the
-  same session would only mirror the first, and the client already on
-  screen is what renders it. The deck's own `+ New Session` still mints
-  sessions — a tile IS a session.
+  tab and inherits the focused pane's directory), typing the remembered
+  script but never an agent (agent entries mint sessions; external
+  `in=tab` launches stay the agent road into an existing session), and
+  adds no Multiplex tab at all: herdr's focus is session-wide, so a
+  second client on the same session would only mirror the first, and
+  the client already on screen is what renders it — a stopped session
+  fails visibly rather than spawn-first. The deck's own `+ New Session`
+  still mints sessions — a tile IS a session.
 - **A disabled host is one the app never dials on its own**
   (`Host.isEnabled`; deck rail menu / DISABLED tile / Host Settings →
   Monitoring): the wall skips it in `runFeed`, never asks `ConnectionHub`

@@ -137,27 +137,33 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         }
     }
 
-    /// What the terminal's `+ TAB` press mints beside this tab.
+    /// The extra `+ TAB` entry this tab offers beyond the leading New
+    /// Session.
     ///
-    /// A tmux (or plain-shell) tab gets another session, attached as a
-    /// second Multiplex tab. A herdr tab instead gets a tab inside its
-    /// session's focused workspace: herdr's focus is session-wide, so a
-    /// second client attached to the same session would only mirror the
-    /// first — the herdr client already on screen is what renders the new
-    /// tab, and no Multiplex tab is added at all.
-    var newTabTarget: NewTabTarget {
-        sessionBackend == .herdr ? .herdrWorkspaceTab : .session
+    /// Every tab leads with another session, attached as a second Multiplex
+    /// tab: a Multiplex tab IS a session attach on either backend, and app
+    /// chrome is the only surface that can mint one — remote-level
+    /// structure (tmux windows, herdr tabs) already belongs to the
+    /// backend's own prefix keys and the shortcut panel. A herdr tab
+    /// appends the one remote-level entry worth a row: a tab inside its
+    /// session's focused workspace, which adds no Multiplex tab at all —
+    /// herdr's focus is session-wide, so a second client attached to the
+    /// same session would only mirror the first, and the herdr client
+    /// already on screen is what renders the new tab.
+    var extraNewTabTarget: NewTabTarget? {
+        sessionBackend == .herdr ? .herdrWorkspaceTab : nil
     }
 
-    /// The two shapes of a `+ TAB` session press, holding the copy each
-    /// surface (the menu entry, the control's label, the failure alert)
-    /// must agree on.
+    /// The two shapes of a `+ TAB` mint, holding the copy each surface
+    /// (the menu entries, the control's label, the failure alert) must
+    /// agree on.
     enum NewTabTarget: Hashable {
         case session
         case herdrWorkspaceTab
 
-        /// The `+ TAB` menu's leading entry — the one that mints a plain
-        /// shell. The agent entries below it keep their own names.
+        /// The menu entry's name. `.session` leads every menu — the agent
+        /// entries below it keep their own names — and `.herdrWorkspaceTab`
+        /// follows them on herdr tabs.
         var menuTitle: String {
             switch self {
             case .session: "New Session"
@@ -165,12 +171,14 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
             }
         }
 
-        var controlAccessibilityLabel: String {
-            switch self {
-            case .session: "New tab: another session or the file viewer"
-            case .herdrWorkspaceTab:
-                "New tab: another tab in this herdr workspace or the file viewer"
-            }
+        /// The `+ TAB` control's label, keyed by the menu it opens.
+        static func controlAccessibilityLabel(
+            offering extra: NewTabTarget?
+        ) -> String {
+            extra == .herdrWorkspaceTab
+                ? "New tab: another session, a tab in this herdr workspace, "
+                    + "or the file viewer"
+                : "New tab: another session or the file viewer"
         }
 
         var failureTitle: String {

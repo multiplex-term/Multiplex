@@ -21,14 +21,18 @@ struct UMDBarConfiguration {
     var fontDown: () -> Void
     var fontUp: () -> Void
     var newSession: (AgentKind?) -> Void
+    /// Runs the herdr-only New Tab in Workspace entry; the row renders
+    /// only when `extraNewTabTarget` says the active tab offers it.
+    var newHerdrWorkspaceTab: () -> Void
     var openFileViewer: () -> Void
     var merge: (UUID) -> Void
     var detach: () -> Void
     var closeSession: (() -> Void)?
     var keychainTip: (() -> Void)?
-    /// What `newSession` actually mints — a herdr tab renames the entry
-    /// and relabels the control (see `TerminalRoute.NewTabTarget`).
-    var newTabTarget: TerminalRoute.NewTabTarget
+    /// The herdr-only second `+ TAB` entry, if the active tab offers one —
+    /// New Session leads the menu on every backend (see
+    /// `TerminalRoute.NewTabTarget`).
+    var extraNewTabTarget: TerminalRoute.NewTabTarget?
     /// Which multiplexer owns the shortcut chip (TMUX/HRDR); nil hides it.
     var shortcutBackend: Host.SessionBackend?
     var style: UMDBarStyle
@@ -55,7 +59,7 @@ private struct UMDBarPresentationKey: Equatable {
     var mergeSources: [UMDBarMergeSourceKey]
     var hasCloseSession: Bool
     var hasKeychainTip: Bool
-    var newTabTarget: TerminalRoute.NewTabTarget
+    var extraNewTabTarget: TerminalRoute.NewTabTarget?
     var shortcutBackend: Host.SessionBackend?
     var style: UMDBarStyle
     var deckControlLabel: String
@@ -71,7 +75,7 @@ private struct UMDBarPresentationKey: Equatable {
         }
         hasCloseSession = configuration.closeSession != nil
         hasKeychainTip = configuration.keychainTip != nil
-        newTabTarget = configuration.newTabTarget
+        extraNewTabTarget = configuration.extraNewTabTarget
         shortcutBackend = configuration.shortcutBackend
         style = configuration.style
         deckControlLabel = configuration.deckControlLabel
@@ -90,6 +94,7 @@ enum UMDBarAction: Equatable {
     case fontDown
     case fontUp
     case newSession(AgentKind?)
+    case newHerdrWorkspaceTab
     case openFileViewer
     case merge(UUID)
     case mergeAll
@@ -189,6 +194,8 @@ final class UMDBarViewController: UIViewController,
             configuration.fontUp()
         case .newSession(let agent):
             configuration.newSession(agent)
+        case .newHerdrWorkspaceTab:
+            configuration.newHerdrWorkspaceTab()
         case .openFileViewer:
             configuration.openFileViewer()
         case .merge(let id):
@@ -483,7 +490,8 @@ final class UMDBarViewController: UIViewController,
             caption: "TAB",
             systemImage: "plus",
             identifier: "umd.newTab",
-            accessibilityLabel: configuration.newTabTarget.controlAccessibilityLabel,
+            accessibilityLabel: TerminalRoute.NewTabTarget
+                .controlAccessibilityLabel(offering: configuration.extraNewTabTarget),
             menu: makeNewTabMenu()
         )
     }
@@ -615,7 +623,7 @@ final class UMDBarViewController: UIViewController,
     private func makeNewTabMenu() -> UIMenu {
         var sessionActions: [UIMenuElement] = [
             menuAction(
-                title: configuration.newTabTarget.menuTitle,
+                title: TerminalRoute.NewTabTarget.session.menuTitle,
                 identifier: "umd.newTab.session",
                 action: .newSession(nil)
             ),
@@ -627,6 +635,21 @@ final class UMDBarViewController: UIViewController,
                 action: .newSession(agent)
             )
         })
+        if configuration.extraNewTabTarget == .herdrWorkspaceTab {
+            // Its own section: the row is remote-level — it adds a tab
+            // inside the herdr client, never a Multiplex tab.
+            sessionActions.append(UIMenu(
+                title: "",
+                options: .displayInline,
+                children: [
+                    menuAction(
+                        title: TerminalRoute.NewTabTarget.herdrWorkspaceTab.menuTitle,
+                        identifier: "umd.newTab.herdrWorkspaceTab",
+                        action: .newHerdrWorkspaceTab
+                    ),
+                ]
+            ))
+        }
         let file = UIMenu(
             title: "",
             options: .displayInline,

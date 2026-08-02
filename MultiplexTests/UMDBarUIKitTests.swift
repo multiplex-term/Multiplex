@@ -4,27 +4,41 @@ import XCTest
 
 @MainActor
 final class UMDBarUIKitTests: XCTestCase {
-    func testHerdrTabRenamesTheSessionEntryAndRelabelsTheControl() throws {
+    func testHerdrTabKeepsNewSessionLeadingAndAddsTheWorkspaceTabRow() throws {
         let controller = UMDBarViewController(configuration: configuration(
-            newTabTarget: .herdrWorkspaceTab
+            extraNewTabTarget: .herdrWorkspaceTab
         ))
         controller.loadViewIfNeeded()
 
         let newTab = try XCTUnwrap(control("umd.newTab", in: controller.view) as? UIButton)
         XCTAssertEqual(
             actions(in: try XCTUnwrap(newTab.menu)).map(\.title),
-            ["New Tab in Workspace", "Claude Code", "Codex", "Pi", "File Viewer"],
-            "the press mints a tab in the herdr workspace — it must not promise a session"
+            ["New Session", "Claude Code", "Codex", "Pi",
+             "New Tab in Workspace", "File Viewer"],
+            "every backend leads with a session mint — the workspace tab is an extra row"
         )
         XCTAssertEqual(
             newTab.accessibilityLabel,
-            "New tab: another tab in this herdr workspace or the file viewer"
+            "New tab: another session, a tab in this herdr workspace, or the file viewer"
+        )
+
+        let tmux = UMDBarViewController(configuration: configuration())
+        tmux.loadViewIfNeeded()
+        let plain = try XCTUnwrap(control("umd.newTab", in: tmux.view) as? UIButton)
+        XCTAssertEqual(
+            actions(in: try XCTUnwrap(plain.menu)).map(\.title),
+            ["New Session", "Claude Code", "Codex", "Pi", "File Viewer"],
+            "tmux windows belong to the prefix key and the shortcut panel, not app chrome"
+        )
+        XCTAssertEqual(
+            plain.accessibilityLabel,
+            "New tab: another session or the file viewer"
         )
     }
 
     func testHerdrBackendRelabelsTheShortcutChipAtTheSameSlot() throws {
         let controller = UMDBarViewController(configuration: configuration(
-            newTabTarget: .herdrWorkspaceTab,
+            extraNewTabTarget: .herdrWorkspaceTab,
             shortcutBackend: .herdr
         ))
         controller.loadViewIfNeeded()
@@ -56,6 +70,7 @@ final class UMDBarUIKitTests: XCTestCase {
             fontDown: { events.append("down") },
             fontUp: { events.append("up") },
             newSession: { events.append($0?.rawValue ?? "session") },
+            newHerdrWorkspaceTab: { events.append("workspaceTab") },
             openFileViewer: { events.append("files") },
             merge: { events.append("merge:\($0.uuidString)") },
             detach: { events.append("detach") },
@@ -68,6 +83,7 @@ final class UMDBarUIKitTests: XCTestCase {
         try XCTUnwrap(control("umd.fontUp", in: controller.view)).sendActions(for: .touchUpInside)
         controller.perform(.newSession(nil))
         controller.perform(.newSession(.codex))
+        controller.perform(.newHerdrWorkspaceTab)
         controller.perform(.openFileViewer)
         controller.perform(.merge(first))
         controller.perform(.mergeAll)
@@ -80,6 +96,7 @@ final class UMDBarUIKitTests: XCTestCase {
             "up",
             "session",
             "codex",
+            "workspaceTab",
             "files",
             "merge:\(first.uuidString)",
             "merge:\(first.uuidString)",
@@ -274,12 +291,13 @@ final class UMDBarUIKitTests: XCTestCase {
         fontDown: @escaping () -> Void = {},
         fontUp: @escaping () -> Void = {},
         newSession: @escaping (AgentKind?) -> Void = { _ in },
+        newHerdrWorkspaceTab: @escaping () -> Void = {},
         openFileViewer: @escaping () -> Void = {},
         merge: @escaping (UUID) -> Void = { _ in },
         detach: @escaping () -> Void = {},
         closeSession: (() -> Void)? = nil,
         keychainTip: (() -> Void)? = nil,
-        newTabTarget: TerminalRoute.NewTabTarget = .session,
+        extraNewTabTarget: TerminalRoute.NewTabTarget? = nil,
         shortcutBackend: Host.SessionBackend? = .tmux,
         style: UMDBarStyle = .regular,
         deckControlLabel: String = "DECK",
@@ -294,12 +312,13 @@ final class UMDBarUIKitTests: XCTestCase {
             fontDown: fontDown,
             fontUp: fontUp,
             newSession: newSession,
+            newHerdrWorkspaceTab: newHerdrWorkspaceTab,
             openFileViewer: openFileViewer,
             merge: merge,
             detach: detach,
             closeSession: closeSession,
             keychainTip: keychainTip,
-            newTabTarget: newTabTarget,
+            extraNewTabTarget: extraNewTabTarget,
             shortcutBackend: shortcutBackend,
             style: style,
             deckControlLabel: deckControlLabel,

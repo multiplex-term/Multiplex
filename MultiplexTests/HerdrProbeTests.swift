@@ -549,6 +549,26 @@ final class HerdrProbeTests: XCTestCase {
         }
         XCTAssertTrue(command.contains("sleep 1"),
                       "the verify loop polls — the server daemonizes asynchronously")
+        XCTAssertFalse(command.contains("cd \"$d\""),
+                       "no directory rider, no cd — the login $HOME is the server default")
+    }
+
+    func testSpawnSessionCommandRootsTheWorldInTheAskedDirectory() {
+        let command = HerdrProbe.spawnSessionCommand(
+            sessionName: "api", directory: "/w/repo")
+        let cd = command.range(
+            of: "d='/w/repo'; [ -d \"$d\" ] || d=\"$HOME\"; cd \"$d\" 2>/dev/null;")
+        let attach = command.range(of: "herdr session attach 'api'")
+        XCTAssertNotNil(cd)
+        XCTAssertNotNil(attach)
+        if let cd, let attach {
+            XCTAssertLessThan(cd.lowerBound, attach.lowerBound,
+                              "the session server inherits the spawn's cwd — cd first")
+        }
+        XCTAssertTrue(
+            HerdrProbe.spawnSessionCommand(sessionName: "api", directory: "~")
+                .contains("d=\"$HOME\"; "),
+            "the New Session sheet's explicit Home choice arrives as ~")
     }
 
     func testParseFocusedPaneReadsALoneSnapshot() throws {
@@ -969,19 +989,17 @@ final class HerdrRouteTests: XCTestCase {
         XCTAssertFalse(shellRoute.usesTmux)
     }
 
-    func testPlusTabMintsAWorkspaceTabForHerdrAndASessionEverywhereElse() {
-        XCTAssertEqual(route.newTabTarget, .herdrWorkspaceTab)
-        XCTAssertEqual(
+    func testPlusTabLeadsWithASessionAndOnlyHerdrOffersTheWorkspaceTabRow() {
+        XCTAssertEqual(route.extraNewTabTarget, .herdrWorkspaceTab)
+        XCTAssertNil(
             TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "main"))
-                .newTabTarget,
-            .session
+                .extraNewTabTarget,
+            "tmux windows belong to the prefix key and the shortcut panel"
         )
-        XCTAssertEqual(
-            TerminalRoute(hostID: UUID(), mode: .shell).newTabTarget, .session)
-        XCTAssertEqual(
+        XCTAssertNil(TerminalRoute(hostID: UUID(), mode: .shell).extraNewTabTarget)
+        XCTAssertNil(
             TerminalRoute(hostID: UUID(), mode: .fileViewer(path: "~"))
-                .newTabTarget,
-            .session,
+                .extraNewTabTarget,
             "an auxiliary pane names no session — the press keeps minting one"
         )
         XCTAssertEqual(
@@ -992,6 +1010,15 @@ final class HerdrRouteTests: XCTestCase {
         XCTAssertEqual(
             TerminalRoute.NewTabTarget.herdrWorkspaceTab.failureTitle,
             "Couldn't Create Tab"
+        )
+        XCTAssertEqual(
+            TerminalRoute.NewTabTarget.controlAccessibilityLabel(
+                offering: .herdrWorkspaceTab),
+            "New tab: another session, a tab in this herdr workspace, or the file viewer"
+        )
+        XCTAssertEqual(
+            TerminalRoute.NewTabTarget.controlAccessibilityLabel(offering: nil),
+            "New tab: another session or the file viewer"
         )
     }
 }

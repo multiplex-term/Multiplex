@@ -827,10 +827,6 @@ final class TerminalWindowViewController: UIViewController,
               let activeTab,
               let host = store.host(id: activeTab.hostID)
         else { return }
-        if case .herdrAttach(let sessionName) = activeTab.mode {
-            openNewHerdrTab(in: sessionName, on: host, launching: agent)
-            return
-        }
         creatingTab = true
         // A host backend can change while this tab stays live. Only inherit a
         // source session from the namespace the new tab will actually use.
@@ -864,28 +860,26 @@ final class TerminalWindowViewController: UIViewController,
         }
     }
 
-    /// The herdr shape of the same press: a tab in the session's focused
+    /// The herdr-only second entry: a tab in the session's focused
     /// workspace, typed into over the control connection. No Multiplex tab
     /// is added — this window is already attached to that session, and its
-    /// client is what shows the new tab (herdr focuses it).
-    private func openNewHerdrTab(
-        in sessionName: String, on host: Host, launching agent: AgentKind?
-    ) {
+    /// client is what shows the new tab (herdr focuses it). Runs the
+    /// remembered setup script but never an agent: the agent entries mint
+    /// sessions, like every backend's leading row.
+    func openNewHerdrWorkspaceTab() {
+        guard !creatingTab,
+              let activeTab,
+              case .herdrAttach(let sessionName) = activeTab.mode,
+              let host = store.host(id: activeTab.hostID)
+        else { return }
         creatingTab = true
-        let preferences = NewSessionPreferences()
-        let script = preferences.rememberedScript(for: host)
+        let script = NewSessionPreferences().rememberedScript(for: host)
         Task { [weak self] in
             guard let self else { return }
             defer { creatingTab = false }
             let created = await hub.model(for: host).createHerdrTab(
                 inSession: sessionName,
-                running: script?.normalizedBody,
-                typing: agent.map {
-                    $0.launchCommand(
-                        model: preferences.rememberedModel(for: $0),
-                        initialPrompt: ""
-                    )
-                }
+                running: script?.normalizedBody
             )
             if !created {
                 presentNewTabFailure(hostName: host.name, target: .herdrWorkspaceTab)
@@ -1398,10 +1392,11 @@ extension TerminalWindowViewController {
         activeTab?.isFileViewer == true ? "Close file viewer" : "Close viewport"
     }
 
-    /// What `+ TAB` mints beside the active tab — the one place the menu
-    /// entry, the control's label, and the failure alert read it from.
-    private var newTabTarget: TerminalRoute.NewTabTarget {
-        activeTab?.newTabTarget ?? .session
+    /// The herdr-only second `+ TAB` entry the active tab offers — the one
+    /// place the menu row, the control's label, and the failure alert read
+    /// it from. The leading entry is New Session on every backend.
+    private var extraNewTabTarget: TerminalRoute.NewTabTarget? {
+        activeTab?.extraNewTabTarget
     }
 
     private func renderUMD() {
@@ -1446,6 +1441,7 @@ extension TerminalWindowViewController {
             fontDown: { [weak self] in self?.changeFont(by: -1) },
             fontUp: { [weak self] in self?.changeFont(by: 1) },
             newSession: { [weak self] in self?.openNewTab(launching: $0) },
+            newHerdrWorkspaceTab: { [weak self] in self?.openNewHerdrWorkspaceTab() },
             openFileViewer: { [weak self] in self?.openFileViewer(target: nil) },
             merge: { [weak self] in self?.merge($0) },
             detach: { [weak self] in self?.detachActiveTab() },
@@ -1453,7 +1449,7 @@ extension TerminalWindowViewController {
                 ? { [weak self] in self?.confirmCloseActiveSession() } : nil,
             keychainTip: activeTabKeychainNotice != nil
                 ? { [weak self] in self?.presentKeychainTip() } : nil,
-            newTabTarget: newTabTarget,
+            extraNewTabTarget: extraNewTabTarget,
             shortcutBackend: activeTab?.sessionBackend,
             style: shell == nil ? .regular : .shell,
             deckControlLabel: shell?.deckControlLabel ?? "DECK",
@@ -2064,7 +2060,8 @@ extension TerminalWindowViewController {
             trailing.append(makeNavigationBarItem(customView: makeMenuButton(
                 caption: "TAB",
                 systemImage: "plus",
-                accessibilityLabel: newTabTarget.controlAccessibilityLabel,
+                accessibilityLabel: TerminalRoute.NewTabTarget
+                    .controlAccessibilityLabel(offering: extraNewTabTarget),
                 menu: makeNewTabMenu()
             )))
             if let activeController {
@@ -2207,7 +2204,9 @@ extension TerminalWindowViewController {
 
     private func makeNewTabMenu() -> UIMenu {
         var actions: [UIMenuElement] = [
-            UIAction(title: newTabTarget.menuTitle) { [weak self] _ in
+            UIAction(
+                title: TerminalRoute.NewTabTarget.session.menuTitle
+            ) { [weak self] _ in
                 self?.openNewTab(launching: nil)
             },
         ]
@@ -2216,6 +2215,13 @@ extension TerminalWindowViewController {
                 self?.openNewTab(launching: agent)
             }
         })
+        if extraNewTabTarget == .herdrWorkspaceTab {
+            actions.append(UIAction(
+                title: TerminalRoute.NewTabTarget.herdrWorkspaceTab.menuTitle
+            ) { [weak self] _ in
+                self?.openNewHerdrWorkspaceTab()
+            })
+        }
         actions.append(UIAction(title: "File Viewer") { [weak self] _ in
             self?.openFileViewer(target: nil)
         })
@@ -2438,6 +2444,7 @@ extension TerminalWindowViewController {
         }
         observe(.multiplexDebugAgentChip) { [weak self] in self?.debugTapFirstSlashChip() }
         observe(.multiplexDebugNewTab) { [weak self] in self?.debugNewTab() }
+        observe(.multiplexDebugHerdrTab) { [weak self] in self?.debugNewHerdrTab() }
         observe(.multiplexDebugMessageJump) { [weak self] in self?.debugJumpToOldestMessage() }
         observe(.multiplexDebugMessageJumpBack) { [weak self] in
             guard let self, ownsFocusedTerminal else { return }
@@ -2516,6 +2523,11 @@ extension TerminalWindowViewController {
     private func debugNewTab() {
         guard ownsFocusedTerminal else { return }
         openNewTab(launching: nil)
+    }
+
+    private func debugNewHerdrTab() {
+        guard ownsFocusedTerminal else { return }
+        openNewHerdrWorkspaceTab()
     }
 
     private func debugOpenViewportForPendingLink() {

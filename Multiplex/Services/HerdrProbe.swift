@@ -639,12 +639,26 @@ enum HerdrProbe {
     /// snapshot is the point: it carries the fresh session's focused pane,
     /// the target for setup typing, so create-and-type is two execs with
     /// no window racing the user's own keyboard.
-    static func spawnSessionCommand(sessionName: String) -> String {
-        pathPrefix
-            + "herdr session attach \(sessionName.shellQuoted) >/dev/null 2>&1 </dev/null; "
+    ///
+    /// `directory` roots the fresh session's world: herdr has no
+    /// start-directory flag, but the session server inherits the spawning
+    /// process's cwd (verified 0.7.5), so the mint cds first — guarded
+    /// like the tmux mint's `-c` (`~` forms expand, a directory missing
+    /// on the host falls to $HOME, never a failed spawn). Revives pass
+    /// nil: a restarted session restores the world it already had.
+    static func spawnSessionCommand(
+        sessionName: String, directory: String? = nil
+    ) -> String {
+        var command = pathPrefix
+        if let directory {
+            command += "d=\(directory.shellQuotedDirectory); "
+                + "[ -d \"$d\" ] || d=\"$HOME\"; cd \"$d\" 2>/dev/null; "
+        }
+        command += "herdr session attach \(sessionName.shellQuoted) >/dev/null 2>&1 </dev/null; "
             + "i=0; while [ \"$i\" -lt 4 ]; do "
             + snapshotInvocation(sessionName: sessionName) + " && exit 0; "
             + "i=$((i+1)); sleep 1; done; true"
+        return command
     }
 
     /// One session-scoped snapshot — the mint's poll when the headless
@@ -753,9 +767,9 @@ enum HerdrProbe {
     /// session is looking right now (0.7.5 defaults `tab create` to the
     /// focused workspace, so no snapshot parse races the create). The
     /// external action's "open in the existing workspace" placement, and
-    /// the terminal window's own `+ TAB` press — which passes neither
-    /// rider, so herdr numbers the tab and starts it in the focused pane's
-    /// directory (a press means "another one here").
+    /// the terminal window's New Tab in Workspace entry — which passes
+    /// neither rider, so herdr numbers the tab and starts it in the
+    /// focused pane's directory (the press means "another one here").
     static func createTabCommand(
         sessionName: String, label: String?, directory: String?
     ) -> String {
