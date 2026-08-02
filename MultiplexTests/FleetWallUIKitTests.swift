@@ -429,6 +429,7 @@ final class FleetWallUIKitTests: XCTestCase {
             attention: .needsYou(.permission),
             usesTmuxAttentionFallback: true,
             hasOpenTab: true,
+            sessionBackend: .tmux,
             compact: false,
             selected: true,
             duplicateAttachTitle: "Attach in New Window",
@@ -455,6 +456,57 @@ final class FleetWallUIKitTests: XCTestCase {
         XCTAssertTrue(copy.contains("LIVE"))
     }
 
+    /// herdr states no client count, so a herdr tile's lamp answers for the
+    /// one client the app can verify: its own open terminal tab. Without one
+    /// the tile keeps offering ATTACH rather than claiming a state nothing
+    /// reported.
+    func testHerdrSessionTileLampFollowsThisAppsOwnOpenTab() {
+        // The record herdr's adapter produces: no clients, ever.
+        var session = makeSession(name: "main")
+        session.clientCount = 0
+
+        func tile(hasOpenTab: Bool) -> FleetSessionTileView {
+            let tile = FleetSessionTileView()
+            tile.configure(FleetSessionTileConfiguration(
+                hostID: UUID(),
+                session: session,
+                lines: ["$ herdr"],
+                attention: nil,
+                usesTmuxAttentionFallback: false,
+                hasOpenTab: hasOpenTab,
+                sessionBackend: .herdr,
+                compact: false,
+                selected: false,
+                duplicateAttachTitle: "Attach in New Window",
+                openTabAccessibilityText: "Shows its open window",
+                attach: {},
+                attachNewWindow: {},
+                delete: {},
+                droppedSession: { _ in }
+            ))
+            tile.frame = CGRect(x: 0, y: 0, width: 360, height: 190)
+            tile.layoutIfNeeded()
+            return tile
+        }
+
+        let open = tile(hasOpenTab: true)
+        XCTAssertTrue(shownText(in: open).contains("LIVE"))
+        XCTAssertFalse(shownText(in: open).contains("ATTACH"))
+        XCTAssertTrue(open.accessibilityLabel?.contains("live") == true)
+
+        let closed = tile(hasOpenTab: false)
+        XCTAssertFalse(shownText(in: closed).contains("LIVE"))
+        XCTAssertTrue(shownText(in: closed).contains("ATTACH"))
+        XCTAssertTrue(closed.accessibilityLabel?.contains("not attached") == true)
+
+        // A tmux tile still reads the probe: an open tab is not what makes
+        // it live, and a client attached elsewhere still does.
+        XCTAssertTrue(Host.SessionBackend.tmux.isSessionLive(
+            clientCount: 1, hasOpenTab: false))
+        XCTAssertFalse(Host.SessionBackend.tmux.isSessionLive(
+            clientCount: 0, hasOpenTab: true))
+    }
+
     func testSessionTileDragIsLocalStableAndHasNoBrightPreviewPlatter() throws {
         let hostID = UUID()
         let sourceSession = makeSession(name: "agent")
@@ -473,6 +525,7 @@ final class FleetWallUIKitTests: XCTestCase {
                 attention: nil,
                 usesTmuxAttentionFallback: true,
                 hasOpenTab: false,
+                sessionBackend: .tmux,
                 compact: false,
                 selected: false,
                 duplicateAttachTitle: "Attach in New Window",
@@ -553,6 +606,7 @@ final class FleetWallUIKitTests: XCTestCase {
             attention: nil,
             usesTmuxAttentionFallback: true,
             hasOpenTab: false,
+            sessionBackend: .tmux,
             compact: false,
             selected: false,
             duplicateAttachTitle: "Attach in New Window",
@@ -776,6 +830,19 @@ final class FleetWallUIKitTests: XCTestCase {
             if let submenu = child as? UIMenu { return menuTitles(submenu) }
             return []
         }
+    }
+
+    /// `visibleText` reads the whole label tree — the tile keeps both faces
+    /// of its attach slot mounted so the row can't resize, so only this
+    /// walk (which honours hidden/zero-alpha branches) can tell which one
+    /// the eye actually sees.
+    private func shownText(in root: UIView) -> String {
+        guard !root.isHidden, root.alpha > 0 else { return "" }
+        let own = (root as? UILabel).flatMap { $0.attributedText?.string ?? $0.text } ?? ""
+        return ([own] + root.subviews.map { shownText(in: $0) })
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+            .uppercased()
     }
 
     private func visibleText(in root: UIView) -> String {

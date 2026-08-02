@@ -25,6 +25,27 @@ struct Host: Identifiable, Codable, Hashable {
     enum SessionBackend: String, Codable, CaseIterable {
         case tmux
         case herdr
+
+        /// Whether the probe can state how many clients a session has.
+        /// tmux answers `#{session_attached}`; herdr 0.7.5 / protocol 17
+        /// exposes no attached-client surface at all (verified 2026-08-02
+        /// across `session list --json`, `api snapshot`, `status --json`,
+        /// and the bundled API schema — only the socket-only
+        /// `client.window_title` reply leaks a `no_foreground_client`
+        /// reason, and no CLI verb reaches it), so its records carry
+        /// `clientCount == 0` whatever is really attached.
+        var reportsClientCount: Bool { self == .tmux }
+
+        /// Whether a session is live right now — said only where it can be
+        /// verified. tmux counts every client on the host. herdr can answer
+        /// for exactly one client: the one this app is, which is what an
+        /// open terminal tab means. A shell on the host attached to the same
+        /// herdr session therefore stays invisible; the tile understates
+        /// rather than guesses, the same choice its missing client count and
+        /// session age already make.
+        func isSessionLive(clientCount: Int, hasOpenTab: Bool) -> Bool {
+            reportsClientCount ? clientCount > 0 : hasOpenTab
+        }
     }
 
     var id: UUID = UUID()

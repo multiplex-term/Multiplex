@@ -1384,6 +1384,7 @@ private final class FleetHostSectionView: UIView {
                     usesTmuxAttentionFallback: snapshot.hasLiveProbe
                         && host.sessionBackend == .tmux,
                     hasOpenTab: snapshot.openSessionNames.contains(session.name),
+                    sessionBackend: host.sessionBackend,
                     compact: configuration.presentation == .shellRail,
                     selected: configuration.selectedTerminal?.hostID == host.id
                         && configuration.selectedTerminal?.sessionName == session.name
@@ -2258,6 +2259,9 @@ struct FleetSessionTileConfiguration {
     /// across every pane and must never fall back to title heuristics.
     let usesTmuxAttentionFallback: Bool
     let hasOpenTab: Bool
+    /// Which multiplexer this tile speaks for. Only the LIVE lamp reads it:
+    /// a herdr session has no client count to light it with.
+    let sessionBackend: Host.SessionBackend
     let compact: Bool
     let selected: Bool
     let duplicateAttachTitle: String
@@ -2266,6 +2270,15 @@ struct FleetSessionTileConfiguration {
     let attachNewWindow: () -> Void
     let delete: () -> Void
     let droppedSession: (String) -> Void
+
+    /// Whether the session is attached right now — the LIVE lamp's one
+    /// authority, resolved per backend by `SessionBackend.isSessionLive`.
+    var isLive: Bool {
+        sessionBackend.isSessionLive(
+            clientCount: session.clientCount,
+            hasOpenTab: hasOpenTab
+        )
+    }
 
     /// Data equality of everything the tile draws. The actions are the only
     /// exclusions: equal data means their captured host/session inputs are
@@ -2277,6 +2290,7 @@ struct FleetSessionTileConfiguration {
             && attention == other.attention
             && usesTmuxAttentionFallback == other.usesTmuxAttentionFallback
             && hasOpenTab == other.hasOpenTab
+            && sessionBackend == other.sessionBackend
             && compact == other.compact
             && selected == other.selected
             && duplicateAttachTitle == other.duplicateAttachTitle
@@ -2579,10 +2593,11 @@ final class FleetSessionTileView: FleetPressView,
         row.addArrangedSubview(name)
 
         let attachSlot = UIView()
+        let isLive = configuration.isLive
         let attach = FleetBadgeView(caption: "ATTACH")
-        attach.alpha = configuration.session.isAttached ? 0 : 1
+        attach.alpha = isLive ? 0 : 1
         let live = UIKitTallyLamp(caption: "LIVE", color: TallyPalette.tally)
-        live.isHidden = !configuration.session.isAttached
+        live.isHidden = !isLive
         attachSlot.addSubview(attach)
         attachSlot.addSubview(live)
         attach.translatesAutoresizingMaskIntoConstraints = false
@@ -2721,7 +2736,7 @@ final class FleetSessionTileView: FleetPressView,
         agentNeedsYou: Bool
     ) -> String {
         let session = configuration.session
-        var parts = [session.name, session.isAttached ? "live" : "not attached"]
+        var parts = [session.name, configuration.isLive ? "live" : "not attached"]
         if agentNeedsYou { parts.append("agent needs your input") }
         if agentRunning { parts.append("agent running") }
         parts.append("\(session.windowCount) windows and \(session.paneCount) panes")

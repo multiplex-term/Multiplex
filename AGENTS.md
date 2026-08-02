@@ -751,7 +751,13 @@ logic belongs — keep parsing/command-building out of views.
   dir — one field, one meaning; an unconfigured host falls to the
   session's world: tmux active-pane cwd / herdr server default). A dead
   target name falls back to the fresh-session mint; a failed in-session
-  create is a visible failure, never a fallback mint. herdr reports no client count or creation time.
+  create is a visible failure, never a fallback mint. herdr reports no client
+  count or creation time — nothing in `session list`, `api snapshot`,
+  `status`, or the bundled `api schema` names an attached client — so a herdr
+  tile's LIVE lamp answers for the one client the app can verify: its own open
+  terminal tab (`Host.SessionBackend.isSessionLive`, pure). A shell attached
+  on the host stays invisible there; the tile understates rather than guesses,
+  the same choice its blank client-count and age telemetry already make.
   The shortcut panel has a herdr variant (`HerdrShortcut`, pure + tested;
   the rail key face reads HRDR; deliberately curated small — zoom,
   scrollback, rename-tab, picker, and sidebar rows were trimmed

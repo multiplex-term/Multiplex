@@ -465,3 +465,20 @@ client follows — that is herdr).
 - On iPhone the tall panel scrolls instead of clipping rows (the tmux
   panel gained the same scroll).
 - tmux tabs are unchanged: same TMUX key, same panel as before.
+
+DECK — a herdr session you have open now shows LIVE
+
+A herdr tile used to offer ATTACH even while one of your terminal
+windows was already attached to it (herdr, unlike tmux, publishes no
+attached-client count anywhere, so the lamp had nothing to read). The
+tile now lights LIVE whenever Multiplex itself has a window open on
+that session.
+
+- On a herdr host, attach a session from the deck, then go back to the
+  deck: its tile reads ● LIVE instead of the ATTACH badge.
+- Close that terminal window (or its tab): the tile returns to ATTACH.
+- Attach the same session from a shell ON the host instead: the tile
+  still says ATTACH — herdr tells the app nothing about other clients,
+  and the tile won't claim what it can't check.
+- tmux tiles are unchanged: they keep counting every client on the host,
+  yours and other people's, and still show "2 CLIENTS" telemetry.
