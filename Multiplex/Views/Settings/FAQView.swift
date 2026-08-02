@@ -111,6 +111,9 @@ final class FAQViewController: UIViewController, AppAppearanceFollowing {
         let rowStack = UIStackView(arrangedSubviews: [answer])
         rowStack.axis = .vertical
         rowStack.spacing = 12
+        if entry.offersMultiplexerInstall {
+            rowStack.addArrangedSubview(FAQMultiplexerInstallView())
+        }
         for command in entry.commands {
             rowStack.addArrangedSubview(UIKitCopyableCommandField(
                 label: command.label,
@@ -134,6 +137,71 @@ final class FAQViewController: UIViewController, AppAppearanceFollowing {
     }
 }
 
+// MARK: - Multiplexer install
+
+/// The install commands for both session backends behind a tmux | herdr
+/// choice bar. The backend is a per-host setting, so the FAQ cannot know
+/// which one the reader needs — showing one road at a time beats stacking
+/// six command fields, and the choice bar is the same control Add Host and
+/// Host Settings use to pick the backend in the first place.
+@MainActor
+private final class FAQMultiplexerInstallView: UIView {
+    private let commandStack = UIStackView()
+    private let pathNote = UILabel()
+
+    init(backend: Host.SessionBackend = .tmux) {
+        super.init(frame: .zero)
+
+        let bar = AddHostChoiceBar<Host.SessionBackend>(
+            // The button face uppercases; pass the natural spelling so
+            // VoiceOver reads "tmux", not the letters T-M-U-X.
+            choices: Host.SessionBackend.allCases.map { ($0.rawValue, $0) },
+            selection: backend
+        ) { [weak self] backend in
+            self?.show(backend)
+        }
+        bar.accessibilityIdentifier = "faq.backendBar"
+
+        commandStack.axis = .vertical
+        commandStack.spacing = 12
+
+        pathNote.font = UIKitChassis.uiFont(10)
+        pathNote.textColor = UIKitChassis.signal2
+        pathNote.numberOfLines = 0
+
+        let stack = UIStackView(arrangedSubviews: [bar, commandStack, pathNote])
+        stack.axis = .vertical
+        stack.spacing = 12
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        show(backend)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    private func show(_ backend: Host.SessionBackend) {
+        for view in commandStack.arrangedSubviews {
+            commandStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        for command in HostGuide.multiplexerInstall(for: backend) {
+            commandStack.addArrangedSubview(UIKitCopyableCommandField(
+                label: command.label,
+                command: command.command
+            ))
+        }
+        pathNote.text = HostGuide.probePathDetail(for: backend)
+    }
+}
+
 // MARK: - Static content
 
 /// Questions render as compressed-caps section titles, so keep them short
@@ -144,21 +212,26 @@ private struct FAQEntry {
     let question: String
     let answer: String
     var commands: [HostGuide.Command] = []
+    /// Renders the tmux | herdr install area instead of a flat command list:
+    /// the answer covers both backends, so the reader picks their host's.
+    var offersMultiplexerInstall = false
     var postscript: String?
 
     static let all: [FAQEntry] = [
         FAQEntry(
-            id: "host-needs-tmux",
-            question: "A host shows no tmux on the deck",
-            answer: "The deck is built around a tmux server on each host — "
-                + "sessions, live tiles, and attach all come from it. A host "
-                + "without tmux still works as a plain shell (the SHELL chip "
-                + "on its rail), it just has no session tiles. To get the "
-                + "full deck, install tmux on the host:",
-            commands: HostGuide.tmuxInstall,
-            postscript: "The deck re-probes every few seconds and finds tmux "
-                + "as soon as it lands — Homebrew and /usr/local installs "
-                + "are already on the probe's PATH."
+            id: "host-needs-multiplexer",
+            question: "A host shows no tmux or herdr",
+            answer: "The deck is built around a session multiplexer on each "
+                + "host — sessions, live tiles, and attach all come from it. "
+                + "Each host runs one, tmux or herdr, chosen in its settings "
+                + "under Sessions run on. A host without that multiplexer "
+                + "still works as a plain shell (the SHELL chip on its rail), "
+                + "it just has no session tiles. To get the full deck, "
+                + "install the one the host is set to:",
+            offersMultiplexerInstall: true,
+            postscript: "The deck re-probes every few seconds and lights the "
+                + "tile as soon as the multiplexer lands — no restart, and "
+                + "nothing to configure on the host."
         ),
         FAQEntry(
             id: "claude-code-tmux-keychain",

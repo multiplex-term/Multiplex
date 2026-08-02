@@ -41,6 +41,20 @@ enum HostGuide {
         }
     }
 
+    /// Why a default install needs no further host setup: both probes
+    /// prepend these directories (`TmuxProbe.pathPrefix`,
+    /// `HerdrProbe.pathPrefix`). Shared so the tile's INSTALL GUIDE and the
+    /// FAQ cannot drift apart on what the probe can already find.
+    static func probePathDetail(for backend: Host.SessionBackend) -> String {
+        switch backend {
+        case .tmux:
+            "Homebrew and /usr/local installs are already on the probe's PATH."
+        case .herdr:
+            "Homebrew, ~/.local/bin, and ~/.cargo/bin installs are already on "
+                + "the probe's PATH."
+        }
+    }
+
     /// The macOS locked-keychain fix (see `KeychainLockCheck`): unlock once
     /// in any shell on the host, then restart the signed-out agent.
     static let keychainUnlock = Command(

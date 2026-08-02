@@ -262,13 +262,7 @@ final class TmuxInstallViewController: UIKitHostGuideSheetViewController {
     }
 
     private var probePathDetail: String {
-        switch host.sessionBackend {
-        case .tmux:
-            "Homebrew and /usr/local installs are already on the probe's PATH."
-        case .herdr:
-            "Homebrew, ~/.local/bin, and ~/.cargo/bin installs are already on "
-                + "the probe's PATH."
-        }
+        HostGuide.probePathDetail(for: host.sessionBackend)
     }
 
     init(host: Host) {

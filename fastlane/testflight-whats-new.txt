@@ -356,3 +356,17 @@ is — the choice is yours, never guessed.
   before.
 - Close the sheet and reopen BIND: Backend is back to TMUX (like the key
   passphrase, the pane never carries a silent choice over).
+
+HERDR IN THE FAQ — install guidance for whichever backend you run
+
+The FAQ's "no sessions on the deck" answer now covers both backends: it
+explains that each host runs one multiplexer, tmux or herdr, and its
+install commands sit behind a TMUX | HERDR bar you switch in place.
+
+- Deck ▸ FAQ, first answer: TMUX shows the four tmux installs; tap HERDR
+  and the two herdr installs replace them, with the line underneath naming
+  the directories the probe already searches for that backend.
+- Copy a command from either side: COPY acknowledges and the clipboard
+  holds that exact line.
+- A dead tile's own INSTALL GUIDE is unchanged — it still shows only the
+  backend that host is set to.

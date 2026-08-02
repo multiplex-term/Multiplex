@@ -31,6 +31,20 @@ final class HostGuideTests: XCTestCase {
             HostGuide.multiplexerInstall(for: .herdr), HostGuide.herdrInstall)
     }
 
+    /// One sentence for both the dead tile's INSTALL GUIDE and the FAQ, so
+    /// neither can promise a probe PATH the other denies.
+    func testProbePathDetailNamesEachBackendsInstallHomes() {
+        XCTAssertEqual(
+            HostGuide.probePathDetail(for: .tmux),
+            "Homebrew and /usr/local installs are already on the probe's PATH."
+        )
+        XCTAssertEqual(
+            HostGuide.probePathDetail(for: .herdr),
+            "Homebrew, ~/.local/bin, and ~/.cargo/bin installs are already on "
+                + "the probe's PATH."
+        )
+    }
+
     func testKeychainUnlockCommandKeepsExactShellLine() {
         XCTAssertEqual(HostGuide.keychainUnlock.label, "")
         XCTAssertEqual(
