@@ -183,7 +183,9 @@ stable). A cloud-init variant covers Docker-less VMs, and `verify.sh` is the
 pre-submission check either way. What it provisions: password auth
 for `review` only with every SSH forwarding surface disabled, no sudo,
 tmux + mosh-server, boot/nightly-reseeded demo sessions (including the
-disclosed agent stub that makes the Pro strip demonstrable), and a
+disclosed agent stub that makes the Pro strip demonstrable), a pinned
+herdr with its own seeded sessions so the HERDR backend the store
+description promises is demoable on the same box, and a
 zero-egress firewall stance (host `DOCKER-USER` rules / in-VM ufw — the box
 can't relay spam or proxy traffic).
 

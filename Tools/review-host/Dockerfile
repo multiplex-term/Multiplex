@@ -12,6 +12,9 @@ FROM ubuntu:24.04
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         openssh-server tmux mosh vim htop procps tini locales-all \
+        # curl + ca-certificates fetch the pinned herdr binary below; python3
+        # runs its seed (the herdr socket API answers JSON).
+        curl ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     # mosh-server refuses to start without a UTF-8 locale; login sessions
@@ -34,14 +37,18 @@ COPY sshd_review.conf /etc/ssh/sshd_config.d/60-review.conf
 COPY scripts/mosh-server-wrapper /usr/bin/mosh-server
 COPY scripts/demo-server-log scripts/demo-worker-log scripts/demo-build-loop \
      scripts/demo-agent-cc scripts/demo-agent-cx scripts/demo-agent-pi \
-     scripts/seed-review-sessions \
+     scripts/seed-review-sessions scripts/seed-review-herdr scripts/install-herdr \
      /usr/local/bin/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod 755 /usr/bin/mosh-server /entrypoint.sh \
         /usr/local/bin/demo-server-log /usr/local/bin/demo-worker-log \
         /usr/local/bin/demo-build-loop /usr/local/bin/demo-agent-cc \
         /usr/local/bin/demo-agent-cx /usr/local/bin/demo-agent-pi \
-        /usr/local/bin/seed-review-sessions
+        /usr/local/bin/seed-review-sessions /usr/local/bin/seed-review-herdr \
+        /usr/local/bin/install-herdr \
+    # herdr — the app's second session backend, pinned and checksummed. Baked
+    # into the image (build time is the one moment this host has egress).
+    && /usr/local/bin/install-herdr
 
 # Host keys persist in a volume: once the app ships TOFU pinning, a stable
 # key across container rebuilds is part of being a well-behaved SSH host.

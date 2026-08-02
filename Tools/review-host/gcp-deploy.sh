@@ -114,7 +114,7 @@ HASH='__HASH__'
 apt-get -o DPkg::Lock::Timeout=180 -q update
 apt-get -o DPkg::Lock::Timeout=180 -yq upgrade
 apt-get -o DPkg::Lock::Timeout=180 -yq install --no-install-recommends \
-    tmux mosh vim htop fail2ban ufw locales-all
+    tmux mosh vim htop fail2ban ufw locales-all python3
 
 # mosh-server needs a UTF-8 locale; stop honoring client LANG/LC_* over ssh
 # (mosh's own -l forwarding is covered by locales-all above).
@@ -152,7 +152,13 @@ install -m 755 /tmp/rh/scripts/mosh-server-wrapper /usr/bin/mosh-server
 install -m 755 /tmp/rh/scripts/demo-server-log /tmp/rh/scripts/demo-worker-log \
     /tmp/rh/scripts/demo-build-loop /tmp/rh/scripts/demo-agent-cc \
     /tmp/rh/scripts/demo-agent-cx /tmp/rh/scripts/demo-agent-pi \
-    /tmp/rh/scripts/seed-review-sessions /usr/local/bin/
+    /tmp/rh/scripts/seed-review-sessions /tmp/rh/scripts/seed-review-herdr \
+    /tmp/rh/scripts/install-herdr /usr/local/bin/
+
+# The second session backend the app can drive (pinned + checksummed). A
+# download failure must not fail the deploy: tmux is what the review notes
+# lead with, and the herdr seed skips itself without the binary.
+/usr/local/bin/install-herdr || echo "herdr install failed — tmux demo unaffected"
 
 cat > /etc/cron.d/review-reseed <<'CRON'
 # Reseed demo sessions on boot and nightly at 08:00 UTC (midnight
@@ -184,6 +190,7 @@ systemctl enable --now fail2ban 2>/dev/null || systemctl restart fail2ban
 /usr/local/bin/seed-review-sessions
 sleep 1
 su - review -c 'tmux ls'
+su - review -c 'herdr session list' 2>/dev/null || true
 echo PROVISION_OK
 PROV
 # render.sh precedent: | is the one char openssl's hash could clash with
@@ -208,6 +215,8 @@ if command -v sshpass >/dev/null; then
   echo "— reviewer login battery"
   if ! sshpass -f "$PWFILE" ssh "${SSH_OPTS[@]}" "review@$TARGET" '
       printf "  sessions:    "; tmux ls 2>/dev/null | wc -l | tr -d " "
+      printf "  herdr:       "; herdr --version 2>/dev/null || echo "not installed"
+      printf "  herdr live:  "; herdr session list 2>/dev/null | grep -c running || true
       printf "  mosh-server: "; command -v mosh-server || echo MISSING
       printf "  locale:      "; locale | grep ^LANG=
       printf "  sudo:        "; sudo -n true 2>/dev/null && echo "!!! HAS SUDO" || echo "none (correct)"

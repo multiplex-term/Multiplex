@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""Seed the reviewer's herdr sessions — the HERDR-backend analog of the tmux
+sessions in seed-review-sessions, and its sibling: seed-review-sessions runs
+this as `review` after the tmux seed, and a host with no herdr binary simply
+skips it.
+
+Three tiles, matching the tmux story so the review notes can describe one
+demo either way:
+
+  default  herdr's protected primary session (a plain shell; the app's
+           blind-attach fallback), left running so the wall isn't empty
+  main     `editor` + `logs` workspaces — the deck draws them as that
+           tile's window spine — the second streaming the worker log
+  agent    three workspaces running the same agent-detection stubs as the
+           tmux `agent` session (cc/cx/pi), each reporting a herdr agent
+           lifecycle state, so RUNNING / NEEDS YOU / idle are reproducible
+
+Wire facts this leans on (herdr 0.7.5 / protocol 17, same set the app's
+HerdrProbe documents): `session attach <name>` auto-creates and auto-starts,
+and without a TTY the client exits *after* the session server daemonizes;
+every socket verb scopes with the global `--session` flag; a fresh session's
+first pane is `w1:p1`; reportable states are idle|working|blocked|unknown.
+"""
+
+import json
+import os
+import pathlib
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+
+SESSIONS = ["main", "agent"]
+DEVNULL = subprocess.DEVNULL
+LOG = pathlib.Path.home() / "herdr-server.log"
+SHELLS = {"sh", "bash", "zsh", "dash", "fish", "csh", "tcsh"}
+
+
+def herdr(session, *args, check=True, capture=False):
+    return subprocess.run(["herdr", "--session", session, *args],
+                          capture_output=capture, text=True, check=check)
+
+
+def server_running():
+    probe = subprocess.run(["herdr", "status", "--json"],
+                           capture_output=True, text=True, check=False)
+    return '"running":true' in probe.stdout.replace(" ", "")
+
+
+def start_default_server():
+    """The default session is the one tile the app can attach blind."""
+    if server_running():
+        return
+    with LOG.open("ab") as log:
+        subprocess.Popen(["herdr", "server"], stdin=DEVNULL, stdout=log,
+                         stderr=log, start_new_session=True)
+    for _ in range(25):
+        if server_running():
+            return
+        time.sleep(0.4)
+    sys.exit(f"herdr server never came up — see {LOG}")
+
+
+def spawn(session):
+    """Recreate a session from scratch: a reseed must not stack workspaces."""
+    for verb in ("stop", "delete"):
+        subprocess.run(["herdr", "session", verb, session],
+                       stdout=DEVNULL, stderr=DEVNULL, check=False)
+    subprocess.run(["herdr", "session", "attach", session],
+                   stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL, check=False)
+    for _ in range(20):
+        if herdr(session, "api", "snapshot",
+                 check=False, capture=True).returncode == 0:
+            return
+        time.sleep(0.3)
+    sys.exit(f"herdr session {session} never answered its socket")
+
+
+def workspace(session, label, cwd, focus=False):
+    """`--no-focus` by default: a session carries ONE focus every client
+    mirrors, and the seed should leave each tile on its first workspace."""
+    out = herdr(session, "workspace", "create", "--cwd", cwd, "--label", label,
+                "--focus" if focus else "--no-focus", capture=True).stdout
+    result = json.loads(out)["result"]
+    return result["workspace"]["workspace_id"], result["root_pane"]["pane_id"]
+
+
+def rename(session, workspace_id, label):
+    """A session's first workspace is labelled after its cwd; the deck draws
+    those labels as the tile's window spine, so name them like tmux's."""
+    herdr(session, "workspace", "rename", workspace_id, label,
+          check=False, capture=True)
+
+
+def foreground_argv0s(session, pane):
+    """argv[0] of every foreground process, however this herdr spells it:
+    0.7.5 reports an `argv0` string on macOS but an `argv` list on Linux
+    (`name` is the executable — `cat` for our `exec -a <kind> cat` stubs —
+    so it is deliberately the last resort)."""
+    out = herdr(session, "pane", "process-info", "--pane", pane,
+                check=False, capture=True)
+    try:
+        info = json.loads(out.stdout)["result"]["process_info"]
+        processes = info["foreground_processes"]
+    except (KeyError, TypeError, ValueError):
+        return []
+    argv0s = []
+    for process in processes:
+        argv0 = process.get("argv0")
+        if not argv0:
+            argv = process.get("argv") or (process.get("cmdline") or "").split()
+            argv0 = argv[0] if argv else process.get("name")
+        argv0s.append(str(argv0 or ""))
+    return argv0s
+
+
+def wait_for_shell(session, pane):
+    for _ in range(30):
+        argv0s = foreground_argv0s(session, pane)
+        if len(argv0s) == 1:
+            if pathlib.Path(argv0s[0].lstrip("-")).name in SHELLS:
+                return
+        time.sleep(0.2)
+
+
+def run(session, pane, command, expect=None):
+    """Type a command into a pane the way a person would, then (optionally)
+    require its process to prove it is live — the seed must never claim an
+    agent over a shell prompt that swallowed the line."""
+    wait_for_shell(session, pane)
+    herdr(session, "pane", "send-text", pane, command)
+    herdr(session, "pane", "send-keys", pane, "Enter")
+    if expect is None:
+        return
+    for attempt in range(20):
+        if expect in foreground_argv0s(session, pane):
+            return
+        if attempt == 5:
+            herdr(session, "pane", "send-keys", pane, "Enter")
+        time.sleep(0.3)
+    sys.exit(f"herdr {session} pane {pane} never launched {expect}")
+
+
+def report(session, pane, agent, state, message=None):
+    herdr(session, "pane", "report-agent", pane, "--source", "multiplex-review",
+          "--agent", agent, "--state", state,
+          *(["--message", message] if message else []))
+
+
+if shutil.which("herdr") is None:
+    print("herdr not installed — skipping herdr seed")
+    sys.exit(0)
+
+home = str(pathlib.Path.home())
+project = os.path.join(home, "project")
+start_default_server()
+for name in SESSIONS:
+    spawn(name)
+
+# `herdr server` brings the default session up empty — a tile with nothing to
+# show. Give it the plain shell a person attaching blind would expect.
+if not json.loads(herdr("default", "workspace", "list",
+                        capture=True).stdout)["result"]["workspaces"]:
+    workspace("default", "shell", home, focus=True)
+
+# main: the tmux demo's shape — an editor pane plus a second workspace with
+# live output, so the tile has both a window spine and a moving miniature.
+rename("main", "w1", "editor")
+# `-R -n`: the tmux demo already holds this file open in its own vim, and a
+# second writable vim lands on the E325 swap-file prompt instead of the notes.
+run("main", "w1:p1",
+    f"vim -R -n {shlex.quote(os.path.join(project, 'notes.md'))}", expect="vim")
+_, logs_pane = workspace("main", "logs", project)
+run("main", logs_pane, "/usr/local/bin/demo-worker-log")
+
+# agent: the disclosed stubs, each with the herdr lifecycle state a real
+# integration would report through the same door. Every stub is `exec -a
+# <kind> cat`, so the kind doubles as the argv0 the pane must show before the
+# state is reported.
+for label, stub, kind, state, message in [
+    ("cc", "demo-agent-cc", "claude", "working", None),
+    ("cx", "demo-agent-cx", "codex", "blocked", "Allow command: npm run deploy?"),
+    ("pi", "demo-agent-pi", "pi", "idle", None),
+]:
+    if label == "cc":
+        pane = "w1:p1"
+        rename("agent", "w1", label)
+    else:
+        _, pane = workspace("agent", label, project)
+    run("agent", pane, f"/usr/local/bin/{stub}", expect=kind)
+    report("agent", pane, kind, state, message)
+
+print("herdr sessions seeded:", ", ".join(["default", *SESSIONS]))

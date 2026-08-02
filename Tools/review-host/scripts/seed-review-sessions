@@ -20,3 +20,9 @@ tmux new-window -t agent:1 -n cx /usr/local/bin/demo-agent-cx
 tmux new-window -t agent:2 -n pi /usr/local/bin/demo-agent-pi
 tmux select-window -t agent:0
 SEED
+
+# The HERDR-backend half of the same demo (skips itself where herdr isn't
+# installed). It runs after the pkill above, so it always starts from a dead
+# herdr server — a reseed is a full reset for both backends.
+su - review -s /bin/bash -c /usr/local/bin/seed-review-herdr || \
+    echo "seed-review-herdr failed — tmux sessions are still seeded" >&2

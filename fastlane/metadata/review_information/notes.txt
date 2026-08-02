@@ -9,6 +9,7 @@ CORE FLOW
 - The free tier saves two hosts; Multiplex Pro removes the limit.
 - + NEW SESSION starts a plain tmux shell or launches Claude Code, Codex, or Pi with an optional first prompt, passed once as the CLI's first message and not retained.
 - Tap a tile to attach: the session opens in its own window with a red LIVE lamp. Attach a second and place them side by side (its own spatial window on Vision Pro; Stage Manager on iPad).
+- [Optional] The demo host also runs herdr: edit the host, set SESSION BACKEND to HERDR, and the wall redraws from herdr sessions (agent states included); TMUX switches back.
 - Vision Pro: Settings → Appearance → GLASS applies smoked spatial material live to the deck, terminals, and forms; SYSTEM/LIGHT/DARK remain available.
 - MERGE in a terminal's bottom bar pulls another window's session in as a tab; a tab's context menu moves it back out, still connected.
 - TMUX in the bottom/key bar (top-right on narrow iPhones) opens New Window, Split, and Copy Mode. In Copy Mode, swipe history, hold to select/copy, press Done.

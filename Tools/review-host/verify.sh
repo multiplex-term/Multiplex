@@ -16,6 +16,9 @@ nc -vz -G 5 "$HOST" 22 || { echo "  UNREACHABLE"; exit 1; }
 echo "— login as review (type the demo password)"
 ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no "review@$HOST" '
   echo "  sessions:"; tmux ls 2>/dev/null | sed "s/^/    /" || echo "    NONE — reseed broken"
+  echo "  herdr:"
+  herdr --version 2>/dev/null | sed "s/^/    /" || echo "    NOT INSTALLED — HERDR backend undemoable"
+  herdr session list 2>/dev/null | sed "s/^/    /" || true
   printf "  mosh-server: "; command -v mosh-server || echo "MISSING"
   printf "  locale:      "; locale | grep ^LANG
   printf "  sudo:        "; sudo -n true 2>/dev/null && echo "!!! HAS SUDO — fix this" || echo "none (correct)"
