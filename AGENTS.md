@@ -1135,7 +1135,11 @@ Multiplex Pro IAP, automation boundaries, and review assets. Whenever a
 user-visible feature, Free/Pro allocation, price, platform, requirement,
 permission, privacy behavior, or reviewer flow changes, update that
 document AND reconcile `fastlane/metadata/`, review notes, release notes,
-`Multiplex.storekit`, and screenshots in the same change. Paywall / Pro
+`Multiplex.storekit`, and screenshots in the same change. App Store
+descriptions are platform-specific:
+`fastlane/metadata/*/description_{ios,visionos}.txt`; never add a shared
+`description.txt`, which can put Vision Pro-only claims on the iOS listing.
+Paywall / Pro
 value changes regenerate the real-paywall IAP review assets at
 `docs/appstore/iap-review-screenshot.{png,jpg}` (private review material,
 separate from public `fastlane/screenshots/`). Price changes also update

@@ -29,9 +29,9 @@ behavior, or App Review flow changes.
 The canonical localized listing copy is stored in
 [`fastlane/metadata/en-US/`](../fastlane/metadata/en-US/):
 
-- name, subtitle, promotional text, description, and keywords;
-- platform-specific `release_notes_ios.txt` and
-  `release_notes_visionos.txt` in each locale;
+- shared name, subtitle, promotional text, and keywords;
+- platform-specific `description_ios.txt` / `description_visionos.txt` and
+  `release_notes_ios.txt` / `release_notes_visionos.txt` in each locale;
 - support, marketing, and privacy URLs;
 - `beta_app_description.txt` — TestFlight's Test Information, the tester-facing
   description, pushed by `testflight_info` and by `beta external:true` (not an
@@ -46,10 +46,18 @@ The canonical localized listing copy is stored in
   rejection arrives mid-upload as `An attribute value is too long. -
   /data/attributes/notes`.
 
-Do not duplicate the complete description in this document. The
-`store_metadata` lane uploads the shared files to both platform versions and
-injects the matching platform release notes into each `deliver` call. Pass
+Do not duplicate either complete description in this document. The
+`store_metadata` lane uploads shared fields to both platform versions and
+injects each locale's matching description and release notes into its
+`deliver` call. Never restore a shared `description.txt`: iOS copy must not
+advertise visionOS-only surfaces such as GLASS, while the visionOS listing
+should describe spatial windows rather than iPhone/iPad windowing. Pass
 `platform:ios` or `platform:visionos` to target only one.
+
+| Platform version | Description emphasis | Appearance claim |
+| --- | --- | --- |
+| iOS | iPhone adaptive shell, iPad scenes/Stage Manager, Home Screen widgets | SYSTEM / LIGHT / DARK only |
+| visionOS | Spatial windows and, on visionOS 26+, widgets pinned in the room | SYSTEM / LIGHT / DARK / GLASS |
 
 ## Bind Host (companion CLI)
 
@@ -172,8 +180,8 @@ Current product split:
   menu, its tile, or Host Settings) that parks a host on the wall without
   connecting to it — no probing, no local-network check, and widget or
   Shortcut actions report it as disabled — carried with the host record to
-  the user's other devices, built-in terminal themes
-  and a separate theme selection per appearance (light adds Tally Frost/Paper/Ivory),
+  the user's other devices, built-in terminal themes with independent light/dark
+  selections (GLASS shares dark; light adds Tally Frost/Paper/Ivory),
   free file attachment on SSH-backed tmux tabs from Files/Photos (plus camera
   on iPad) and drag-and-drop through the same SSH upload path, opening web and
   mail links found in terminal output (long press, or tap where the remote is
@@ -286,7 +294,7 @@ can still be permission-gated or require App Store Connect UI work.
 
 | Work | Current route |
 | --- | --- |
-| App listing metadata and review notes | `bundle exec fastlane store_metadata` (both platform versions by default; optional `platform:ios\|visionos`) |
+| App listing metadata and review notes | `bundle exec fastlane store_metadata` (shared fields plus each platform's description/release notes; both versions by default, optional `platform:ios\|visionos`) |
 | Public App Store screenshots | `bundle exec fastlane store_screenshots` |
 | iOS (iPhone + iPad) + visionOS TestFlight binaries | `bundle exec fastlane beta` |
 | TestFlight Test Information (beta app description, feedback email, URLs) | `bundle exec fastlane testflight_info` (also pushed by `beta external:true`) |

@@ -1,0 +1,28 @@
+Multiplex is a terminal for people who live inside persistent remote sessions — built native for Apple Vision Pro.
+
+THE WALL
+Hosts probe concurrently. Every tmux session is a live monitor: actual last lines, one spine segment per window, and red LIVE while attached. Choose herdr per host for one tile per session, its workspaces on the spine, and agent state from herdr. See your whole fleet before attaching; NO SIGNAL reconnects in one tap.
+
+A WINDOW PER SESSION
+Attach opens the session in its own spatial window — build logs above your editor, a server dashboard across the room. Merge windows into tabs and split them back out. The SSH connection, buffer, and scrollback move with the tab, so shells never drop.
+
+BUILT FOR AI AGENT SESSIONS
+Start Claude Code, Codex, or Pi with an optional setup script and first prompt in one step. Multiplex spots all three across every pane. Helper chips follow the foreground agent, so commands reach the process receiving your keystrokes. Everyone gets daily one-tap commands: stop, compact/resume, model and thinking switches, and more. Each host remembers its setup across devices — move built-ins between Bar and More, add ordered custom commands, and share them across agents. Pro removes the daily limit, alerts when an unwatched Claude Code/Codex turn in tmux — or Claude Code/Codex/Pi turn in herdr — finishes or needs input, and opens Claude Code tmux prompt history with one-tap transcript jumps. On SSH-backed tmux tabs, attach or drop files: Multiplex uploads into the pane's working directory and types the remote path.
+
+WIDGETS & SHORTCUTS
+On visionOS 26 or later, pin a host in your space: a wall tile in miniature — last-known session frames with an honest SEEN stamp — plus SHELL and AGENT keys that jump straight into a connection; a fleet widget shows every host at a glance. Shortcuts and Siri can open a shell on any host; on tmux hosts they can also launch Claude Code, Codex, or Pi in a chosen working directory, with setup script and first prompt. A multiplex:// URL scheme powers your own automations.
+
+MOSH BUILT IN
+With Pro, switch a host to mosh and the session survives sleep, roaming, and IP changes — a native Swift mosh client, no companion app. Made for a headset that suspends and resumes on a different path.
+
+A REAL TERMINAL
+Full xterm-256color emulation, multilingual system-keyboard input, gaze-and-pinch clicks for mouse-aware TUIs, hardware keyboards, live PTY resize, and a built-in menu for everyday tmux commands — windows, panes, copy mode, rename, zoom. Copy mode keeps selection native; Done exits. System, Light, Dark, and smoked Glass switch the whole chassis. Glass admits the room while preserving TALLY's monitor hierarchy and shares Dark's terminal-theme selection — ten built-ins included. Pro adds a custom theme editor for background, text, cursor, and all 16 ANSI colors.
+
+PRIVATE BY DESIGN
+Hosts, agent-command setups, and secrets sync between your devices through iCloud Keychain, end-to-end encrypted. Nothing touches our servers — there are none. No account, no analytics, no tracking.
+
+MULTIPLEX PRO
+One purchase, no subscription: unlimited hosts, mosh, agent notifications, the unmetered agent command strip, and custom themes — on all your devices. The free app includes two hosts, the full spatial experience, and 10 agent-command chip taps each day.
+
+WHAT YOU NEED
+A remote host you can reach over SSH (password or OpenSSH ed25519/RSA key). The live wall and persistent sessions need tmux 1.8+ or herdr 0.7.5+; plain SSH shells work without either. mosh needs mosh-server on the host. Works with any POSIX login shell.
