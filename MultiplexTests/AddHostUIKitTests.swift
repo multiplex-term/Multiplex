@@ -214,7 +214,9 @@ final class AddHostUIKitTests: XCTestCase {
 
         let herdr = try XCTUnwrap(
             descendants(of: UIButton.self, in: fixture.controller.view)
-                .first { $0.accessibilityLabel == "HERDR" }
+                // The face uppercases; the spoken label stays the natural
+                // spelling so VoiceOver says "herdr", not H-E-R-D-R.
+                .first { $0.accessibilityLabel == "herdr" }
         )
         herdr.sendActions(for: .touchUpInside)
 
@@ -228,6 +230,27 @@ final class AddHostUIKitTests: XCTestCase {
             .first { $0.accessibilityIdentifier == "addhost.section.tmuxConf" }
         XCTAssertTrue(directories?.isHidden == true)
         XCTAssertTrue(tmuxConf?.isHidden == true)
+    }
+
+    /// The backend bar shipped as a bare section row: it spanned the card
+    /// edge to edge while every other row — the auth bar it sits above
+    /// included — carries the inset row's 12 pt gutter.
+    func testBackendChoiceBarSitsInTheSameInsetRowAsTheAuthChoiceBar() throws {
+        let fixture = makeFixture()
+        defer { clean(fixture) }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.setMode(.manual)
+
+        let bar = try XCTUnwrap(
+            descendants(of: UIView.self, in: fixture.controller.view)
+                .first { $0.accessibilityIdentifier == "addhost.backendBar" }
+        )
+        var ancestor = bar.superview
+        while ancestor != nil, !(ancestor is AddHostInsetRow) {
+            ancestor = ancestor?.superview
+        }
+        XCTAssertNotNil(ancestor, "backend bar must sit inside an inset row")
+        XCTAssertTrue(renderedText(in: fixture.controller.view).contains("Sessions run on"))
     }
 
     func testChoiceBarMatchesPlainTallySegmentGeometryAndSelectionStyling() throws {

@@ -1394,7 +1394,9 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private func renderBackend() {
         let bar = AddHostChoiceBar<Host.SessionBackend>(
-            choices: Host.SessionBackend.allCases.map { ($0.rawValue.uppercased(), $0) },
+            // The button face uppercases; pass the natural spelling so
+            // VoiceOver reads "tmux", not the letters T-M-U-X.
+            choices: Host.SessionBackend.allCases.map { ($0.rawValue, $0) },
             selection: form.sessionBackend
         ) { [weak self] backend in
             guard let self else { return }
@@ -1403,8 +1405,17 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             self.renderTestSection()
         }
         bar.accessibilityIdentifier = "addhost.backendBar"
+        let label = addHostLabel(
+            "Sessions run on",
+            font: UIKitChassis.uiFont(10, weight: .semibold),
+            color: UIKitChassis.signal2
+        )
+        let stack = UIStackView(arrangedSubviews: [label, bar])
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 8
         backendSection.setDetail(backendDetail)
-        backendSection.setRows([bar])
+        backendSection.setRows([AddHostInsetRow(contentView: stack)])
         // Herdr owns a session's world and has no analog of tmux's targeted
         // options. Keep both stored values for a later switch back; hide the
         // editors rather than claiming they affect herdr sessions.
@@ -1782,11 +1793,14 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private func scheduleDebugScrollIfNeeded() {
         #if DEBUG
         guard !didScheduleDebugScroll else { return }
-        let shouldScrollModels = ProcessInfo.processInfo.environment[
+        let requestedSection = ProcessInfo.processInfo.environment[
             "MULTIPLEX_AUTO_HOST_SETTINGS"
-        ] == "models"
+        ]
+        let shouldScrollModels = requestedSection == "models"
+        let shouldScrollBackend = requestedSection == "backend"
         let shouldScrollElsewhere = AddHostAutoOpen.requested == .bindElsewhere
-        guard shouldScrollModels || shouldScrollElsewhere else { return }
+        guard shouldScrollModels || shouldScrollBackend || shouldScrollElsewhere
+        else { return }
         didScheduleDebugScroll = true
         debugScrollTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(700))
@@ -1794,6 +1808,11 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             let targetY: CGFloat
             if shouldScrollModels {
                 targetY = self.agentModelsSection.convert(.zero, to: self.scrollView).y
+            } else if shouldScrollBackend {
+                // Back off the navigation bar's inset so the section header
+                // and its caption clear the translucent bar in a capture.
+                targetY = self.backendSection.convert(.zero, to: self.scrollView).y
+                    - self.scrollView.adjustedContentInset.top
             } else if let bindContainer = self.bindContainer {
                 targetY = bindContainer.convert(
                     CGPoint(x: 0, y: self.bindElsewhereOffset),
