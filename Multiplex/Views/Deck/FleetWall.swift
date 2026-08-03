@@ -176,9 +176,11 @@ final class FleetWallContainerViewController: UIViewController {
         if #available(iOS 26.0, *) {
             item.hidesSharedBackground = true
         }
+        #if compiler(>=6.4)
         if #available(iOS 27.0, *) {
             item.isPaddingRemoved = true
         }
+        #endif
         #endif
         wallController.navigationItem.rightBarButtonItem = item
     }
@@ -2357,10 +2359,12 @@ final class FleetSessionTileView: FleetPressView,
         // A gaze/pointer move past UIKit's hysteresis is already clear drag
         // intent. Waiting out the lift delay made spatial reordering feel
         // intermittent, especially beside the tile's long-press menu.
+        #if compiler(>=6.4)
         if #available(iOS 27.0, visionOS 27.0, *),
            FleetTileDragPolicy.allowsPointerDragBeforeLiftDelay {
             drag.allowsPointerDragBeforeLiftDelay = true
         }
+        #endif
         addInteraction(drag)
         addInteraction(UIDropInteraction(delegate: self))
         accessibilityIdentifier = "fleet.sessionTile"

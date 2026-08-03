@@ -431,12 +431,14 @@ final class TerminalWindowUIKitTests: XCTestCase {
                 "TALLY faces own their background; iPadOS must not wrap them in Glass"
             )
         }
+        #if compiler(>=6.4)
         if #available(iOS 27.0, *) {
             XCTAssertTrue(
                 items.allSatisfy(\.isPaddingRemoved),
                 "System bar padding must not inflate the exact chip geometry"
             )
         }
+        #endif
         if #available(iOS 26.0, *) {
             let rightmost = try XCTUnwrap(
                 fixture.controller.navigationItem.rightBarButtonItems?.first?.customView

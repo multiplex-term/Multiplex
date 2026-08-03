@@ -2159,9 +2159,11 @@ extension TerminalWindowViewController {
         if #available(iOS 26.0, *) {
             item.hidesSharedBackground = true
         }
+        #if compiler(>=6.4)
         if #available(iOS 27.0, *) {
             item.isPaddingRemoved = true
         }
+        #endif
         return item
     }
 

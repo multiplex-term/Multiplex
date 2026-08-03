@@ -645,6 +645,7 @@ final class FleetWallUIKitTests: XCTestCase {
         XCTAssertTrue(tile.accessibilityActivate())
         XCTAssertEqual(attached, 1)
 
+        #if compiler(>=6.4)
         if #available(iOS 27.0, visionOS 27.0, *) {
             let drag = try XCTUnwrap(
                 tile.interactions.compactMap { $0 as? UIDragInteraction }.first
@@ -655,6 +656,7 @@ final class FleetWallUIKitTests: XCTestCase {
                 FleetTileDragPolicy.allowsPointerDragBeforeLiftDelay
             )
         }
+        #endif
     }
 
     func testEmptyFleetWallMountsOnlyNativeControllersAndAwaitingAction() throws {
@@ -739,12 +741,14 @@ final class FleetWallUIKitTests: XCTestCase {
                 "The custom TALLY stack must not receive a shared Glass capsule"
             )
         }
+        #if compiler(>=6.4)
         if #available(iOS 27.0, *) {
             XCTAssertTrue(
                 item.isPaddingRemoved,
                 "System bar padding must not inflate the exact TALLY stack geometry"
             )
         }
+        #endif
     }
     #endif
 
