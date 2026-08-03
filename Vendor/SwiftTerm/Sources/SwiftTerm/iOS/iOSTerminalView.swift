@@ -755,41 +755,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 beginRemoteMouseDrag(at: gestureRecognizer.location(in: self)) {
                  return
              }
-             let _ = self.becomeFirstResponder()
-             let tapLocation = gestureRecognizer.location(in: gestureRecognizer.view)
-             let tapRegion = makeContextMenuRegionForTap (point: tapLocation)
-             let hit = calculateTapHit (gesture: gestureRecognizer).grid
-
-             // Multiplex patch: with app-owned selection chrome a long press
-             // is just a firmer tap — seed the word selection (links wait
-             // until the mode ends; selection is the whole point here).
-             if selectionUIHandler != nil {
-                 _ = dismissAppMenu()
-                 seedAppSelection(at: hit)
-                 return
-             }
-
-             // Multiplex patch: a long press is a local gesture — no mouse
-             // report rides on it at any tracking mode — so it is the one
-             // activation route that always reaches the user's intent. A press
-             // over a link the app claims resolves it; a declined match (a
-             // filesystem path) or a press anywhere else opens the selection
-             // menu exactly as before.
-             if let result = linkForClick(at: hit, hasCommandModifier: commandActive),
-                activateLink(result) {
-                 _ = dismissAppMenu()
-                 return
-             }
-
-             // Multiplex patch: outside the select-text mode the app's
-             // long-press block replaces the UIMenuController flow — a
-             // re-press elsewhere simply moves it.
-             if let handler = longPressMenuHandler {
-                 handler(tapRegion, hit)
-                 return
-             }
-
-             showContextMenu (forRegion: tapRegion, pos: hit)
+             presentLocalPressActions(at: gestureRecognizer.location(in: self))
          case .changed:
              continueRemoteMouseDrag(at: gestureRecognizer.location(in: self))
          case .ended, .cancelled, .failed:
@@ -797,6 +763,54 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
          default:
              break
           }
+    }
+
+    /// Multiplex patch: the local action chain a long press runs, shared with
+    /// a pointer's secondary click — the same "reach the local surface"
+    /// intent said with a mouse. In select-text mode the press seeds the
+    /// selection; otherwise a press over a link the app claims resolves it
+    /// (a long press/right click is local at any mouse-tracking mode, so it
+    /// is the one activation route that always reaches the user's intent);
+    /// anywhere else raises the app's long-press block, or legacy
+    /// UIMenuController when no handler is installed.
+    func presentLocalPressActions (at tapLocation: CGPoint) {
+        let _ = self.becomeFirstResponder()
+        let tapRegion = makeContextMenuRegionForTap (point: tapLocation)
+        let hit = calculateTapHit (point: tapLocation).grid
+
+        // With app-owned selection chrome a press is just a firmer tap —
+        // seed the word selection (links wait until the mode ends;
+        // selection is the whole point here).
+        if selectionUIHandler != nil {
+            _ = dismissAppMenu()
+            seedAppSelection(at: hit)
+            return
+        }
+
+        if let result = linkForClick(at: hit, hasCommandModifier: commandActive),
+           activateLink(result) {
+            _ = dismissAppMenu()
+            return
+        }
+
+        // Outside the select-text mode the app's long-press block replaces
+        // the UIMenuController flow — a re-press elsewhere simply moves it.
+        if let handler = longPressMenuHandler {
+            handler(tapRegion, hit)
+            return
+        }
+
+        showContextMenu (forRegion: tapRegion, pos: hit)
+    }
+
+    /// Multiplex patch: a mouse/trackpad secondary click runs the same local
+    /// chain as a long press. Deliberately never a remote button-2 report —
+    /// the block's MENU chip is the explicit road to a TUI's own right-click
+    /// surface, and a silent remote report would make links unreachable by
+    /// pointer under mouse tracking.
+    @objc func secondaryClick (_ gestureRecognizer: UITapGestureRecognizer) {
+        guard gestureRecognizer.state == .ended else { return }
+        presentLocalPressActions(at: gestureRecognizer.location(in: self))
     }
 
     /// Multiplex patch: when set, a long press over a cell this filter claims
@@ -1667,6 +1681,22 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         let tripleTap = UITapGestureRecognizer (target: self, action: #selector(tripleTap(_:)))
         tripleTap.numberOfTapsRequired = 3
         addGestureRecognizer(tripleTap)
+
+        // Multiplex patch: a pointer's secondary click is the long press
+        // said with a mouse — same local chain, decided in
+        // `presentLocalPressActions`. ⚠ `buttonMaskRequired` constrains
+        // only indirect-pointer events — a plain finger tap sails past it
+        // (observed on device) — so the touch type must be pinned to
+        // `.indirectPointer` too or every single tap raises the block. No
+        // delegate: the failure chain below is a primary-button concern,
+        // and this recognizer's touch type keeps it out of the tap
+        // handlers' way.
+        if #available(iOS 13.4, visionOS 1.0, *) {
+            let secondaryClick = UITapGestureRecognizer (target: self, action: #selector(secondaryClick(_:)))
+            secondaryClick.allowedTouchTypes = [UITouch.TouchType.indirectPointer.rawValue as NSNumber]
+            secondaryClick.buttonMaskRequired = .secondary
+            addGestureRecognizer(secondaryClick)
+        }
 
         // Multiplex patch: the single→double→triple failure chain is decided
         // per touch by the delegate instead of `require(toFail:)`. With mouse

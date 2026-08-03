@@ -609,7 +609,18 @@ logic belongs — keep parsing/command-building out of views.
   mode (seeded at the pressed word / the whole pane — a Select All taken
   before the async pane rect lands is *re-clamped*, never dropped);
   PASTE types the pasteboard as ever; a tap dismisses-and-consumes, the
-  native menu's contract (`appMenuDismiss`). On herdr tabs the block adds
+  native menu's contract (`appMenuDismiss`). A pointer's secondary click
+  runs the SAME local chain (`presentLocalPressActions`, shared by the
+  long press and a tap recognizer pinned to
+  `allowedTouchTypes = [.indirectPointer]` +
+  `buttonMaskRequired = .secondary` — the mask alone does NOT filter
+  direct finger taps, verified on device):
+  link/path resolution into its confirmation sheet first, else the
+  block — deliberately never a remote button-2 report, or links would
+  be pointer-unreachable under mouse tracking (the MENU chip below is
+  the explicit road to a TUI's right-click surface). No headless route
+  can inject pointer clicks (sim or Mac), so the recognizer wiring
+  ships on device testing. On herdr tabs the block adds
   MENU — one right-button press+release reported at the pressed cell
   (`sendRemoteRightClick`; `Terminal.sendButtonReleaseEvent` names the
   true button in SGR release, which the stock path masks to a *left* up)
