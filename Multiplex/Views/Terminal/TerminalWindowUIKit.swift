@@ -1973,11 +1973,13 @@ extension TerminalWindowViewController {
 
     private func configureNavigationChrome(
         compactAttachmentAvailabilityOverride: FileAttachMenuAvailability? = nil,
-        hardwareKeyboardConnectedOverride: Bool? = nil
+        hardwareKeyboardConnectedOverride: Bool? = nil,
+        keyboardLockedOverride: Bool? = nil
     ) {
         #if !os(visionOS)
         let hardwareKeyboardConnected = hardwareKeyboardConnectedOverride
             ?? HardwareKeyboardMonitor.shared.isConnected
+        let keyboardLocked = keyboardLockedOverride ?? KeyboardLock.shared.isLocked
         let compactAttachmentAvailability: FileAttachMenuAvailability? = {
             guard shell == nil,
                   traitCollection.horizontalSizeClass == .compact,
@@ -2003,7 +2005,7 @@ extension TerminalWindowViewController {
                 TerminalWindowMergeSourceKey(id: $0.id, label: $0.label)
             },
             activeTabHasSession: activeTabHasSession,
-            keyboardLocked: KeyboardLock.shared.isLocked,
+            keyboardLocked: keyboardLocked,
             hardwareKeyboardConnected: hardwareKeyboardConnected,
             compactAttachmentAvailability: compactAttachmentAvailability
         )
@@ -2088,7 +2090,8 @@ extension TerminalWindowViewController {
                     menu: makeOverflowMenu(
                         displacesDirectActions: true,
                         attachmentAvailability: compactAttachmentAvailability,
-                        hardwareKeyboardConnected: hardwareKeyboardConnected
+                        hardwareKeyboardConnected: hardwareKeyboardConnected,
+                        keyboardLocked: keyboardLocked
                     )
                 ),
                 addsLegacyTrailingInset: true
@@ -2118,15 +2121,17 @@ extension TerminalWindowViewController {
                     menu: makeMergeMenu()
                 )))
             }
-            if activeController != nil {
+            let overflowMenu = makeOverflowMenu(
+                displacesDirectActions: false,
+                hardwareKeyboardConnected: hardwareKeyboardConnected,
+                keyboardLocked: keyboardLocked
+            )
+            if !overflowMenu.children.isEmpty {
                 trailing.append(makeNavigationBarItem(customView: makeMenuButton(
                     caption: "",
                     systemImage: "ellipsis",
                     accessibilityLabel: "Terminal actions",
-                    menu: makeOverflowMenu(
-                        displacesDirectActions: false,
-                        hardwareKeyboardConnected: hardwareKeyboardConnected
-                    )
+                    menu: overflowMenu
                 )))
             }
             if activeTabHasSession {
@@ -2158,13 +2163,15 @@ extension TerminalWindowViewController {
 
     /// Deterministic seam for asserting the snapshot-menu transition without
     /// opening a real SSH transport in a UIKit unit test.
-    func renderCompactNavigationChromeForTesting(
-        attachmentAvailability: FileAttachMenuAvailability,
-        hardwareKeyboardConnected: Bool? = nil
+    func renderNavigationChromeForTesting(
+        attachmentAvailability: FileAttachMenuAvailability? = nil,
+        hardwareKeyboardConnected: Bool? = nil,
+        keyboardLocked: Bool? = nil
     ) {
         configureNavigationChrome(
             compactAttachmentAvailabilityOverride: attachmentAvailability,
-            hardwareKeyboardConnectedOverride: hardwareKeyboardConnected
+            hardwareKeyboardConnectedOverride: hardwareKeyboardConnected,
+            keyboardLockedOverride: keyboardLocked
         )
     }
 
@@ -2304,10 +2311,10 @@ extension TerminalWindowViewController {
     private func makeOverflowMenu(
         displacesDirectActions: Bool,
         attachmentAvailability: FileAttachMenuAvailability? = nil,
-        hardwareKeyboardConnected: Bool
+        hardwareKeyboardConnected: Bool,
+        keyboardLocked: Bool
     ) -> UIMenu {
         var groups: [UIMenuElement] = []
-        let keyboardLocked = KeyboardLock.shared.isLocked
         if let activeController,
            keyboardLocked || !hardwareKeyboardConnected {
             groups.append(UIAction(

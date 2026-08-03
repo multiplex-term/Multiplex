@@ -402,12 +402,18 @@ final class UMDBarViewController: UIViewController,
             if let backend = configuration.shortcutBackend {
                 views.append(shortcutButton(backend))
             }
-            if showsChipCompanionMenu {
-                views.append(overflowButton(displacesDirectActions: false))
+            if let overflow = overflowButtonIfNeeded(
+                displacesDirectActions: false
+            ) {
+                views.append(overflow)
             }
             views.append(detachButton())
         } else {
-            views.append(overflowButton(displacesDirectActions: true))
+            if let overflow = overflowButtonIfNeeded(
+                displacesDirectActions: true
+            ) {
+                views.append(overflow)
+            }
             if let backend = configuration.shortcutBackend,
                showsCompactTopBarShortcut(state: state) {
                 views.append(shortcutButton(backend))
@@ -419,14 +425,6 @@ final class UMDBarViewController: UIViewController,
         row.alignment = .center
         row.spacing = 9
         return row
-    }
-
-    private var showsChipCompanionMenu: Bool {
-        #if os(visionOS)
-        false
-        #else
-        configuration.controller != nil
-        #endif
     }
 
     private func showsCompactTopBarShortcut(
@@ -536,15 +534,19 @@ final class UMDBarViewController: UIViewController,
         )
     }
 
-    private func overflowButton(displacesDirectActions: Bool) -> UMDBarButton {
-        menuButton(
+    private func overflowButtonIfNeeded(
+        displacesDirectActions: Bool
+    ) -> UMDBarButton? {
+        let menu = makeOverflowMenu(
+            displacesDirectActions: displacesDirectActions
+        )
+        guard !menu.children.isEmpty else { return nil }
+        return menuButton(
             caption: "",
             systemImage: "ellipsis",
             identifier: "umd.overflow",
             accessibilityLabel: "Terminal actions",
-            menu: makeOverflowMenu(
-                displacesDirectActions: displacesDirectActions
-            )
+            menu: menu
         )
     }
 

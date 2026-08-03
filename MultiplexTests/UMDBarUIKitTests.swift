@@ -137,6 +137,58 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertEqual(compactController.fittingContentSize(for: 375).width, 375)
     }
 
+    #if !os(visionOS)
+    func testWideShellHidesOverflowWhenItsMenuHasNoActions() throws {
+        let terminal = terminalController(useMosh: false)
+        let controller = UMDBarViewController(configuration: configuration(
+            controller: terminal,
+            style: .shell,
+            availableWidth: 1_200
+        ))
+        controller.loadViewIfNeeded()
+
+        controller.applyObservedState(UMDBarObservedState(
+            status: .live,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: false,
+            hardwareKeyboardConnected: true
+        ))
+        XCTAssertNotNil(view("umd.shell.wide", in: controller.view))
+        XCTAssertNil(control("umd.overflow", in: controller.view))
+
+        controller.applyObservedState(UMDBarObservedState(
+            status: .live,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: false,
+            hardwareKeyboardConnected: false
+        ))
+        let lock = try XCTUnwrap(
+            control("umd.overflow", in: controller.view) as? UIButton
+        )
+        XCTAssertEqual(
+            actions(in: try XCTUnwrap(lock.menu)).map(\.title),
+            ["Lock Keyboard Closed"]
+        )
+
+        controller.applyObservedState(UMDBarObservedState(
+            status: .live,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: true,
+            hardwareKeyboardConnected: true
+        ))
+        let unlock = try XCTUnwrap(
+            control("umd.overflow", in: controller.view) as? UIButton
+        )
+        XCTAssertEqual(
+            actions(in: try XCTUnwrap(unlock.menu)).map(\.title),
+            ["Unlock Keyboard"]
+        )
+    }
+    #endif
+
     func testCompactOverflowContainsDisplacedActionsMergeDestructionAndFileSources() throws {
         let terminal = terminalController(useMosh: false)
         let source = window("OTHER")

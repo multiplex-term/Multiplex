@@ -455,6 +455,73 @@ final class TerminalWindowUIKitTests: XCTestCase {
         }
     }
 
+    func testClassicRegularNavigationHidesOverflowWhenItsMenuHasNoActions() throws {
+        let host = Host(
+            name: "devbox",
+            hostname: "127.0.0.1",
+            port: 1,
+            username: "dev"
+        )
+        let tab = TerminalRoute(
+            hostID: host.id,
+            mode: .attach(sessionName: "main")
+        )
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tab: tab),
+            hosts: [host]
+        )
+        defer {
+            fixture.controller.prepareForRemoval()
+            fixture.store.remove(host)
+        }
+
+        let navigation = UINavigationController(
+            rootViewController: fixture.controller
+        )
+        navigation.setOverrideTraitCollection(
+            UITraitCollection(horizontalSizeClass: .regular),
+            forChild: fixture.controller
+        )
+        navigation.loadViewIfNeeded()
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.viewWillAppear(false)
+
+        fixture.controller.renderNavigationChromeForTesting(
+            hardwareKeyboardConnected: true,
+            keyboardLocked: false
+        )
+        XCTAssertNil(navigationButton(
+            accessibilityLabel: "Terminal actions",
+            in: fixture.controller
+        ))
+
+        fixture.controller.renderNavigationChromeForTesting(
+            hardwareKeyboardConnected: false,
+            keyboardLocked: false
+        )
+        let lock = try XCTUnwrap(navigationButton(
+            accessibilityLabel: "Terminal actions",
+            in: fixture.controller
+        ))
+        XCTAssertEqual(
+            menuActions(in: try XCTUnwrap(lock.menu)).map(\.title),
+            ["Lock Keyboard Closed"]
+        )
+
+        fixture.controller.renderNavigationChromeForTesting(
+            hardwareKeyboardConnected: true,
+            keyboardLocked: true
+        )
+        let unlock = try XCTUnwrap(navigationButton(
+            accessibilityLabel: "Terminal actions",
+            in: fixture.controller
+        ))
+        XCTAssertEqual(
+            menuActions(in: try XCTUnwrap(unlock.menu)).map(\.title),
+            ["Unlock Keyboard"]
+        )
+    }
+
     func testClassicCompactOverflowTracksAttachmentAndKeyboardAvailabilityWithoutChurn() throws {
         var host = Host(
             name: "devbox",
@@ -531,7 +598,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
         XCTAssertTrue(retainedOverflow === overflow)
         XCTAssertTrue(retainedOverflow.menu === menu)
 
-        fixture.controller.renderCompactNavigationChromeForTesting(
+        fixture.controller.renderNavigationChromeForTesting(
             attachmentAvailability: FileAttachMenuAvailability(
                 canOffer: true,
                 isLive: true
@@ -552,7 +619,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
             "The connecting-to-live transition must rebuild enabled upload actions"
         )
 
-        fixture.controller.renderCompactNavigationChromeForTesting(
+        fixture.controller.renderNavigationChromeForTesting(
             attachmentAvailability: FileAttachMenuAvailability(
                 canOffer: true,
                 isLive: true
@@ -565,7 +632,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
         XCTAssertTrue(retainedLiveOverflow === liveOverflow)
         XCTAssertTrue(retainedLiveOverflow.menu === liveMenu)
 
-        fixture.controller.renderCompactNavigationChromeForTesting(
+        fixture.controller.renderNavigationChromeForTesting(
             attachmentAvailability: FileAttachMenuAvailability(
                 canOffer: true,
                 isLive: true
@@ -581,7 +648,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
             $0.title == keyboardLockTitle
         })
 
-        fixture.controller.renderCompactNavigationChromeForTesting(
+        fixture.controller.renderNavigationChromeForTesting(
             attachmentAvailability: FileAttachMenuAvailability(
                 canOffer: true,
                 isLive: true
