@@ -361,6 +361,65 @@ enum TerminalFocusArbiter {
         installDebugDismissHook()
         installDebugScrollHooks()
         installDebugKeyboardLockHook()
+        installDebugResizeDragHook()
+    }
+
+    /// Headless stand-in for the long-press-on-border resize drag (no
+    /// headless route can synthesize a touch): `… -p
+    /// app.multiplexterm.multiplex.debug.resizedrag` finds the first vertical
+    /// divider glyph the focused terminal's drag filter claims, then drives
+    /// the exact begin → motion → release path the gesture takes, dragging
+    /// six columns right. Proof is host-side: the herdr split ratio moves
+    /// (`herdr --session <name> pane layout`).
+    private static func installDebugResizeDragHook() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.resizedrag", &token, .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                performDebugResizeDrag()
+            }
+        }
+    }
+
+    private static func performDebugResizeDrag() {
+        guard let view = current, let filter = view.longPressMouseDragFilter else { return }
+        let terminal = view.getTerminal()
+        // herdr draws several vertical-bar columns (sidebar edge, pane
+        // frames); the shared divider of a side-by-side split is the bar
+        // column nearest the grid's horizontal center. Drag at that column's
+        // median bar row.
+        var rowsByColumn: [Int: [Int]] = [:]
+        for row in 0..<terminal.rows {
+            for col in 0..<terminal.cols {
+                let content = terminal.getCharacter(col: col, row: row)
+                if HerdrPaneBorder.isVerticalBar(content), filter((col, row), content) {
+                    rowsByColumn[col, default: []].append(row)
+                }
+            }
+        }
+        guard let (column, rows) = rowsByColumn.min(by: {
+            abs($0.key - terminal.cols / 2) < abs($1.key - terminal.cols / 2)
+        }) else {
+            keyboardLogger.debug("resizedrag no vertical bar found cols=\(terminal.cols) rows=\(terminal.rows)")
+            return
+        }
+        let cell = (col: column, row: rows[rows.count / 2])
+        let candidates = rowsByColumn.keys.sorted().map { "\($0)x\(rowsByColumn[$0]!.count)" }
+            .joined(separator: ",")
+        keyboardLogger.debug(
+            "resizedrag grid=\(terminal.cols)x\(terminal.rows) candidates=\(candidates) chose=\(cell.col),\(cell.row)")
+        Task { @MainActor in
+            guard view.beginRemoteMouseDrag(at: view.pointForCell(col: cell.col, row: cell.row))
+            else { return }
+            for step in 1...6 {
+                try? await Task.sleep(nanoseconds: 40_000_000)
+                view.continueRemoteMouseDrag(
+                    at: view.pointForCell(col: cell.col + step, row: cell.row))
+            }
+            try? await Task.sleep(nanoseconds: 40_000_000)
+            view.endRemoteMouseDrag(at: view.pointForCell(col: cell.col + 6, row: cell.row))
+        }
     }
 
     /// Headless stand-in for the keyboard key's long press (no simulator
