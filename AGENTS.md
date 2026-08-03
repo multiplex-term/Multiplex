@@ -214,6 +214,8 @@ app.multiplexterm.multiplex.<name>`:
   highlight with the floating COPY/SELECT ALL bar after `selecttextall`,
   and a tap that no longer reaches the remote — with tmux `mouse on`,
   `#{pane_in_mode}` stays 0 under a pan).
+- `debug.herdrmenu` — one right-click report at screen center (the block's
+  MENU chip path); proof is herdr's own pane menu rendering in the pane.
 - `debug.tmuxclosepane` / `debug.tmuxclosewindow` — the already-confirmed
   destructive close actions (disposable sessions only).
 - `debug.keybar` — iPad key-bar proof: a shell prompt capture shows `~|/-^C`.
@@ -607,7 +609,13 @@ logic belongs — keep parsing/command-building out of views.
   mode (seeded at the pressed word / the whole pane — a Select All taken
   before the async pane rect lands is *re-clamped*, never dropped);
   PASTE types the pasteboard as ever; a tap dismisses-and-consumes, the
-  native menu's contract (`appMenuDismiss`). Selection covers the
+  native menu's contract (`appMenuDismiss`). On herdr tabs the block adds
+  MENU — one right-button press+release reported at the pressed cell
+  (`sendRemoteRightClick`; `Terminal.sendButtonReleaseEvent` names the
+  true button in SGR release, which the stock path masks to a *left* up)
+  so herdr's own pane menu, unreachable by touch, opens where the finger
+  was. herdr-only on purpose: tmux's right-click menu would fight the
+  shortcut panel and the block itself. Selection covers the
   visible screen only (herdr's scrollback lives host-side) and nothing
   freezes — a busy pane keeps drawing under the selection.
 - **A terminal link is confirmed, never followed** (`TerminalLink`, pure +

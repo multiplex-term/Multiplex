@@ -879,6 +879,41 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                         y: (bufferRow + 0.5) * cellDimension.height)
     }
 
+    /// Multiplex patch: sends one right-button press + release report at the
+    /// given buffer position — how the app's long-press block reaches a TUI's
+    /// own right-click surface (herdr's pane menu; no touch gesture maps to a
+    /// right click). Sent only while the client reports mouse; returns
+    /// whether the click went out.
+    @discardableResult
+    public func sendRemoteRightClick (atBufferPosition position: Position) -> Bool {
+        guard allowMouseReporting,
+              let terminal,
+              terminal.mouseMode != .off,
+              let screen = position.toScreenCoordinate(from: terminal.displayBuffer)
+        else { return false }
+        let col = min (max (0, screen.col), terminal.cols-1)
+        let row = min (max (0, screen.row), terminal.rows-1)
+        let point = pointForCell(col: col, row: row)
+        let pixelX = Int (point.x)
+        let pixelY = Int (point.y)
+        let press = terminal.encodeButton(button: 2, release: false,
+                                          shift: false, meta: false, control: false)
+        terminal.sendEvent(buttonFlags: press, x: col, y: row, pixelX: pixelX, pixelY: pixelY)
+        terminal.sendButtonReleaseEvent(button: 2, x: col, y: row, pixelX: pixelX, pixelY: pixelY)
+        return true
+    }
+
+    /// Multiplex patch: the view-point flavor of the right-click send — what
+    /// the app's DEBUG hooks stand on (no headless route can synthesize a
+    /// real touch).
+    @discardableResult
+    public func sendRemoteRightClick (at point: CGPoint) -> Bool {
+        guard let hit = remoteMouseDragCell(at: point), let terminal else { return false }
+        let buffer = Position(col: hit.grid.col,
+                              row: hit.grid.row + terminal.displayBuffer.yDisp)
+        return sendRemoteRightClick(atBufferPosition: buffer)
+    }
+
     /// Multiplex patch: releases an active drag at `point` (falling back to
     /// the last reported cell), always exactly once.
     public func endRemoteMouseDrag (at point: CGPoint? = nil) {

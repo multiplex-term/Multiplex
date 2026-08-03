@@ -1050,6 +1050,13 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         terminal.longPressMenuHandler?(region, Position(col: 0, row: 0))
     }
 
+    func debugSendRemoteRightClick() {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
+        terminal.sendRemoteRightClick(
+            at: CGPoint(x: terminal.bounds.midX, y: terminal.bounds.midY)
+        )
+    }
+
     func debugPerformConfirmedTmuxClose(_ shortcut: TmuxShortcut) {
         guard let terminal,
               TerminalFocusArbiter.current === terminal,
@@ -1154,6 +1161,11 @@ enum TmuxShortcutDebugHook {
         notify_register_dispatch(
             "app.multiplexterm.multiplex.debug.longpressmenu", &longPressMenuToken, .main
         ) { _ in focusedBar()?.debugShowLongPressMenu() }
+
+        var herdrMenuToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.herdrmenu", &herdrMenuToken, .main
+        ) { _ in focusedBar()?.debugSendRemoteRightClick() }
 
         var closePaneToken: Int32 = 0
         notify_register_dispatch(

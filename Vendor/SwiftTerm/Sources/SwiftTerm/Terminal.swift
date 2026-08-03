@@ -5783,6 +5783,26 @@ open class Terminal {
     {
         sendEvent(buttonFlags: buttonFlags+32, x: x, y: y, pixelX: pixelX, pixelY: pixelY)
     }
+
+    /// Multiplex patch: a button release that names the released button in
+    /// SGR modes, as xterm does — `sendEvent`'s release encoding masks the
+    /// button bits to 0, which a client reads as a *left*-button up. Needed
+    /// for synthesized non-left clicks (a TUI's right-click menu); non-SGR
+    /// protocols keep the legacy release encoding, which cannot carry the
+    /// button at all.
+    public func sendButtonReleaseEvent (button: Int, x: Int, y: Int, pixelX: Int, pixelY: Int)
+    {
+        switch mouseProtocol {
+        case .sgr:
+            sendResponse(cc.CSI, "<\(button);\(x+1);\(y+1)m")
+        case .sgrPixel:
+            sendResponse(cc.CSI, "<\(button);\(pixelX);\(pixelY)m")
+        default:
+            let flags = encodeButton(button: button, release: true,
+                                     shift: false, meta: false, control: false)
+            sendEvent(buttonFlags: flags, x: x, y: y, pixelX: pixelX, pixelY: pixelY)
+        }
+    }
     
     static var matchColorCache : [Int:Int] = [:]
     func matchColor (_ r1: Int, _ g1: Int, _ b1: Int) -> Int32

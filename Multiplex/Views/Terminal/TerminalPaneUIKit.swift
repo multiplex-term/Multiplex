@@ -355,7 +355,19 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
                         )
                         guard controller.selectTextModeUIActive else { return }
                         controller.terminalView?.selectAll(nil)
-                    }
+                    },
+                    // A touch never maps to a right click, so herdr's own
+                    // pane menu is otherwise unreachable; the block carries
+                    // it as a MENU chip that reports one right click at the
+                    // pressed cell. herdr-only: tmux's right-click menu
+                    // overlaps the panel + block, and tmux tabs already own
+                    // that slot's behavior.
+                    remoteMenu: controller.route.sessionBackend == .herdr
+                        ? { [weak self] position in
+                            self?.configuration.controller?.terminalView?
+                                .sendRemoteRightClick(atBufferPosition: position)
+                        }
+                        : nil
                 )
             }
             if state.selectTextModeUIActive { longPressMenuOverlay?.hide() }
@@ -867,7 +879,9 @@ private func floatContextBar(
 /// replacement for UIMenuController's SELECT / SELECT ALL / PASTE. SELECT
 /// and SELECT ALL hand off into select-text mode (seeded at the pressed
 /// word / the whole pane); PASTE types the pasteboard into the live screen
-/// exactly like the old menu action. Installed for every live active
+/// exactly like the old menu action; on herdr tabs a MENU chip reports one
+/// right click at the pressed cell so herdr's own pane menu — unreachable
+/// by touch — opens where the finger was. Installed for every live active
 /// terminal pane through `TerminalView.longPressMenuHandler`; a tap
 /// anywhere dismisses the block and is consumed, the native menu's own
 /// contract.
@@ -878,16 +892,19 @@ final class TerminalLongPressMenuOverlay {
     private var pressedPosition: Position?
     private let select: (Position) -> Void
     private let selectAll: (Position) -> Void
+    private let remoteMenu: ((Position) -> Void)?
 
     init(
         terminal: TerminalView,
         select: @escaping (Position) -> Void,
-        selectAll: @escaping (Position) -> Void
+        selectAll: @escaping (Position) -> Void,
+        remoteMenu: ((Position) -> Void)? = nil
     ) {
         self.terminal = terminal
         self.select = select
         self.selectAll = selectAll
-        bar = TerminalContextBarView(items: [
+        self.remoteMenu = remoteMenu
+        var items: [UIView] = [
             UIKitChassisChip(
                 "SELECT",
                 prominent: true,
@@ -904,7 +921,15 @@ final class TerminalLongPressMenuOverlay {
                 accessibilityLabel: "Paste",
                 action: { [weak self] in self?.performPaste() }
             ),
-        ])
+        ]
+        if remoteMenu != nil {
+            items.append(UIKitChassisChip(
+                "MENU",
+                accessibilityLabel: "Open the remote pane menu",
+                action: { [weak self] in self?.performRemoteMenu() }
+            ))
+        }
+        bar = TerminalContextBarView(items: items)
         bar.accessibilityIdentifier = "terminalPane.longPress.menu"
         bar.isHidden = true
         terminal.addSubview(bar)
@@ -946,6 +971,12 @@ final class TerminalLongPressMenuOverlay {
     private func performPaste() {
         hide()
         terminal?.paste(nil)
+    }
+
+    private func performRemoteMenu() {
+        hide()
+        guard let pressedPosition else { return }
+        remoteMenu?(pressedPosition)
     }
 }
 
