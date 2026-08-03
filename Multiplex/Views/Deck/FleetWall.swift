@@ -2611,7 +2611,14 @@ final class FleetSessionTileView: FleetPressView,
             attach.trailingAnchor.constraint(equalTo: attachSlot.trailingAnchor),
             attach.topAnchor.constraint(equalTo: attachSlot.topAnchor),
             attach.bottomAnchor.constraint(equalTo: attachSlot.bottomAnchor),
+            // This is a ZStack-style overlay: the slot must reserve the
+            // larger face. With only a leading edge, a crowded row could
+            // compress the hidden ATTACH badge while LIVE painted beyond the
+            // slot and over the telemetry beside it (amplified by Mac type).
             live.leadingAnchor.constraint(equalTo: attachSlot.leadingAnchor),
+            live.trailingAnchor.constraint(lessThanOrEqualTo: attachSlot.trailingAnchor),
+            live.topAnchor.constraint(greaterThanOrEqualTo: attachSlot.topAnchor),
+            live.bottomAnchor.constraint(lessThanOrEqualTo: attachSlot.bottomAnchor),
             live.centerYAnchor.constraint(equalTo: attachSlot.centerYAnchor),
         ])
         row.addArrangedSubview(attachSlot)

@@ -456,6 +456,59 @@ final class FleetWallUIKitTests: XCTestCase {
         XCTAssertTrue(copy.contains("LIVE"))
     }
 
+    func testCrowdedLiveSessionTileKeepsTelemetryOutsideTheLamp() throws {
+        let tile = FleetSessionTileView()
+        tile.configure(FleetSessionTileConfiguration(
+            hostID: UUID(),
+            session: makeSession(name: "long-running-session"),
+            lines: ["$ codex", "Working…"],
+            attention: .busy,
+            usesTmuxAttentionFallback: true,
+            hasOpenTab: true,
+            sessionBackend: .tmux,
+            compact: false,
+            selected: false,
+            duplicateAttachTitle: "Attach in New Window",
+            openTabAccessibilityText: "Shows its open window",
+            attach: {},
+            attachNewWindow: {},
+            delete: {},
+            droppedSession: { _ in }
+        ))
+        // Deterministically reproduce the pressure from iOS-on-Mac's 1.3×
+        // type boost: the trailing telemetry wins by one priority point, but
+        // the ATTACH/LIVE overlay must still reserve its complete live face.
+        tile.frame = CGRect(x: 0, y: 0, width: 220, height: 190)
+        tile.layoutIfNeeded()
+
+        let live = try XCTUnwrap(descendants(of: UIKitTallyLamp.self, in: tile).first {
+            $0.accessibilityLabel == "live"
+        })
+        let telemetry = try XCTUnwrap(descendants(of: UILabel.self, in: tile).first {
+            $0.text?.hasPrefix("1 WIN") == true
+        })
+        telemetry.setContentCompressionResistancePriority(
+            UILayoutPriority(UILayoutPriority.defaultHigh.rawValue + 1),
+            for: .horizontal
+        )
+        tile.setNeedsLayout()
+        tile.layoutIfNeeded()
+
+        let liveSlot = try XCTUnwrap(live.superview)
+        XCTAssertLessThanOrEqual(
+            live.frame.maxX,
+            liveSlot.bounds.maxX,
+            "The LIVE lamp must stay inside the ATTACH/LIVE overlay slot"
+        )
+        let liveFrame = live.convert(live.bounds, to: tile)
+        let telemetryFrame = telemetry.convert(telemetry.bounds, to: tile)
+        XCTAssertLessThanOrEqual(
+            liveFrame.maxX,
+            telemetryFrame.minX,
+            "The LIVE lamp must reserve its full width instead of painting over telemetry"
+        )
+    }
+
     /// herdr states no client count, so a herdr tile's lamp answers for the
     /// one client the app can verify: its own open terminal tab. Without one
     /// the tile keeps offering ATTACH rather than claiming a state nothing
