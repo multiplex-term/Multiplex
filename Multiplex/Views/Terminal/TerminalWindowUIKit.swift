@@ -1163,22 +1163,49 @@ final class TerminalWindowViewController: UIViewController,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, isViewLoaded, helperController != nil else { return }
-                // The strip cross-dissolves its own content; this animates
-                // the bar folding into (or out of) the corner dot and the
-                // terminal reclaiming or ceding the docked row.
-                UIView.animate(
-                    withDuration: 0.35,
-                    delay: 0,
-                    usingSpringWithDamping: 0.85,
-                    initialSpringVelocity: 0
-                ) {
-                    self.renderNow()
-                    self.rootView.layoutIfNeeded()
-                }
+            // The collapse choice is posted on MainActor. Handle it in this
+            // same turn, before the helper's direct fallback render can make
+            // the ornament jump to its final intrinsic size without a
+            // SwiftUI transaction.
+            MainActor.assumeIsolated {
+                guard let self,
+                      self.isViewLoaded,
+                      self.helperController != nil
+                else { return }
+                self.animateAgentHelperCollapse()
             }
         })
+    }
+
+    private func animateAgentHelperCollapse() {
+        #if os(visionOS)
+        if shell == nil {
+            // Classic ornaments are SwiftUI-hosted in their own window. The
+            // mirrored collapse value in TerminalVisionOrnamentState drives
+            // that host's spring; a UIView animation on `rootView` cannot.
+            renderNow()
+            return
+        }
+        #endif
+
+        let changes = { [self] in
+            renderNow()
+            rootView.layoutIfNeeded()
+        }
+        guard !UIAccessibility.isReduceMotionEnabled else {
+            changes()
+            return
+        }
+        // The strip cross-dissolves its own content; this spring folds the
+        // slab into (or out of) the corner dot and lets the terminal reclaim
+        // or cede the docked row.
+        UIView.animate(
+            withDuration: 0.35,
+            delay: 0,
+            usingSpringWithDamping: 0.85,
+            initialSpringVelocity: 0,
+            animations: changes
+        )
     }
 
     private func configurePassphrasePresenter() {

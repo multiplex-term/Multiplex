@@ -99,6 +99,11 @@ final class TerminalVisionOrnamentState {
     private(set) var activeTerminalController: TerminalSessionController?
     private(set) var umdController: UIViewController?
     private(set) var helperController: AgentHelperStripViewController?
+    /// The helper controller is native UIKit, so its app-wide collapse choice
+    /// is not observable by SwiftUI on its own. Mirror it into ornament state:
+    /// this value is the animation trigger for the full rail ↔ corner dot
+    /// geometry instead of relying on an unrelated revision redraw.
+    private(set) var helperCollapsed = false
     /// The width the console row reserves for the mounted UMD. Held here
     /// rather than measured inside the ornament body: the bar re-renders on
     /// its own observations (a mosh contact loss swaps LIVE for the wider
@@ -139,13 +144,16 @@ final class TerminalVisionOrnamentState {
             hasHelper: nextHelper != nil,
             windowWidth: windowWidth
         )
+        let nextHelperCollapsed = nextHelper?.isCollapsed == true
         let changed = presentation != nextPresentation
             || self.activeTerminalController !== activeTerminalController
             || self.umdController !== umdController
             || self.helperController !== nextHelper
+            || helperCollapsed != nextHelperCollapsed
         self.activeTerminalController = activeTerminalController
         self.umdController = umdController
         self.helperController = nextHelper
+        helperCollapsed = nextHelperCollapsed
         presentation = nextPresentation
         refreshUMDContentSize()
         guard changed || forceRevision else { return }
@@ -167,6 +175,7 @@ final class TerminalVisionOrnamentState {
         activeTerminalController = nil
         umdController = nil
         helperController = nil
+        helperCollapsed = false
         umdContentSize = .zero
         presentation = TerminalVisionOrnamentPresentation(
             showsTopSourceLabels: false,
@@ -269,6 +278,7 @@ private struct TerminalVisionTopOrnament: View {
 
 private struct TerminalVisionBottomOrnament: View {
     @Bindable var state: TerminalVisionOrnamentState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @ViewBuilder
     var body: some View {
@@ -291,9 +301,9 @@ private struct TerminalVisionBottomOrnament: View {
         case .terminal(let showsHelper):
             // Collapsed, the helper is a small dot leaning on the console
             // row's leading edge — the ornament analog of the flat platforms'
-            // bottom-left corner. Revision bumps re-evaluate this body, so
-            // the live read stays current across windows.
-            let helperCollapsed = state.helperController?.isCollapsed == true
+            // bottom-left corner. Ornament state mirrors the app-wide choice
+            // so every window follows it through its own animation transaction.
+            let helperCollapsed = state.helperCollapsed
             // `UIHostingOrnament` centers the root's geometric bounds but
             // does not consume a descendant alignment guide. Make the console
             // top the root's actual midpoint instead: the row then starts at
@@ -358,6 +368,18 @@ private struct TerminalVisionBottomOrnament: View {
                     value: .console
                 )
             }
+            // The terminal owner previously wrapped this change in a UIKit
+            // animator, but a classic ornament lives in a separate SwiftUI
+            // host window: laying out the terminal scene cannot animate it.
+            // Drive the spatial host's own transaction from the mirrored
+            // collapse value. The native strip still cross-dissolves its
+            // content while this folds its slab along the same path.
+            .animation(
+                reduceMotion
+                    ? nil
+                    : .spring(response: 0.35, dampingFraction: 0.85),
+                value: helperCollapsed
+            )
         }
     }
 }

@@ -217,6 +217,43 @@ final class AgentHelperStripUIKitTests: XCTestCase {
         XCTAssertNil(button("agentHelpers.dot", in: controller.view))
     }
 
+    #if os(visionOS)
+    func testVisionOrnamentStateMirrorsCollapseAsItsAnimationTrigger() {
+        AgentHelperStripCollapse.shared.setCollapsed(false)
+        defer { AgentHelperStripCollapse.shared.setCollapsed(false) }
+        let controller = makeController(agent: .claudeCode)
+        controller.loadViewIfNeeded()
+        let state = TerminalVisionOrnamentState(tabStrip: TerminalTabStripView())
+        let umd = UIViewController()
+
+        func updateState() {
+            state.update(
+                tabCount: 1,
+                isAuxiliary: false,
+                activeTerminalController: nil,
+                umdController: umd,
+                helperController: controller,
+                windowWidth: 600,
+                interfaceStyle: .dark,
+                forceRevision: false
+            )
+        }
+
+        updateState()
+        XCTAssertFalse(state.helperCollapsed)
+        let expandedRevision = state.revision
+
+        controller.perform(.collapse)
+        updateState()
+        XCTAssertTrue(state.helperCollapsed)
+        XCTAssertGreaterThan(state.revision, expandedRevision)
+
+        controller.perform(.expand)
+        updateState()
+        XCTAssertFalse(state.helperCollapsed)
+    }
+    #endif
+
     /// ✳ and ◆ draw through fallback fonts whose line metrics disagree with
     /// SF Mono's, so title/label centering visibly un-centered the mark.
     /// The dot centers rendered ink bounds instead — prove it in pixels.
