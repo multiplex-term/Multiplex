@@ -181,6 +181,20 @@ def app_review_information
   REVIEW_INFORMATION.keys.each_with_object({}) { |key, info| info[key] = review_value(key) }
 end
 
+# The App Review demo video (a screen recording of the reviewer flow against
+# the demo host) rides the iOS version's review record only; visionOS
+# deliberately carries none. The file is git-ignored like the .env secrets —
+# returns nil when absent, and deliver REMOVES any remote attachment on a
+# push without one, so restore the file before store_metadata when the
+# attachment should survive.
+def review_attachment_path
+  path = File.expand_path("multiplex-ios-demo.mp4", __dir__)
+  return path if File.exist?(path)
+
+  UI.important("fastlane/multiplex-ios-demo.mp4 is missing — this push removes the iOS review attachment")
+  nil
+end
+
 def beta_review_info
   info = app_review_information.each_with_object({}) do |(key, value), beta|
     beta[BETA_REVIEW_INFORMATION.fetch(key)] = value
@@ -405,12 +419,39 @@ lane :store_metadata do |options|
       # App Store review reads the exact record TestFlight's Beta App Review
       # gets — including the two values that live in .env, not in git.
       app_review_information: app_review_information,
+      # iOS carries the demo-video review attachment; the visionOS record
+      # stays empty on purpose (nil here means deliver deletes any remote
+      # attachment, which keeps that promise on every push).
+      app_review_attachment_file: platform == "ios" ? review_attachment_path : nil,
       skip_binary_upload: true,
       skip_screenshots: true,
       force: true,                             # skip the HTML preview prompt (CI-friendly)
       precheck_include_in_app_purchases: false, # API-key auth cannot precheck IAP
     )
   end
+end
+
+desc "Attach fastlane/multiplex-ios-demo.mp4 to the editable iOS version's App Review Information. Touches no other metadata; visionOS stays empty."
+lane :review_attachment do
+  path = review_attachment_path
+  UI.user_error!("fastlane/multiplex-ios-demo.mp4 not found") unless path
+  Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.create(
+    key_id: ENV.fetch("ASC_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+    filepath: File.expand_path(ENV.fetch("ASC_KEY_PATH")),
+  )
+  app = Spaceship::ConnectAPI::App.find("app.multiplexterm.multiplex")
+  UI.user_error!("App record not found") unless app
+  version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+  UI.user_error!("No editable iOS App Store version") unless version
+  detail = version.fetch_app_store_review_detail
+  UI.user_error!("The iOS version has no App Review Information record yet — run store_metadata once first") unless detail
+  (detail.app_store_review_attachments || []).each do |attachment|
+    UI.message("Removing existing review attachment #{attachment.file_name}")
+    attachment.delete!
+  end
+  detail.upload_attachment(path: path)
+  UI.success("Attached #{File.basename(path)} to iOS #{version.version_string} (#{version.app_version_state})")
 end
 
 desc "Push fastlane/screenshots to App Store Connect (device class inferred from pixel size)."
