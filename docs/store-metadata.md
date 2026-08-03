@@ -97,7 +97,7 @@ Free surface added 2026-08-02 (unreleased; ships with the next binary):
 | Attach/create/close | A tile attaches the full herdr client. Attach creates missing sessions and restarts stopped ones. The deck's New Session can type the selected setup script and agent launch into the fresh pane before attach, and its Working Directory choice roots the new session's world (a missing directory falls back to home); close stops then deletes (herdr keeps its protected default session on disk, stopped) |
 | New tab in a terminal | The terminal's `+ TAB` leads with **New Session** on every backend — another session attached as its own Multiplex tab, agent entries included, starting in the focused pane's directory, the same shape as tmux. A herdr tab adds a second entry, **New Tab in Workspace**: a tab in the session's focused workspace, in the focused pane's directory, focused by herdr — the attached client is the surface, so that entry opens no second Multiplex tab |
 | Requirements | herdr 0.7.5+ / protocol 17 on the SSH host. Homebrew and herdr's installer are offered in-app. Plain SSH shells remain available without either multiplexer |
-| Honest limits | No herdr API reports attached-client count or creation time, so those claims are omitted. tmux-only controls, FILE upload, and Claude HISTORY are hidden on herdr tabs. Widget/Shortcut shell attach and Open Agent both work — an agent launch mints a herdr session, or lands inside an existing one as a new tab in the focused workspace / a new workspace |
+| Honest limits | No herdr API reports attached-client count or creation time, so those claims are omitted. The Claude HISTORY panel stays hidden on herdr tabs (herdr exposes no transcript identity), and tmux Copy Mode stays tmux's own — herdr tabs instead carry the shared Select Text mode, their own HRDR shortcut panel, and the same FILE attach/drop. Widget/Shortcut shell attach and Open Agent both work — an agent launch mints a herdr session, or lands inside an existing one as a new tab in the focused workspace / a new workspace |
 | Tier / privacy | Free, like tmux. No new permission or collection: probes and attaches still travel directly over the user's SSH connection. This does not change the Pro allocation, StoreKit catalog, paywall, IAP screenshot, or public screenshot set |
 
 ## Widgets, Shortcuts, and the URL scheme
@@ -177,10 +177,12 @@ Current product split:
   and primary-button touch/pointer input for mouse-aware TUIs, all-pane agent
   detection and wall
   telemetry with foreground-aware helpers in tmux panes, herdr sessions,
-  and plain SSH shells (including direct-shell NEEDS YOU chrome), a per-host
+  and plain SSH shells (including direct-shell NEEDS YOU chrome; the strip
+  folds to a corner dot on a title tap), a per-host
   TMUX / HERDR backend choice (herdr 0.7.5+; one tile per session, workspaces
   on its spine, lifecycle-backed RUNNING / NEEDS YOU, attach/create/restart/
-  close; tmux-only FILE/HISTORY/shortcut controls stay hidden there), a
+  close; a herdr-specific HRDR shortcut panel and the same FILE attach ride
+  along, while the Claude HISTORY panel stays tmux-only), a
   System/Light/Dark appearance setting plus smoked GLASS on Vision Pro
   (SYSTEM follows the device; the whole chassis, launch screen, and keyboard
   flip together; GLASS shares the dark terminal-theme slot), New Session
@@ -195,7 +197,8 @@ Current product split:
   Shortcut actions report it as disabled — carried with the host record to
   the user's other devices, built-in terminal themes with independent light/dark
   selections (GLASS shares dark; light adds Tally Frost/Paper/Ivory),
-  free file attachment on SSH-backed tmux tabs from Files/Photos (plus camera
+  free file attachment on SSH-backed tmux and herdr tabs from Files/Photos
+  (plus camera
   on iPad) and drag-and-drop through the same SSH upload path, a read-only
   File Viewer (code, rendered Markdown, images, and git diffs) summoned from
   + TAB or a confirmed path in terminal output (a percent-decoded,
@@ -212,9 +215,14 @@ Current product split:
   address is tap-to-edit (typed addresses ride the same web-only gate and
   loopback rewrite), and viewport
   tabs never persist across launches, a
-  most-used tmux
-  shortcut dropdown on both platforms (including touch-native copy-mode
-  selection and explicit exit), Home Screen widgets (per-host monitor +
+  most-used shortcut dropdown for each backend — TMUX, or HRDR on herdr
+  tabs — on both platforms (including touch-native copy-mode selection and
+  explicit exit), an app-owned Select Text mode from the terminal long press
+  (a SELECT / SELECT ALL / PASTE block on any live pane; the selection clamps
+  to the pressed pane with a floating COPY / SELECT ALL / DONE block beside
+  it, a pointer's secondary click raises the same block, and herdr tabs add
+  a MENU chip that opens herdr's own pane menu in place), Home Screen
+  widgets (per-host monitor +
   fleet wall; iPadOS 17+, visionOS 26+) and App Shortcuts ("Open Shell" /
   "Open Agent" with host-configured working-directory, setup-script, and
   launch-model pickers plus an optional first prompt; per-host agent model
