@@ -360,6 +360,10 @@ enum HerdrProbe {
         var tabID: String
         var agent: String?
         var agentStatus: String
+        /// The raw OSC title, spinner/status glyphs intact — what the
+        /// history jump's idle classifier reads (the stripped variant
+        /// removes exactly the glyphs it needs).
+        var terminalTitle: String?
         var terminalTitleStripped: String?
         /// The pane's shell cwd and the foreground process's cwd (0.7.5
         /// reports both) — `foreground_cwd` is `pane_current_path`'s
@@ -376,6 +380,7 @@ enum HerdrProbe {
             case tabID = "tab_id"
             case agent
             case agentStatus = "agent_status"
+            case terminalTitle = "terminal_title"
             case terminalTitleStripped = "terminal_title_stripped"
             case cwd
             case foregroundCwd = "foreground_cwd"
@@ -735,6 +740,28 @@ enum HerdrProbe {
             ),
             agent: pane.agent.flatMap(AgentKind.init(herdrAgent:)),
             isDefinitive: true
+        )
+    }
+
+    /// The agent-history jump's view of one `pane current` envelope: the
+    /// pane id the walk will aim captures and key sends at, the RAW
+    /// terminal title (glyphs intact — see `Pane.terminalTitle`), and the
+    /// spliceable working directory, foreground process first.
+    struct CurrentPaneSummary: Equatable {
+        var paneID: String
+        var title: String
+        var workingDirectory: String?
+    }
+
+    static func parseCurrentPaneSummary(_ output: String) -> CurrentPaneSummary? {
+        guard let pane = firstDecodedLine(in: output, decodeCurrentPane)
+        else { return nil }
+        return CurrentPaneSummary(
+            paneID: pane.paneID,
+            title: pane.terminalTitle ?? "",
+            workingDirectory: [pane.foregroundCwd, pane.cwd]
+                .compactMap { $0 }
+                .first(where: isSpliceablePath)
         )
     }
 

@@ -131,30 +131,86 @@ enum AgentSessionHistory {
             + " 2>/dev/null | grep -m1 '^MULTIPLEX_HIST_CWD '; "
             + "root=$(tmux list-panes -t \(target)"
             + " -F '#{?pane_active,#{pane_pid},}' 2>/dev/null | grep -m1 .); "
-            + "if [ -n \"$root\" ]; then "
-            + "reg() { c=\"$1\"; [ -n \"$c\" ] || return 1; "
-            + "f=\"$c/sessions/$p.json\"; [ -r \"$f\" ] || return 1; "
-            + "value=$(sed -n 's/.*\"sessionId\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p'"
-            + " \"$f\" | head -1); [ -n \"$value\" ]; }; "
-            + "out=$(ps -eo pid=,ppid= 2>/dev/null | "
-            + "awk -v r=\"$root\" '{ parent[$1] = $2 } END { "
-            + "print 0, r; for (pid in parent) { if (pid == r) continue; "
-            + "p = pid; depth = 0; "
-            + "while (p in parent && p != r && depth < 64) { p = parent[p]; depth++ } "
-            + "if (p == r) print depth, pid } }' | sort -n | "
-            + "while read -r depth p; do "
-            + "pe=; [ -r \"/proc/$p/environ\" ] && "
-            + "pe=$(tr '\\0' '\\n' < \"/proc/$p/environ\" 2>/dev/null | "
-            + "sed -n 's/^CLAUDE_CONFIG_DIR=//p' | head -1); "
-            + "[ -n \"$pe\" ] || pe=$(ps -E -o command= -p \"$p\" 2>/dev/null | "
-            + "sed -n 's/.* CLAUDE_CONFIG_DIR=\\([^ ]*\\).*/\\1/p' | head -1); "
-            + "if reg \"$pe\" || reg \"$CLAUDE_CONFIG_DIR\" || reg \"$HOME/.claude\"; then "
-            + "printf '%s\\n%s\\n' \"$value\" \"$c\"; break; fi; done); "
-            + "sid=$(printf '%s\\n' \"$out\" | sed -n 1p); "
-            + "cfg=$(printf '%s\\n' \"$out\" | sed -n 2p); "
-            + "[ -n \"$sid\" ] && printf 'MULTIPLEX_HIST_AGENT_SESSION %s\\n' \"$sid\"; "
-            + "[ -n \"$cfg\" ] && printf 'MULTIPLEX_HIST_CONFIG_DIR %s\\n' \"$cfg\"; "
-            + "fi; true"
+            + registryLookupScript
+            + "true"
+    }
+
+    /// The `$root`-descendant registry walk shared by both backends: accept
+    /// a config root only if it holds a descendant pid's `sessions/<pid>.json`
+    /// registry, then report that entry's session id and the root that held
+    /// it. Expects `$root` (the pane's shell pid) already resolved; prints
+    /// nothing when it is empty or no registry matches — the mtime fallback's
+    /// signal.
+    private static let registryLookupScript =
+        "if [ -n \"$root\" ]; then "
+        + "reg() { c=\"$1\"; [ -n \"$c\" ] || return 1; "
+        + "f=\"$c/sessions/$p.json\"; [ -r \"$f\" ] || return 1; "
+        + "value=$(sed -n 's/.*\"sessionId\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p'"
+        + " \"$f\" | head -1); [ -n \"$value\" ]; }; "
+        + "out=$(ps -eo pid=,ppid= 2>/dev/null | "
+        + "awk -v r=\"$root\" '{ parent[$1] = $2 } END { "
+        + "print 0, r; for (pid in parent) { if (pid == r) continue; "
+        + "p = pid; depth = 0; "
+        + "while (p in parent && p != r && depth < 64) { p = parent[p]; depth++ } "
+        + "if (p == r) print depth, pid } }' | sort -n | "
+        + "while read -r depth p; do "
+        + "pe=; [ -r \"/proc/$p/environ\" ] && "
+        + "pe=$(tr '\\0' '\\n' < \"/proc/$p/environ\" 2>/dev/null | "
+        + "sed -n 's/^CLAUDE_CONFIG_DIR=//p' | head -1); "
+        + "[ -n \"$pe\" ] || pe=$(ps -E -o command= -p \"$p\" 2>/dev/null | "
+        + "sed -n 's/.* CLAUDE_CONFIG_DIR=\\([^ ]*\\).*/\\1/p' | head -1); "
+        + "if reg \"$pe\" || reg \"$CLAUDE_CONFIG_DIR\" || reg \"$HOME/.claude\"; then "
+        + "printf '%s\\n%s\\n' \"$value\" \"$c\"; break; fi; done); "
+        + "sid=$(printf '%s\\n' \"$out\" | sed -n 1p); "
+        + "cfg=$(printf '%s\\n' \"$out\" | sed -n 2p); "
+        + "[ -n \"$sid\" ] && printf 'MULTIPLEX_HIST_AGENT_SESSION %s\\n' \"$sid\"; "
+        + "[ -n \"$cfg\" ] && printf 'MULTIPLEX_HIST_CONFIG_DIR %s\\n' \"$cfg\"; "
+        + "fi; "
+
+    /// The herdr analog of `paneContextCommand`, one exec: a session
+    /// snapshot (the focused pane's cwd, decoded app-side by
+    /// `HerdrProbe.parseFocusedPaneWorkingDirectory` — the drop path's own
+    /// anchor), and the same registry walk rooted at the focused pane's
+    /// `shell_pid` from `pane process-info --current` (the `pane_pid`
+    /// analog). Both answer server-side focus and work even on a clientless
+    /// session — unlike `pane current`, which needs an attached client
+    /// (verified herdr 0.7.5). The snapshot envelope is one JSON line and
+    /// the walk's markers are line-anchored, so no sentinel framing is
+    /// needed here.
+    static func herdrPaneContextCommand(sessionName: String) -> String {
+        let session = sessionName.shellQuoted
+        return HerdrProbe.pathPrefix
+            + "herdr --session \(session) api snapshot 2>/dev/null; echo; "
+            + "root=$(herdr --session \(session) pane process-info --current 2>/dev/null"
+            + " | sed -n 's/.*\"shell_pid\":\\([0-9][0-9]*\\).*/\\1/p' | head -1); "
+            + registryLookupScript
+            + "true"
+    }
+
+    /// Herdr context: cwd from the snapshot's focused pane (foreground cwd
+    /// first — `pane_current_path`'s analog), session id + config root from
+    /// the shared registry-walk markers. No focused-pane cwd → nil, the
+    /// honest NO WORKING DIRECTORY.
+    static func parseHerdrPaneContext(_ output: String) -> PaneContext? {
+        var sessionID: String?
+        var configDir: String?
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("MULTIPLEX_HIST_AGENT_SESSION ") {
+                sessionID = line.dropFirst("MULTIPLEX_HIST_AGENT_SESSION ".count)
+                    .trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("MULTIPLEX_HIST_CONFIG_DIR ") {
+                let value = line.dropFirst("MULTIPLEX_HIST_CONFIG_DIR ".count)
+                    .trimmingCharacters(in: .whitespaces)
+                if value.hasPrefix("/") { configDir = value }
+            }
+        }
+        guard let cwd = HerdrProbe.parseFocusedPaneWorkingDirectory(output)
+        else { return nil }
+        return PaneContext(
+            cwd: cwd,
+            agentSessionID: validatedClaudeSessionID(sessionID),
+            configDir: configDir
+        )
     }
 
     static func parsePaneContext(_ output: String) -> PaneContext? {
@@ -517,6 +573,74 @@ enum AgentSessionHistory {
         )
     }
 
+    /// The herdr prologue: the focused pane's envelope (`pane current` — a
+    /// live tab always has the app's own client attached) carries the pane
+    /// id and the RAW terminal title (`terminal_title`, never the stripped
+    /// variant — the idle classifier reads the spinner/✳ glyphs herdr
+    /// strips), then one visible-screen read of that pane. Width is
+    /// measured app-side from the capture (herdr reports no pane column
+    /// count; Claude's full-width chrome rows make the maximum row width
+    /// exact). No client-size census exists, and mouse-reporting state is
+    /// unreadable, so header clicks stay disarmed — the walk just scrolls.
+    static func herdrJumpPrologueCommand(sessionName: String) -> String {
+        let session = sessionName.shellQuoted
+        return HerdrProbe.pathPrefix
+            + "o=$(herdr --session \(session) pane current 2>/dev/null); "
+            + "p=$(printf '%s\\n' \"$o\""
+            + " | sed -n 's/.*\"pane_id\":\"\\([^\"]*\\)\".*/\\1/p' | head -1); "
+            + "if [ -n \"$p\" ]; then "
+            + "printf 'MPXJ_HPANE %s\\n' \"$o\"; "
+            + "echo MPXJ_CAP; "
+            + "herdr --session \(session) pane read \"$p\""
+            + " --source visible --format text 2>/dev/null; "
+            + "echo MPXJ_CAPEND; "
+            + "else echo MPXJ_NOSESSION; fi; true"
+    }
+
+    /// `JumpPrologue.sessionID` carries the herdr PANE id — the walk's
+    /// target coordinate on this backend (herdr commands aim at panes, and
+    /// the session name is already the route's). The id is bake-vetted
+    /// before it can ever be spliced into the find command.
+    static func parseHerdrJumpPrologue(_ output: String) -> JumpPrologue? {
+        guard !output.contains("MPXJ_NOSESSION") else { return nil }
+        var summary: HerdrProbe.CurrentPaneSummary?
+        var capture: [String] = []
+        var inCapture = false
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("MPXJ_HPANE ") {
+                summary = HerdrProbe.parseCurrentPaneSummary(
+                    String(line.dropFirst("MPXJ_HPANE ".count))
+                )
+            } else if line == "MPXJ_CAP" {
+                inCapture = true
+            } else if line == "MPXJ_CAPEND" {
+                inCapture = false
+            } else if inCapture {
+                capture.append(String(line))
+            }
+        }
+        guard let summary,
+              HerdrProbe.bakeablePaneID(summary.paneID)
+        else { return nil }
+        let width = captureDisplayWidth(capture)
+        guard width > 0 else { return nil }
+        return JumpPrologue(
+            sessionID: summary.paneID,
+            paneWidth: width,
+            paneTitle: summary.title,
+            capture: capture
+        )
+    }
+
+    /// The widest rendered row, in terminal cells — the herdr prologue's
+    /// pane-width oracle. Wide glyphs cost two, the same arithmetic the
+    /// needle builder uses, so a CJK-heavy row can't overstate the pane.
+    static func captureDisplayWidth(_ capture: [String]) -> Int {
+        capture.reduce(0) { widest, line in
+            max(widest, line.reduce(0) { $0 + displayColumns(of: $1) })
+        }
+    }
+
     // MARK: - Needles
 
     /// One entry of the header oracle's index: the ordinal of a loaded
@@ -637,6 +761,52 @@ enum AgentSessionHistory {
     }
 
     // MARK: - Jump find (header-oracle navigation)
+
+    /// Where the walk's captures and key sends aim. tmux addresses the
+    /// session (its active pane answers); herdr commands address a pane, so
+    /// the prologue-resolved focused pane rides along with the route's
+    /// session name.
+    enum JumpTarget: Equatable {
+        case tmux(sessionID: String)
+        case herdr(sessionName: String, paneID: String)
+    }
+
+    /// The per-backend primitives every walk step goes through — everything
+    /// else in the find script is backend-neutral:
+    ///
+    ///   capture   the visible screen, one row per line
+    ///   skey $1   one key send (`$KU`/`$KD` page up/down, `$KE` scroll-
+    ///             bottom restore)
+    ///   sraw $1   literal bytes (the SGR sticky click)
+    ///
+    /// tmux names keys and lets the server translate; herdr's `send-keys`
+    /// vocabulary has no page/end keys (0.7.5), but `send-text` passes raw
+    /// bytes verbatim in ONE write (verified against a real Claude pager
+    /// 2026-08-03: `\e[5~`/`\e[6~` page, `\e[1;5F` restores) — so the keys
+    /// ARE their escape sequences there. One write per key matters: a
+    /// split ESC would read as a bare Escape, which can interrupt a turn.
+    private static func jumpPrimitives(_ target: JumpTarget) -> String {
+        switch target {
+        case .tmux(let sessionID):
+            return TmuxProbe.pathPrefix
+                + "sid=\(sessionID.shellQuoted); "
+                + "capture() { tmux capture-pane -p -t \"$sid\" 2>/dev/null; }; "
+                + "skey() { tmux send-keys -t \"$sid\" \"$1\" 2>/dev/null; }; "
+                + "sraw() { tmux send-keys -t \"$sid\" -l \"$1\" 2>/dev/null; }; "
+                + "KU=PPage; KD=NPage; KE=C-End; "
+        case .herdr(let sessionName, let paneID):
+            let session = sessionName.shellQuoted
+            let pane = paneID.shellQuoted
+            return HerdrProbe.pathPrefix
+                + "capture() { herdr --session \(session) pane read \(pane)"
+                + " --source visible --format text 2>/dev/null; }; "
+                + "skey() { herdr --session \(session) pane send-text \(pane)"
+                + " \"$1\" 2>/dev/null; }; "
+                + "sraw() { skey \"$1\"; }; "
+                + "KU=$(printf '\\033[5~'); KD=$(printf '\\033[6~'); "
+                + "KE=$(printf '\\033[1;5F'); "
+        }
+    }
 
     /// The per-capture classifier, shared by every step of the find script.
     /// Claude's pager pins the header of the turn that OWNS THE TOP ROW at
@@ -762,7 +932,7 @@ enum AgentSessionHistory {
     /// header sits at row 1 — invisible to `real`, an undercount that
     /// would land on the wrong twin.
     static func jumpFindCommand(
-        sessionID: String,
+        target: JumpTarget,
         needles: [JumpNeedle],
         targetIndex: Int,
         targetNeedles: [String],
@@ -806,13 +976,11 @@ enum AgentSessionHistory {
         // Header clicks warp the viewport, which is exactly what the twin
         // count cannot survive — unique targets only.
         let clicks = headerClicks && !anyTwins
-        return TmuxProbe.pathPrefix
-            + "sid=\(sessionID.shellQuoted); "
+        return jumpPrimitives(target)
             + "ndl=$(printf '%s\\n' \(listArguments)); "
             + "n1=\(primary.shellQuoted); n2=\(fallback.shellQuoted); "
             + "t=\(targetIndex + 1); k=\(twins); k2=\(fallbackTwins); "
             + "prog='\(classifierProgram)'; "
-            + "capture() { tmux capture-pane -p -t \"$sid\" 2>/dev/null; }; "
             + "classify() { vals=$(printf '%s\\n' \"$cur\" | "
             + "MPXNDL=\"$ndl\" MPXPFX='❯' MPXTGT=\"$tgt\" awk \"$prog\"); "
             + "pin=-1; fam=0; real=0; h=0; eval \"$vals\"; "
@@ -824,10 +992,10 @@ enum AgentSessionHistory {
             + "last=\"$cur\"; polls=$((polls+1)); done; }; "
             + "stepk() { count=$1; key=$2; s=0; "
             + "while [ $s -lt $count ]; do "
-            + "tmux send-keys -t \"$sid\" \"$key\" 2>/dev/null || return 1; "
+            + "skey \"$key\" || return 1; "
             + "s=$((s+1)); sent=$((sent+1)); sleep 0.03; done; "
             + "settle \"$cur\"; }; "
-            + "restore() { tmux send-keys -t \"$sid\" C-End 2>/dev/null; sleep 0.08; }; "
+            + "restore() { skey \"$KE\"; sleep 0.08; }; "
             // Wait out an in-flight redraw from an UNKNOWN base — a C-End
             // from a deep scroll can repaint for longer than a fixed sleep,
             // and a stale capture would anchor the next settle against the
@@ -859,9 +1027,9 @@ enum AgentSessionHistory {
             // crossings the other fallback trigger needs. Scroll-top after
             // BOTH needles, when the target's turn was pinned but its row
             // never rendered, enters the nearby descent instead.
-            + "climb() { stepk \"$1\" PPage || return 1; "
+            + "climb() { stepk \"$1\" \"$KU\" || return 1; "
             + "if [ \"$moved\" = 0 ]; then "
-            + "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then swapfb; stepk 1 PPage || return 1; "
+            + "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then swapfb; stepk 1 \"$KU\" || return 1; "
             + "elif [ $sawt = 1 ] && [ $sawreal = 0 ] && [ $nb = 0 ]; then nb=1; dir=d; "
             + "else top=1; return 1; fi; fi; }; "
             // Click the sticky at row 1: one send jumps to that turn's
@@ -870,7 +1038,7 @@ enum AgentSessionHistory {
             // oracle). A click that moved nothing disarms clicking — this
             // Claude doesn't jump, or the view already sat at the turn's
             // top — and the scroll walk resumes without it.
-            + "hclick() { tmux send-keys -t \"$sid\" -l \"$mseq\" 2>/dev/null || return 1; "
+            + "hclick() { sraw \"$mseq\" || return 1; "
             + "sent=$((sent+1)); settle \"$cur\"; "
             + "printf 'MPXJ_C %s %s\\n' \"$sent\" \"$moved\"; }; "
             + "cskip() { dir=u; hclick || return 1; "
@@ -882,7 +1050,7 @@ enum AgentSessionHistory {
             // semantics in force — the LIVE view's row 1 is ordinary
             // transcript and must not be classified.
             + "restore; stab; "
-            + "stepk 1 PPage || true; "
+            + "stepk 1 \"$KU\" || true; "
             + "while [ $sent -lt \(sendBudget) ]; do "
             + "classify; "
             + "printf 'MPXJ_T %s %s %s %s\\n' \"$sent\" \"$pin\" \"$real\" \"$seen\"; "
@@ -896,7 +1064,7 @@ enum AgentSessionHistory {
             + "if [ \"$h0\" = 0 ]; then h0=$h; fi; "
             + "if [ \"$h\" != \"$h0\" ]; then "
             + "if [ \"$rsz\" = 0 ]; then rsz=1; h0=$h; rebase; "
-            + "stepk 1 PPage || break; continue; else break; fi; fi; "
+            + "stepk 1 \"$KU\" || break; continue; else break; fi; fi; "
             // Verify the capture after a target-header click + PgUp. The
             // row should now be real (~1 + region/2, inside the landing
             // window) and the ordinary branches finish. No row while the
@@ -924,7 +1092,7 @@ enum AgentSessionHistory {
             // over exactly this). Only twins need the count discipline.
             + "if [ \"$k\" = 0 ] || [ \"$seen\" -gt \"$k\" ]; then "
             + "if [ \"$real\" -le $((h / 2)) ]; then found=1; break; fi; "
-            + "dir=d; stepk 1 NPage || break; "
+            + "dir=d; stepk 1 \"$KD\" || break; "
             + "[ \"$moved\" = 0 ] && break; continue; fi; "
             // A newer twin: climb through it.
             + "dir=u; climb \(twinSafeBatch) || break; continue; fi; "
@@ -947,8 +1115,8 @@ enum AgentSessionHistory {
             // Descend in singles toward the turn; overshooting to a NEWER
             // pin steps back up one.
             + "if [ \"$pin\" -gt \"$t\" ] 2>/dev/null; then "
-            + "dir=u; stepk 1 PPage || break; else "
-            + "dir=d; stepk 1 NPage || break; fi; "
+            + "dir=u; stepk 1 \"$KU\" || break; else "
+            + "dir=d; stepk 1 \"$KD\" || break; fi; "
             + "[ \"$moved\" = 0 ] && break; continue; fi; "
             + "if [ \"$pin\" -gt \"$t\" ] 2>/dev/null; then "
             // Row 1's turn is newer than the target. With clicks armed,
@@ -969,12 +1137,12 @@ enum AgentSessionHistory {
             + "if [ \"$dir\" = u ]; then osc=$((osc+1)); fi; "
             + "if [ $osc -ge 2 ]; then "
             + "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then "
-            + "swapfb; stepk 1 PPage || break; continue; "
+            + "swapfb; stepk 1 \"$KU\" || break; continue; "
             // Both needles crossed the pinned target turn without its row
             // ever rendering: land nearby instead of lying "not found".
             + "elif [ $sawt = 1 ] && [ $sawreal = 0 ] && [ $nb = 0 ]; then "
             + "nb=1; dir=d; continue; else break; fi; fi; "
-            + "dir=d; stepk 1 NPage || break; "
+            + "dir=d; stepk 1 \"$KD\" || break; "
             + "[ \"$moved\" = 0 ] && break; continue; fi; "
             // Unknown ❯ turn (wrapper/meta or older than the list) or the
             // banner region: keep the current direction. A clickable
@@ -987,7 +1155,7 @@ enum AgentSessionHistory {
             + "if [ \"$dir\" = u ]; then "
             + "if [ \"$ck\" = 1 ] && [ \"$pin\" = 0 ]; then cskip || break; continue; fi; "
             + "climb \(twinSafeBatch) || break; "
-            + "else stepk 1 NPage || break; [ \"$moved\" = 0 ] && break; fi; "
+            + "else stepk 1 \"$KD\" || break; [ \"$moved\" = 0 ] && break; fi; "
             + "done; "
             + "if [ \"$found\" = 1 ]; then "
             + "keep=1; trap - HUP INT TERM EXIT; printf 'MPXJ_FOUND %s\\n' \"$sent\"; "
@@ -1042,9 +1210,19 @@ enum AgentSessionHistory {
 
     /// BACK TO LIVE: Claude maps Ctrl+End to scroll-bottom. It is constant
     /// time even after a very long seek, and unlike Esc cannot interrupt a
-    /// turn that started after finding began.
-    static func jumpReturnCommand(sessionID: String, pages _: Int) -> String {
-        TmuxProbe.pathPrefix
-            + "tmux send-keys -t \(sessionID.shellQuoted) C-End 2>/dev/null; true"
+    /// turn that started after finding began. On herdr the key is its raw
+    /// escape sequence in one `send-text` write — the same fact the find
+    /// script's restore leans on.
+    static func jumpReturnCommand(target: JumpTarget, pages _: Int) -> String {
+        switch target {
+        case .tmux(let sessionID):
+            return TmuxProbe.pathPrefix
+                + "tmux send-keys -t \(sessionID.shellQuoted) C-End 2>/dev/null; true"
+        case .herdr(let sessionName, let paneID):
+            return HerdrProbe.pathPrefix
+                + "herdr --session \(sessionName.shellQuoted)"
+                + " pane send-text \(paneID.shellQuoted)"
+                + " \"$(printf '\\033[1;5F')\" 2>/dev/null; true"
+        }
     }
 }

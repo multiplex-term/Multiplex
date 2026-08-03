@@ -1126,7 +1126,24 @@ logic belongs — keep parsing/command-building out of views.
   pager with the header oracle** (`AgentSessionHistory`, pure +
   fixture-tested; Pro via `canBrowseAgentHistory`). **Claude Code only**
   — Codex/Pi history was withdrawn 2026-07-16; don't re-add a lesser
-  variant. File selection: pane cwd (`list-panes -F`) → descendants of
+  variant. **Both backends** (E2E-verified on herdr 0.7.5, 2026-08-03):
+  the walk's four touchpoints are backend-parameterized (`JumpTarget`:
+  capture / key send / literal send / prologue), everything else —
+  oracle, needles, twin counting, restore discipline — is shared. herdr
+  specifics: context cwd from one `api snapshot` (the drop path's
+  parser) and the registry walk rooted at `pane process-info
+  --current`'s `shell_pid` (the `pane_pid` analog; both work clientless,
+  unlike `pane current`, which the jump prologue may use because a live
+  tab IS an attached client); captures via `pane read --source visible
+  --format text`; 0.7.5's `send-keys` has no page/end names, so keys go
+  as RAW escape bytes (`\e[5~`/`\e[6~`/`\e[1;5F`) each in ONE
+  `send-text` write — a split ESC would read as bare Escape and can
+  interrupt a turn; the prologue title must be raw `terminal_title`
+  (the stripped variant removes exactly the spinner/✳ glyphs the idle
+  classifier reads); pane width is measured from the capture's widest
+  row (no column oracle exists); header clicks and the client-size
+  census stay off (no mouse-flag or client-list surface). File
+  selection: pane cwd (`list-panes -F`) → descendants of
   `#{pane_pid}` → Claude's live `<config root>/sessions/<pid>.json`
   registry → that exact `projects/<munged-cwd>/<sessionId>.jsonl`;
   **never regress to newest-mtime-only** (multiple Claude panes per cwd

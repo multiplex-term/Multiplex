@@ -96,7 +96,7 @@ final class TerminalSessionController {
     }
     private(set) var historyJump: HistoryJumpPhase?
     private var historyJumpTask: Task<Void, Never>?
-    private var historyJumpSessionID: String?
+    private var historyJumpTarget: AgentSessionHistory.JumpTarget?
     /// Transient status pill ("AGENT IS BUSY", "NOT IN THE VISIBLE
     /// TRANSCRIPT") — jump failures are outcomes, not errors.
     private(set) var historyNotice: String?
@@ -825,7 +825,7 @@ final class TerminalSessionController {
             // Typing (or Escape) returns Claude Code's pager to the live
             // tail on its own; drop the app-side state with it.
             historyJump = nil
-            historyJumpSessionID = nil
+            historyJumpTarget = nil
         }
         // Escape is the select-text HUD's exit key and the mode is app-local,
         // so the byte must not leak to the remote (it could interrupt a
@@ -1261,8 +1261,11 @@ final class TerminalSessionController {
     var canOfferAgentHistory: Bool {
         guard status == .live else { return false }
         if route.usesTmux { return true }
-        // Herdr does not expose the transcript identity this stack needs;
-        // only a true plain shell may use its own process-discovered cwd.
+        // herdr resolves the same transcript identity through its own
+        // surfaces: focused-pane cwd from a snapshot, the registry walk
+        // rooted at `pane process-info`'s shell_pid (verified 0.7.5).
+        if route.sessionBackend == .herdr { return true }
+        // Only a true plain shell may use its own process-discovered cwd.
         guard route.sessionName == nil else { return false }
         return connection != nil && directShellWorkingDirectory != nil
     }
@@ -1304,6 +1307,17 @@ final class TerminalSessionController {
                         cwd = context?.cwd
                         preferredSessionID = context?.agentSessionID
                         configDir = context?.configDir
+                    } else if route.sessionBackend == .herdr,
+                              let sessionName = route.sessionName {
+                        let output = try await connection.exec(
+                            AgentSessionHistory.herdrPaneContextCommand(
+                                sessionName: sessionName
+                            )
+                        )
+                        let context = AgentSessionHistory.parseHerdrPaneContext(output)
+                        cwd = context?.cwd
+                        preferredSessionID = context?.agentSessionID
+                        configDir = context?.configDir
                     } else {
                         cwd = shellCwd
                         preferredSessionID = nil
@@ -1331,7 +1345,8 @@ final class TerminalSessionController {
             agentHistory = .loaded(
                 agent: agent,
                 messages: result.messages,
-                jumpAvailable: route.usesTmux && agent == .claudeCode
+                jumpAvailable: (route.usesTmux || route.sessionBackend == .herdr)
+                    && agent == .claudeCode
             )
         } catch {
             guard !Task.isCancelled, agentHistory != nil else { return }
@@ -1340,7 +1355,7 @@ final class TerminalSessionController {
     }
 
     private enum HistoryJumpOutcome {
-        case found(sessionID: String, pages: Int)
+        case found(target: AgentSessionHistory.JumpTarget, pages: Int)
         case failed(String)
     }
 
@@ -1352,7 +1367,7 @@ final class TerminalSessionController {
     /// pager shows is matched against it, so each step is directed.
     func startHistoryJump(to message: AgentUserMessage) {
         guard status == .live,
-              route.usesTmux,
+              route.usesTmux || route.sessionBackend == .herdr,
               let sessionName = route.sessionName,
               !tmuxCopyModeUIActive,
               case .loaded(let agent, let messages, true) = agentHistory,
@@ -1368,7 +1383,7 @@ final class TerminalSessionController {
         // dictated words without a trace. Close the microphone instead.
         cancelDictation()
         #endif
-        historyJumpSessionID = nil
+        historyJumpTarget = nil
         let preview = String(message.firstLine.prefix(24))
         historyJump = .finding(preview: preview)
         historyJumpTask = Task { [weak self] in
@@ -1388,13 +1403,28 @@ final class TerminalSessionController {
         preview: String
     ) async {
         let outcome: HistoryJumpOutcome
+        let isHerdr = route.sessionBackend == .herdr
         do {
             outcome = try await withControlConnection { connection in
                 let prologueOutput = try await connection.exec(
-                    AgentSessionHistory.jumpPrologueCommand(sessionName: sessionName)
+                    isHerdr
+                        ? AgentSessionHistory.herdrJumpPrologueCommand(
+                            sessionName: sessionName
+                        )
+                        : AgentSessionHistory.jumpPrologueCommand(
+                            sessionName: sessionName
+                        )
                 )
-                guard let prologue = AgentSessionHistory.parseJumpPrologue(prologueOutput)
+                guard let prologue = isHerdr
+                    ? AgentSessionHistory.parseHerdrJumpPrologue(prologueOutput)
+                    : AgentSessionHistory.parseJumpPrologue(prologueOutput)
                 else { return .failed("SESSION NOT FOUND") }
+                // The walk's coordinate: tmux aims at the session (its
+                // active pane answers); herdr aims at the prologue's
+                // bake-vetted focused pane.
+                let target: AgentSessionHistory.JumpTarget = isHerdr
+                    ? .herdr(sessionName: sessionName, paneID: prologue.sessionID)
+                    : .tmux(sessionID: prologue.sessionID)
                 switch AgentAttention.classify(
                     title: prologue.paneTitle, tail: prologue.capture
                 ) {
@@ -1430,7 +1460,7 @@ final class TerminalSessionController {
                 }
                 let findOutput = try await connection.exec(
                     AgentSessionHistory.jumpFindCommand(
-                        sessionID: prologue.sessionID,
+                        target: target,
                         needles: entries,
                         targetIndex: message.ordinal,
                         targetNeedles: targetNeedles,
@@ -1455,7 +1485,7 @@ final class TerminalSessionController {
                     // the message's flattened row (a rebuilt transcript
                     // omits long multiline prompt bodies). From the user's
                     // seat that is the jump destination.
-                    return .found(sessionID: prologue.sessionID, pages: pages)
+                    return .found(target: target, pages: pages)
                 case .top, .exhausted:
                     // The remote script already restored the live view. A
                     // second differently-sized client can invalidate the
@@ -1483,14 +1513,14 @@ final class TerminalSessionController {
         }
 
         switch outcome {
-        case .found(let sessionID, let pages):
+        case .found(let target, let pages):
             if Task.isCancelled || historyJump == nil {
                 // Cancelled mid-find but the search landed: put the pane
                 // back rather than leaving it silently paged.
-                returnTranscriptToLive(sessionID: sessionID, pages: pages)
+                returnTranscriptToLive(target: target, pages: pages)
                 return
             }
-            historyJumpSessionID = sessionID
+            historyJumpTarget = target
             historyJump = .jumped(preview: preview, pages: pages)
         case .failed(let reason):
             guard !Task.isCancelled, historyJump != nil else { return }
@@ -1512,19 +1542,21 @@ final class TerminalSessionController {
     /// never Esc — a turn may have started since the search verified idle.
     func finishHistoryJump() {
         guard case .jumped(_, let pages) = historyJump else { return }
-        let sessionID = historyJumpSessionID
+        let target = historyJumpTarget
         historyJump = nil
-        historyJumpSessionID = nil
-        guard let sessionID else { return }
-        returnTranscriptToLive(sessionID: sessionID, pages: pages)
+        historyJumpTarget = nil
+        guard let target else { return }
+        returnTranscriptToLive(target: target, pages: pages)
     }
 
-    private func returnTranscriptToLive(sessionID: String, pages: Int) {
+    private func returnTranscriptToLive(
+        target: AgentSessionHistory.JumpTarget, pages: Int
+    ) {
         Task { [weak self] in
             _ = try? await self?.withControlConnection { connection in
                 try await connection.exec(
                     AgentSessionHistory.jumpReturnCommand(
-                        sessionID: sessionID, pages: pages
+                        target: target, pages: pages
                     )
                 )
             }
@@ -1548,7 +1580,7 @@ final class TerminalSessionController {
         historyJumpTask?.cancel()
         historyJumpTask = nil
         historyJump = nil
-        historyJumpSessionID = nil
+        historyJumpTarget = nil
         historyNoticeClearTask?.cancel()
         historyNoticeClearTask = nil
         historyNotice = nil

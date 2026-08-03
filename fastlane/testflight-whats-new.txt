@@ -9,6 +9,7 @@
   - FILE attach: FILE and drag-and-drop work on herdr tabs — upload into the focused pane's directory, path typed, never submitted.
   - Agent strip: switch tabs or workspaces inside herdr; the helper chips should follow the focused agent in about one second instead of waiting for the five-second wall refresh.
   - RESIZE BY TOUCH: on a herdr tab, long-press a pane divider line and drag — the split follows your finger (herdr resizes it live). A long press anywhere else keeps its usual meaning (links, selection menu).
+  - AGENT HISTORY: on a herdr tab running Claude Code, the strip's HIST opens the same prompt list as tmux (full text of prompts the TUI truncates), JUMP scrolls Claude's own transcript back to that prompt, BACK TO LIVE returns instantly — try it from a workspace with splits (the walk aims at the focused pane) and confirm a running turn refuses with AGENT IS BUSY.
 - UIKIT REBUILD: every surface (deck, terminals, shell, Settings, Add Host, paywall, file viewer, viewport) now runs on UIKit — sweep your usual flows; anything that looks or feels different from the last beta is a find.
 - FASTER TAPS: under mouse reporting each tap reaches tmux immediately, one click per tap, so remote double-clicks work.
 - VISION PRO GLASS: Settings ▸ Appearance adds GLASS beside SYSTEM / LIGHT / DARK, applied live to deck, terminals, forms, and popovers.
