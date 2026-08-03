@@ -232,6 +232,54 @@ final class HerdrProbeTests: XCTestCase {
         ], "one miniature read per running session — its focused pane")
     }
 
+    func testPaneScreenRectsComeFromTheFocusedLayout() throws {
+        let snapshot = try fixtureSnapshot()
+        // Fixture: focused tab w1:t1 holds one pane, rect x26 y1 54×23 with
+        // viewport_rows 23 == rect height → no border inset.
+        XCTAssertEqual(
+            HerdrProbe.parsePaneScreenRects(snapshot),
+            [PaneScreenRectEntry(
+                id: "w1:p1",
+                rect: PaneScreenRect(columns: 26...79, rows: 1...23),
+                isFocused: true
+            )]
+        )
+        XCTAssertEqual(HerdrProbe.parsePaneScreenRects("not an envelope"), [])
+        XCTAssertEqual(HerdrProbe.parsePaneScreenRects(""), [])
+    }
+
+    func testPaneScreenRectsInsetDrawnBordersPerPane() {
+        // viewport_rows 21 inside a 23-row rect → one border row each side,
+        // trimmed symmetrically on both axes; the unfocused sibling keeps
+        // its own geometry and flag.
+        let snapshot = #"{"id":"cli:api:snapshot","result":{"snapshot":{"#
+            + #""version":"0.7.5","protocol":17,"focused_workspace_id":"w1","#
+            + #""focused_tab_id":"w1:t1","focused_pane_id":"w1:p1","#
+            + #""workspaces":[{"workspace_id":"w1","number":1,"label":"one","#
+            + #""active_tab_id":"w1:t1"}],"#
+            + #""panes":[{"pane_id":"w1:p1","tab_id":"w1:t1","#
+            + #""agent_status":"unknown","scroll":{"viewport_rows":21}},"#
+            + #"{"pane_id":"w1:p2","tab_id":"w1:t1","#
+            + #""agent_status":"unknown","scroll":{"viewport_rows":21}}],"#
+            + #""layouts":[{"tab_id":"w1:t1","focused_pane_id":"w1:p1","#
+            + #""panes":[{"pane_id":"w1:p1","focused":true,"#
+            + #""rect":{"x":10,"y":2,"width":40,"height":23}},"#
+            + #"{"pane_id":"w1:p2","focused":false,"#
+            + #""rect":{"x":50,"y":2,"width":40,"height":23}}]}]}}}"#
+        XCTAssertEqual(HerdrProbe.parsePaneScreenRects(snapshot), [
+            PaneScreenRectEntry(
+                id: "w1:p1",
+                rect: PaneScreenRect(columns: 11...48, rows: 3...23),
+                isFocused: true
+            ),
+            PaneScreenRectEntry(
+                id: "w1:p2",
+                rect: PaneScreenRect(columns: 51...88, rows: 3...23),
+                isFocused: false
+            ),
+        ])
+    }
+
     func testForeignAgentKeepsStatusWithoutClaimingAKind() throws {
         // A kind Multiplex has no helper set for (herdr supports many
         // more) keeps its lifecycle status but maps to no AgentKind.

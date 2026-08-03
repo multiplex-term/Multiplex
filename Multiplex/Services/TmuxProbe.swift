@@ -1,5 +1,43 @@
 import Foundation
 
+/// One pane's rectangle in the attached client's screen cells, both ends
+/// inclusive — the select-text mode's clamp for local selection. tmux
+/// answers it from `list-panes -F` geometry; herdr from its snapshot's
+/// layout rects (border-inset by the viewport oracle). Screen-relative on
+/// purpose: the pane is fixed on screen while the buffer may scroll.
+struct PaneScreenRect: Equatable, Sendable {
+    var columns: ClosedRange<Int>
+    var rows: ClosedRange<Int>
+
+    func contains(col: Int, row: Int) -> Bool {
+        columns.contains(col) && rows.contains(row)
+    }
+
+    /// The dominant screen direction from one pane to another (rect-center
+    /// comparison) — herdr's only focus verb is directional, so this is
+    /// how a two-pane layout's "other" pane gets focused.
+    static func direction(from: PaneScreenRect, to: PaneScreenRect) -> String? {
+        let dx = (to.columns.lowerBound + to.columns.upperBound)
+            - (from.columns.lowerBound + from.columns.upperBound)
+        let dy = (to.rows.lowerBound + to.rows.upperBound)
+            - (from.rows.lowerBound + from.rows.upperBound)
+        if dx == 0 && dy == 0 { return nil }
+        if abs(dx) >= abs(dy) {
+            return dx > 0 ? "right" : "left"
+        }
+        return dy > 0 ? "down" : "up"
+    }
+}
+
+/// One visible pane's identity + rectangle + focus flag, both backends'
+/// geometry answers normalized: what the select-text mode picks its clamp
+/// (and its focus switch) from.
+struct PaneScreenRectEntry: Equatable, Sendable {
+    var id: String
+    var rect: PaneScreenRect
+    var isFocused: Bool
+}
+
 /// Builds and parses the `tmux` commands used to discover remote sessions.
 /// Pure functions — exercised directly by unit tests.
 ///
@@ -298,6 +336,46 @@ enum TmuxProbe {
             }
         }
         return nil
+    }
+
+    /// Every visible pane's screen rectangle — what the select-text mode
+    /// picks its clamp (pressed pane first, focused pane otherwise) from.
+    /// Current window only (that is what the attached client shows);
+    /// `list-panes -F`, never `display-message` (3.6a renders `pane_*`
+    /// empty for outside clients). tmux pane geometry is content cells in
+    /// the client's coordinate space — no border inset needed.
+    static func paneRectsCommand(sessionName: String) -> String {
+        pathPrefix
+            + "\(tmuxCommand) list-panes -t \("=\(sessionName)".shellQuoted) "
+            + "-F 'MPXRECT #{pane_id} #{pane_active} #{pane_left} #{pane_top} "
+            + "#{pane_width} #{pane_height}' 2>/dev/null"
+    }
+
+    static func parsePaneRects(_ output: String) -> [PaneScreenRectEntry] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: " ").map(String.init)
+            guard fields.count == 7, fields[0] == "MPXRECT",
+                  fields[1].hasPrefix("%"),
+                  let left = Int(fields[3]), let top = Int(fields[4]),
+                  let width = Int(fields[5]), let height = Int(fields[6]),
+                  left >= 0, top >= 0, width > 0, height > 0
+            else { return nil }
+            return PaneScreenRectEntry(
+                id: fields[1],
+                rect: PaneScreenRect(
+                    columns: left...(left + width - 1),
+                    rows: top...(top + height - 1)
+                ),
+                isFocused: fields[2] == "1"
+            )
+        }
+    }
+
+    /// Focus one pane by id — what a click would have done had the
+    /// select-text mode not kept the tap local. `%id` pane targets are
+    /// exact on 3.6a (only `=name` pane targets misbehave).
+    static func focusPaneCommand(paneID: String) -> String {
+        pathPrefix + "\(tmuxCommand) select-pane -t \(paneID.shellQuoted) 2>/dev/null"
     }
 
     /// Process rows for one pane TTY. This is separate from the one-second

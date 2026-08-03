@@ -207,6 +207,13 @@ app.multiplexterm.multiplex.<name>`:
   capture-pane.
 - `debug.tmuxcopy` / `debug.tmuxcopydone` — Copy Mode and the HUD's Done,
   through the ordered pump.
+- `debug.selecttext` / `debug.selecttextdone` / `debug.selecttextall` /
+  `debug.longpressmenu` (the idle SELECT/SELECT ALL/PASTE block at screen
+  center) — the app-owned Select Text mode, its Done, and Select All (both
+  backends; app-local, so proof is the SELECT TEXT HUD, the pane-clamped
+  highlight with the floating COPY/SELECT ALL bar after `selecttextall`,
+  and a tap that no longer reaches the remote — with tmux `mouse on`,
+  `#{pane_in_mode}` stays 0 under a pan).
 - `debug.tmuxclosepane` / `debug.tmuxclosewindow` — the already-confirmed
   destructive close actions (disposable sessions only).
 - `debug.keybar` — iPad key-bar proof: a shell prompt capture shows `~|/-^C`.
@@ -551,7 +558,58 @@ logic belongs — keep parsing/command-building out of views.
   device pasteboard. The contextual bar's Done (and keyboard Escape) sends
   Escape through the same path. Always restore mouse reporting when the
   mode ends or the transport closes, or tmux touch interaction silently
-  stops.
+  stops. **Select Text is the backend-agnostic sibling**
+  (`selectTextModeUIActive`; entered ONLY from the long-press block's
+  SELECT / SELECT ALL on tmux AND herdr — a shortcut-panel Screen row
+  shipped and was removed 2026-08-03, don't re-add one without asking):
+  the same tap-ownership flip with NO
+  remote mode entered — mouse reporting off so native selection owns
+  taps, pans suppressed outright (`suppressRemotePanScroll`, a fork
+  patch: with no copy-mode view answering cursor keys, the
+  alternate-screen fallback would type arrows into the remote app). DONE
+  or Escape exits; the Escape byte is consumed app-side (it must not
+  interrupt a running agent) unless tmux copy mode is active too and
+  needs it to leave. **Selection is clamped to the TARGET pane**
+  (`PaneScreenRect`/`PaneScreenRectEntry`; `SelectionService.clampRect`
+  in the fork): entry and every resize run one read-only control exec
+  listing EVERY visible pane — tmux `list-panes -F` geometry (content
+  cells, no inset), herdr the snapshot's layout rects border-inset by
+  the `viewport_rows` oracle — and the target is the pane under the
+  long-press that entered the mode (the focused pane when no press rides
+  along), so drags can't bleed across a split, Select All means the pane
+  (not herdr's sidebar/tab bar), and extraction joins per-pane-row
+  slices with newlines instead of splicing neighbor-pane bytes. **The
+  backend's focus follows a pressed non-focused pane** — the switch a
+  click would have made: tmux `select-pane` by `%id`; herdr's only
+  focus verb is directional (0.7.5 has no focus-by-id), so ONE step
+  fires and only in a two-pane layout, where a single step is exact.
+  Clamp rows are SCREEN-relative (converted through `yDisp` per
+  operation); a failed fetch falls back to whole-screen, and a clamp
+  arriving after a Select All *re-clamps* the live selection
+  (`reclampActiveSelection`), never drops it. **In this mode the app
+  owns ALL selection chrome in ONE floating block**
+  (`TerminalView.selectionUIHandler`, a fork patch;
+  `TerminalSelectionActionsOverlay`, a TerminalView subview — the link
+  hover overlay's pattern): the deprecated UIMenuController never
+  shows, a plain tap or long press seeds a word selection directly (no
+  PASTE/SELECT detour; links wait until the mode ends), and every
+  selection change reports its screen box so the block — SELECT TEXT
+  lamp, COPY (hidden without a selection), SELECT ALL, DONE — floats
+  beside the selection, parking top-center without one so the mode and
+  its exit stay visible; there is deliberately NO separate top-center
+  HUD. COPY rides the fork's `copy(_:)` (pasteboard + clear) and then
+  ENDS the mode — the grab is what the mode was entered for; SELECT
+  ALL rides the clamped `selectAll`. Detach restores the stock flow and
+  clears the selection. **Outside the mode, a long press raises the
+  app's own SELECT / SELECT ALL / PASTE block** (`longPressMenuHandler` +
+  `TerminalLongPressMenuOverlay`, every live pane) in UIMenuController's
+  place — links still win the press first; SELECT / SELECT ALL enter the
+  mode (seeded at the pressed word / the whole pane — a Select All taken
+  before the async pane rect lands is *re-clamped*, never dropped);
+  PASTE types the pasteboard as ever; a tap dismisses-and-consumes, the
+  native menu's contract (`appMenuDismiss`). Selection covers the
+  visible screen only (herdr's scrollback lives host-side) and nothing
+  freezes — a busy pane keeps drawing under the selection.
 - **A terminal link is confirmed, never followed** (`TerminalLink`, pure +
   tested; `TerminalLinkSheet`). Long press is the activation route on
   every platform — it is local at any mouse mode, while a tap belongs to

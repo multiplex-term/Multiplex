@@ -366,6 +366,10 @@ enum HerdrProbe {
         /// analog: while an agent runs there, the agent's own directory.
         var cwd: String?
         var foregroundCwd: String?
+        /// 0.7.5 reports per-pane scroll state; `viewport_rows` is the
+        /// content height inside the pane rect — the border-inset oracle
+        /// for the select-text clamp.
+        var scroll: PaneScroll?
 
         enum CodingKeys: String, CodingKey {
             case paneID = "pane_id"
@@ -375,17 +379,48 @@ enum HerdrProbe {
             case terminalTitleStripped = "terminal_title_stripped"
             case cwd
             case foregroundCwd = "foreground_cwd"
+            case scroll
+        }
+    }
+
+    private struct PaneScroll: Decodable {
+        var viewportRows: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case viewportRows = "viewport_rows"
         }
     }
 
     private struct Layout: Decodable {
         var tabID: String
         var focusedPaneID: String?
+        /// Screen-cell rects per pane (0.7.5) — already in the attached
+        /// client's coordinate space, sidebar and tab bar accounted for.
+        var panes: [LayoutPane]?
 
         enum CodingKeys: String, CodingKey {
             case tabID = "tab_id"
             case focusedPaneID = "focused_pane_id"
+            case panes
         }
+    }
+
+    private struct LayoutPane: Decodable {
+        var paneID: String
+        var focused: Bool?
+        var rect: LayoutRect?
+
+        enum CodingKeys: String, CodingKey {
+            case paneID = "pane_id"
+            case focused, rect
+        }
+    }
+
+    private struct LayoutRect: Decodable {
+        var x: Int
+        var y: Int
+        var width: Int
+        var height: Int
     }
 
     private struct CurrentPaneResult: Decodable {
@@ -723,6 +758,56 @@ enum HerdrProbe {
         return [pane.foregroundCwd, pane.cwd]
             .compactMap { $0 }
             .first(where: isSpliceablePath)
+    }
+
+    /// Every visible pane's screen rectangle out of one snapshot exec — the
+    /// select-text mode's clamp candidates. The layout rects are already in
+    /// the attached client's screen cells (sidebar and tab bar included in
+    /// x/y), but they count drawn borders; each pane's `viewport_rows` names
+    /// its content height, so the difference halves into a symmetric inset.
+    /// Focus comes from the layout's `focused` flags backed by the
+    /// snapshot's global focused pane; any missing piece drops that pane
+    /// (an empty answer keeps the caller on whole-screen behavior).
+    static func parsePaneScreenRects(_ output: String) -> [PaneScreenRectEntry] {
+        guard let snapshot = firstDecodedLine(in: output, decodeSnapshot),
+              let focusedTab = snapshot.focusedTabID,
+              let layout = snapshot.layouts.first(where: { $0.tabID == focusedTab }),
+              let panes = layout.panes
+        else { return [] }
+        let focusedPaneID = layout.focusedPaneID ?? snapshot.focusedPaneID
+        return panes.compactMap { pane in
+            guard let rect = pane.rect,
+                  rect.x >= 0, rect.y >= 0, rect.width > 0, rect.height > 0
+            else { return nil }
+            var inset = 0
+            if let viewportRows = snapshot.panes
+                .first(where: { $0.paneID == pane.paneID })?.scroll?.viewportRows,
+               viewportRows > 0, viewportRows <= rect.height {
+                inset = (rect.height - viewportRows) / 2
+            }
+            let colLo = rect.x + inset
+            let colHi = rect.x + rect.width - 1 - inset
+            let rowLo = rect.y + inset
+            let rowHi = rect.y + rect.height - 1 - inset
+            guard colLo <= colHi, rowLo <= rowHi else { return nil }
+            return PaneScreenRectEntry(
+                id: pane.paneID,
+                rect: PaneScreenRect(columns: colLo...colHi, rows: rowLo...rowHi),
+                isFocused: pane.focused ?? (pane.paneID == focusedPaneID)
+            )
+        }
+    }
+
+    /// herdr 0.7.5 has no focus-pane-by-id — `pane focus` is strictly
+    /// directional — so the select-text mode's auto-focus fires one step,
+    /// and only when the layout is two panes (where a single step is
+    /// exact). Direction values are herdr's own: left/right/up/down.
+    static func focusPaneDirectionCommand(
+        sessionName: String, direction: String
+    ) -> String {
+        pathPrefix
+            + "herdr --session \(sessionName.shellQuoted) pane focus"
+            + " --direction \(direction.shellQuoted) 2>/dev/null || true"
     }
 
     /// Absolute and control-free — the only directory shape safe to hand

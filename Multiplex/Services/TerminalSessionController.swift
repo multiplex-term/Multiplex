@@ -56,6 +56,21 @@ final class TerminalSessionController {
     /// The terminal HUD provides the explicit exit path tmux itself lacks.
     private(set) var tmuxCopyModeUIActive = false
 
+    /// The copy-mode HUD's backend-agnostic sibling: the same tap ownership
+    /// flip (mouse reporting off, so hold/double-tap run native selection
+    /// over the visible screen and copy to the device pasteboard) without
+    /// entering any remote mode — herdr has no copy mode to enter, and on
+    /// tmux nothing needs to touch the server just to select. Pans are
+    /// suppressed rather than translated: no remote view answers cursor
+    /// keys here, and the alternate screen has no local scrollback. Entry
+    /// is the long-press block's SELECT / SELECT ALL; exit is the floating
+    /// block's DONE, its COPY (the grab finishes the mode), or a keyboard
+    /// Escape (consumed — see `sendInput`).
+    private(set) var selectTextModeUIActive = false
+    /// Drops a stale focused-pane-rect answer when the mode ends or a
+    /// resize refetches before the previous exec came home.
+    private var selectTextClampGeneration = 0
+
     /// The HISTORY surface: user prompts read from the agent's own session
     /// file on the host (see `AgentSessionHistory`). Present while the panel
     /// is open; cleared on dismiss so a stale list never reopens.
@@ -213,8 +228,7 @@ final class TerminalSessionController {
 
     func bind(_ view: TerminalView) {
         terminalView = view
-        view.allowMouseReporting = !tmuxCopyModeUIActive
-        view.forceRemoteCursorScroll = tmuxCopyModeUIActive
+        applyTouchInteractionModes()
         // Touch never hovers, so SwiftTerm's pointer-gated activation can
         // never fire here; this pane decides instead. The view owns the
         // closure and this controller owns the view — capture weakly.
@@ -569,6 +583,7 @@ final class TerminalSessionController {
         stopTransportPumps()
         stopDirectShellMonitoring()
         setTmuxCopyModeUIActive(false)
+        setSelectTextModeUIActive(false)
         resetHistoryState()
         handoffWatch = nil
         status = .ended(reason)
@@ -802,6 +817,14 @@ final class TerminalSessionController {
             historyJump = nil
             historyJumpSessionID = nil
         }
+        // Escape is the select-text HUD's exit key and the mode is app-local,
+        // so the byte must not leak to the remote (it could interrupt a
+        // running agent). When tmux copy mode is also active the byte keeps
+        // riding below — tmux needs it to leave its own mode.
+        if selectTextModeUIActive, data == Data([0x1B]) {
+            setSelectTextModeUIActive(false)
+            if !tmuxCopyModeUIActive { return }
+        }
         inputContinuation?.yield(data)
         // Both the app-owned DONE action and a hardware/software Escape key
         // travel through this same delegate path. Restore normal tmux mouse
@@ -818,6 +841,80 @@ final class TerminalSessionController {
         switch item.payload {
         case .tmux(let shortcut): performTmuxShortcut(shortcut)
         case .herdr(let shortcut): performHerdrShortcut(shortcut)
+        }
+    }
+
+    /// Hand the visible screen to native selection on any session-backed
+    /// tab. Entered from the long-press block's SELECT/SELECT ALL, which
+    /// carry the pressed cell so the selection targets the pane under the
+    /// finger — and the backend's focus follows it, the switch a tap would
+    /// have made had the mode not kept taps local. No position (the DEBUG
+    /// hook) targets the focused pane.
+    func beginSelectTextMode(atScreenPosition point: (col: Int, row: Int)? = nil) {
+        guard status == .live else { return }
+        if case .finding = historyJump { return }
+        setSelectTextModeUIActive(true)
+        refreshSelectTextClamp(targeting: point)
+    }
+
+    /// The block's DONE. Local state only — the remote never entered a mode.
+    func finishSelectTextMode() {
+        setSelectTextModeUIActive(false)
+    }
+
+    /// Ask the backend for the visible panes' screen rectangles and clamp
+    /// local selection into the target pane — the pressed one when a
+    /// position rides along, the focused one otherwise. A selection must
+    /// not bleed across a pane border, and Select All should mean the pane,
+    /// not the screen (which on herdr would also sweep the sidebar and tab
+    /// bar). When the target is not the focused pane, focus follows: tmux
+    /// by pane id; herdr's only focus verb is directional, so one step
+    /// fires and only in a two-pane layout, where a single step is exact.
+    /// Fail-soft throughout: no answer leaves the whole-screen behavior.
+    private func refreshSelectTextClamp(targeting point: (col: Int, row: Int)? = nil) {
+        guard selectTextModeUIActive,
+              let backend = route.sessionBackend,
+              let sessionName = route.sessionName
+        else { return }
+        selectTextClampGeneration &+= 1
+        let generation = selectTextClampGeneration
+        let command = switch backend {
+        case .tmux: TmuxProbe.paneRectsCommand(sessionName: sessionName)
+        case .herdr: HerdrProbe.snapshotCommand(sessionName: sessionName)
+        }
+        Task {
+            guard let output = try? await withControlConnection({
+                try await $0.exec(command)
+            }) else { return }
+            guard generation == selectTextClampGeneration,
+                  selectTextModeUIActive
+            else { return }
+            let panes = switch backend {
+            case .tmux: TmuxProbe.parsePaneRects(output)
+            case .herdr: HerdrProbe.parsePaneScreenRects(output)
+            }
+            let focused = panes.first(where: \.isFocused)
+            guard let target = point.flatMap({ p in
+                panes.first(where: { $0.rect.contains(col: p.col, row: p.row) })
+            }) ?? focused ?? panes.first
+            else { return }
+            terminalView?.selectionClampRect = (target.rect.columns, target.rect.rows)
+            guard !target.isFocused else { return }
+            switch backend {
+            case .tmux:
+                await executeControlCommand(
+                    TmuxProbe.focusPaneCommand(paneID: target.id)
+                )
+            case .herdr:
+                guard panes.count == 2, let focused,
+                      let direction = PaneScreenRect.direction(
+                        from: focused.rect, to: target.rect
+                      )
+                else { return }
+                await executeControlCommand(HerdrProbe.focusPaneDirectionCommand(
+                    sessionName: sessionName, direction: direction
+                ))
+            }
         }
     }
 
@@ -1070,8 +1167,30 @@ final class TerminalSessionController {
     private func setTmuxCopyModeUIActive(_ active: Bool) {
         guard tmuxCopyModeUIActive != active else { return }
         tmuxCopyModeUIActive = active
-        terminalView?.allowMouseReporting = !active
-        terminalView?.forceRemoteCursorScroll = active
+        applyTouchInteractionModes()
+    }
+
+    private func setSelectTextModeUIActive(_ active: Bool) {
+        guard selectTextModeUIActive != active else { return }
+        selectTextModeUIActive = active
+        applyTouchInteractionModes()
+        if !active {
+            selectTextClampGeneration &+= 1
+            terminalView?.selectionClampRect = nil
+        }
+    }
+
+    /// The one writer for the view flags the two app-owned interaction modes
+    /// share. Copy mode keeps pans alive as cursor keys (tmux copy mode
+    /// answers them); select-text has no remote listener, so its pans are
+    /// suppressed outright — unless copy mode is active too and wins.
+    private func applyTouchInteractionModes() {
+        guard let terminalView else { return }
+        terminalView.allowMouseReporting =
+            !(tmuxCopyModeUIActive || selectTextModeUIActive)
+        terminalView.forceRemoteCursorScroll = tmuxCopyModeUIActive
+        terminalView.suppressRemotePanScroll =
+            selectTextModeUIActive && !tmuxCopyModeUIActive
     }
 
     /// SSH tabs already own an exec-capable connection next to their PTY.
@@ -1447,6 +1566,10 @@ final class TerminalSessionController {
         lastRows = rows
         guard status == .live else { return }
         resizeContinuation?.yield(TerminalSize(cols: cols, rows: rows))
+        // A resize relayouts the multiplexer's panes, so a select-text clamp
+        // fetched for the old geometry is wrong — refetch (the generation
+        // counter drops the stale answer if resizes storm).
+        if selectTextModeUIActive { refreshSelectTextClamp() }
     }
 
     /// Scene became active again: a mosh transport heartbeats immediately
@@ -1745,6 +1868,7 @@ final class TerminalSessionController {
         stopTransportPumps()
         stopDirectShellMonitoring()
         setTmuxCopyModeUIActive(false)
+        setSelectTextModeUIActive(false)
         resetHistoryState()
         status = .ended(nil)
         keyPassphraseChallenge = nil
@@ -1775,6 +1899,7 @@ final class TerminalSessionController {
             keyPassphraseChallenge = nil
         }
         setTmuxCopyModeUIActive(false)
+        setSelectTextModeUIActive(false)
         resetHistoryState()
         status = .connecting
         beginTransportRun()
@@ -1865,6 +1990,7 @@ final class TerminalSessionController {
         keyPassphraseChallenge = nil
         guard case .ended = status else { return }
         setTmuxCopyModeUIActive(false)
+        setSelectTextModeUIActive(false)
         resetHistoryState()
         status = .connecting
         beginTransportRun()

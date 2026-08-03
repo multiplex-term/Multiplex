@@ -692,6 +692,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     ///  - pos: the location where this was triggered in the buffer, it used at a later point
     ///  to auto-select a word
     func showContextMenu (forRegion: CGRect, pos: Position) {
+        // Multiplex patch: the app owns selection chrome — the deprecated
+        // UIMenuController stays out of the picture entirely.
+        if selectionUIHandler != nil {
+            return
+        }
         var items: [UIMenuItem] = []
 
         lastLongSelect = pos
@@ -745,6 +750,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
              let tapRegion = makeContextMenuRegionForTap (point: tapLocation)
              let hit = calculateTapHit (gesture: gestureRecognizer).grid
 
+             // Multiplex patch: with app-owned selection chrome a long press
+             // is just a firmer tap — seed the word selection (links wait
+             // until the mode ends; selection is the whole point here).
+             if selectionUIHandler != nil {
+                 _ = dismissAppMenu()
+                 seedAppSelection(at: hit)
+                 return
+             }
+
              // Multiplex patch: a long press is a local gesture — no mouse
              // report rides on it at any tracking mode — so it is the one
              // activation route that always reaches the user's intent. A press
@@ -753,6 +767,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
              // menu exactly as before.
              if let result = linkForClick(at: hit, hasCommandModifier: commandActive),
                 activateLink(result) {
+                 _ = dismissAppMenu()
+                 return
+             }
+
+             // Multiplex patch: outside the select-text mode the app's
+             // long-press block replaces the UIMenuController flow — a
+             // re-press elsewhere simply moves it.
+             if let handler = longPressMenuHandler {
+                 handler(tapRegion, hit)
                  return
              }
 
@@ -879,6 +902,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// second opinion and never as the sole authority.
     @discardableResult
     func dismissLocalSelectionUI () -> Bool {
+        // Multiplex patch: the app's long-press block obeys the same
+        // contract as the native menu — a tap anywhere dismisses it and is
+        // consumed.
+        if dismissAppMenu() {
+            return true
+        }
         guard selection.active || contextMenuPresented || UIMenuController.shared.isMenuVisible
         else { return false }
         if selection.active {
@@ -906,6 +935,22 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         guard gestureRecognizer.view != nil else { return }
 
         if gestureRecognizer.state != .ended {
+            return
+        }
+
+        // Multiplex patch: while the app owns selection chrome, a tap seeds
+        // a word selection right where it lands — no PASTE/SELECT menu
+        // detour, and no dismiss-then-retap dance (re-tapping simply
+        // re-anchors). Links and mouse reporting are out of the picture in
+        // that state by construction.
+        if selectionUIHandler != nil {
+            if !isFirstResponder {
+                let _ = becomeFirstResponder()
+            }
+            // A lingering long-press block from before the mode started
+            // goes away with the tap; the seed still happens.
+            _ = dismissAppMenu()
+            seedAppSelection(at: calculateTapHit(gesture: gestureRecognizer).grid)
             return
         }
 
@@ -1134,11 +1179,121 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
 
+    /// Multiplex patch: constrain local selection to one multiplexer pane.
+    /// The app sets the focused pane's screen rectangle while its
+    /// select-text mode runs, so taps, drags, and Select All operate on the
+    /// pane instead of the whole screen (a split's neighbor pane must not
+    /// bleed into a selection). Rows/columns are screen cells, both ends
+    /// inclusive. A live selection is pulled into the new rectangle rather
+    /// than dropped — the clamp arrives asynchronously, and a Select All
+    /// taken meanwhile should tighten to the pane, not vanish.
+    public var selectionClampRect: (columns: ClosedRange<Int>, rows: ClosedRange<Int>)? {
+        get { selection.clampRect }
+        set {
+            selection.clampRect = newValue
+            selection.reclampActiveSelection()
+            queuePendingDisplay()
+        }
+    }
+
+    /// Multiplex patch: while set, the APP owns selection chrome. The
+    /// deprecated UIMenuController never shows (`showContextMenu` no-ops),
+    /// a plain tap or long press seeds a word selection directly — no
+    /// PASTE/SELECT menu detour — and every selection change reports the
+    /// selection's screen rectangle (nil when the selection clears) so the
+    /// app can float its own actions beside it. Set only while the app's
+    /// select-text mode runs; nil restores the stock UIKit selection flow.
+    public var selectionUIHandler: ((CGRect?) -> Void)?
+
+    /// Multiplex patch: the app's replacement for the long-press context
+    /// menu OUTSIDE the select-text mode. When set, a long press that
+    /// neither seeds an in-mode selection nor activates a link reports its
+    /// screen region and buffer position here instead of showing the
+    /// deprecated UIMenuController — the app draws its own SELECT /
+    /// SELECT ALL / PASTE block there.
+    public var longPressMenuHandler: ((CGRect, Position) -> Void)?
+
+    /// Multiplex patch: set by the app while its long-press block is on
+    /// screen. A tap dismisses-and-consumes exactly like the native menu
+    /// (`dismissLocalSelectionUI` calls and clears it); the app also clears
+    /// it whenever it hides the block itself.
+    public var appMenuDismiss: (() -> Void)?
+
+    /// Multiplex patch: run-and-clear the app's menu dismissal, answering
+    /// whether anything was dismissed.
+    private func dismissAppMenu () -> Bool {
+        guard let dismiss = appMenuDismiss else { return false }
+        appMenuDismiss = nil
+        dismiss()
+        return true
+    }
+
+    /// Multiplex patch: the app's SELECT action — seed a word selection at
+    /// the position its long-press block recorded, exactly like an in-mode
+    /// tap.
+    public func seedWordSelection (atBufferPosition position: Position) {
+        seedAppSelection(at: position)
+    }
+
+    /// Multiplex patch: the active selection's bounding box in view
+    /// coordinates — what `selectionUIHandler` reports. Rows convert
+    /// through `yDisp`; multi-row widths honor `selectionClampRect` so the
+    /// box hugs the pane the selection lives in.
+    public func selectionUIRect () -> CGRect? {
+        guard let terminal, selection.active, selection.hasSelectionRange else { return nil }
+        let (first, last) = Position.compare(selection.start, selection.end) == .before
+            ? (selection.start, selection.end)
+            : (selection.end, selection.start)
+        let yDisp = terminal.displayBuffer.yDisp
+        let startRow = first.row - yDisp
+        let endRow = last.row - yDisp
+        guard endRow >= 0, startRow < terminal.rows else { return nil }
+        let cols: (lo: Int, hi: Int)
+        if startRow == endRow {
+            cols = (first.col, last.col)
+        } else if let clamp = selection.clampRect {
+            cols = (clamp.columns.lowerBound, clamp.columns.upperBound)
+        } else {
+            cols = (0, terminal.cols - 1)
+        }
+        return CGRect(
+            x: CGFloat(cols.lo) * cellDimension.width,
+            y: CGFloat(max(0, startRow)) * cellDimension.height,
+            width: CGFloat(cols.hi - cols.lo + 1) * cellDimension.width,
+            height: CGFloat(min(terminal.rows - 1, endRow) - max(0, startRow) + 1) * cellDimension.height)
+    }
+
+    /// Multiplex patch: seed a word selection at a gesture location — what
+    /// a plain tap/long press does while the app owns selection chrome.
+    /// Character-granular drags afterwards, exactly like the double-tap
+    /// selection path.
+    private func seedAppSelection (at hit: Position) {
+        selection.selectWordOrExpression(at: hit, in: terminal.displayBuffer)
+        selection.selectionMode = .character
+        enableSelectionPanGesture()
+        queuePendingDisplay()
+    }
+
+    /// Multiplex patch: an app-owned select-text HUD over a mouse-capturing
+    /// full-screen app (tmux, herdr). Like the copy-mode state above it turns
+    /// mouse reporting off so taps run the native selection gestures — but
+    /// unlike copy mode there is no remote view that answers cursor keys, so
+    /// a pan falling through to the alternate-screen branch would type
+    /// arrows into the remote app. While set, pans are not forwarded at all
+    /// (the alternate buffer has no local scrollback to move either).
+    public var suppressRemotePanScroll: Bool = false {
+        didSet {
+            guard suppressRemotePanScroll != oldValue else { return }
+            updateRemotePanGesture()
+        }
+    }
+
     /// True when a pan should be forwarded to the remote instead of
     /// scrolling the local scrollback. Terminal.init replays mode changes
     /// through the delegate before `terminal` is assigned — stay nil-safe.
     var remoteScrollApplies: Bool {
         guard let terminal else { return false }
+        if suppressRemotePanScroll { return false }
         return forceRemoteCursorScroll
             || (allowMouseReporting && terminal.mouseMode != .off)
             || terminal.isCurrentBufferAlternate
@@ -1708,6 +1863,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// system (where `selectNone` would otherwise come from).
     public func clearSelection() {
         selection?.selectNone()
+        // Multiplex patch: programmatic clears (the app-owned selection
+        // chrome's teardown) must also retire the selection drag recognizer
+        // and repaint, or a stale highlight and gesture linger.
+        disableSelectionPanGesture()
+        queuePendingDisplay()
     }
 
     /// Programmatically presents SwiftTerm's standard Copy / Paste /
@@ -3533,9 +3693,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         pendingSelectionChanged = true
         DispatchQueue.main.async {
             self.pendingSelectionChanged = false
-            
+
             self.inputDelegate?.selectionWillChange (self)
             self.inputDelegate?.selectionDidChange(self)
+
+            // Multiplex patch: report the selection's screen box to the
+            // app-owned selection chrome (nil = selection cleared).
+            self.selectionUIHandler?(self.selectionUIRect())
  
 #if canImport(MetalKit)
             if self.metalView != nil {

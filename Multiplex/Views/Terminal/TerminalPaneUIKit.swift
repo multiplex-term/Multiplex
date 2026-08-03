@@ -1,4 +1,5 @@
 import Observation
+import SwiftTerm
 import UIKit
 import UniformTypeIdentifiers
 
@@ -23,6 +24,7 @@ struct TerminalPaneObservedState: Equatable {
     var status: TerminalSessionController.Status
     var isResuming: Bool
     var tmuxCopyModeUIActive: Bool
+    var selectTextModeUIActive: Bool
     var historyJump: TerminalSessionController.HistoryJumpPhase?
     var historyNotice: String?
     var dropState: TerminalSessionController.DropState?
@@ -37,6 +39,7 @@ struct TerminalPaneObservedState: Equatable {
         status = controller.status
         isResuming = controller.isResuming
         tmuxCopyModeUIActive = controller.tmuxCopyModeUIActive
+        selectTextModeUIActive = controller.selectTextModeUIActive
         historyJump = controller.historyJump
         historyNotice = controller.historyNotice
         dropState = controller.dropState
@@ -62,6 +65,8 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
     private(set) var findingVeil: TerminalHistoryFindingVeilView?
     private(set) var dropTargetVeil: DropTargetVeilView?
     private(set) var missingHostView: UIView?
+    private var selectionActionsOverlay: TerminalSelectionActionsOverlay?
+    private var longPressMenuOverlay: TerminalLongPressMenuOverlay?
 
     private let topCenterStack = UIStackView()
     private let topTrailingStack = UIStackView()
@@ -127,6 +132,10 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         var inactive = surfaceConfiguration
         inactive.isActive = false
         terminalSurface?.update(configuration: inactive)
+        selectionActionsOverlay?.detach()
+        selectionActionsOverlay = nil
+        longPressMenuOverlay?.detach()
+        longPressMenuOverlay = nil
         hideDropTarget()
     }
 
@@ -288,6 +297,72 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         renderTopCenter(state, controller: controller)
         renderTopTrailing(state, controller: controller)
         renderBottom(state)
+        renderSelectionActions(state, controller: controller)
+    }
+
+    /// Select Text mode's app-owned COPY/SELECT ALL bar. Installed while the
+    /// mode is on for the active pane; detaching restores the fork's stock
+    /// selection flow and clears any live selection with it.
+    private func renderSelectionActions(
+        _ state: TerminalPaneObservedState,
+        controller: TerminalSessionController
+    ) {
+        let wantsOverlay = state.selectTextModeUIActive
+            && configuration.isActive
+            && state.status == .live
+        if wantsOverlay {
+            if selectionActionsOverlay == nil,
+               let terminal = controller.terminalView {
+                selectionActionsOverlay = TerminalSelectionActionsOverlay(
+                    terminal: terminal,
+                    done: { [weak controller] in
+                        controller?.finishSelectTextMode()
+                    }
+                )
+            }
+        } else if let overlay = selectionActionsOverlay {
+            overlay.detach()
+            selectionActionsOverlay = nil
+        }
+        renderLongPressMenu(state, controller: controller)
+    }
+
+    /// The idle long-press block (SELECT / SELECT ALL / PASTE) rides every
+    /// live active pane; inside select-text mode long presses seed the
+    /// selection instead, so any visible block hides with the mode change.
+    private func renderLongPressMenu(
+        _ state: TerminalPaneObservedState,
+        controller: TerminalSessionController
+    ) {
+        let wantsMenu = configuration.isActive && state.status == .live
+        if wantsMenu {
+            if longPressMenuOverlay == nil,
+               let terminal = controller.terminalView {
+                longPressMenuOverlay = TerminalLongPressMenuOverlay(
+                    terminal: terminal,
+                    select: { [weak self] position in
+                        guard let controller = self?.configuration.controller else { return }
+                        controller.beginSelectTextMode(
+                            atScreenPosition: (col: position.col, row: position.row)
+                        )
+                        guard controller.selectTextModeUIActive else { return }
+                        controller.terminalView?.seedWordSelection(atBufferPosition: position)
+                    },
+                    selectAll: { [weak self] position in
+                        guard let controller = self?.configuration.controller else { return }
+                        controller.beginSelectTextMode(
+                            atScreenPosition: (col: position.col, row: position.row)
+                        )
+                        guard controller.selectTextModeUIActive else { return }
+                        controller.terminalView?.selectAll(nil)
+                    }
+                )
+            }
+            if state.selectTextModeUIActive { longPressMenuOverlay?.hide() }
+        } else if let overlay = longPressMenuOverlay {
+            overlay.detach()
+            longPressMenuOverlay = nil
+        }
     }
 
     private func renderStatus(
@@ -354,6 +429,8 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             bar.accessibilityIdentifier = "terminalPane.context.copyMode"
             topCenterStack.addArrangedSubview(bar)
         }
+        // Select Text mode carries its own chrome in the floating block
+        // (`TerminalSelectionActionsOverlay`) — nothing top-center.
         #if !os(visionOS)
         if let dictation = state.dictation {
             guard !state.tmuxCopyModeUIActive else { return }
@@ -468,6 +545,10 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         statusView = nil
         findingVeil?.removeFromSuperview()
         findingVeil = nil
+        selectionActionsOverlay?.detach()
+        selectionActionsOverlay = nil
+        longPressMenuOverlay?.detach()
+        longPressMenuOverlay = nil
         hideDropTarget()
         removeArrangedSubviews(from: topCenterStack)
         removeArrangedSubviews(from: topTrailingStack)
@@ -668,6 +749,207 @@ final class TerminalContextBarView: UIKitTallyBorderedView {
         ])
     }
 
+}
+
+/// Select Text mode's ONE piece of chrome — the mode lamp, its selection
+/// actions, and its exit, all in the floating block (the top-center HUD
+/// moved down here so cancel sits beside the work). Installing it hands the
+/// fork's selection chrome to the app (`TerminalView.selectionUIHandler`):
+/// the native menu never shows, a plain tap seeds a word selection, and the
+/// handler reports the selection's screen box so the block can float
+/// beside it — with no selection yet, the block parks top-center (COPY
+/// hidden until there is something to copy; DONE always reachable). Lives
+/// as a subview of the `TerminalView` itself (the link hover overlay's
+/// pattern) so the reported rect needs no conversion.
+@MainActor
+final class TerminalSelectionActionsOverlay {
+    private weak var terminal: TerminalView?
+    private let bar: TerminalContextBarView
+    private let copyChip: UIKitChassisChip
+
+    init(terminal: TerminalView, done: @escaping () -> Void) {
+        self.terminal = terminal
+        // COPY finishes the job: pasteboard, then the mode ends with it —
+        // the grab is what the mode was entered for.
+        copyChip = UIKitChassisChip(
+            "COPY",
+            prominent: true,
+            accessibilityLabel: "Copy selection",
+            action: { [weak terminal] in
+                terminal?.copy(nil)
+                done()
+            }
+        )
+        bar = TerminalContextBarView(items: [
+            UIKitTallyLamp(caption: "SELECT TEXT", color: TallyPalette.caution),
+            copyChip,
+            UIKitChassisChip(
+                "SELECT ALL",
+                accessibilityLabel: "Select all in pane",
+                action: { [weak terminal] in terminal?.selectAll(nil) }
+            ),
+            UIKitChassisChip(
+                "DONE",
+                accessibilityLabel: "Done selecting",
+                action: done
+            ),
+        ])
+        bar.accessibilityIdentifier = "terminalPane.selection.actions"
+        terminal.addSubview(bar)
+        terminal.selectionUIHandler = { [weak self] rect in
+            self?.place(rect)
+        }
+        // A selection can already exist when the mode's chrome installs —
+        // SELECT from the long-press block seeds it before Observation
+        // re-renders the pane — so place the block for it right away.
+        place(terminal.selectionUIRect())
+    }
+
+    /// Uninstall: the fork returns to its stock selection flow and any live
+    /// selection clears with the mode.
+    func detach() {
+        terminal?.selectionUIHandler = nil
+        terminal?.clearSelection()
+        bar.removeFromSuperview()
+    }
+
+    /// Float the block beside the selection; without one it parks
+    /// top-center — the mode stays visible and DONE stays reachable.
+    private func place(_ rect: CGRect?) {
+        guard let terminal else { return }
+        copyChip.isHidden = rect == nil
+        if let rect {
+            floatContextBar(bar, near: rect, in: terminal)
+        } else {
+            let size = bar.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+            bar.frame = CGRect(
+                origin: CGPoint(
+                    x: max(8, (terminal.bounds.width - size.width) / 2),
+                    y: 8
+                ),
+                size: size
+            )
+            bar.isHidden = false
+            terminal.bringSubviewToFront(bar)
+        }
+    }
+}
+
+/// Shared placement for floating context bars over the terminal: centered
+/// above the anchor, below when the top would clip, always inside the
+/// terminal's bounds.
+@MainActor
+private func floatContextBar(
+    _ bar: TerminalContextBarView,
+    near rect: CGRect,
+    in terminal: TerminalView
+) {
+    let size = bar.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+    let bounds = terminal.bounds
+    let margin: CGFloat = 8
+    let x = min(
+        max(rect.midX - size.width / 2, margin),
+        max(margin, bounds.width - size.width - margin)
+    )
+    var y = rect.minY - size.height - margin
+    if y < margin {
+        y = rect.maxY + margin
+    }
+    if y + size.height > bounds.height - margin {
+        y = max(margin, bounds.height - size.height - margin)
+    }
+    bar.frame = CGRect(origin: CGPoint(x: x, y: y), size: size)
+    bar.isHidden = false
+    terminal.bringSubviewToFront(bar)
+}
+
+/// The long-press block OUTSIDE select-text mode — the app-drawn
+/// replacement for UIMenuController's SELECT / SELECT ALL / PASTE. SELECT
+/// and SELECT ALL hand off into select-text mode (seeded at the pressed
+/// word / the whole pane); PASTE types the pasteboard into the live screen
+/// exactly like the old menu action. Installed for every live active
+/// terminal pane through `TerminalView.longPressMenuHandler`; a tap
+/// anywhere dismisses the block and is consumed, the native menu's own
+/// contract.
+@MainActor
+final class TerminalLongPressMenuOverlay {
+    private weak var terminal: TerminalView?
+    private var bar: TerminalContextBarView!
+    private var pressedPosition: Position?
+    private let select: (Position) -> Void
+    private let selectAll: (Position) -> Void
+
+    init(
+        terminal: TerminalView,
+        select: @escaping (Position) -> Void,
+        selectAll: @escaping (Position) -> Void
+    ) {
+        self.terminal = terminal
+        self.select = select
+        self.selectAll = selectAll
+        bar = TerminalContextBarView(items: [
+            UIKitChassisChip(
+                "SELECT",
+                prominent: true,
+                accessibilityLabel: "Select text",
+                action: { [weak self] in self?.performSelect() }
+            ),
+            UIKitChassisChip(
+                "SELECT ALL",
+                accessibilityLabel: "Select all in pane",
+                action: { [weak self] in self?.performSelectAll() }
+            ),
+            UIKitChassisChip(
+                "PASTE",
+                accessibilityLabel: "Paste",
+                action: { [weak self] in self?.performPaste() }
+            ),
+        ])
+        bar.accessibilityIdentifier = "terminalPane.longPress.menu"
+        bar.isHidden = true
+        terminal.addSubview(bar)
+        terminal.longPressMenuHandler = { [weak self] region, position in
+            self?.show(near: region, position: position)
+        }
+    }
+
+    func hide() {
+        bar.isHidden = true
+        terminal?.appMenuDismiss = nil
+    }
+
+    func detach() {
+        terminal?.longPressMenuHandler = nil
+        terminal?.appMenuDismiss = nil
+        bar.removeFromSuperview()
+    }
+
+    private func show(near region: CGRect, position: Position) {
+        guard let terminal else { return }
+        pressedPosition = position
+        floatContextBar(bar, near: region, in: terminal)
+        terminal.appMenuDismiss = { [weak self] in self?.hide() }
+    }
+
+    private func performSelect() {
+        hide()
+        guard let pressedPosition else { return }
+        select(pressedPosition)
+    }
+
+    private func performSelectAll() {
+        hide()
+        guard let pressedPosition else { return }
+        selectAll(pressedPosition)
+    }
+
+    private func performPaste() {
+        hide()
+        terminal?.paste(nil)
+    }
+}
+
+extension TerminalContextBarView {
     #if !os(visionOS)
     static func dictation(
         _ state: TerminalSessionController.DictationState,

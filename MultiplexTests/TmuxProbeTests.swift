@@ -910,4 +910,47 @@ final class TmuxProbeTests: XCTestCase {
         let shell = TerminalRoute(hostID: host, mode: .shell)
         XCTAssertNil(shell.moshRemoteCommand)
     }
+
+    func testPaneRectsCarryIdGeometryAndFocus() {
+        let output = """
+        MPXRECT %3 0 0 0 50 24
+        MPXRECT %7 1 51 0 49 23
+        login banner noise
+        MPXRECT %9 1 0 0 0 24
+        """
+        XCTAssertEqual(TmuxProbe.parsePaneRects(output), [
+            PaneScreenRectEntry(
+                id: "%3",
+                rect: PaneScreenRect(columns: 0...49, rows: 0...23),
+                isFocused: false
+            ),
+            PaneScreenRectEntry(
+                id: "%7",
+                rect: PaneScreenRect(columns: 51...99, rows: 0...22),
+                isFocused: true
+            ),
+        ], "noise and the zero-width line drop; geometry and focus survive")
+        XCTAssertTrue(
+            TmuxProbe.paneRectsCommand(sessionName: "ma in")
+                .contains("list-panes -t '=ma in'"),
+            "session names ride shell-quoted exact-match targets"
+        )
+        XCTAssertTrue(
+            TmuxProbe.focusPaneCommand(paneID: "%7").contains("select-pane -t '%7'"),
+            "focus targets the pane id, never a name"
+        )
+    }
+
+    func testPaneScreenRectDirectionPicksTheDominantAxis() {
+        let left = PaneScreenRect(columns: 0...49, rows: 0...23)
+        let right = PaneScreenRect(columns: 51...99, rows: 0...23)
+        let below = PaneScreenRect(columns: 0...49, rows: 25...47)
+        XCTAssertEqual(PaneScreenRect.direction(from: left, to: right), "right")
+        XCTAssertEqual(PaneScreenRect.direction(from: right, to: left), "left")
+        XCTAssertEqual(PaneScreenRect.direction(from: left, to: below), "down")
+        XCTAssertEqual(PaneScreenRect.direction(from: below, to: left), "up")
+        XCTAssertNil(PaneScreenRect.direction(from: left, to: left))
+        XCTAssertTrue(left.contains(col: 10, row: 5))
+        XCTAssertFalse(left.contains(col: 50, row: 5))
+    }
 }

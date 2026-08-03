@@ -1025,6 +1025,31 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         finishTmuxCopyMode()
     }
 
+    func debugBeginSelectText() {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
+        controller?.beginSelectTextMode()
+    }
+
+    func debugFinishSelectText() {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
+        controller?.finishSelectTextMode()
+    }
+
+    func debugSelectTextAll() {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
+        terminal.selectAll(nil)
+    }
+
+    /// Raises the app's long-press block at screen center through the same
+    /// handler a real press uses (no headless long press exists).
+    func debugShowLongPressMenu() {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
+        let region = CGRect(
+            x: terminal.bounds.midX, y: terminal.bounds.midY, width: 12, height: 18
+        )
+        terminal.longPressMenuHandler?(region, Position(col: 0, row: 0))
+    }
+
     func debugPerformConfirmedTmuxClose(_ shortcut: TmuxShortcut) {
         guard let terminal,
               TerminalFocusArbiter.current === terminal,
@@ -1109,6 +1134,26 @@ enum TmuxShortcutDebugHook {
         notify_register_dispatch(
             "app.multiplexterm.multiplex.debug.tmuxcopydone", &copyDoneToken, .main
         ) { _ in focusedBar()?.debugFinishTmuxCopyMode() }
+
+        var selectTextToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.selecttext", &selectTextToken, .main
+        ) { _ in focusedBar()?.debugBeginSelectText() }
+
+        var selectTextDoneToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.selecttextdone", &selectTextDoneToken, .main
+        ) { _ in focusedBar()?.debugFinishSelectText() }
+
+        var selectTextAllToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.selecttextall", &selectTextAllToken, .main
+        ) { _ in focusedBar()?.debugSelectTextAll() }
+
+        var longPressMenuToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.longpressmenu", &longPressMenuToken, .main
+        ) { _ in focusedBar()?.debugShowLongPressMenu() }
 
         var closePaneToken: Int32 = 0
         notify_register_dispatch(

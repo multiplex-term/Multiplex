@@ -93,6 +93,46 @@ class SelectionService: CustomDebugStringConvertible {
     public var isMultiLine: Bool {
         return start.row != end.row
     }
+
+    /// Multiplex patch: an optional screen-relative rectangle every
+    /// selection operation is clamped into. The host app sets it while its
+    /// select-text mode runs over a split multiplexer screen (tmux, herdr),
+    /// so a selection can never bleed across a pane border and "select all"
+    /// means the pane, not the screen. Flow semantics stay, but the "line"
+    /// is the rect's column span; extraction joins per-row slices with
+    /// newlines. Rows are screen-relative (converted through `yDisp` at use
+    /// time) because the pane is fixed on screen while the buffer may
+    /// scroll. nil restores upstream whole-screen behavior.
+    var clampRect: (columns: ClosedRange<Int>, rows: ClosedRange<Int>)?
+
+    /// The clamp's row range in buffer coordinates for the current scroll
+    /// position; nil when no clamp is set.
+    private var clampBufferRows: ClosedRange<Int>? {
+        guard let clampRect else { return nil }
+        let yDisp = terminal.displayBuffer.yDisp
+        return (clampRect.rows.lowerBound + yDisp)...(clampRect.rows.upperBound + yDisp)
+    }
+
+    /// Multiplex patch: pull an already-active selection into the clamp
+    /// rectangle — what a clamp arriving AFTER a selection does (the app
+    /// fetches pane geometry asynchronously; a Select All taken meanwhile
+    /// should tighten to the pane, not vanish).
+    func reclampActiveSelection () {
+        guard active, clampRect != nil else { return }
+        start = rectClamped (start)
+        end = rectClamped (end)
+        setActiveAndNotify()
+    }
+
+    /// Clamps a buffer-relative position into the clamp rectangle; identity
+    /// when no clamp is set.
+    private func rectClamped (_ p: Position) -> Position {
+        guard let clampRect, let rows = clampBufferRows else { return p }
+        let cols = clampRect.columns
+        return Position(
+            col: min (max (p.col, cols.lowerBound), cols.upperBound),
+            row: min (max (p.row, rows.lowerBound), rows.upperBound))
+    }
     
     /**
      * Starts the selection from the specific screen-relative location
@@ -156,8 +196,10 @@ class SelectionService: CustomDebugStringConvertible {
      * The locoation is buffer-relative
      */
     public func setSoftStart (bufferPosition: Position) {
-        start = bufferPosition
-        end = bufferPosition
+        // Multiplex patch: keep every anchor inside the clamp rectangle.
+        let clamped = rectClamped (bufferPosition)
+        start = clamped
+        end = clamped
         setActiveAndNotify()
     }
     
@@ -192,14 +234,16 @@ class SelectionService: CustomDebugStringConvertible {
      * The bufferPosition is buffer-relative
      */
     public func shiftExtend (bufferPosition newEnd: Position) {
-        var adjustedNewEnd = newEnd
-        
+        // Multiplex patch: clamp before and after word expansion — the
+        // expansion itself may run past the pane's column edge.
+        var adjustedNewEnd = rectClamped (newEnd)
+
         // If we're in word selection mode, extend to word boundaries
         if selectionMode == .word {
-            let direction = Position.compare(newEnd, start) == .before ? -1 : 1
-            adjustedNewEnd = extendToWordBoundary(position: newEnd, in: terminal.displayBuffer, direction: direction)
+            let direction = Position.compare(adjustedNewEnd, start) == .before ? -1 : 1
+            adjustedNewEnd = rectClamped (extendToWordBoundary(position: adjustedNewEnd, in: terminal.displayBuffer, direction: direction))
         }
-        
+
         var shouldSwapStart = false
         if Position.compare (start, end) == .before {
             // start is before end, is the new end before Start
@@ -243,13 +287,14 @@ class SelectionService: CustomDebugStringConvertible {
         guard let pivot = pivot else {
             return
         }
-        
-        var adjustedPosition = bufferPosition
-        
+
+        // Multiplex patch: clamp before and after word expansion.
+        var adjustedPosition = rectClamped (bufferPosition)
+
         // If we're in word selection mode, extend to word boundaries
         if selectionMode == .word {
-            let direction = Position.compare(bufferPosition, pivot) == .before ? -1 : 1
-            adjustedPosition = extendToWordBoundary(position: bufferPosition, in: terminal.displayBuffer, direction: direction)
+            let direction = Position.compare(adjustedPosition, pivot) == .before ? -1 : 1
+            adjustedPosition = rectClamped (extendToWordBoundary(position: adjustedPosition, in: terminal.displayBuffer, direction: direction))
         }
         
         switch Position.compare (adjustedPosition, pivot) {
@@ -280,7 +325,9 @@ class SelectionService: CustomDebugStringConvertible {
      * Extends the selection by moving the end point to the new point.
      * The position is in buffer coordinates
      */
-    public func dragExtend (bufferPosition: Position) {
+    public func dragExtend (bufferPosition uncheckedPosition: Position) {
+        // Multiplex patch: keep the drag inside the clamp rectangle.
+        let bufferPosition = rectClamped (uncheckedPosition)
         // When the selection was seeded by a double-click (word mode), pivot the
         // drag around the whole seed word.  This keeps the seed word in the
         // selection when the drag goes *backwards* (to the left/up) past it, and
@@ -288,11 +335,11 @@ class SelectionService: CustomDebugStringConvertible {
         if selectionMode == .word, let anchor = wordSelectionAnchor {
             let buffer = terminal.displayBuffer
             if Position.compare(bufferPosition, anchor.start) == .before {
-                start = extendToWordBoundary(position: bufferPosition, in: buffer, direction: -1)
+                start = rectClamped (extendToWordBoundary(position: bufferPosition, in: buffer, direction: -1))
                 end = anchor.end
             } else if Position.compare(bufferPosition, anchor.end) == .after {
                 start = anchor.start
-                end = extendToWordBoundary(position: bufferPosition, in: buffer, direction: 1)
+                end = rectClamped (extendToWordBoundary(position: bufferPosition, in: buffer, direction: 1))
             } else {
                 // Still inside the seed word: keep the whole word selected.
                 start = anchor.start
@@ -307,7 +354,7 @@ class SelectionService: CustomDebugStringConvertible {
         // If we're in word selection mode, extend to word boundaries
         if selectionMode == .word {
             let direction = Position.compare(bufferPosition, start) == .before ? -1 : 1
-            adjustedEnd = extendToWordBoundary(position: bufferPosition, in: terminal.displayBuffer, direction: direction)
+            adjustedEnd = rectClamped (extendToWordBoundary(position: bufferPosition, in: terminal.displayBuffer, direction: direction))
         }
 
         end = adjustedEnd
@@ -319,6 +366,13 @@ class SelectionService: CustomDebugStringConvertible {
      */
     public func selectAll ()
     {
+        // Multiplex patch: with a clamp rectangle, "all" is the pane.
+        if let clampRect, let rows = clampBufferRows {
+            start = Position(col: clampRect.columns.lowerBound, row: rows.lowerBound)
+            end = Position(col: clampRect.columns.upperBound, row: rows.upperBound)
+            setActiveAndNotify()
+            return
+        }
         start = Position(col: 0, row: 0)
         end = Position(col: terminal.cols-1, row: terminal.displayBuffer.lines.maxLength - 1)
         setActiveAndNotify()
@@ -340,8 +394,16 @@ class SelectionService: CustomDebugStringConvertible {
      */
     public func select(row: Int)
     {
-        start = Position(col: 0, row: row)
-        end = Position(col: terminal.cols-1, row: row)
+        // Multiplex patch: a "row" inside a clamp rectangle is the pane's
+        // span of that row, clamped into the pane's rows.
+        if let clampRect, let rows = clampBufferRows {
+            let clampedRow = min (max (row, rows.lowerBound), rows.upperBound)
+            start = Position(col: clampRect.columns.lowerBound, row: clampedRow)
+            end = Position(col: clampRect.columns.upperBound, row: clampedRow)
+        } else {
+            start = Position(col: 0, row: row)
+            end = Position(col: terminal.cols-1, row: row)
+        }
         selectingRows = true
         selectionMode = .row
         wordSelectionAnchor = nil
@@ -524,8 +586,9 @@ class SelectionService: CustomDebugStringConvertible {
 //        let position = Position(
 //            col: max (min (uncheckedPosition.col, buffer.cols-1), 0),
 //            row: max (min (uncheckedPosition.row, buffer.rows-1+buffer.yDisp), buffer.yDisp))
-        let position = Position (col: (min (terminal.cols, max (uncheckedPosition.col, 0))),
-                                 row: (max (uncheckedPosition.row, 0)))
+        // Multiplex patch: seed inside the clamp rectangle.
+        let position = rectClamped (Position (col: (min (terminal.cols, max (uncheckedPosition.col, 0))),
+                                              row: (max (uncheckedPosition.row, 0))))
         switch character (at: position, in: buffer) {
         case Character(UnicodeScalar(0)):
             simpleScanSelection (from: position, in: buffer) { ch in ch == nullChar }
@@ -551,6 +614,12 @@ class SelectionService: CustomDebugStringConvertible {
             start = position
             end = position
         }
+        // Multiplex patch: whatever the scan produced, keep it inside the
+        // clamp rectangle (a word or balanced expression can cross a pane
+        // border only through its glyphs, but the balanced search also
+        // walks rows).
+        start = rectClamped (start)
+        end = rectClamped (end)
         selectionMode = .word
         wordSelectionAnchor = (start, end)
         setActiveAndNotify()
@@ -573,6 +642,34 @@ class SelectionService: CustomDebugStringConvertible {
             (start, end)
         } else {
             (end, start)
+        }
+        // Multiplex patch: inside a clamp rectangle the selection flows
+        // within the pane, so the text is per-row slices of the pane's
+        // column span joined with newlines (the multiplexer hard-wraps at
+        // the pane edge; full-width extraction would splice neighbor-pane
+        // bytes into every line). Trailing spaces per slice are padding,
+        // not content.
+        if let clampRect {
+            let cols = clampRect.columns
+            var rows: [String] = []
+            for row in min.row...max.row {
+                let from = Position(
+                    col: row == min.row ? Swift.max(min.col, cols.lowerBound) : cols.lowerBound,
+                    row: row)
+                let to = Position(
+                    col: row == max.row ? Swift.min(max.col, cols.upperBound) : cols.upperBound,
+                    row: row)
+                guard from.col <= to.col else {
+                    rows.append("")
+                    continue
+                }
+                var slice = terminal.getDisplayText(start: from, end: to)
+                while slice.hasSuffix("\n") || slice.hasSuffix(" ") {
+                    slice.removeLast()
+                }
+                rows.append(slice)
+            }
+            return rows.joined(separator: "\n")
         }
         let r = terminal.getDisplayText(start: min, end: max)
         return r

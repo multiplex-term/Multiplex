@@ -1030,9 +1030,16 @@ extension TerminalView {
             return nil
         }
 
-        let lowerBound = max(0, min(selectionRange.location, cols))
-        let upperBound = max(lowerBound, min(cols, selectionRange.location + selectionRange.length))
-        if lowerBound == upperBound {
+        var lowerBound = max(0, min(selectionRange.location, cols))
+        var upperBound = max(lowerBound, min(cols, selectionRange.location + selectionRange.length))
+        // Multiplex patch: with a clamp rectangle the highlight, like the
+        // extraction, covers only the pane's column span — full-width
+        // middle rows would wash over neighbor panes.
+        if let clamp = selection.clampRect {
+            lowerBound = max(lowerBound, clamp.columns.lowerBound)
+            upperBound = min(upperBound, clamp.columns.upperBound + 1)
+        }
+        if lowerBound >= upperBound {
             return nil
         }
         return lowerBound..<upperBound
