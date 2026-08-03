@@ -127,6 +127,26 @@ final class TerminalPaneUIKitTests: XCTestCase {
         XCTAssertTrue(renderedText(in: pane.view).contains("notes.md · 62%"))
     }
 
+    func testSharedSelectionMenuEntryPointOpensAppOwnedBlock() throws {
+        let terminal = terminalController(mode: .attach(sessionName: "main"))
+        let pane = TerminalPaneViewController(configuration: configuration(
+            controller: terminal
+        ))
+        pane.loadViewIfNeeded()
+        pane.view.frame = CGRect(x: 0, y: 0, width: 600, height: 400)
+        pane.view.layoutIfNeeded()
+        var state = TerminalPaneObservedState(controller: terminal)
+        state.status = .live
+
+        pane.applyObservedState(state)
+
+        let terminalView = try XCTUnwrap(terminal.terminalView)
+        let menu = try XCTUnwrap(view("terminalPane.longPress.menu", in: pane.view))
+        XCTAssertTrue(menu.isHidden)
+        XCTAssertTrue(terminalView.presentSelectionMenu(at: CGPoint(x: 20, y: 20)))
+        XCTAssertFalse(menu.isHidden)
+    }
+
     func testHistoryBarMovesToTrailingSlotWhenCopyModeEnds() {
         let terminal = terminalController(mode: .attach(sessionName: "agent"))
         let pane = TerminalPaneViewController(configuration: configuration(

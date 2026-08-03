@@ -63,7 +63,7 @@ final class TerminalSessionController {
     /// tmux nothing needs to touch the server just to select. Pans are
     /// suppressed rather than translated: no remote view answers cursor
     /// keys here, and the alternate screen has no local scrollback. Entry
-    /// is the long-press block's SELECT / SELECT ALL; exit is the floating
+    /// is the selection block's SELECT / SELECT ALL; exit is the floating
     /// block's DONE, its COPY (the grab finishes the mode), or a keyboard
     /// Escape (consumed — see `sendInput`).
     private(set) var selectTextModeUIActive = false
@@ -855,10 +855,10 @@ final class TerminalSessionController {
     }
 
     /// Hand the visible screen to native selection on any session-backed
-    /// tab. Entered from the long-press block's SELECT/SELECT ALL, which
-    /// carry the pressed cell so the selection targets the pane under the
-    /// finger — and the backend's focus follows it, the switch a tap would
-    /// have made had the mode not kept taps local. No position (the DEBUG
+    /// tab. Entered from the selection block's SELECT/SELECT ALL, which carry
+    /// the gesture's cell so selection targets that pane — and the backend's
+    /// focus follows it, the switch a tap would have made had the mode not
+    /// kept taps local. No position (the DEBUG
     /// hook) targets the focused pane.
     func beginSelectTextMode(atScreenPosition point: (col: Int, row: Int)? = nil) {
         guard status == .live else { return }

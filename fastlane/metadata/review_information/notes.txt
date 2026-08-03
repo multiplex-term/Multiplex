@@ -13,6 +13,7 @@ CORE FLOW
 - Vision Pro: Settings → Appearance → GLASS applies smoked spatial material live to the deck, terminals, and forms; SYSTEM/LIGHT/DARK remain available.
 - MERGE in a terminal's bottom bar pulls another window's session in as a tab; a tab's context menu moves it back out, still connected.
 - TMUX in the bottom/key bar (top-right on narrow iPhones) opens New Window, Split, and Copy Mode. In Copy Mode, swipe history, hold to select/copy, press Done.
+- Outside Copy Mode, long-press or touch-double-tap a terminal for the pane-clamped SELECT / SELECT ALL / PASTE block; a pointer secondary-click opens it too.
 - The dictation key appears with a physical keyboard (including Simulator), or in the KEYBOARD LOCKED tip. Press it; speech is typed with STOP/CANCEL on its bar.
 - FILE attaches Photos/Files (Camera on iPad), uploads into the active pane's working directory, and types the remote path without Return. Drops use the same pipeline.
 - DETACH closes the window; tmux keeps the session running, so its tile stays on the wall.

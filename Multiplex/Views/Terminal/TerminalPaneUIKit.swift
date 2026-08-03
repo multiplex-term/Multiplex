@@ -66,7 +66,7 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
     private(set) var dropTargetVeil: DropTargetVeilView?
     private(set) var missingHostView: UIView?
     private var selectionActionsOverlay: TerminalSelectionActionsOverlay?
-    private var longPressMenuOverlay: TerminalLongPressMenuOverlay?
+    private var selectionMenuOverlay: TerminalSelectionMenuOverlay?
 
     private let topCenterStack = UIStackView()
     private let topTrailingStack = UIStackView()
@@ -134,8 +134,8 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         terminalSurface?.update(configuration: inactive)
         selectionActionsOverlay?.detach()
         selectionActionsOverlay = nil
-        longPressMenuOverlay?.detach()
-        longPressMenuOverlay = nil
+        selectionMenuOverlay?.detach()
+        selectionMenuOverlay = nil
         hideDropTarget()
     }
 
@@ -324,21 +324,22 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             overlay.detach()
             selectionActionsOverlay = nil
         }
-        renderLongPressMenu(state, controller: controller)
+        renderSelectionMenu(state, controller: controller)
     }
 
-    /// The idle long-press block (SELECT / SELECT ALL / PASTE) rides every
-    /// live active pane; inside select-text mode long presses seed the
-    /// selection instead, so any visible block hides with the mode change.
-    private func renderLongPressMenu(
+    /// The idle SELECT / SELECT ALL / PASTE block rides every live active
+    /// pane. Long press, touch double tap, and pointer secondary click can
+    /// raise it; inside select-text mode presses seed the selection instead,
+    /// so any visible block hides with the mode change.
+    private func renderSelectionMenu(
         _ state: TerminalPaneObservedState,
         controller: TerminalSessionController
     ) {
         let wantsMenu = configuration.isActive && state.status == .live
         if wantsMenu {
-            if longPressMenuOverlay == nil,
+            if selectionMenuOverlay == nil,
                let terminal = controller.terminalView {
-                longPressMenuOverlay = TerminalLongPressMenuOverlay(
+                selectionMenuOverlay = TerminalSelectionMenuOverlay(
                     terminal: terminal,
                     select: { [weak self] position in
                         guard let controller = self?.configuration.controller else { return }
@@ -370,10 +371,10 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
                         : nil
                 )
             }
-            if state.selectTextModeUIActive { longPressMenuOverlay?.hide() }
-        } else if let overlay = longPressMenuOverlay {
+            if state.selectTextModeUIActive { selectionMenuOverlay?.hide() }
+        } else if let overlay = selectionMenuOverlay {
             overlay.detach()
-            longPressMenuOverlay = nil
+            selectionMenuOverlay = nil
         }
     }
 
@@ -559,8 +560,8 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         findingVeil = nil
         selectionActionsOverlay?.detach()
         selectionActionsOverlay = nil
-        longPressMenuOverlay?.detach()
-        longPressMenuOverlay = nil
+        selectionMenuOverlay?.detach()
+        selectionMenuOverlay = nil
         hideDropTarget()
         removeArrangedSubviews(from: topCenterStack)
         removeArrangedSubviews(from: topTrailingStack)
@@ -812,7 +813,7 @@ final class TerminalSelectionActionsOverlay {
             self?.place(rect)
         }
         // A selection can already exist when the mode's chrome installs —
-        // SELECT from the long-press block seeds it before Observation
+        // SELECT from the idle selection block seeds it before Observation
         // re-renders the pane — so place the block for it right away.
         place(terminal.selectionUIRect())
     }
@@ -875,18 +876,17 @@ private func floatContextBar(
     terminal.bringSubviewToFront(bar)
 }
 
-/// The long-press block OUTSIDE select-text mode — the app-drawn
+/// The idle selection block OUTSIDE select-text mode — the app-drawn
 /// replacement for UIMenuController's SELECT / SELECT ALL / PASTE. SELECT
-/// and SELECT ALL hand off into select-text mode (seeded at the pressed
+/// and SELECT ALL hand off into select-text mode (seeded at the gesture's
 /// word / the whole pane); PASTE types the pasteboard into the live screen
 /// exactly like the old menu action; on herdr tabs a MENU chip reports one
-/// right click at the pressed cell so herdr's own pane menu — unreachable
-/// by touch — opens where the finger was. Installed for every live active
-/// terminal pane through `TerminalView.longPressMenuHandler`; a tap
-/// anywhere dismisses the block and is consumed, the native menu's own
-/// contract.
+/// right click at that cell so herdr's own pane menu — unreachable by touch —
+/// opens there. Installed for every live active terminal pane through
+/// `TerminalView.selectionMenuHandler`; a tap anywhere dismisses the block
+/// and is consumed, the native menu's own contract.
 @MainActor
-final class TerminalLongPressMenuOverlay {
+final class TerminalSelectionMenuOverlay {
     private weak var terminal: TerminalView?
     private var bar: TerminalContextBarView!
     private var pressedPosition: Position?
@@ -930,10 +930,11 @@ final class TerminalLongPressMenuOverlay {
             ))
         }
         bar = TerminalContextBarView(items: items)
+        // Keep the pre-double-tap automation identifier stable.
         bar.accessibilityIdentifier = "terminalPane.longPress.menu"
         bar.isHidden = true
         terminal.addSubview(bar)
-        terminal.longPressMenuHandler = { [weak self] region, position in
+        terminal.selectionMenuHandler = { [weak self] region, position in
             self?.show(near: region, position: position)
         }
     }
@@ -944,7 +945,7 @@ final class TerminalLongPressMenuOverlay {
     }
 
     func detach() {
-        terminal?.longPressMenuHandler = nil
+        terminal?.selectionMenuHandler = nil
         terminal?.appMenuDismiss = nil
         bar.removeFromSuperview()
     }

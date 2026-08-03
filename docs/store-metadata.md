@@ -252,11 +252,11 @@ Current product split:
   tabs never persist across launches, a
   most-used shortcut dropdown for each backend — TMUX, or HRDR on herdr
   tabs — on both platforms (including touch-native copy-mode selection and
-  explicit exit), an app-owned Select Text mode from the terminal long press
-  (a SELECT / SELECT ALL / PASTE block on any live pane; the selection clamps
-  to the pressed pane with a floating COPY / SELECT ALL / DONE block beside
-  it, a pointer's secondary click raises the same block, and herdr tabs add
-  a MENU chip that opens herdr's own pane menu in place), Home Screen
+  explicit exit), an app-owned Select Text mode from a terminal long press or
+  touch double-tap (a SELECT / SELECT ALL / PASTE block on any live pane; the
+  selection clamps to that pane with a floating COPY / SELECT ALL / DONE
+  block beside it, a pointer's secondary click raises the same block, and herdr
+  tabs add a MENU chip that opens herdr's own pane menu in place), Home Screen
   widgets (per-host monitor +
   fleet wall; iPadOS 17+, visionOS 26+) and App Shortcuts ("Open Shell" /
   "Open Agent" with host-configured working-directory, setup-script, and

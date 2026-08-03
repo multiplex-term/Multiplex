@@ -771,7 +771,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// selection; otherwise a press over a link the app claims resolves it
     /// (a long press/right click is local at any mouse-tracking mode, so it
     /// is the one activation route that always reaches the user's intent);
-    /// anywhere else raises the app's long-press block, or legacy
+    /// anywhere else raises the app's selection block, or legacy
     /// UIMenuController when no handler is installed.
     func presentLocalPressActions (at tapLocation: CGPoint) {
         let _ = self.becomeFirstResponder()
@@ -793,14 +793,28 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         }
 
-        // Outside the select-text mode the app's long-press block replaces
-        // the UIMenuController flow — a re-press elsewhere simply moves it.
-        if let handler = longPressMenuHandler {
-            handler(tapRegion, hit)
+        // Outside select-text mode the app's block replaces the
+        // UIMenuController flow — another gesture elsewhere simply moves it.
+        if presentSelectionMenu(at: tapLocation) {
             return
         }
 
         showContextMenu (forRegion: tapRegion, pos: hit)
+    }
+
+    /// Multiplex patch: raise the app-owned SELECT / SELECT ALL / PASTE
+    /// block at a view coordinate. Long press and secondary click reach this
+    /// after link resolution; a direct double tap reaches it deliberately
+    /// without resolving a link, because that gesture expresses selection.
+    /// Public so the app's headless hook can exercise the shared entry point.
+    @discardableResult
+    public func presentSelectionMenu (at tapLocation: CGPoint) -> Bool {
+        guard let handler = selectionMenuHandler else { return false }
+        handler(
+            makeContextMenuRegionForTap(point: tapLocation),
+            calculateTapHit(point: tapLocation).grid
+        )
+        return true
     }
 
     /// Multiplex patch: a mouse/trackpad secondary click runs the same local
@@ -894,7 +908,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     /// Multiplex patch: sends one right-button press + release report at the
-    /// given buffer position — how the app's long-press block reaches a TUI's
+    /// given buffer position — how the app's selection block reaches a TUI's
     /// own right-click surface (herdr's pane menu; no touch gesture maps to a
     /// right click). Sent only while the client reports mouse; returns
     /// whether the click went out.
@@ -1060,9 +1074,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// second opinion and never as the sole authority.
     @discardableResult
     func dismissLocalSelectionUI () -> Bool {
-        // Multiplex patch: the app's long-press block obeys the same
-        // contract as the native menu — a tap anywhere dismisses it and is
-        // consumed.
+        // Multiplex patch: the app's selection block obeys the same contract
+        // as the native menu — a tap anywhere dismisses it and is consumed.
         if dismissAppMenu() {
             return true
         }
@@ -1105,8 +1118,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             if !isFirstResponder {
                 let _ = becomeFirstResponder()
             }
-            // A lingering long-press block from before the mode started
-            // goes away with the tap; the seed still happens.
+            // A lingering selection block from before the mode started goes
+            // away with the tap; the seed still happens.
             _ = dismissAppMenu()
             seedAppSelection(at: calculateTapHit(gesture: gestureRecognizer).grid)
             return
@@ -1174,16 +1187,22 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
 
         if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode.sendButtonPress() {
-            // Multiplex patch: a fast re-tap on an active selection or its
-            // menu lands here (singleTap requires this recognizer to fail) —
-            // it must dismiss that UI, never reach the remote.
+            // Multiplex patch: a touchscreen double tap (and visionOS's
+            // gaze/pinch equivalent) is an additive route to the app-owned
+            // selection block. The single recognizer has already sent both
+            // physical taps to the remote immediately — preserving the
+            // no-latency contract — and this recognizer must not add a third.
+            // Pointer double-clicks remain remote-only on iOS/iPadOS/Mac.
+            if localDoubleTapOpensSelectionMenu(gestureRecognizer) {
+                _ = dismissLocalSelectionUI()
+                _ = presentSelectionMenu(at: gestureRecognizer.location(in: self))
+                return
+            }
+            // A fast re-tap on an active selection or its menu must dismiss
+            // that UI, never add another remote click.
             if dismissLocalSelectionUI() {
                 return
             }
-            // Multiplex patch: while the remote owns taps the failure chain
-            // is bypassed, so singleTap already sent a click for every
-            // physical tap — this recognizer still fires on the second one
-            // and must not add a third click on top.
             if remoteOwnsImmediateTaps(for: gestureRecognizer) {
                 return
             }
@@ -1363,15 +1382,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// select-text mode runs; nil restores the stock UIKit selection flow.
     public var selectionUIHandler: ((CGRect?) -> Void)?
 
-    /// Multiplex patch: the app's replacement for the long-press context
-    /// menu OUTSIDE the select-text mode. When set, a long press that
-    /// neither seeds an in-mode selection nor activates a link reports its
-    /// screen region and buffer position here instead of showing the
-    /// deprecated UIMenuController — the app draws its own SELECT /
-    /// SELECT ALL / PASTE block there.
-    public var longPressMenuHandler: ((CGRect, Position) -> Void)?
+    /// Multiplex patch: the app's replacement for the selection context menu
+    /// OUTSIDE select-text mode. A long press / secondary click that does not
+    /// activate a link, or a direct double tap, reports its screen region and
+    /// buffer position here instead of showing deprecated UIMenuController —
+    /// the app draws its own SELECT / SELECT ALL / PASTE block there.
+    public var selectionMenuHandler: ((CGRect, Position) -> Void)?
 
-    /// Multiplex patch: set by the app while its long-press block is on
+    /// Multiplex patch: set by the app while its selection block is on
     /// screen. A tap dismisses-and-consumes exactly like the native menu
     /// (`dismissLocalSelectionUI` calls and clears it); the app also clears
     /// it whenever it hides the block itself.
@@ -1387,7 +1405,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     /// Multiplex patch: the app's SELECT action — seed a word selection at
-    /// the position its long-press block recorded, exactly like an in-mode
+    /// the position its selection block recorded, exactly like an in-mode
     /// tap.
     public func seedWordSelection (atBufferPosition position: Position) {
         seedAppSelection(at: position)
@@ -1665,6 +1683,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         panSelectionGesture = nil
     }
     
+    /// Last touch type admitted by each tap recognizer. UIKit routes fingers,
+    /// Pencil, pointers, and visionOS gaze through the same recognizer action;
+    /// remembering the type lets double *tap* gain a local affordance without
+    /// stealing pointer double-click from a mouse-aware remote.
+    private var tapTouchTypes: [ObjectIdentifier: UITouch.TouchType] = [:]
+
     func setupGestures ()
     {
         let longPress = UILongPressGestureRecognizer (target: self, action: #selector(longPress(_:)))
@@ -1700,15 +1724,46 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         // Multiplex patch: the single→double→triple failure chain is decided
         // per touch by the delegate instead of `require(toFail:)`. With mouse
-        // reporting active all three taps send the same remote click, so the
-        // static chain bought nothing but ~350 ms of latency on every tap —
-        // and collapsed two fast taps into ONE click, making remote
-        // double-click semantics (tmux, herdr, vim) impossible. With mouse
-        // off, the delegate answers exactly like the old chain: double/triple
-        // keep their local word/line selection, singles keep waiting.
+        // reporting active, single taps never wait: every physical tap reaches
+        // the remote immediately, preserving remote double-click semantics.
+        // The app-owned double-tap selection block is additive; only the
+        // otherwise-silent double recognizer waits for triple to fail so a
+        // triple tap cannot flash the block. With mouse off, the delegate
+        // answers exactly like the old chain: double/triple keep their local
+        // word/line selection, singles keep waiting.
         singleTap.delegate = self
         doubleTap.delegate = self
         tripleTap.delegate = self
+    }
+
+    /// Multiplex patch: remember the input kind for the recognizer action.
+    /// Returning true leaves UIKit's admission behavior unchanged.
+    public func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldReceive touch: UITouch
+    ) -> Bool {
+        if gestureRecognizer is UITapGestureRecognizer,
+           gestureRecognizer.view === self {
+            tapTouchTypes[ObjectIdentifier(gestureRecognizer)] = touch.type
+        }
+        return true
+    }
+
+    /// Whether this remote-owned double gesture should additionally raise
+    /// local selection chrome. iOS/iPadOS reserve it for finger/Pencil taps,
+    /// keeping mouse/trackpad double-clicks wholly remote. visionOS presents
+    /// gaze/pinch as an indirect pointer, so that spatial tap counts too.
+    private func localDoubleTapOpensSelectionMenu(
+        _ gestureRecognizer: UITapGestureRecognizer
+    ) -> Bool {
+        guard selectionMenuHandler != nil,
+              let touchType = tapTouchTypes[ObjectIdentifier(gestureRecognizer)]
+        else { return false }
+        #if os(visionOS)
+        return touchType == .direct || touchType == .indirectPointer
+        #else
+        return touchType == .direct || touchType == .pencil
+        #endif
     }
 
     /// Multiplex patch: true while a tap belongs to the remote right now —
@@ -1721,11 +1776,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             && terminal.mouseMode.sendButtonPress()
     }
 
-    /// Multiplex patch: the dynamic form of the tap failure chain. Only the
-    /// single→double and double→triple pairs are ever required, and only
-    /// while taps have local meaning (mouse reporting off, or bypassed by a
-    /// held hardware Shift). While the remote owns taps, no requirement
-    /// exists and every tap fires immediately as its own click.
+    /// Multiplex patch: the dynamic form of the tap failure chain. Mouse-off
+    /// gestures keep the stock single→double→triple chain. While the remote
+    /// owns taps, single never waits for double; when the app selection block
+    /// is installed, double alone waits for triple so a triple remains three
+    /// immediate remote clicks without briefly opening local chrome.
     public func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer
@@ -1735,7 +1790,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
               tap.view === self, other.view === self,
               other.numberOfTapsRequired == tap.numberOfTapsRequired + 1
         else { return false }
-        return !remoteOwnsImmediateTaps(for: tap)
+        let remoteOwnsTap = remoteOwnsImmediateTaps(for: tap)
+        if remoteOwnsTap,
+           tap.numberOfTapsRequired == 2,
+           selectionMenuHandler != nil {
+            return true
+        }
+        return !remoteOwnsTap
     }
 
     func setupLinkReportingInteractions ()

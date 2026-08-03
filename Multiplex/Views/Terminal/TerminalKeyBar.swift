@@ -1040,14 +1040,14 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         terminal.selectAll(nil)
     }
 
-    /// Raises the app's long-press block at screen center through the same
-    /// handler a real press uses (no headless long press exists).
+    /// Raises the app's selection block at screen center through the shared
+    /// long-press / touch-double-tap entry point (no headless tap exists).
     func debugShowLongPressMenu() {
         guard let terminal, TerminalFocusArbiter.current === terminal else { return }
-        let region = CGRect(
-            x: terminal.bounds.midX, y: terminal.bounds.midY, width: 12, height: 18
-        )
-        terminal.longPressMenuHandler?(region, Position(col: 0, row: 0))
+        _ = terminal.presentSelectionMenu(at: CGPoint(
+            x: terminal.bounds.midX,
+            y: terminal.bounds.midY
+        ))
     }
 
     func debugSendRemoteRightClick() {

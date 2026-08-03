@@ -210,7 +210,8 @@ app.multiplexterm.multiplex.<name>`:
   through the ordered pump.
 - `debug.selecttext` / `debug.selecttextdone` / `debug.selecttextall` /
   `debug.longpressmenu` (the idle SELECT/SELECT ALL/PASTE block at screen
-  center) — the app-owned Select Text mode, its Done, and Select All (both
+  center, through the shared long-press/double-tap entry point) — the
+  app-owned Select Text mode, its Done, and Select All (both
   backends; app-local, so proof is the SELECT TEXT HUD, the pane-clamped
   highlight with the floating COPY/SELECT ALL bar after `selecttextall`,
   and a tap that no longer reaches the remote — with tmux `mouse on`,
@@ -339,13 +340,15 @@ logic belongs — keep parsing/command-building out of views.
     - The single→double→triple tap failure chain is decided PER TOUCH by a
       gesture-delegate method, never static `require(toFail:)`
       (`remoteOwnsImmediateTaps`): while the client reports mouse (tmux
-      `mouse on`, the app's premise) all three taps send the same click, so
-      the static chain bought ~350 ms of latency per tap and collapsed two
-      fast taps into ONE click — remote double-click was impossible. Now
-      every tap fires immediately as its own click there (double/triple's
-      mouse branches send nothing extra), while mouse-off — and a held
-      hardware Shift bypassing reporting — keeps the old chain so local
-      word/line selection still works.
+      `mouse on`, the app's premise) every physical tap fires immediately as
+      its own click — the old static chain bought ~350 ms latency and folded
+      a remote double-click into ONE click. A direct touch double-tap (plus
+      visionOS's gaze/pinch equivalent) now ALSO raises the app's selection
+      block after its two immediate remote clicks; only double waits for
+      triple, so single-tap latency and three-click semantics stay intact.
+      Pointer double-click stays remote-only on iOS/iPadOS/Mac. Mouse-off —
+      and a held hardware Shift bypassing reporting — keeps the old chain so
+      local word/line selection still works.
     - A tap while a local selection **or its context menu** is present
       dismisses it and is consumed (`dismissLocalSelectionUI`, checked
       before link opening and mouse reporting, mirrored into the
@@ -565,8 +568,8 @@ logic belongs — keep parsing/command-building out of views.
   Escape through the same path. Always restore mouse reporting when the
   mode ends or the transport closes, or tmux touch interaction silently
   stops. **Select Text is the backend-agnostic sibling**
-  (`selectTextModeUIActive`; entered ONLY from the long-press block's
-  SELECT / SELECT ALL on tmux AND herdr — a shortcut-panel Screen row
+  (`selectTextModeUIActive`; entered ONLY from the selection block's SELECT /
+  SELECT ALL on tmux AND herdr — a shortcut-panel Screen row
   shipped and was removed 2026-08-03, don't re-add one without asking):
   the same tap-ownership flip with NO
   remote mode entered — mouse reporting off so native selection owns
@@ -580,9 +583,9 @@ logic belongs — keep parsing/command-building out of views.
   in the fork): entry and every resize run one read-only control exec
   listing EVERY visible pane — tmux `list-panes -F` geometry (content
   cells, no inset), herdr the snapshot's layout rects border-inset by
-  the `viewport_rows` oracle — and the target is the pane under the
-  long-press that entered the mode (the focused pane when no press rides
-  along), so drags can't bleed across a split, Select All means the pane
+  the `viewport_rows` oracle — and the target is the pane under the gesture
+  that raised the block (the focused pane when no position rides along), so
+  drags can't bleed across a split, Select All means the pane
   (not herdr's sidebar/tab bar), and extraction joins per-pane-row
   slices with newlines instead of splicing neighbor-pane bytes. **The
   backend's focus follows a pressed non-focused pane** — the switch a
@@ -606,16 +609,17 @@ logic belongs — keep parsing/command-building out of views.
   HUD. COPY rides the fork's `copy(_:)` (pasteboard + clear) and then
   ENDS the mode — the grab is what the mode was entered for; SELECT
   ALL rides the clamped `selectAll`. Detach restores the stock flow and
-  clears the selection. **Outside the mode, a long press raises the
-  app's own SELECT / SELECT ALL / PASTE block** (`longPressMenuHandler` +
-  `TerminalLongPressMenuOverlay`, every live pane) in UIMenuController's
-  place — links still win the press first; SELECT / SELECT ALL enter the
-  mode (seeded at the pressed word / the whole pane — a Select All taken
-  before the async pane rect lands is *re-clamped*, never dropped);
-  PASTE types the pasteboard as ever; a tap dismisses-and-consumes, the
-  native menu's contract (`appMenuDismiss`). A pointer's secondary click
-  runs the SAME local chain (`presentLocalPressActions`, shared by the
-  long press and a tap recognizer pinned to
+  clears the selection. **Outside the mode, a long press or touch double-tap
+  raises the app's own SELECT / SELECT ALL / PASTE block**
+  (`selectionMenuHandler` + `TerminalSelectionMenuOverlay`, every live pane)
+  in UIMenuController's place. Long press resolves links/paths first; double
+  tap goes straight to selection. SELECT / SELECT ALL enter the mode (seeded
+  at the gesture's word / the whole pane — a Select All taken before the
+  async pane rect lands is *re-clamped*, never dropped); PASTE types the
+  pasteboard as ever; a tap dismisses-and-consumes, the native menu's
+  contract (`appMenuDismiss`). A pointer's secondary click runs the SAME
+  local chain (`presentLocalPressActions`, shared by the long press and a tap
+  recognizer pinned to
   `allowedTouchTypes = [.indirectPointer]` +
   `buttonMaskRequired = .secondary` — the mask alone does NOT filter
   direct finger taps, verified on device):

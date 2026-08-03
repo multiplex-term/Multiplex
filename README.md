@@ -70,8 +70,10 @@ bake-off is recorded in [docs/landing/](docs/landing/).*
   together below; narrower locked phones move TMUX above. Shortcuts send
   their default `Ctrl-B` bindings through the same ordered input path as the
   keyboard. Copy mode becomes a clear contextual
-  state: swipe through remote history, hold text for native selection/copy,
-  then press **Done** to return to the shell. On SSH-backed tmux tabs,
+  state: swipe through remote history, hold or double-tap text for native
+  selection/copy, then press **Done** to return to the shell. Outside Copy
+  Mode, long-press or touch double-tap for pane-clamped **Select Text** on
+  tmux or herdr. On SSH-backed tmux tabs,
   **FILE** attaches from Photos or Files (plus Camera on iPad), uploads into
   the active pane's working directory, and types the remote path without
   submitting; dropping a file on the terminal uses the same path. Long-press a
