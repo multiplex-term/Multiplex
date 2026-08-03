@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 import StoreKit
 import SwiftUI
 
@@ -204,6 +205,11 @@ final class EntitlementStore {
         let task: Task<Bool, Never>
     }
 
+    private static let logger = Logger(
+        subsystem: "app.multiplexterm.multiplex",
+        category: "commerce"
+    )
+
     private static let unlockedKey = "MultiplexProUnlocked"
     private static let slashChipDayKey = "MultiplexSlashChipDay"
     private static let slashChipCountKey = "MultiplexSlashChipCount"
@@ -361,11 +367,15 @@ final class EntitlementStore {
                 do {
                     guard let product = try await storeClient.loadProduct(),
                           product.id == Self.proProductID else {
+                        Self.logger.error("product load returned no Pro product")
                         return .failed("Multiplex Pro is not available from the App Store right now.")
                     }
                     return .loaded(product)
                 } catch {
-                    return .failed(error.localizedDescription)
+                    Self.logger.error(
+                        "product load failed: \(String(describing: error), privacy: .public)"
+                    )
+                    return .failed(Self.storeErrorMessage(error))
                 }
             }
             load = ProductLoad(id: id, task: task)
@@ -432,6 +442,7 @@ final class EntitlementStore {
 
             switch result {
             case .success(.unverified):
+                Self.logger.error("purchase returned an unverified transaction")
                 return settlePurchase(withFallback: .failed(
                     "The App Store transaction could not be verified."
                 ))
@@ -474,7 +485,10 @@ final class EntitlementStore {
                 ))
             }
         } catch {
-            return settlePurchase(withFallback: .failed(error.localizedDescription))
+            Self.logger.error(
+                "purchase failed: \(String(describing: error), privacy: .public)"
+            )
+            return settlePurchase(withFallback: .failed(Self.storeErrorMessage(error)))
         }
     }
 
@@ -516,7 +530,10 @@ final class EntitlementStore {
                 commerceState = .restored
                 return true
             }
-            commerceState = .failed(error.localizedDescription)
+            Self.logger.error(
+                "restore failed: \(String(describing: error), privacy: .public)"
+            )
+            commerceState = .failed(Self.storeErrorMessage(error))
             return false
         }
     }
@@ -685,6 +702,9 @@ final class EntitlementStore {
                 }
                 await transaction.finish()
             case .unverified(let productID):
+                Self.logger.error(
+                    "unverified transaction update for \(productID ?? "?", privacy: .public)"
+                )
                 guard productID == Self.proProductID, purchaseAwaitingApproval else { continue }
                 purchaseAwaitingApproval = false
                 commerceState = .failed("The App Store transaction could not be verified.")
@@ -720,6 +740,35 @@ final class EntitlementStore {
         }
         commerceState = fallback
         return false
+    }
+
+    /// StoreKit's `localizedDescription` collapses most failures into "An
+    /// unknown error occurred", which is undiagnosable from a screenshot of
+    /// the paywall (the shape of the App Review sandbox reports). Name the
+    /// known StoreKit failure modes in actionable copy; anything else keeps
+    /// its own description.
+    static func storeErrorMessage(_ error: Error) -> String {
+        switch error {
+        case StoreKitError.networkError:
+            return "The App Store could not be reached. Check the internet "
+                + "connection and try again."
+        case StoreKitError.systemError(let underlying):
+            return "The App Store reported a system error. "
+                + "(\(underlying.localizedDescription))"
+        case StoreKitError.notAvailableInStorefront:
+            return "Multiplex Pro is not available in this App Store storefront."
+        case StoreKitError.notEntitled:
+            return "This copy of the app is not entitled to App Store purchases."
+        case StoreKitError.unknown:
+            return "The App Store could not complete the request. "
+                + "Try again in a moment."
+        case Product.PurchaseError.purchaseNotAllowed:
+            return "Purchases are not allowed for this Apple ID on this device."
+        case Product.PurchaseError.productUnavailable:
+            return "Multiplex Pro is not available for purchase right now."
+        default:
+            return error.localizedDescription
+        }
     }
 
     /// One policy function serves both compilation modes, so tests can pin

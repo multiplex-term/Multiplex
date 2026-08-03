@@ -85,9 +85,16 @@ developer portal before archiving).
 
 ## Multiplex Pro
 
-Last remote readback: **2026-07-13 — `READY_TO_SUBMIT`**. The local review
-screenshot was refreshed on 2026-07-15 for the two-host free-tier wording and
-still needs to be re-uploaded and read back before submission.
+Last remote readback: **2026-08-03 — `IN_REVIEW`** (App Store Connect API:
+en-US localization present, review screenshot asset `COMPLETE`, one open-ended
+$19.99 manual price, `availableInNewTerritories=true`). The readback was taken
+while triaging the 2026-08-03 App Review report "an error displayed upon
+purchasing Pro plan" — the IAP record itself is complete and attached to the
+submission, so that report points at the Paid Applications Agreement, a
+sandbox-environment fault, or a device-side condition, not missing product
+configuration. The local review screenshot was refreshed on 2026-07-15 for the
+two-host free-tier wording; confirm which revision the `COMPLETE` remote asset
+is before relying on it.
 
 | Field | Current value |
 | --- | --- |
