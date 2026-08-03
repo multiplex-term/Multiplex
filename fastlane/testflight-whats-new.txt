@@ -185,3 +185,4 @@ itself. Genuinely wrapped long paths and URLs still join.
 - A long absolute path wrapped mid-segment still presses as the full path.
 - A schemeless URL below wrapped prose raises the link sheet, not a glued
   file path.
+- PAYWALL ERRORS SAY WHY: if a Pro purchase or restore fails, the paywall now names the actual App Store problem (no network, storefront availability, purchases not allowed) instead of "An unknown error occurred". If you can, try the paywall in Airplane Mode and confirm the message tells you to check the connection.
