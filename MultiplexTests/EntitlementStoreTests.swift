@@ -1,3 +1,4 @@
+import StoreKit
 import XCTest
 @testable import Multiplex
 
@@ -1021,5 +1022,30 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertFalse(store.hasVerifiedStoreEntitlementForTesting)
         XCTAssertFalse(store.purchaseIsUnavailable)
         storeDouble.finishUpdates()
+    }
+
+    // MARK: - Store error copy
+
+    func testStoreErrorMessageNamesKnownStoreKitFailures() {
+        XCTAssertEqual(
+            EntitlementStore.storeErrorMessage(
+                StoreKitError.networkError(URLError(.notConnectedToInternet))
+            ),
+            "The App Store could not be reached. Check the internet connection and try again."
+        )
+        XCTAssertEqual(
+            EntitlementStore.storeErrorMessage(StoreKitError.notAvailableInStorefront),
+            "Multiplex Pro is not available in this App Store storefront."
+        )
+        XCTAssertEqual(
+            EntitlementStore.storeErrorMessage(StoreKitError.unknown),
+            "The App Store could not complete the request. Try again in a moment."
+        )
+        // Errors StoreKit does not own keep their own description, so the
+        // injected-client suites above stay valid and app errors stay honest.
+        XCTAssertEqual(
+            EntitlementStore.storeErrorMessage(ProStoreDoubleError.purchase),
+            "purchase failed"
+        )
     }
 }
