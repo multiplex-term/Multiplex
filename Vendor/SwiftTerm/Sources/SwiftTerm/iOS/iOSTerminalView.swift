@@ -744,7 +744,17 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     @objc func longPress (_ gestureRecognizer: UILongPressGestureRecognizer)
     {
-         if gestureRecognizer.state == .began {
+         switch gestureRecognizer.state {
+         case .began:
+             // Multiplex patch: the app can claim a long press as the start of
+             // a remote mouse drag (press + motion + release) for cells it
+             // recognizes — a TUI multiplexer's pane-resize bar. Checked before
+             // link activation and the selection menu; everything the filter
+             // declines keeps the existing behavior.
+             if !shiftBypassesMouseReporting(for: gestureRecognizer),
+                beginRemoteMouseDrag(at: gestureRecognizer.location(in: self)) {
+                 return
+             }
              let _ = self.becomeFirstResponder()
              let tapLocation = gestureRecognizer.location(in: gestureRecognizer.view)
              let tapRegion = makeContextMenuRegionForTap (point: tapLocation)
@@ -780,7 +790,106 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
              }
 
              showContextMenu (forRegion: tapRegion, pos: hit)
+         case .changed:
+             continueRemoteMouseDrag(at: gestureRecognizer.location(in: self))
+         case .ended, .cancelled, .failed:
+             endRemoteMouseDrag(at: gestureRecognizer.location(in: self))
+         default:
+             break
           }
+    }
+
+    /// Multiplex patch: when set, a long press over a cell this filter claims
+    /// becomes a remote mouse drag instead of the selection menu. The filter
+    /// receives the screen cell (zero-based, what the wire will report) and
+    /// that cell's character, and must answer quickly — it runs at gesture
+    /// time. Only consulted while the client requested button tracking
+    /// (1002/1003), so a plain shell never loses its long press.
+    public var longPressMouseDragFilter: ((_ cell: (col: Int, row: Int), _ content: Character?) -> Bool)?
+
+    /// Multiplex patch: true between a claimed drag's press and its release.
+    public var remoteMouseDragActive: Bool { mouseDragPressFlags != nil }
+
+    private var mouseDragPressFlags: Int?
+    private var mouseDragReleaseFlags = 0
+    private var mouseDragLastCell: Position?
+
+    /// Converts a point in view coordinates to the screen cell a mouse report
+    /// should carry, clamped to the visible grid.
+    private func remoteMouseDragCell (at point: CGPoint) -> (grid: Position, pixels: Position)? {
+        guard let terminal else { return nil }
+        let hit = calculateTapHit(point: point)
+        guard let screen = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) else { return nil }
+        let clamped = Position(col: min (max (0, screen.col), terminal.cols-1),
+                               row: min (max (0, screen.row), terminal.rows-1))
+        return (clamped, hit.pixels)
+    }
+
+    /// Multiplex patch: begins a remote mouse drag at `point` if the filter
+    /// claims that cell. Public so the app's DEBUG hooks can drive the exact
+    /// gesture path headlessly. Returns true when the press was sent.
+    @discardableResult
+    public func beginRemoteMouseDrag (at point: CGPoint) -> Bool {
+        guard let filter = longPressMouseDragFilter,
+              allowMouseReporting,
+              let terminal,
+              terminal.mouseMode.sendButtonTracking(),
+              !selection.active,
+              !contextMenuPresented,
+              mouseDragPressFlags == nil,
+              let hit = remoteMouseDragCell(at: point)
+        else { return false }
+        guard filter((hit.grid.col, hit.grid.row),
+                     terminal.getCharacter(col: hit.grid.col, row: hit.grid.row))
+        else { return false }
+        // Encode both flag values once at press time: encodeFlags clears the
+        // app's CTRL latch as a side effect, and a drag's many motion samples
+        // must all ride the modifiers the press carried.
+        let control = terminalAccessory?.controlModifier ?? controlModifier
+        let pressFlags = encodeFlags(release: false)
+        mouseDragPressFlags = pressFlags
+        mouseDragReleaseFlags = terminal.encodeButton(button: 0, release: true,
+                                                      shift: false, meta: false, control: control)
+        mouseDragLastCell = hit.grid
+        terminal.sendEvent(buttonFlags: pressFlags, x: hit.grid.col, y: hit.grid.row,
+                           pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+        return true
+    }
+
+    /// Multiplex patch: sends a motion report when the drag has moved to a new
+    /// cell. Quantized to cells so a fast finger never floods the remote.
+    public func continueRemoteMouseDrag (at point: CGPoint) {
+        guard let pressFlags = mouseDragPressFlags,
+              let terminal,
+              let hit = remoteMouseDragCell(at: point),
+              hit.grid != mouseDragLastCell
+        else { return }
+        mouseDragLastCell = hit.grid
+        terminal.sendMotion(buttonFlags: pressFlags, x: hit.grid.col, y: hit.grid.row,
+                            pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+    }
+
+    /// Multiplex patch: the inverse of `calculateTapHit` for a visible screen
+    /// cell — the view-coordinate center of that cell. What the app's DEBUG
+    /// hooks stand on to drive the drag path headlessly (no headless route
+    /// can synthesize a real touch).
+    public func pointForCell (col: Int, row: Int) -> CGPoint {
+        let bufferRow = CGFloat (row + (terminal?.displayBuffer.yDisp ?? 0))
+        return CGPoint (x: (CGFloat (col) + 0.5) * cellDimension.width,
+                        y: (bufferRow + 0.5) * cellDimension.height)
+    }
+
+    /// Multiplex patch: releases an active drag at `point` (falling back to
+    /// the last reported cell), always exactly once.
+    public func endRemoteMouseDrag (at point: CGPoint? = nil) {
+        guard mouseDragPressFlags != nil, let terminal else { return }
+        let hit = point.flatMap { remoteMouseDragCell(at: $0) }
+        let cell = hit?.grid ?? mouseDragLastCell ?? Position(col: 0, row: 0)
+        let pixels = hit?.pixels ?? Position(col: 0, row: 0)
+        terminal.sendEvent(buttonFlags: mouseDragReleaseFlags, x: cell.col, y: cell.row,
+                           pixelX: pixels.col, pixelY: pixels.row)
+        mouseDragPressFlags = nil
+        mouseDragLastCell = nil
     }
     
     /// This controls whether the backspace should send ^? or ^H, the default is ^?

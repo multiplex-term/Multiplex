@@ -236,6 +236,16 @@ final class TerminalSessionController {
         view.linkActivationHandler = { [weak self] target, _, rowTexts in
             self?.activateLink(target, rowFragments: rowTexts) ?? false
         }
+        // herdr resizes its pane splits by mouse drag, so a long press on a
+        // border cell becomes a remote press-drag-release. herdr tabs only:
+        // the same drag under tmux starts a copy-mode selection, and the
+        // fork's filter is consulted only while the client requested button
+        // tracking, so a plain shell never loses its long press.
+        if route.sessionBackend == .herdr {
+            view.longPressMouseDragFilter = { _, content in
+                HerdrPaneBorder.isBorderCell(content)
+            }
+        }
         if !pendingOutput.isEmpty {
             view.feed(byteArray: pendingOutput[...])
             pendingOutput.removeAll()
