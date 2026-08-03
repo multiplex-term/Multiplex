@@ -599,7 +599,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
     #endif
 
     #if os(visionOS)
-    func testVisionOrnamentPresentationPinsVisibilityWidthAndAnchorGuide() {
+    func testVisionOrnamentPresentationPinsVisibilityWidthAndModes() {
         let terminal = TerminalVisionOrnamentPresentation.resolve(
             tabCount: 2,
             isAuxiliary: false,
@@ -610,7 +610,6 @@ final class TerminalWindowUIKitTests: XCTestCase {
         XCTAssertTrue(terminal.showsTopSourceLabels)
         XCTAssertEqual(terminal.bottom, .terminal(showsHelper: false))
         XCTAssertEqual(terminal.maximumConsoleWidth, 876)
-        XCTAssertEqual(terminal.bottomCenterGuide, 24)
 
         let withHelper = TerminalVisionOrnamentPresentation.resolve(
             tabCount: 1,
@@ -622,7 +621,6 @@ final class TerminalWindowUIKitTests: XCTestCase {
         XCTAssertFalse(withHelper.showsTopSourceLabels)
         XCTAssertEqual(withHelper.bottom, .terminal(showsHelper: true))
         XCTAssertEqual(withHelper.maximumConsoleWidth, 576)
-        XCTAssertEqual(withHelper.bottomCenterGuide, 40)
 
         let auxiliary = TerminalVisionOrnamentPresentation.resolve(
             tabCount: 2,
@@ -633,7 +631,6 @@ final class TerminalWindowUIKitTests: XCTestCase {
         )
         XCTAssertEqual(auxiliary.bottom, .auxiliary)
         XCTAssertEqual(auxiliary.maximumConsoleWidth, 1)
-        XCTAssertEqual(auxiliary.bottomCenterGuide, 24)
 
         let hidden = TerminalVisionOrnamentPresentation.resolve(
             tabCount: 2,
@@ -643,6 +640,32 @@ final class TerminalWindowUIKitTests: XCTestCase {
             windowWidth: 900
         )
         XCTAssertEqual(hidden.bottom, .hidden)
+    }
+
+    func testVisionConsoleGeometryPutsTheWholeRowBelowTheSceneEdge() {
+        let helperless = TerminalVisionConsoleGeometry.resolve(
+            helperSize: nil,
+            consoleSize: CGSize(width: 600, height: 44),
+            helperLeading: false,
+            spacing: 10
+        )
+        XCTAssertEqual(helperless.size, CGSize(width: 600, height: 88))
+        XCTAssertEqual(helperless.consoleOrigin, CGPoint(x: 0, y: 44))
+        XCTAssertNil(helperless.helperOrigin)
+        XCTAssertEqual(
+            helperless.consoleOrigin.y,
+            helperless.size.height / 2
+        )
+
+        let collapsedHelper = TerminalVisionConsoleGeometry.resolve(
+            helperSize: CGSize(width: 30, height: 30),
+            consoleSize: CGSize(width: 600, height: 44),
+            helperLeading: true,
+            spacing: 10
+        )
+        XCTAssertEqual(collapsedHelper.size, CGSize(width: 600, height: 88))
+        XCTAssertEqual(collapsedHelper.helperOrigin, CGPoint(x: 0, y: 4))
+        XCTAssertEqual(collapsedHelper.consoleOrigin, CGPoint(x: 0, y: 44))
     }
 
     func testVisionConsoleMountsNativeCenterOnceAcrossFittingCandidates() async {

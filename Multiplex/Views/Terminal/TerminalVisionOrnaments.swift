@@ -17,13 +17,6 @@ struct TerminalVisionOrnamentPresentation: Equatable {
     var bottom: Bottom
     var maximumConsoleWidth: CGFloat
 
-    var bottomCenterGuide: CGFloat {
-        switch bottom {
-        case .terminal(showsHelper: true): 40
-        case .terminal, .auxiliary, .hidden: 24
-        }
-    }
-
     static func resolve(
         tabCount: Int,
         isAuxiliary: Bool,
@@ -43,6 +36,50 @@ struct TerminalVisionOrnamentPresentation: Equatable {
             showsTopSourceLabels: tabCount > 1,
             bottom: bottom,
             maximumConsoleWidth: max(1, windowWidth - 24)
+        )
+    }
+}
+
+/// Geometric contract for the scene-bottom console ornament. The console's
+/// top is always the exact vertical midpoint of the reported bounds; that is
+/// the point `UIHostingOrnament(contentAlignment: .center)` actually honors.
+struct TerminalVisionConsoleGeometry: Equatable {
+    var size: CGSize
+    var helperOrigin: CGPoint?
+    var consoleOrigin: CGPoint
+
+    static func resolve(
+        helperSize: CGSize?,
+        consoleSize: CGSize,
+        helperLeading: Bool,
+        spacing: CGFloat
+    ) -> Self {
+        let helperSize = helperSize.map(Self.normalized)
+        let consoleSize = Self.normalized(consoleSize)
+        let spacing = spacing.isFinite ? max(0, spacing) : 0
+        let upperExtent = helperSize.map { $0.height + spacing } ?? 0
+        let halfHeight = max(upperExtent, consoleSize.height)
+        let width = max(helperSize?.width ?? 0, consoleSize.width)
+        let helperOrigin = helperSize.map { helperSize in
+            CGPoint(
+                x: helperLeading ? 0 : (width - helperSize.width) / 2,
+                y: halfHeight - spacing - helperSize.height
+            )
+        }
+        return Self(
+            size: CGSize(width: width, height: halfHeight * 2),
+            helperOrigin: helperOrigin,
+            consoleOrigin: CGPoint(
+                x: (width - consoleSize.width) / 2,
+                y: halfHeight
+            )
+        )
+    }
+
+    private static func normalized(_ size: CGSize) -> CGSize {
+        CGSize(
+            width: size.width.isFinite ? max(0, size.width) : 0,
+            height: size.height.isFinite ? max(0, size.height) : 0
         )
     }
 }
@@ -249,9 +286,6 @@ private struct TerminalVisionBottomOrnament: View {
                 )
                 .fixedSize()
                 .modifier(GlassPrototypeSlabGround())
-                .alignmentGuide(VerticalAlignment.center) { _ in
-                    state.presentation.bottomCenterGuide
-                }
             }
 
         case .terminal(let showsHelper):
@@ -260,7 +294,14 @@ private struct TerminalVisionBottomOrnament: View {
             // bottom-left corner. Revision bumps re-evaluate this body, so
             // the live read stays current across windows.
             let helperCollapsed = state.helperController?.isCollapsed == true
-            VStack(alignment: helperCollapsed ? .leading : .center, spacing: 10) {
+            // `UIHostingOrnament` centers the root's geometric bounds but
+            // does not consume a descendant alignment guide. Make the console
+            // top the root's actual midpoint instead: the row then starts at
+            // the scene edge whether or not a helper exists above it.
+            TerminalVisionConsoleLayout(
+                helperLeading: helperCollapsed,
+                spacing: 10
+            ) {
                 if showsHelper, let helper = state.helperController {
                     TerminalVisionControllerMount(
                         controller: helper,
@@ -274,6 +315,10 @@ private struct TerminalVisionBottomOrnament: View {
                             ? AgentHelperStripViewController.collapsedDotDiameter / 2
                             : 12
                     ))
+                    .layoutValue(
+                        key: TerminalVisionConsoleRoleKey.self,
+                        value: .helper
+                    )
                 }
 
                 TerminalVisionOrnamentWidthClamp(
@@ -308,10 +353,102 @@ private struct TerminalVisionBottomOrnament: View {
                         }
                     }
                 }
+                .layoutValue(
+                    key: TerminalVisionConsoleRoleKey.self,
+                    value: .console
+                )
             }
-            .alignmentGuide(VerticalAlignment.center) { _ in
-                state.presentation.bottomCenterGuide
-            }
+        }
+    }
+}
+
+private enum TerminalVisionConsoleRole: Equatable {
+    case helper
+    case console
+}
+
+private struct TerminalVisionConsoleRoleKey: LayoutValueKey {
+    static let defaultValue = TerminalVisionConsoleRole.console
+}
+
+/// Gives the hosting ornament real, symmetric bounds around the console seam.
+/// A descendant `.alignmentGuide` does not cross `UIHostingOrnament`'s root
+/// boundary, which is why the helper-less row used to remain half in-window.
+private struct TerminalVisionConsoleLayout: Layout {
+    var helperLeading: Bool
+    var spacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let console = console(in: subviews) else { return .zero }
+        return TerminalVisionConsoleGeometry.resolve(
+            helperSize: helper(in: subviews)?.sizeThatFits(proposal),
+            consoleSize: console.sizeThatFits(proposal),
+            helperLeading: helperLeading,
+            spacing: spacing
+        ).size
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let console = console(in: subviews) else { return }
+        let helper = helper(in: subviews)
+        let helperSize = helper?.sizeThatFits(proposal)
+        let consoleSize = console.sizeThatFits(proposal)
+        let geometry = TerminalVisionConsoleGeometry.resolve(
+            helperSize: helperSize,
+            consoleSize: consoleSize,
+            helperLeading: helperLeading,
+            spacing: spacing
+        )
+        let origin = CGPoint(
+            x: bounds.midX - geometry.size.width / 2,
+            y: bounds.midY - geometry.size.height / 2
+        )
+        console.place(
+            at: CGPoint(
+                x: origin.x + geometry.consoleOrigin.x,
+                y: origin.y + geometry.consoleOrigin.y
+            ),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(
+                width: consoleSize.width,
+                height: consoleSize.height
+            )
+        )
+        if let helper,
+           let helperSize,
+           let helperOrigin = geometry.helperOrigin {
+            helper.place(
+                at: CGPoint(
+                    x: origin.x + helperOrigin.x,
+                    y: origin.y + helperOrigin.y
+                ),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(
+                    width: helperSize.width,
+                    height: helperSize.height
+                )
+            )
+        }
+    }
+
+    private func helper(in subviews: Subviews) -> LayoutSubview? {
+        subviews.first {
+            $0[TerminalVisionConsoleRoleKey.self] == .helper
+        }
+    }
+
+    private func console(in subviews: Subviews) -> LayoutSubview? {
+        subviews.first {
+            $0[TerminalVisionConsoleRoleKey.self] == .console
         }
     }
 }

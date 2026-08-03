@@ -487,11 +487,14 @@ logic belongs — keep parsing/command-building out of views.
   compact can't fit, a `fixedSize` floor lets the row overflow the window
   edges symmetrically. Never re-add a keys-under-UMD restack (the system
   CLIPS ornament content hanging below the anchor) and never let the UMD
-  compress (its title truncates). The ornament's
-  `alignmentGuide(VerticalAlignment.center)` constants (40 with an agent
-  strip, 24 without) are load-bearing — neither plain anchor works;
-  re-verify visually when touching them. DECK and the text-size chips live
-  in the UMD title row. ⚠ SwiftTerm still *builds* its stock accessory on
+  compress (its title truncates). `UIHostingOrnament` centers the root's
+  geometric bounds; a descendant alignment guide does not cross that host.
+  `TerminalVisionConsoleLayout` therefore makes the console row's top the
+  root's actual midpoint, with the helper in the upper half. Do not regress
+  it to a plain VStack/alignment guide: helper-less keys will straddle the
+  window until an agent grows the stack. Re-verify visually when touching
+  it. DECK and the text-size chips live in the UMD title row. ⚠ SwiftTerm
+  still *builds* its stock accessory on
   visionOS and `commitTextInput` prefers its `controlModifier` —
   `SwiftTermView` nils `inputAccessoryView` there; don't remove that.
 - **A physical keyboard or software-keyboard lock exposes app-owned
