@@ -96,6 +96,34 @@ configuration. The local review screenshot was refreshed on 2026-07-15 for the
 two-host free-tier wording; confirm which revision the `COMPLETE` remote asset
 is before relying on it.
 
+Same-day triage facts (2026-08-03 readbacks; keep until the IAP first reaches
+`APPROVED`):
+
+- The empty-product failure **reproduced on the TestFlight 1.2.0 build** with
+  `Product.products` succeeding but returning zero products (the paywall's
+  "not available from the App Store right now" branch). TestFlight IAP rides
+  the sandbox with the user's real Apple ID — the Settings sandbox tester is
+  consulted only by development-signed builds.
+- Ruled out by API readback: IAP availability spans 175 territories (USA and
+  TWN included) and the `app.multiplexterm.multiplex` bundle ID has the
+  `IN_APP_PURCHASE` capability enabled. Per Apple DTS/TN3186, in-review state
+  does not gate sandbox availability.
+- **The IAP has never been `APPROVED`**: every visionOS review submission
+  (1.0, 1.0.1, 1.2.0 — `READY_FOR_SALE` since 2026-07-30) carried only the
+  app-version item; the IAP item rides only the iOS submissions (all removed
+  or rejected so far). Until an iOS submission carrying the IAP is approved,
+  the production catalog serves nothing — the live visionOS paywall shows the
+  same "not available" state, so no customer can buy Pro yet.
+- ASC UI state decoder: the product page's "In Review" is the IAP lifecycle
+  state (tied up in an open review cycle); the iOS submission item's "Ready
+  for Review" is that item's queue state after the app-version item was
+  rejected — resubmitting reviews both.
+- Business section (Paid Applications Agreement, banking, tax forms) was
+  confirmed all-active in the ASC UI on 2026-08-03 after this triage;
+  incomplete/outdated tax detail (e.g. W-8BEN / Certificate of Foreign
+  Status) is TN3186's remaining cause for an empty sandbox catalog and is
+  invisible to the API — re-verify it first if the symptom returns.
+
 | Field | Current value |
 | --- | --- |
 | App Store Connect IAP ID | `6790252556` |
