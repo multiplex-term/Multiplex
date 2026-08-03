@@ -52,6 +52,7 @@ final class SettingsUIKitTests: XCTestCase {
             "Agent alerts",
             "App lock",
             "Multiplex Pro",
+            "About",
         ])
 
         let rendered = renderedText(in: fixture.controller.view)
@@ -63,6 +64,7 @@ final class SettingsUIKitTests: XCTestCase {
         XCTAssertTrue(rendered.contains("AGENT HELPERS"))
         XCTAssertTrue(rendered.contains("AGENT ALERTS"))
         XCTAssertTrue(rendered.contains("CUSTOM THEMES"))
+        XCTAssertTrue(rendered.contains("OPEN SOURCE LICENSES"))
         XCTAssertTrue(rendered.contains("PRIVACY POLICY"))
         if GlassPrototype.enabled {
             XCTAssertTrue(rendered.contains {
@@ -306,6 +308,66 @@ final class SettingsUIKitTests: XCTestCase {
             fixture.controller.agentAlertsControl?.accessibilityHint == nil
                 && self.renderedText(in: fixture.controller.view).contains("UNLOCKED")
         }
+    }
+
+    func testLicensesRowPresentsItsOwnModalSheet() async throws {
+        let fixture = makeFixture(isPro: false)
+        defer { clean(fixture) }
+        // Presenting needs a scene-attached window (a scene-less window
+        // cannot present on visionOS).
+        let scene = try XCTUnwrap(
+            UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 820, height: 1180)
+        window.rootViewController = fixture.navigation
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        fixture.navigation.view.frame = window.bounds
+        fixture.navigation.view.layoutIfNeeded()
+
+        let row = try XCTUnwrap(descendants(
+            of: UIControl.self,
+            in: fixture.controller.view
+        ).first { $0.accessibilityLabel == "Open source licenses" })
+        row.sendActions(for: .touchUpInside)
+
+        await waitUntil("licenses modal presentation") {
+            fixture.controller.presentedViewController != nil
+        }
+        let presented = try XCTUnwrap(
+            fixture.controller.presentedViewController as? UINavigationController
+        )
+        let licenses = try XCTUnwrap(
+            presented.viewControllers.first as? LicensesViewController
+        )
+        licenses.loadViewIfNeeded()
+        XCTAssertEqual(licenses.title, "Open Source Licenses")
+        XCTAssertEqual(licenses.components.count, 13)
+        XCTAssertNotNil(
+            licenses.navigationItem.rightBarButtonItem,
+            "A modal licenses sheet needs its own Done"
+        )
+        // Settings itself stays where it was — the licenses page is a
+        // sibling sheet, never a push that resizes the settings stack.
+        XCTAssertTrue(fixture.navigation.topViewController === fixture.controller)
+
+        // Leave no live presentation behind: the next presenting test would
+        // crash the shared test host's sheet machinery. Dismissal completes
+        // on later run-loop turns, so poll with real sleeps (Task.yield
+        // alone never lets UIKit's completion run).
+        fixture.controller.dismiss(animated: false)
+        for _ in 0..<100 where fixture.controller.presentedViewController != nil {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertNil(
+            fixture.controller.presentedViewController,
+            "Licenses modal must be dismissed before the test ends"
+        )
     }
 
     func testPrivacyChipRoutesTheExactPolicyURL() throws {

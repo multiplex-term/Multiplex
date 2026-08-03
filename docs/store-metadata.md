@@ -59,6 +59,18 @@ should describe spatial windows rather than iPhone/iPad windowing. Pass
 | iOS | iPhone adaptive shell, iPad scenes/Stage Manager, Home Screen widgets | SYSTEM / LIGHT / DARK only |
 | visionOS | Spatial windows and, on visionOS 26+, widgets pinned in the room | SYSTEM / LIGHT / DARK / GLASS |
 
+## Open-source licenses
+
+Free surface added 2026-08-03 (unreleased; ships with the next binary):
+
+| Item | Facts |
+| --- | --- |
+| Availability | Settings → About → Open Source Licenses on iPhone, iPad, and Vision Pro |
+| Inventory | The 13 runtime components shipped in the binary: nine Apache-2.0, three MIT, and one BSD. The build-only `swift-docc-plugin` and `swift-docc-symbolkit` packages are deliberately excluded |
+| Presentation | Compact widths group the registry by license family and push full text per component; regular iPad widths and Vision Pro use a filterable two-pane component wall. Every full-text screen has a COPY action and identifies vendored forks separately |
+| Mosh note | The page states that Multiplex's mosh transport is a clean-room implementation from protocol facts and carries no third-party license |
+| Tier / privacy / store impact | Free, offline, and no permission or data-collection impact. This legal-notice surface does not change the Pro allocation, IAP, public App Store descriptions, review flow, or screenshot set; its tester flow is staged in `fastlane/testflight-whats-new.txt` |
+
 ## Bind Host (companion CLI)
 
 Free surface added 2026-07-27 (unreleased; ships with the next binary):

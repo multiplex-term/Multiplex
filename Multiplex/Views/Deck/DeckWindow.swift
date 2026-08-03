@@ -938,7 +938,7 @@ final class DeckWindowViewController: UIViewController {
 
     private func presentSettingsForVerificationIfRequested() {
         guard let request = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_SETTINGS"],
-              ["1", "theme"].contains(request) else { return }
+              ["1", "theme", "licenses"].contains(request) else { return }
         requestPresentation(.settings)
     }
 

@@ -120,8 +120,9 @@ app.multiplexterm.multiplex`):
 - `MULTIPLEX_AUTO_PAYWALL=1` — the real locked paywall with a deterministic
   $19.99 storefront preview (simctl launches don't inherit Xcode's StoreKit
   session).
-- `MULTIPLEX_AUTO_SETTINGS=1|theme` / `MULTIPLEX_AUTO_FAQ=1` — open those
-  sheets for headless capture (`theme` pushes the theme editor).
+- `MULTIPLEX_AUTO_SETTINGS=1|theme|licenses` / `MULTIPLEX_AUTO_FAQ=1` — open
+  those sheets for headless capture (`theme` pushes the theme editor,
+  `licenses` the Open Source Licenses page).
 - `MULTIPLEX_AUTO_HOST_SETTINGS=1|models|backend|directories` — opens the
   first host's edit sheet (regression-checks the Observation environment
   across the sheet boundary — a missing HostStore is a fatal error);

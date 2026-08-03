@@ -82,6 +82,7 @@ final class SettingsViewController: UIViewController {
         super.viewDidAppear(animated)
         #if DEBUG
         presentThemeEditorForVerificationIfRequested()
+        presentLicensesForVerificationIfRequested()
         #endif
     }
 
@@ -243,6 +244,7 @@ final class SettingsViewController: UIViewController {
             makeAlertsSection(state),
             makeAppLockSection(state),
             makeProSection(state),
+            makeAboutSection(),
             makePrivacyLink(),
         ]
         replaceContent(with: sections)
@@ -563,6 +565,20 @@ final class SettingsViewController: UIViewController {
         return SettingsInsetRow(contentView: row)
     }
 
+    private func makeAboutSection() -> UIView {
+        let licenses = SettingsNavigationRow(
+            title: "Open Source Licenses",
+            accessibilityLabel: "Open source licenses"
+        ) { [weak self] in
+            self?.showLicenses()
+        }
+        return SettingsSectionView(
+            title: "About",
+            detail: "License notices for the third-party code shipped with Multiplex.",
+            rows: [licenses]
+        )
+    }
+
     private func makePrivacyLink() -> UIView {
         let holder = UIView()
         let chip = UIKitChassisChip(
@@ -611,6 +627,27 @@ final class SettingsViewController: UIViewController {
         }
         controller.followAppAppearance(themes)
         navigationController?.pushViewController(controller, animated: true)
+    }
+
+    /// The licenses page is its own modal, not a push: its component wall
+    /// wants the license texts' authored column width (980 pt), and resizing
+    /// the settings sheet mid-navigation reads as a glitch. A fresh sheet
+    /// arrives at full width with the stock presentation animation.
+    private func showLicenses() {
+        let controller = LicensesViewController()
+        controller.followAppAppearance(themes)
+        let navigation = UINavigationController(rootViewController: controller)
+        navigation.navigationBar.prefersLargeTitles = false
+        navigation.view.backgroundColor = GlassPrototype.clearedChassis
+        UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
+        // visionOS sheets honor preferredContentSize as-is; iPad needs the
+        // form-sheet style for it (a page sheet's width is system-fixed).
+        // iPhone's sheet ignores it either way.
+        navigation.preferredContentSize = LicensesViewController.preferredSheetSize
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            navigation.modalPresentationStyle = .formSheet
+        }
+        present(navigation, animated: true)
     }
 
     private func save(_ theme: TerminalTheme) {
@@ -681,6 +718,14 @@ final class SettingsViewController: UIViewController {
         didRunDebugPresentation = true
         let selected = themes.selected(for: resolvedAppearance(for: themes.appearance))
         showThemeEditor(selected.asCustom(named: "Tally Custom"))
+    }
+
+    private func presentLicensesForVerificationIfRequested() {
+        guard !didRunDebugPresentation,
+              ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_SETTINGS"] == "licenses"
+        else { return }
+        didRunDebugPresentation = true
+        showLicenses()
     }
     #endif
 }
@@ -791,6 +836,67 @@ final class SettingsInsetRow: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
+}
+
+@MainActor
+final class SettingsNavigationRow: UIControl {
+    private let action: () -> Void
+
+    init(title: String, accessibilityLabel: String, action: @escaping () -> Void) {
+        self.action = action
+        super.init(frame: .zero)
+        backgroundColor = GlassPrototype.strataChassis
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        isAccessibilityElement = true
+        self.accessibilityLabel = accessibilityLabel
+        accessibilityTraits = .button
+        addTarget(self, action: #selector(pressed), for: .touchUpInside)
+
+        let titleLabel = UIKitChassisLabel(title, size: 10)
+        let chevron = UIImageView(image: UIImage(
+            systemName: "chevron.right",
+            withConfiguration: UIImage.SymbolConfiguration(
+                pointSize: 9 * Theme.typeScale,
+                weight: .semibold
+            )
+        ))
+        chevron.tintColor = UIKitChassis.signal2
+        chevron.contentMode = .scaleAspectFit
+        chevron.isAccessibilityElement = false
+        let row = UIStackView(arrangedSubviews: [
+            titleLabel,
+            settingsFlexibleSpacer(),
+            chevron,
+        ])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 10
+        row.isUserInteractionEnabled = false
+        addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            row.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override var isHighlighted: Bool {
+        didSet {
+            backgroundColor = isHighlighted
+                ? UIKitChassis.bezel
+                : GlassPrototype.strataChassis
+        }
+    }
+
+    @objc private func pressed() {
+        action()
+    }
 }
 
 enum SettingsAppearanceChoiceMetrics {
