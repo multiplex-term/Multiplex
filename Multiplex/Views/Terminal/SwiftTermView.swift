@@ -770,3 +770,21 @@ final class TerminalSurfaceView: UIView {
         func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
     }
 }
+
+extension TerminalView {
+    /// True while the user is actively typing into this terminal — read from
+    /// the same send-path stamp the fork's immediate-display window uses, so
+    /// every input road (IME commits, the key rail, kitty-encoded hardware
+    /// keys, dictation chunks) counts, and none has to report separately.
+    /// Chrome uses it to defer work that has no business running between
+    /// keystrokes: the focused-pane agent probe and the gaze hover-region
+    /// rebuild both wait for a quiet gap instead.
+    func hasRecentUserInput(within window: Duration) -> Bool {
+        let last = lastUserInputUptimeNanoseconds
+        guard last > 0 else { return false }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now >= last else { return false }
+        let windowNs = UInt64(window / .nanoseconds(1))
+        return now - last <= windowNs
+    }
+}

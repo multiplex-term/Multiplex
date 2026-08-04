@@ -191,6 +191,14 @@ final class TerminalWindowViewController: UIViewController,
 {
     private static let hostProbeInterval: Duration = .seconds(5)
     private static let focusedPaneProbeInterval: Duration = .seconds(1)
+    /// A tick of the focused-pane check is skipped while the terminal saw a
+    /// keystroke this recently. Detection has no business running between
+    /// keystrokes — the pane under the fingers is not changing — and the
+    /// probe's exec, parse, and Observation pokes all compete with input
+    /// handling on a spatial display where every window stays live. Chips
+    /// settle one quiet beat after typing stops; the 5 s wall probe stays
+    /// the untouched broad authority.
+    private static let typingQuietWindow: Duration = .milliseconds(1500)
 
     private(set) var route: TerminalWindowRoute
     private var shell: TerminalWindowShellConfiguration?
@@ -1138,7 +1146,8 @@ final class TerminalWindowViewController: UIViewController,
                 if UIApplication.shared.applicationState == .active,
                    let controller = activeController,
                    let view = controller.terminalView,
-                   TerminalFocusArbiter.current === view {
+                   TerminalFocusArbiter.current === view,
+                   !view.hasRecentUserInput(within: Self.typingQuietWindow) {
                     await controller.refreshDirectShellAgent(ifStaleFor: 0.8)
                     guard !Task.isCancelled,
                           activeTab?.id == watchedTab.id
@@ -1185,9 +1194,14 @@ final class TerminalWindowViewController: UIViewController,
                 if UIApplication.shared.applicationState == .active,
                    let view = activeController?.terminalView,
                    TerminalFocusArbiter.current === view {
-                    let detection = await model.detectActiveAgent(in: sessionName)
-                    guard !Task.isCancelled, activeTab?.id == watchedTab.id else { return }
-                    if let detection { apply(detection) }
+                    // Mid-burst the check waits — and deliberately without
+                    // falling to the wall-verdict branch below, so a chip
+                    // never swaps under the user's fingers.
+                    if !view.hasRecentUserInput(within: Self.typingQuietWindow) {
+                        let detection = await model.detectActiveAgent(in: sessionName)
+                        guard !Task.isCancelled, activeTab?.id == watchedTab.id else { return }
+                        if let detection { apply(detection) }
+                    }
                 } else if UIApplication.shared.applicationState == .active {
                     let nextAgent = detectedAgent
                     if shownAgent != nextAgent {
@@ -1204,7 +1218,8 @@ final class TerminalWindowViewController: UIViewController,
         while !Task.isCancelled {
             if UIApplication.shared.applicationState == .active,
                let view = activeController?.terminalView,
-               TerminalFocusArbiter.current === view {
+               TerminalFocusArbiter.current === view,
+               !view.hasRecentUserInput(within: Self.typingQuietWindow) {
                 let detection = await model.detectActiveAgent(in: sessionName)
                 guard !Task.isCancelled, activeTab?.id == watchedTab.id else { return }
                 if let detection { apply(detection) }

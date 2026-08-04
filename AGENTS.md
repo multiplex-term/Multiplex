@@ -753,7 +753,11 @@ logic belongs — keep parsing/command-building out of views.
   (the leak the per-host conf documents). On visionOS links glow under
   the eye (`TerminalLinkHoverOverlay`, a `TerminalView` subview): system
   hover regions stood over the fork's link enumeration, rebuilt debounced
-  on output/scroll. Hover regions ARE hit regions — a pinch on a lit link
+  on output/scroll — deferred while keystrokes flow (the fork's send-path
+  stamp via `hasRecentUserInput`; typing echoes retrigger the debounce
+  ~3×/s for no visible benefit), and an unchanged region set is a
+  comparison, never a rebuild (each region is a cross-process
+  hover-effect registration). Hover regions ARE hit regions — a pinch on a lit link
   outranks the remote click on those cells (accepted trade); only targets
   `resolve` would confirm get a region; obscured tabs clear theirs. Full
   record: `local-plan/terminal-links.md`.
@@ -1161,8 +1165,13 @@ logic belongs — keep parsing/command-building out of views.
   only `TerminalFocusArbiter.current` runs a 1 s focused check: tmux uses
   current-window `list-panes` (with a cached single-TTY ps fallback for
   ambiguous wrappers), while herdr's small `pane current` response names
-  the globally focused pane and its canonical agent definitively. Settled
-  full probes coalesce for 4 s. Plain `.shell` tabs use their own
+  the globally focused pane and its canonical agent definitively. A tick
+  is skipped while that terminal saw a keystroke within ~1.5 s
+  (`TerminalView.hasRecentUserInput`, reading the fork's send-path stamp
+  — the pane under the fingers isn't changing, and detection must not
+  compete with input handling; chips settle a beat after typing stops,
+  and mid-burst the shown chip is left alone rather than dropped to the
+  wall verdict). Settled full probes coalesce for 4 s. Plain `.shell` tabs use their own
   PTY authority (`ShellAgentProbe`: exec channel's `$PPID` → sibling PTY
   under sshd → foreground pgid/tpgid only, so a suspended background
   agent leaves no helpers); title/visible-screen signatures are a narrow

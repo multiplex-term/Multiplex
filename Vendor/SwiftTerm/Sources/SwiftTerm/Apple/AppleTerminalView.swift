@@ -2224,6 +2224,16 @@ extension TerminalView {
         return lastUserInputUptimeNs
     }
 
+    /// Multiplex patch: the uptime instant of the most recent user-input send
+    /// (0 before any input), exposed so app chrome can defer non-urgent work —
+    /// gaze hover-region rebuilds, focused-pane agent probes — while
+    /// keystrokes are actively flowing. Every input road funnels through
+    /// `send(data:)`, so IME commits, the key rail, kitty-encoded hardware
+    /// keys, and dictation all stamp it.
+    public var lastUserInputUptimeNanoseconds: UInt64 {
+        loadLastUserInputUptimeNs()
+    }
+
     private func displayImmediately() {
         #if os(iOS) || os(visionOS)
         guard renderUpdatesEnabled else { return }
