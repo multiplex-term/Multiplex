@@ -73,6 +73,53 @@ final class FileViewerPaneUIKitTests: XCTestCase {
         XCTAssertTrue(FileViewerPaneViewController.startsWithDrawerOpen(browsing))
     }
 
+    func testDiffPresentationCarriesAcrossChangedFileSelections() {
+        let changed = FileTree.Row(
+            entry: FileTreeEntry(
+                name: "App.swift",
+                path: "/srv/app/App.swift",
+                isDirectory: false
+            ),
+            depth: 0,
+            badge: .modified
+        )
+        let clean = FileTree.Row(
+            entry: FileTreeEntry(
+                name: "README.md",
+                path: "/srv/app/README.md",
+                isDirectory: false
+            ),
+            depth: 0
+        )
+        let deleted = FileTree.Row(
+            entry: FileTreeEntry(
+                name: "Old.swift",
+                path: "/srv/app/Old.swift",
+                isDirectory: false
+            ),
+            depth: 0,
+            badge: .deleted
+        )
+        let diffViewer = FileViewerController(
+            tabID: UUID(),
+            host: makeHost(),
+            startDirectory: "/srv/app",
+            target: nil,
+            targetPresentation: .diff
+        )
+        let sourceViewer = FileViewerController(
+            tabID: UUID(),
+            host: makeHost(),
+            startDirectory: "/srv/app",
+            target: nil
+        )
+
+        XCTAssertEqual(diffViewer.selectionPresentation(for: changed), .diff)
+        XCTAssertEqual(diffViewer.selectionPresentation(for: clean), .source)
+        XCTAssertEqual(sourceViewer.selectionPresentation(for: changed), .source)
+        XCTAssertEqual(sourceViewer.selectionPresentation(for: deleted), .diff)
+    }
+
     func testNativeCodeScreenKeepsSelectionSurfaceAndTruncationVerdict() {
         let screen = FileViewerCodeContentView()
         screen.apply(

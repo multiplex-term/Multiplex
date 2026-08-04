@@ -66,6 +66,7 @@ final class FileViewerPaneViewController: UIViewController {
     private let controller: FileViewerController
     private var contentSafeArea: UIEdgeInsets
     private var isActive: Bool
+    private var openInNewTabAction: (FileTree.Row) -> Void
     private var closeAction: () -> Void
     private let startsController: Bool
 
@@ -123,12 +124,14 @@ final class FileViewerPaneViewController: UIViewController {
         contentSafeArea: UIEdgeInsets = .zero,
         isActive: Bool = true,
         startsController: Bool = true,
+        openInNewTab: @escaping (FileTree.Row) -> Void = { _ in },
         close: @escaping () -> Void
     ) {
         self.controller = controller
         self.contentSafeArea = contentSafeArea
         self.isActive = isActive
         self.startsController = startsController
+        openInNewTabAction = openInNewTab
         closeAction = close
         drawerOpen = Self.startsWithDrawerOpen(controller)
         super.init(nibName: nil, bundle: nil)
@@ -154,9 +157,15 @@ final class FileViewerPaneViewController: UIViewController {
         // Give Auto Layout a complete initial graph before the first
         // controller layout callback supplies the real canvas width.
         applyResponsiveLayout(for: max(view.bounds.width, Self.compactThreshold))
-        treeView.apply(controller: controller) { [weak self] in
-            self?.setDrawerOpen(false, animated: true)
-        }
+        treeView.apply(
+            controller: controller,
+            closeDrawer: { [weak self] in
+                self?.setDrawerOpen(false, animated: true)
+            },
+            openInNewTab: { [weak self] row in
+                self?.openInNewTabAction(row)
+            }
+        )
 
         observationGeneration &+= 1
         observeAndRender(generation: observationGeneration)
@@ -203,8 +212,10 @@ final class FileViewerPaneViewController: UIViewController {
     func update(
         contentSafeArea: UIEdgeInsets,
         isActive: Bool,
+        openInNewTab: @escaping (FileTree.Row) -> Void,
         close: @escaping () -> Void
     ) {
+        openInNewTabAction = openInNewTab
         closeAction = close
         if self.contentSafeArea != contentSafeArea {
             self.contentSafeArea = contentSafeArea

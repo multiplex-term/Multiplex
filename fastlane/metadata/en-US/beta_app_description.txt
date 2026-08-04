@@ -19,7 +19,7 @@ WHERE THINGS ARE
 - TMUX (bottom bar on Vision Pro, key rail on iPad/iPhone, top-right on narrow iPhones) sends everyday tmux commands: new window, split, copy mode. On herdr tabs the key reads HRDR and sends herdr's own commands.
 - Long-press or touch double-tap the terminal for SELECT / SELECT ALL / PASTE on either backend: selection stays inside that pane and COPY grabs it. Pointer secondary-click opens the same block; herdr tabs add MENU, which opens herdr's own pane menu at the gesture cell.
 - FILE uploads from Photos, Files, or the camera into the active pane's working directory and types the remote path without pressing Return. Dragging a file onto the terminal does the same.
-- + TAB → File Viewer browses host files and git diffs. Long-press a path or file:///… address in terminal output to confirm and open that remote file beside the session.
+- + TAB → File Viewer browses host files and git diffs. Long-press a path or file:///… address in terminal output to confirm and open that remote file beside the session; inside the tree, long-press a file to open it in another viewer tab. DIFF stays selected as you move between changed files.
 - DETACH closes the window; the remote session keeps running on the host and its tile stays on the wall.
 - Home Screen widgets show a host's last-known sessions plus SHELL and AGENT keys; Shortcuts and Siri can open a shell or launch an agent.
 

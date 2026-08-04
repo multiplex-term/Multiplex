@@ -94,12 +94,14 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
 
     private var controller: FileViewerController?
     private var closeDrawer: () -> Void = {}
+    private var openInNewTabAction: (FileTree.Row) -> Void = { _ in }
     private var observationGeneration = 0
 
     private var onUp: () -> Void = {}
     private var onRepoDiff: () -> Void = {}
     private var onChangedFilter: () -> Void = {}
     private var onSelect: (FileTree.Row) -> Void = { _ in }
+    private var onOpenInNewTab: (FileTree.Row) -> Void = { _ in }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -140,10 +142,12 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
 
     func apply(
         controller: FileViewerController,
-        closeDrawer: @escaping () -> Void
+        closeDrawer: @escaping () -> Void,
+        openInNewTab: @escaping (FileTree.Row) -> Void
     ) {
         self.controller = controller
         self.closeDrawer = closeDrawer
+        self.openInNewTabAction = openInNewTab
         observationGeneration &+= 1
         observeAndRender(generation: observationGeneration)
     }
@@ -156,7 +160,8 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
         onUp: @escaping () -> Void = {},
         onRepoDiff: @escaping () -> Void = {},
         onChangedFilter: @escaping () -> Void = {},
-        onSelect: @escaping (FileTree.Row) -> Void = { _ in }
+        onSelect: @escaping (FileTree.Row) -> Void = { _ in },
+        onOpenInNewTab: @escaping (FileTree.Row) -> Void = { _ in }
     ) {
         // The chrome is built once and mutated in place: `render` runs on every
         // file selection and on every watch tick, and tearing the stack down
@@ -169,6 +174,7 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
         self.onRepoDiff = onRepoDiff
         self.onChangedFilter = onChangedFilter
         self.onSelect = onSelect
+        self.onOpenInNewTab = onOpenInNewTab
         updateChrome(previous: previous)
         chromeRendered = true
         rebuildDisplayRows()
@@ -184,6 +190,27 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
               case .tree(let row) = displayRows[index]
         else { return }
         onSelect(row)
+    }
+
+    func openInNewTab(path: String) {
+        guard let row = snapshot.rows.first(where: { $0.entry.path == path }),
+              !row.entry.isDirectory
+        else { return }
+        onOpenInNewTab(row)
+    }
+
+    func menu(for path: String) -> UIMenu? {
+        guard snapshot.rows.contains(where: {
+            $0.entry.path == path && !$0.entry.isDirectory
+        }) else { return nil }
+        return UIMenu(children: [
+            UIAction(
+                title: "Open in New Tab",
+                image: UIImage(systemName: "plus.square.on.square")
+            ) { [weak self] _ in
+                self?.openInNewTab(path: path)
+            },
+        ])
     }
 
     func numberOfSections(in tableView: UITableView) -> Int { 1 }
@@ -242,6 +269,20 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
                 at: indexPath
             )
             cell.apply(row, isCurrent: snapshot.railPath == row.entry.path)
+            if row.entry.isDirectory {
+                cell.accessibilityCustomActions = nil
+            } else {
+                cell.accessibilityCustomActions = [
+                    UIAccessibilityCustomAction(
+                        name: "Open in New Tab",
+                        actionHandler: { [weak self] _ in
+                            guard let self else { return false }
+                            self.openInNewTab(path: row.entry.path)
+                            return true
+                        }
+                    ),
+                ]
+            }
             return cell
         }
     }
@@ -249,6 +290,24 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: false)
         selectRow(at: indexPath.row)
+    }
+
+    func tableView(
+        _ tableView: UITableView,
+        contextMenuConfigurationForRowAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard displayRows.indices.contains(indexPath.row),
+              case .tree(let row) = displayRows[indexPath.row],
+              !row.entry.isDirectory
+        else { return nil }
+        let path = row.entry.path
+        return UIContextMenuConfiguration(
+            identifier: path as NSString,
+            previewProvider: nil
+        ) { [weak self] _ in
+            self?.menu(for: path)
+        }
     }
 
     private func observeAndRender(generation: Int) {
@@ -272,6 +331,9 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
             onSelect: { [weak self, weak controller] row in
                 controller?.select(row)
                 if !row.entry.isDirectory { self?.closeDrawer() }
+            },
+            onOpenInNewTab: { [weak self] row in
+                self?.openInNewTabAction(row)
             }
         )
     }

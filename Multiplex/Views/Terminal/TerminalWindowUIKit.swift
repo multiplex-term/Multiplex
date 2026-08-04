@@ -933,6 +933,41 @@ final class TerminalWindowViewController: UIViewController,
         }
     }
 
+    private func openFileInNewViewerTab(
+        _ row: FileTree.Row,
+        after sourceTabID: UUID
+    ) {
+        guard !row.entry.isDirectory,
+              let sourceTab = route.tabs.first(where: { $0.id == sourceTabID }),
+              sourceTab.isFileViewer,
+              let sourceController = workspace.fileViewerController(for: sourceTabID),
+              let host = store.host(id: sourceTab.hostID)
+        else { return }
+        let path = row.entry.path
+        // Tree entries are absolute remote paths. Carry that authority into
+        // a fresh, in-memory viewer controller, registered before its route
+        // enters the tab list like every other auxiliary pane.
+        let target = TerminalPathTarget(
+            raw: path,
+            path: path,
+            base: .absolute,
+            line: nil
+        )
+        let tab = TerminalRoute(
+            hostID: sourceTab.hostID,
+            mode: .fileViewer(path: path)
+        )
+        workspace.openFileViewer(
+            tab: tab,
+            host: host,
+            startDirectory: FileTree.parent(of: path),
+            anchorSessionName: nil,
+            target: target,
+            targetPresentation: sourceController.selectionPresentation(for: row)
+        )
+        dock(tab, after: sourceTabID)
+    }
+
     func openViewport(_ offer: ViewportOffer) {
         guard let activeTab, let host = store.host(id: activeTab.hostID) else { return }
         let tab = TerminalRoute(
@@ -1298,6 +1333,9 @@ extension TerminalWindowViewController {
                 controller: fileViewer,
                 contentSafeArea: contentSafeArea,
                 isActive: tab.id == activeTab?.id,
+                openInNewTab: { [weak self] row in
+                    self?.openFileInNewViewerTab(row, after: tab.id)
+                },
                 close: { [weak self] in self?.closeTab(tab.id) }
             )
         }
@@ -1323,6 +1361,9 @@ extension TerminalWindowViewController {
             fileViewer.update(
                 contentSafeArea: contentSafeArea,
                 isActive: isActive,
+                openInNewTab: { [weak self] row in
+                    self?.openFileInNewViewerTab(row, after: tab.id)
+                },
                 close: { [weak self] in self?.closeTab(tab.id) }
             )
         }

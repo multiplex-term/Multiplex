@@ -63,6 +63,16 @@ final class FileViewerController: AuxiliaryPaneController {
     private let anchorSessionName: String?
     /// The pressed path this tab was summoned to show, when it was.
     private let target: TerminalPathTarget?
+    /// A file viewer keeps SOURCE | DIFF as a browsing mode: once DIFF is
+    /// selected, choosing another changed file opens its diff too. The mode
+    /// also rides an "Open in New Tab" summons so the new viewer opens the
+    /// same representation instead of flashing source first.
+    enum FilePresentation: Equatable {
+        case source
+        case diff
+    }
+    private let targetPresentation: FilePresentation
+    private(set) var filePresentation: FilePresentation
     /// True when the tab was summoned to BROWSE (+ TAB ▸ File Viewer)
     /// rather than to show a specific pressed file — the tree is the
     /// subject until a file is chosen, so the compact drawer opens itself
@@ -74,13 +84,16 @@ final class FileViewerController: AuxiliaryPaneController {
         host: Host,
         startDirectory: String?,
         anchorSessionName: String? = nil,
-        target: TerminalPathTarget?
+        target: TerminalPathTarget?,
+        targetPresentation: FilePresentation = .source
     ) {
         self.tabID = tabID
         self.host = host
         self.startDirectory = startDirectory
         self.anchorSessionName = anchorSessionName
         self.target = target
+        self.targetPresentation = targetPresentation
+        self.filePresentation = targetPresentation
         self.opensBrowsing = target == nil
     }
 
@@ -291,15 +304,27 @@ final class FileViewerController: AuxiliaryPaneController {
             let anchor = resolvedTarget.map { FileTree.parent(of: $0) ?? "/" } ?? base
             await probeGit(at: anchor)
             rootPath = gitRoot ?? anchor
-            // The pressed file is the summons — render it before the
-            // listing and the (possibly seconds-cold) git status; tree
-            // rows and badges fill in quietly behind the document.
+            // A source summons renders before the listing and the (possibly
+            // seconds-cold) git status. A DIFF summons needs the status first:
+            // it distinguishes an untracked all-additions diff from HEAD and
+            // confirms the file is still changed before preserving the mode.
+            var loadedGitVerdicts = false
             if let resolvedTarget {
-                await open(path: resolvedTarget, line: target?.line)
+                if targetPresentation == .diff, gitRoot != nil {
+                    await refreshGitVerdicts()
+                    loadedGitVerdicts = true
+                    if badges[resolvedTarget] != nil {
+                        await showFileDiff(path: resolvedTarget)
+                    } else {
+                        await open(path: resolvedTarget, line: target?.line)
+                    }
+                } else {
+                    await open(path: resolvedTarget, line: target?.line)
+                }
             }
             await list(rootPath)
             expandChain(to: anchor)
-            await refreshGitVerdicts()
+            if !loadedGitVerdicts { await refreshGitVerdicts() }
             if resolvedTarget == nil { content = .idle }
         } catch {
             content = .failure(
@@ -435,12 +460,23 @@ final class FileViewerController: AuxiliaryPaneController {
             toggleExpand(row.entry)
             return
         }
-        // A deleted file has no working-tree bytes — its diff IS the file.
-        if badges[row.entry.path] == .deleted {
+        switch selectionPresentation(for: row) {
+        case .source:
+            Task { await open(path: row.entry.path, line: nil) }
+        case .diff:
             Task { await showFileDiff(path: row.entry.path) }
-            return
         }
-        Task { await open(path: row.entry.path, line: nil) }
+    }
+
+    /// The representation a tree-file choice should open. Deleted files have
+    /// no worktree bytes, so their diff remains the only honest source in
+    /// either mode. A clean file leaves DIFF mode because it has no diff to
+    /// show; changed files inherit the current mode.
+    func selectionPresentation(for row: FileTree.Row) -> FilePresentation {
+        let badge = row.badge ?? badges[row.entry.path]
+        if badge == .deleted { return .diff }
+        if filePresentation == .diff, badge != nil { return .diff }
+        return .source
     }
 
     /// The tree header's UP chip: hoist the root one directory.
@@ -484,6 +520,7 @@ final class FileViewerController: AuxiliaryPaneController {
     // MARK: Opening files
 
     func open(path: String, line: Int?) async {
+        filePresentation = .source
         let name = FileTree.name(of: path)
         contentGeneration += 1
         let generation = contentGeneration
@@ -638,6 +675,7 @@ final class FileViewerController: AuxiliaryPaneController {
 
     func showFileDiff(path: String) async {
         guard let gitRoot else { return }
+        filePresentation = .diff
         contentGeneration += 1
         let generation = contentGeneration
         let name = FileTree.name(of: path)
@@ -655,6 +693,9 @@ final class FileViewerController: AuxiliaryPaneController {
 
     func showRepoDiff() async {
         guard let gitRoot else { return }
+        // The repo-wide review is not SOURCE | DIFF for one file. Preserve
+        // the prior behavior when a tree row is picked from this screen.
+        filePresentation = .source
         contentGeneration += 1
         let generation = contentGeneration
         watchedStamp = nil
@@ -715,6 +756,7 @@ final class FileViewerController: AuxiliaryPaneController {
     /// The SOURCE chip: back to the document behind a per-file diff.
     func showSource() {
         guard case .diff(_, .file(let path)) = content else { return }
+        filePresentation = .source
         if let lastDocument, lastDocument.path == path {
             contentGeneration += 1
             content = .document(lastDocument)

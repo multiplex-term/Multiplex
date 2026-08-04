@@ -122,7 +122,8 @@ final class TerminalWorkspace {
         host: Host,
         startDirectory: String?,
         anchorSessionName: String?,
-        target: TerminalPathTarget?
+        target: TerminalPathTarget?,
+        targetPresentation: FileViewerController.FilePresentation = .source
     ) {
         guard tab.isFileViewer, auxiliaryControllers[tab.id] == nil else { return }
         auxiliaryControllers[tab.id] = FileViewerController(
@@ -130,7 +131,8 @@ final class TerminalWorkspace {
             host: host,
             startDirectory: startDirectory,
             anchorSessionName: anchorSessionName,
-            target: target
+            target: target,
+            targetPresentation: targetPresentation
         )
     }
 

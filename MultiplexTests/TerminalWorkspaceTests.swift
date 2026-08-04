@@ -95,6 +95,36 @@ final class TerminalWorkspaceTests: XCTestCase {
             hostID: host, sessionName: "shell", backend: .tmux))
     }
 
+    func testFileViewerRegistersRequestedPresentationBeforeItsRouteArrives() {
+        let workspace = TerminalWorkspace()
+        let host = Host(
+            name: "devbox",
+            hostname: "127.0.0.1",
+            username: "tester"
+        )
+        let path = "/srv/app/App.swift"
+        let tab = TerminalRoute(hostID: host.id, mode: .fileViewer(path: path))
+        workspace.openFileViewer(
+            tab: tab,
+            host: host,
+            startDirectory: "/srv/app",
+            anchorSessionName: nil,
+            target: TerminalPathTarget(
+                raw: path,
+                path: path,
+                base: .absolute,
+                line: nil
+            ),
+            targetPresentation: .diff
+        )
+
+        XCTAssertEqual(
+            workspace.fileViewerController(for: tab.id)?.filePresentation,
+            .diff
+        )
+        workspace.closeTab(tab.id)
+    }
+
     func testUnregisteredWindowStopsMatching() {
         let workspace = TerminalWorkspace()
         let host = UUID()

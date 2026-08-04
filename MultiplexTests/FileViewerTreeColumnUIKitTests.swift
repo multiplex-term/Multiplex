@@ -68,6 +68,53 @@ final class FileViewerTreeColumnUIKitTests: XCTestCase {
         XCTAssertEqual(selected, [row])
     }
 
+    func testFileLongPressOffersOpenInNewTab() {
+        let directory = makeRow(
+            name: "Sources",
+            path: "/srv/app/Sources",
+            directory: true,
+            expanded: false
+        )
+        let file = makeRow(
+            name: "App.swift",
+            path: "/srv/app/Sources/App.swift",
+            directory: false,
+            expanded: false
+        )
+        var snapshot = makeSnapshot(rootPath: "/srv/app")
+        snapshot.rows = [directory, file]
+        var opened: [FileTree.Row] = []
+        let view = FileViewerTreeColumnView()
+        view.render(
+            snapshot: snapshot,
+            onOpenInNewTab: { opened.append($0) }
+        )
+
+        XCTAssertNil(view.menu(for: directory.entry.path))
+        XCTAssertEqual(menuTitles(view.menu(for: file.entry.path)), ["Open in New Tab"])
+        XCTAssertNil(view.tableView(
+            view.tableView,
+            contextMenuConfigurationForRowAt: IndexPath(row: 0, section: 0),
+            point: .zero
+        ))
+        XCTAssertNotNil(view.tableView(
+            view.tableView,
+            contextMenuConfigurationForRowAt: IndexPath(row: 1, section: 0),
+            point: .zero
+        ))
+
+        let cell = view.tableView(
+            view.tableView,
+            cellForRowAt: IndexPath(row: 1, section: 0)
+        )
+        XCTAssertEqual(
+            cell.accessibilityCustomActions?.map(\.name),
+            ["Open in New Tab"]
+        )
+        view.openInNewTab(path: file.entry.path)
+        XCTAssertEqual(opened, [file])
+    }
+
     func testFailurePrecedesRowsAndEmptyStatUsesQuietReadout() {
         var snapshot = makeSnapshot(rootPath: "/srv/app")
         snapshot.treeFailure = "Permission denied"
@@ -90,6 +137,10 @@ final class FileViewerTreeColumnUIKitTests: XCTestCase {
             FileViewerTreeColumnView.countsText(GitShortStat()).string,
             "±0"
         )
+    }
+
+    private func menuTitles(_ menu: UIMenu?) -> [String] {
+        menu?.children.compactMap { ($0 as? UIAction)?.title } ?? []
     }
 
     private func makeSnapshot(rootPath: String) -> FileViewerTreeColumnSnapshot {

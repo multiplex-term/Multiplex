@@ -80,7 +80,9 @@ bake-off is recorded in [docs/landing/](docs/landing/).*
   host path — including a percent-encoded `file:///…` URI — to confirm its
   decoded remote path, then open it read-only in a **File Viewer** tab with
   source, rendered Markdown, images, and git diffs; + TAB opens the same viewer
-  for browsing. SwiftTerm renders xterm-256color, sends taps and pointer clicks
+  for browsing. Long-press a file in its tree to open it in another viewer tab;
+  while reviewing diffs, choosing another changed file keeps DIFF selected.
+  SwiftTerm renders xterm-256color, sends taps and pointer clicks
   to mouse-aware TUIs as primary-button events, and reports window resizing to
   the remote PTY.
   **Detach** closes the active tab's channel — tmux keeps the session; the wall
