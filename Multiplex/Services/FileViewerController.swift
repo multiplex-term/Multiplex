@@ -138,6 +138,10 @@ final class FileViewerController: AuxiliaryPaneController {
     }
 
     private(set) var content: Content = .idle
+    /// Back/forward trail of the content screens this tab visited. Written
+    /// only where content lands (a failed load is never a destination);
+    /// `visit`'s equality gate keeps refresh and quiet watch swaps out.
+    private(set) var history = FileViewerHistory()
     /// The document behind a per-file DIFF, so SOURCE flips back without a
     /// round trip.
     private(set) var lastDocument: Document?
@@ -544,6 +548,7 @@ final class FileViewerController: AuxiliaryPaneController {
             lastDocument = document
             watchedStamp = stat
             content = .document(document)
+            history.visit(.document(path: path))
         } catch {
             guard generation == contentGeneration else { return }
             if let refusal = error as? LoadRefusal {
@@ -722,6 +727,10 @@ final class FileViewerController: AuxiliaryPaneController {
             let diff = await Task.detached { GitDiff.parse(body) }.value
             guard generation == contentGeneration else { return }
             content = .diff(diff, scope: scope)
+            switch scope {
+            case .file(let path): history.visit(.fileDiff(path: path))
+            case .repo: history.visit(.repoDiff)
+            }
         } catch {
             guard generation == contentGeneration else { return }
             content = .failure(
@@ -760,8 +769,39 @@ final class FileViewerController: AuxiliaryPaneController {
         if let lastDocument, lastDocument.path == path {
             contentGeneration += 1
             content = .document(lastDocument)
+            history.visit(.document(path: path))
         } else {
             Task { await open(path: path, line: nil) }
+        }
+    }
+
+    // MARK: History
+
+    var canGoBack: Bool { history.canGoBack }
+    var canGoForward: Bool { history.canGoForward }
+
+    /// Back/forward re-run the recorded navigation; `history.current`
+    /// already names the destination, so the landing's own `visit` no-ops
+    /// and a failed load leaves the failure panel with the trail moved —
+    /// the browser contract.
+    func goBack() {
+        guard let entry = history.goBack() else { return }
+        Task { await navigate(to: entry) }
+    }
+
+    func goForward() {
+        guard let entry = history.goForward() else { return }
+        Task { await navigate(to: entry) }
+    }
+
+    private func navigate(to entry: FileViewerHistory.Entry) async {
+        switch entry {
+        case .document(let path):
+            await open(path: path, line: nil)
+        case .fileDiff(let path):
+            await showFileDiff(path: path)
+        case .repoDiff:
+            await showRepoDiff()
         }
     }
 

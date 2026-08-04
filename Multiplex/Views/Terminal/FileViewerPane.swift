@@ -33,6 +33,8 @@ private struct FileViewerPaneObservedState {
     var documentBadge: GitFileStatus.Badge?
     var markdownRaw: Bool
     var isBusy: Bool
+    var canGoBack: Bool
+    var canGoForward: Bool
 
     @MainActor
     init(controller: FileViewerController) {
@@ -44,6 +46,8 @@ private struct FileViewerPaneObservedState {
         documentDiffBadge = controller.documentDiffBadge
         markdownRaw = controller.markdownRaw
         isBusy = controller.isBusy
+        canGoBack = controller.canGoBack
+        canGoForward = controller.canGoForward
         if case .document = controller.content {
             // `documentDiffBadge` is the document's own badge already, and
             // every read of `controller.badges` rebuilds the repo-wide map —
@@ -91,6 +95,8 @@ final class FileViewerPaneViewController: UIViewController {
     private let treeDivider = UIView()
     private(set) var treeView = FileViewerTreeColumnView()
 
+    private(set) var backChip: UIKitChassisChip?
+    private(set) var forwardChip: UIKitChassisChip?
     private(set) var sourceChip: UIKitChassisChip?
     private(set) var diffChip: UIKitChassisChip?
     private(set) var selectChip: UIKitChassisChip?
@@ -662,9 +668,35 @@ final class FileViewerPaneViewController: UIViewController {
             railStack.removeArrangedSubview(child)
             if child !== railPathLabel { child.removeFromSuperview() }
         }
+        backChip = nil
+        forwardChip = nil
         sourceChip = nil
         diffChip = nil
         selectChip = nil
+
+        // Back/forward appear once there is anywhere to go — a fresh tab's
+        // rail stays uncluttered. The pair shows together (a dimmed twin
+        // keeps the other from jumping around) and dims like REFRESH does.
+        if state.canGoBack || state.canGoForward {
+            let back = makeChip("◂", accessibility: "Back") { [weak controller] in
+                controller?.goBack()
+            }
+            back.accessibilityIdentifier = "fileViewer.back"
+            setChipEnabled(back, state.canGoBack)
+            backChip = back
+            let forward = makeChip("▸", accessibility: "Forward") { [weak controller] in
+                controller?.goForward()
+            }
+            forward.accessibilityIdentifier = "fileViewer.forward"
+            setChipEnabled(forward, state.canGoForward)
+            forwardChip = forward
+            let pair = UIStackView(arrangedSubviews: [back, forward])
+            pair.axis = .horizontal
+            pair.alignment = .center
+            pair.spacing = 4
+            pair.isAccessibilityElement = false
+            railStack.addArrangedSubview(pair)
+        }
 
         if state.documentDiffBadge != nil {
             let sourceMode: Bool
@@ -734,9 +766,7 @@ final class FileViewerPaneViewController: UIViewController {
             controller?.refresh()
         }
         refresh.accessibilityIdentifier = "fileViewer.refresh"
-        refresh.isUserInteractionEnabled = !state.isBusy
-        refresh.alpha = state.isBusy ? 0.5 : 1
-        refresh.accessibilityTraits = state.isBusy ? [.button, .notEnabled] : .button
+        setChipEnabled(refresh, !state.isBusy)
         refreshChip = refresh
         railStack.addArrangedSubview(refresh)
 
@@ -765,6 +795,12 @@ final class FileViewerPaneViewController: UIViewController {
         chip.setContentHuggingPriority(.required, for: .horizontal)
         chip.setContentCompressionResistancePriority(.required, for: .horizontal)
         return chip
+    }
+
+    private func setChipEnabled(_ chip: UIKitChassisChip, _ enabled: Bool) {
+        chip.isUserInteractionEnabled = enabled
+        chip.alpha = enabled ? 1 : 0.5
+        chip.accessibilityTraits = enabled ? .button : [.button, .notEnabled]
     }
 
     private func toggleMarkdownSelection() {
