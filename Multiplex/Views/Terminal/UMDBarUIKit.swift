@@ -120,6 +120,7 @@ enum UMDBarAction: Equatable {
     case detach
     case closeSession
     case toggleKeyboardLock
+    case showGuide
     case attach(FileAttachPicker)
 }
 
@@ -135,8 +136,11 @@ final class UMDBarViewController: UIViewController,
     private(set) var fileAttachController: FileAttachMenuViewController
     private weak var shortcutPopoverController: ShortcutPanelViewController?
     private weak var shortcutButtonView: UMDBarButton?
+    private weak var guideNavigationController: UINavigationController?
+    private weak var guideFocusController: TerminalSessionController?
     private var resumesFocusAfterShortcutPanel = false
-    #if DEBUG && os(visionOS)
+    private var resumesFocusAfterGuide = false
+    #if DEBUG
     private var debugObservers: [NSObjectProtocol] = []
     #endif
     private var observationGeneration = 0
@@ -168,7 +172,7 @@ final class UMDBarViewController: UIViewController,
         addChild(fileAttachController)
         rootView.parkFileAttachView(fileAttachController.view)
         fileAttachController.didMove(toParent: self)
-        #if DEBUG && os(visionOS)
+        #if DEBUG
         installDebugObservers()
         #endif
         renderAndObserve()
@@ -197,7 +201,10 @@ final class UMDBarViewController: UIViewController,
         shortcutPopoverController?.dismiss(animated: false)
         shortcutPopoverController = nil
         resumeFocusAfterShortcutPresentationIfNeeded()
-        #if DEBUG && os(visionOS)
+        guideNavigationController?.dismiss(animated: false)
+        guideNavigationController = nil
+        resumeFocusAfterGuidePresentationIfNeeded()
+        #if DEBUG
         for observer in debugObservers {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -235,6 +242,8 @@ final class UMDBarViewController: UIViewController,
             #if !os(visionOS)
             configuration.controller?.toggleKeyboardLock()
             #endif
+        case .showGuide:
+            showGuide()
         case .attach(let picker):
             fileAttachController.request(
                 picker,
@@ -347,6 +356,9 @@ final class UMDBarViewController: UIViewController,
         }
         if !configuration.mergeSources.isEmpty {
             views.append(mergeButton())
+        }
+        if let overflow = overflowButtonIfNeeded(displacesDirectActions: false) {
+            views.append(overflow)
         }
         views.append(divider())
         views.append(detachButton())
@@ -766,6 +778,12 @@ final class UMDBarViewController: UIViewController,
             ))
         }
         #endif
+        children.append(menuAction(
+            title: "Guide",
+            image: UIImage(systemName: "questionmark.circle"),
+            identifier: "umd.guide",
+            action: .showGuide
+        ))
 
         if displacesDirectActions {
             children.append(UIMenu(
@@ -866,6 +884,44 @@ final class UMDBarViewController: UIViewController,
         }
     }
 
+    private func showGuide() {
+        guard guideNavigationController == nil,
+              shortcutPopoverController == nil,
+              presentedViewController == nil
+        else { return }
+
+        resumesFocusAfterGuide =
+            configuration.controller?.suspendFocusForPresentation() == true
+        guideFocusController = resumesFocusAfterGuide ? configuration.controller : nil
+        let guide = TerminalGuideViewController(context: TerminalGuideContext(
+            platform: terminalGuidePlatform,
+            backendIsHerdr: configuration.shortcutBackend == .herdr
+        ))
+        guide.followAppAppearance(nil, presentedFrom: self)
+        let navigation = UINavigationController(rootViewController: guide)
+        navigation.navigationBar.prefersLargeTitles = false
+        navigation.view.backgroundColor = GlassPrototype.clearedChassis
+        UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
+        navigation.modalPresentationStyle = .formSheet
+        guide.onDone = { [weak self, weak navigation] in
+            navigation?.dismiss(animated: true) {
+                self?.finishGuidePresentation()
+            }
+        }
+        guideNavigationController = navigation
+        navigation.presentationController?.delegate = self
+        present(navigation, animated: true)
+        guide.refreshDynamicTextColorsAfterTraitPropagation()
+    }
+
+    private var terminalGuidePlatform: TerminalGuideContext.Platform {
+        #if os(visionOS)
+        .vision
+        #else
+        UIDevice.current.userInterfaceIdiom == .phone ? .phone : .pad
+        #endif
+    }
+
     private func showShortcutPanel(from source: UIView) {
         guard shortcutPopoverController == nil,
               let content = ShortcutPanelContent.content(
@@ -945,6 +1001,12 @@ final class UMDBarViewController: UIViewController,
     func presentationControllerDidDismiss(
         _ presentationController: UIPresentationController
     ) {
+        if let navigation = presentationController.presentedViewController
+            as? UINavigationController,
+           navigation.viewControllers.first is TerminalGuideViewController {
+            finishGuidePresentation()
+            return
+        }
         shortcutPopoverController = nil
         resumeFocusAfterShortcutPresentationIfNeeded()
     }
@@ -968,11 +1030,39 @@ final class UMDBarViewController: UIViewController,
         configuration.controller?.resumeFocusAfterPresentation()
     }
 
-    #if DEBUG && os(visionOS)
-    /// visionOS spelling of `debug.tmuxshortcuts` (the iPad key rail's hook
-    /// registers the same Darwin name there): opens the focused window's UMD
-    /// shortcut popover (TMUX or HRDR) for layout capture.
+    private func finishGuidePresentation() {
+        guideNavigationController = nil
+        resumeFocusAfterGuidePresentationIfNeeded()
+    }
+
+    private func resumeFocusAfterGuidePresentationIfNeeded() {
+        let controller = guideFocusController
+        guideFocusController = nil
+        guard resumesFocusAfterGuide else { return }
+        resumesFocusAfterGuide = false
+        controller?.resumeFocusAfterPresentation()
+    }
+
+    #if DEBUG
     private func installDebugObservers() {
+        TerminalGuideDebugHook.install()
+        debugObservers.append(NotificationCenter.default.addObserver(
+            forName: .multiplexDebugTerminalGuide,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      let terminalView = self.configuration.controller?.terminalView,
+                      TerminalFocusArbiter.current === terminalView
+                else { return }
+                self.showGuide()
+            }
+        })
+
+        #if os(visionOS)
+        // The iPad key rail owns the other spelling of this hook; visionOS
+        // opens the focused window's UMD shortcut panel directly.
         UMDTmuxShortcutsDebugHook.install()
         debugObservers.append(NotificationCenter.default.addObserver(
             forName: .multiplexDebugUMDTmuxShortcuts,
@@ -988,17 +1078,44 @@ final class UMDBarViewController: UIViewController,
                 self.showShortcutPanel(from: button)
             }
         })
+        #endif
     }
     #endif
 }
 
-#if DEBUG && os(visionOS)
+#if DEBUG
 extension Notification.Name {
+    static let multiplexDebugTerminalGuide = Notification.Name(
+        "MultiplexDebugTerminalGuide"
+    )
+
+    #if os(visionOS)
     static let multiplexDebugUMDTmuxShortcuts = Notification.Name(
         "MultiplexDebugUMDTmuxShortcuts"
     )
+    #endif
 }
 
+@MainActor
+private enum TerminalGuideDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.guide", &token, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugTerminalGuide,
+                object: nil
+            )
+        }
+    }
+}
+
+#if os(visionOS)
 @MainActor
 private enum UMDTmuxShortcutsDebugHook {
     private static var installed = false
@@ -1017,6 +1134,7 @@ private enum UMDTmuxShortcutsDebugHook {
         }
     }
 }
+#endif
 #endif
 
 @MainActor

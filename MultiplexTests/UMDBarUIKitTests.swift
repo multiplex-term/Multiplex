@@ -138,7 +138,7 @@ final class UMDBarUIKitTests: XCTestCase {
     }
 
     #if !os(visionOS)
-    func testWideShellHidesOverflowWhenItsMenuHasNoActions() throws {
+    func testWideShellKeepsTheUniversalGuideInOverflow() throws {
         let terminal = terminalController(useMosh: false)
         let controller = UMDBarViewController(configuration: configuration(
             controller: terminal,
@@ -155,7 +155,13 @@ final class UMDBarUIKitTests: XCTestCase {
             hardwareKeyboardConnected: true
         ))
         XCTAssertNotNil(view("umd.shell.wide", in: controller.view))
-        XCTAssertNil(control("umd.overflow", in: controller.view))
+        let guideOnly = try XCTUnwrap(
+            control("umd.overflow", in: controller.view) as? UIButton
+        )
+        XCTAssertEqual(
+            actions(in: try XCTUnwrap(guideOnly.menu)).map(\.title),
+            ["Guide"]
+        )
 
         controller.applyObservedState(UMDBarObservedState(
             status: .live,
@@ -169,7 +175,7 @@ final class UMDBarUIKitTests: XCTestCase {
         )
         XCTAssertEqual(
             actions(in: try XCTUnwrap(lock.menu)).map(\.title),
-            ["Lock Keyboard Closed"]
+            ["Lock Keyboard Closed", "Guide"]
         )
 
         controller.applyObservedState(UMDBarObservedState(
@@ -184,7 +190,7 @@ final class UMDBarUIKitTests: XCTestCase {
         )
         XCTAssertEqual(
             actions(in: try XCTUnwrap(unlock.menu)).map(\.title),
-            ["Unlock Keyboard"]
+            ["Unlock Keyboard", "Guide"]
         )
     }
     #endif
@@ -214,6 +220,11 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertEqual(menu.children.compactMap { ($0 as? UIMenu)?.title }, [
             "Text Size", "New Tab", "Send File…", "Merge Window", "",
         ])
+        XCTAssertTrue(allActions.map(\.title).contains("Guide"))
+        XCTAssertEqual(
+            allActions.first { $0.title == "Guide" }?.identifier,
+            UIAction.Identifier("umd.guide")
+        )
         #if os(visionOS)
         // Keyboard lock is an iPad software-keyboard affordance. The
         // production controller and the SwiftUI surface it replaced both

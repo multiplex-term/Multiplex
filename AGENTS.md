@@ -197,6 +197,7 @@ app.multiplexterm.multiplex.<name>`:
 - `debug.tmuxshortcuts` / `debug.customcommands` / `debug.msghistory` — open
   the focused tab's shortcut popover (TMUX content, or HRDR on a herdr
   tab) / Command Setup editor / agent HISTORY panel for layout capture.
+- `debug.guide` — open the focused terminal's GUIDE field manual for layout capture.
 - `debug.link` — activate the first visible link through the resolve →
   policy → confirmation path (URL → link sheet, path → file-viewer sheet;
   text both resolvers decline must present nothing). `debug.linkopen` runs
