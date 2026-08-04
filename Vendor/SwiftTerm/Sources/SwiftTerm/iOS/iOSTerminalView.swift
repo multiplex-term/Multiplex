@@ -1201,12 +1201,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
 
         if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode.sendButtonPress() {
-            // Multiplex patch: a touchscreen double tap (and visionOS's
-            // gaze/pinch equivalent) is an additive route to the app-owned
-            // selection block. The single recognizer has already sent both
-            // physical taps to the remote immediately — preserving the
-            // no-latency contract — and this recognizer must not add a third.
-            // Pointer double-clicks remain remote-only on iOS/iPadOS/Mac.
+            // Multiplex patch: a double tap — finger, Pencil, visionOS
+            // gaze/pinch, or a pointer's double-click — is an additive route
+            // to the app-owned selection block. The single recognizer has
+            // already sent both physical clicks to the remote immediately —
+            // preserving the no-latency contract — and this recognizer must
+            // not add a third.
             if localDoubleTapOpensSelectionMenu(gestureRecognizer) {
                 _ = dismissLocalSelectionUI()
                 _ = presentSelectionMenu(at: gestureRecognizer.location(in: self))
@@ -1697,12 +1697,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         panSelectionGesture = nil
     }
     
-    /// Last touch type admitted by each tap recognizer. UIKit routes fingers,
-    /// Pencil, pointers, and visionOS gaze through the same recognizer action;
-    /// remembering the type lets double *tap* gain a local affordance without
-    /// stealing pointer double-click from a mouse-aware remote.
-    private var tapTouchTypes: [ObjectIdentifier: UITouch.TouchType] = [:]
-
     func setupGestures ()
     {
         let longPress = UILongPressGestureRecognizer (target: self, action: #selector(longPress(_:)))
@@ -1754,34 +1748,16 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         tripleTap.delegate = self
     }
 
-    /// Multiplex patch: remember the input kind for the recognizer action.
-    /// Returning true leaves UIKit's admission behavior unchanged.
-    public func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldReceive touch: UITouch
-    ) -> Bool {
-        if gestureRecognizer is UITapGestureRecognizer,
-           gestureRecognizer.view === self {
-            tapTouchTypes[ObjectIdentifier(gestureRecognizer)] = touch.type
-        }
-        return true
-    }
-
     /// Whether this remote-owned double gesture should additionally raise
-    /// local selection chrome. iOS/iPadOS reserve it for finger/Pencil taps,
-    /// keeping mouse/trackpad double-clicks wholly remote. visionOS presents
-    /// gaze/pinch as an indirect pointer, so that spatial tap counts too.
+    /// local selection chrome. Every input kind counts — finger, Pencil,
+    /// visionOS gaze/pinch, and a pointer's double-click — so a mouse says
+    /// "select this word" exactly the way a double tap does. The two physical
+    /// clicks still reach the remote first, so a mouse-aware TUI keeps its
+    /// own double-click semantics.
     private func localDoubleTapOpensSelectionMenu(
         _ gestureRecognizer: UITapGestureRecognizer
     ) -> Bool {
-        guard selectionMenuHandler != nil,
-              let touchType = tapTouchTypes[ObjectIdentifier(gestureRecognizer)]
-        else { return false }
-        #if os(visionOS)
-        return touchType == .direct || touchType == .indirectPointer
-        #else
-        return touchType == .direct || touchType == .pencil
-        #endif
+        selectionMenuHandler != nil
     }
 
     /// Multiplex patch: true while a tap belongs to the remote right now —

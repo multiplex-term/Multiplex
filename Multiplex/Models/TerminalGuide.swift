@@ -61,7 +61,7 @@ enum TerminalGuide {
             title: "DOUBLE TAP",
             tag: nil,
             body: [
-                .text("The remote gets two real clicks first — then the selection block rises at your finger: "),
+                .text("Tap or click twice. The remote gets two real clicks first — then the selection block rises at that spot: "),
                 .control("SELECT"),
                 .text(" · "),
                 .control("SELECT ALL"),

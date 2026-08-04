@@ -343,11 +343,12 @@ logic belongs — keep parsing/command-building out of views.
       (`remoteOwnsImmediateTaps`): while the client reports mouse (tmux
       `mouse on`, the app's premise) every physical tap fires immediately as
       its own click — the old static chain bought ~350 ms latency and folded
-      a remote double-click into ONE click. A direct touch double-tap (plus
-      visionOS's gaze/pinch equivalent) now ALSO raises the app's selection
-      block after its two immediate remote clicks; only double waits for
+      a remote double-click into ONE click. A double gesture of ANY input
+      kind — finger, Pencil, visionOS gaze/pinch, or a pointer's
+      double-click — now ALSO raises the app's selection block after its two
+      immediate remote clicks; only double waits for
       triple, so single-tap latency and three-click semantics stay intact.
-      Pointer double-click stays remote-only on iOS/iPadOS/Mac. Mouse-off —
+      Mouse-off —
       and a held hardware Shift bypassing reporting — keeps the old chain so
       local word/line selection still works.
     - A tap while a local selection **or its context menu** is present
