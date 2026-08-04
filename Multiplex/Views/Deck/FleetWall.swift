@@ -609,6 +609,9 @@ final class FleetWallViewController: UIViewController {
                 ))
             },
             requestNewSession: { [weak self] in self?.presentNewSession(on: host) },
+            requestNewHerdrTab: { [weak self] session in
+                self?.createHerdrTab(in: session, on: host)
+            },
             requestDeleteSession: { [weak self] session in
                 self?.confirmDelete(session: session, on: host)
             },
@@ -755,6 +758,10 @@ final class FleetWallViewController: UIViewController {
     private func createSession(on host: Host, submission: NewSessionSubmission) {
         let model = configuration.hub.model(for: host)
         Task { [weak self] in
+            if let target = submission.tabTargetSession {
+                await self?.createTab(in: target, on: host, submission: submission, model: model)
+                return
+            }
             // The name rides raw: `createSession` picks the backend's own
             // sanitizer + uniquer (they run on `base:` regardless), so the
             // view never second-guesses the naming rules.
@@ -771,6 +778,93 @@ final class FleetWallViewController: UIViewController {
             ) else { return }
             self?.open(TerminalRoute(hostID: host.id, mode: created))
         }
+    }
+
+    /// The sheet's Creates → "Tab in …" branch: `launchInSession`'s herdr
+    /// tab placement carrying the sheet's own launch/script/directory
+    /// riders — the external `in=tab` road, pressed from the deck. A nil
+    /// directory omits `--cwd`, so herdr starts the tab in the focused
+    /// pane's directory (what the sheet's Focused Pane row promises).
+    private func createTab(
+        in target: String, on host: Host,
+        submission: NewSessionSubmission, model: HostConnectionModel
+    ) async {
+        guard let mode = await model.launchInSession(
+            named: target,
+            placement: .tab,
+            directory: submission.directory,
+            label: submission.agent?.launchCommand,
+            running: submission.script?.normalizedBody,
+            typing: submission.agent?.launchCommand(
+                model: submission.model,
+                initialPrompt: submission.initialPrompt
+            )
+        ) else {
+            presentTabCreateFailure(session: target, on: host, model: model)
+            return
+        }
+        reveal(mode: mode, session: target, on: host)
+    }
+
+    /// The tile menu's herdr-only New Tab in Workspace: the terminal
+    /// window's `+ TAB` row pressed from the deck — remembered setup
+    /// script, never an agent, no label or directory rider (herdr numbers
+    /// the tab and inherits the focused pane's directory). Unlike that row
+    /// the deck may be looking at a session nobody is attached to, so this
+    /// rides `launchInSession` — its spawn revives a stopped server — and
+    /// then reveals the session so the new tab is on screen, not created
+    /// where nobody is looking.
+    private func createHerdrTab(in session: TmuxSession, on host: Host) {
+        let model = configuration.hub.model(for: host)
+        let script = NewSessionPreferences().rememberedScript(for: host)
+        Task { [weak self] in
+            guard let mode = await model.launchInSession(
+                named: session.name,
+                placement: .tab,
+                directory: nil,
+                label: nil,
+                running: script?.normalizedBody,
+                typing: nil
+            ) else {
+                self?.presentTabCreateFailure(
+                    session: session.name, on: host, model: model)
+                return
+            }
+            self?.reveal(mode: mode, session: session.name, on: host)
+        }
+    }
+
+    /// Created first, revealed second — the external performer's rule: the
+    /// fresh pane is already the session's focus, so an existing tab needs
+    /// only the reveal and a missing one attaches straight onto it.
+    private func reveal(mode: TerminalRoute.Mode, session: String, on host: Host) {
+        if configuration.workspace.focusTab(
+            hostID: host.id,
+            sessionName: session,
+            backend: host.sessionBackend
+        ) { return }
+        open(TerminalRoute(hostID: host.id, mode: mode))
+    }
+
+    /// Failure copy shared by the sheet's tab branch and the tile row's New
+    /// Tab in Workspace — an in-session create that fails stays a visible
+    /// failure, never a fallback mint (the external performer's rule).
+    private func presentTabCreateFailure(
+        session: String, on host: Host, model: HostConnectionModel
+    ) {
+        let message: String
+        if case .failed(let reason) = model.phase {
+            message = reason
+        } else {
+            message = "Couldn't open a new tab in session \(session) on \(host.name)."
+        }
+        let alert = UIAlertController(
+            title: "Couldn't Create Tab",
+            message: message,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        present(alert, animated: true)
     }
 
     private func confirmDelete(session: TmuxSession, on host: Host) {
@@ -1091,6 +1185,7 @@ private struct FleetHostSectionConfiguration {
     var openSession: (TmuxSession) -> Void
     var openDuplicateSession: (TmuxSession) -> Void
     var requestNewSession: () -> Void
+    var requestNewHerdrTab: (TmuxSession) -> Void
     var requestDeleteSession: (TmuxSession) -> Void
     var reconnect: (HostConnectionModel) -> Void
     var requestPassphrase: (HostConnectionModel) -> Void
@@ -1397,6 +1492,9 @@ private final class FleetHostSectionView: UIView {
                     attach: { [weak self] in self?.configuration.openSession(session) },
                     attachNewWindow: { [weak self] in
                         self?.configuration.openDuplicateSession(session)
+                    },
+                    newHerdrTab: { [weak self] in
+                        self?.configuration.requestNewHerdrTab(session)
                     },
                     delete: { [weak self] in
                         self?.configuration.requestDeleteSession(session)
@@ -2270,6 +2368,9 @@ struct FleetSessionTileConfiguration {
     let openTabAccessibilityText: String
     let attach: () -> Void
     let attachNewWindow: () -> Void
+    /// The herdr-only menu row — a tab in this session's focused workspace.
+    /// Displayed only when `sessionBackend == .herdr`.
+    let newHerdrTab: () -> Void
     let delete: () -> Void
     let droppedSession: (String) -> Void
 
@@ -2381,14 +2482,25 @@ final class FleetSessionTileView: FleetPressView,
         pressAction = configuration.attach
         menuProvider = { [weak self] in
             guard let configuration = self?.configuration else { return nil }
-            return UIMenu(children: [
+            var children: [UIMenuElement] = [
                 UIAction(title: configuration.duplicateAttachTitle) { _ in
                     configuration.attachNewWindow()
                 },
+            ]
+            if configuration.sessionBackend == .herdr {
+                // The terminal window's + TAB row, reachable from the deck;
+                // one title source so the surfaces can't drift.
+                children.append(UIAction(
+                    title: TerminalRoute.NewTabTarget.herdrWorkspaceTab.menuTitle
+                ) { _ in
+                    configuration.newHerdrTab()
+                })
+            }
+            children.append(
                 UIAction(title: "Delete Session…", attributes: .destructive) { _ in
                     configuration.delete()
-                },
-            ])
+                })
+            return UIMenu(children: children)
         }
         applyBorder()
         guard !unchanged else { return }
@@ -3182,6 +3294,9 @@ struct NewSessionSubmission: Equatable {
     let initialPrompt: String
     let directory: String?
     let script: SessionScript?
+    /// nil mints a fresh session; a name adds a tab to that herdr session's
+    /// focused workspace instead (the sheet's Creates row, herdr only).
+    let tabTargetSession: String?
 }
 
 /// Framework-independent form rules shared by the native controller and its
@@ -3203,6 +3318,11 @@ struct NewSessionFormState {
     var directory: String?
     var script: SessionScript?
     var remembersLastLaunch: Bool
+    /// nil creates a fresh session. A session name instead adds a tab to
+    /// that herdr session's focused workspace — the external `in=tab`
+    /// launch pressed from the deck. Deliberately one-shot: REMEMBER never
+    /// saves it.
+    private(set) var tabTargetSession: String?
 
     init(
         host: Host,
@@ -3244,6 +3364,23 @@ struct NewSessionFormState {
         }
     }
 
+    /// The existing sessions a new tab can land in — non-empty only on a
+    /// herdr host with sessions, the gate for the sheet's Creates row.
+    /// tmux deliberately offers no window-in-session shape here: the
+    /// deck's mint stays session-first, and tmux windows belong to the
+    /// prefix keys and the shortcut panel.
+    var tabTargetChoices: [String] {
+        host.sessionBackend == .herdr ? existingNames : []
+    }
+
+    mutating func selectTabTarget(_ session: String?) {
+        guard let session, tabTargetChoices.contains(session) else {
+            tabTargetSession = nil
+            return
+        }
+        tabTargetSession = session
+    }
+
     var agentToLaunch: AgentKind? {
         launchMode == .agents ? selectedAgent : nil
     }
@@ -3255,7 +3392,9 @@ struct NewSessionFormState {
     }
 
     var canSubmit: Bool {
-        !name.trimmingCharacters(in: .whitespaces).isEmpty
+        // A tab needs no name — herdr numbers it.
+        tabTargetSession != nil
+            || !name.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var commandPreview: String {
@@ -3302,14 +3441,31 @@ struct NewSessionFormState {
             model: modelToLaunch,
             initialPrompt: initialPrompt,
             directory: directory,
-            script: script
+            script: script,
+            tabTargetSession: tabTargetSession
         )
+    }
+
+    var targetDetail: String {
+        guard let tabTargetSession else {
+            return "A fresh \(host.sessionBackend.rawValue) session, its own tile "
+                + "on the deck. Choose a session to add a tab to its focused "
+                + "workspace instead."
+        }
+        return "Adds a tab to “\(tabTargetSession)”'s focused workspace — "
+            + "no new session is created."
     }
 
     var launchDetail: String {
         let remembers = host.sessionScripts.isEmpty
             ? "REMEMBER saves only the launch choice."
             : "REMEMBER saves the launch and setup-script choices."
+        if let tabTargetSession {
+            guard let agentToLaunch else {
+                return "Opens the new tab's shell in “\(tabTargetSession)”. \(remembers)"
+            }
+            return "Starts \(agentToLaunch.displayName) in the new tab. The optional prompt becomes its first message; \(remembers)"
+        }
         guard let agentToLaunch else {
             return "Creates the \(host.sessionBackend.rawValue) session, then attaches "
                 + "to its login shell. \(remembers)"
@@ -3324,14 +3480,26 @@ struct NewSessionFormState {
         return "Types \(script.displayName) into the fresh shell first, so the launch inherits what it sets up."
     }
 
+    /// What an empty directory means, by target: a fresh session spawns at
+    /// the login shell's $HOME, while a tab create omits `--cwd` and herdr
+    /// starts it where the session's focused pane is (the `+ TAB` row's
+    /// behavior — "another one here").
+    var directoryFallbackTitle: String {
+        tabTargetSession == nil ? "Home" : "Focused Pane"
+    }
+
     var directoryDetail: String {
-        guard !host.workingDirs.isEmpty else {
-            return "Uses the host's login-shell home directory."
-        }
+        let fallback = tabTargetSession == nil
+            ? "Uses the host's login-shell home directory."
+            : "Uses the focused pane's directory — where the session is looking now."
+        guard !host.workingDirs.isEmpty else { return fallback }
         if let directory {
-            return "Starts in \(directory). Choose Home to use the login shell's default."
+            let alternative = tabTargetSession == nil
+                ? "Choose Home to use the login shell's default."
+                : "Choose Focused Pane to inherit the session's own directory."
+            return "Starts in \(directory). \(alternative)"
         }
-        return "Uses the host's login-shell home directory."
+        return fallback
     }
 
     private func prefill(for agent: AgentKind?) -> String {
@@ -3373,6 +3541,11 @@ final class NewSessionViewController: UIViewController,
     private var scriptSection: FleetFormSectionView?
     private var directoryButton: FleetMenuFieldButton?
     private var directorySection: FleetFormSectionView?
+    private var directoryHomeLabel: UILabel?
+    private var directoryHomeRow: UIStackView?
+    private var createsButton: FleetMenuFieldButton?
+    private var createsSection: FleetFormSectionView?
+    private var identitySection: FleetFormSectionView?
     private var createItem: UIBarButtonItem?
 
     init(
@@ -3480,7 +3653,14 @@ final class NewSessionViewController: UIViewController,
         ])
 
         contentStack.addArrangedSubview(makeTargetSection())
-        contentStack.addArrangedSubview(makeIdentitySection())
+        if !form.tabTargetChoices.isEmpty {
+            let creates = makeCreatesSection()
+            createsSection = creates
+            contentStack.addArrangedSubview(creates)
+        }
+        let identity = makeIdentitySection()
+        identitySection = identity
+        contentStack.addArrangedSubview(identity)
         let launch = makeLaunchSection()
         launchSection = launch
         contentStack.addArrangedSubview(launch)
@@ -3522,7 +3702,23 @@ final class NewSessionViewController: UIViewController,
         return FleetFormSectionView(title: "Target host", rows: [row])
     }
 
-    private func makeIdentitySection() -> UIView {
+    /// The herdr-only Creates row: a fresh session (the default), or a tab
+    /// in an existing session's focused workspace — the external `in=tab`
+    /// launch, pressed from the deck. Built only when the host has sessions
+    /// a tab could land in.
+    private func makeCreatesSection() -> FleetFormSectionView {
+        let button = FleetMenuFieldButton()
+        button.accessibilityLabel = "Creates"
+        button.accessibilityIdentifier = "newSession.creates"
+        createsButton = button
+        return FleetFormSectionView(
+            title: "Creates",
+            detail: form.targetDetail,
+            rows: [button]
+        )
+    }
+
+    private func makeIdentitySection() -> FleetFormSectionView {
         configureTextField(
             nameField,
             placeholder: form.defaultNameBase,
@@ -3629,13 +3825,15 @@ final class NewSessionViewController: UIViewController,
             let home = UILabel()
             home.font = UIKitChassis.monoFont(10, weight: .medium)
             home.textColor = UIKitChassis.signal
-            home.text = "HOME"
+            home.text = form.directoryFallbackTitle.uppercased()
+            directoryHomeLabel = home
             let row = UIStackView(arrangedSubviews: [starts, UIView(), home])
             row.axis = .horizontal
             row.alignment = .center
             row.spacing = 12
             row.isAccessibilityElement = true
-            row.accessibilityLabel = "Starts in, Home"
+            row.accessibilityLabel = "Starts in, \(form.directoryFallbackTitle)"
+            directoryHomeRow = row
             return FleetFormSectionView(
                 title: "Directory",
                 detail: form.directoryDetail,
@@ -3674,12 +3872,42 @@ final class NewSessionViewController: UIViewController,
         promptView.setPlaceholder(form.agentToLaunch.map {
             "What should \($0.displayName) do?"
         } ?? "Initial prompt")
+        updateCreatesMenu()
         updateModelMenu()
         updateScriptMenu()
         updateDirectoryMenu()
+        // A tab needs no name — herdr numbers it — so the identity section
+        // leaves with the choice rather than asking for a name the create
+        // would ignore.
+        identitySection?.isHidden = form.tabTargetSession != nil
+        createsSection?.setDetail(form.targetDetail)
         scriptSection?.setDetail(form.scriptDetail)
         directorySection?.setDetail(form.directoryDetail)
+        directoryHomeLabel?.text = form.directoryFallbackTitle.uppercased()
+        directoryHomeRow?.accessibilityLabel = "Starts in, \(form.directoryFallbackTitle)"
         createItem?.isEnabled = form.canSubmit
+    }
+
+    private func updateCreatesMenu() {
+        guard let createsButton else { return }
+        let value = form.tabTargetSession.map { "Tab in “\($0)”" } ?? "New Session"
+        createsButton.setValue(value)
+        createsButton.accessibilityValue = value
+        var actions: [UIMenuElement] = [
+            UIAction(title: "New Session") { [weak self] _ in
+                self?.form.selectTabTarget(nil)
+                self?.renderForm()
+            },
+        ]
+        actions.append(UIMenu(options: .displayInline, children:
+            form.tabTargetChoices.map { session in
+                UIAction(title: "Tab in “\(session)”") { [weak self] _ in
+                    self?.form.selectTabTarget(session)
+                    self?.renderForm()
+                }
+            }))
+        createsButton.menu = UIMenu(children: actions)
+        createsButton.showsMenuAsPrimaryAction = true
     }
 
     private func updateModelMenu() {
@@ -3755,8 +3983,8 @@ final class NewSessionViewController: UIViewController,
 
     private func updateDirectoryMenu() {
         guard let directoryButton else { return }
-        directoryButton.setValue(form.directory ?? "Home")
-        directoryButton.accessibilityValue = form.directory ?? "Home"
+        directoryButton.setValue(form.directory ?? form.directoryFallbackTitle)
+        directoryButton.accessibilityValue = form.directory ?? form.directoryFallbackTitle
         var actions: [UIMenuElement] = form.host.workingDirs.map { directory in
             UIAction(title: directory) { [weak self] _ in
                 self?.form.directory = directory
@@ -3764,7 +3992,7 @@ final class NewSessionViewController: UIViewController,
             }
         }
         actions.append(UIMenu(options: .displayInline, children: [
-            UIAction(title: "Home") { [weak self] _ in
+            UIAction(title: form.directoryFallbackTitle) { [weak self] _ in
                 self?.form.directory = nil
                 self?.renderForm()
             },

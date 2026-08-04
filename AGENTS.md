@@ -972,7 +972,19 @@ logic belongs — keep parsing/command-building out of views.
   second client on the same session would only mirror the first, and
   the client already on screen is what renders it — a stopped session
   fails visibly rather than spawn-first. The deck's own `+ New Session`
-  still mints sessions — a tile IS a session.
+  defaults to minting a session — a tile IS a session — but a herdr
+  host's sheet adds a Creates row (herdr only; tmux windows stay with
+  the prefix keys): pick an existing session and the mint becomes a tab
+  in its focused workspace through `launchInSession(placement: .tab)`,
+  the external `in=tab` road — name field leaves (herdr numbers the
+  tab), launch/script/directory riders apply, nil directory inherits
+  the focused pane's (the sheet's Focused Pane row). A herdr session
+  tile's long-press menu carries NEW TAB IN WORKSPACE too (remembered
+  script, never an agent). Both deck roads — unlike the `+ TAB` row —
+  ride the reviving spawn and then front/attach the session's window,
+  so the new tab lands on screen, never where nobody is attached; an
+  in-session create that fails alerts ("Couldn't Create Tab"), never a
+  fallback mint.
 - **A disabled host is one the app never dials on its own**
   (`Host.isEnabled`; deck rail menu / DISABLED tile / Host Settings →
   Monitoring): the wall skips it in `runFeed`, never asks `ConnectionHub`

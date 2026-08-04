@@ -193,7 +193,8 @@ final class FleetWallUIKitTests: XCTestCase {
             model: "gpt-5.1-codex",
             initialPrompt: "Inspect the wall",
             directory: "/srv/app",
-            script: script
+            script: script,
+            tabTargetSession: nil
         )])
         XCTAssertEqual(dismissCount, 1)
     }
@@ -436,6 +437,7 @@ final class FleetWallUIKitTests: XCTestCase {
             openTabAccessibilityText: "Shows its open window",
             attach: { attaches += 1 },
             attachNewWindow: {},
+            newHerdrTab: {},
             delete: {},
             droppedSession: { _ in }
         ))
@@ -472,6 +474,7 @@ final class FleetWallUIKitTests: XCTestCase {
             openTabAccessibilityText: "Shows its open window",
             attach: {},
             attachNewWindow: {},
+            newHerdrTab: {},
             delete: {},
             droppedSession: { _ in }
         ))
@@ -534,6 +537,94 @@ final class FleetWallUIKitTests: XCTestCase {
         )
     }
 
+    func testNewSessionTabTargetIsHerdrOnlyAndNeedsNoName() {
+        let preferences = NewSessionPreferences(defaults: isolatedDefaults())
+        var host = makeHost()
+        host.sessionBackend = .herdr
+        var state = NewSessionFormState(
+            host: host,
+            existingNames: ["main", "deploy"],
+            preferences: preferences
+        )
+        XCTAssertEqual(state.tabTargetChoices, ["main", "deploy"])
+        XCTAssertNil(state.tabTargetSession)
+        XCTAssertEqual(state.directoryFallbackTitle, "Home")
+
+        state.name = "   "
+        XCTAssertFalse(state.canSubmit)
+        state.selectTabTarget("deploy")
+        XCTAssertTrue(state.canSubmit, "A tab needs no name — herdr numbers it")
+        XCTAssertEqual(state.submission.tabTargetSession, "deploy")
+        XCTAssertEqual(state.directoryFallbackTitle, "Focused Pane")
+        XCTAssertTrue(state.targetDetail.contains("deploy"))
+
+        state.selectTabTarget("gone")
+        XCTAssertNil(
+            state.tabTargetSession,
+            "Only a session the probe listed may become a tab target"
+        )
+
+        let tmuxState = NewSessionFormState(
+            host: makeHost(),
+            existingNames: ["main"],
+            preferences: preferences
+        )
+        XCTAssertTrue(
+            tmuxState.tabTargetChoices.isEmpty,
+            "tmux windows belong to the prefix keys — the deck mint stays session-first"
+        )
+    }
+
+    func testHerdrNewSessionSheetCreatesRowSwapsTheMintForATab() throws {
+        var host = makeHost()
+        host.sessionBackend = .herdr
+        var submissions: [NewSessionSubmission] = []
+        let controller = NewSessionViewController(
+            host: host,
+            existingNames: ["main"],
+            preferences: NewSessionPreferences(defaults: isolatedDefaults()),
+            create: { submissions.append($0) }
+        )
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 680, height: 760)
+        controller.view.layoutIfNeeded()
+
+        let creates = try XCTUnwrap(descendants(of: UIButton.self, in: controller.view).first {
+            $0.accessibilityIdentifier == "newSession.creates"
+        })
+        XCTAssertEqual(menuTitles(creates.menu), ["New Session", "Tab in “main”"])
+
+        let name = try XCTUnwrap(descendants(of: UITextField.self, in: controller.view).first {
+            $0.accessibilityIdentifier == "newSession.name"
+        })
+        XCTAssertFalse(isEffectivelyHidden(name, below: controller.view))
+
+        let tabAction = try XCTUnwrap(flattenedActions(creates.menu).first {
+            $0.title == "Tab in “main”"
+        })
+        tabAction.performWithSender(nil, target: nil)
+        controller.view.layoutIfNeeded()
+
+        XCTAssertTrue(
+            isEffectivelyHidden(name, below: controller.view),
+            "A tab needs no name — the identity section leaves with the choice"
+        )
+        send(controller.navigationItem.rightBarButtonItem)
+        XCTAssertEqual(submissions.map(\.tabTargetSession), ["main"])
+
+        // A tmux host never grows the row.
+        let tmux = NewSessionViewController(
+            host: makeHost(),
+            existingNames: ["main"],
+            preferences: NewSessionPreferences(defaults: isolatedDefaults()),
+            create: { _ in }
+        )
+        tmux.loadViewIfNeeded()
+        XCTAssertTrue(descendants(of: UIButton.self, in: tmux.view).allSatisfy {
+            $0.accessibilityIdentifier != "newSession.creates"
+        })
+    }
+
     func testHerdrSessionTileLampFollowsThisAppsOwnOpenTab() {
         // The record herdr's adapter produces: no clients, ever.
         var session = makeSession(name: "main")
@@ -555,6 +646,7 @@ final class FleetWallUIKitTests: XCTestCase {
                 openTabAccessibilityText: "Shows its open window",
                 attach: {},
                 attachNewWindow: {},
+                newHerdrTab: {},
                 delete: {},
                 droppedSession: { _ in }
             ))
@@ -564,6 +656,11 @@ final class FleetWallUIKitTests: XCTestCase {
         }
 
         let open = tile(hasOpenTab: true)
+        XCTAssertEqual(
+            menuTitles(open.menuProvider?()),
+            ["Attach in New Window", "New Tab in Workspace", "Delete Session…"],
+            "A herdr tile carries the terminal window's + TAB row"
+        )
         XCTAssertTrue(shownText(in: open).contains("LIVE"))
         XCTAssertFalse(shownText(in: open).contains("ATTACH"))
         XCTAssertTrue(open.accessibilityLabel?.contains("live") == true)
@@ -606,6 +703,7 @@ final class FleetWallUIKitTests: XCTestCase {
                 openTabAccessibilityText: "",
                 attach: {},
                 attachNewWindow: {},
+                newHerdrTab: {},
                 delete: {},
                 droppedSession: droppedSession
             ))
@@ -687,6 +785,7 @@ final class FleetWallUIKitTests: XCTestCase {
             openTabAccessibilityText: "",
             attach: { attached += 1 },
             attachNewWindow: {},
+            newHerdrTab: {},
             delete: {},
             droppedSession: { _ in }
         ))
@@ -899,6 +998,26 @@ final class FleetWallUIKitTests: XCTestCase {
             return XCTFail("Missing navigation action")
         }
         UIApplication.shared.sendAction(action, to: item.target, from: item, for: nil)
+    }
+
+    private func flattenedActions(_ menu: UIMenu?) -> [UIAction] {
+        guard let menu else { return [] }
+        return menu.children.flatMap { child -> [UIAction] in
+            if let action = child as? UIAction { return [action] }
+            if let submenu = child as? UIMenu { return flattenedActions(submenu) }
+            return []
+        }
+    }
+
+    /// Whether any ancestor up to `root` hides the view — how a stack-hidden
+    /// section's fields disappear without their own `isHidden` flipping.
+    private func isEffectivelyHidden(_ view: UIView, below root: UIView) -> Bool {
+        var current: UIView? = view
+        while let checked = current, checked !== root {
+            if checked.isHidden { return true }
+            current = checked.superview
+        }
+        return false
     }
 
     private func menuTitles(_ menu: UIMenu?) -> [String] {

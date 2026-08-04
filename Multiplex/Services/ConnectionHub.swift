@@ -1101,7 +1101,8 @@ final class HostConnectionModel {
     /// that), create a new tab in the focused workspace or a new workspace
     /// per `placement`, then type into the pane the create envelope named.
     /// `label` names the herdr tab/workspace (tmux windows name themselves
-    /// from the running command); `directory` carries the Working Directory
+    /// from the running command); nil leaves herdr's own tab numbering —
+    /// the deck's shell-only tab creates; `directory` carries the Working Directory
     /// semantics — callers pass the explicit choice or the host's first
     /// configured dir, exactly like the fresh-session mint, so the one
     /// field means the same thing wherever the agent lands. Only a host
@@ -1114,7 +1115,7 @@ final class HostConnectionModel {
         named sessionName: String,
         placement: ExternalSessionPlacement,
         directory: String?,
-        label: String,
+        label: String?,
         running script: String? = nil,
         typing launch: String?
     ) async -> TerminalRoute.Mode? {
@@ -1154,7 +1155,7 @@ final class HostConnectionModel {
     /// window where typing could land in somebody else's shell.
     private func launchInHerdrSession(
         named sessionName: String, placement: ExternalSessionPlacement,
-        directory: String?, label: String,
+        directory: String?, label: String?,
         running script: String?, typing launch: String?,
         over connection: SSHConnection
     ) async -> TerminalRoute.Mode? {
@@ -1168,7 +1169,7 @@ final class HostConnectionModel {
         }
         let create = placement == .workspace
             ? HerdrProbe.createWorkspaceCommand(
-                sessionName: sessionName, label: label, directory: directory)
+                sessionName: sessionName, label: label ?? "", directory: directory)
             : HerdrProbe.createTabCommand(
                 sessionName: sessionName, label: label, directory: directory)
         guard let output = try? await deadlined({
