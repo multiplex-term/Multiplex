@@ -1895,6 +1895,12 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
         guard !mounting, mountedCount < blocks.count else { return }
         mounting = true
         defer { mounting = false }
+        // contentSize can be stale here: a width change reflows the mounted
+        // text to a shorter height only during the scroll view's NEXT layout
+        // pass, and reading the old (taller) height makes the reach check
+        // decide the viewport is already filled — leaving a half-rendered
+        // page until a scroll re-enters this method.
+        scrollView.layoutIfNeeded()
         var passes = 0
         while mountedCount < blocks.count, passes < Self.maximumMountPasses {
             passes += 1
