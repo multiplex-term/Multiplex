@@ -735,6 +735,7 @@ final class TerminalVisionTabOrnamentHostView: UIView {
         layer.cornerRadius = 10
         layer.cornerCurve = .continuous
         accessibilityIdentifier = "terminal.vision.topOrnament"
+        tabStrip.installDropTarget(on: self)
         adoptTabStripIfNeeded()
     }
 

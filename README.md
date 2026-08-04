@@ -52,10 +52,11 @@ bake-off is recorded in [docs/landing/](docs/landing/).*
   placement on visionOS, real multiple scenes on iPadOS (Stage Manager /
   split screen). A window holds one or more sessions as **tabs**: **Merge**
   pulls another window's sessions in as tabs (the emptied window closes
-  itself), and a tab's context menu moves it back out into its own window.
-  Moving a tab never drops the shell — the live SSH connection, buffer, and
-  scrollback travel with it. Tabs render as multiviewer source labels (square
-  cells, a tally dot per tab) on a top ornament (visionOS) / top bar (iPad),
+  itself). Drag a tab onto another to reorder the window; its context menu
+  moves it back out into its own window. Moving a tab never drops the shell —
+  the live SSH connection, buffer, and scrollback travel with it. Tabs render
+  as multiviewer source labels (square cells, a tally dot per tab) on a top
+  ornament (visionOS) / top bar (iPad),
   shown only when a window holds more than one tab; below the window sits the
   **UMD** — the under-monitor display carrying the source label, status lamp,
   and controls. A custom TALLY dropdown in the UMD on visionOS and the bottom

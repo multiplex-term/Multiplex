@@ -162,6 +162,44 @@ final class TerminalWindowUIKitTests: XCTestCase {
         XCTAssertEqual(fixture.controller.route.activeTabID, second.id)
     }
 
+    func testReorderingTabsUpdatesRouteWorkspaceAndNativeStripInPlace() throws {
+        let first = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "main"))
+        let second = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "scratch"))
+        let third = TerminalRoute(hostID: UUID(), mode: .shell)
+        var changed: [TerminalWindowRoute] = []
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tabs: [first, second, third]),
+            routeChanged: { changed.append($0) }
+        )
+        fixture.controller.loadViewIfNeeded()
+
+        #if os(visionOS)
+        let strip = fixture.controller.visionOrnamentTabStripForTesting
+        #else
+        let strip = try XCTUnwrap(descendant(
+            of: TerminalTabStripView.self,
+            in: fixture.controller.view
+        ))
+        #endif
+        let originalCells = Dictionary(uniqueKeysWithValues: strip.cells.map {
+            ($0.itemID, ObjectIdentifier($0))
+        })
+
+        fixture.controller.reorderTab(first.id, to: third.id)
+
+        let expected = [second, third, first]
+        XCTAssertEqual(fixture.controller.route.tabs, expected)
+        XCTAssertEqual(fixture.controller.route.activeTabID, first.id)
+        XCTAssertEqual(changed.last?.tabs, expected)
+        XCTAssertEqual(fixture.workspace.windows.first?.tabs, expected)
+        XCTAssertEqual(strip.cells.map(\.itemID), expected.map(\.id))
+        XCTAssertEqual(
+            strip.cells.map { ObjectIdentifier($0) },
+            expected.compactMap { originalCells[$0.id] },
+            "A drop must reorder the live cells instead of destroying its interaction views"
+        )
+    }
+
     func testShellWindowUsesNativeUMDAndSuppressesSplitAction() throws {
         let first = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "main"))
         let second = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "scratch"))
@@ -236,6 +274,14 @@ final class TerminalWindowUIKitTests: XCTestCase {
         XCTAssertTrue(
             rail.touchesShouldCancel(in: cell),
             "A real drag starting on a cell must still scroll the strip"
+        )
+        XCTAssertTrue(
+            rail.interactions.contains { $0 is UIDropInteraction },
+            "The full padded rail must accept a tab-sort drop"
+        )
+        XCTAssertTrue(
+            fixture.controller.view.interactions.contains { $0 is UIDropInteraction },
+            "A tab that strays into the pane must remain a sort, never a file drop"
         )
         XCTAssertEqual(
             rail.contentSize.width,

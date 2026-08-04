@@ -202,7 +202,16 @@ commands kept off the rail remain in MORE.
 
 **Tabs.** Multiviewer source labels on an opaque chassis slab (top ornament
 on visionOS, top row on iPad, only when a window holds >1 tab): square cells,
-compressed-caps names, one tally dot per tab (red = that shell is live).
+compressed-caps names, one tally dot per tab (red = that shell is live). Cells
+drag onto each other to reorder within the window; the compatible destination
+gets a two-point `signal2` border, and the lift keeps the square silhouette
+without a system platter. Once lifted, the ornament, padded rail, and terminal
+window remain one forgiving sort catch keyed by horizontal position. Release
+retargets the lifted preview to the source cell's exact committed center while
+neighboring cells glide from their old slots on UIKit's same drop animator —
+one velocity-coherent settle, with the platform's reduced-motion behavior. A local
+payload marker makes the terminal's file-upload target explicitly reject tab
+drags, so slipping below the rail never flashes DROP TO UPLOAD.
 
 **Sheets** (Add Host, Settings, theme editor) stay platform-native with mono
 identity fields and eyebrow section labels — transient chrome doesn't wear

@@ -1,14 +1,51 @@
 import Observation
 import UIKit
+import UniformTypeIdentifiers
+
+/// A pointer drag may skip UIKit's lift delay everywhere except Designed for
+/// iPad on Mac, where arming at mouse-down steals the tab's ordinary click.
+enum TerminalTabDragPolicy {
+    static func allowsPointerDragBeforeLiftDelay(isIOSAppOnMac: Bool) -> Bool {
+        !isIOSAppOnMac
+    }
+
+    static var allowsPointerDragBeforeLiftDelay: Bool {
+        allowsPointerDragBeforeLiftDelay(
+            isIOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac
+        )
+    }
+}
+
+/// Local-object marker shared with the terminal's file-drop gate. The provider
+/// carries only a process-local representation; this second gate keeps the
+/// file surface honest even if UIKit hands nested targets only the local item.
+struct TerminalTabDragPayload {
+    var stripID: UUID
+    var tabID: UUID
+}
 
 /// UIKit tab strip rendered in the window's multiviewer source-label voice:
 /// square cells in compressed caps, each with its own tally dot.
 @MainActor
-final class TerminalTabStripView: UIView {
+final class TerminalTabStripView: UIView, UIDropInteractionDelegate {
     static let cellSpacing: CGFloat = 4
+
+    /// Process-local and outside `public.item`: other drop surfaces cannot
+    /// mistake this representation for text or a file.
+    private static let dragType = UTType(
+        tag: "application/x-multiplex-window-tab",
+        tagClass: .mimeType,
+        conformingTo: nil
+    )
 
     /// Closures deliberately stay out of the key: retained cells route every
     /// action through this view, whose callback properties `apply` refreshes.
+    private struct PendingDropAnimation {
+        var sourceID: UUID
+        var destinationCenter: CGPoint
+        var displacedIDs: Set<UUID>
+    }
+
     private struct RenderKey: Equatable {
         struct Cell: Equatable {
             var id: UUID
@@ -38,11 +75,16 @@ final class TerminalTabStripView: UIView {
     private(set) var cells: [TerminalTabCell] = []
 
     private let stackView = UIStackView()
+    private let dragScopeID = UUID()
+    private var installedDropHosts: Set<ObjectIdentifier> = []
+    private var dropTargetID: UUID?
+    private var pendingDropAnimation: PendingDropAnimation?
     private var items: [TerminalTabStrip.Item] = []
     private var allowsSplit = true
     private var activate: (UUID) -> Void = { _ in }
     private var split: (UUID) -> Void = { _ in }
     private var close: (UUID) -> Void = { _ in }
+    private var reorder: (UUID, UUID) -> Void = { _, _ in }
     private var configurationGeneration = 0
     /// The session controllers the live observation registration covers, in
     /// item order. `nil` until the first arming.
@@ -65,6 +107,7 @@ final class TerminalTabStripView: UIView {
             stackView.topAnchor.constraint(equalTo: topAnchor),
             stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        installDropTarget(on: self)
     }
 
     @available(*, unavailable)
@@ -103,13 +146,15 @@ final class TerminalTabStripView: UIView {
         allowsSplit: Bool,
         activate: @escaping (UUID) -> Void,
         split: @escaping (UUID) -> Void,
-        close: @escaping (UUID) -> Void
+        close: @escaping (UUID) -> Void,
+        reorder: @escaping (UUID, UUID) -> Void = { _, _ in }
     ) {
         self.items = items
         self.allowsSplit = allowsSplit
         self.activate = activate
         self.split = split
         self.close = close
+        self.reorder = reorder
         accessibilityLabel = "\(items.count) tabs"
 
         // The window re-renders this strip on every observed change of its
@@ -145,6 +190,14 @@ final class TerminalTabStripView: UIView {
         close(id)
     }
 
+    func reorderTab(id sourceID: UUID, to targetID: UUID) {
+        guard sourceID != targetID,
+              items.contains(where: { $0.id == sourceID }),
+              items.contains(where: { $0.id == targetID })
+        else { return }
+        reorder(sourceID, targetID)
+    }
+
     func menu(for id: UUID) -> UIMenu {
         var actions: [UIMenuElement] = []
         if canSplit(id: id) {
@@ -165,8 +218,230 @@ final class TerminalTabStripView: UIView {
         return UIMenu(children: actions)
     }
 
+    /// Expands the sort target from the tiny cell itself to the rail/ornament
+    /// that frames it. One installation per host keeps repeated renders inert.
+    func installDropTarget(on host: UIView) {
+        guard installedDropHosts.insert(ObjectIdentifier(host)).inserted else { return }
+        host.addInteraction(UIDropInteraction(delegate: self))
+    }
+
     private func canSplit(id: UUID) -> Bool {
         allowsSplit && items.count > 1 && items.contains(where: { $0.id == id })
+    }
+
+    private func dragItem(for tabID: UUID, session: UIDragSession) -> UIDragItem? {
+        guard items.count > 1,
+              items.contains(where: { $0.id == tabID }),
+              let dragType = Self.dragType
+        else { return nil }
+        let payload = TerminalTabDragPayload(stripID: dragScopeID, tabID: tabID)
+        session.localContext = payload
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(
+            forTypeIdentifier: dragType.identifier,
+            visibility: .ownProcess
+        ) { completion in
+            completion(Data(), nil)
+            return nil
+        }
+        let item = UIDragItem(itemProvider: provider)
+        item.localObject = payload
+        return item
+    }
+
+    private func canHandleTabDrag(_ session: UIDropSession) -> Bool {
+        guard items.count > 1,
+              let payload = dragPayload(from: session)
+        else { return false }
+        return payload.stripID == dragScopeID
+            && items.contains(where: { $0.id == payload.tabID })
+    }
+
+    private func dropTarget(for session: UIDropSession) -> UUID? {
+        guard canHandleTabDrag(session),
+              let sourceID = dragPayload(from: session)?.tabID
+        else { return nil }
+
+        let location = session.location(in: self)
+        if let source = cells.first(where: { $0.itemID == sourceID }),
+           location.x >= source.frame.minX - Self.cellSpacing / 2,
+           location.x <= source.frame.maxX + Self.cellSpacing / 2 {
+            return nil
+        }
+        return cells
+            .filter { $0.itemID != sourceID }
+            .min {
+                abs(location.x - $0.frame.midX) < abs(location.x - $1.frame.midX)
+            }?
+            .itemID
+    }
+
+    private func setDropTarget(_ id: UUID?) {
+        dropTargetID = id
+        for cell in cells {
+            cell.setDropTarget(cell.itemID == id)
+        }
+    }
+
+    private func dragPayload(from session: UIDropSession) -> TerminalTabDragPayload? {
+        if let payload = session.localDragSession?.localContext as? TerminalTabDragPayload {
+            return payload
+        }
+        return session.items.lazy
+            .compactMap { $0.localObject as? TerminalTabDragPayload }
+            .first
+    }
+
+    /// Rebuild the stack at its committed order without exposing that jump,
+    /// then let UIKit's velocity-aware drop animator carry every displaced
+    /// neighbor from its presentation slot. The dragged preview itself flies
+    /// to the source cell's exact final center.
+    private func prepareDropAnimation(sourceID: UUID, targetID: UUID) {
+        finishDropAnimation()
+        layoutIfNeeded()
+        let oldCenters = Dictionary(uniqueKeysWithValues: cells.map { cell in
+            (cell.itemID, center(of: cell))
+        })
+
+        UIView.performWithoutAnimation {
+            reorderTab(id: sourceID, to: targetID)
+            layoutIfNeeded()
+        }
+
+        guard let sourceCell = cells.first(where: { $0.itemID == sourceID }) else { return }
+        let destinationCenter = center(of: sourceCell)
+        var displacedIDs = Set<UUID>()
+        UIView.performWithoutAnimation {
+            for cell in cells where cell.itemID != sourceID {
+                guard let oldCenter = oldCenters[cell.itemID] else { continue }
+                let finalCenter = center(of: cell)
+                let offset = CGVector(
+                    dx: oldCenter.x - finalCenter.x,
+                    dy: oldCenter.y - finalCenter.y
+                )
+                guard abs(offset.dx) > 0.5 || abs(offset.dy) > 0.5 else { continue }
+                cell.transform = CGAffineTransform(
+                    translationX: offset.dx,
+                    y: offset.dy
+                )
+                displacedIDs.insert(cell.itemID)
+            }
+        }
+        pendingDropAnimation = PendingDropAnimation(
+            sourceID: sourceID,
+            destinationCenter: destinationCenter,
+            displacedIDs: displacedIDs
+        )
+    }
+
+    private func center(of cell: TerminalTabCell) -> CGPoint {
+        cell.convert(CGPoint(x: cell.bounds.midX, y: cell.bounds.midY), to: self)
+    }
+
+    private func finishDropAnimation(sourceID: UUID? = nil) {
+        guard let pendingDropAnimation,
+              sourceID == nil || sourceID == pendingDropAnimation.sourceID
+        else { return }
+        UIView.performWithoutAnimation {
+            for cell in cells where pendingDropAnimation.displacedIDs.contains(cell.itemID) {
+                cell.transform = .identity
+            }
+        }
+        self.pendingDropAnimation = nil
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        canHandle session: UIDropSession
+    ) -> Bool {
+        canHandleTabDrag(session)
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        sessionDidEnter session: UIDropSession
+    ) {
+        setDropTarget(dropTarget(for: session))
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        sessionDidUpdate session: UIDropSession
+    ) -> UIDropProposal {
+        let target = dropTarget(for: session)
+        setDropTarget(target)
+        return UIDropProposal(operation: target == nil ? .forbidden : .move)
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        sessionDidExit session: UIDropSession
+    ) {
+        setDropTarget(nil)
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        sessionDidEnd session: UIDropSession
+    ) {
+        setDropTarget(nil)
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        previewForDropping item: UIDragItem,
+        withDefault defaultPreview: UITargetedDragPreview
+    ) -> UITargetedDragPreview? {
+        guard let payload = item.localObject as? TerminalTabDragPayload,
+              let pendingDropAnimation,
+              payload.tabID == pendingDropAnimation.sourceID
+        else { return defaultPreview }
+        let target = UIDragPreviewTarget(
+            container: self,
+            center: pendingDropAnimation.destinationCenter
+        )
+        return defaultPreview.retargetedPreview(with: target)
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        performDrop session: UIDropSession
+    ) {
+        let sourceID = dragPayload(from: session)?.tabID
+        let targetID = dropTarget(for: session)
+        setDropTarget(nil)
+        guard let sourceID, let targetID else { return }
+        prepareDropAnimation(sourceID: sourceID, targetID: targetID)
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        item: UIDragItem,
+        willAnimateDropWith animator: UIDragAnimating
+    ) {
+        guard let payload = item.localObject as? TerminalTabDragPayload,
+              let pendingDropAnimation,
+              payload.tabID == pendingDropAnimation.sourceID
+        else { return }
+        animator.addAnimations { [weak self] in
+            guard let self,
+                  self.pendingDropAnimation?.sourceID == pendingDropAnimation.sourceID
+            else { return }
+            for cell in self.cells
+                where pendingDropAnimation.displacedIDs.contains(cell.itemID) {
+                cell.transform = .identity
+            }
+        }
+        animator.addCompletion { [weak self] _ in
+            self?.finishDropAnimation(sourceID: pendingDropAnimation.sourceID)
+        }
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        concludeDrop session: UIDropSession
+    ) {
+        finishDropAnimation()
     }
 
     /// Everything `TerminalTabTallyState` reads observably is one session
@@ -209,21 +484,33 @@ final class TerminalTabStripView: UIView {
         let previousStructure = renderedKey?.structure
         renderedKey = key
 
-        // A cell is a UIControl a finger can already be tracking, and this
+        // A cell is an interaction view a finger can already be tracking, and this
         // strip re-renders on every observed status change (a ~5 s host probe
-        // is enough) and on every tab switch. Destroying and recreating the
-        // cells there cancels that in-flight touch, which is what makes a tab
-        // press read as dead. Nothing structural moved, so mutate in place.
-        if previousStructure == key.structure,
-           cells.count == key.cells.count,
-           items.count == key.cells.count {
+        // is enough), tab switch, and reorder. Destroying and recreating the
+        // cells there cancels that in-flight interaction. Reuse by identity
+        // even when the order changed, then only rearrange the stack.
+        if let reusable = reusableCells(
+            from: previousStructure,
+            to: key.structure
+        ), items.count == key.cells.count {
+            if !zip(cells, reusable).allSatisfy({ $0 === $1 }) {
+                for cell in cells {
+                    stackView.removeArrangedSubview(cell)
+                }
+                cells = reusable
+                for cell in cells {
+                    stackView.addArrangedSubview(cell)
+                }
+            }
             for index in key.cells.indices {
                 cells[index].update(
                     item: items[index],
                     tallyState: states[index],
-                    canSplit: key.cells[index].canSplit
+                    canSplit: key.cells[index].canSplit,
+                    canReorder: items.count > 1
                 )
             }
+            setDropTarget(dropTargetID)
             // Keep invalidation local. Each host already requests its own
             // geometry pass after `apply`; walking the ancestor chain here can
             // pull unrelated pending descendants into a shell animation.
@@ -247,13 +534,42 @@ final class TerminalTabStripView: UIView {
                 },
                 split: { [weak self] in self?.splitTab(id: item.id) },
                 close: { [weak self] in self?.closeTab(id: item.id) },
-                canSplit: canSplit(id: item.id)
+                beginDrag: { [weak self] session in
+                    self?.dragItem(for: item.id, session: session)
+                },
+                canSplit: canSplit(id: item.id),
+                canReorder: items.count > 1
             )
             stackView.addArrangedSubview(cell)
             return cell
         }
+        setDropTarget(dropTargetID)
         invalidateIntrinsicContentSize()
         setNeedsLayout()
+    }
+
+    private func reusableCells(
+        from previous: [RenderKey.Structure]?,
+        to next: [RenderKey.Structure]
+    ) -> [TerminalTabCell]? {
+        guard let previous,
+              previous.count == next.count,
+              previous.count == cells.count
+        else { return nil }
+
+        var byID: [UUID: (isAuxiliary: Bool, cell: TerminalTabCell)] = [:]
+        for (structure, cell) in zip(previous, cells) {
+            guard byID[structure.id] == nil else { return nil }
+            byID[structure.id] = (structure.isAuxiliary, cell)
+        }
+        var result: [TerminalTabCell] = []
+        for structure in next {
+            guard let existing = byID[structure.id],
+                  existing.isAuxiliary == structure.isAuxiliary
+            else { return nil }
+            result.append(existing.cell)
+        }
+        return result
     }
 }
 
@@ -294,7 +610,9 @@ enum TerminalTabTallyState: Equatable {
 }
 
 @MainActor
-final class TerminalTabCell: UIControl {
+final class TerminalTabCell: UIView,
+    UIContextMenuInteractionDelegate, UIDragInteractionDelegate
+{
     static let horizontalInset: CGFloat = 12
     static let verticalInset: CGFloat = 7
     static let contentSpacing: CGFloat = 8
@@ -309,10 +627,21 @@ final class TerminalTabCell: UIControl {
     private let makeMenu: () -> UIMenu
     private let split: () -> Void
     private let close: () -> Void
+    private let beginDrag: (UIDragSession) -> UIDragItem?
     private var canSplit: Bool
+    private var canReorder: Bool
     private var isActive: Bool
     private var labelText: String
     private let contentStack = UIStackView()
+    private weak var tabDragInteraction: UIDragInteraction?
+    private weak var suspendedScrollView: UIScrollView?
+    private var suspendedScrollWasEnabled = true
+    private var isDropTarget = false {
+        didSet {
+            guard oldValue != isDropTarget else { return }
+            refreshBorderAndLamp()
+        }
+    }
 
     init(
         item: TerminalTabStrip.Item,
@@ -321,7 +650,9 @@ final class TerminalTabCell: UIControl {
         makeMenu: @escaping () -> UIMenu,
         split: @escaping () -> Void,
         close: @escaping () -> Void,
-        canSplit: Bool
+        beginDrag: @escaping (UIDragSession) -> UIDragItem?,
+        canSplit: Bool,
+        canReorder: Bool
     ) {
         itemID = item.id
         self.tallyState = tallyState
@@ -329,7 +660,9 @@ final class TerminalTabCell: UIControl {
         self.makeMenu = makeMenu
         self.split = split
         self.close = close
+        self.beginDrag = beginDrag
         self.canSplit = canSplit
+        self.canReorder = canReorder
         isActive = item.isActive
         labelText = Self.label(for: item)
         sourceLabel = UIKitChassisLabel(
@@ -343,12 +676,28 @@ final class TerminalTabCell: UIControl {
         layer.borderWidth = 1
         refreshBorderAndLamp()
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 3))
-        isContextMenuInteractionEnabled = true
+        addGestureRecognizer(UITapGestureRecognizer(
+            target: self,
+            action: #selector(pressed)
+        ))
+        addInteraction(UIContextMenuInteraction(delegate: self))
 
         isAccessibilityElement = true
         accessibilityTraits = Self.traits(isActive: item.isActive)
         accessibilityLabel = Self.accessibilityLabel(for: item)
+        accessibilityHint = canReorder ? "Drag to reorder within this window" : nil
         accessibilityCustomActions = makeAccessibilityActions()
+
+        let drag = UIDragInteraction(delegate: self)
+        drag.isEnabled = canReorder
+        #if compiler(>=6.4)
+        if #available(iOS 27.0, visionOS 27.0, *),
+           TerminalTabDragPolicy.allowsPointerDragBeforeLiftDelay {
+            drag.allowsPointerDragBeforeLiftDelay = true
+        }
+        #endif
+        addInteraction(drag)
+        tabDragInteraction = drag
 
         contentStack.axis = .horizontal
         contentStack.alignment = .center
@@ -391,23 +740,27 @@ final class TerminalTabCell: UIControl {
         }
         sourceLabel.isAccessibilityElement = false
         contentStack.addArrangedSubview(sourceLabel)
-
-        addTarget(self, action: #selector(pressed), for: .touchUpInside)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
     /// In-place refresh for a cell whose identity and anatomy are unchanged.
-    /// The control itself survives, so a press already tracking it does too.
+    /// The view itself survives, so a press already tracking it does too.
     func update(
         item: TerminalTabStrip.Item,
         tallyState: TerminalTabTallyState,
-        canSplit: Bool
+        canSplit: Bool,
+        canReorder: Bool
     ) {
         if self.canSplit != canSplit {
             self.canSplit = canSplit
             accessibilityCustomActions = makeAccessibilityActions()
+        }
+        if self.canReorder != canReorder {
+            self.canReorder = canReorder
+            tabDragInteraction?.isEnabled = canReorder
+            accessibilityHint = canReorder ? "Drag to reorder within this window" : nil
         }
         let nextLabelText = Self.label(for: item)
         if labelText != nextLabelText {
@@ -418,8 +771,8 @@ final class TerminalTabCell: UIControl {
             isActive = item.isActive
             backgroundColor = Self.ground(isActive: item.isActive)
             accessibilityTraits = Self.traits(isActive: item.isActive)
-            // Keep the arranged-subview tree untouched while this control's
-            // own touch action is switching tabs. The host may measure the
+            // Keep the arranged-subview tree untouched while this view's own
+            // touch action is switching tabs. The host may measure the
             // strip before that action has unwound.
             sourceLabel.setInk(Self.ink(isActive: item.isActive))
         }
@@ -488,13 +841,80 @@ final class TerminalTabCell: UIControl {
         return true
     }
 
-    override func contextMenuInteraction(
+    func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
         configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
         UIContextMenuConfiguration(identifier: itemID as NSUUID, previewProvider: nil) { [makeMenu] _ in
             makeMenu()
         }
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        itemsForBeginning session: UIDragSession
+    ) -> [UIDragItem] {
+        guard let item = beginDrag(session) else { return [] }
+        item.previewProvider = { [weak self] in
+            guard let self else { return nil }
+            return UIDragPreview(
+                view: self,
+                parameters: self.dragPreviewParameters()
+            )
+        }
+        return [item]
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        previewForLifting item: UIDragItem,
+        session: UIDragSession
+    ) -> UITargetedDragPreview? {
+        UITargetedDragPreview(view: self, parameters: dragPreviewParameters())
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        sessionWillBegin session: UIDragSession
+    ) {
+        // Unlike deck tiles, tabs sit inside a horizontal UIScrollView. Once
+        // UIKit has committed to a lift, suspend that competing pan recognizer
+        // until the drop ends or it can consume the movement and strand the
+        // lifted cell over its original slot.
+        guard let scrollView = sequence(first: superview, next: { $0?.superview })
+            .compactMap({ $0 as? UIScrollView })
+            .first
+        else { return }
+        suspendedScrollView = scrollView
+        suspendedScrollWasEnabled = scrollView.isScrollEnabled
+        scrollView.isScrollEnabled = false
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        sessionDidEnd session: UIDragSession,
+        with operation: UIDropOperation
+    ) {
+        suspendedScrollView?.isScrollEnabled = suspendedScrollWasEnabled
+        suspendedScrollView = nil
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        sessionIsRestrictedToDraggingApplication session: UIDragSession
+    ) -> Bool {
+        true
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        prefersFullSizePreviewsFor session: UIDragSession
+    ) -> Bool {
+        true
+    }
+
+    func setDropTarget(_ targeted: Bool) {
+        isDropTarget = targeted
     }
 
     private func makeAccessibilityActions() -> [UIAccessibilityCustomAction] {
@@ -523,10 +943,20 @@ final class TerminalTabCell: UIControl {
     }
 
     private func refreshBorderAndLamp() {
-        layer.borderColor = UIKitChassis.bezelHi
-            .resolvedColor(with: traitCollection).cgColor
+        let border = isDropTarget ? UIKitChassis.signal2 : UIKitChassis.bezelHi
+        layer.borderColor = border.resolvedColor(with: traitCollection).cgColor
+        layer.borderWidth = isDropTarget ? 2 : 1
         dotView?.backgroundColor = tallyState.color
         refreshLampShadow()
+    }
+
+    private func dragPreviewParameters() -> UIDragPreviewParameters {
+        let parameters = UIDragPreviewParameters()
+        let path = UIBezierPath(rect: bounds)
+        parameters.backgroundColor = .clear
+        parameters.visiblePath = path
+        parameters.shadowPath = path
+        return parameters
     }
 
     private func refreshLampShadow() {

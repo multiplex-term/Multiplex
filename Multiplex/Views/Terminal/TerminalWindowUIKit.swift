@@ -329,6 +329,11 @@ final class TerminalWindowViewController: UIViewController,
 
     override func loadView() {
         view = rootView
+        // A tab drag remains sortable if it strays below the narrow rail. Its
+        // local-object marker lets this root target coexist with the pane's real
+        // file-upload target without either gesture impersonating the other.
+        tabStrip.installDropTarget(on: rootView)
+        tabStrip.installDropTarget(on: rootView.tabScrollView)
         // PROTOTYPE(GLASS): the scene root's `TerminalGlassWindowShell`
         // carries the smoked system glass; this silhouette goes clear
         // over it.
@@ -782,6 +787,14 @@ final class TerminalWindowViewController: UIViewController,
         if let splitTab {
             sceneWindows.openTerminal(TerminalWindowRoute(tab: splitTab))
         }
+    }
+
+    func reorderTab(_ sourceID: UUID, to targetID: UUID) {
+        guard sourceID != targetID,
+              route.tabs.contains(where: { $0.id == sourceID }),
+              route.tabs.contains(where: { $0.id == targetID })
+        else { return }
+        mutateRoute { $0.moveTab(id: sourceID, to: targetID) }
     }
 
     private func merge(_ windowID: UUID) {
@@ -1405,7 +1418,10 @@ extension TerminalWindowViewController {
             allowsSplit: shell == nil,
             activate: { [weak self] in self?.activate($0) },
             split: { [weak self] in self?.splitTab($0) },
-            close: { [weak self] in self?.closeTab($0) }
+            close: { [weak self] in self?.closeTab($0) },
+            reorder: { [weak self] source, target in
+                self?.reorderTab(source, to: target)
+            }
         )
         #if os(visionOS)
         guard shell != nil else {
@@ -2690,9 +2706,9 @@ extension TerminalWindowViewController {
 /// and discards them outright if the finger drifts during that window, so once
 /// the tabs overflow the rail a perfectly ordinary press never reached the
 /// cell — the "tabs feel dead" report. Track immediately instead, and let a
-/// genuine drag that starts on a cell still scroll the strip: UIKit's default
-/// `touchesShouldCancel` answers *false* for a `UIControl`, which with
-/// undelayed touches would pin the strip in place under any press.
+/// genuine pre-lift drag that starts on a cell still scroll the strip. Keep
+/// that cancellation explicit so the cell's tap/context/drag interactions do
+/// not pin an overflowing strip in place under an ordinary swipe.
 @MainActor
 final class TerminalTabScrollView: UIScrollView {
     override init(frame: CGRect) {

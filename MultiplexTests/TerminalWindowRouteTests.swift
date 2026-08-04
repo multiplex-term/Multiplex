@@ -33,6 +33,33 @@ final class TerminalWindowRouteTests: XCTestCase {
         XCTAssertEqual(route.activeTab, tabs[0])
     }
 
+    // MARK: Reordering
+
+    func testMoveTabIntoTargetSlotInEitherDirectionAndKeepActive() {
+        let tabs = [tab("a"), tab("b"), tab("c"), tab("d")]
+        var route = TerminalWindowRoute(tabs: tabs, activeTabID: tabs[1].id)
+
+        route.moveTab(id: tabs[1].id, to: tabs[3].id)
+        XCTAssertEqual(route.tabs, [tabs[0], tabs[2], tabs[3], tabs[1]])
+        XCTAssertEqual(route.activeTabID, tabs[1].id)
+
+        route.moveTab(id: tabs[3].id, to: tabs[0].id)
+        XCTAssertEqual(route.tabs, [tabs[3], tabs[0], tabs[2], tabs[1]])
+        XCTAssertEqual(route.activeTabID, tabs[1].id)
+    }
+
+    func testMoveTabIgnoresSelfAndUnknownIDs() {
+        let tabs = [tab("a"), tab("b")]
+        var route = TerminalWindowRoute(tabs: tabs)
+
+        route.moveTab(id: tabs[0].id, to: tabs[0].id)
+        route.moveTab(id: UUID(), to: tabs[1].id)
+        route.moveTab(id: tabs[0].id, to: UUID())
+
+        XCTAssertEqual(route.tabs, tabs)
+        XCTAssertEqual(route.activeTabID, tabs[0].id)
+    }
+
     // MARK: Removal (close / split)
 
     func testRemoveActiveTabActivatesRightNeighbor() {

@@ -160,15 +160,14 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
     // MARK: Drop interaction
 
     func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
-        configuration.controller?.status == .live
-            && session.hasItemsConforming(toTypeIdentifiers: [UTType.item.identifier])
+        canAcceptFileDrop(session)
     }
 
     func dropInteraction(
         _ interaction: UIDropInteraction,
         sessionDidEnter session: UIDropSession
     ) {
-        guard configuration.controller?.status == .live else { return }
+        guard canAcceptFileDrop(session) else { return }
         showDropTarget()
     }
 
@@ -190,7 +189,7 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         _ interaction: UIDropInteraction,
         sessionDidUpdate session: UIDropSession
     ) -> UIDropProposal {
-        UIDropProposal(operation: configuration.controller?.status == .live ? .copy : .forbidden)
+        UIDropProposal(operation: canAcceptFileDrop(session) ? .copy : .forbidden)
     }
 
     func dropInteraction(
@@ -198,13 +197,25 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         performDrop session: UIDropSession
     ) {
         hideDropTarget()
-        guard let controller = configuration.controller,
-              controller.status == .live
+        guard canAcceptFileDrop(session),
+              let controller = configuration.controller
         else { return }
         let providers = session.items.map(\.itemProvider)
         Task { @MainActor [weak controller] in
             controller?.deliverDrop(await TerminalDropLoader.load(providers))
         }
+    }
+
+    static func isFileDropCandidate(_ session: UIDropSession) -> Bool {
+        let isTabDrag = session.localDragSession?.localContext is TerminalTabDragPayload
+            || session.items.contains { $0.localObject is TerminalTabDragPayload }
+        return !isTabDrag
+            && session.hasItemsConforming(toTypeIdentifiers: [UTType.item.identifier])
+    }
+
+    private func canAcceptFileDrop(_ session: UIDropSession) -> Bool {
+        configuration.controller?.status == .live
+            && Self.isFileDropCandidate(session)
     }
 
     // MARK: Primary surface
