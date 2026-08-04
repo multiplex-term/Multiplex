@@ -500,6 +500,73 @@ logic belongs — keep parsing/command-building out of views.
   still *builds* its stock accessory on
   visionOS and `commitTextInput` prefers its `controlModifier` —
   `SwiftTermView` nils `inputAccessoryView` there; don't remove that.
+- **A terminal window's title bar is app-owned, and its scene asks for
+  `.minimal` window controls** (`TerminalClassicRailInsets`;
+  `MultiplexSceneDelegate.preferredWindowingControlStyle(for:)`). Two
+  system pieces had to go. **The navigation bar**: iPadOS 26+ sizes it for
+  system controls and it CANNOT be shortened — measured 54 pt above a
+  10 pt scene inset (64 pt of chrome for 21 pt faces), where
+  `sizeThatFits` is consulted and ignored, a `frame` clamp never lands
+  (constraint-driven layout), and a `bounds` clamp shrinks the bar but
+  leaves UIKit centring it in the band it still reserves, pushing the
+  content inset to 74.5 pt. Don't retry those; the classic window mounts
+  the same `UMDBarViewController` `.shell` rail a full-screen iPad wears,
+  and the navigation controller stays only as the hosting plan with its
+  bar hidden. **The window-control pill**: iPadOS 26's default
+  `.unifiedStyle` parks it INSIDE the scene's content, 21–43 pt below the
+  window's top edge, and nothing app-side moves it (hidden status bar, no
+  navigation controller, rail heights 54/41/31 all left it exactly there).
+  `.minimalStyle` — "occupy as little of the scene's space as possible" —
+  lifts it to 6–27.5 pt, in line with the rail's own chips. It is scoped
+  to terminal scenes: the deck and shell still host system navigation
+  bars, and `.unified` is what insets THOSE bars around the pill. Total
+  chrome: 44 pt in a window — the rail matches `TerminalKeyBar.barHeight`
+  at the pane's other end (`minimumContentHeight`; the faces keep their
+  size and centre in it, and the padding becomes a floor) — pill
+  contained, versus the old 64 pt. The rail spends a top strip ONLY where the scene reaches the
+  display's top chrome, and never on the Mac (its scene already sits below
+  a real title bar). Both halves are caught regressions: spending it
+  always paints the row below a floating window's pill and under a second,
+  empty Mac title bar; spending it never paints the rail UNDER the status
+  bar when the window is maximised. ⚠ Under iPadOS 26 windowing NONE of
+  the obvious signals answer this (all measured 2026-08-04):
+  `safeAreaInsets.top` reports the display's 32 pt status bar even for a
+  711x941 window floating in the middle of a 1032x1376 display,
+  `statusBarManager` likewise answers for the display, and
+  `UIWindowScene.isFullScreen` is Mac Catalyst's property — it stays false
+  even when the window is maximised. ⚠ Nothing reports a window MOVE
+  either: `UIWindowSceneGeometry` on iOS carries no origin (coordinate
+  space, orientation, `isInteractivelyResizing`; `systemFrame` is Mac
+  Catalyst only), so `windowScene(_:didUpdateEffectiveGeometry:)` —
+  iOS 26's replacement for the deprecated `didUpdateCoordinateSpace`,
+  adopted here — covers resizes and screen moves but NOT a drag, and
+  the rail kept stale insets (user-reported as "doesn't always expand
+  or collapse when the window is moved"). A 0.5 s position watch
+  closes it: one rect conversion per tick while the scene is active,
+  layout invalidated only on a real change — watching is polling, the
+  deck's way. Geometry is what's left, and a
+  window's own frame is scene-relative (origin always zero) — the position
+  comes from `window.convert(window.bounds, to: screen.coordinateSpace)`,
+  which DOES report where a scene sits on the display (measured: a
+  floating window at y 217.5 on a 1376 pt display). `meetsSystemTopChrome`
+  (spans the display) compares the dimensions UNORDERED — `UIScreen
+  .bounds` does not follow the scene's orientation, so a maximised
+  landscape window is 1376x1032 against a 1032x1376 screen. Same trap for anything else asking "am I full
+  screen" — the shell-mode decision's own `isFullScreen` read is worth
+  re-checking. The rail also never draws the TMUX/HRDR chip on a classic
+  window (`shortcutRidesKeyRail`): the pane's key rail below carries that
+  same road, and only the shell's rail can lose it at narrow widths.
+  MERGE rides the wide row beside DETACH (the overflow carries it only
+  when it displaces the direct actions).
+  ⚠ The clearances are the RAIL's (`umdSafeArea`), never a pane's
+  (`contentSafeArea`): the leading inset reaching
+  `TerminalPaneConfiguration` shoves the terminal and key rail off their
+  own window (shipped-and-caught, 2026-08-04; `paneAndRailInsetsForTesting`
+  pins them apart). `umdAvailableWidth` must likewise stay non-nil or the
+  rail never chooses its compact row. There is still NO way to touch the
+  Mac's own title bar from a Designed-for-iPad binary (`UITitlebar` is
+  Mac Catalyst-only and absent from the iOS SDK).
+
 - **A physical keyboard or software-keyboard lock exposes app-owned
   dictation** (`HardwareKeyboardMonitor`, `DictationSession`,
   `DictationStream`/`DictationText` pure + tested; the pane's
@@ -893,8 +960,8 @@ logic belongs — keep parsing/command-building out of views.
   backend's own prefix keys and the shortcut panel. A herdr tab appends
   the one remote-level row that earns chrome, NEW TAB IN WORKSPACE
   (`TerminalRoute.extraNewTabTarget` — the one place the row, the
-  control's label, and the failure alert read it from, so the classic
-  toolbar and the UMD bar cannot drift; it carries the setup-script
+  control's label, and the failure alert read it from, so no rail can
+  drift from another; it carries the setup-script
   rider the HRDR panel's stock ⌃B New Tab cannot): a tab in the
   session's focused workspace through the same `createTabCommand` +
   `typeCommand` pair, label and `--cwd` both omitted (herdr numbers the
@@ -1077,7 +1144,7 @@ logic belongs — keep parsing/command-building out of views.
   agent leaves no helpers); title/visible-screen signatures are a narrow
   fallback for direct mosh shells or ps-less hosts; Pi's stale title is
   never trusted without the process probe. A direct shell alerts in its
-  UMD/toolbar keyed by tab UUID. Any failing stage disables that signal
+  UMD rail keyed by tab UUID. Any failing stage disables that signal
   only, never the session list. Helper chips only *type* through
   `TerminalSessionController.sendInput` (Enter = CR, Esc = 0x1B,
   Shift+Tab = CSI Z, Codex TRANSCRIPT = Ctrl+T, Pi THINK/TOOLS/THINKING =
@@ -1123,7 +1190,7 @@ logic belongs — keep parsing/command-building out of views.
   sentinels cross the wire; a `uname` gate answers NA once per connection
   on non-Macs. Only LOCKED lights the tip (MISSING is a genuine first
   login). Two surfaces: the deck rail and the affected tabs' terminal
-  chrome (UMD cluster / classic-iPad toolbar lamp). Clears the moment the
+  chrome (UMD cluster / rail lamp). Clears the moment the
   screen moves on; 60 s TTL re-confirm while the symptom persists.
   Verdicts log under category `wall` (debug). `security unlock-keychain`
   advice re-verified on macOS 27 (the registered login keychain persists
@@ -1218,9 +1285,8 @@ logic belongs — keep parsing/command-building out of views.
   `.shell` tabs list history (cwd via `readlink /proc`, `lsof` fallback)
   but never jump. Record: `local-plan/agent-message-history.md`.
 - **File attach/drop = SFTP upload + typed path, never Enter**:
-  SSH-backed tmux and herdr tabs carry one free FILE menu in the UMD /
-  classic iPad toolbar (Camera on iPad/iPhone; Photos + Files
-  everywhere). On
+  SSH-backed tmux and herdr tabs carry one free FILE menu in the UMD
+  rail (Camera on iPad/iPhone; Photos + Files everywhere). On
   compact widths FILE is a submenu of the terminal overflow: picker
   state and presentation modifiers must stay on the persistent OUTER
   menu, and presentation waits one main-queue turn — SwiftUI tears down

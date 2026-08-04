@@ -39,6 +39,18 @@ struct UMDBarConfiguration {
     var deckControlLabel: String
     var availableWidth: CGFloat?
     var contentSafeArea: UIEdgeInsets
+    /// Chassis above and below the rail's faces. The shell keeps the
+    /// authored 8; the classic window buys terminal rows with a tighter one
+    /// (it is a title bar, and it already spends the scene's top strip).
+    var contentVerticalPadding: CGFloat = 8
+    /// True where the pane's own key rail carries the TMUX/HRDR key, so the
+    /// wide row must not draw a second one. The compact row still may — that
+    /// is the width at which the key rail drops it.
+    var shortcutRidesKeyRail = false
+    /// Floor for the rail's own height, excluding any top strip it spends.
+    /// The classic window's title bar matches the key rail at the other end
+    /// of the pane; its faces keep their size and centre in the extra room.
+    var minimumContentHeight: CGFloat = 0
 }
 
 struct UMDBarObservedState: Equatable {
@@ -66,6 +78,9 @@ private struct UMDBarPresentationKey: Equatable {
     var deckControlLabel: String
     var availableWidth: CGFloat?
     var contentSafeArea: UIEdgeInsets
+    var contentVerticalPadding: CGFloat
+    var shortcutRidesKeyRail: Bool
+    var minimumContentHeight: CGFloat
 
     @MainActor
     init(_ configuration: UMDBarConfiguration) {
@@ -82,6 +97,9 @@ private struct UMDBarPresentationKey: Equatable {
         deckControlLabel = configuration.deckControlLabel
         availableWidth = configuration.availableWidth
         contentSafeArea = configuration.contentSafeArea
+        contentVerticalPadding = configuration.contentVerticalPadding
+        shortcutRidesKeyRail = configuration.shortcutRidesKeyRail
+        minimumContentHeight = configuration.minimumContentHeight
     }
 }
 
@@ -287,7 +305,9 @@ final class UMDBarViewController: UIViewController,
             content: content,
             style: configuration.style,
             availableWidth: configuration.availableWidth,
-            safeArea: configuration.contentSafeArea
+            safeArea: configuration.contentSafeArea,
+            verticalPadding: configuration.contentVerticalPadding,
+            minimumHeight: configuration.minimumContentHeight
         )
         view.setNeedsLayout()
         view.layoutIfNeeded()
@@ -399,8 +419,15 @@ final class UMDBarViewController: UIViewController,
             ))
             views.append(newTabButton())
             views.append(fileAttachController.takeAttachButton())
-            if let backend = configuration.shortcutBackend {
+            if let backend = configuration.shortcutBackend,
+               !configuration.shortcutRidesKeyRail {
                 views.append(shortcutButton(backend))
+            }
+            // MERGE is a window-level road and belongs beside DETACH; the
+            // wide row is the only place it fits (the overflow carries it
+            // only when it displaces the direct actions).
+            if !configuration.mergeSources.isEmpty {
+                views.append(mergeButton())
             }
             if let overflow = overflowButtonIfNeeded(
                 displacesDirectActions: false
@@ -994,6 +1021,11 @@ private enum UMDTmuxShortcutsDebugHook {
 
 @MainActor
 final class UMDBarRootView: UIView {
+    /// Chassis between the rail's faces and the window's side edges. Callers
+    /// that reserve a wider corner (the classic title bar clearing the
+    /// window-control pill) express it as clearance INCLUDING this.
+    static let horizontalPadding: CGFloat = 10
+
     private let contentContainer = UIView()
     private let presenterParking = UIView()
     private let bottomRule = UIView()
@@ -1001,6 +1033,8 @@ final class UMDBarRootView: UIView {
     private var style = UMDBarStyle.regular
     private var availableWidth: CGFloat?
     private var safeArea = UIEdgeInsets.zero
+    private var verticalPadding: CGFloat = 8
+    private var minimumHeight: CGFloat = 0
     private var containerEdgeConstraints: [NSLayoutConstraint] = []
     private var contentEdgeConstraints: [NSLayoutConstraint] = []
     private var parkingConstraints: [NSLayoutConstraint] = []
@@ -1055,7 +1089,9 @@ final class UMDBarRootView: UIView {
         content: UIView,
         style: UMDBarStyle,
         availableWidth: CGFloat?,
-        safeArea: UIEdgeInsets
+        safeArea: UIEdgeInsets,
+        verticalPadding: CGFloat = 8,
+        minimumHeight: CGFloat = 0
     ) {
         NSLayoutConstraint.deactivate(containerEdgeConstraints)
         NSLayoutConstraint.deactivate(contentEdgeConstraints)
@@ -1065,6 +1101,8 @@ final class UMDBarRootView: UIView {
         self.style = style
         self.availableWidth = availableWidth
         self.safeArea = safeArea
+        self.verticalPadding = verticalPadding
+        self.minimumHeight = minimumHeight
         contentView = content
         contentContainer.addSubview(content)
         content.translatesAutoresizingMaskIntoConstraints = false
@@ -1090,14 +1128,33 @@ final class UMDBarRootView: UIView {
             containerEdgeConstraints = [
                 contentContainer.leadingAnchor.constraint(
                     equalTo: leadingAnchor,
-                    constant: 10 + safeArea.left
+                    constant: Self.horizontalPadding + safeArea.left
                 ),
                 contentContainer.trailingAnchor.constraint(
                     equalTo: trailingAnchor,
-                    constant: -(10 + safeArea.right)
+                    constant: -(Self.horizontalPadding + safeArea.right)
                 ),
-                contentContainer.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-                contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+                // The classic window's rail spans the scene's top safe strip
+                // so the chassis reaches the window edge, and hands the
+                // clearance back here — no chip may sit in the window's grab
+                // region. The shell always passes top: 0 (it spends its own
+                // safe areas before this controller sees them).
+                // The padding is a floor, not the geometry: a rail asked to
+                // match the key bar's height keeps its faces the same size
+                // and centres them in the room below whatever strip it
+                // spends.
+                contentContainer.topAnchor.constraint(
+                    greaterThanOrEqualTo: topAnchor,
+                    constant: verticalPadding + safeArea.top
+                ),
+                contentContainer.bottomAnchor.constraint(
+                    lessThanOrEqualTo: bottomAnchor,
+                    constant: -verticalPadding
+                ),
+                contentContainer.centerYAnchor.constraint(
+                    equalTo: centerYAnchor,
+                    constant: safeArea.top / 2
+                ),
             ]
         }
         NSLayoutConstraint.activate(containerEdgeConstraints)
@@ -1124,7 +1181,7 @@ final class UMDBarRootView: UIView {
         case .shell:
             // `availableWidth` already excludes the shell's side safe areas.
             // The real frame is wider and spends those insets in `apply`.
-            horizontalInset = 20
+            horizontalInset = Self.horizontalPadding * 2
         }
         let targetWidth = proposedWidth.map { max(0, $0 - horizontalInset) }
             ?? UIView.layoutFittingCompressedSize.width
@@ -1139,7 +1196,13 @@ final class UMDBarRootView: UIView {
             verticalFittingPriority: .fittingSizeLevel
         )
         let width = proposedWidth ?? ceil(contentSize.width + horizontalInset)
-        return CGSize(width: width, height: ceil(contentSize.height + (style == .regular ? 22 : 16)))
+        // The shell style also carries whatever top strip it was asked to
+        // span (classic window: the scene's own safe area; shell: zero).
+        if style == .regular {
+            return CGSize(width: width, height: ceil(contentSize.height + 22))
+        }
+        let body = max(minimumHeight, contentSize.height + verticalPadding * 2)
+        return CGSize(width: width, height: ceil(body + safeArea.top))
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {

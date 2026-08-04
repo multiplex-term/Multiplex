@@ -436,7 +436,169 @@ final class TerminalWindowUIKitTests: XCTestCase {
         ))
     }
 
-    func testClassicNavigationChipsOptOutOfNativeSharedBackgroundAndPadding() throws {
+    func testClassicRailClearsTheWindowControlPillWithoutSpendingATopStrip() {
+        // iPadOS floats its close/minimise pill over the window's top-left
+        // corner whether or not a navigation bar exists, and keeps the same
+        // offset either way — so the rail clears it horizontally and never
+        // pushes its own row down to make room.
+        // Neither the safe area nor the status bar distinguishes a floating
+        // window from a maximised one — iPadOS hands a scene the display's
+        // 32 pt inset either way (measured: a 711x941 window on a 1032x1376
+        // display). Only spanning the display puts a scene under the status
+        // bar.
+        XCTAssertFalse(TerminalClassicRailInsets.meetsSystemTopChrome(
+            sceneSize: CGSize(width: 711, height: 941),
+            screenSize: CGSize(width: 1032, height: 1376)
+        ))
+        XCTAssertTrue(TerminalClassicRailInsets.meetsSystemTopChrome(
+            sceneSize: CGSize(width: 1032, height: 1376),
+            screenSize: CGSize(width: 1032, height: 1376)
+        ))
+        // `UIScreen.bounds` does not follow the scene's orientation: a
+        // maximised landscape window must still read as spanning.
+        XCTAssertTrue(TerminalClassicRailInsets.meetsSystemTopChrome(
+            sceneSize: CGSize(width: 1376, height: 1032),
+            screenSize: CGSize(width: 1032, height: 1376)
+        ))
+        XCTAssertFalse(TerminalClassicRailInsets.meetsSystemTopChrome(
+            sceneSize: CGSize(width: 1376, height: 700),
+            screenSize: CGSize(width: 1032, height: 1376)
+        ))
+        XCTAssertFalse(TerminalClassicRailInsets.meetsSystemTopChrome(
+            sceneSize: CGSize(width: 1032, height: 1376),
+            screenSize: .zero
+        ))
+
+        // A window's own frame is scene-relative; only its frame in SCREEN
+        // coordinates says whether it is parked under the status bar.
+        XCTAssertEqual(
+            TerminalClassicRailInsets.systemTopChromeOverlap(
+                windowFrameOnScreen: CGRect(x: 160.5, y: 217.5, width: 711, height: 941),
+                statusBarHeight: 32
+            ),
+            0,
+            "A window floating below the status bar owes it nothing"
+        )
+        XCTAssertEqual(
+            TerminalClassicRailInsets.systemTopChromeOverlap(
+                windowFrameOnScreen: CGRect(x: 0, y: 0, width: 1032, height: 1376),
+                statusBarHeight: 32
+            ),
+            32
+        )
+        XCTAssertEqual(
+            TerminalClassicRailInsets.systemTopChromeOverlap(
+                windowFrameOnScreen: CGRect(x: 40, y: 12, width: 700, height: 900),
+                statusBarHeight: 32
+            ),
+            20,
+            "A window parked partly under the bar spends exactly the overlap"
+        )
+
+        let windowed = TerminalClassicRailInsets.safeArea(
+            sceneSafeArea: UIEdgeInsets(top: 32, left: 0, bottom: 10, right: 0),
+            hostsWindowControls: true,
+            systemTopChromeOverlap: 0,
+            spansDisplay: false
+        )
+        XCTAssertEqual(
+            windowed.top,
+            0,
+            "A floating window meets no status bar; a spent strip only lowers the row"
+        )
+
+        XCTAssertEqual(
+            windowed.left + 10,
+            TerminalClassicRailInsets.windowControlsClearance,
+            "A floating scene owes its pill the leading corner"
+        )
+
+        // Spanning the display: the scene wears the status bar and hides its
+        // pill, so it spends the strip and keeps its leading corner.
+        let fullScreen = TerminalClassicRailInsets.safeArea(
+            sceneSafeArea: UIEdgeInsets(top: 32, left: 0, bottom: 20, right: 0),
+            hostsWindowControls: true,
+            systemTopChromeOverlap: 32,
+            spansDisplay: true
+        )
+        XCTAssertEqual(fullScreen.top, 32)
+        XCTAssertEqual(
+            fullScreen.left,
+            0,
+            "No pill is drawn over a spanning scene; DECK keeps the corner"
+        )
+        XCTAssertEqual(windowed.bottom, 0, "The rail owns the top edge only")
+        XCTAssertEqual(
+            windowed.right + 10,
+            TerminalClassicRailInsets.windowEdgeClearance,
+            "The last chip owes the rounded window corner daylight too"
+        )
+
+        let parkedAtTop = TerminalClassicRailInsets.safeArea(
+            sceneSafeArea: UIEdgeInsets(top: 32, left: 0, bottom: 10, right: 0),
+            hostsWindowControls: true,
+            systemTopChromeOverlap: 32,
+            spansDisplay: false
+        )
+        XCTAssertEqual(parkedAtTop.top, 32, "Under the bar, the rail spends the band")
+        XCTAssertEqual(
+            parkedAtTop.left + 10,
+            TerminalClassicRailInsets.windowControlsClearance,
+            "It is still a floating window, so its pill still owns the corner"
+        )
+
+        // The Mac wears its own title bar above the scene, so nothing floats
+        // into the app's leading corner there.
+        let mac = TerminalClassicRailInsets.safeArea(
+            sceneSafeArea: UIEdgeInsets(top: 0, left: 8, bottom: 0, right: 8),
+            hostsWindowControls: false,
+            systemTopChromeOverlap: 32,
+            spansDisplay: true
+        )
+        XCTAssertEqual(mac.left, 8)
+        XCTAssertEqual(
+            mac.top,
+            0,
+            "The Mac's scene sits below its own title bar; a strip there reads as a second one"
+        )
+    }
+
+    func testClassicRailClearanceNeverReachesThePanes() throws {
+        let host = Host(
+            name: "devbox",
+            hostname: "127.0.0.1",
+            port: 1,
+            username: "dev"
+        )
+        let tab = TerminalRoute(
+            hostID: host.id,
+            mode: .attach(sessionName: "main")
+        )
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tab: tab),
+            hosts: [host]
+        )
+        defer {
+            fixture.controller.prepareForRemoval()
+            fixture.store.remove(host)
+        }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 420, height: 700)
+        fixture.controller.view.layoutIfNeeded()
+
+        let insets = fixture.controller.paneAndRailInsetsForTesting
+        XCTAssertEqual(
+            insets.pane,
+            .zero,
+            "The pill clearance is chrome geometry; a pane inset by it lays out off-window"
+        )
+        // Rail insets need a real window (they are measured against the
+        // screen); the pure cases are covered above. Unwindowed, the rail
+        // must still fail safe rather than hand a pane anything.
+        XCTAssertEqual(insets.rail.top, 0)
+    }
+
+    func testClassicWindowWearsTheAppRailInsteadOfANavigationBar() throws {
         let host = Host(
             name: "devbox",
             hostname: "127.0.0.1",
@@ -459,256 +621,43 @@ final class TerminalWindowUIKitTests: XCTestCase {
         let navigation = UINavigationController(
             rootViewController: fixture.controller
         )
-        navigation.setOverrideTraitCollection(
-            UITraitCollection(horizontalSizeClass: .regular),
-            forChild: fixture.controller
-        )
         navigation.loadViewIfNeeded()
         fixture.controller.loadViewIfNeeded()
+        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
         fixture.controller.viewWillAppear(false)
+        fixture.controller.view.layoutIfNeeded()
 
-        let items = [fixture.controller.navigationItem.leftBarButtonItem]
-            .compactMap { $0 }
-            + (fixture.controller.navigationItem.rightBarButtonItems ?? [])
-        XCTAssertFalse(items.isEmpty)
-        if #available(iOS 26.0, *) {
-            XCTAssertTrue(
-                items.allSatisfy(\.hidesSharedBackground),
-                "TALLY faces own their background; iPadOS must not wrap them in Glass"
-            )
-        }
-        #if compiler(>=6.4)
-        if #available(iOS 27.0, *) {
-            XCTAssertTrue(
-                items.allSatisfy(\.isPaddingRemoved),
-                "System bar padding must not inflate the exact chip geometry"
-            )
-        }
-        #endif
-        if #available(iOS 26.0, *) {
-            let rightmost = try XCTUnwrap(
-                fixture.controller.navigationItem.rightBarButtonItems?.first?.customView
-                    as? TerminalNavigationTrailingInsetView
-            )
-            let contentSize = rightmost.contentView.intrinsicContentSize
-            XCTAssertEqual(TerminalNavigationTrailingInsetView.trailingInset, 12)
-            XCTAssertEqual(
-                rightmost.intrinsicContentSize.width - contentSize.width,
-                12,
-                accuracy: 0.001,
-                "Only the window-edge item restores the beta's 12-point breathing room"
-            )
-        }
+        XCTAssertNil(fixture.controller.navigationItem.leftBarButtonItem)
+        XCTAssertNil(fixture.controller.navigationItem.rightBarButtonItems)
+
+        let root = try XCTUnwrap(
+            fixture.controller.viewIfLoaded as? TerminalWindowUIKitRootView
+        )
+        let deck = try XCTUnwrap(
+            descendants(of: UIButton.self, in: root.umdContainer)
+                .first { $0.accessibilityIdentifier == "umd.deck" }
+        )
+        XCTAssertEqual(root.umdContainer.frame.minY, 0, "The rail owns the top edge")
+        XCTAssertEqual(root.umdContainer.frame.width, 900)
+        XCTAssertGreaterThan(root.umdContainer.frame.height, 0)
+        XCTAssertEqual(
+            root.umdContainer.frame.height,
+            TerminalKeyBar.barHeight,
+            "The title bar matches the key rail at the pane's other end"
+        )
+        XCTAssertLessThan(
+            root.umdContainer.frame.height,
+            64,
+            "The whole point is beating the system bar's 54pt-plus-strip band"
+        )
+        XCTAssertEqual(
+            root.paneContainer.frame.minY,
+            root.umdContainer.frame.maxY,
+            "Nothing insets for the top strip twice — the rail spent it"
+        )
+        XCTAssertTrue(deck.isDescendant(of: root.umdContainer))
     }
 
-    func testClassicRegularNavigationHidesOverflowWhenItsMenuHasNoActions() throws {
-        let host = Host(
-            name: "devbox",
-            hostname: "127.0.0.1",
-            port: 1,
-            username: "dev"
-        )
-        let tab = TerminalRoute(
-            hostID: host.id,
-            mode: .attach(sessionName: "main")
-        )
-        let fixture = makeFixture(
-            route: TerminalWindowRoute(tab: tab),
-            hosts: [host]
-        )
-        defer {
-            fixture.controller.prepareForRemoval()
-            fixture.store.remove(host)
-        }
-
-        let navigation = UINavigationController(
-            rootViewController: fixture.controller
-        )
-        navigation.setOverrideTraitCollection(
-            UITraitCollection(horizontalSizeClass: .regular),
-            forChild: fixture.controller
-        )
-        navigation.loadViewIfNeeded()
-        fixture.controller.loadViewIfNeeded()
-        fixture.controller.viewWillAppear(false)
-
-        fixture.controller.renderNavigationChromeForTesting(
-            hardwareKeyboardConnected: true,
-            keyboardLocked: false
-        )
-        XCTAssertNil(navigationButton(
-            accessibilityLabel: "Terminal actions",
-            in: fixture.controller
-        ))
-
-        fixture.controller.renderNavigationChromeForTesting(
-            hardwareKeyboardConnected: false,
-            keyboardLocked: false
-        )
-        let lock = try XCTUnwrap(navigationButton(
-            accessibilityLabel: "Terminal actions",
-            in: fixture.controller
-        ))
-        XCTAssertEqual(
-            menuActions(in: try XCTUnwrap(lock.menu)).map(\.title),
-            ["Lock Keyboard Closed"]
-        )
-
-        fixture.controller.renderNavigationChromeForTesting(
-            hardwareKeyboardConnected: true,
-            keyboardLocked: true
-        )
-        let unlock = try XCTUnwrap(navigationButton(
-            accessibilityLabel: "Terminal actions",
-            in: fixture.controller
-        ))
-        XCTAssertEqual(
-            menuActions(in: try XCTUnwrap(unlock.menu)).map(\.title),
-            ["Unlock Keyboard"]
-        )
-    }
-
-    func testClassicCompactOverflowTracksAttachmentAndKeyboardAvailabilityWithoutChurn() throws {
-        var host = Host(
-            name: "devbox",
-            hostname: "127.0.0.1",
-            port: 1,
-            username: "dev"
-        )
-        host.useMosh = false
-        let tab = TerminalRoute(
-            hostID: host.id,
-            mode: .attach(sessionName: "main")
-        )
-        let fixture = makeFixture(
-            route: TerminalWindowRoute(tab: tab),
-            hosts: [host]
-        )
-        defer {
-            fixture.controller.prepareForRemoval()
-            fixture.store.remove(host)
-        }
-
-        let navigation = UINavigationController(
-            rootViewController: fixture.controller
-        )
-        navigation.setOverrideTraitCollection(
-            UITraitCollection(horizontalSizeClass: .compact),
-            forChild: fixture.controller
-        )
-        navigation.loadViewIfNeeded()
-        fixture.controller.loadViewIfNeeded()
-        fixture.controller.viewWillAppear(false)
-
-        XCTAssertEqual(
-            fixture.controller.traitCollection.horizontalSizeClass,
-            .compact
-        )
-        let rightmost = try XCTUnwrap(
-            fixture.controller.navigationItem.rightBarButtonItems?.first?.customView
-                as? TerminalNavigationTrailingInsetView
-        )
-        XCTAssertEqual(
-            rightmost.intrinsicContentSize.width
-                - rightmost.contentView.intrinsicContentSize.width,
-            12,
-            accuracy: 0.001
-        )
-        let overflow = try XCTUnwrap(navigationButton(
-            accessibilityLabel: "Terminal actions",
-            in: fixture.controller
-        ))
-        let menu = try XCTUnwrap(overflow.menu)
-        let actions = menuActions(in: menu)
-        XCTAssertTrue(menu.children.contains {
-            ($0 as? UIMenu)?.title == "Send File…"
-        })
-        XCTAssertTrue(actions.contains { $0.title == "Camera…" })
-        XCTAssertTrue(actions.contains { $0.title == "Photo Library…" })
-        XCTAssertTrue(actions.contains { $0.title == "Files…" })
-        XCTAssertTrue(
-            actions.first { $0.title == "Files…" }?.attributes.contains(.disabled)
-                == true,
-            "A connecting terminal advertises upload sources but cannot invoke them"
-        )
-
-        fixture.controller.update(
-            route: fixture.controller.route,
-            shell: nil
-        )
-        fixture.controller.viewWillAppear(false)
-        let retainedOverflow = try XCTUnwrap(navigationButton(
-            accessibilityLabel: "Terminal actions",
-            in: fixture.controller
-        ))
-        XCTAssertTrue(retainedOverflow === overflow)
-        XCTAssertTrue(retainedOverflow.menu === menu)
-
-        fixture.controller.renderNavigationChromeForTesting(
-            attachmentAvailability: FileAttachMenuAvailability(
-                canOffer: true,
-                isLive: true
-            )
-        )
-        let liveOverflow = try XCTUnwrap(navigationButton(
-            accessibilityLabel: "Terminal actions",
-            in: fixture.controller
-        ))
-        let liveMenu = try XCTUnwrap(liveOverflow.menu)
-        let liveFiles = try XCTUnwrap(
-            menuActions(in: liveMenu).first { $0.title == "Files…" }
-        )
-        XCTAssertFalse(liveOverflow === overflow)
-        XCTAssertFalse(liveMenu === menu)
-        XCTAssertFalse(
-            liveFiles.attributes.contains(.disabled),
-            "The connecting-to-live transition must rebuild enabled upload actions"
-        )
-
-        fixture.controller.renderNavigationChromeForTesting(
-            attachmentAvailability: FileAttachMenuAvailability(
-                canOffer: true,
-                isLive: true
-            )
-        )
-        let retainedLiveOverflow = try XCTUnwrap(navigationButton(
-            accessibilityLabel: "Terminal actions",
-            in: fixture.controller
-        ))
-        XCTAssertTrue(retainedLiveOverflow === liveOverflow)
-        XCTAssertTrue(retainedLiveOverflow.menu === liveMenu)
-
-        fixture.controller.renderNavigationChromeForTesting(
-            attachmentAvailability: FileAttachMenuAvailability(
-                canOffer: true,
-                isLive: true
-            ),
-            hardwareKeyboardConnected: false
-        )
-        let disconnectedMenu = try XCTUnwrap(navigationButton(
-            accessibilityLabel: "Terminal actions",
-            in: fixture.controller
-        )?.menu)
-        let keyboardLockTitle = "Lock Keyboard Closed"
-        XCTAssertTrue(menuActions(in: disconnectedMenu).contains {
-            $0.title == keyboardLockTitle
-        })
-
-        fixture.controller.renderNavigationChromeForTesting(
-            attachmentAvailability: FileAttachMenuAvailability(
-                canOffer: true,
-                isLive: true
-            ),
-            hardwareKeyboardConnected: true
-        )
-        let connectedMenu = try XCTUnwrap(navigationButton(
-            accessibilityLabel: "Terminal actions",
-            in: fixture.controller
-        )?.menu)
-        XCTAssertFalse(menuActions(in: connectedMenu).contains {
-            $0.title == keyboardLockTitle
-        })
-    }
     #endif
 
     #if os(visionOS)
@@ -994,26 +943,6 @@ final class TerminalWindowUIKitTests: XCTestCase {
             if let match = view(identifier, in: child) { return match }
         }
         return nil
-    }
-
-    private func navigationButton(
-        accessibilityLabel: String,
-        in controller: UIViewController
-    ) -> UIButton? {
-        let items = [controller.navigationItem.leftBarButtonItem]
-            .compactMap { $0 }
-            + (controller.navigationItem.rightBarButtonItems ?? [])
-        return items.compactMap(\.customView).lazy
-            .flatMap { self.descendants(of: UIButton.self, in: $0) }
-            .first { $0.accessibilityLabel == accessibilityLabel }
-    }
-
-    private func menuActions(in menu: UIMenu) -> [UIAction] {
-        menu.children.flatMap { element -> [UIAction] in
-            if let action = element as? UIAction { return [action] }
-            if let submenu = element as? UIMenu { return menuActions(in: submenu) }
-            return []
-        }
     }
 }
 

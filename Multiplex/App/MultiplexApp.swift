@@ -110,6 +110,14 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
             case .shell(let controller): controller.prepareForRemoval()
             }
         }
+
+        func setNeedsChromeLayout() {
+            switch self {
+            case .deck(let controller): controller.viewIfLoaded?.setNeedsLayout()
+            case .terminal(let controller): controller.viewIfLoaded?.setNeedsLayout()
+            case .shell(let controller): controller.viewIfLoaded?.setNeedsLayout()
+            }
+        }
     }
 
     private var sceneRouter: UIKitSceneRouter?
@@ -255,6 +263,47 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
             mountedContent?.setSceneActive(true)
         }
     }
+
+    #if !os(visionOS)
+    /// iPadOS 26's `.unified` default parks the window-control pill INSIDE
+    /// the scene's content — measured 21–43 pt below the window's top edge,
+    /// wherever the app's own chrome is, and no app-side lever moves it (a
+    /// hidden status bar, no navigation controller, and rail heights of 54,
+    /// 41, and 31 pt all left it exactly there). `.minimal` is the legacy
+    /// placement: the controls take as little of the scene as they can and
+    /// ride the window's top edge, which is what lets the terminal's own
+    /// rail own the title row. visionOS has no such style (`minimalStyle`
+    /// is iOS-only) and its terminal wears ornaments anyway.
+    @available(iOS 26.0, *)
+    func preferredWindowingControlStyle(
+        for windowScene: UIWindowScene
+    ) -> UIWindowScene.WindowingControlStyle {
+        // Terminal scenes only. The deck and the shell still host system
+        // navigation bars, and `.unified` is what insets those bars' leading
+        // items around the pill for them; a terminal window owns its whole
+        // title row and clears the pill itself
+        // (`TerminalClassicRailInsets.windowControlsClearance`).
+        if case .terminal = mountedContent { return .minimal }
+        if case .terminal = payload { return .minimal }
+        return .automatic
+    }
+    #endif
+
+    /// Resizes and screen moves. iPadOS 26 replaced the deprecated
+    /// `didUpdateCoordinateSpace` with this; it is NOT a "window moved"
+    /// callback, because `UIWindowSceneGeometry` on iOS models no origin at
+    /// all (coordinate space, orientation, `isInteractivelyResizing` — and
+    /// `systemFrame` is Mac Catalyst only). The classic rail's own position
+    /// watcher covers pure moves.
+    #if !os(visionOS)
+    @available(iOS 26.0, *)
+    func windowScene(
+        _ windowScene: UIWindowScene,
+        didUpdateEffectiveGeometry previousEffectiveGeometry: UIWindowScene.Geometry
+    ) {
+        mountedContent?.setNeedsChromeLayout()
+    }
+    #endif
 
     func sceneDidBecomeActive(_ scene: UIScene) {
         if sceneRouter == nil {
@@ -482,10 +531,14 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
             #if os(visionOS)
             content = controller
             #else
+            // The terminal window's title bar is the app's own UMD rail. The
+            // navigation controller stays as the hosting plan (pushes and
+            // presentations ride it) with its bar hidden: iPadOS 26+ sizes
+            // that bar for system controls and it cannot be shortened — see
+            // `TerminalClassicRailInsets`.
             let navigation = UINavigationController(rootViewController: controller)
-            navigation.navigationBar.prefersLargeTitles = false
+            navigation.isNavigationBarHidden = true
             navigation.view.backgroundColor = UIKitChassis.chassis
-            UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
             content = navigation
             #endif
 

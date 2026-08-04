@@ -44,30 +44,6 @@ private struct TerminalWindowShellPresentationKey: Equatable {
     }
 }
 
-#if !os(visionOS)
-private struct TerminalWindowMergeSourceKey: Equatable {
-    var id: UUID
-    var label: String
-}
-
-private struct TerminalWindowNavigationChromeKey: Equatable {
-    var usesShell: Bool
-    var windowTitle: String
-    var horizontalSizeClass: UIUserInterfaceSizeClass
-    var activeControllerID: ObjectIdentifier?
-    var usesMosh: Bool
-    var needsYou: Bool
-    var hasKeychainNotice: Bool
-    var activeIsAuxiliary: Bool
-    var auxiliaryCloseLabel: String
-    var mergeSources: [TerminalWindowMergeSourceKey]
-    var activeTabHasSession: Bool
-    var keyboardLocked: Bool
-    var hardwareKeyboardConnected: Bool
-    var compactAttachmentAvailability: FileAttachMenuAvailability?
-}
-#endif
-
 /// The classic scene lays pane controls above the protected bottom strip,
 /// then paints that noninteractive strip as a continuation of the surface
 /// touching it. SwiftUI did this edge bleed implicitly; UIKit needs the
@@ -96,130 +72,113 @@ enum TerminalWindowBottomSafeAreaFill: Equatable {
     }
 }
 
-#if !os(visionOS)
-/// Restores the explicit outer breathing room the SwiftUI terminal toolbar
-/// applied after its final action on iPadOS 26+. Bar-item padding remains
-/// disabled so the TALLY faces themselves keep their exact intrinsic widths;
-/// this wrapper contributes space only between the last face and the window.
-@MainActor
-final class TerminalNavigationTrailingInsetView: UIView {
-    static let trailingInset: CGFloat = 12
+/// The classic iPad/Mac terminal window wears the app's own UMD rail instead
+/// of a system navigation bar. iPadOS 26+ sizes that bar for system controls —
+/// measured 54 pt above a 10 pt scene inset, 64 pt of chrome for TALLY faces
+/// only 21 pt tall — and it cannot be shortened: `sizeThatFits` is consulted
+/// and ignored, and clamping the frame/bounds only makes UIKit center the
+/// shrunken bar inside the band it still reserves (the content inset grew to
+/// 74.5 pt). Hiding the bar hands the whole band back, which is what this
+/// type's insets then spend deliberately.
+///
+/// The rail spans the window's full top edge, INCLUDING the scene safe-area
+/// strip, and hands the clearance back as the bar's own content inset: the
+/// strip is the window's grab region, so chrome may be painted there but no
+/// chip may sit in it. A windowed iPadOS scene also floats its
+/// close/minimize pill over that corner (measured on iPadOS 27: x 20.5–59.5 pt
+/// from the window's leading edge, vertically centred ~29 pt down, drawn with
+/// or without a navigation bar), so the rail's content starts clear of it. An
+/// iOS app on the Mac wears the Mac's own title bar and has no in-window pill.
+enum TerminalClassicRailInsets {
+    /// The rail's own side padding, which every clearance below is quoted
+    /// inclusive of.
+    private static var railPadding: CGFloat { UMDBarRootView.horizontalPadding }
 
-    let contentView: UIView
+    /// Leading clearance for the iPadOS window-control pill, measured from
+    /// the window edge and inclusive of the rail's own 10 pt padding: the
+    /// pill ends at 59.5 pt, and the first chip owes it visible daylight.
+    static let windowControlsClearance: CGFloat = 72
 
-    init(contentView: UIView) {
-        self.contentView = contentView
-        super.init(frame: .zero)
-        addSubview(contentView)
-        isAccessibilityElement = false
-        setContentHuggingPriority(.required, for: .horizontal)
-        setContentHuggingPriority(.required, for: .vertical)
-        setContentCompressionResistancePriority(.required, for: .horizontal)
-        setContentCompressionResistancePriority(.required, for: .vertical)
+    /// Trailing clearance for the last chip, likewise inclusive of the rail's
+    /// 10 pt padding. The window's rounded corner crowds a chip parked at the
+    /// bare padding; the retired navigation bar spent the same daylight
+    /// through its own trailing-inset wrapper.
+    static let windowEdgeClearance: CGFloat = 26
+
+    /// Chassis above and below the rail's faces — tighter than the shell's
+    /// authored 8: this is a title bar, and every point it gives back is a
+    /// terminal row.
+    static let verticalPadding: CGFloat = 5
+
+    /// Whether the scene actually reaches the display's top chrome. Neither
+    /// obvious signal works on iPadOS 26+: the scene's `safeAreaInsets.top`
+    /// reports the display's status bar (32 pt) even for a window floating
+    /// well below it, `statusBarManager` answers for the display too, and
+    /// `isFullScreen` is Mac Catalyst's property — false under iPadOS
+    /// windowing even when the window is maximised (all three measured
+    /// 2026-08-04). What remains is geometry: only a scene spanning the
+    /// display can be under the status bar.
+    static func meetsSystemTopChrome(
+        sceneSize: CGSize,
+        screenSize: CGSize
+    ) -> Bool {
+        guard screenSize.width > 0, screenSize.height > 0 else { return false }
+        // Compare the dimensions unordered: `UIScreen.bounds` does not follow
+        // the scene's orientation, so a maximised landscape window is
+        // 1376x1032 against a 1032x1376 screen and a naive per-axis compare
+        // reports "not spanning" — which paints the rail under the status bar
+        // (reported on device, 2026-08-04).
+        let scene = (long: max(sceneSize.width, sceneSize.height),
+                     short: min(sceneSize.width, sceneSize.height))
+        let screen = (long: max(screenSize.width, screenSize.height),
+                      short: min(screenSize.width, screenSize.height))
+        return scene.long >= screen.long - 1 && scene.short >= screen.short - 1
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
+    /// How much of a window actually sits under the display's status bar —
+    /// the only honest answer to "is this window near the system's top
+    /// chrome". A window's own frame is scene-relative (origin always
+    /// zero), but converting it to the SCREEN's coordinate space reports
+    /// where it really is (measured: a floating window at y 217.5 on a
+    /// 1376 pt display), which no other API on iOS exposes.
+    static func systemTopChromeOverlap(
+        windowFrameOnScreen: CGRect,
+        statusBarHeight: CGFloat
+    ) -> CGFloat {
+        max(0, statusBarHeight - windowFrameOnScreen.minY)
+    }
 
-    override var intrinsicContentSize: CGSize {
-        let content = contentView.intrinsicContentSize
-        return CGSize(
-            width: ceil(max(0, content.width)) + Self.trailingInset,
-            height: ceil(max(0, content.height))
+    /// The rail spends exactly the band the system's top chrome covers, and
+    /// clears the window-control pill only where one is drawn. An iOS app on
+    /// the Mac has neither: its scene already sits below a real title bar.
+    static func safeArea(
+        sceneSafeArea: UIEdgeInsets,
+        hostsWindowControls: Bool,
+        systemTopChromeOverlap: CGFloat,
+        spansDisplay: Bool
+    ) -> UIEdgeInsets {
+        // A scene spanning the display wears the status bar but hides its
+        // pill, so DECK keeps the leading corner there; a floating scene
+        // shows the pill wherever it sits, and only owes a top strip when it
+        // is parked under the status bar.
+        let strip = hostsWindowControls
+            ? min(max(0, systemTopChromeOverlap), max(0, sceneSafeArea.top))
+            : 0
+        let floatsWithPill = hostsWindowControls && !spansDisplay
+        return UIEdgeInsets(
+            top: strip,
+            left: floatsWithPill
+                ? max(sceneSafeArea.left, windowControlsClearance - railPadding)
+                : sceneSafeArea.left,
+            bottom: 0,
+            right: max(sceneSafeArea.right, windowEdgeClearance - railPadding)
         )
     }
 
-    override func sizeThatFits(_ size: CGSize) -> CGSize {
-        intrinsicContentSize
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        let content = contentView.intrinsicContentSize
-        let width = min(max(0, bounds.width - Self.trailingInset), max(0, content.width))
-        let height = min(bounds.height, max(0, content.height))
-        contentView.frame = CGRect(
-            x: 0,
-            y: max(0, (bounds.height - height) / 2),
-            width: width,
-            height: height
-        )
-    }
+    /// A windowed iPadOS scene draws the pill; the Mac draws a real title bar
+    /// above the scene instead.
+    static let deviceHostsWindowControls = !ProcessInfo.processInfo.isiOSAppOnMac
 }
-
-/// Keeps the legacy SwiftUI font controls as one fixed-size HStack. Separate
-/// custom bar items inherit iPadOS's 44-point item width and system spacing,
-/// which makes these two compact chips visibly wider and farther apart.
-@MainActor
-final class TerminalFontSizeControl: UIView {
-    static let spacing: CGFloat = 4
-
-    let smallerButton: UMDBarButton
-    let largerButton: UMDBarButton
-
-    init(fontDown: @escaping () -> Void, fontUp: @escaping () -> Void) {
-        smallerButton = UMDBarButton(
-            caption: "A−",
-            systemImage: nil,
-            prominent: false,
-            accessibilityLabel: "Smaller text"
-        )
-        largerButton = UMDBarButton(
-            caption: "A+",
-            systemImage: nil,
-            prominent: false,
-            accessibilityLabel: "Larger text"
-        )
-        super.init(frame: .zero)
-
-        smallerButton.addAction(UIAction { _ in fontDown() }, for: .touchUpInside)
-        largerButton.addAction(UIAction { _ in fontUp() }, for: .touchUpInside)
-        addSubview(smallerButton)
-        addSubview(largerButton)
-
-        setContentHuggingPriority(.required, for: .horizontal)
-        setContentHuggingPriority(.required, for: .vertical)
-        setContentCompressionResistancePriority(.required, for: .horizontal)
-        setContentCompressionResistancePriority(.required, for: .vertical)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    override var intrinsicContentSize: CGSize {
-        let smaller = smallerButton.intrinsicContentSize
-        let larger = largerButton.intrinsicContentSize
-        return CGSize(
-            width: smaller.width + Self.spacing + larger.width,
-            height: max(smaller.height, larger.height)
-        )
-    }
-
-    override func sizeThatFits(_ size: CGSize) -> CGSize {
-        intrinsicContentSize
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        let smaller = smallerButton.intrinsicContentSize
-        let larger = largerButton.intrinsicContentSize
-        let contentWidth = smaller.width + Self.spacing + larger.width
-        let startX = max(0, (bounds.width - contentWidth) / 2)
-        smallerButton.frame = CGRect(
-            x: startX,
-            y: (bounds.height - smaller.height) / 2,
-            width: smaller.width,
-            height: smaller.height
-        )
-        largerButton.frame = CGRect(
-            x: smallerButton.frame.maxX + Self.spacing,
-            y: (bounds.height - larger.height) / 2,
-            width: larger.width,
-            height: larger.height
-        )
-    }
-}
-#endif
 
 /// UIKit owner of one classic terminal scene or the terminal side of the
 /// adaptive shell. It owns route reconciliation, child pane lifetimes,
@@ -248,7 +207,16 @@ final class TerminalWindowViewController: UIViewController,
     private var preparedForRemoval = false
     private var appLocked = false
     #if !os(visionOS)
-    private var renderedNavigationChromeKey: TerminalWindowNavigationChromeKey?
+    /// Last geometry the classic rail was rendered for; see
+    /// `layoutNativeChrome`. Both halves matter: the width picks the compact
+    /// row, and the insets decide the strip the rail spends.
+    private var renderedClassicRailGeometry: ClassicRailGeometry?
+    private var windowPositionWatch: Timer?
+
+    private struct ClassicRailGeometry: Equatable {
+        var width: CGFloat?
+        var safeArea: UIEdgeInsets
+    }
     #endif
 
     private let rootView = TerminalWindowUIKitRootView()
@@ -271,7 +239,6 @@ final class TerminalWindowViewController: UIViewController,
     /// hosts expose the same agent kind, their editor drafts and command
     /// configuration must never share controller state.
     private var helperHostID: UUID?
-    private var fileAttachController: FileAttachMenuViewController?
     private let passphrasePresenter = SSHKeyPassphrasePromptPresenterViewController()
 
     private var observationGeneration = 0
@@ -377,16 +344,66 @@ final class TerminalWindowViewController: UIViewController,
         #endif
     }
 
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        configureNavigationChrome()
-    }
-
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         restoreActiveTerminalFocusIfOwner()
         presentPendingFeatureIfPossible()
+        #if !os(visionOS)
+        startWindowPositionWatchIfNeeded()
+        #endif
     }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        #if !os(visionOS)
+        stopWindowPositionWatch()
+        #endif
+    }
+
+    #if !os(visionOS)
+    /// The rail's insets depend on where the window sits on the display, and
+    /// UIKit reports no such thing: a scene's geometry models no origin, so
+    /// `didUpdateEffectiveGeometry` covers resizes and screen moves but a
+    /// pure DRAG fires nothing at all and the rail keeps a stale inset (user
+    /// report: "doesn't always expand or collapse when the window is
+    /// moved"). Watching is polling, the deck's way — one rect conversion a
+    /// tick, and layout is invalidated only when the answer actually moves.
+    private func startWindowPositionWatchIfNeeded() {
+        // Only where window position feeds the rail at all: the Mac's scene
+        // sits below a real title bar and draws no pill, so its insets do
+        // not move with the window.
+        guard shell == nil,
+              TerminalClassicRailInsets.deviceHostsWindowControls,
+              windowPositionWatch == nil
+        else { return }
+        let timer = Timer.scheduledTimer(
+            withTimeInterval: 0.5,
+            repeats: true
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkWindowPosition() }
+        }
+        timer.tolerance = 0.2
+        windowPositionWatch = timer
+        checkWindowPosition()
+    }
+
+    private func stopWindowPositionWatch() {
+        windowPositionWatch?.invalidate()
+        windowPositionWatch = nil
+    }
+
+    private func checkWindowPosition() {
+        guard !preparedForRemoval,
+              UIApplication.shared.applicationState == .active,
+              rootView.window != nil
+        else { return }
+        // Compare what the rail actually lays out against, not the raw
+        // frame: dragging sideways, or anywhere clear of the status bar,
+        // moves the window without moving a single inset.
+        guard umdSafeArea != renderedClassicRailGeometry?.safeArea else { return }
+        rootView.setNeedsLayout()
+    }
+    #endif
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
@@ -459,6 +476,9 @@ final class TerminalWindowViewController: UIViewController,
         guard !preparedForRemoval else { return }
         preparedForRemoval = true
         observationGeneration &+= 1
+        #if !os(visionOS)
+        stopWindowPositionWatch()
+        #endif
         hostProbeTask?.cancel()
         activePaneTask?.cancel()
         hideAgentTask?.cancel()
@@ -504,8 +524,43 @@ final class TerminalWindowViewController: UIViewController,
     private var terminalFocusAllowed: Bool {
         shell?.terminalFocusAllowed ?? true
     }
+    /// The PANE's clearance — terminal, viewport, file viewer, helper strip.
+    /// The rail's own insets are `umdSafeArea`: they clear the window-control
+    /// pill, which is chrome geometry and must never reach a pane (a leaked
+    /// leading inset shoves the terminal off its own window).
     private var contentSafeArea: UIEdgeInsets {
         shell?.contentSafeArea ?? .zero
+    }
+
+    /// What the rail is asked to clear. The shell hands its panes' insets
+    /// straight through; the classic window adds the window-control pill and
+    /// window-edge clearance — see `TerminalClassicRailInsets`.
+    private var umdSafeArea: UIEdgeInsets {
+        if let shell { return shell.contentSafeArea }
+        #if os(visionOS)
+        return .zero
+        #else
+        guard isViewLoaded else { return .zero }
+        let hostsWindowControls = TerminalClassicRailInsets.deviceHostsWindowControls
+        guard let window = rootView.window else { return .zero }
+        let screen = window.screen
+        return TerminalClassicRailInsets.safeArea(
+            sceneSafeArea: rootView.safeAreaInsets,
+            hostsWindowControls: hostsWindowControls,
+            systemTopChromeOverlap: TerminalClassicRailInsets.systemTopChromeOverlap(
+                windowFrameOnScreen: window.convert(
+                    window.bounds,
+                    to: screen.coordinateSpace
+                ),
+                statusBarHeight: window.windowScene?.statusBarManager?
+                    .statusBarFrame.height ?? 0
+            ),
+            spansDisplay: TerminalClassicRailInsets.meetsSystemTopChrome(
+                sceneSize: window.bounds.size,
+                screenSize: screen.bounds.size
+            )
+        )
+        #endif
     }
     private var railOwnsBottomSafeArea: Bool {
         shell?.railOwnsBottomSafeArea ?? false
@@ -661,7 +716,6 @@ final class TerminalWindowViewController: UIViewController,
         reconcileVisionChromeOwnership()
         updateVisionOrnaments(forceRevision: true)
         #endif
-        configureNavigationChrome()
         updatePassphrasePrompt()
         #if os(visionOS)
         rootView.setTabsVisible(shell != nil && route.tabs.count > 1)
@@ -1488,17 +1542,95 @@ extension TerminalWindowViewController {
         activeTab?.extraNewTabTarget
     }
 
-    private func renderUMD() {
-        #if os(visionOS)
-        let needsUMD = true
-        #else
-        let needsUMD = shell != nil
-        #endif
-        guard needsUMD else {
-            replaceUMD(with: nil)
-            return
-        }
+    /// Everything the rail's geometry turns on, resolved once. Three facts
+    /// (which row, how much chassis, who owns the shortcut key) all follow
+    /// from one question — is this the classic window's own title bar? —
+    /// and deriving them separately is how they drift apart.
+    private struct RailProfile {
+        var style: UMDBarStyle
+        var auxiliaryStyle: ViewportUMDStyle
+        /// Chassis above and below the faces, a floor once `minimumHeight`
+        /// applies.
+        var verticalPadding: CGFloat
+        /// The title bar matches the key rail at the pane's other end.
+        var minimumHeight: CGFloat
+        /// The classic window always shows its pane's key rail, whose
+        /// TMUX/HRDR key is the same road — the title bar must not draw a
+        /// second one. The shell's rail is the one that can lose it at
+        /// narrow widths.
+        var shortcutRidesKeyRail: Bool
 
+        /// visionOS classic windows wear the `.regular` row inside an
+        /// ornament; every other terminal surface — the adaptive shell and,
+        /// since the system navigation bar was retired, the classic
+        /// iPad/Mac window — wears the slim rail.
+        static let ornament = RailProfile(
+            style: .regular,
+            auxiliaryStyle: .regular,
+            verticalPadding: 8,
+            minimumHeight: 0,
+            shortcutRidesKeyRail: false
+        )
+
+        static let shell = RailProfile(
+            style: .shell,
+            auxiliaryStyle: .shell,
+            verticalPadding: 8,
+            minimumHeight: 0,
+            shortcutRidesKeyRail: false
+        )
+
+        #if !os(visionOS)
+        /// `TerminalKeyBar` is iPad/iPhone-only, and so is this profile.
+        static let titleBar = RailProfile(
+            style: .shell,
+            auxiliaryStyle: .shell,
+            verticalPadding: TerminalClassicRailInsets.verticalPadding,
+            minimumHeight: TerminalKeyBar.barHeight,
+            shortcutRidesKeyRail: true
+        )
+        #endif
+    }
+
+    private var railProfile: RailProfile {
+        guard shell == nil else { return .shell }
+        #if os(visionOS)
+        return .ornament
+        #else
+        return .titleBar
+        #endif
+    }
+
+    /// The pane's clearance and the rail's, side by side. They must never be
+    /// the same value on a classic window: the rail clears the window-control
+    /// pill, and that inset reaching a pane shoves the terminal and key rail
+    /// off their own window (regression, 2026-08-04).
+    var paneAndRailInsetsForTesting: (pane: UIEdgeInsets, rail: UIEdgeInsets) {
+        (contentSafeArea, umdSafeArea)
+    }
+
+    /// What the rail may measure against: the window minus the clearance it
+    /// hands back. The shell computes its own; the classic window derives one
+    /// so the rail can still choose its compact row in a narrow Stage Manager
+    /// window (a nil width reads as unlimited and would pin it wide).
+    private var umdAvailableWidth: CGFloat? {
+        if let shell { return shell.availableWidth }
+        #if os(visionOS)
+        return nil
+        #else
+        guard isViewLoaded else { return nil }
+        return railWidth(clearing: umdSafeArea)
+        #endif
+    }
+
+    #if !os(visionOS)
+    private func railWidth(clearing insets: UIEdgeInsets) -> CGFloat {
+        max(0, rootView.bounds.width - insets.left - insets.right)
+    }
+    #endif
+
+    private func renderUMD() {
+        let profile = railProfile
         if activeTab?.isAuxiliaryPane == true {
             let configuration = ViewportUMDConfiguration(
                 title: umdTitle,
@@ -1509,9 +1641,11 @@ extension TerminalWindowViewController {
                     guard let id = self?.activeTab?.id else { return }
                     self?.closeTab(id)
                 },
-                style: shell == nil ? .regular : .shell,
+                style: profile.auxiliaryStyle,
                 deckControlLabel: shell?.deckControlLabel ?? "DECK",
-                contentSafeArea: contentSafeArea,
+                contentSafeArea: umdSafeArea,
+                contentVerticalPadding: profile.verticalPadding,
+                minimumContentHeight: profile.minimumHeight,
                 closeAccessibilityLabel: auxiliaryCloseLabel
             )
             if let controller = umdController as? ViewportUMDViewController {
@@ -1540,10 +1674,13 @@ extension TerminalWindowViewController {
                 ? { [weak self] in self?.presentKeychainTip() } : nil,
             extraNewTabTarget: extraNewTabTarget,
             shortcutBackend: activeTab?.sessionBackend,
-            style: shell == nil ? .regular : .shell,
+            style: profile.style,
             deckControlLabel: shell?.deckControlLabel ?? "DECK",
-            availableWidth: shell?.availableWidth,
-            contentSafeArea: contentSafeArea
+            availableWidth: umdAvailableWidth,
+            contentSafeArea: umdSafeArea,
+            contentVerticalPadding: profile.verticalPadding,
+            shortcutRidesKeyRail: profile.shortcutRidesKeyRail,
+            minimumContentHeight: profile.minimumHeight
         )
         if let controller = umdController as? UMDBarViewController {
             controller.update(configuration: configuration)
@@ -1805,6 +1942,7 @@ extension TerminalWindowViewController {
     private func layoutNativeChrome() {
         guard isViewLoaded else { return }
         let bounds = rootView.bounds
+
         #if os(visionOS)
         if shell == nil {
             refreshVisionHelperWidthIfNeeded()
@@ -1832,6 +1970,26 @@ extension TerminalWindowViewController {
             reservesBottomSafeArea: shell == nil,
             safeAreaInsets: rootView.safeAreaInsets
         )
+        #if !os(visionOS)
+        // The classic rail's compact/wide choice and its measured height both
+        // ride the width this pass just resolved. Re-render only when that
+        // width actually moves — `renderUMD` allocates a configuration, and
+        // layout runs far more often than the window resizes.
+        if shell == nil {
+            // One resolve per pass: the insets are a window→screen
+            // conversion plus a status-bar query, and the width is derived
+            // from them.
+            let insets = umdSafeArea
+            let geometry = ClassicRailGeometry(
+                width: railWidth(clearing: insets),
+                safeArea: insets
+            )
+            if renderedClassicRailGeometry != geometry {
+                renderedClassicRailGeometry = geometry
+                renderUMD()
+            }
+        }
+        #endif
         let tabsFitting = tabStrip.fittingContentSize()
         let tabsHeight: CGFloat = route.tabs.count > 1
             ? tabsFitting.height
@@ -1865,24 +2023,24 @@ extension TerminalWindowViewController {
                 height: max(0, contentBounds.height - umdHeight - tabsHeight)
             )
         } else {
-            // The classic window is the one plan hosted inside a
-            // UINavigationController, and a native child controller receives
-            // the navigation controller's FULL bounds — the translucent bar
-            // overlays the top band. Spend the top safe area here exactly
-            // like the bottom is spent below, or the tab rail lays out
-            // entirely under the bar (user-reported as "tab system gone")
-            // and the pane's first text row slides beneath it.
-            let topInset = rootView.safeAreaInsets.top
+            // The classic window's rail is app-owned chrome pinned to the
+            // window's top edge: it spends the scene's top safe strip itself
+            // (`contentSafeArea` hands that clearance to the bar's content),
+            // so nothing below it needs to inset again. The previous system
+            // navigation bar overlaid this band instead and cost 64 pt for a
+            // 21 pt row — see `TerminalClassicRailInsets`.
+            rootView.umdContainer.frame = CGRect(
+                x: 0, y: 0, width: bounds.width, height: umdHeight
+            )
             rootView.tabScrollView.frame = CGRect(
-                x: 0, y: topInset, width: contentBounds.width, height: tabsHeight
+                x: 0, y: umdHeight, width: contentBounds.width, height: tabsHeight
             )
             rootView.paneContainer.frame = CGRect(
                 x: 0,
-                y: topInset + tabsHeight,
+                y: umdHeight + tabsHeight,
                 width: contentBounds.width,
-                height: max(0, contentBounds.height - topInset - tabsHeight)
+                height: max(0, contentBounds.height - umdHeight - tabsHeight)
             )
-            rootView.umdContainer.frame = .zero
         }
         // One measurement per pass owns the rail's height, the strip's frame,
         // and the scroller's content size together, so they can never disagree
@@ -2027,391 +2185,6 @@ extension TerminalWindowViewController {
             pane.view.frame = rootView.paneContainer.bounds
         }
     }
-
-    private func configureNavigationChrome(
-        compactAttachmentAvailabilityOverride: FileAttachMenuAvailability? = nil,
-        hardwareKeyboardConnectedOverride: Bool? = nil,
-        keyboardLockedOverride: Bool? = nil
-    ) {
-        #if !os(visionOS)
-        let hardwareKeyboardConnected = hardwareKeyboardConnectedOverride
-            ?? HardwareKeyboardMonitor.shared.isConnected
-        let keyboardLocked = keyboardLockedOverride ?? KeyboardLock.shared.isLocked
-        let compactAttachmentAvailability: FileAttachMenuAvailability? = {
-            guard shell == nil,
-                  traitCollection.horizontalSizeClass == .compact,
-                  activeTab?.isAuxiliaryPane != true
-            else { return nil }
-            return compactAttachmentAvailabilityOverride
-                ?? FileAttachMenuAvailability(controller: activeController)
-        }()
-        let key = TerminalWindowNavigationChromeKey(
-            usesShell: shell != nil,
-            windowTitle: windowTitle,
-            horizontalSizeClass: traitCollection.horizontalSizeClass,
-            activeControllerID: activeController.map(ObjectIdentifier.init),
-            usesMosh: activeController?.host.useMosh == true,
-            needsYou: {
-                if case .needsYou = activeController?.directShellAttention { return true }
-                return false
-            }(),
-            hasKeychainNotice: activeTabKeychainNotice != nil,
-            activeIsAuxiliary: activeTab?.isAuxiliaryPane == true,
-            auxiliaryCloseLabel: auxiliaryCloseLabel,
-            mergeSources: mergeSources.map {
-                TerminalWindowMergeSourceKey(id: $0.id, label: $0.label)
-            },
-            activeTabHasSession: activeTabHasSession,
-            keyboardLocked: keyboardLocked,
-            hardwareKeyboardConnected: hardwareKeyboardConnected,
-            compactAttachmentAvailability: compactAttachmentAvailability
-        )
-        guard renderedNavigationChromeKey != key else { return }
-        renderedNavigationChromeKey = key
-        fileAttachController?.parkAttachButton()
-        guard isViewLoaded, shell == nil else {
-            navigationItem.leftBarButtonItems = nil
-            navigationItem.rightBarButtonItems = nil
-            return
-        }
-        title = windowTitle
-        navigationItem.largeTitleDisplayMode = .never
-        if let navigationBar = navigationController?.navigationBar {
-            UIKitChassis.configureSheetNavigationBar(navigationBar)
-        }
-
-        let deck = makeButton(
-            caption: "DECK",
-            systemImage: "square.grid.2x2",
-            accessibilityLabel: "Show Deck",
-            action: { [weak self] in self?.showDeck() }
-        )
-        navigationItem.leftBarButtonItem = makeNavigationBarItem(customView: deck)
-
-        var trailing: [UIBarButtonItem] = []
-        if activeController?.host.useMosh == true {
-            let badge = makeButton(
-                caption: "MOSH",
-                accessibilityLabel: "Connects over mosh",
-                action: {}
-            )
-            badge.isUserInteractionEnabled = false
-            trailing.append(makeNavigationBarItem(customView: badge))
-        }
-        if case .needsYou = activeController?.directShellAttention {
-            trailing.append(makeNavigationBarItem(customView: UIKitTallyLamp(
-                caption: "NEEDS YOU",
-                color: TallyPalette.caution
-            )))
-        }
-        if activeTabKeychainNotice != nil {
-            let keychain = makeButton(
-                caption: "KEYCHAIN LOCKED",
-                accessibilityLabel: "The Mac's keychain is locked, so Claude Code shows signed out",
-                action: { [weak self] in self?.presentKeychainTip() }
-            )
-            keychain.accessibilityHint = "Shows how to unlock the keychain"
-            trailing.append(makeNavigationBarItem(customView: keychain))
-        }
-
-        if activeTab?.isAuxiliaryPane == true {
-            if !mergeSources.isEmpty {
-                trailing.append(makeNavigationBarItem(customView: makeMenuButton(
-                    caption: "MERGE",
-                    accessibilityLabel: "Merge another window into this one",
-                    menu: makeMergeMenu()
-                )))
-            }
-            trailing.append(makeNavigationBarItem(
-                customView: makeButton(
-                    caption: "CLOSE",
-                    prominent: true,
-                    accessibilityLabel: auxiliaryCloseLabel,
-                    action: { [weak self] in
-                        guard let id = self?.activeTab?.id else { return }
-                        self?.closeTab(id)
-                    }
-                ),
-                addsLegacyTrailingInset: true
-            ))
-        } else if traitCollection.horizontalSizeClass == .compact {
-            if let activeController {
-                let attach = ensureFileAttachController(for: activeController)
-                attach.parkAttachButton()
-            }
-            trailing.append(makeNavigationBarItem(
-                customView: makeMenuButton(
-                    caption: "",
-                    systemImage: "ellipsis",
-                    accessibilityLabel: "Terminal actions",
-                    menu: makeOverflowMenu(
-                        displacesDirectActions: true,
-                        attachmentAvailability: compactAttachmentAvailability,
-                        hardwareKeyboardConnected: hardwareKeyboardConnected,
-                        keyboardLocked: keyboardLocked
-                    )
-                ),
-                addsLegacyTrailingInset: true
-            ))
-        } else {
-            trailing.append(makeNavigationBarItem(customView: makeMenuButton(
-                caption: "TAB",
-                systemImage: "plus",
-                accessibilityLabel: TerminalRoute.NewTabTarget
-                    .controlAccessibilityLabel(offering: extraNewTabTarget),
-                menu: makeNewTabMenu()
-            )))
-            if let activeController {
-                let attach = ensureFileAttachController(for: activeController)
-                trailing.append(makeNavigationBarItem(
-                    customView: attach.takeAttachButton()
-                ))
-            }
-            trailing.append(makeNavigationBarItem(customView: TerminalFontSizeControl(
-                fontDown: { [weak self] in self?.changeFont(by: -1) },
-                fontUp: { [weak self] in self?.changeFont(by: 1) }
-            )))
-            if !mergeSources.isEmpty {
-                trailing.append(makeNavigationBarItem(customView: makeMenuButton(
-                    caption: "MERGE",
-                    accessibilityLabel: "Merge another window into this one",
-                    menu: makeMergeMenu()
-                )))
-            }
-            let overflowMenu = makeOverflowMenu(
-                displacesDirectActions: false,
-                hardwareKeyboardConnected: hardwareKeyboardConnected,
-                keyboardLocked: keyboardLocked
-            )
-            if !overflowMenu.children.isEmpty {
-                trailing.append(makeNavigationBarItem(customView: makeMenuButton(
-                    caption: "",
-                    systemImage: "ellipsis",
-                    accessibilityLabel: "Terminal actions",
-                    menu: overflowMenu
-                )))
-            }
-            if activeTabHasSession {
-                trailing.append(makeNavigationBarItem(
-                    customView: makeMenuButton(
-                        caption: "DETACH",
-                        prominent: true,
-                        accessibilityLabel: "Detach or close the session",
-                        menu: makeDetachMenu()
-                    ),
-                    addsLegacyTrailingInset: true
-                ))
-            } else {
-                trailing.append(makeNavigationBarItem(
-                    customView: makeButton(
-                        caption: "DETACH",
-                        prominent: true,
-                        accessibilityLabel: "Detach: tmux keeps the session",
-                        action: { [weak self] in self?.detachActiveTab() }
-                    ),
-                    addsLegacyTrailingInset: true
-                ))
-            }
-        }
-        // UIKit displays right-bar items in reverse visual order.
-        navigationItem.rightBarButtonItems = trailing.reversed()
-        #endif
-    }
-
-    /// Deterministic seam for asserting the snapshot-menu transition without
-    /// opening a real SSH transport in a UIKit unit test.
-    func renderNavigationChromeForTesting(
-        attachmentAvailability: FileAttachMenuAvailability? = nil,
-        hardwareKeyboardConnected: Bool? = nil,
-        keyboardLocked: Bool? = nil
-    ) {
-        configureNavigationChrome(
-            compactAttachmentAvailabilityOverride: attachmentAvailability,
-            hardwareKeyboardConnectedOverride: hardwareKeyboardConnected,
-            keyboardLockedOverride: keyboardLocked
-        )
-    }
-
-    #if !os(visionOS)
-    /// iPadOS 26+ otherwise puts its shared Glass plate around each custom
-    /// TALLY face in a navigation bar. These controls already own their
-    /// complete background, border, highlight, and intrinsic geometry.
-    private func makeNavigationBarItem(
-        customView: UIView,
-        addsLegacyTrailingInset: Bool = false
-    ) -> UIBarButtonItem {
-        let resolvedView: UIView
-        if #available(iOS 26.0, *), addsLegacyTrailingInset {
-            resolvedView = TerminalNavigationTrailingInsetView(contentView: customView)
-        } else {
-            resolvedView = customView
-        }
-        let item = UIBarButtonItem(customView: resolvedView)
-        if #available(iOS 26.0, *) {
-            item.hidesSharedBackground = true
-        }
-        #if compiler(>=6.4)
-        if #available(iOS 27.0, *) {
-            item.isPaddingRemoved = true
-        }
-        #endif
-        return item
-    }
-
-    private func ensureFileAttachController(
-        for controller: TerminalSessionController
-    ) -> FileAttachMenuViewController {
-        if let fileAttachController {
-            fileAttachController.update(controller: controller)
-            fileAttachController.loadViewIfNeeded()
-            return fileAttachController
-        }
-        let attach = FileAttachMenuViewController(controller: controller)
-        fileAttachController = attach
-        addChild(attach)
-        attach.loadViewIfNeeded()
-        rootView.parkFileAttachView(attach.view)
-        attach.didMove(toParent: self)
-        return attach
-    }
-
-    private func makeButton(
-        caption: String,
-        systemImage: String? = nil,
-        prominent: Bool = false,
-        accessibilityLabel: String,
-        action: @escaping () -> Void
-    ) -> UMDBarButton {
-        let button = UMDBarButton(
-            caption: caption,
-            systemImage: systemImage,
-            prominent: prominent,
-            accessibilityLabel: accessibilityLabel
-        )
-        button.addAction(UIAction { _ in action() }, for: .touchUpInside)
-        return button
-    }
-
-    private func makeMenuButton(
-        caption: String,
-        systemImage: String? = nil,
-        prominent: Bool = false,
-        accessibilityLabel: String,
-        menu: UIMenu
-    ) -> UMDBarButton {
-        let button = UMDBarButton(
-            caption: caption,
-            systemImage: systemImage,
-            prominent: prominent,
-            accessibilityLabel: accessibilityLabel
-        )
-        button.menu = menu
-        button.showsMenuAsPrimaryAction = true
-        return button
-    }
-
-    private func makeNewTabMenu() -> UIMenu {
-        var actions: [UIMenuElement] = [
-            UIAction(
-                title: TerminalRoute.NewTabTarget.session.menuTitle
-            ) { [weak self] _ in
-                self?.openNewTab(launching: nil)
-            },
-        ]
-        actions.append(contentsOf: AgentKind.allCases.map { agent in
-            UIAction(title: agent.displayName) { [weak self] _ in
-                self?.openNewTab(launching: agent)
-            }
-        })
-        if extraNewTabTarget == .herdrWorkspaceTab {
-            actions.append(UIAction(
-                title: TerminalRoute.NewTabTarget.herdrWorkspaceTab.menuTitle
-            ) { [weak self] _ in
-                self?.openNewHerdrWorkspaceTab()
-            })
-        }
-        actions.append(UIAction(title: "File Viewer") { [weak self] _ in
-            self?.openFileViewer(target: nil)
-        })
-        return UIMenu(children: actions)
-    }
-
-    private func makeMergeMenu() -> UIMenu {
-        var actions: [UIMenuElement] = mergeSources.map { source in
-            UIAction(
-                title: source.label,
-                image: UIImage(systemName: "macwindow")
-            ) { [weak self] _ in self?.merge(source.id) }
-        }
-        if mergeSources.count > 1 {
-            actions.append(UIAction(
-                title: "Merge All Windows",
-                image: UIImage(systemName: "rectangle.stack")
-            ) { [weak self] _ in
-                guard let self else { return }
-                for source in mergeSources { merge(source.id) }
-            })
-        }
-        return UIMenu(children: actions)
-    }
-
-    private func makeDetachMenu() -> UIMenu {
-        UIMenu(children: [
-            UIAction(title: "Detach") { [weak self] _ in self?.detachActiveTab() },
-            UIAction(
-                title: "Close Session",
-                attributes: .destructive
-            ) { [weak self] _ in self?.confirmCloseActiveSession() },
-        ])
-    }
-
-    private func makeOverflowMenu(
-        displacesDirectActions: Bool,
-        attachmentAvailability: FileAttachMenuAvailability? = nil,
-        hardwareKeyboardConnected: Bool,
-        keyboardLocked: Bool
-    ) -> UIMenu {
-        var groups: [UIMenuElement] = []
-        if let activeController,
-           keyboardLocked || !hardwareKeyboardConnected {
-            groups.append(UIAction(
-                title: keyboardLocked ? "Unlock Keyboard" : "Lock Keyboard Closed",
-                image: UIImage(systemName: keyboardLocked ? "lock.open" : "lock")
-            ) { _ in activeController.toggleKeyboardLock() })
-        }
-        if displacesDirectActions {
-            groups.append(UIMenu(title: "Text Size", children: [
-                UIAction(title: "Smaller Text") { [weak self] _ in
-                    self?.changeFont(by: -1)
-                },
-                UIAction(title: "Larger Text") { [weak self] _ in
-                    self?.changeFont(by: 1)
-                },
-            ]))
-            groups.append(UIMenu(title: "New Tab", children: makeNewTabMenu().children))
-            if let attachMenu = fileAttachController?.makeSourceMenu(
-                title: "Send File…",
-                image: UIImage(systemName: "paperclip"),
-                availability: attachmentAvailability
-            ) {
-                groups.append(attachMenu)
-            }
-            if !mergeSources.isEmpty {
-                groups.append(UIMenu(title: "Merge Window", children: makeMergeMenu().children))
-            }
-            groups.append(UIAction(title: "Detach") { [weak self] _ in
-                self?.detachActiveTab()
-            })
-            if activeTabHasSession {
-                groups.append(UIAction(
-                    title: "Close Session",
-                    attributes: .destructive
-                ) { [weak self] _ in self?.confirmCloseActiveSession() })
-            }
-        }
-        return UIMenu(children: groups)
-    }
-    #endif
 }
 
 // MARK: - Native presentations
@@ -2735,7 +2508,6 @@ final class TerminalWindowUIKitRootView: UIView {
     let umdContainer = UIView()
     let helperContainer = UIView()
     private let bottomSafeAreaBackfill = UIView()
-    private let fileAttachPresenterParking = UIView()
     private let tabDivider = UIView()
 
     override init(frame: CGRect) {
@@ -2768,10 +2540,6 @@ final class TerminalWindowUIKitRootView: UIView {
         addSubview(umdContainer)
         addSubview(helperContainer)
         addSubview(bottomSafeAreaBackfill)
-        addSubview(fileAttachPresenterParking)
-        fileAttachPresenterParking.frame = .zero
-        fileAttachPresenterParking.clipsToBounds = true
-
         paneContainer.accessibilityIdentifier = "terminalWindow.panes"
         tabScrollView.accessibilityIdentifier = "terminalWindow.tabs"
         umdContainer.accessibilityIdentifier = "terminalWindow.umd"
@@ -2794,13 +2562,6 @@ final class TerminalWindowUIKitRootView: UIView {
     func setTabsVisible(_ visible: Bool) {
         tabScrollView.isHidden = !visible
         tabDivider.isHidden = !visible
-    }
-
-    func parkFileAttachView(_ view: UIView) {
-        view.removeFromSuperview()
-        fileAttachPresenterParking.addSubview(view)
-        view.frame = .zero
-        view.autoresizingMask = []
     }
 
     static func contentBounds(

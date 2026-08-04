@@ -378,6 +378,20 @@ enum TerminalKeyBarLayout {
         case essentialsFloor
     }
 
+    /// Window-edge daylight for the iPad-width tiers. The tight and floor
+    /// tiers keep 8/7: `SingleWindowShellLayout`'s 390/420 pt cutoffs are
+    /// measured against those, and widening them would move the cutoffs.
+    /// The Mac keeps the authored 8 — its window has no rounded bottom
+    /// corners crowding the row, and its point grid is already scaled. Pure
+    /// in its input so both branches stay assertable from either host.
+    static func regularEdgeInset(isIOSAppOnMac: Bool) -> CGFloat {
+        isIOSAppOnMac ? 8 : 16
+    }
+
+    static let regularEdgeInset = regularEdgeInset(
+        isIOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac
+    )
+
     struct Metric: Equatable {
         var keyWidth: CGFloat
         var spacing: CGFloat
@@ -441,7 +455,7 @@ enum TerminalKeyBarLayout {
                 pageKeys: true,
                 tmux: showsTmux,
                 metric: .regular,
-                edgeInset: 8
+                edgeInset: regularEdgeInset
             ),
             Specification(
                 tier: .twoSymbolsAndPages,
@@ -449,7 +463,7 @@ enum TerminalKeyBarLayout {
                 pageKeys: true,
                 tmux: showsTmux,
                 metric: .regular,
-                edgeInset: 8
+                edgeInset: regularEdgeInset
             ),
             Specification(
                 tier: .twoSymbols,
@@ -457,7 +471,7 @@ enum TerminalKeyBarLayout {
                 pageKeys: false,
                 tmux: showsTmux,
                 metric: .regular,
-                edgeInset: 8
+                edgeInset: regularEdgeInset
             ),
             Specification(
                 tier: .regularEssentials,
@@ -465,7 +479,7 @@ enum TerminalKeyBarLayout {
                 pageKeys: false,
                 tmux: showsTmux,
                 metric: .regular,
-                edgeInset: 8
+                edgeInset: regularEdgeInset
             ),
         ]
         if showsTmux {
@@ -525,7 +539,23 @@ struct TerminalKeyBarObservedState: Equatable {
 /// ordered byte route for every key.
 @MainActor
 final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
-    static let barHeight: CGFloat = 48
+    /// The rail is the window's bottom edge on iPad: its keys keep their
+    /// full press target, and the chassis below them is trimmed to a hairline
+    /// so the terminal keeps the row (the window's own rounded corner and,
+    /// where it applies, the home-indicator strip already sit under it).
+    static let keyHeight: CGFloat = 34
+    static let keyTopInset: CGFloat = 7
+    /// Trimmed on iPad/iPhone, where the rail is the window's bottom edge
+    /// and the window's own corner already sits under it. The Mac keeps the
+    /// authored symmetry — its window bottom is the Mac's, not ours.
+    static func keyBottomInset(isIOSAppOnMac: Bool) -> CGFloat {
+        isIOSAppOnMac ? keyTopInset : 3
+    }
+
+    static let keyBottomInset = keyBottomInset(
+        isIOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac
+    )
+    static let barHeight: CGFloat = keyTopInset + keyHeight + keyBottomInset
 
     var contentSafeArea = UIEdgeInsets.zero {
         didSet {
@@ -752,7 +782,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                 let control = TerminalTallyKeyControl(
                     face: descriptor.face,
                     width: metric.keyWidth,
-                    height: 34,
+                    height: Self.keyHeight,
                     accessibilityLabel: descriptor.accessibility,
                     accessibilityIdentifier: "terminal.keybar.\(descriptor.identifier)",
                     repeats: descriptor.repeats,
@@ -800,7 +830,12 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         for groupIndex in counts.indices {
             for keyIndex in 0..<counts[groupIndex] {
                 let key = renderedKeys[index]
-                key.frame = CGRect(x: x, y: 7, width: metric.keyWidth, height: 34)
+                key.frame = CGRect(
+                    x: x,
+                    y: Self.keyTopInset,
+                    width: metric.keyWidth,
+                    height: Self.keyHeight
+                )
                 x += metric.keyWidth
                 if keyIndex < counts[groupIndex] - 1 { x += metric.spacing }
                 index += 1

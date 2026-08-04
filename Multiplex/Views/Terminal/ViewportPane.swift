@@ -741,6 +741,12 @@ struct ViewportUMDConfiguration {
     var style: ViewportUMDStyle
     var deckControlLabel: String
     var contentSafeArea: UIEdgeInsets
+    /// Matches `UMDBarConfiguration.contentVerticalPadding`.
+    var contentVerticalPadding: CGFloat = 8
+    /// Matches `UMDBarConfiguration.minimumContentHeight` — an auxiliary
+    /// tab's rail must be the same band as a terminal tab's, or the pane
+    /// jumps when you switch between them.
+    var minimumContentHeight: CGFloat = 0
     var closeAccessibilityLabel: String
 }
 
@@ -766,6 +772,9 @@ final class ViewportUMDViewController: UIViewController {
         private let deckControlLabel: String?
         private let shellSafeAreaLeft: CGFloat?
         private let shellSafeAreaRight: CGFloat?
+        private let shellSafeAreaTop: CGFloat?
+        private let shellVerticalPadding: CGFloat?
+        private let shellMinimumHeight: CGFloat?
         private let closeAccessibilityLabel: String
 
         init(_ configuration: ViewportUMDConfiguration) {
@@ -780,11 +789,17 @@ final class ViewportUMDViewController: UIViewController {
                 deckControlLabel = nil
                 shellSafeAreaLeft = nil
                 shellSafeAreaRight = nil
+                shellSafeAreaTop = nil
+                shellVerticalPadding = nil
+                shellMinimumHeight = nil
             case .shell:
                 mergeSources = []
                 deckControlLabel = configuration.deckControlLabel
                 shellSafeAreaLeft = configuration.contentSafeArea.left
                 shellSafeAreaRight = configuration.contentSafeArea.right
+                shellSafeAreaTop = configuration.contentSafeArea.top
+                shellVerticalPadding = configuration.contentVerticalPadding
+                shellMinimumHeight = configuration.minimumContentHeight
             }
         }
     }
@@ -884,7 +899,9 @@ final class ViewportUMDViewController: UIViewController {
         rootView.apply(
             content: row,
             style: configuration.style,
-            safeArea: configuration.contentSafeArea
+            safeArea: configuration.contentSafeArea,
+            verticalPadding: configuration.contentVerticalPadding,
+            minimumHeight: configuration.minimumContentHeight
         )
         preferredContentSize = fittingContentSize()
     }
@@ -928,13 +945,23 @@ final class ViewportUMDViewController: UIViewController {
 @MainActor
 final class ViewportUMDRootView: UIKitTallyBorderedView {
     private(set) var contentInsets = UIEdgeInsets.zero
+    private var minimumHeight: CGFloat = 0
+    private var spentTopStrip: CGFloat = 0
     private weak var content: UIView?
     private weak var bottomDivider: UIView?
 
-    func apply(content: UIView, style: ViewportUMDStyle, safeArea: UIEdgeInsets) {
+    func apply(
+        content: UIView,
+        style: ViewportUMDStyle,
+        safeArea: UIEdgeInsets,
+        verticalPadding: CGFloat = 8,
+        minimumHeight: CGFloat = 0
+    ) {
         self.content?.removeFromSuperview()
         bottomDivider?.removeFromSuperview()
         self.content = content
+        self.minimumHeight = minimumHeight
+        self.spentTopStrip = style == .shell ? safeArea.top : 0
         backgroundColor = UIKitChassis.bezel
         switch style {
         case .regular:
@@ -947,11 +974,14 @@ final class ViewportUMDRootView: UIKitTallyBorderedView {
             layer.borderWidth = 0
             layer.cornerRadius = 0
             clipsToBounds = false
+            // The classic window's rail spans the scene's top safe strip and
+            // hands the clearance back here, exactly like `UMDBarRootView`
+            // (the shell always passes top: 0).
             contentInsets = UIEdgeInsets(
-                top: 8,
-                left: 10 + safeArea.left,
-                bottom: 8,
-                right: 10 + safeArea.right
+                top: verticalPadding + safeArea.top,
+                left: UMDBarRootView.horizontalPadding + safeArea.left,
+                bottom: verticalPadding,
+                right: UMDBarRootView.horizontalPadding + safeArea.right
             )
             let divider = UIView()
             divider.backgroundColor = UIKitChassis.bezelHi
@@ -970,8 +1000,21 @@ final class ViewportUMDRootView: UIKitTallyBorderedView {
         NSLayoutConstraint.activate([
             content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentInsets.left),
             content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -contentInsets.right),
-            content.topAnchor.constraint(equalTo: topAnchor, constant: contentInsets.top),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -contentInsets.bottom),
+            // The insets are a floor: a rail asked to match the key bar's
+            // height keeps its faces the same size and centres them below
+            // whatever strip it spends (`UMDBarRootView` does the same).
+            content.topAnchor.constraint(
+                greaterThanOrEqualTo: topAnchor,
+                constant: contentInsets.top
+            ),
+            content.bottomAnchor.constraint(
+                lessThanOrEqualTo: bottomAnchor,
+                constant: -contentInsets.bottom
+            ),
+            content.centerYAnchor.constraint(
+                equalTo: centerYAnchor,
+                constant: safeArea.top / 2
+            ),
         ])
     }
 
@@ -981,11 +1024,15 @@ final class ViewportUMDRootView: UIKitTallyBorderedView {
             height: UIView.layoutFittingCompressedSize.height
         )
         let horizontal: UILayoutPriority = proposedWidth == nil ? .fittingSizeLevel : .required
-        return systemLayoutSizeFitting(
+        let measured = systemLayoutSizeFitting(
             target,
             withHorizontalFittingPriority: horizontal,
             verticalFittingPriority: .fittingSizeLevel
         )
+        // The floor applies to the band below whatever top strip the rail
+        // spends, matching `UMDBarRootView.fittingSize`.
+        let body = max(minimumHeight, measured.height - spentTopStrip)
+        return CGSize(width: measured.width, height: body + spentTopStrip)
     }
 }
 

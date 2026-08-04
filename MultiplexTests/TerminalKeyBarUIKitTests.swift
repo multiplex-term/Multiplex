@@ -101,7 +101,28 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
         bar.frame = CGRect(x: 0, y: 0, width: 420, height: TerminalKeyBar.barHeight)
         bar.layoutIfNeeded()
 
-        XCTAssertEqual(bar.intrinsicContentSize.height, 48)
+        XCTAssertEqual(
+            bar.intrinsicContentSize.height,
+            TerminalKeyBar.keyTopInset + TerminalKeyBar.keyHeight
+                + TerminalKeyBar.keyBottomInset
+        )
+        // Both branches are assertable from either host: the platform fact
+        // is a parameter, and the shipped constants are the convenience.
+        XCTAssertLessThan(
+            TerminalKeyBar.keyBottomInset(isIOSAppOnMac: false),
+            TerminalKeyBar.keyTopInset,
+            "On iPad the rail is the window's bottom edge; its chassis is trimmed"
+        )
+        XCTAssertEqual(
+            TerminalKeyBar.keyBottomInset(isIOSAppOnMac: true),
+            TerminalKeyBar.keyTopInset,
+            "The Mac's window bottom is the Mac's; the rail keeps its symmetry"
+        )
+        XCTAssertGreaterThan(
+            TerminalKeyBarLayout.regularEdgeInset(isIOSAppOnMac: false),
+            TerminalKeyBarLayout.regularEdgeInset(isIOSAppOnMac: true),
+            "Only the iPad's rounded window corners buy extra edge daylight"
+        )
         XCTAssertFalse(bar.renderedKeys.isEmpty)
         XCTAssertEqual(
             bar.renderedKeys.prefix(3).map(\.accessibilityIdentifier),
