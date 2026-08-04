@@ -368,8 +368,17 @@ logic belongs — keep parsing/command-building out of views.
       `UIKeyCommand` (stops Cocoa's `cancelOperation:` resigning focus).
       Ctrl+character chords need the separate `GCKeyboard` HID bridge —
       UIKit drops them at the Cocoa key-binding table before ANY responder
-      path runs; the bridge sends the control byte (kitty-encoded when
-      flags are on) to the first responder and never installs on real iPads.
+      path runs; the bridge sends the control byte (kitty-encoded when flags
+      are on) to the first responder and never installs on real iPads. A
+      bridged Ctrl+B/fallback key carries a short duplicate receipt because OS
+      revisions can also surface it through UIKit. Ctrl+B additionally arms
+      ONE printable follow-up (with no app-authored timeout — the remote owns
+      that state): UIKit gets 60 ms to provide the layout-resolved key; if
+      Cocoa swallows it, HID supplies the ANSI fallback. The follow-up MUST be
+      encoded as a Kitty KEY when flags are active — a raw `v` is a text event,
+      which herdr inserts into the pane while leaving PREFIX armed. This is
+      what keeps physical `Ctrl+B`, then `v` working as a multiplexer chord on
+      the Mac without taking ordinary typing away from the IME.
     - Hardware Shift+Enter is a first-class newline: `pressesBegan` claims
       Return (all three HID usages); kitty flags → `CSI 13;2u`, else LF
       0x0A (verified against Claude Code / Codex / Pi / tmux 3.6a
@@ -690,13 +699,15 @@ logic belongs — keep parsing/command-building out of views.
   recognizer pinned to
   `allowedTouchTypes = [.indirectPointer]` +
   `buttonMaskRequired = .secondary` — the mask alone does NOT filter
-  direct finger taps, verified on device):
-  link/path resolution into its confirmation sheet first, else the
-  block — deliberately never a remote button-2 report, or links would
-  be pointer-unreachable under mouse tracking (the MENU chip below is
-  the explicit road to a TUI's right-click surface). No headless route
-  can inject pointer clicks (sim or Mac), so the recognizer wiring
-  ships on device testing. On herdr tabs the block adds
+  direct finger taps, verified on device). Designed-for-iPad adds a physical
+  `GCMouse.rightButton` HID fallback aimed by the terminal's last
+  `UIPointerInteraction` location; a 200 ms gate deduplicates mice that reach
+  both roads. Thus either road resolves a link/path into its confirmation
+  sheet first, else the block — deliberately never a remote button-2 report,
+  or links would be pointer-unreachable under mouse tracking (the MENU chip
+  below is the explicit road to a TUI's right-click surface). Mac synthetic
+  clicks exercise the UIKit road; no headless route can drive the GCMouse
+  hardware callback or an iPad pointer. On herdr tabs the block adds
   MENU — one right-button press+release reported at the pressed cell
   (`sendRemoteRightClick`; `Terminal.sendButtonReleaseEvent` names the
   true button in SGR release, which the stock path masks to a *left* up)

@@ -236,6 +236,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     private var didFinishSetup = false
     var linkHighlightRange: [Terminal.LinkMatch.RowRange]?
     private var lastPointerLocation: CGPoint?
+    private var lastMacSecondaryClickAt: TimeInterval = -.infinity
     
     /**
      * If set, this turns Option-letter keystrokes into an escape + keystroke combination
@@ -824,7 +825,20 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// pointer under mouse tracking.
     @objc func secondaryClick (_ gestureRecognizer: UITapGestureRecognizer) {
         guard gestureRecognizer.state == .ended else { return }
-        presentLocalPressActions(at: gestureRecognizer.location(in: self))
+        handleSecondaryClick(at: gestureRecognizer.location(in: self))
+    }
+
+    /// One secondary-click sink for UIKit's pointer recognizer and the Mac HID
+    /// fallback. A physical click can reach both; the short gate makes that
+    /// one local action regardless of callback order.
+    private func handleSecondaryClick(at location: CGPoint) {
+        let now = ProcessInfo.processInfo.systemUptime
+        if ProcessInfo.processInfo.isiOSAppOnMac,
+           now - lastMacSecondaryClickAt < Self.macSecondaryClickDedupWindow {
+            return
+        }
+        lastMacSecondaryClickAt = now
+        presentLocalPressActions(at: location)
     }
 
     /// Multiplex patch: when set, a long press over a cell this filter claims
@@ -1708,16 +1722,20 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         // Multiplex patch: a pointer's secondary click is the long press
         // said with a mouse — same local chain, decided in
-        // `presentLocalPressActions`. ⚠ `buttonMaskRequired` constrains
-        // only indirect-pointer events — a plain finger tap sails past it
-        // (observed on device) — so the touch type must be pinned to
-        // `.indirectPointer` too or every single tap raises the block. No
-        // delegate: the failure chain below is a primary-button concern,
-        // and this recognizer's touch type keeps it out of the tap
-        // handlers' way.
+        // `presentLocalPressActions`. `buttonMaskRequired` is the actual
+        // secondary-button gate, but the touch type must ALSO be pinned to
+        // `.indirectPointer`: the mask is ignored for direct input, so
+        // otherwise every finger tap raises the block (observed on device).
+        // Designed-for-iPad has a separate GCMouse HID fallback for physical
+        // clicks UIKit fails to classify as indirect pointer input.
         if #available(iOS 13.4, visionOS 1.0, *) {
-            let secondaryClick = UITapGestureRecognizer (target: self, action: #selector(secondaryClick(_:)))
-            secondaryClick.allowedTouchTypes = [UITouch.TouchType.indirectPointer.rawValue as NSNumber]
+            let secondaryClick = UITapGestureRecognizer(
+                target: self,
+                action: #selector(secondaryClick(_:))
+            )
+            secondaryClick.allowedTouchTypes = [
+                UITouch.TouchType.indirectPointer.rawValue as NSNumber
+            ]
             secondaryClick.buttonMaskRequired = .secondary
             addGestureRecognizer(secondaryClick)
         }
@@ -1806,6 +1824,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             addInteraction(interaction)
             pointerInteraction = interaction
         }
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            Self.setupMacSecondaryClickBridgeIfNeeded()
+        }
         if #available(iOS 13.0, visionOS 1.0, *) {
             let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
             addGestureRecognizer(hover)
@@ -1817,6 +1838,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     public func pointerInteraction(_ interaction: UIPointerInteraction, regionFor request: UIPointerRegionRequest, defaultRegion: UIPointerRegion) -> UIPointerRegion?
     {
         lastPointerLocation = request.location
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            Self.macSecondaryClickTarget = self
+        }
         reportLinkIfNeeded(at: request.location, modifiers: request.modifiers, force: false)
         updateLinkHighlightIfNeeded(at: request.location, modifiers: request.modifiers, force: false)
         return nil
@@ -1828,10 +1852,17 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         case .began, .changed:
             let location = gestureRecognizer.location(in: self)
             lastPointerLocation = location
+            if ProcessInfo.processInfo.isiOSAppOnMac {
+                Self.macSecondaryClickTarget = self
+            }
             reportLinkIfNeeded(at: location, modifiers: [], force: true)
             updateLinkHighlightIfNeeded(at: location, modifiers: [.command], force: true)
         case .ended, .cancelled:
             lastReportedLink = nil
+            lastPointerLocation = nil
+            if Self.macSecondaryClickTarget === self {
+                Self.macSecondaryClickTarget = nil
+            }
             if linkHighlightMode == .hover || linkHighlightMode == .hoverWithModifier {
                 let oldRange = linkHighlightRange
                 linkHighlightRange = nil
@@ -2758,6 +2789,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     */
     open func insertText(_ text: String) {
         uitiLog("insertText(\(text.debugDescription)) \(textInputStateDescription())")
+        // Multiplex patch: direct text input beat the Mac prefix fallback, so
+        // preserve UIKit's layout result while retaining HID's key identity.
+        // If HID already had to deliver a press, consume its receipt instead.
+        if sendPendingMacPrefixTextInput(text) { return }
+        guard !consumeMacBridgedText(text) else { return }
         commitTextInput(text, applyModifiers: true)
     }
     private func kittyEncoder() -> KittyKeyboardEncoder {
@@ -3462,6 +3498,67 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // the pressesBegan path — this bridge never installs there.
     private static weak var macControlKeyTarget: TerminalView?
     private static var macControlKeyBridgeInstalled = false
+    private static weak var macSecondaryClickTarget: TerminalView?
+    private static var macSecondaryClickBridgeInstalled = false
+    private static let macSecondaryClickDedupWindow: TimeInterval = 0.2
+    private static let macBridgedPressLifetime: TimeInterval = 0.25
+    private static let macPrefixFallbackDelay: TimeInterval = 0.06
+
+    /// One prefix/fallback HID press already delivered by the Mac bridge.
+    /// UIKit normally drops Ctrl+character before `pressesBegan`, but OS
+    /// revisions can also surface Ctrl+B through `pressesBegan` or
+    /// `insertText`. A short-lived receipt consumes that duplicate once.
+    private struct MacBridgedPress {
+        var hidUsage: Int
+        var text: String
+        var expiresAt: TimeInterval
+    }
+
+    private var macBridgedPresses: [MacBridgedPress] = []
+    private var macPrefixFollowUpArmed = false
+    private var macPendingPrefixKeyCode: GCKeyCode?
+    private var macPendingPrefixFallback = ""
+    private var macPendingPrefixShifted = false
+    private var macPendingPrefixGeneration = 0
+
+    /// Designed-for-iPad's UIKit pointer recognizer misses some physical Mac
+    /// secondary-button reports. GameController sees the mouse at HID level;
+    /// combine that button with UIPointerInteraction's absolute location and
+    /// route it through the same local action chain. The UIKit recognizer stays
+    /// installed for trackpads and synthetic pointer events.
+    private static func setupMacSecondaryClickBridgeIfNeeded() {
+        guard ProcessInfo.processInfo.isiOSAppOnMac,
+              !macSecondaryClickBridgeInstalled
+        else { return }
+        macSecondaryClickBridgeInstalled = true
+        for mouse in GCMouse.mice() {
+            installMacSecondaryClickHandler(on: mouse)
+        }
+        for name in [Notification.Name.GCMouseDidConnect,
+                     Notification.Name.GCMouseDidBecomeCurrent] {
+            NotificationCenter.default.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { note in
+                installMacSecondaryClickHandler(on: note.object as? GCMouse)
+            }
+        }
+    }
+
+    private static func installMacSecondaryClickHandler(on mouse: GCMouse?) {
+        guard let mouse, let button = mouse.mouseInput?.rightButton else { return }
+        mouse.handlerQueue = .main
+        button.pressedChangedHandler = { _, _, pressed in
+            guard pressed,
+                  let target = macSecondaryClickTarget,
+                  let location = target.lastPointerLocation,
+                  target.window != nil,
+                  target.bounds.contains(location)
+            else { return }
+            target.handleSecondaryClick(at: location)
+        }
+    }
 
     private static func setupMacControlKeyBridgeIfNeeded() {
         guard ProcessInfo.processInfo.isiOSAppOnMac, !macControlKeyBridgeInstalled else { return }
@@ -3474,18 +3571,74 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     private static func installMacControlKeyHandler(on keyboard: GCKeyboard?) {
-        guard let input = keyboard?.keyboardInput else { return }
+        guard let keyboard, let input = keyboard.keyboardInput else { return }
+        // The receipt must exist before UIKit sees the same physical press.
+        // GameController defaults to main; state it explicitly so another
+        // consumer cannot move this shared keyboard's callbacks off UIKit's
+        // ordered input path.
+        keyboard.handlerQueue = .main
         input.keyChangedHandler = { input, _, keyCode, pressed in
             guard pressed,
-                  input.button(forKeyCode: .leftControl)?.isPressed == true ||
-                  input.button(forKeyCode: .rightControl)?.isPressed == true,
-                  input.button(forKeyCode: .leftGUI)?.isPressed != true,
-                  input.button(forKeyCode: .rightGUI)?.isPressed != true,
-                  let character = macControlCharacter(for: keyCode),
                   let target = macControlKeyTarget,
-                  target.isFirstResponder, target.window?.isKeyWindow == true
+                  target.isFirstResponder,
+                  target.window?.isKeyWindow == true
             else { return }
+
+            let controlHeld = input.button(forKeyCode: .leftControl)?.isPressed == true ||
+                input.button(forKeyCode: .rightControl)?.isPressed == true
+            let commandHeld = input.button(forKeyCode: .leftGUI)?.isPressed == true ||
+                input.button(forKeyCode: .rightGUI)?.isPressed == true
+            let optionHeld = input.button(forKeyCode: .leftAlt)?.isPressed == true ||
+                input.button(forKeyCode: .rightAlt)?.isPressed == true
+            let shiftHeld = input.button(forKeyCode: .leftShift)?.isPressed == true ||
+                input.button(forKeyCode: .rightShift)?.isPressed == true
+
+            // A non-modifier after bridged Ctrl+B is part of the same
+            // multiplexer chord. UIKit on Designed for iPad can swallow this
+            // first ordinary key while unwinding Cocoa's Ctrl+B binding. Give
+            // `pressesBegan` one short turn to supply the layout-resolved
+            // character; if it never arrives, send printable ANSI from HID.
+            // This is deliberately one-key: ordinary typing remains owned by
+            // the user's keyboard layout and IME.
+            if !isMacModifierKey(keyCode),
+               target.takeMacPrefixFollowUp(),
+               !controlHeld,
+               !commandHeld,
+               !optionHeld,
+               let character = macPlainCharacter(for: keyCode, shifted: shiftHeld) {
+                target.scheduleMacPrefixFollowUp(
+                    keyCode: keyCode,
+                    fallback: character,
+                    shifted: shiftHeld
+                )
+                return
+            }
+
+            guard controlHeld,
+                  !commandHeld,
+                  let character = macControlCharacter(for: keyCode)
+            else { return }
+            target.macPrefixFollowUpArmed = false
+            target.cancelMacPrefixFollowUpForTextInput()
+            if character == "b" {
+                target.recordMacBridgedPress(keyCode: keyCode, text: character)
+            }
             target.sendMacControl(character)
+            if character == "b" {
+                // A multiplexer waits for its next key, not for an app-authored
+                // deadline. Keep the bridge armed until that one key arrives.
+                target.macPrefixFollowUpArmed = true
+            }
+        }
+    }
+
+    private static func isMacModifierKey(_ keyCode: GCKeyCode) -> Bool {
+        switch keyCode {
+        case .leftControl, .rightControl, .leftShift, .rightShift,
+             .leftAlt, .rightAlt, .leftGUI, .rightGUI:
+            true
+        default:
+            false
         }
     }
 
@@ -3507,6 +3660,176 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         case .hyphen:       return "_"   // Ctrl+- / Ctrl+_ → US (0x1f)
         default:            return nil
         }
+    }
+
+    /// ANSI printable fallback for the one key following bridged Ctrl+B.
+    /// Normal text never takes this path; UIKit still owns layout and IME.
+    private static func macPlainCharacter(for keyCode: GCKeyCode, shifted: Bool) -> String? {
+        if keyCode.rawValue >= GCKeyCode.keyA.rawValue && keyCode.rawValue <= GCKeyCode.keyZ.rawValue {
+            let offset = UInt8(keyCode.rawValue - GCKeyCode.keyA.rawValue)
+            let base = shifted ? UInt8(ascii: "A") : UInt8(ascii: "a")
+            return String(UnicodeScalar(base + offset))
+        }
+
+        let digitKeys: [GCKeyCode] = [
+            .one, .two, .three, .four, .five, .six, .seven, .eight, .nine, .zero
+        ]
+        if let index = digitKeys.firstIndex(of: keyCode) {
+            let plain = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+            let upper = ["!", "@", "#", "$", "%", "^", "&", "*", "(", ")"]
+            return shifted ? upper[index] : plain[index]
+        }
+
+        switch keyCode {
+        case .spacebar: return " "
+        case .hyphen: return shifted ? "_" : "-"
+        case .equalSign: return shifted ? "+" : "="
+        case .openBracket: return shifted ? "{" : "["
+        case .closeBracket: return shifted ? "}" : "]"
+        case .backslash: return shifted ? "|" : "\\"
+        case .semicolon: return shifted ? ":" : ";"
+        case .quote: return shifted ? "\"" : "'"
+        case .graveAccentAndTilde: return shifted ? "~" : "`"
+        case .comma: return shifted ? "<" : ","
+        case .period: return shifted ? ">" : "."
+        case .slash: return shifted ? "?" : "/"
+        default: return nil
+        }
+    }
+
+    private func takeMacPrefixFollowUp() -> Bool {
+        guard macPrefixFollowUpArmed else { return false }
+        macPrefixFollowUpArmed = false
+        return true
+    }
+
+    private func scheduleMacPrefixFollowUp(
+        keyCode: GCKeyCode,
+        fallback: String,
+        shifted: Bool
+    ) {
+        pruneMacBridgedPresses()
+        let usage = Int(keyCode.rawValue)
+        // A new physical key proves UIKit has finished dispatching the Ctrl+B
+        // key-down. Do not let that old receipt eat a same-letter follow-up.
+        macBridgedPresses.removeAll { $0.hidUsage == usage }
+        macPendingPrefixGeneration += 1
+        let generation = macPendingPrefixGeneration
+        macPendingPrefixKeyCode = keyCode
+        macPendingPrefixFallback = fallback
+        macPendingPrefixShifted = shifted
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.macPrefixFallbackDelay) { [weak self] in
+            guard let self,
+                  self.macPendingPrefixGeneration == generation,
+                  self.macPendingPrefixKeyCode == keyCode
+            else { return }
+            self.macPendingPrefixKeyCode = nil
+            self.recordMacBridgedPress(keyCode: keyCode, text: fallback)
+            self.sendMacPrefixFollowUp(
+                keyCode: keyCode,
+                text: fallback,
+                shifted: shifted
+            )
+        }
+    }
+
+    /// UIKit has a real key event, so cancel the HID timer and let the ordinary
+    /// `pressesBegan` pipeline retain layout, IME, and Kitty metadata.
+    private func macPrefixFollowUpWillUseUIKit(_ key: UIKey) {
+        guard macPendingPrefixKeyCode?.rawValue == key.keyCode.rawValue else { return }
+        macPendingPrefixKeyCode = nil
+        macPendingPrefixGeneration += 1
+    }
+
+    /// Some Mac text-system paths call `insertText` without exposing a
+    /// `pressesBegan`. Pair that layout-resolved text with the HID key metadata
+    /// rather than degrading it to a paste/text event while a multiplexer is
+    /// waiting for a key.
+    private func sendPendingMacPrefixTextInput(_ text: String) -> Bool {
+        guard let keyCode = macPendingPrefixKeyCode else { return false }
+        let fallback = macPendingPrefixFallback
+        let shifted = macPendingPrefixShifted
+        macPendingPrefixKeyCode = nil
+        macPendingPrefixGeneration += 1
+        sendMacPrefixFollowUp(
+            keyCode: keyCode,
+            text: text.isEmpty ? fallback : text,
+            shifted: shifted
+        )
+        return true
+    }
+
+    private func cancelMacPrefixFollowUpForTextInput() {
+        guard macPendingPrefixKeyCode != nil else { return }
+        macPendingPrefixKeyCode = nil
+        macPendingPrefixGeneration += 1
+    }
+
+    /// A raw printable byte is a text event under Kitty's report-all-keys mode;
+    /// Herdr inserts it into the pane and leaves PREFIX armed. Reconstruct the
+    /// same Unicode key event UIKit would have emitted so the multiplexer sees
+    /// its binding. Legacy terminals still receive the ordinary text byte.
+    private func sendMacPrefixFollowUp(
+        keyCode: GCKeyCode,
+        text: String,
+        shifted: Bool
+    ) {
+        guard !terminal.keyboardEnhancementFlags.isEmpty,
+              text.unicodeScalars.count == 1,
+              let textScalar = text.unicodeScalars.first,
+              let physicalBase = Self.macPlainCharacter(for: keyCode, shifted: false)?
+                .unicodeScalars.first
+        else {
+            send(txt: text)
+            return
+        }
+
+        let baseScalar = String(textScalar).lowercased().unicodeScalars.first ?? textScalar
+        let baseLayoutKey = physicalBase == baseScalar ? nil : physicalBase
+        _ = sendKittyEvent(KittyKeyEvent(
+            key: .unicode(baseScalar.value),
+            modifiers: shifted ? [.shift] : [],
+            eventType: .press,
+            text: text,
+            shiftedKey: shifted ? textScalar : nil,
+            baseLayoutKey: baseLayoutKey,
+            composing: false
+        ))
+    }
+
+    private func recordMacBridgedPress(keyCode: GCKeyCode, text: String) {
+        pruneMacBridgedPresses()
+        let usage = Int(keyCode.rawValue)
+        macBridgedPresses.removeAll { $0.hidUsage == usage }
+        macBridgedPresses.append(MacBridgedPress(
+            hidUsage: usage,
+            text: text,
+            expiresAt: ProcessInfo.processInfo.systemUptime + Self.macBridgedPressLifetime
+        ))
+    }
+
+    private func consumeMacBridgedPress(keyCode: UIKeyboardHIDUsage) -> Bool {
+        guard ProcessInfo.processInfo.isiOSAppOnMac else { return false }
+        pruneMacBridgedPresses()
+        guard let index = macBridgedPresses.firstIndex(where: {
+            $0.hidUsage == Int(keyCode.rawValue)
+        }) else { return false }
+        macBridgedPresses.remove(at: index)
+        return true
+    }
+
+    private func consumeMacBridgedText(_ text: String) -> Bool {
+        guard ProcessInfo.processInfo.isiOSAppOnMac else { return false }
+        pruneMacBridgedPresses()
+        guard let index = macBridgedPresses.firstIndex(where: { $0.text == text })
+        else { return false }
+        macBridgedPresses.remove(at: index)
+        return true
+    }
+
+    private func pruneMacBridgedPresses() {
+        let now = ProcessInfo.processInfo.systemUptime
+        macBridgedPresses.removeAll { $0.expiresAt < now }
     }
 
     /// Multiplex patch: synchronous HID-level read of the physical Shift keys
@@ -3565,6 +3888,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 commandActive = true
             }
             uitiLog("pressesBegan keyCode:\(key.keyCode) chars:\(key.characters.debugDescription) ignoring:\(key.charactersIgnoringModifiers.debugDescription) modifiers:\(key.modifierFlags)")
+            // Multiplex patch: GameController already sent this Mac hardware
+            // key. Consume UIKit's duplicate before either the kitty or legacy
+            // branch can emit it a second time.
+            if consumeMacBridgedPress(keyCode: key.keyCode) {
+                didHandleEvent = true
+                continue
+            }
+            macPrefixFollowUpWillUseUIKit(key)
             if !kittyFlags.isEmpty {
                 if key.modifierFlags.contains([.alternate, .command]) && key.charactersIgnoringModifiers == "o" {
                     optionAsMetaKey.toggle()
