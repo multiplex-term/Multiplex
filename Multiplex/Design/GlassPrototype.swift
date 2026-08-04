@@ -131,6 +131,21 @@ enum GlassPrototype {
     /// become strata over the smoke, like chips.
     static let strataChassis = material(strataMaterial, fallback: TallyPalette.chassis)
 
+    /// Chrome that floats directly OVER live terminal content — the Select
+    /// Text / Copy Mode / dictation block. Unlike every other strata
+    /// surface, nothing carries the window smoke beneath it: the pane below
+    /// is the theme tint at `screenAlpha` over real glass, so a 5% strata
+    /// step leaves the block reading as scrolling text with chips over it.
+    /// It brings its own ground — the window smoke recipe, dense enough
+    /// that the content behind stops competing, still a material and not
+    /// opaque graphite.
+    static let floatingChromeMaterial = UIColor(
+        red: 20 / 255, green: 21 / 255, blue: 24 / 255, alpha: 0.92
+    )
+    static let floatingChrome = material(
+        floatingChromeMaterial, fallback: TallyPalette.bezel
+    )
+
     /// Popover content roots (tmux shortcuts, Command Setup, agent HISTORY,
     /// the ctrl-combo slab): a popover hosts in its own window over its own
     /// bright platter, so the root paints the smoke there — the sheet

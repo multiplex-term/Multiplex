@@ -739,7 +739,10 @@ final class TerminalContextBarView: UIKitTallyBorderedView {
 
     init(items: [UIView]) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.bezel
+        // PROTOTYPE(GLASS): this bar floats over live terminal content with
+        // no smoke ground beneath it, so it carries its own dense material
+        // instead of the strata step every grounded surface takes.
+        backgroundColor = GlassPrototype.floatingChrome
         layer.cornerRadius = 8
         layer.cornerCurve = .continuous
         clipsToBounds = true
@@ -1216,7 +1219,10 @@ final class TerminalHistoryFindingVeilView: UIView {
 final class TerminalHistoryNoticePillView: UIKitTallyBorderedView {
     init(text: String) {
         super.init(frame: .zero)
-        backgroundColor = UIKitChassis.bezel
+        // PROTOTYPE(GLASS): floats over live terminal content, so it grounds
+        // on the dense floating material rather than the strata step (see
+        // `TerminalContextBarView`).
+        backgroundColor = GlassPrototype.floatingChrome
         isAccessibilityElement = true
         accessibilityLabel = text
 
