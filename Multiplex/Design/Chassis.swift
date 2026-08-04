@@ -355,6 +355,10 @@ final class UIKitChassisChip: UIKitTallyBorderedView {
     }
 
     private func refreshCaption() {
+        // An empty caption must LEAVE the stack, not merely measure zero: a
+        // visible arranged subview still earns the five-point spacing after
+        // the symbol, which pushes an icon-only chip's glyph off centre.
+        captionLabel.isHidden = caption.isEmpty
         captionLabel.attributedText = NSAttributedString(
             string: caption,
             attributes: [
