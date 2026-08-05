@@ -40,7 +40,7 @@ uniform downscale, never a crop.
 | 1 | `wall` | Deck, 2 hosts, ~6 live tiles, one LIVE lamp, agent glyph | EVERY TMUX SESSION, LIVE ON THE WALL | `2 HOSTS · 6 SESSIONS` ● LIVE |
 | 2 | `windows` | 3 terminals around the room (visionOS) / Stage Manager scenes (iPad) | A SPATIAL WINDOW PER SESSION *(iPad: REAL SCENES, STAGE MANAGER READY)* | `3 WINDOWS` ● LIVE |
 | 3 | `agents` | Wall with agent glyph + NEEDS YOU; notification banner in frame | KNOW WHEN YOUR AGENT NEEDS YOU | `✳ CLAUDE CODE` ● NEEDS YOU |
-| 4 | `strip` | Real Claude Code, chip strip + one custom chip visible | ONE-TAP AGENT COMMANDS — PLUS YOUR OWN | `/CLEAR · /COMPACT · STOP` |
+| 4 | `strip` | Real Claude Code, chip strip + one custom chip visible | ONE-TAP AGENT COMMANDS — PLUS YOUR OWN | `/CLEAR · /COMPACT · /MODEL` |
 | 5 | `launch` | New Session sheet over the wall: Claude Code selected, prompt + setup script + dir filled | START AN AGENT SESSION IN ONE STEP | `CLAUDE CODE · CODEX · PI` |
 | 6 | `drop` | FILE menu open over a live agent session | ATTACH FILES STRAIGHT INTO THE SESSION | iPad `CAMERA · PHOTOS · FILES` / visionOS `PHOTOS · FILES · DRAG & DROP` |
 | 7 | `widgets` | Home Screen widgets (iPad) / widget pinned in the room (visionOS 26) | THE WALL, ON YOUR HOME SCREEN *(visionOS: PINNED IN YOUR SPACE)* | `WIDGETS · APP SHORTCUTS` |
@@ -60,6 +60,13 @@ visionOS sim, ship visionOS with 9 or revive `shortcuts` from git history as
 its 10th. The 2026-07-21 capture pass retired `tabs` (the merge story reads
 as ordinary tab UI in a still) for `keys` on every platform — each device
 class shows its own key surface (rail / ornament cluster).
+
+⚠ **The shipped `strip` frames are stale as of 2026-08-05**: the STOP chip was
+withdrawn from every agent's built-in set, so `ipad-04-strip`, `iphone-04-strip`,
+and `visionos-04-strip` all show a chip the binary no longer draws, and their
+telemetry caption read `/CLEAR · /COMPACT · STOP`. The caption above is
+corrected; the three images must be re-captured before the next `deliver` run
+that ships screenshots. Nothing else in the set depends on the strip's contents.
 
 ## Shot list — iPhone (portrait, 9 shots)
 

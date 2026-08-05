@@ -15,7 +15,7 @@ behavior, or App Review flow changes.
 | SKU | `multiplex` |
 | Bundle ID | `app.multiplexterm.multiplex` |
 | Platforms | iOS (iPhone + iPad) and visionOS in one app record — the iPhone joined the universal iOS binary 2026-07-18 (single-window shell) and ships with the next binary |
-| Current version | 1.2.0 in `project.yml` (1.0 was the first submitted version; 1.1.0 remained unpublished during App Review, so its release-note content is carried forward into 1.2.0) |
+| Current version | 1.3.0 in `project.yml` (1.0 was the first submitted version; 1.1.0 remained unpublished during App Review, so its release-note content was carried forward into 1.2.0) |
 | Minimum OS | iOS 17.0; visionOS 1.0 |
 | Target release model | Free download with one non-consumable Pro unlock; confirm the base-app price manually |
 | Primary category | Developer Tools |
@@ -282,13 +282,17 @@ Current product split:
   nine-character bar label previews, plus optional sharing across that host's
   Claude Code, Codex, and Pi strips), and
   ten built-in or custom agent-command chip taps per local calendar day.
+  ⚠ The built-in set lost **STOP** on 2026-08-05 — no chip types a bare
+  Escape any more (it interrupts a running turn, and every platform already
+  carries a real ESC key beside the terminal). The shipped `strip`
+  screenshots still show it; see `docs/appstore/screenshots-plan.md`.
 - Pro: unlimited hosts, mosh, unmetered built-in and custom agent command
   chips, Claude Code/Codex agent alerts from tmux sessions and plain shells
   plus lifecycle-backed Claude Code/Codex/Pi alerts from herdr sessions,
   the HISTORY panel (a Claude Code session's prompt history read from
   Claude's own session file, with full text where the TUI truncates, plus
-  jump-back-to-message on tmux tabs — Claude Code only; Codex/Pi history
-  was deliberately withdrawn 2026-07-16 to keep the jump exact), and
+  jump-back-to-message on tmux and herdr tabs — Claude Code only; Codex/Pi
+  history was deliberately withdrawn 2026-07-16 to keep the jump exact), and
   custom-theme editing.
 - Existing/synced hosts, existing mosh configuration, and existing custom
   themes are never deleted or disabled when Pro is absent.

@@ -79,12 +79,28 @@ end
 # here, so by upload time the file is the release's tester script. Internal
 # builds may go out without one; an external build reaches real testers and a
 # placeholder would be the first thing they read.
+#
+# App Store Connect caps whatsNew at 4,000 characters, same as the review
+# notes — and for the same reason it is checked here rather than left to the
+# API: a file that grew past the cap across a beta cycle otherwise fails after
+# both platform archives, as Spaceship's opaque "An attribute value is too
+# long. - /data/attributes/whatsNew". Measured in CHARACTERS, which is what the
+# API counts; this file's bullets and arrows make its byte length run higher.
+WHATS_NEW_LIMIT = 4000
+
 def whats_new(external)
   path = File.expand_path("testflight-whats-new.txt", __dir__)
   body = File.exist?(path) ? File.read(path) : ""
   if body.strip.empty?
     UI.user_error!("Write #{path} before distributing externally") if external
     return "Internal build."
+  end
+  if body.strip.length > WHATS_NEW_LIMIT
+    UI.user_error!(
+      "What to Test is too long: #{path} is #{body.strip.length} characters, " \
+      "App Store Connect allows #{WHATS_NEW_LIMIT}. Condense it to this " \
+      "release's tester script.",
+    )
   end
   body
 end
