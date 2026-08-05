@@ -415,7 +415,6 @@ final class AgentSignatureTests: XCTestCase {
     // MARK: command payloads
 
     func testKeyPayloads() {
-        XCTAssertEqual(AgentCommand.stop.payload, Data([0x1B]))                 // Esc
         XCTAssertEqual(AgentCommand.mode.payload, Data([0x1B, 0x5B, 0x5A]))     // CSI Z
         XCTAssertEqual(AgentCommand.think.payload, Data([0x1B, 0x5B, 0x5A]))    // CSI Z
         XCTAssertEqual(AgentCommand.transcript.payload, Data([0x14]))           // Ctrl+T
@@ -429,8 +428,6 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(AgentCommand.slash("clear").payload, Data("/clear".utf8))
         XCTAssertTrue(AgentCommand.slash("clear").submitsAfterPause)
         XCTAssertTrue(AgentCommand.slash("clear").consumesSlashChipTaste)
-        XCTAssertFalse(AgentCommand.stop.submitsAfterPause)
-        XCTAssertFalse(AgentCommand.stop.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.mode.submitsAfterPause)
         XCTAssertFalse(AgentCommand.mode.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.think.submitsAfterPause)
@@ -445,6 +442,23 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertFalse(AgentCommand.pageUp.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.pageDown.submitsAfterPause)
         XCTAssertFalse(AgentCommand.pageDown.consumesSlashChipTaste)
+    }
+
+    /// No built-in chip types a bare Escape. The STOP chip did, and it was
+    /// withdrawn: Escape is the one byte that interrupts a running turn, every
+    /// platform already carries a real ESC key beside the terminal (the
+    /// iPad/iPhone key rail, visionOS's ornament cluster), and a chip that
+    /// sits a thumb's width from /clear is the wrong place to keep it.
+    func testNoBuiltInChipTypesABareEscape() {
+        for kind in AgentKind.allCases {
+            for command in AgentCommandSet.all(for: kind) {
+                XCTAssertNotEqual(
+                    command.payload,
+                    Data([0x1B]),
+                    "\(kind) ships \(command.label) as a bare Escape"
+                )
+            }
+        }
     }
 
     func testCommandSetMembership() {
@@ -482,7 +496,7 @@ final class AgentSignatureTests: XCTestCase {
         let piOverflow = AgentCommandSet.overflow(for: .pi)
         XCTAssertEqual(
             pi,
-            [.stop, .slash("new"), .slash("resume"), .slash("compact"),
+            [.slash("new"), .slash("resume"), .slash("compact"),
              .slash("model"), .slash("tree"), .think, .tools]
         )
         XCTAssertTrue(piOverflow.contains(.thinking))

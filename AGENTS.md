@@ -1331,10 +1331,14 @@ logic belongs — keep parsing/command-building out of views.
   never trusted without the process probe. A direct shell alerts in its
   UMD rail keyed by tab UUID. Any failing stage disables that signal
   only, never the session list. Helper chips only *type* through
-  `TerminalSessionController.sendInput` (Enter = CR, Esc = 0x1B,
-  Shift+Tab = CSI Z, Codex TRANSCRIPT = Ctrl+T, Pi THINK/TOOLS/THINKING =
-  Shift+Tab/Ctrl+O/Ctrl+T; Claude PG UP/DN chips are visionOS-only);
-  **never ship a Ctrl+B payload** — it's the remote tmux prefix. The
+  `TerminalSessionController.sendInput` (Enter = CR, Shift+Tab = CSI Z,
+  Codex TRANSCRIPT = Ctrl+T, Pi THINK/TOOLS/THINKING = Shift+Tab/Ctrl+O/Ctrl+T;
+  Claude PG UP/DN chips are visionOS-only); **never ship a Ctrl+B payload** —
+  it's the remote tmux prefix — and **no chip types a bare Escape**: the STOP
+  chip did and was withdrawn 2026-08-05 (Escape interrupts a running turn, and
+  every platform already carries a real ESC key beside the terminal — the
+  iPad/iPhone key rail, visionOS's ornament cluster). Pinned by
+  `testNoBuiltInChipTypesABareEscape`. The
   strip and agent alerts (`AttentionCenter`) are Pro-gated; detection and
   wall telemetry stay free. Pi's attention stays fail-soft idle — no
   RUNNING/turn-end claims without a separate reliable signal. **Slash

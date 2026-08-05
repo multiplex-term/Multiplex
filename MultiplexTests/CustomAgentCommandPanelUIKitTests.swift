@@ -30,7 +30,7 @@ final class CustomAgentCommandPanelUIKitTests: XCTestCase {
         let controller = makeController(
             agent: .codex,
             builtInPlacements: [
-                "STOP": .more,
+                "TRANSCRIPT": .more,
                 "/new": .bar,
                 "removed-command": .bar,
             ]
@@ -38,7 +38,7 @@ final class CustomAgentCommandPanelUIKitTests: XCTestCase {
         controller.loadViewIfNeeded()
 
         XCTAssertFalse(controller.isBuiltInExpanded)
-        XCTAssertEqual(controller.builtInPlacementOverrides, ["STOP": .more])
+        XCTAssertEqual(controller.builtInPlacementOverrides, ["TRANSCRIPT": .more])
         let accordion = try XCTUnwrap(
             control("customCommands.builtInAccordion", in: controller.view)
         )
@@ -59,13 +59,15 @@ final class CustomAgentCommandPanelUIKitTests: XCTestCase {
             AgentCommandSet.all(for: .codex).count
         )
 
-        let stop = try XCTUnwrap(
-            AgentCommandSet.all(for: .codex).first { $0.id == "STOP" }
+        // A stock BAR built-in: moving it to MORE records an override, moving
+        // it back to its default clears the entry rather than pinning it.
+        let transcript = try XCTUnwrap(
+            AgentCommandSet.all(for: .codex).first { $0.id == "TRANSCRIPT" }
         )
-        controller.setBuiltInPlacement(.bar, for: stop)
-        XCTAssertNil(controller.builtInPlacementOverrides[stop.id])
-        controller.setBuiltInPlacement(.more, for: stop)
-        XCTAssertEqual(controller.builtInPlacementOverrides[stop.id], .more)
+        controller.setBuiltInPlacement(.bar, for: transcript)
+        XCTAssertNil(controller.builtInPlacementOverrides[transcript.id])
+        controller.setBuiltInPlacement(.more, for: transcript)
+        XCTAssertEqual(controller.builtInPlacementOverrides[transcript.id], .more)
     }
 
     func testTextSwitchMoveDeleteAndAddMutateDraftsByStableID() throws {
