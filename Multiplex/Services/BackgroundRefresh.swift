@@ -67,10 +67,20 @@ final class BackgroundRefresh {
 
     /// Must run before the app finishes launching — `BGTaskScheduler` rejects
     /// a later registration.
+    ///
+    /// ⚠ `using:` must be `.main`, never `nil`. `nil` means *a default
+    /// background queue*, so the launch handler — and the expiration handler,
+    /// which the system delivers on the same queue — run off-main and every
+    /// `MainActor.assumeIsolated` below traps. That shipped in 1.3.0 build
+    /// 202608050 and crashed on the first real wake (EXC_BREAKPOINT in
+    /// `_dispatch_assert_queue_fail`, iPad, 2026-08-05). The simulator cannot
+    /// catch it: `submit` always throws there, so no wake ever reaches this
+    /// closure and the `debug.bgrefresh` hook registers its own `.main`
+    /// dispatch instead.
     func register() {
         BGTaskScheduler.shared.register(
             forTaskWithIdentifier: Self.taskIdentifier,
-            using: nil
+            using: .main
         ) { [weak self] task in
             MainActor.assumeIsolated {
                 guard let refreshTask = task as? BGAppRefreshTask else {
