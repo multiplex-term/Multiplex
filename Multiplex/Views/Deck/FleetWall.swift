@@ -681,10 +681,23 @@ final class FleetWallViewController: UIViewController {
 
     // MARK: Feed cadence
 
+    /// Whether the probe feed is alive. Pinned by a test because the answer
+    /// is load-bearing and was once wrong: the feed used to die on
+    /// resign-active, so the per-tick activity gate below it never ran.
+    var isFeedRunningForTesting: Bool { feedTask != nil }
+
     private func restartFeedIfNeeded(force: Bool) {
         guard isViewLoaded else { return }
         let hosts = latestSnapshot?.hosts ?? configuration.store.hosts
-        let active = configuration.sceneIsActive && isOnScreen
+        // The feed LIVES as long as the wall is on screen; whether each tick
+        // may work is `BackgroundActivity`'s call, per host. Scene activity
+        // deliberately no longer decides existence: a resign-active can mean
+        // an iPad Stage Manager sibling took focus with the wall still fully
+        // visible, and killing the task there stopped the deck probing while
+        // the user watched it. `viewDidDisappear` is what ends a feed.
+        // Activity changes still force a restart below, which is where a
+        // returning scene resets each model's connect-retry backoff.
+        let active = isOnScreen
         // `FleetFeedID` normalizes every host through
         // `connectionModelConfiguration`, so command-setup, setup-script,
         // launch-model, and tmux-conf edits (and the `updatedAt` bump any save
@@ -714,7 +727,12 @@ final class FleetWallViewController: UIViewController {
     private static func runFeed(for model: HostConnectionModel) async {
         model.resetConnectRetryBackoff()
         while !Task.isCancelled {
-            guard UIApplication.shared.applicationState == .active else {
+            // Foreground-inactive counts (a Stage Manager sibling window is on
+            // screen and used to stop probing); background counts only for a
+            // keep-alive host while the assertion holds. `permitsWork`
+            // resolves the switch live, so the model's snapshot going stale
+            // between rebuilds cannot strand this loop on an old answer.
+            guard BackgroundActivity.shared.permitsWork(for: model.host) else {
                 do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
                 continue
             }

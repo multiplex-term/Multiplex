@@ -133,6 +133,33 @@ struct AttentionTapTarget: Equatable {
     }
 }
 
+/// When an alert is dropped because the user is already watching the session
+/// that raised it.
+///
+/// Keyboard focus is the app's stand-in for "the terminal you are engaged
+/// with" (`TerminalFocusArbiter` owns exactly one, app-wide), and suppressing
+/// a banner about the pane under your fingers is right. But the arbiter does
+/// **not** release focus when the app leaves the screen: it answers "which
+/// terminal would receive a keystroke", not "is anyone here". So the premise
+/// silently inverts the moment you switch apps — the session you walked away
+/// from still looks focused, and it is the likeliest one to be running an
+/// agent. That made "leave while the agent works, get pinged" — the whole
+/// point of the feature — the one case that stayed quiet.
+///
+/// Hence: focus only silences an alert while the app is frontmost.
+/// `.inactive` deliberately does not count. A Stage Manager sibling window
+/// with the terminal visible beside the app being typed in is not engagement,
+/// and `ForegroundBanner` exists precisely to show a banner over a visible
+/// but unattended window.
+enum AttentionFocusPolicy {
+    static func suppressesAlert(
+        appIsFrontmost: Bool,
+        sessionOwnsKeyboardFocus: Bool
+    ) -> Bool {
+        appIsFrontmost && sessionOwnsKeyboardFocus
+    }
+}
+
 /// The state classifier. Everything here matches *structure*, not prose —
 /// the agents' spinner verbs and dialog copy are undocumented UI that
 /// already shifted once (v2.1.206 dropped the "esc to interrupt" hint the

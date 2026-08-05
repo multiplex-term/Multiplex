@@ -50,6 +50,7 @@ struct AddHostFormState {
     var privateKeyConcealed = false
     var passphrase = ""
     var isEnabled = true
+    var backgroundKeepAlive = false
     var sessionBackend = Host.SessionBackend.tmux
     var useMosh = false
     var moshServerPath = ""
@@ -80,6 +81,7 @@ struct AddHostFormState {
         privateKeyConcealed = !privateKey.isEmpty
         passphrase = secrets.passphrase ?? ""
         isEnabled = host.isEnabled
+        backgroundKeepAlive = host.backgroundKeepAlive
         sessionBackend = host.sessionBackend
         useMosh = host.useMosh
         moshServerPath = host.moshServerPath ?? ""
@@ -159,6 +161,7 @@ struct AddHostFormState {
         host.username = username.trimmingCharacters(in: .whitespaces)
         host.authMethod = authMethod
         host.isEnabled = isEnabled
+        host.backgroundKeepAlive = backgroundKeepAlive
         host.sessionBackend = sessionBackend
         host.useMosh = useMosh
         let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
@@ -272,6 +275,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private(set) var privateKeyView: AddHostGrowingTextView?
     private(set) var passphraseField: AddHostRevealableSecretField?
     private(set) var monitoringControl: SettingsBooleanRow?
+    private(set) var backgroundKeepAliveControl: SettingsBooleanRow?
     private(set) var moshControl: SettingsBooleanRow?
     private(set) var testChip: UIKitChassisChip?
     private(set) var newWorkingDirectoryField = UITextField()
@@ -786,23 +790,48 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             self.monitoringSection.setDetail(self.monitoringDetail)
         }
         monitoringControl = control
+        let keepAlive = SettingsBooleanRow(
+            title: "Keep alive in background",
+            isOn: form.backgroundKeepAlive,
+            accessibilityHint: "Holds this host's sessions and probing open for the extra "
+                + "seconds iOS grants after you leave the app"
+        ) { [weak self] enabled in
+            guard let self else { return }
+            self.form.backgroundKeepAlive = enabled
+            self.monitoringSection.setDetail(self.monitoringDetail)
+        }
+        backgroundKeepAliveControl = keepAlive
         let section = AddHostSectionView(
             title: "Monitoring",
             detail: monitoringDetail,
-            rows: [control]
+            rows: [control, keepAlive]
         )
         section.accessibilityIdentifier = "addhost.section.monitoring"
         return section
     }
 
+    /// One caption for both switches — they answer the same question at two
+    /// scales: whether the app dials this host at all, and whether it keeps
+    /// doing so for a moment after you look away.
     private var monitoringDetail: String {
-        if form.isEnabled {
-            return "The deck probes this host about every five seconds while it's in "
+        let connect = form.isEnabled
+            ? "The deck probes this host about every five seconds while it's in "
                 + "front, and its sessions appear as live tiles."
-        }
-        return "Off parks the host on the deck without dialling it: no probing, no tiles, "
-            + "and widgets or Shortcuts report it as disabled. Terminal windows already "
-            + "open keep running, and Signal check below still connects on demand."
+            : "Off parks the host on the deck without dialling it: no probing, no tiles, "
+                + "and widgets or Shortcuts report it as disabled. Terminal windows already "
+                + "open keep running, and Signal check below still connects on demand."
+        // Sized to the mechanism on purpose. iOS grants a leaving app a short
+        // stretch of extra running time and nothing more; the modes that would
+        // buy minutes are for apps genuinely playing audio or tracking
+        // location, so the promise here stops where the grant does.
+        let keepAlive = form.backgroundKeepAlive
+            ? "Leaving the app holds this host's sessions and probing open for the extra "
+                + "time iOS grants — tens of seconds, not minutes. Agent alerts still reach "
+                + "you inside that window; after it the app suspends as usual and tabs "
+                + "reattach when you come back."
+            : "Background keep-alive is off: leaving the app suspends it, this host's "
+                + "sessions drop, and its tabs reattach when you return."
+        return connect + "\n\n" + keepAlive
     }
 
     private func renderCredentials() {

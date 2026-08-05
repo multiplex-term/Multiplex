@@ -619,6 +619,41 @@ final class AgentAttentionTests: XCTestCase {
         defaults.removePersistentDomain(forName: "attention-pro-test")
     }
 
+    /// The bug behind "agent alerts never arrive when I switch away": keyboard
+    /// focus stands in for "you are watching this session", but the arbiter
+    /// keeps its owner when the app leaves the screen — so the session you
+    /// walked away from stayed silent, and it is the one most likely running
+    /// an agent. Focus may only silence an alert while the app is frontmost.
+    func testFocusSilencesAnAlertOnlyWhileTheAppIsFrontmost() {
+        XCTAssertTrue(
+            AttentionFocusPolicy.suppressesAlert(
+                appIsFrontmost: true,
+                sessionOwnsKeyboardFocus: true
+            ),
+            "the pane under your fingers must not banner at you"
+        )
+        XCTAssertFalse(
+            AttentionFocusPolicy.suppressesAlert(
+                appIsFrontmost: false,
+                sessionOwnsKeyboardFocus: true
+            ),
+            "walked away: retained keyboard focus is not engagement"
+        )
+        XCTAssertFalse(
+            AttentionFocusPolicy.suppressesAlert(
+                appIsFrontmost: true,
+                sessionOwnsKeyboardFocus: false
+            ),
+            "another window, a background tab, or no open tab always alerts"
+        )
+        XCTAssertFalse(
+            AttentionFocusPolicy.suppressesAlert(
+                appIsFrontmost: false,
+                sessionOwnsKeyboardFocus: false
+            )
+        )
+    }
+
     func testParseTailsKeepsFullDialogWhileMiniatureClips() {
         let dialog = permissionDialog.joined(separator: "\n")
         let output = "MULTIPLEX_TAILS\nMPXS $1\n\(dialog)\n\nMPXE"

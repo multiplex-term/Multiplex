@@ -412,6 +412,38 @@ final class AddHostUIKitTests: XCTestCase {
         XCTAssertEqual(existingPaywallCount, 0)
     }
 
+    /// Background keep-alive is the Monitoring section's second switch: free
+    /// (no paywall detour, unlike mosh), off for a host that never asked, and
+    /// carried onto the saved record. Its caption states what the switch
+    /// actually buys, so the sheet can't quietly start promising minutes.
+    func testBackgroundKeepAliveIsAFreeMonitoringSwitchThatReachesTheRecord() throws {
+        let fixture = makeFixture(isPro: false)
+        defer { clean(fixture) }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.setMode(.manual)
+        var paywalls = 0
+        fixture.controller.presentPaywallOverride = { paywalls += 1 }
+
+        let control = try XCTUnwrap(fixture.controller.backgroundKeepAliveControl)
+        XCTAssertFalse(control.isOn, "a host opts in; it never starts opted in")
+        XCTAssertFalse(fixture.controller.form.backgroundKeepAlive)
+
+        control.sendActions(for: .touchUpInside)
+        XCTAssertTrue(fixture.controller.form.backgroundKeepAlive)
+        XCTAssertEqual(paywalls, 0, "connection plumbing, not a Pro capability")
+        XCTAssertTrue(fixture.controller.form.host(liveHost: nil).backgroundKeepAlive)
+
+        XCTAssertTrue(
+            renderedText(in: fixture.controller.view)
+                .contains { $0.contains("tens of seconds") },
+            "the caption must stay sized to the assertion iOS actually grants"
+        )
+
+        control.sendActions(for: .touchUpInside)
+        XCTAssertFalse(fixture.controller.form.backgroundKeepAlive)
+        XCTAssertFalse(fixture.controller.form.host(liveHost: nil).backgroundKeepAlive)
+    }
+
     func testSignalCheckRendersWarningsAndRelevantEditRetiresResult() async throws {
         let fixture = makeFixture(isPro: true, testRunner: { _, _ in
             .connected(HostTest.Report(

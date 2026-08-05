@@ -27,6 +27,9 @@ final class MultiplexApplicationDelegate: UIResponder, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        // BGTaskScheduler rejects a registration made after launch finishes,
+        // and a cold wake for the task launches through exactly this path.
+        runtime.backgroundRefresh.register()
         return true
     }
 
@@ -313,6 +316,11 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
         mountedContent?.setSceneActive(true)
         Task { await runtime.appLock.autoUnlock() }
+        // Settle notification permission while the user is here, so an alert
+        // raised after they walk away is delivered rather than spent raising
+        // a system prompt over whatever app they switched to. No-op once
+        // asked, or without Pro and the Alerts switch.
+        runtime.attention.primeAuthorization()
     }
 
     private func promoteAwaitingRestorationIfNeeded(in windowScene: UIWindowScene) {

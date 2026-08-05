@@ -79,7 +79,7 @@ Free surface added 2026-07-27 (unreleased; ships with the next binary):
 | --- | --- |
 | What it is | A **BIND** road inside the Add Host sheet (a `BIND | MANUAL` choice bar; BIND is the default for a new host, and editing an existing host has no such bar) plus an open-source companion CLI (`mpx`, `github.com/multiplex-term/multiplex-cli`, MIT) that the user runs **on the machine being added**. The machine offers itself over a terminal QR, a Bonjour announcement, and — only with `mpx bind --copy` — the clipboard; the app enrolls **its own** newly generated ed25519 public key into that machine's `authorized_keys` |
 | Distribution of the CLI | Not shipped inside the app and not required to use it — a Homebrew tap (`multiplex-term/tap`) and `curl -fsSL https://multiplexterm.dev/install-mpx-cli | sh`, both covering macOS and Linux and both offered as copyable text in the BIND pane. Prebuilt archives are hosted in `multiplex-term/multiplex-cli-releases`; the installer verifies each download's SHA-256 against that release's `SHA256SUMS`; the MANUAL road is the unchanged Add Host form |
-| Discovery | Bonjour `_multiplex-bind._tcp` (`NSBonjourServices`), browsed only while the Add Host sheet's BIND pane is open (or an enrollment it started is still in flight) and the app is active. No `UIBackgroundModes`, no background sockets. **No special networking entitlement**: Bonjour browsing needs only `NSBonjourServices` + `NSLocalNetworkUsageDescription`, both declared |
+| Discovery | Bonjour `_multiplex-bind._tcp` (`NSBonjourServices`), browsed only while the Add Host sheet's BIND pane is open (or an enrollment it started is still in flight) and the app is active. Discovery never browses or holds a socket in the background and rides no background mode (the app declares only `fetch`, used solely by the agent-alert refresh described under Multiplex Pro). **No special networking entitlement**: Bonjour browsing needs only `NSBonjourServices` + `NSLocalNetworkUsageDescription`, both declared |
 | Credentials | The normal path moves no private key: the device keeps its key, the machine gets the public half (comment-marked `multiplex:bind:<id>:<device>`, removable with `mpx unbind`). `mpx bind --offline`, for hosts reachable only over SSH, ships a CLI-generated key inside the payload; the app then replaces it with a device-generated key on the first connection |
 | Confirmation | Every enrollment is confirmed twice — a 6-digit PIN or single-use token app-side, and `[Y/n]` on the machine's own terminal. A `multiplex://b/` URL opened from another app never executes: it only adds a candidate row on the BIND pane, which the user must ENROLL. Scan and paste live inside that pane, where the act itself is the app-side confirmation |
 | Tier | Free, and the two-host free limit is enforced **before** anything is written to the machine (the paywall appears instead) |
@@ -230,7 +230,16 @@ Current product split:
   menu, its tile, or Host Settings) that parks a host on the wall without
   connecting to it — no probing, no local-network check, and widget or
   Shortcut actions report it as disabled — carried with the host record to
-  the user's other devices, built-in terminal themes with independent light/dark
+  the user's other devices, a second per-host switch (Host Settings →
+  Monitoring, off by default) that keeps that host's sessions and probing
+  alive for the short stretch of running time iOS grants an app on its way
+  to the background, and — through the one background mode the app declares
+  (`fetch`, for `BGAppRefreshTask`) — lets iOS wake it later to check that
+  host again so an agent finishing while the user is away can still notify
+  them. No socket is held in the background, the wake is entirely at the
+  system's discretion (and does nothing if the user disables Background App
+  Refresh), and a host that was never opted in is never probed or scheduled
+  for — built-in terminal themes with independent light/dark
   selections (GLASS shares dark; light adds Tally Frost/Paper/Ivory),
   free file attachment on SSH-backed tmux and herdr tabs from Files/Photos
   (plus camera

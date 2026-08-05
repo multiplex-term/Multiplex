@@ -61,6 +61,21 @@ struct Host: Identifiable, Codable, Hashable {
     /// press on its tile. Rides the synced record, so a host switched off
     /// stays off on the user's other devices.
     var isEnabled: Bool = true
+    /// Keep this host's sessions and probing alive when the app leaves the
+    /// screen. Off (the default) is the plain iOS contract: the app suspends,
+    /// its sockets die, and `SessionResumePolicy` reattaches on the way back.
+    /// On, the app takes a background-task assertion as it leaves and keeps
+    /// this host's transports and probes running until the grant runs out —
+    /// tens of seconds, never indefinite, and never a `UIBackgroundModes`
+    /// declaration (`BackgroundActivityPolicy` records why). What it buys: a
+    /// quick trip to another app costs no reattach, and an agent that finishes
+    /// just after you look away still reaches `AttentionCenter` in time to
+    /// ping you. Rides the synced record. A flip reaches a running probe
+    /// through `BackgroundActivity.keepAliveLookup`, which resolves the switch
+    /// against the live store — deliberately not through the feed rebuild the
+    /// field's place in `connectionModelConfiguration` also causes, because
+    /// every asking loop holds a host snapshot of its own.
+    var backgroundKeepAlive: Bool = false
     /// Attach terminals over mosh (SSP over UDP) instead of the SSH PTY.
     /// The credentials above still authenticate the SSH bootstrap that
     /// launches `mosh-server`; deck probing stays on SSH either way.
@@ -177,6 +192,12 @@ extension Host {
         // Records written before the switch existed are hosts the user
         // expects to see probing: absent means enabled.
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        // Absent means off: background keep-alive spends battery and radio on
+        // a host's behalf, so it is never inherited by a record that predates
+        // the switch — the user opts each host in.
+        backgroundKeepAlive = try container.decodeIfPresent(
+            Bool.self, forKey: .backgroundKeepAlive
+        ) ?? false
         useMosh = try container.decodeIfPresent(Bool.self, forKey: .useMosh) ?? false
         // Decode via the raw string so an unknown value — a record written
         // by a newer schema that grew a third backend — degrades to tmux
@@ -212,6 +233,9 @@ extension Host {
     /// current/future Host field remains part of the identity — `isEnabled`
     /// deliberately included, so a host switched off on another device
     /// restarts the wall feed here, which is where the live probe is dropped.
+    /// (`backgroundKeepAlive` is in the identity only by that default rule —
+    /// nothing depends on the rebuild, because the loops resolve that switch
+    /// live through `BackgroundActivity.keepAliveLookup`.)
     var connectionModelConfiguration: Host {
         var configuration = self
         configuration.agentCommandConfiguration = AgentCommandConfiguration()

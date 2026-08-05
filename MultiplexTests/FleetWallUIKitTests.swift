@@ -947,6 +947,60 @@ final class FleetWallUIKitTests: XCTestCase {
         XCTAssertEqual(visibleText(in: settings), "SETTINGS")
     }
 
+    /// The feed's lifetime is the wall's visibility, not the scene's focus.
+    /// Regression: it used to die on resign-active, so an iPad Stage Manager
+    /// sibling taking focus stopped the deck probing while the user watched
+    /// it — and the per-tick `BackgroundActivity` gate below it never ran.
+    func testTheProbeFeedOutlivesTheSceneResigningActive() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FleetWallFeedLifetime-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try JSONEncoder().encode([makeHost()]).write(
+            to: directory.appendingPathComponent("hosts.json"),
+            options: .atomic
+        )
+
+        var configuration = FleetWallConfiguration(
+            store: HostStore(directory: directory, knownMirroredIDs: []),
+            hub: ConnectionHub(),
+            networkChanges: NetworkChangeMonitor(),
+            workspace: TerminalWorkspace(),
+            terminalOpener: TerminalRouteOpener(destination: .window, action: { _ in }),
+            presentation: .shellRail,
+            selectedTerminal: nil,
+            shellSafeArea: .zero,
+            reduceMotion: true,
+            sceneIsActive: true,
+            addHost: {},
+            editHost: { _ in },
+            openSettings: {},
+            openFAQ: {}
+        )
+        let controller = FleetWallViewController(configuration: configuration)
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 760)
+        controller.view.layoutIfNeeded()
+        controller.viewDidAppear(false)
+        XCTAssertTrue(controller.isFeedRunningForTesting)
+
+        configuration.sceneIsActive = false
+        controller.update(configuration: configuration)
+        XCTAssertTrue(
+            controller.isFeedRunningForTesting,
+            "a visible wall keeps probing; the per-tick gate decides, not the task's life"
+        )
+
+        controller.viewDidDisappear(false)
+        XCTAssertFalse(
+            controller.isFeedRunningForTesting,
+            "leaving the screen is what ends a feed"
+        )
+    }
+
     private func makeHost() -> Host {
         Host(
             name: "devbox",

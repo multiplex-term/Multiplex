@@ -86,6 +86,20 @@ targets:
         # never sees ATS either way).
         NSAppTransportSecurity:
           NSAllowsArbitraryLoadsInWebContent: true
+        # Background keep-alive's late half. `fetch` buys ONE thing: the
+        # right to run `BGAppRefreshTask`, so a host the user opted into
+        # keep-alive can be probed long after the departing app's
+        # background-task assertion expired and an agent's turn-end can
+        # still reach them. No socket is held in the background, nothing is
+        # scheduled for a host that never opted in, and the app declares no
+        # other mode — `audio`/`voip`/`location` would each require the app
+        # to genuinely do that thing (see BackgroundActivityPolicy).
+        UIBackgroundModes:
+          - fetch
+        # BGTaskScheduler refuses to register an identifier that is not
+        # declared here; keep in lockstep with `BackgroundRefresh.taskIdentifier`.
+        BGTaskSchedulerPermittedIdentifiers:
+          - app.multiplexterm.multiplex.refresh
         NSCameraUsageDescription: Multiplex uses the camera when you take a photo to send to your remote SSH session, and when you scan the code that binds a machine to the app.
         # Also covers Optic ID on visionOS (there is no separate key).
         NSFaceIDUsageDescription: Multiplex unlocks with Face ID when the optional App Lock setting is turned on.

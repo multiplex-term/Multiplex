@@ -1117,7 +1117,10 @@ final class TerminalWindowViewController: UIViewController,
         else { return }
         let model = hub.model(for: host)
         while !Task.isCancelled {
-            if UIApplication.shared.applicationState == .active {
+            // `permitsWork` resolves the keep-alive switch live, so this
+            // task — which outlives a Host Settings save — sees a flip
+            // without waiting for a tab change to restart it.
+            if BackgroundActivity.shared.permitsWork(for: host) {
                 entitlements.refreshSlashChipMeter()
                 await model.refreshAndWait(ifStaleFor: 4)
             }

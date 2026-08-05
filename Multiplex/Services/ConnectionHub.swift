@@ -701,8 +701,18 @@ final class HostConnectionModel {
     /// probe pass — title and tail inputs arrive together.
     private func evaluateAttention() {
         guard case .sessions(let sessions) = tmux else {
+            // Stop *claiming* attention we can no longer see — NEEDS YOU is
+            // re-earned live, never asserted from a dead probe.
             if !attention.isEmpty { attention = [:] }
-            attentionTracker.reset()
+            // But keep the edge baseline. A lost connection is not evidence
+            // that an agent's state changed, and the baseline is the only
+            // record of what it was: reset here, the reconnect's first pass
+            // has nothing to compare against and emits nothing. That is
+            // precisely the suspend → socket dies → wake → reconnect path,
+            // so clearing it made "the agent finished while you were away"
+            // unannounceable — the case background keep-alive and the
+            // background refresh both exist to serve. A session that really
+            // is gone is dropped by `prune` on the next successful pass.
             return
         }
         var next: [String: PaneAgentState] = [:]

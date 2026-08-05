@@ -17,6 +17,10 @@ final class AppRuntime {
     let appLock = AppLockStore()
     let externalActions = ExternalActionRouter.shared
     let bind = BindController.shared
+    /// The late half of keep-alive. Registered from
+    /// `didFinishLaunchingWithOptions` (BGTaskScheduler rejects anything
+    /// later) and re-scheduled whenever the app leaves.
+    let backgroundRefresh: BackgroundRefresh
 
     init() {
         // Attention wiring: every probe's events funnel through one center,
@@ -33,7 +37,37 @@ final class AppRuntime {
         self.entitlements = entitlements
         self.attention = attention
         self.workspace = workspace
-        hub = ConnectionHub(attention: attention)
+        let hub = ConnectionHub(attention: attention)
+        self.hub = hub
+        backgroundRefresh = BackgroundRefresh(
+            store: store,
+            hub: hub,
+            attention: attention
+        )
+
+        // Background keep-alive: the assertion is taken only when a host the
+        // user opted in has something for the extra time to do, so the
+        // default install's background behaviour is unchanged. Composed here
+        // because the answer needs both the live host list and the workspace,
+        // which the asking scenes do not all hold.
+        BackgroundActivity.shared.demand = { [weak store, weak workspace] in
+            guard let store else { return false }
+            return BackgroundActivityPolicy.wantsBackgroundTime(
+                hosts: store.hosts,
+                hostIDsWithLiveSessions: workspace?.hostIDsWithLiveSessions ?? []
+            )
+        }
+        // Every asking loop holds a host snapshot; this is where the switch's
+        // live value comes from, so a Host Settings flip reaches a probe
+        // already running. A deleted host wants nothing.
+        BackgroundActivity.shared.keepAliveLookup = { [weak store] hostID in
+            store?.host(id: hostID)?.backgroundKeepAlive ?? false
+        }
+        BackgroundActivity.shared.start()
+        backgroundRefresh.start()
+        #if DEBUG
+        backgroundRefresh.installDebugHook()
+        #endif
 
         // Mint the widget-link token once per install: the widget process
         // reads it from the App Group to mark its own deep links, and

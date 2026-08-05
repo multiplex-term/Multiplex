@@ -51,6 +51,7 @@ final class HostStore {
             seedFromEnvironmentIfNeeded()
             #if DEBUG
             installDebugHostEnableHook()
+            installDebugHostKeepAliveHook()
             #endif
         }
     }
@@ -348,6 +349,10 @@ final class HostStore {
         // off, which is how the never-dials-it promise is checked headlessly
         // (the harness sshd log stays empty). Absent leaves it alone.
         if let enabled = seed.enabled { host.isEnabled = enabled }
+        // A seeded `backgroundKeepAlive: true` starts the launch opted in, so
+        // the assertion path can be driven headlessly (nothing can tap the
+        // Host Settings switch). Absent leaves it off, as a real record is.
+        if let keepAlive = seed.backgroundKeepAlive { host.backgroundKeepAlive = keepAlive }
         if let key = seed.privateKey { KeychainStore.set(key, for: host.id, kind: .privateKey) }
         // For headless proofs of the encrypted-key connect path: a seed can
         // carry the key's passphrase so the probe connects without the
@@ -383,6 +388,25 @@ final class HostStore {
         }
     }
 
+    /// Headless-verification hook for the other Monitoring switch: flips the
+    /// FIRST host's background keep-alive through the same record write the
+    /// Host Settings row performs, so one run can prove both postures — the
+    /// hold appearing in the `background` log category and the harness sshd
+    /// log staying busy, then neither.
+    private func installDebugHostKeepAliveHook() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.hostkeepalive", &token, .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let host = self.hosts.first else { return }
+                var updated = host
+                updated.backgroundKeepAlive.toggle()
+                self.update(updated)
+            }
+        }
+    }
+
     private struct SeedHost: Decodable {
         var name: String
         var hostname: String
@@ -392,6 +416,7 @@ final class HostStore {
         var privateKey: String?
         var passphrase: String?
         var enabled: Bool?
+        var backgroundKeepAlive: Bool?
         var useMosh: Bool?
         var sessionBackend: String?
         var moshServerPath: String?

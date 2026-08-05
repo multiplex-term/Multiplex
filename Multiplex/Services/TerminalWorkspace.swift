@@ -158,6 +158,15 @@ final class TerminalWorkspace {
         auxiliaryControllers.removeValue(forKey: tabID)?.shutdown()
     }
 
+    /// Hosts with at least one live transport right now, whichever window
+    /// holds the tab. `BackgroundActivityPolicy` asks as the app leaves: a
+    /// keep-alive host with a live tab is worth an assertion even when the
+    /// deck would never dial it (a *disabled* host's open windows keep
+    /// running — disabling only stops the app dialling on its own).
+    var hostIDsWithLiveSessions: Set<UUID> {
+        Set(controllers.values.filter { $0.status == .live }.map(\.host.id))
+    }
+
     func resumeConnectionsWaitingForKeyPassphrase(hostID: UUID) {
         for controller in controllers.values where controller.host.id == hostID {
             controller.resumeAfterKeyPassphraseUpdate()
