@@ -1,3 +1,7 @@
+// The fixtures below are `.jsonl` bodies: one JSON record per line is the
+// format under test, so wrapping a record would change what the parser sees.
+// swiftlint:disable line_length
+
 import XCTest
 @testable import Multiplex
 
@@ -475,7 +479,7 @@ final class AgentSessionHistoryTests: XCTestCase {
 
     func testJumpFindCommandCarriesHeaderOracle() {
         let command = AgentSessionHistory.jumpFindCommand(
-            sessionID: "$4",
+            target: .tmux(sessionID: "$4"),
             needles: [
                 .init(index: 0, text: "Alpha turn"),
                 .init(index: 1, text: "it's the Bravo turn"),
@@ -542,7 +546,7 @@ final class AgentSessionHistoryTests: XCTestCase {
         // upward count.
         XCTAssertTrue(command.contains("if [ \"$k\" = 0 ] || [ \"$seen\" -gt \"$k\" ]; then"))
         XCTAssertTrue(command.contains(
-            "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then swapfb; stepk 1 PPage || return 1; "
+            "if [ $fbused = 0 ] && [ -n \"$n2\" ]; then swapfb; stepk 1 \"$KU\" || return 1; "
                 + "elif [ $sawt = 1 ] && [ $sawreal = 0 ] && [ $nb = 0 ]; then nb=1; dir=d; "
                 + "else top=1; return 1; fi"
         ))
@@ -553,7 +557,10 @@ final class AgentSessionHistoryTests: XCTestCase {
         XCTAssertTrue(command.contains(
             "mseq=$(printf '\\033[<0;2;1M\\033[<0;2;1m')"
         ))
-        XCTAssertTrue(command.contains("send-keys -t \"$sid\" -l \"$mseq\""))
+        // The click rides the backend's literal-bytes primitive (tmux:
+        // `send-keys -l`; herdr would be one `send-text` write).
+        XCTAssertTrue(command.contains("sraw \"$mseq\""))
+        XCTAssertTrue(command.contains("sraw() { tmux send-keys -t \"$sid\" -l \"$1\""))
         XCTAssertTrue(command.contains(
             "cskip() { dir=u; hclick || return 1; "
                 + "if [ \"$moved\" = 1 ]; then climb 1 || return 1; else ck=0; fi; }"
@@ -597,7 +604,7 @@ final class AgentSessionHistoryTests: XCTestCase {
 
     func testJumpFindCommandCountsDuplicateTwinsFromTheBottom() {
         let command = AgentSessionHistory.jumpFindCommand(
-            sessionID: "$0",
+            target: .tmux(sessionID: "$0"),
             needles: [
                 .init(index: 1, text: "commit"),
                 .init(index: 3, text: "top bar: right area toggle"),
@@ -635,7 +642,7 @@ final class AgentSessionHistoryTests: XCTestCase {
         // A unique target keeps the fast batches; without the prologue's
         // mouse capability the clicks stay disarmed by default.
         let unique = AgentSessionHistory.jumpFindCommand(
-            sessionID: "$0",
+            target: .tmux(sessionID: "$0"),
             needles: [.init(index: 0, text: "only prompt")],
             targetIndex: 0,
             targetNeedles: ["only prompt"]
@@ -649,7 +656,7 @@ final class AgentSessionHistoryTests: XCTestCase {
         // swap in mid-walk, and its viewport guarantee has to hold from
         // the first batch.
         let fallbackFamily = AgentSessionHistory.jumpFindCommand(
-            sessionID: "$0",
+            target: .tmux(sessionID: "$0"),
             needles: [
                 .init(index: 0, text: "deploy the staging environment now"),
                 .init(index: 2, text: "deploy the staging environment again"),
@@ -691,7 +698,7 @@ final class AgentSessionHistoryTests: XCTestCase {
         )
         // The scaled budget is what the built command runs with.
         let command = AgentSessionHistory.jumpFindCommand(
-            sessionID: "$0",
+            target: .tmux(sessionID: "$0"),
             needles: [.init(index: 0, text: "only prompt")],
             targetIndex: 0,
             targetNeedles: ["only prompt"],
@@ -702,7 +709,7 @@ final class AgentSessionHistoryTests: XCTestCase {
 
     func testJumpFindCommandSurvivesEmptyOracle() {
         let command = AgentSessionHistory.jumpFindCommand(
-            sessionID: "$1",
+            target: .tmux(sessionID: "$1"),
             needles: [],
             targetIndex: 0,
             targetNeedles: ["Only message"]
@@ -745,9 +752,133 @@ final class AgentSessionHistoryTests: XCTestCase {
     }
 
     func testJumpReturnUsesConstantTimeScrollBottom() {
-        let command = AgentSessionHistory.jumpReturnCommand(sessionID: "$1", pages: 500)
+        let command = AgentSessionHistory.jumpReturnCommand(
+            target: .tmux(sessionID: "$1"), pages: 500
+        )
         XCTAssertTrue(command.contains("send-keys -t '$1' C-End"))
         XCTAssertFalse(command.contains("NPage"))
         XCTAssertFalse(command.contains("Escape"))
     }
+
+    // MARK: - herdr backend
+
+    func testHerdrPaneContextCommandRidesSnapshotAndProcessInfo() {
+        let command = AgentSessionHistory.herdrPaneContextCommand(
+            sessionName: "ma in"
+        )
+        // The cwd anchor is the snapshot's focused pane — decoded app-side,
+        // never spliced by the shell.
+        XCTAssertTrue(command.contains("herdr --session 'ma in' api snapshot"))
+        // The registry walk roots at the focused pane's shell pid, the
+        // `pane_pid` analog (works on a clientless session, unlike
+        // `pane current`).
+        XCTAssertTrue(command.contains("pane process-info --current"))
+        XCTAssertTrue(command.contains("\"shell_pid\""))
+        // The shared walk: registry-gated config roots, most-specific pid
+        // first, markers identical to the tmux path.
+        XCTAssertTrue(command.contains("sessions/$p.json"))
+        XCTAssertTrue(command.contains("MULTIPLEX_HIST_AGENT_SESSION"))
+        XCTAssertTrue(command.contains("MULTIPLEX_HIST_CONFIG_DIR"))
+        XCTAssertTrue(command.hasSuffix("true"))
+    }
+
+    func testHerdrPaneContextParses() {
+        let snapshot = #"{"id":"x","result":{"snapshot":{"version":"0.7.5","protocol":17,"focused_workspace_id":"w1","focused_tab_id":"w1:t1","focused_pane_id":"w1:p2","workspaces":[{"workspace_id":"w1","number":1,"label":"one","active_tab_id":"w1:t1"}],"panes":[{"pane_id":"w1:p2","tab_id":"w1:t1","agent":"claude","agent_status":"idle","cwd":"/home/dev","foreground_cwd":"/home/dev/project"}],"layouts":[]},"type":"snapshot"}}"#
+        let output = snapshot + "\n"
+            + "MULTIPLEX_HIST_AGENT_SESSION 0f9caf6f-9a2f-4a80-bd4c-9d94f1adbdd4\n"
+            + "MULTIPLEX_HIST_CONFIG_DIR /home/dev/.config/claude\n"
+        let context = AgentSessionHistory.parseHerdrPaneContext(output)
+        // Foreground cwd wins — `pane_current_path`'s analog.
+        XCTAssertEqual(context?.cwd, "/home/dev/project")
+        XCTAssertEqual(
+            context?.agentSessionID, "0f9caf6f-9a2f-4a80-bd4c-9d94f1adbdd4"
+        )
+        XCTAssertEqual(context?.configDir, "/home/dev/.config/claude")
+        // No focused-pane cwd → nil, the honest NO WORKING DIRECTORY.
+        XCTAssertNil(AgentSessionHistory.parseHerdrPaneContext(
+            "MULTIPLEX_HIST_AGENT_SESSION 0f9caf6f-9a2f-4a80-bd4c-9d94f1adbdd4"
+        ))
+    }
+
+    func testHerdrJumpPrologueCommandAndParse() {
+        let command = AgentSessionHistory.herdrJumpPrologueCommand(
+            sessionName: "dev"
+        )
+        // One exec: focused pane envelope, then a visible read of that pane.
+        XCTAssertTrue(command.contains("pane current"))
+        XCTAssertTrue(command.contains("--source visible --format text"))
+        XCTAssertTrue(command.contains("MPXJ_NOSESSION"))
+
+        let pane = #"{"id":"x","result":{"pane":{"pane_id":"w1:p2","tab_id":"w1:t1","agent":"claude","agent_status":"idle","terminal_title":"✳ Claude Code","terminal_title_stripped":"Claude Code","cwd":"/home/dev","focused":true},"type":"pane_info"}}"#
+        let output = "MPXJ_HPANE " + pane + "\n"
+            + "MPXJ_CAP\n"
+            + "╭──────────────────────╮\n"
+            + "│ transcript           │\n"
+            + "╰──────────────────────╯\n"
+            + "MPXJ_CAPEND\n"
+        let prologue = AgentSessionHistory.parseHerdrJumpPrologue(output)
+        // The pane id rides in the target coordinate slot; the RAW title
+        // keeps the glyphs the idle classifier reads.
+        XCTAssertEqual(prologue?.sessionID, "w1:p2")
+        XCTAssertEqual(prologue?.paneTitle, "✳ Claude Code")
+        XCTAssertEqual(prologue?.capture.count, 3)
+        // Width is the widest rendered row — Claude's chrome spans the pane.
+        XCTAssertEqual(prologue?.paneWidth, 24)
+        // No census / no mouse oracle on herdr: the size warning stays
+        // silent and clicks stay disarmed.
+        XCTAssertEqual(prologue?.clientSizeCount, 0)
+        XCTAssertEqual(prologue?.supportsHeaderClicks, false)
+        XCTAssertNil(AgentSessionHistory.parseHerdrJumpPrologue("MPXJ_NOSESSION"))
+        // An unbakeable pane id (response-derived, spliced into the find
+        // command) drops the prologue outright.
+        let hostile = output.replacingOccurrences(of: "w1:p2", with: "w1 p2")
+        XCTAssertNil(AgentSessionHistory.parseHerdrJumpPrologue(hostile))
+    }
+
+    func testCaptureDisplayWidthCountsWideGlyphsAsTwo() {
+        XCTAssertEqual(
+            AgentSessionHistory.captureDisplayWidth(["ab", "日本語", "x"]), 6
+        )
+        XCTAssertEqual(AgentSessionHistory.captureDisplayWidth([]), 0)
+    }
+
+    func testHerdrJumpFindUsesRawKeyBytesInOneWrite() {
+        let command = AgentSessionHistory.jumpFindCommand(
+            target: .herdr(sessionName: "de v", paneID: "w1:p2"),
+            needles: [.init(index: 0, text: "only prompt")],
+            targetIndex: 0,
+            targetNeedles: ["only prompt"]
+        )
+        // Captures and sends aim at the prologue's pane, shell-quoted.
+        XCTAssertTrue(command.contains(
+            "herdr --session 'de v' pane read 'w1:p2' --source visible --format text"
+        ))
+        XCTAssertTrue(command.contains(
+            "herdr --session 'de v' pane send-text 'w1:p2'"
+        ))
+        // herdr 0.7.5's send-keys has no page/end vocabulary: the keys ARE
+        // their escape sequences, each in ONE send-text write (a split ESC
+        // would read as a bare Escape and could interrupt a turn).
+        XCTAssertTrue(command.contains("KU=$(printf '\\033[5~')"))
+        XCTAssertTrue(command.contains("KD=$(printf '\\033[6~')"))
+        XCTAssertTrue(command.contains("KE=$(printf '\\033[1;5F')"))
+        // The walk body is the shared oracle — same classifier, same
+        // restore discipline, no tmux leakage.
+        XCTAssertTrue(command.contains("MPXNDL=\"$ndl\" MPXPFX='❯' MPXTGT=\"$tgt\""))
+        XCTAssertFalse(command.contains("tmux"))
+        XCTAssertFalse(command.contains("Escape"))
+    }
+
+    func testHerdrJumpReturnSendsScrollBottomBytes() {
+        let command = AgentSessionHistory.jumpReturnCommand(
+            target: .herdr(sessionName: "dev", paneID: "w1:p2"), pages: 3
+        )
+        XCTAssertTrue(command.contains(
+            "pane send-text 'w1:p2' \"$(printf '\\033[1;5F')\""
+        ))
+        XCTAssertFalse(command.contains("tmux"))
+        XCTAssertFalse(command.contains("Escape"))
+    }
 }
+
+// swiftlint:enable line_length

@@ -56,6 +56,21 @@ final class TerminalSessionController {
     /// The terminal HUD provides the explicit exit path tmux itself lacks.
     private(set) var tmuxCopyModeUIActive = false
 
+    /// The copy-mode HUD's backend-agnostic sibling: the same tap ownership
+    /// flip (mouse reporting off, so hold/double-tap run native selection
+    /// over the visible screen and copy to the device pasteboard) without
+    /// entering any remote mode — herdr has no copy mode to enter, and on
+    /// tmux nothing needs to touch the server just to select. Pans are
+    /// suppressed rather than translated: no remote view answers cursor
+    /// keys here, and the alternate screen has no local scrollback. Entry
+    /// is the selection block's SELECT / SELECT ALL; exit is the floating
+    /// block's DONE, its COPY (the grab finishes the mode), or a keyboard
+    /// Escape (consumed — see `sendInput`).
+    private(set) var selectTextModeUIActive = false
+    /// Drops a stale focused-pane-rect answer when the mode ends or a
+    /// resize refetches before the previous exec came home.
+    private var selectTextClampGeneration = 0
+
     /// The HISTORY surface: user prompts read from the agent's own session
     /// file on the host (see `AgentSessionHistory`). Present while the panel
     /// is open; cleared on dismiss so a stale list never reopens.
@@ -81,7 +96,7 @@ final class TerminalSessionController {
     }
     private(set) var historyJump: HistoryJumpPhase?
     private var historyJumpTask: Task<Void, Never>?
-    private var historyJumpSessionID: String?
+    private var historyJumpTarget: AgentSessionHistory.JumpTarget?
     /// Transient status pill ("AGENT IS BUSY", "NOT IN THE VISIBLE
     /// TRANSCRIPT") — jump failures are outcomes, not errors.
     private(set) var historyNotice: String?
@@ -213,14 +228,23 @@ final class TerminalSessionController {
 
     func bind(_ view: TerminalView) {
         terminalView = view
-        view.allowMouseReporting = !tmuxCopyModeUIActive
-        view.forceRemoteCursorScroll = tmuxCopyModeUIActive
+        applyTouchInteractionModes()
         // Touch never hovers, so SwiftTerm's pointer-gated activation can
         // never fire here; this pane decides instead. The view owns the
         // closure and this controller owns the view — capture weakly.
         view.linkActivationIgnoresHighlight = true
         view.linkActivationHandler = { [weak self] target, _, rowTexts in
             self?.activateLink(target, rowFragments: rowTexts) ?? false
+        }
+        // herdr resizes its pane splits by mouse drag, so a long press on a
+        // border cell becomes a remote press-drag-release. herdr tabs only:
+        // the same drag under tmux starts a copy-mode selection, and the
+        // fork's filter is consulted only while the client requested button
+        // tracking, so a plain shell never loses its long press.
+        if route.sessionBackend == .herdr {
+            view.longPressMouseDragFilter = { _, content in
+                HerdrPaneBorder.isBorderCell(content)
+            }
         }
         if !pendingOutput.isEmpty {
             view.feed(byteArray: pendingOutput[...])
@@ -284,8 +308,9 @@ final class TerminalSessionController {
     /// The keyboard lock as a named menu action. The rail key's hold gesture
     /// stays the fast path, but nothing on screen announced it — a held key
     /// is unfindable, so the same lock/unlock lives in the terminal's actions
-    /// menu, spelled out. Unlocking asks for the keyboard back, exactly like
-    /// the padlock's short press.
+    /// menu. Lock hides while a hardware keyboard makes it redundant; an
+    /// already-held lock keeps Unlock available. Unlocking asks for the
+    /// keyboard back, exactly like the padlock's short press.
     func toggleKeyboardLock() {
         guard let terminalView else { return }
         if KeyboardLock.shared.isLocked {
@@ -297,8 +322,8 @@ final class TerminalSessionController {
     #endif
 
     /// Scene became active again: re-assert focus only if this terminal is
-    /// (or nothing is) the app-wide owner — every window's scene activates
-    /// at once on foreground, and they must not steal from each other.
+    /// already the app-wide owner — every window's scene activates at once
+    /// on foreground, and notification order must not elect a new owner.
     func restoreFocusIfOwner(allowed: Bool = true) {
         guard let terminalView else { return }
         TerminalFocusArbiter.restore(terminalView, allowed: allowed)
@@ -568,6 +593,7 @@ final class TerminalSessionController {
         stopTransportPumps()
         stopDirectShellMonitoring()
         setTmuxCopyModeUIActive(false)
+        setSelectTextModeUIActive(false)
         resetHistoryState()
         handoffWatch = nil
         status = .ended(reason)
@@ -592,12 +618,12 @@ final class TerminalSessionController {
         directShellMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                // Same active-state gate as the wall feed and the terminal
-                // window's probes: iOS suspension is what normally parks
-                // this loop, but if anything keeps the process alive in the
-                // background (an extension, a brief transition), a hidden
-                // app must not keep issuing SSH exec probes.
-                if UIApplication.shared.applicationState == .active {
+                // Same gate as the wall feed and the terminal window's
+                // probes: iOS suspension is what normally parks this loop,
+                // and a hidden app must not keep issuing SSH exec probes —
+                // unless this tab's host bought background time, which is
+                // exactly so a shell agent's turn-end can still be seen.
+                if BackgroundActivity.shared.permitsWork(for: self.host) {
                     await self.refreshDirectShellAgent(ifStaleFor: 4)
                 }
                 try? await Task.sleep(for: Self.directShellProbeInterval)
@@ -799,7 +825,15 @@ final class TerminalSessionController {
             // Typing (or Escape) returns Claude Code's pager to the live
             // tail on its own; drop the app-side state with it.
             historyJump = nil
-            historyJumpSessionID = nil
+            historyJumpTarget = nil
+        }
+        // Escape is the select-text HUD's exit key and the mode is app-local,
+        // so the byte must not leak to the remote (it could interrupt a
+        // running agent). When tmux copy mode is also active the byte keeps
+        // riding below — tmux needs it to leave its own mode.
+        if selectTextModeUIActive, data == Data([0x1B]) {
+            setSelectTextModeUIActive(false)
+            if !tmuxCopyModeUIActive { return }
         }
         inputContinuation?.yield(data)
         // Both the app-owned DONE action and a hardware/software Escape key
@@ -810,12 +844,98 @@ final class TerminalSessionController {
         }
     }
 
+    /// One entry point for the shared shortcut panel: dispatch by the row's
+    /// own payload. A payload mismatched to this tab's backend fails closed
+    /// on the per-backend route guards below.
+    func performPanelShortcut(_ item: ShortcutPanelItem) {
+        switch item.payload {
+        case .tmux(let shortcut): performTmuxShortcut(shortcut)
+        case .herdr(let shortcut): performHerdrShortcut(shortcut)
+        }
+    }
+
+    /// Hand the visible screen to native selection on any session-backed
+    /// tab. Entered from the selection block's SELECT/SELECT ALL, which carry
+    /// the gesture's cell so selection targets that pane — and the backend's
+    /// focus follows it, the switch a tap would have made had the mode not
+    /// kept taps local. No position (the DEBUG
+    /// hook) targets the focused pane.
+    func beginSelectTextMode(atScreenPosition point: (col: Int, row: Int)? = nil) {
+        guard status == .live else { return }
+        if case .finding = historyJump { return }
+        setSelectTextModeUIActive(true)
+        refreshSelectTextClamp(targeting: point)
+    }
+
+    /// The block's DONE. Local state only — the remote never entered a mode.
+    func finishSelectTextMode() {
+        setSelectTextModeUIActive(false)
+    }
+
+    /// Ask the backend for the visible panes' screen rectangles and clamp
+    /// local selection into the target pane — the pressed one when a
+    /// position rides along, the focused one otherwise. A selection must
+    /// not bleed across a pane border, and Select All should mean the pane,
+    /// not the screen (which on herdr would also sweep the sidebar and tab
+    /// bar). When the target is not the focused pane, focus follows: tmux
+    /// by pane id; herdr's only focus verb is directional, so one step
+    /// fires and only in a two-pane layout, where a single step is exact.
+    /// Fail-soft throughout: no answer leaves the whole-screen behavior.
+    private func refreshSelectTextClamp(targeting point: (col: Int, row: Int)? = nil) {
+        guard selectTextModeUIActive,
+              let backend = route.sessionBackend,
+              let sessionName = route.sessionName
+        else { return }
+        selectTextClampGeneration &+= 1
+        let generation = selectTextClampGeneration
+        let command = switch backend {
+        case .tmux: TmuxProbe.paneRectsCommand(sessionName: sessionName)
+        case .herdr: HerdrProbe.snapshotCommand(sessionName: sessionName)
+        }
+        Task {
+            guard let output = try? await withControlConnection({
+                try await $0.exec(command)
+            }) else { return }
+            guard generation == selectTextClampGeneration,
+                  selectTextModeUIActive
+            else { return }
+            let panes = switch backend {
+            case .tmux: TmuxProbe.parsePaneRects(output)
+            case .herdr: HerdrProbe.parsePaneScreenRects(output)
+            }
+            let focused = panes.first(where: \.isFocused)
+            guard let target = point.flatMap({ p in
+                panes.first(where: { $0.rect.contains(col: p.col, row: p.row) })
+            }) ?? focused ?? panes.first
+            else { return }
+            terminalView?.selectionClampRect = (target.rect.columns, target.rect.rows)
+            guard !target.isFocused else { return }
+            switch backend {
+            case .tmux:
+                await executeControlCommand(
+                    TmuxProbe.focusPaneCommand(paneID: target.id)
+                )
+            case .herdr:
+                guard panes.count == 2, let focused,
+                      let direction = PaneScreenRect.direction(
+                        from: focused.rect, to: target.rect
+                      )
+                else { return }
+                await executeControlCommand(HerdrProbe.focusPaneDirectionCommand(
+                    sessionName: sessionName, direction: direction
+                ))
+            }
+        }
+    }
+
     /// Run one command from the shared tmux panel. Ordinary shortcuts enter
     /// through SwiftTerm exactly like keyboard input. Destructive shortcuts
     /// were already confirmed by the panel's second press and use an SSH exec
     /// channel, which avoids the timing-sensitive tmux `:` prompt entirely.
     func performTmuxShortcut(_ shortcut: TmuxShortcut) {
-        guard status == .live, let sessionName = route.sessionName else { return }
+        guard status == .live, route.usesTmux,
+              let sessionName = route.sessionName
+        else { return }
         // The jump search owns the pane while it pages; a shortcut now would
         // either be dropped by the input lock (leaving copy-mode UI stuck
         // half-armed) or race the remote script.
@@ -835,14 +955,70 @@ final class TerminalSessionController {
         guard let command = TmuxProbe.directShortcutCommand(
             shortcut, sessionName: sessionName
         ) else { return }
-        Task { await executeTmuxControlCommand(command) }
+        Task { await executeControlCommand(command) }
+    }
+
+    /// Run one command from the herdr panel (HRDR) — `performTmuxShortcut`'s
+    /// herdr-backend sibling. Non-destructive rows send herdr's stock ⌃B
+    /// binding through SwiftTerm; the confirmed closes resolve the focused
+    /// target from one snapshot exec and close it by id, so they follow the
+    /// server's truth rather than a rebindable key.
+    func performHerdrShortcut(_ shortcut: HerdrShortcut) {
+        guard status == .live, route.sessionBackend == .herdr,
+              let sessionName = route.sessionName
+        else { return }
+        if case .finding = historyJump { return }
+        if let input = shortcut.bindingInput {
+            terminalView?.send(input)
+            return
+        }
+        guard let scope = shortcut.closeScope else { return }
+        Task { await closeHerdrFocusedTarget(scope, sessionName: sessionName) }
+    }
+
+    /// Snapshot → focused id → close, two control execs. An unreadable
+    /// snapshot or an unnamed focus declines silently — the tmux closes'
+    /// `[ -n "$target" ]` posture: a close must never guess its target.
+    private func closeHerdrFocusedTarget(
+        _ scope: HerdrShortcut.CloseScope, sessionName: String
+    ) async {
+        let snapshot = HerdrProbe.snapshotCommand(sessionName: sessionName)
+        guard let output = try? await withControlConnection({
+            try await $0.exec(snapshot)
+        }),
+            let target = HerdrProbe.parseFocusedCloseTarget(output, scope: scope),
+            let close = HerdrProbe.closeShortcutCommand(
+                sessionName: sessionName, scope: scope, targetID: target
+            )
+        else { return }
+        await executeControlCommand(close)
+    }
+
+    /// The shortcut panel's switch list — tmux windows or herdr workspaces,
+    /// decided by this tab's backend so the panel never learns one.
+    func loadShortcutSwitchChoices() async -> [TmuxWindowChoice]? {
+        switch route.sessionBackend {
+        case .tmux: await loadTmuxWindowList()
+        case .herdr: await loadHerdrWorkspaceList()
+        case nil: nil
+        }
+    }
+
+    func selectShortcutSwitchChoice(_ choice: TmuxWindowChoice) {
+        switch route.sessionBackend {
+        case .tmux: selectTmuxWindow(choice)
+        case .herdr: selectHerdrWorkspace(choice)
+        case nil: break
+        }
     }
 
     /// The shortcut panel's window list, read through the control path so
     /// SSH and mosh tabs answer alike. A failure returns nil and the panel
     /// simply shows no window section — the shortcut grid stays useful.
     func loadTmuxWindowList() async -> [TmuxWindowChoice]? {
-        guard status == .live, let sessionName = route.sessionName else { return nil }
+        guard status == .live, route.usesTmux,
+              let sessionName = route.sessionName
+        else { return nil }
         let command = TmuxProbe.windowListCommand(sessionName: sessionName)
         guard let output = try? await withControlConnection({
             try await $0.exec(command)
@@ -854,10 +1030,35 @@ final class TerminalSessionController {
     /// path like the confirmed close actions: no terminal input, no `:`
     /// prompt, and the attached client follows tmux's own state change.
     func selectTmuxWindow(_ window: TmuxWindowChoice) {
-        guard status == .live, route.sessionName != nil else { return }
+        guard status == .live, route.usesTmux else { return }
         if case .finding = historyJump { return }
         let command = TmuxProbe.selectWindowCommand(windowID: window.tmuxID)
-        Task { await executeTmuxControlCommand(command) }
+        Task { await executeControlCommand(command) }
+    }
+
+    /// The herdr panel's workspace rows, through the same control path.
+    func loadHerdrWorkspaceList() async -> [TmuxWindowChoice]? {
+        guard status == .live, route.sessionBackend == .herdr,
+              let sessionName = route.sessionName
+        else { return nil }
+        let command = HerdrProbe.workspaceListCommand(sessionName: sessionName)
+        guard let output = try? await withControlConnection({
+            try await $0.exec(command)
+        }) else { return nil }
+        return HerdrProbe.parseWorkspaceChoices(output)
+    }
+
+    /// Focus one workspace of the attached herdr session — the session's ONE
+    /// global focus moves, and the attached client follows on its own.
+    func selectHerdrWorkspace(_ choice: TmuxWindowChoice) {
+        guard status == .live, route.sessionBackend == .herdr,
+              let sessionName = route.sessionName
+        else { return }
+        if case .finding = historyJump { return }
+        guard let command = HerdrProbe.focusWorkspaceCommand(
+            sessionName: sessionName, workspaceID: choice.tmuxID
+        ) else { return }
+        Task { await executeControlCommand(command) }
     }
 
     /// Leave the contextual copy UI and tmux copy mode together. Escape is
@@ -976,14 +1177,36 @@ final class TerminalSessionController {
     private func setTmuxCopyModeUIActive(_ active: Bool) {
         guard tmuxCopyModeUIActive != active else { return }
         tmuxCopyModeUIActive = active
-        terminalView?.allowMouseReporting = !active
-        terminalView?.forceRemoteCursorScroll = active
+        applyTouchInteractionModes()
+    }
+
+    private func setSelectTextModeUIActive(_ active: Bool) {
+        guard selectTextModeUIActive != active else { return }
+        selectTextModeUIActive = active
+        applyTouchInteractionModes()
+        if !active {
+            selectTextClampGeneration &+= 1
+            terminalView?.selectionClampRect = nil
+        }
+    }
+
+    /// The one writer for the view flags the two app-owned interaction modes
+    /// share. Copy mode keeps pans alive as cursor keys (tmux copy mode
+    /// answers them); select-text has no remote listener, so its pans are
+    /// suppressed outright — unless copy mode is active too and wins.
+    private func applyTouchInteractionModes() {
+        guard let terminalView else { return }
+        terminalView.allowMouseReporting =
+            !(tmuxCopyModeUIActive || selectTextModeUIActive)
+        terminalView.forceRemoteCursorScroll = tmuxCopyModeUIActive
+        terminalView.suppressRemotePanScroll =
+            selectTextModeUIActive && !tmuxCopyModeUIActive
     }
 
     /// SSH tabs already own an exec-capable connection next to their PTY.
     /// Mosh tabs deliberately do not, so a destructive user action opens a
     /// short-lived SSH control connection and closes it after the command.
-    private func executeTmuxControlCommand(_ command: String) async {
+    private func executeControlCommand(_ command: String) async {
         if let connection {
             _ = try? await connection.exec(command)
             return
@@ -1037,7 +1260,13 @@ final class TerminalSessionController {
     /// its own exec surface (direct mosh shells have neither).
     var canOfferAgentHistory: Bool {
         guard status == .live else { return false }
-        if route.sessionName != nil { return true }
+        if route.usesTmux { return true }
+        // herdr resolves the same transcript identity through its own
+        // surfaces: focused-pane cwd from a snapshot, the registry walk
+        // rooted at `pane process-info`'s shell_pid (verified 0.7.5).
+        if route.sessionBackend == .herdr { return true }
+        // Only a true plain shell may use its own process-discovered cwd.
+        guard route.sessionName == nil else { return false }
         return connection != nil && directShellWorkingDirectory != nil
     }
 
@@ -1046,7 +1275,7 @@ final class TerminalSessionController {
     /// bounded tail read is cheap. Claude Code only: the session-file
     /// surface concentrates on the one agent whose pager jump is exact.
     func openAgentHistory(for agent: AgentKind) {
-        guard status == .live, agent == .claudeCode else { return }
+        guard canOfferAgentHistory, agent == .claudeCode else { return }
         historyLoadTask?.cancel()
         agentHistory = .loading
         historyLoadTask = Task { [weak self] in
@@ -1068,13 +1297,24 @@ final class TerminalSessionController {
                     let cwd: String?
                     let preferredSessionID: String?
                     let configDir: String?
-                    if let sessionName = route.sessionName {
+                    if route.usesTmux, let sessionName = route.sessionName {
                         let output = try await connection.exec(
                             AgentSessionHistory.paneContextCommand(
                                 sessionName: sessionName
                             )
                         )
                         let context = AgentSessionHistory.parsePaneContext(output)
+                        cwd = context?.cwd
+                        preferredSessionID = context?.agentSessionID
+                        configDir = context?.configDir
+                    } else if route.sessionBackend == .herdr,
+                              let sessionName = route.sessionName {
+                        let output = try await connection.exec(
+                            AgentSessionHistory.herdrPaneContextCommand(
+                                sessionName: sessionName
+                            )
+                        )
+                        let context = AgentSessionHistory.parseHerdrPaneContext(output)
                         cwd = context?.cwd
                         preferredSessionID = context?.agentSessionID
                         configDir = context?.configDir
@@ -1105,7 +1345,8 @@ final class TerminalSessionController {
             agentHistory = .loaded(
                 agent: agent,
                 messages: result.messages,
-                jumpAvailable: route.sessionName != nil && agent == .claudeCode
+                jumpAvailable: (route.usesTmux || route.sessionBackend == .herdr)
+                    && agent == .claudeCode
             )
         } catch {
             guard !Task.isCancelled, agentHistory != nil else { return }
@@ -1114,7 +1355,7 @@ final class TerminalSessionController {
     }
 
     private enum HistoryJumpOutcome {
-        case found(sessionID: String, pages: Int)
+        case found(target: AgentSessionHistory.JumpTarget, pages: Int)
         case failed(String)
     }
 
@@ -1126,6 +1367,7 @@ final class TerminalSessionController {
     /// pager shows is matched against it, so each step is directed.
     func startHistoryJump(to message: AgentUserMessage) {
         guard status == .live,
+              route.usesTmux || route.sessionBackend == .herdr,
               let sessionName = route.sessionName,
               !tmuxCopyModeUIActive,
               case .loaded(let agent, let messages, true) = agentHistory,
@@ -1141,7 +1383,7 @@ final class TerminalSessionController {
         // dictated words without a trace. Close the microphone instead.
         cancelDictation()
         #endif
-        historyJumpSessionID = nil
+        historyJumpTarget = nil
         let preview = String(message.firstLine.prefix(24))
         historyJump = .finding(preview: preview)
         historyJumpTask = Task { [weak self] in
@@ -1161,13 +1403,28 @@ final class TerminalSessionController {
         preview: String
     ) async {
         let outcome: HistoryJumpOutcome
+        let isHerdr = route.sessionBackend == .herdr
         do {
             outcome = try await withControlConnection { connection in
                 let prologueOutput = try await connection.exec(
-                    AgentSessionHistory.jumpPrologueCommand(sessionName: sessionName)
+                    isHerdr
+                        ? AgentSessionHistory.herdrJumpPrologueCommand(
+                            sessionName: sessionName
+                        )
+                        : AgentSessionHistory.jumpPrologueCommand(
+                            sessionName: sessionName
+                        )
                 )
-                guard let prologue = AgentSessionHistory.parseJumpPrologue(prologueOutput)
+                guard let prologue = isHerdr
+                    ? AgentSessionHistory.parseHerdrJumpPrologue(prologueOutput)
+                    : AgentSessionHistory.parseJumpPrologue(prologueOutput)
                 else { return .failed("SESSION NOT FOUND") }
+                // The walk's coordinate: tmux aims at the session (its
+                // active pane answers); herdr aims at the prologue's
+                // bake-vetted focused pane.
+                let target: AgentSessionHistory.JumpTarget = isHerdr
+                    ? .herdr(sessionName: sessionName, paneID: prologue.sessionID)
+                    : .tmux(sessionID: prologue.sessionID)
                 switch AgentAttention.classify(
                     title: prologue.paneTitle, tail: prologue.capture
                 ) {
@@ -1203,7 +1460,7 @@ final class TerminalSessionController {
                 }
                 let findOutput = try await connection.exec(
                     AgentSessionHistory.jumpFindCommand(
-                        sessionID: prologue.sessionID,
+                        target: target,
                         needles: entries,
                         targetIndex: message.ordinal,
                         targetNeedles: targetNeedles,
@@ -1228,7 +1485,7 @@ final class TerminalSessionController {
                     // the message's flattened row (a rebuilt transcript
                     // omits long multiline prompt bodies). From the user's
                     // seat that is the jump destination.
-                    return .found(sessionID: prologue.sessionID, pages: pages)
+                    return .found(target: target, pages: pages)
                 case .top, .exhausted:
                     // The remote script already restored the live view. A
                     // second differently-sized client can invalidate the
@@ -1256,14 +1513,14 @@ final class TerminalSessionController {
         }
 
         switch outcome {
-        case .found(let sessionID, let pages):
+        case .found(let target, let pages):
             if Task.isCancelled || historyJump == nil {
                 // Cancelled mid-find but the search landed: put the pane
                 // back rather than leaving it silently paged.
-                returnTranscriptToLive(sessionID: sessionID, pages: pages)
+                returnTranscriptToLive(target: target, pages: pages)
                 return
             }
-            historyJumpSessionID = sessionID
+            historyJumpTarget = target
             historyJump = .jumped(preview: preview, pages: pages)
         case .failed(let reason):
             guard !Task.isCancelled, historyJump != nil else { return }
@@ -1285,19 +1542,21 @@ final class TerminalSessionController {
     /// never Esc — a turn may have started since the search verified idle.
     func finishHistoryJump() {
         guard case .jumped(_, let pages) = historyJump else { return }
-        let sessionID = historyJumpSessionID
+        let target = historyJumpTarget
         historyJump = nil
-        historyJumpSessionID = nil
-        guard let sessionID else { return }
-        returnTranscriptToLive(sessionID: sessionID, pages: pages)
+        historyJumpTarget = nil
+        guard let target else { return }
+        returnTranscriptToLive(target: target, pages: pages)
     }
 
-    private func returnTranscriptToLive(sessionID: String, pages: Int) {
+    private func returnTranscriptToLive(
+        target: AgentSessionHistory.JumpTarget, pages: Int
+    ) {
         Task { [weak self] in
             _ = try? await self?.withControlConnection { connection in
                 try await connection.exec(
                     AgentSessionHistory.jumpReturnCommand(
-                        sessionID: sessionID, pages: pages
+                        target: target, pages: pages
                     )
                 )
             }
@@ -1321,7 +1580,7 @@ final class TerminalSessionController {
         historyJumpTask?.cancel()
         historyJumpTask = nil
         historyJump = nil
-        historyJumpSessionID = nil
+        historyJumpTarget = nil
         historyNoticeClearTask?.cancel()
         historyNoticeClearTask = nil
         historyNotice = nil
@@ -1334,7 +1593,7 @@ final class TerminalSessionController {
     @discardableResult
     func debugSendTmuxShortcutThroughTerminal(_ shortcut: TmuxShortcut) -> Bool {
         guard status == .live,
-              route.sessionName != nil,
+              route.usesTmux,
               shortcut.bindingInput != nil,
               terminalView != nil
         else { return false }
@@ -1349,6 +1608,10 @@ final class TerminalSessionController {
         lastRows = rows
         guard status == .live else { return }
         resizeContinuation?.yield(TerminalSize(cols: cols, rows: rows))
+        // A resize relayouts the multiplexer's panes, so a select-text clamp
+        // fetched for the old geometry is wrong — refetch (the generation
+        // counter drops the stale answer if resizes storm).
+        if selectTextModeUIActive { refreshSelectTextClamp() }
     }
 
     /// Scene became active again: a mosh transport heartbeats immediately
@@ -1369,13 +1632,13 @@ final class TerminalSessionController {
         // The jump search owns the pane's input while it pages; the FINDING
         // veil is visible over the drop target for its few seconds.
         if case .finding = historyJump { return }
-        if (host.useMosh || route.sessionName == nil),
+        if host.useMosh || route.sessionBackend == nil,
            status == .live, dropTask == nil, !files.isEmpty {
-            // Mosh has no SFTP channel, while a plain shell has no tmux pane
-            // whose foreground cwd can be resolved. Say so instead of
-            // silently discarding the user's attach/drop intent.
+            // Mosh has no SFTP channel, while a plain shell has no
+            // multiplexer pane whose foreground cwd can be resolved. Say so
+            // instead of silently discarding the user's attach/drop intent.
             dropClearTask?.cancel()
-            dropState = .failed("File upload requires tmux over SSH")
+            dropState = .failed("File upload requires tmux or herdr over SSH")
             dropClearTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled else { return }
@@ -1448,40 +1711,67 @@ final class TerminalSessionController {
         var prepareGitIgnoredDirectory: Bool
     }
 
-    /// The pane's cwd when tmux can tell us (it follows the foreground
-    /// process, i.e. the agent's own cwd) — corralled into a self-ignoring
-    /// `.multiplex-drops/` when that cwd is inside a git worktree, so drops
-    /// never clutter `git status`. Otherwise $HOME with absolute typed
-    /// paths. The query's first `/`-prefixed line is the path; a
-    /// MULTIPLEX_GIT line marks a worktree.
+    /// The pane's cwd when the session backend can tell us (both follow
+    /// the foreground process, i.e. the agent's own cwd) — corralled into
+    /// a self-ignoring `.multiplex-drops/` when that cwd is inside a git
+    /// worktree, so drops never clutter `git status`. Otherwise $HOME with
+    /// absolute typed paths.
     private func dropDestination(
         over connection: SSHConnection
     ) async throws -> DropDestination {
-        if let sessionName = route.sessionName {
-            let output = (try? await connection.exec(
-                TmuxProbe.dropDestinationCommand(sessionName: sessionName)
-            )) ?? ""
-            let destination = TmuxProbe.parseDropDestination(output)
-            if let path = destination.cwd {
-                if destination.insideGitWorktree {
-                    return DropDestination(
-                        directory: path + "/" + DropText.dropsDirectoryName,
-                        typedPrefix: DropText.dropsDirectoryName + "/",
-                        prepareGitIgnoredDirectory: true
-                    )
-                }
+        let anchor = await paneDropAnchor(over: connection)
+        if let path = anchor.cwd {
+            if anchor.insideGitWorktree {
                 return DropDestination(
-                    directory: path,
-                    typedPrefix: "",
-                    prepareGitIgnoredDirectory: false
+                    directory: path + "/" + DropText.dropsDirectoryName,
+                    typedPrefix: DropText.dropsDirectoryName + "/",
+                    prepareGitIgnoredDirectory: true
                 )
             }
+            return DropDestination(
+                directory: path,
+                typedPrefix: "",
+                prepareGitIgnoredDirectory: false
+            )
         }
         return DropDestination(
             directory: try await connection.remoteHomeDirectory(),
             typedPrefix: nil,
             prepareGitIgnoredDirectory: false
         )
+    }
+
+    /// The backend-dispatched cwd + git-worktree answer behind a drop.
+    /// tmux resolves both in one exec (the cwd stays in a shell variable
+    /// for the git check). herdr's cwd comes home in snapshot JSON —
+    /// strictly the focused pane, where this tab's typed paths land — so
+    /// the corral check is its own exec with the app-resolved path
+    /// respliced; both print the marker `TmuxProbe.parseDropDestination`
+    /// reads. Any failure is (nil, false): the $HOME fallback, never an
+    /// error.
+    private func paneDropAnchor(
+        over connection: SSHConnection
+    ) async -> (cwd: String?, insideGitWorktree: Bool) {
+        guard let sessionName = route.sessionName else { return (nil, false) }
+        switch route.sessionBackend {
+        case .tmux:
+            let output = (try? await connection.exec(
+                TmuxProbe.dropDestinationCommand(sessionName: sessionName)
+            )) ?? ""
+            return TmuxProbe.parseDropDestination(output)
+        case .herdr:
+            let snapshot = (try? await connection.exec(
+                HerdrProbe.snapshotCommand(sessionName: sessionName)
+            )) ?? ""
+            guard let cwd = HerdrProbe.parseFocusedPaneWorkingDirectory(snapshot)
+            else { return (nil, false) }
+            let check = (try? await connection.exec(
+                TmuxProbe.gitWorktreeCheckCommand(directory: cwd)
+            )) ?? ""
+            return (cwd, TmuxProbe.parseDropDestination(check).insideGitWorktree)
+        case nil:
+            return (nil, false)
+        }
     }
 
     // MARK: Links
@@ -1510,6 +1800,16 @@ final class TerminalSessionController {
     }
 
     private func claimResolved(_ target: String) -> Bool {
+        // `file:` is URI-shaped, but in a remote pane it names a file on the
+        // SSH host, never this device. Give the strict local-authority file
+        // parser first refusal so it reaches the viewer; malformed/non-local
+        // file URIs then fall through to TerminalLink's blocked, copy-only
+        // confirmation. Ordinary links must still precede ordinary paths — a
+        // schemeless domain such as example.com/docs is legal path syntax too.
+        if let file = TerminalPathTarget.resolveFileURL(target) {
+            pendingActivation = .path(file)
+            return true
+        }
         if let link = TerminalLink.resolve(target) {
             pendingActivation = .link(link)
             return true
@@ -1558,16 +1858,28 @@ final class TerminalSessionController {
         if case .path = pendingActivation { pendingActivation = nil }
     }
 
-    /// The pane's cwd for the file viewer's anchor — the same `list-panes`
-    /// truth drops resolve (the first `/`-prefixed line; the MULTIPLEX_GIT
-    /// marker is ignored here). nil when no pane can answer: a plain shell,
-    /// a mosh tab (no exec surface), or a dead transport.
+    /// The pane's cwd for the file viewer's anchor — the same per-backend
+    /// truth drops resolve (tmux's `list-panes` line or the herdr
+    /// snapshot's focused pane; the git-worktree question is not asked
+    /// here). nil when no pane can answer: a plain shell, a mosh tab (no
+    /// exec surface), or a dead transport.
     func paneWorkingDirectory() async -> String? {
-        guard let sessionName = route.sessionName, let connection else { return nil }
-        let output = (try? await connection.exec(
-            TmuxProbe.dropDestinationCommand(sessionName: sessionName)
-        )) ?? ""
-        return TmuxProbe.parseDropDestination(output).cwd
+        guard let sessionName = route.sessionName, let connection
+        else { return nil }
+        switch route.sessionBackend {
+        case .tmux:
+            let output = (try? await connection.exec(
+                TmuxProbe.dropDestinationCommand(sessionName: sessionName)
+            )) ?? ""
+            return TmuxProbe.parseDropDestination(output).cwd
+        case .herdr:
+            let output = (try? await connection.exec(
+                HerdrProbe.snapshotCommand(sessionName: sessionName)
+            )) ?? ""
+            return HerdrProbe.parseFocusedPaneWorkingDirectory(output)
+        case nil:
+            return nil
+        }
     }
 
     // MARK: Actions
@@ -1598,6 +1910,7 @@ final class TerminalSessionController {
         stopTransportPumps()
         stopDirectShellMonitoring()
         setTmuxCopyModeUIActive(false)
+        setSelectTextModeUIActive(false)
         resetHistoryState()
         status = .ended(nil)
         keyPassphraseChallenge = nil
@@ -1628,6 +1941,7 @@ final class TerminalSessionController {
             keyPassphraseChallenge = nil
         }
         setTmuxCopyModeUIActive(false)
+        setSelectTextModeUIActive(false)
         resetHistoryState()
         status = .connecting
         beginTransportRun()
@@ -1718,6 +2032,7 @@ final class TerminalSessionController {
         keyPassphraseChallenge = nil
         guard case .ended = status else { return }
         setTmuxCopyModeUIActive(false)
+        setSelectTextModeUIActive(false)
         resetHistoryState()
         status = .connecting
         beginTransportRun()

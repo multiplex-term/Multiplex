@@ -406,6 +406,18 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertTrue(command.contains("echo MULTIPLEX_GIT"))
     }
 
+    func testGitWorktreeCheckCommandRequotesTheResolvedDirectory() {
+        // The herdr drop path resolves the cwd app-side (snapshot JSON), so
+        // the corral question is its own exec — same marker, same parser,
+        // the directory respliced shell-quoted.
+        let command = TmuxProbe.gitWorktreeCheckCommand(directory: "/home/dev/my repo")
+        XCTAssertTrue(command.contains(
+            "git -C '/home/dev/my repo' rev-parse --is-inside-work-tree"))
+        XCTAssertTrue(command.contains("echo MULTIPLEX_GIT"))
+        XCTAssertFalse(command.contains("list-panes"),
+                       "no pane query — the cwd is already known")
+    }
+
     func testParseDropDestinationReadsPathAndWorktreeMarker() {
         let inWorktree = TmuxProbe.parseDropDestination("/home/dev/repo\nMULTIPLEX_GIT\n")
         XCTAssertEqual(inWorktree.cwd, "/home/dev/repo")
@@ -470,7 +482,8 @@ final class TmuxProbeTests: XCTestCase {
         // Wanted name first, then the unnamed retry — the server settles
         // duplicate-name races and its printed id+name pair is the truth.
         XCTAssertTrue(command.contains(
-            "i=$(multiplex_tmux new-session -d -P -F '#{session_id} #{session_name}' -c \"$d\" -s 'claude' 2>/dev/null)"))
+            "i=$(multiplex_tmux new-session -d -P -F '#{session_id} #{session_name}' "
+                + "-c \"$d\" -s 'claude' 2>/dev/null)"))
         XCTAssertTrue(command.contains(
             "|| i=$(multiplex_tmux new-session -d -P -F '#{session_id} #{session_name}' -c \"$d\" 2>/dev/null)"))
         // The launch is TYPED into the shell (literal text, then Enter),
@@ -525,6 +538,51 @@ final class TmuxProbeTests: XCTestCase {
             "tmux -u send-keys -t \"${i%% *}\" -l -- 'nvm use 20'; "
                 + "tmux -u send-keys -t \"${i%% *}\" Enter"))
         XCTAssertTrue(command.contains("MULTIPLEX_NEW"))
+    }
+
+    func testNewWindowCommandDefaultsToTheSessionsOwnDirectoryAndTypes() {
+        let command = TmuxProbe.newWindowCommand(
+            sessionName: "my project", script: "nvm use 20", launch: "claude 'go'")
+        // Callers pass the Working Directory choice (or the host's first
+        // configured dir); nil only reaches here when the host configures
+        // nothing, and then the target session's ACTIVE pane cwd beats a
+        // bare $HOME. Same list-panes resolution as the mint's
+        // source-session branch.
+        XCTAssertTrue(command.contains("tmux -u list-panes -t '=my project'"))
+        XCTAssertTrue(command.contains("d=\"${p:-$HOME}\""))
+        // No -d: the window becomes the session's current window, so the
+        // reveal/attach that follows fronts the agent. `=name` exact-match
+        // is fine for a WINDOW target; the typing below switches to the
+        // printed pane id (3.6a rejects `=name` for pane targets). The
+        // server already exists, so no systemd-scope runner here.
+        XCTAssertTrue(command.contains(
+            "i=$(tmux -u new-window -t '=my project' -P -F '#{pane_id}' -c \"$d\" 2>/dev/null)"))
+        XCTAssertFalse(command.contains("multiplex_tmux"))
+        XCTAssertTrue(command.contains(
+            "tmux -u send-keys -t \"$i\" -l -- 'nvm use 20'; "
+                + "tmux -u send-keys -t \"$i\" Enter; "
+                + "tmux -u send-keys -t \"$i\" -l -- 'claude '\\''go'\\'''"))
+        XCTAssertTrue(command.contains("printf 'MULTIPLEX_NEWWIN %s\\n' \"$i\""))
+        // Citadel throws on non-zero exit: a failed create must read as a
+        // missing sentinel, never a torn-down control connection.
+        XCTAssertTrue(command.hasSuffix("; true"))
+    }
+
+    func testNewWindowCommandStartsInExplicitDirectoryWithHomeFallback() {
+        let command = TmuxProbe.newWindowCommand(
+            sessionName: "main", startDirectory: "~/srv/app", launch: "claude")
+        XCTAssertTrue(command.contains("d=\"$HOME\"/'srv/app'; [ -d \"$d\" ] || d=\"$HOME\"; "))
+        XCTAssertFalse(command.contains("list-panes"))
+    }
+
+    func testParseNewWindowReadsThePaneIDSentinel() {
+        XCTAssertEqual(
+            TmuxProbe.parseNewWindow("login noise\nMULTIPLEX_NEWWIN %41\n"), "%41")
+        XCTAssertNil(TmuxProbe.parseNewWindow("MULTIPLEX_NEWWIN \n"))
+        XCTAssertNil(TmuxProbe.parseNewWindow("no window today"))
+        // A new-WINDOW response can never satisfy the new-SESSION parser
+        // and vice versa — different execs, but keep the sentinels honest.
+        XCTAssertNil(TmuxProbe.parseNewSession("MULTIPLEX_NEWWIN %41\n"))
     }
 
     func testNewSessionCommandWithoutSourceOrLaunch() {
@@ -851,5 +909,48 @@ final class TmuxProbeTests: XCTestCase {
 
         let shell = TerminalRoute(hostID: host, mode: .shell)
         XCTAssertNil(shell.moshRemoteCommand)
+    }
+
+    func testPaneRectsCarryIdGeometryAndFocus() {
+        let output = """
+        MPXRECT %3 0 0 0 50 24
+        MPXRECT %7 1 51 0 49 23
+        login banner noise
+        MPXRECT %9 1 0 0 0 24
+        """
+        XCTAssertEqual(TmuxProbe.parsePaneRects(output), [
+            PaneScreenRectEntry(
+                id: "%3",
+                rect: PaneScreenRect(columns: 0...49, rows: 0...23),
+                isFocused: false
+            ),
+            PaneScreenRectEntry(
+                id: "%7",
+                rect: PaneScreenRect(columns: 51...99, rows: 0...22),
+                isFocused: true
+            ),
+        ], "noise and the zero-width line drop; geometry and focus survive")
+        XCTAssertTrue(
+            TmuxProbe.paneRectsCommand(sessionName: "ma in")
+                .contains("list-panes -t '=ma in'"),
+            "session names ride shell-quoted exact-match targets"
+        )
+        XCTAssertTrue(
+            TmuxProbe.focusPaneCommand(paneID: "%7").contains("select-pane -t '%7'"),
+            "focus targets the pane id, never a name"
+        )
+    }
+
+    func testPaneScreenRectDirectionPicksTheDominantAxis() {
+        let left = PaneScreenRect(columns: 0...49, rows: 0...23)
+        let right = PaneScreenRect(columns: 51...99, rows: 0...23)
+        let below = PaneScreenRect(columns: 0...49, rows: 25...47)
+        XCTAssertEqual(PaneScreenRect.direction(from: left, to: right), "right")
+        XCTAssertEqual(PaneScreenRect.direction(from: right, to: left), "left")
+        XCTAssertEqual(PaneScreenRect.direction(from: left, to: below), "down")
+        XCTAssertEqual(PaneScreenRect.direction(from: below, to: left), "up")
+        XCTAssertNil(PaneScreenRect.direction(from: left, to: left))
+        XCTAssertTrue(left.contains(col: 10, row: 5))
+        XCTAssertFalse(left.contains(col: 50, row: 5))
     }
 }

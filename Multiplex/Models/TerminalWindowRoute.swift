@@ -48,6 +48,18 @@ struct TerminalWindowRoute: Codable, Hashable, Identifiable {
         activeTabID = tabID
     }
 
+    /// Reorder within one window. A drop onto another tab moves the source
+    /// into that tab's current slot; the active tab remains active by id.
+    mutating func moveTab(id sourceID: UUID, to targetID: UUID) {
+        guard let sourceIndex = tabs.firstIndex(where: { $0.id == sourceID }),
+              let targetIndex = tabs.firstIndex(where: { $0.id == targetID }),
+              sourceIndex != targetIndex
+        else { return }
+
+        let moved = tabs.remove(at: sourceIndex)
+        tabs.insert(moved, at: targetIndex)
+    }
+
     /// Merge: append tabs surrendered by another window. Deduplicates by id
     /// (a tab lives in exactly one window) and keeps the current active tab.
     mutating func merge(_ incoming: [TerminalRoute]) {

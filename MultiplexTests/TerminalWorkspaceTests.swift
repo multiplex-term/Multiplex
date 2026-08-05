@@ -32,7 +32,8 @@ final class TerminalWorkspaceTests: XCTestCase {
         var revealed: [UUID] = []
         register(workspace, tabs: [main, scratch]) { revealed.append($0) }
 
-        XCTAssertTrue(workspace.focusTab(hostID: host, sessionName: "scratch"))
+        XCTAssertTrue(workspace.focusTab(
+            hostID: host, sessionName: "scratch", backend: .tmux))
         XCTAssertEqual(revealed, [scratch.id], "create-mode tabs are bound to their session too")
     }
 
@@ -44,7 +45,8 @@ final class TerminalWorkspaceTests: XCTestCase {
         register(workspace, tabs: [TerminalRoute(hostID: host, mode: .attach(sessionName: "main"))])
         register(workspace, tabs: [deploy]) { revealed.append($0) }
 
-        XCTAssertTrue(workspace.focusTab(hostID: host, sessionName: "deploy"))
+        XCTAssertTrue(workspace.focusTab(
+            hostID: host, sessionName: "deploy", backend: .tmux))
         XCTAssertEqual(revealed, [deploy.id])
     }
 
@@ -55,11 +57,33 @@ final class TerminalWorkspaceTests: XCTestCase {
         register(workspace, tabs: [TerminalRoute(hostID: host, mode: .attach(sessionName: "main"))])
 
         XCTAssertFalse(
-            workspace.focusTab(hostID: otherHost, sessionName: "main"),
+            workspace.focusTab(
+                hostID: otherHost, sessionName: "main", backend: .tmux),
             "the same session name on another host is a different session")
-        XCTAssertFalse(workspace.focusTab(hostID: host, sessionName: "missing"))
-        XCTAssertTrue(workspace.hasTab(hostID: host, sessionName: "main"))
-        XCTAssertFalse(workspace.hasTab(hostID: otherHost, sessionName: "main"))
+        XCTAssertFalse(workspace.focusTab(
+            hostID: host, sessionName: "missing", backend: .tmux))
+        XCTAssertTrue(workspace.hasTab(
+            hostID: host, sessionName: "main", backend: .tmux))
+        XCTAssertFalse(workspace.hasTab(
+            hostID: otherHost, sessionName: "main", backend: .tmux))
+    }
+
+    func testSameNamedSessionsInDifferentBackendsNeverCrossFocus() {
+        let workspace = TerminalWorkspace()
+        let host = UUID()
+        let tmux = TerminalRoute(hostID: host, mode: .attach(sessionName: "main"))
+        let herdr = TerminalRoute(
+            hostID: host, mode: .herdrAttach(sessionName: "main"))
+        var revealed: [UUID] = []
+        register(workspace, tabs: [tmux, herdr]) { revealed.append($0) }
+
+        XCTAssertTrue(workspace.focusTab(
+            hostID: host, sessionName: "main", backend: .herdr))
+        XCTAssertEqual(revealed, [herdr.id])
+        XCTAssertTrue(workspace.hasTab(
+            hostID: host, sessionName: "main", backend: .tmux))
+        XCTAssertTrue(workspace.hasTab(
+            hostID: host, sessionName: "main", backend: .herdr))
     }
 
     func testShellTabsNeverMatch() {
@@ -67,7 +91,38 @@ final class TerminalWorkspaceTests: XCTestCase {
         let host = UUID()
         register(workspace, tabs: [TerminalRoute(hostID: host, mode: .shell)])
 
-        XCTAssertFalse(workspace.hasTab(hostID: host, sessionName: "shell"))
+        XCTAssertFalse(workspace.hasTab(
+            hostID: host, sessionName: "shell", backend: .tmux))
+    }
+
+    func testFileViewerRegistersRequestedPresentationBeforeItsRouteArrives() {
+        let workspace = TerminalWorkspace()
+        let host = Host(
+            name: "devbox",
+            hostname: "127.0.0.1",
+            username: "tester"
+        )
+        let path = "/srv/app/App.swift"
+        let tab = TerminalRoute(hostID: host.id, mode: .fileViewer(path: path))
+        workspace.openFileViewer(
+            tab: tab,
+            host: host,
+            startDirectory: "/srv/app",
+            anchorSessionName: nil,
+            target: TerminalPathTarget(
+                raw: path,
+                path: path,
+                base: .absolute,
+                line: nil
+            ),
+            targetPresentation: .diff
+        )
+
+        XCTAssertEqual(
+            workspace.fileViewerController(for: tab.id)?.filePresentation,
+            .diff
+        )
+        workspace.closeTab(tab.id)
     }
 
     func testUnregisteredWindowStopsMatching() {
@@ -79,6 +134,7 @@ final class TerminalWorkspaceTests: XCTestCase {
 
         workspace.unregisterWindow(id: id)
 
-        XCTAssertFalse(workspace.hasTab(hostID: host, sessionName: "main"))
+        XCTAssertFalse(workspace.hasTab(
+            hostID: host, sessionName: "main", backend: .tmux))
     }
 }

@@ -32,7 +32,7 @@ DESTINATIONS = {
 # The one external TestFlight group. Invitation only by construction: it is
 # created with no public link, so a tester joins by an emailed invite and the
 # seat cannot be forwarded on.
-EXTERNAL_GROUP = ENV.fetch("TESTFLIGHT_EXTERNAL_GROUP", "Public Beta")
+EXTERNAL_GROUP = ENV.fetch("TESTFLIGHT_EXTERNAL_GROUP", "Multiplex Beta")
 
 def asc_api_key
   app_store_connect_api_key(
@@ -79,6 +79,15 @@ end
 # here, so by upload time the file is the release's tester script. Internal
 # builds may go out without one; an external build reaches real testers and a
 # placeholder would be the first thing they read.
+#
+# App Store Connect caps whatsNew at 4,000 characters, same as the review
+# notes — and for the same reason it is checked here rather than left to the
+# API: a file that grew past the cap across a beta cycle otherwise fails after
+# both platform archives, as Spaceship's opaque "An attribute value is too
+# long. - /data/attributes/whatsNew". Measured in CHARACTERS, which is what the
+# API counts; this file's bullets and arrows make its byte length run higher.
+WHATS_NEW_LIMIT = 4000
+
 def whats_new(external)
   path = File.expand_path("testflight-whats-new.txt", __dir__)
   body = File.exist?(path) ? File.read(path) : ""
@@ -86,20 +95,41 @@ def whats_new(external)
     UI.user_error!("Write #{path} before distributing externally") if external
     return "Internal build."
   end
+  if body.strip.length > WHATS_NEW_LIMIT
+    UI.user_error!(
+      "What to Test is too long: #{path} is #{body.strip.length} characters, " \
+      "App Store Connect allows #{WHATS_NEW_LIMIT}. Condense it to this " \
+      "release's tester script.",
+    )
+  end
   body
 end
 
-# Deliver has one shared metadata path, so inject the one field that differs
-# between App Store platform versions instead of duplicating every locale.
-def platform_release_notes(platform)
-  pattern = File.expand_path("metadata/*/release_notes_#{platform}.txt", __dir__)
-  notes = Dir.glob(pattern).sort.each_with_object({}) do |path, localized|
-    body = File.read(path)
-    UI.user_error!("Release notes are empty: #{path}") if body.strip.empty?
-    localized[File.basename(File.dirname(path))] = body
+# Deliver has one shared metadata path, so inject the fields that differ
+# between App Store platform versions instead of duplicating every shared file.
+# App Store Connect caps both localized fields at 4,000 characters.
+PLATFORM_LOCALIZED_LIMITS = {
+  "description" => 4000,
+  "release_notes" => 4000,
+}.freeze
+
+def platform_localized_metadata(field, platform)
+  field = field.to_s
+  pattern = File.expand_path("metadata/*/#{field}_#{platform}.txt", __dir__)
+  localized = Dir.glob(pattern).sort.each_with_object({}) do |path, values|
+    body = File.read(path).strip
+    UI.user_error!("Platform metadata is empty: #{path}") if body.empty?
+    limit = PLATFORM_LOCALIZED_LIMITS.fetch(field)
+    if body.length > limit
+      UI.user_error!(
+        "Platform metadata is too long: #{path} is #{body.length} characters; " \
+        "App Store Connect allows #{limit}",
+      )
+    end
+    values[File.basename(File.dirname(path))] = body
   end
-  UI.user_error!("No release notes found for #{platform} (expected #{pattern})") if notes.empty?
-  notes
+  UI.user_error!("No #{field} found for #{platform} (expected #{pattern})") if localized.empty?
+  localized
 end
 
 # Review information is ONE record, read once and handed to both reviews:
@@ -165,6 +195,20 @@ end
 
 def app_review_information
   REVIEW_INFORMATION.keys.each_with_object({}) { |key, info| info[key] = review_value(key) }
+end
+
+# The App Review demo video (a screen recording of the reviewer flow against
+# the demo host) rides the iOS version's review record only; visionOS
+# deliberately carries none. The file is git-ignored like the .env secrets —
+# returns nil when absent, and deliver REMOVES any remote attachment on a
+# push without one, so restore the file before store_metadata when the
+# attachment should survive.
+def review_attachment_path
+  path = File.expand_path("multiplex-ios-demo.mp4", __dir__)
+  return path if File.exist?(path)
+
+  UI.important("fastlane/multiplex-ios-demo.mp4 is missing — this push removes the iOS review attachment")
+  nil
 end
 
 def beta_review_info
@@ -376,7 +420,7 @@ lane :beta do |options|
   end
 end
 
-desc "Push shared metadata plus platform release notes. platform:ios|visionos or omit for both. Uploads no binary or screenshots."
+desc "Push shared metadata plus platform descriptions/release notes. platform:ios|visionos or omit for both. Uploads no binary or screenshots."
 lane :store_metadata do |options|
   platforms = options[:platform] ? [options[:platform]] : DESTINATIONS.keys
   platforms.each { |platform| DESTINATIONS.fetch(platform) }
@@ -385,17 +429,45 @@ lane :store_metadata do |options|
     deliver(
       api_key: api_key,
       platform: DESTINATIONS.fetch(platform)[:pilot],
-      release_notes: platform_release_notes(platform),
+      description: platform_localized_metadata(:description, platform),
+      release_notes: platform_localized_metadata(:release_notes, platform),
       # Passed explicitly rather than left to deliver's own file discovery, so
       # App Store review reads the exact record TestFlight's Beta App Review
       # gets — including the two values that live in .env, not in git.
       app_review_information: app_review_information,
+      # iOS carries the demo-video review attachment; the visionOS record
+      # stays empty on purpose (nil here means deliver deletes any remote
+      # attachment, which keeps that promise on every push).
+      app_review_attachment_file: platform == "ios" ? review_attachment_path : nil,
       skip_binary_upload: true,
       skip_screenshots: true,
       force: true,                             # skip the HTML preview prompt (CI-friendly)
       precheck_include_in_app_purchases: false, # API-key auth cannot precheck IAP
     )
   end
+end
+
+desc "Attach fastlane/multiplex-ios-demo.mp4 to the editable iOS version's App Review Information. Touches no other metadata; visionOS stays empty."
+lane :review_attachment do
+  path = review_attachment_path
+  UI.user_error!("fastlane/multiplex-ios-demo.mp4 not found") unless path
+  Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.create(
+    key_id: ENV.fetch("ASC_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+    filepath: File.expand_path(ENV.fetch("ASC_KEY_PATH")),
+  )
+  app = Spaceship::ConnectAPI::App.find("app.multiplexterm.multiplex")
+  UI.user_error!("App record not found") unless app
+  version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+  UI.user_error!("No editable iOS App Store version") unless version
+  detail = version.fetch_app_store_review_detail
+  UI.user_error!("The iOS version has no App Review Information record yet — run store_metadata once first") unless detail
+  (detail.app_store_review_attachments || []).each do |attachment|
+    UI.message("Removing existing review attachment #{attachment.file_name}")
+    attachment.delete!
+  end
+  detail.upload_attachment(path: path)
+  UI.success("Attached #{File.basename(path)} to iOS #{version.version_string} (#{version.app_version_state})")
 end
 
 desc "Push fastlane/screenshots to App Store Connect (device class inferred from pixel size)."

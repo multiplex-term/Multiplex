@@ -1,5 +1,6 @@
 import Citadel
 import Foundation
+import ImageIO
 import Observation
 import UIKit
 
@@ -23,6 +24,29 @@ final class FileViewerController: AuxiliaryPaneController {
     /// that highlighting stays interactive.
     static let textByteLimit = 1_500_000
     static let imageByteLimit = 12_000_000
+    /// The longest edge the viewer decodes to. Encoded bytes bound nothing
+    /// about a bitmap's size, and the screen this renders on is smaller than
+    /// this in every dimension.
+    static let imageMaxPixelEdge = 4096
+
+    /// Decode through ImageIO with a pixel ceiling, so a decompression bomb
+    /// from the host costs a downsample instead of the app's memory.
+    /// Falls back to nothing (i.e. "binary") when the bytes aren't an image.
+    static func decodeImage(_ data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0
+        else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: imageMaxPixelEdge,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(
+            source, 0, options as CFDictionary
+        ) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
 
     let tabID: UUID
     private let host: Host
@@ -39,6 +63,16 @@ final class FileViewerController: AuxiliaryPaneController {
     private let anchorSessionName: String?
     /// The pressed path this tab was summoned to show, when it was.
     private let target: TerminalPathTarget?
+    /// A file viewer keeps SOURCE | DIFF as a browsing mode: once DIFF is
+    /// selected, choosing another changed file opens its diff too. The mode
+    /// also rides an "Open in New Tab" summons so the new viewer opens the
+    /// same representation instead of flashing source first.
+    enum FilePresentation: Equatable {
+        case source
+        case diff
+    }
+    private let targetPresentation: FilePresentation
+    private(set) var filePresentation: FilePresentation
     /// True when the tab was summoned to BROWSE (+ TAB ▸ File Viewer)
     /// rather than to show a specific pressed file — the tree is the
     /// subject until a file is chosen, so the compact drawer opens itself
@@ -50,13 +84,16 @@ final class FileViewerController: AuxiliaryPaneController {
         host: Host,
         startDirectory: String?,
         anchorSessionName: String? = nil,
-        target: TerminalPathTarget?
+        target: TerminalPathTarget?,
+        targetPresentation: FilePresentation = .source
     ) {
         self.tabID = tabID
         self.host = host
         self.startDirectory = startDirectory
         self.anchorSessionName = anchorSessionName
         self.target = target
+        self.targetPresentation = targetPresentation
+        self.filePresentation = targetPresentation
         self.opensBrowsing = target == nil
     }
 
@@ -101,6 +138,10 @@ final class FileViewerController: AuxiliaryPaneController {
     }
 
     private(set) var content: Content = .idle
+    /// Back/forward trail of the content screens this tab visited. Written
+    /// only where content lands (a failed load is never a destination);
+    /// `visit`'s equality gate keeps refresh and quiet watch swaps out.
+    private(set) var history = FileViewerHistory()
     /// The document behind a per-file DIFF, so SOURCE flips back without a
     /// round trip.
     private(set) var lastDocument: Document?
@@ -267,15 +308,27 @@ final class FileViewerController: AuxiliaryPaneController {
             let anchor = resolvedTarget.map { FileTree.parent(of: $0) ?? "/" } ?? base
             await probeGit(at: anchor)
             rootPath = gitRoot ?? anchor
-            // The pressed file is the summons — render it before the
-            // listing and the (possibly seconds-cold) git status; tree
-            // rows and badges fill in quietly behind the document.
+            // A source summons renders before the listing and the (possibly
+            // seconds-cold) git status. A DIFF summons needs the status first:
+            // it distinguishes an untracked all-additions diff from HEAD and
+            // confirms the file is still changed before preserving the mode.
+            var loadedGitVerdicts = false
             if let resolvedTarget {
-                await open(path: resolvedTarget, line: target?.line)
+                if targetPresentation == .diff, gitRoot != nil {
+                    await refreshGitVerdicts()
+                    loadedGitVerdicts = true
+                    if badges[resolvedTarget] != nil {
+                        await showFileDiff(path: resolvedTarget)
+                    } else {
+                        await open(path: resolvedTarget, line: target?.line)
+                    }
+                } else {
+                    await open(path: resolvedTarget, line: target?.line)
+                }
             }
             await list(rootPath)
             expandChain(to: anchor)
-            await refreshGitVerdicts()
+            if !loadedGitVerdicts { await refreshGitVerdicts() }
             if resolvedTarget == nil { content = .idle }
         } catch {
             content = .failure(
@@ -411,12 +464,23 @@ final class FileViewerController: AuxiliaryPaneController {
             toggleExpand(row.entry)
             return
         }
-        // A deleted file has no working-tree bytes — its diff IS the file.
-        if badges[row.entry.path] == .deleted {
+        switch selectionPresentation(for: row) {
+        case .source:
+            Task { await open(path: row.entry.path, line: nil) }
+        case .diff:
             Task { await showFileDiff(path: row.entry.path) }
-            return
         }
-        Task { await open(path: row.entry.path, line: nil) }
+    }
+
+    /// The representation a tree-file choice should open. Deleted files have
+    /// no worktree bytes, so their diff remains the only honest source in
+    /// either mode. A clean file leaves DIFF mode because it has no diff to
+    /// show; changed files inherit the current mode.
+    func selectionPresentation(for row: FileTree.Row) -> FilePresentation {
+        let badge = row.badge ?? badges[row.entry.path]
+        if badge == .deleted { return .diff }
+        if filePresentation == .diff, badge != nil { return .diff }
+        return .source
     }
 
     /// The tree header's UP chip: hoist the root one directory.
@@ -460,6 +524,7 @@ final class FileViewerController: AuxiliaryPaneController {
     // MARK: Opening files
 
     func open(path: String, line: Int?) async {
+        filePresentation = .source
         let name = FileTree.name(of: path)
         contentGeneration += 1
         let generation = contentGeneration
@@ -483,6 +548,7 @@ final class FileViewerController: AuxiliaryPaneController {
             lastDocument = document
             watchedStamp = stat
             content = .document(document)
+            history.visit(.document(path: path))
         } catch {
             guard generation == contentGeneration else { return }
             if let refusal = error as? LoadRefusal {
@@ -529,8 +595,12 @@ final class FileViewerController: AuxiliaryPaneController {
                 try await $0.readFile(atPath: path, limit: Self.imageByteLimit)
             }
             // Undecodable "image" bytes are binary content by any honest
-            // reading — same verdict as the NUL sniff below.
-            if let image = UIImage(data: data) {
+            // reading — same verdict as the NUL sniff below. Decoding goes
+            // through a bounded downsample: the byte limit above says nothing
+            // about pixels, and a few hundred kilobytes of valid PNG can
+            // decode into gigabytes of bitmap (the viewer only ever shows it
+            // at screen size anyway).
+            if let image = Self.decodeImage(data) {
                 document.image = image
             } else {
                 document.kind = .binary
@@ -610,6 +680,7 @@ final class FileViewerController: AuxiliaryPaneController {
 
     func showFileDiff(path: String) async {
         guard let gitRoot else { return }
+        filePresentation = .diff
         contentGeneration += 1
         let generation = contentGeneration
         let name = FileTree.name(of: path)
@@ -627,6 +698,9 @@ final class FileViewerController: AuxiliaryPaneController {
 
     func showRepoDiff() async {
         guard let gitRoot else { return }
+        // The repo-wide review is not SOURCE | DIFF for one file. Preserve
+        // the prior behavior when a tree row is picked from this screen.
+        filePresentation = .source
         contentGeneration += 1
         let generation = contentGeneration
         watchedStamp = nil
@@ -653,6 +727,10 @@ final class FileViewerController: AuxiliaryPaneController {
             let diff = await Task.detached { GitDiff.parse(body) }.value
             guard generation == contentGeneration else { return }
             content = .diff(diff, scope: scope)
+            switch scope {
+            case .file(let path): history.visit(.fileDiff(path: path))
+            case .repo: history.visit(.repoDiff)
+            }
         } catch {
             guard generation == contentGeneration else { return }
             content = .failure(
@@ -687,11 +765,43 @@ final class FileViewerController: AuxiliaryPaneController {
     /// The SOURCE chip: back to the document behind a per-file diff.
     func showSource() {
         guard case .diff(_, .file(let path)) = content else { return }
+        filePresentation = .source
         if let lastDocument, lastDocument.path == path {
             contentGeneration += 1
             content = .document(lastDocument)
+            history.visit(.document(path: path))
         } else {
             Task { await open(path: path, line: nil) }
+        }
+    }
+
+    // MARK: History
+
+    var canGoBack: Bool { history.canGoBack }
+    var canGoForward: Bool { history.canGoForward }
+
+    /// Back/forward re-run the recorded navigation; `history.current`
+    /// already names the destination, so the landing's own `visit` no-ops
+    /// and a failed load leaves the failure panel with the trail moved —
+    /// the browser contract.
+    func goBack() {
+        guard let entry = history.goBack() else { return }
+        Task { await navigate(to: entry) }
+    }
+
+    func goForward() {
+        guard let entry = history.goForward() else { return }
+        Task { await navigate(to: entry) }
+    }
+
+    private func navigate(to entry: FileViewerHistory.Entry) async {
+        switch entry {
+        case .document(let path):
+            await open(path: path, line: nil)
+        case .fileDiff(let path):
+            await showFileDiff(path: path)
+        case .repoDiff:
+            await showRepoDiff()
         }
     }
 

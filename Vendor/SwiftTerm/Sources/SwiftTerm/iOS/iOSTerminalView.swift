@@ -52,7 +52,7 @@ public extension Notification.Name {
  * Use the `configureNativeColors()` to set the defaults colors for the view to match the OS
  * defaults, otherwise, this uses its own set of defaults colors.
  */
-open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollViewDelegate, TerminalDelegate, UIPointerInteractionDelegate {
+open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollViewDelegate, TerminalDelegate, UIPointerInteractionDelegate, UIGestureRecognizerDelegate {
     private enum PendingKoreanResyllabificationResult {
         case none
         case prefixReinserted
@@ -236,6 +236,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     private var didFinishSetup = false
     var linkHighlightRange: [Terminal.LinkMatch.RowRange]?
     private var lastPointerLocation: CGPoint?
+    private var lastMacSecondaryClickAt: TimeInterval = -.infinity
     
     /**
      * If set, this turns Option-letter keystrokes into an escape + keystroke combination
@@ -692,6 +693,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     ///  - pos: the location where this was triggered in the buffer, it used at a later point
     ///  to auto-select a word
     func showContextMenu (forRegion: CGRect, pos: Position) {
+        // Multiplex patch: the app owns selection chrome — the deprecated
+        // UIMenuController stays out of the picture entirely.
+        if selectionUIHandler != nil {
+            return
+        }
         var items: [UIMenuItem] = []
 
         lastLongSelect = pos
@@ -739,25 +745,228 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     @objc func longPress (_ gestureRecognizer: UILongPressGestureRecognizer)
     {
-         if gestureRecognizer.state == .began {
-             let _ = self.becomeFirstResponder()
-             let tapLocation = gestureRecognizer.location(in: gestureRecognizer.view)
-             let tapRegion = makeContextMenuRegionForTap (point: tapLocation)
-             let hit = calculateTapHit (gesture: gestureRecognizer).grid
-
-             // Multiplex patch: a long press is a local gesture — no mouse
-             // report rides on it at any tracking mode — so it is the one
-             // activation route that always reaches the user's intent. A press
-             // over a link the app claims resolves it; a declined match (a
-             // filesystem path) or a press anywhere else opens the selection
-             // menu exactly as before.
-             if let result = linkForClick(at: hit, hasCommandModifier: commandActive),
-                activateLink(result) {
+         switch gestureRecognizer.state {
+         case .began:
+             // Multiplex patch: the app can claim a long press as the start of
+             // a remote mouse drag (press + motion + release) for cells it
+             // recognizes — a TUI multiplexer's pane-resize bar. Checked before
+             // link activation and the selection menu; everything the filter
+             // declines keeps the existing behavior.
+             if !shiftBypassesMouseReporting(for: gestureRecognizer),
+                beginRemoteMouseDrag(at: gestureRecognizer.location(in: self)) {
                  return
              }
-
-             showContextMenu (forRegion: tapRegion, pos: hit)
+             presentLocalPressActions(at: gestureRecognizer.location(in: self))
+         case .changed:
+             continueRemoteMouseDrag(at: gestureRecognizer.location(in: self))
+         case .ended, .cancelled, .failed:
+             endRemoteMouseDrag(at: gestureRecognizer.location(in: self))
+         default:
+             break
           }
+    }
+
+    /// Multiplex patch: the local action chain a long press runs, shared with
+    /// a pointer's secondary click — the same "reach the local surface"
+    /// intent said with a mouse. In select-text mode the press seeds the
+    /// selection; otherwise a press over a link the app claims resolves it
+    /// (a long press/right click is local at any mouse-tracking mode, so it
+    /// is the one activation route that always reaches the user's intent);
+    /// anywhere else raises the app's selection block, or legacy
+    /// UIMenuController when no handler is installed.
+    func presentLocalPressActions (at tapLocation: CGPoint) {
+        let _ = self.becomeFirstResponder()
+        let tapRegion = makeContextMenuRegionForTap (point: tapLocation)
+        let hit = calculateTapHit (point: tapLocation).grid
+
+        // With app-owned selection chrome a press is just a firmer tap —
+        // seed the word selection (links wait until the mode ends;
+        // selection is the whole point here).
+        if selectionUIHandler != nil {
+            _ = dismissAppMenu()
+            seedAppSelection(at: hit)
+            return
+        }
+
+        if let result = linkForClick(at: hit, hasCommandModifier: commandActive),
+           activateLink(result) {
+            _ = dismissAppMenu()
+            return
+        }
+
+        // Outside select-text mode the app's block replaces the
+        // UIMenuController flow — another gesture elsewhere simply moves it.
+        if presentSelectionMenu(at: tapLocation) {
+            return
+        }
+
+        showContextMenu (forRegion: tapRegion, pos: hit)
+    }
+
+    /// Multiplex patch: raise the app-owned SELECT / SELECT ALL / PASTE
+    /// block at a view coordinate. Long press and secondary click reach this
+    /// after link resolution; a direct double tap reaches it deliberately
+    /// without resolving a link, because that gesture expresses selection.
+    /// Public so the app's headless hook can exercise the shared entry point.
+    @discardableResult
+    public func presentSelectionMenu (at tapLocation: CGPoint) -> Bool {
+        guard let handler = selectionMenuHandler else { return false }
+        handler(
+            makeContextMenuRegionForTap(point: tapLocation),
+            calculateTapHit(point: tapLocation).grid
+        )
+        return true
+    }
+
+    /// Multiplex patch: a mouse/trackpad secondary click runs the same local
+    /// chain as a long press. Deliberately never a remote button-2 report —
+    /// the block's MENU chip is the explicit road to a TUI's own right-click
+    /// surface, and a silent remote report would make links unreachable by
+    /// pointer under mouse tracking.
+    @objc func secondaryClick (_ gestureRecognizer: UITapGestureRecognizer) {
+        guard gestureRecognizer.state == .ended else { return }
+        handleSecondaryClick(at: gestureRecognizer.location(in: self))
+    }
+
+    /// One secondary-click sink for UIKit's pointer recognizer and the Mac HID
+    /// fallback. A physical click can reach both; the short gate makes that
+    /// one local action regardless of callback order.
+    private func handleSecondaryClick(at location: CGPoint) {
+        let now = ProcessInfo.processInfo.systemUptime
+        if ProcessInfo.processInfo.isiOSAppOnMac,
+           now - lastMacSecondaryClickAt < Self.macSecondaryClickDedupWindow {
+            return
+        }
+        lastMacSecondaryClickAt = now
+        presentLocalPressActions(at: location)
+    }
+
+    /// Multiplex patch: when set, a long press over a cell this filter claims
+    /// becomes a remote mouse drag instead of the selection menu. The filter
+    /// receives the screen cell (zero-based, what the wire will report) and
+    /// that cell's character, and must answer quickly — it runs at gesture
+    /// time. Only consulted while the client requested button tracking
+    /// (1002/1003), so a plain shell never loses its long press.
+    public var longPressMouseDragFilter: ((_ cell: (col: Int, row: Int), _ content: Character?) -> Bool)?
+
+    /// Multiplex patch: true between a claimed drag's press and its release.
+    public var remoteMouseDragActive: Bool { mouseDragPressFlags != nil }
+
+    private var mouseDragPressFlags: Int?
+    private var mouseDragReleaseFlags = 0
+    private var mouseDragLastCell: Position?
+
+    /// Converts a point in view coordinates to the screen cell a mouse report
+    /// should carry, clamped to the visible grid.
+    private func remoteMouseDragCell (at point: CGPoint) -> (grid: Position, pixels: Position)? {
+        guard let terminal else { return nil }
+        let hit = calculateTapHit(point: point)
+        guard let screen = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) else { return nil }
+        let clamped = Position(col: min (max (0, screen.col), terminal.cols-1),
+                               row: min (max (0, screen.row), terminal.rows-1))
+        return (clamped, hit.pixels)
+    }
+
+    /// Multiplex patch: begins a remote mouse drag at `point` if the filter
+    /// claims that cell. Public so the app's DEBUG hooks can drive the exact
+    /// gesture path headlessly. Returns true when the press was sent.
+    @discardableResult
+    public func beginRemoteMouseDrag (at point: CGPoint) -> Bool {
+        guard let filter = longPressMouseDragFilter,
+              allowMouseReporting,
+              let terminal,
+              terminal.mouseMode.sendButtonTracking(),
+              !selection.active,
+              !contextMenuPresented,
+              mouseDragPressFlags == nil,
+              let hit = remoteMouseDragCell(at: point)
+        else { return false }
+        guard filter((hit.grid.col, hit.grid.row),
+                     terminal.getCharacter(col: hit.grid.col, row: hit.grid.row))
+        else { return false }
+        // Encode both flag values once at press time: encodeFlags clears the
+        // app's CTRL latch as a side effect, and a drag's many motion samples
+        // must all ride the modifiers the press carried.
+        let control = terminalAccessory?.controlModifier ?? controlModifier
+        let pressFlags = encodeFlags(release: false)
+        mouseDragPressFlags = pressFlags
+        mouseDragReleaseFlags = terminal.encodeButton(button: 0, release: true,
+                                                      shift: false, meta: false, control: control)
+        mouseDragLastCell = hit.grid
+        terminal.sendEvent(buttonFlags: pressFlags, x: hit.grid.col, y: hit.grid.row,
+                           pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+        return true
+    }
+
+    /// Multiplex patch: sends a motion report when the drag has moved to a new
+    /// cell. Quantized to cells so a fast finger never floods the remote.
+    public func continueRemoteMouseDrag (at point: CGPoint) {
+        guard let pressFlags = mouseDragPressFlags,
+              let terminal,
+              let hit = remoteMouseDragCell(at: point),
+              hit.grid != mouseDragLastCell
+        else { return }
+        mouseDragLastCell = hit.grid
+        terminal.sendMotion(buttonFlags: pressFlags, x: hit.grid.col, y: hit.grid.row,
+                            pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+    }
+
+    /// Multiplex patch: the inverse of `calculateTapHit` for a visible screen
+    /// cell — the view-coordinate center of that cell. What the app's DEBUG
+    /// hooks stand on to drive the drag path headlessly (no headless route
+    /// can synthesize a real touch).
+    public func pointForCell (col: Int, row: Int) -> CGPoint {
+        let bufferRow = CGFloat (row + (terminal?.displayBuffer.yDisp ?? 0))
+        return CGPoint (x: (CGFloat (col) + 0.5) * cellDimension.width,
+                        y: (bufferRow + 0.5) * cellDimension.height)
+    }
+
+    /// Multiplex patch: sends one right-button press + release report at the
+    /// given buffer position — how the app's selection block reaches a TUI's
+    /// own right-click surface (herdr's pane menu; no touch gesture maps to a
+    /// right click). Sent only while the client reports mouse; returns
+    /// whether the click went out.
+    @discardableResult
+    public func sendRemoteRightClick (atBufferPosition position: Position) -> Bool {
+        guard allowMouseReporting,
+              let terminal,
+              terminal.mouseMode != .off,
+              let screen = position.toScreenCoordinate(from: terminal.displayBuffer)
+        else { return false }
+        let col = min (max (0, screen.col), terminal.cols-1)
+        let row = min (max (0, screen.row), terminal.rows-1)
+        let point = pointForCell(col: col, row: row)
+        let pixelX = Int (point.x)
+        let pixelY = Int (point.y)
+        let press = terminal.encodeButton(button: 2, release: false,
+                                          shift: false, meta: false, control: false)
+        terminal.sendEvent(buttonFlags: press, x: col, y: row, pixelX: pixelX, pixelY: pixelY)
+        terminal.sendButtonReleaseEvent(button: 2, x: col, y: row, pixelX: pixelX, pixelY: pixelY)
+        return true
+    }
+
+    /// Multiplex patch: the view-point flavor of the right-click send — what
+    /// the app's DEBUG hooks stand on (no headless route can synthesize a
+    /// real touch).
+    @discardableResult
+    public func sendRemoteRightClick (at point: CGPoint) -> Bool {
+        guard let hit = remoteMouseDragCell(at: point), let terminal else { return false }
+        let buffer = Position(col: hit.grid.col,
+                              row: hit.grid.row + terminal.displayBuffer.yDisp)
+        return sendRemoteRightClick(atBufferPosition: buffer)
+    }
+
+    /// Multiplex patch: releases an active drag at `point` (falling back to
+    /// the last reported cell), always exactly once.
+    public func endRemoteMouseDrag (at point: CGPoint? = nil) {
+        guard mouseDragPressFlags != nil, let terminal else { return }
+        let hit = point.flatMap { remoteMouseDragCell(at: $0) }
+        let cell = hit?.grid ?? mouseDragLastCell ?? Position(col: 0, row: 0)
+        let pixels = hit?.pixels ?? Position(col: 0, row: 0)
+        terminal.sendEvent(buttonFlags: mouseDragReleaseFlags, x: cell.col, y: cell.row,
+                           pixelX: pixels.col, pixelY: pixels.row)
+        mouseDragPressFlags = nil
+        mouseDragLastCell = nil
     }
     
     /// This controls whether the backspace should send ^? or ^H, the default is ^?
@@ -879,6 +1088,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// second opinion and never as the sole authority.
     @discardableResult
     func dismissLocalSelectionUI () -> Bool {
+        // Multiplex patch: the app's selection block obeys the same contract
+        // as the native menu — a tap anywhere dismisses it and is consumed.
+        if dismissAppMenu() {
+            return true
+        }
         guard selection.active || contextMenuPresented || UIMenuController.shared.isMenuVisible
         else { return false }
         if selection.active {
@@ -906,6 +1120,22 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         guard gestureRecognizer.view != nil else { return }
 
         if gestureRecognizer.state != .ended {
+            return
+        }
+
+        // Multiplex patch: while the app owns selection chrome, a tap seeds
+        // a word selection right where it lands — no PASTE/SELECT menu
+        // detour, and no dismiss-then-retap dance (re-tapping simply
+        // re-anchors). Links and mouse reporting are out of the picture in
+        // that state by construction.
+        if selectionUIHandler != nil {
+            if !isFirstResponder {
+                let _ = becomeFirstResponder()
+            }
+            // A lingering selection block from before the mode started goes
+            // away with the tap; the seed still happens.
+            _ = dismissAppMenu()
+            seedAppSelection(at: calculateTapHit(gesture: gestureRecognizer).grid)
             return
         }
 
@@ -971,10 +1201,23 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
 
         if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode.sendButtonPress() {
-            // Multiplex patch: a fast re-tap on an active selection or its
-            // menu lands here (singleTap requires this recognizer to fail) —
-            // it must dismiss that UI, never reach the remote.
+            // Multiplex patch: a double tap — finger, Pencil, visionOS
+            // gaze/pinch, or a pointer's double-click — is an additive route
+            // to the app-owned selection block. The single recognizer has
+            // already sent both physical clicks to the remote immediately —
+            // preserving the no-latency contract — and this recognizer must
+            // not add a third.
+            if localDoubleTapOpensSelectionMenu(gestureRecognizer) {
+                _ = dismissLocalSelectionUI()
+                _ = presentSelectionMenu(at: gestureRecognizer.location(in: self))
+                return
+            }
+            // A fast re-tap on an active selection or its menu must dismiss
+            // that UI, never add another remote click.
             if dismissLocalSelectionUI() {
+                return
+            }
+            if remoteOwnsImmediateTaps(for: gestureRecognizer) {
                 return
             }
             sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
@@ -1004,6 +1247,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode.sendButtonPress() {
             // Multiplex patch: same dismissal rule as singleTap/doubleTap.
             if dismissLocalSelectionUI() {
+                return
+            }
+            // Multiplex patch: same no-extra-click rule as doubleTap while
+            // the failure chain is bypassed.
+            if remoteOwnsImmediateTaps(for: gestureRecognizer) {
                 return
             }
             sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
@@ -1122,11 +1370,120 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
 
+    /// Multiplex patch: constrain local selection to one multiplexer pane.
+    /// The app sets the focused pane's screen rectangle while its
+    /// select-text mode runs, so taps, drags, and Select All operate on the
+    /// pane instead of the whole screen (a split's neighbor pane must not
+    /// bleed into a selection). Rows/columns are screen cells, both ends
+    /// inclusive. A live selection is pulled into the new rectangle rather
+    /// than dropped — the clamp arrives asynchronously, and a Select All
+    /// taken meanwhile should tighten to the pane, not vanish.
+    public var selectionClampRect: (columns: ClosedRange<Int>, rows: ClosedRange<Int>)? {
+        get { selection.clampRect }
+        set {
+            selection.clampRect = newValue
+            selection.reclampActiveSelection()
+            queuePendingDisplay()
+        }
+    }
+
+    /// Multiplex patch: while set, the APP owns selection chrome. The
+    /// deprecated UIMenuController never shows (`showContextMenu` no-ops),
+    /// a plain tap or long press seeds a word selection directly — no
+    /// PASTE/SELECT menu detour — and every selection change reports the
+    /// selection's screen rectangle (nil when the selection clears) so the
+    /// app can float its own actions beside it. Set only while the app's
+    /// select-text mode runs; nil restores the stock UIKit selection flow.
+    public var selectionUIHandler: ((CGRect?) -> Void)?
+
+    /// Multiplex patch: the app's replacement for the selection context menu
+    /// OUTSIDE select-text mode. A long press / secondary click that does not
+    /// activate a link, or a direct double tap, reports its screen region and
+    /// buffer position here instead of showing deprecated UIMenuController —
+    /// the app draws its own SELECT / SELECT ALL / PASTE block there.
+    public var selectionMenuHandler: ((CGRect, Position) -> Void)?
+
+    /// Multiplex patch: set by the app while its selection block is on
+    /// screen. A tap dismisses-and-consumes exactly like the native menu
+    /// (`dismissLocalSelectionUI` calls and clears it); the app also clears
+    /// it whenever it hides the block itself.
+    public var appMenuDismiss: (() -> Void)?
+
+    /// Multiplex patch: run-and-clear the app's menu dismissal, answering
+    /// whether anything was dismissed.
+    private func dismissAppMenu () -> Bool {
+        guard let dismiss = appMenuDismiss else { return false }
+        appMenuDismiss = nil
+        dismiss()
+        return true
+    }
+
+    /// Multiplex patch: the app's SELECT action — seed a word selection at
+    /// the position its selection block recorded, exactly like an in-mode
+    /// tap.
+    public func seedWordSelection (atBufferPosition position: Position) {
+        seedAppSelection(at: position)
+    }
+
+    /// Multiplex patch: the active selection's bounding box in view
+    /// coordinates — what `selectionUIHandler` reports. Rows convert
+    /// through `yDisp`; multi-row widths honor `selectionClampRect` so the
+    /// box hugs the pane the selection lives in.
+    public func selectionUIRect () -> CGRect? {
+        guard let terminal, selection.active, selection.hasSelectionRange else { return nil }
+        let (first, last) = Position.compare(selection.start, selection.end) == .before
+            ? (selection.start, selection.end)
+            : (selection.end, selection.start)
+        let yDisp = terminal.displayBuffer.yDisp
+        let startRow = first.row - yDisp
+        let endRow = last.row - yDisp
+        guard endRow >= 0, startRow < terminal.rows else { return nil }
+        let cols: (lo: Int, hi: Int)
+        if startRow == endRow {
+            cols = (first.col, last.col)
+        } else if let clamp = selection.clampRect {
+            cols = (clamp.columns.lowerBound, clamp.columns.upperBound)
+        } else {
+            cols = (0, terminal.cols - 1)
+        }
+        return CGRect(
+            x: CGFloat(cols.lo) * cellDimension.width,
+            y: CGFloat(max(0, startRow)) * cellDimension.height,
+            width: CGFloat(cols.hi - cols.lo + 1) * cellDimension.width,
+            height: CGFloat(min(terminal.rows - 1, endRow) - max(0, startRow) + 1) * cellDimension.height)
+    }
+
+    /// Multiplex patch: seed a word selection at a gesture location — what
+    /// a plain tap/long press does while the app owns selection chrome.
+    /// Character-granular drags afterwards, exactly like the double-tap
+    /// selection path.
+    private func seedAppSelection (at hit: Position) {
+        selection.selectWordOrExpression(at: hit, in: terminal.displayBuffer)
+        selection.selectionMode = .character
+        enableSelectionPanGesture()
+        queuePendingDisplay()
+    }
+
+    /// Multiplex patch: an app-owned select-text HUD over a mouse-capturing
+    /// full-screen app (tmux, herdr). Like the copy-mode state above it turns
+    /// mouse reporting off so taps run the native selection gestures — but
+    /// unlike copy mode there is no remote view that answers cursor keys, so
+    /// a pan falling through to the alternate-screen branch would type
+    /// arrows into the remote app. While set, pans are not forwarded at all
+    /// (the alternate buffer has no local scrollback to move either).
+    public var suppressRemotePanScroll: Bool = false {
+        didSet {
+            guard suppressRemotePanScroll != oldValue else { return }
+            updateRemotePanGesture()
+        }
+    }
+
     /// True when a pan should be forwarded to the remote instead of
     /// scrolling the local scrollback. Terminal.init replays mode changes
     /// through the delegate before `terminal` is assigned — stay nil-safe.
     var remoteScrollApplies: Bool {
         guard let terminal else { return false }
+        if suppressRemotePanScroll { return false }
         return forceRemoteCursorScroll
             || (allowMouseReporting && terminal.mouseMode != .off)
             || terminal.isCurrentBufferAlternate
@@ -1357,8 +1714,83 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         tripleTap.numberOfTapsRequired = 3
         addGestureRecognizer(tripleTap)
 
-        singleTap.require(toFail: doubleTap)
-        doubleTap.require(toFail: tripleTap)
+        // Multiplex patch: a pointer's secondary click is the long press
+        // said with a mouse — same local chain, decided in
+        // `presentLocalPressActions`. `buttonMaskRequired` is the actual
+        // secondary-button gate, but the touch type must ALSO be pinned to
+        // `.indirectPointer`: the mask is ignored for direct input, so
+        // otherwise every finger tap raises the block (observed on device).
+        // Designed-for-iPad has a separate GCMouse HID fallback for physical
+        // clicks UIKit fails to classify as indirect pointer input.
+        if #available(iOS 13.4, visionOS 1.0, *) {
+            let secondaryClick = UITapGestureRecognizer(
+                target: self,
+                action: #selector(secondaryClick(_:))
+            )
+            secondaryClick.allowedTouchTypes = [
+                UITouch.TouchType.indirectPointer.rawValue as NSNumber
+            ]
+            secondaryClick.buttonMaskRequired = .secondary
+            addGestureRecognizer(secondaryClick)
+        }
+
+        // Multiplex patch: the single→double→triple failure chain is decided
+        // per touch by the delegate instead of `require(toFail:)`. With mouse
+        // reporting active, single taps never wait: every physical tap reaches
+        // the remote immediately, preserving remote double-click semantics.
+        // The app-owned double-tap selection block is additive; only the
+        // otherwise-silent double recognizer waits for triple to fail so a
+        // triple tap cannot flash the block. With mouse off, the delegate
+        // answers exactly like the old chain: double/triple keep their local
+        // word/line selection, singles keep waiting.
+        singleTap.delegate = self
+        doubleTap.delegate = self
+        tripleTap.delegate = self
+    }
+
+    /// Whether this remote-owned double gesture should additionally raise
+    /// local selection chrome. Every input kind counts — finger, Pencil,
+    /// visionOS gaze/pinch, and a pointer's double-click — so a mouse says
+    /// "select this word" exactly the way a double tap does. The two physical
+    /// clicks still reach the remote first, so a mouse-aware TUI keeps its
+    /// own double-click semantics.
+    private func localDoubleTapOpensSelectionMenu(
+        _ gestureRecognizer: UITapGestureRecognizer
+    ) -> Bool {
+        selectionMenuHandler != nil
+    }
+
+    /// Multiplex patch: true while a tap belongs to the remote right now —
+    /// the same predicate the tap handlers' mouse branches test, evaluated
+    /// per touch so runtime mouse-mode flips and the Copy Mode
+    /// `allowMouseReporting` toggle are always honored.
+    private func remoteOwnsImmediateTaps(for gestureRecognizer: UIGestureRecognizer) -> Bool {
+        allowMouseReporting
+            && !shiftBypassesMouseReporting(for: gestureRecognizer)
+            && terminal.mouseMode.sendButtonPress()
+    }
+
+    /// Multiplex patch: the dynamic form of the tap failure chain. Mouse-off
+    /// gestures keep the stock single→double→triple chain. While the remote
+    /// owns taps, single never waits for double; when the app selection block
+    /// is installed, double alone waits for triple so a triple remains three
+    /// immediate remote clicks without briefly opening local chrome.
+    public func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        guard let tap = gestureRecognizer as? UITapGestureRecognizer,
+              let other = otherGestureRecognizer as? UITapGestureRecognizer,
+              tap.view === self, other.view === self,
+              other.numberOfTapsRequired == tap.numberOfTapsRequired + 1
+        else { return false }
+        let remoteOwnsTap = remoteOwnsImmediateTaps(for: tap)
+        if remoteOwnsTap,
+           tap.numberOfTapsRequired == 2,
+           selectionMenuHandler != nil {
+            return true
+        }
+        return !remoteOwnsTap
     }
 
     func setupLinkReportingInteractions ()
@@ -1367,6 +1799,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             let interaction = UIPointerInteraction(delegate: self)
             addInteraction(interaction)
             pointerInteraction = interaction
+        }
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            Self.setupMacSecondaryClickBridgeIfNeeded()
         }
         if #available(iOS 13.0, visionOS 1.0, *) {
             let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
@@ -1379,6 +1814,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     public func pointerInteraction(_ interaction: UIPointerInteraction, regionFor request: UIPointerRegionRequest, defaultRegion: UIPointerRegion) -> UIPointerRegion?
     {
         lastPointerLocation = request.location
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            Self.macSecondaryClickTarget = self
+        }
         reportLinkIfNeeded(at: request.location, modifiers: request.modifiers, force: false)
         updateLinkHighlightIfNeeded(at: request.location, modifiers: request.modifiers, force: false)
         return nil
@@ -1390,10 +1828,17 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         case .began, .changed:
             let location = gestureRecognizer.location(in: self)
             lastPointerLocation = location
+            if ProcessInfo.processInfo.isiOSAppOnMac {
+                Self.macSecondaryClickTarget = self
+            }
             reportLinkIfNeeded(at: location, modifiers: [], force: true)
             updateLinkHighlightIfNeeded(at: location, modifiers: [.command], force: true)
         case .ended, .cancelled:
             lastReportedLink = nil
+            lastPointerLocation = nil
+            if Self.macSecondaryClickTarget === self {
+                Self.macSecondaryClickTarget = nil
+            }
             if linkHighlightMode == .hover || linkHighlightMode == .hoverWithModifier {
                 let oldRange = linkHighlightRange
                 linkHighlightRange = nil
@@ -1660,6 +2105,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// system (where `selectNone` would otherwise come from).
     public func clearSelection() {
         selection?.selectNone()
+        // Multiplex patch: programmatic clears (the app-owned selection
+        // chrome's teardown) must also retire the selection drag recognizer
+        // and repaint, or a stale highlight and gesture linger.
+        disableSelectionPanGesture()
+        queuePendingDisplay()
     }
 
     /// Programmatically presents SwiftTerm's standard Copy / Paste /
@@ -2315,6 +2765,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     */
     open func insertText(_ text: String) {
         uitiLog("insertText(\(text.debugDescription)) \(textInputStateDescription())")
+        // Multiplex patch: direct text input beat the Mac prefix fallback, so
+        // preserve UIKit's layout result while retaining HID's key identity.
+        // If HID already had to deliver a press, consume its receipt instead.
+        if sendPendingMacPrefixTextInput(text) { return }
+        guard !consumeMacBridgedText(text) else { return }
         commitTextInput(text, applyModifiers: true)
     }
     private func kittyEncoder() -> KittyKeyboardEncoder {
@@ -3019,6 +3474,67 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // the pressesBegan path — this bridge never installs there.
     private static weak var macControlKeyTarget: TerminalView?
     private static var macControlKeyBridgeInstalled = false
+    private static weak var macSecondaryClickTarget: TerminalView?
+    private static var macSecondaryClickBridgeInstalled = false
+    private static let macSecondaryClickDedupWindow: TimeInterval = 0.2
+    private static let macBridgedPressLifetime: TimeInterval = 0.25
+    private static let macPrefixFallbackDelay: TimeInterval = 0.06
+
+    /// One prefix/fallback HID press already delivered by the Mac bridge.
+    /// UIKit normally drops Ctrl+character before `pressesBegan`, but OS
+    /// revisions can also surface Ctrl+B through `pressesBegan` or
+    /// `insertText`. A short-lived receipt consumes that duplicate once.
+    private struct MacBridgedPress {
+        var hidUsage: Int
+        var text: String
+        var expiresAt: TimeInterval
+    }
+
+    private var macBridgedPresses: [MacBridgedPress] = []
+    private var macPrefixFollowUpArmed = false
+    private var macPendingPrefixKeyCode: GCKeyCode?
+    private var macPendingPrefixFallback = ""
+    private var macPendingPrefixShifted = false
+    private var macPendingPrefixGeneration = 0
+
+    /// Designed-for-iPad's UIKit pointer recognizer misses some physical Mac
+    /// secondary-button reports. GameController sees the mouse at HID level;
+    /// combine that button with UIPointerInteraction's absolute location and
+    /// route it through the same local action chain. The UIKit recognizer stays
+    /// installed for trackpads and synthetic pointer events.
+    private static func setupMacSecondaryClickBridgeIfNeeded() {
+        guard ProcessInfo.processInfo.isiOSAppOnMac,
+              !macSecondaryClickBridgeInstalled
+        else { return }
+        macSecondaryClickBridgeInstalled = true
+        for mouse in GCMouse.mice() {
+            installMacSecondaryClickHandler(on: mouse)
+        }
+        for name in [Notification.Name.GCMouseDidConnect,
+                     Notification.Name.GCMouseDidBecomeCurrent] {
+            NotificationCenter.default.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { note in
+                installMacSecondaryClickHandler(on: note.object as? GCMouse)
+            }
+        }
+    }
+
+    private static func installMacSecondaryClickHandler(on mouse: GCMouse?) {
+        guard let mouse, let button = mouse.mouseInput?.rightButton else { return }
+        mouse.handlerQueue = .main
+        button.pressedChangedHandler = { _, _, pressed in
+            guard pressed,
+                  let target = macSecondaryClickTarget,
+                  let location = target.lastPointerLocation,
+                  target.window != nil,
+                  target.bounds.contains(location)
+            else { return }
+            target.handleSecondaryClick(at: location)
+        }
+    }
 
     private static func setupMacControlKeyBridgeIfNeeded() {
         guard ProcessInfo.processInfo.isiOSAppOnMac, !macControlKeyBridgeInstalled else { return }
@@ -3031,18 +3547,74 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     private static func installMacControlKeyHandler(on keyboard: GCKeyboard?) {
-        guard let input = keyboard?.keyboardInput else { return }
+        guard let keyboard, let input = keyboard.keyboardInput else { return }
+        // The receipt must exist before UIKit sees the same physical press.
+        // GameController defaults to main; state it explicitly so another
+        // consumer cannot move this shared keyboard's callbacks off UIKit's
+        // ordered input path.
+        keyboard.handlerQueue = .main
         input.keyChangedHandler = { input, _, keyCode, pressed in
             guard pressed,
-                  input.button(forKeyCode: .leftControl)?.isPressed == true ||
-                  input.button(forKeyCode: .rightControl)?.isPressed == true,
-                  input.button(forKeyCode: .leftGUI)?.isPressed != true,
-                  input.button(forKeyCode: .rightGUI)?.isPressed != true,
-                  let character = macControlCharacter(for: keyCode),
                   let target = macControlKeyTarget,
-                  target.isFirstResponder, target.window?.isKeyWindow == true
+                  target.isFirstResponder,
+                  target.window?.isKeyWindow == true
             else { return }
+
+            let controlHeld = input.button(forKeyCode: .leftControl)?.isPressed == true ||
+                input.button(forKeyCode: .rightControl)?.isPressed == true
+            let commandHeld = input.button(forKeyCode: .leftGUI)?.isPressed == true ||
+                input.button(forKeyCode: .rightGUI)?.isPressed == true
+            let optionHeld = input.button(forKeyCode: .leftAlt)?.isPressed == true ||
+                input.button(forKeyCode: .rightAlt)?.isPressed == true
+            let shiftHeld = input.button(forKeyCode: .leftShift)?.isPressed == true ||
+                input.button(forKeyCode: .rightShift)?.isPressed == true
+
+            // A non-modifier after bridged Ctrl+B is part of the same
+            // multiplexer chord. UIKit on Designed for iPad can swallow this
+            // first ordinary key while unwinding Cocoa's Ctrl+B binding. Give
+            // `pressesBegan` one short turn to supply the layout-resolved
+            // character; if it never arrives, send printable ANSI from HID.
+            // This is deliberately one-key: ordinary typing remains owned by
+            // the user's keyboard layout and IME.
+            if !isMacModifierKey(keyCode),
+               target.takeMacPrefixFollowUp(),
+               !controlHeld,
+               !commandHeld,
+               !optionHeld,
+               let character = macPlainCharacter(for: keyCode, shifted: shiftHeld) {
+                target.scheduleMacPrefixFollowUp(
+                    keyCode: keyCode,
+                    fallback: character,
+                    shifted: shiftHeld
+                )
+                return
+            }
+
+            guard controlHeld,
+                  !commandHeld,
+                  let character = macControlCharacter(for: keyCode)
+            else { return }
+            target.macPrefixFollowUpArmed = false
+            target.cancelMacPrefixFollowUpForTextInput()
+            if character == "b" {
+                target.recordMacBridgedPress(keyCode: keyCode, text: character)
+            }
             target.sendMacControl(character)
+            if character == "b" {
+                // A multiplexer waits for its next key, not for an app-authored
+                // deadline. Keep the bridge armed until that one key arrives.
+                target.macPrefixFollowUpArmed = true
+            }
+        }
+    }
+
+    private static func isMacModifierKey(_ keyCode: GCKeyCode) -> Bool {
+        switch keyCode {
+        case .leftControl, .rightControl, .leftShift, .rightShift,
+             .leftAlt, .rightAlt, .leftGUI, .rightGUI:
+            true
+        default:
+            false
         }
     }
 
@@ -3064,6 +3636,176 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         case .hyphen:       return "_"   // Ctrl+- / Ctrl+_ → US (0x1f)
         default:            return nil
         }
+    }
+
+    /// ANSI printable fallback for the one key following bridged Ctrl+B.
+    /// Normal text never takes this path; UIKit still owns layout and IME.
+    private static func macPlainCharacter(for keyCode: GCKeyCode, shifted: Bool) -> String? {
+        if keyCode.rawValue >= GCKeyCode.keyA.rawValue && keyCode.rawValue <= GCKeyCode.keyZ.rawValue {
+            let offset = UInt8(keyCode.rawValue - GCKeyCode.keyA.rawValue)
+            let base = shifted ? UInt8(ascii: "A") : UInt8(ascii: "a")
+            return String(UnicodeScalar(base + offset))
+        }
+
+        let digitKeys: [GCKeyCode] = [
+            .one, .two, .three, .four, .five, .six, .seven, .eight, .nine, .zero
+        ]
+        if let index = digitKeys.firstIndex(of: keyCode) {
+            let plain = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+            let upper = ["!", "@", "#", "$", "%", "^", "&", "*", "(", ")"]
+            return shifted ? upper[index] : plain[index]
+        }
+
+        switch keyCode {
+        case .spacebar: return " "
+        case .hyphen: return shifted ? "_" : "-"
+        case .equalSign: return shifted ? "+" : "="
+        case .openBracket: return shifted ? "{" : "["
+        case .closeBracket: return shifted ? "}" : "]"
+        case .backslash: return shifted ? "|" : "\\"
+        case .semicolon: return shifted ? ":" : ";"
+        case .quote: return shifted ? "\"" : "'"
+        case .graveAccentAndTilde: return shifted ? "~" : "`"
+        case .comma: return shifted ? "<" : ","
+        case .period: return shifted ? ">" : "."
+        case .slash: return shifted ? "?" : "/"
+        default: return nil
+        }
+    }
+
+    private func takeMacPrefixFollowUp() -> Bool {
+        guard macPrefixFollowUpArmed else { return false }
+        macPrefixFollowUpArmed = false
+        return true
+    }
+
+    private func scheduleMacPrefixFollowUp(
+        keyCode: GCKeyCode,
+        fallback: String,
+        shifted: Bool
+    ) {
+        pruneMacBridgedPresses()
+        let usage = Int(keyCode.rawValue)
+        // A new physical key proves UIKit has finished dispatching the Ctrl+B
+        // key-down. Do not let that old receipt eat a same-letter follow-up.
+        macBridgedPresses.removeAll { $0.hidUsage == usage }
+        macPendingPrefixGeneration += 1
+        let generation = macPendingPrefixGeneration
+        macPendingPrefixKeyCode = keyCode
+        macPendingPrefixFallback = fallback
+        macPendingPrefixShifted = shifted
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.macPrefixFallbackDelay) { [weak self] in
+            guard let self,
+                  self.macPendingPrefixGeneration == generation,
+                  self.macPendingPrefixKeyCode == keyCode
+            else { return }
+            self.macPendingPrefixKeyCode = nil
+            self.recordMacBridgedPress(keyCode: keyCode, text: fallback)
+            self.sendMacPrefixFollowUp(
+                keyCode: keyCode,
+                text: fallback,
+                shifted: shifted
+            )
+        }
+    }
+
+    /// UIKit has a real key event, so cancel the HID timer and let the ordinary
+    /// `pressesBegan` pipeline retain layout, IME, and Kitty metadata.
+    private func macPrefixFollowUpWillUseUIKit(_ key: UIKey) {
+        guard macPendingPrefixKeyCode?.rawValue == key.keyCode.rawValue else { return }
+        macPendingPrefixKeyCode = nil
+        macPendingPrefixGeneration += 1
+    }
+
+    /// Some Mac text-system paths call `insertText` without exposing a
+    /// `pressesBegan`. Pair that layout-resolved text with the HID key metadata
+    /// rather than degrading it to a paste/text event while a multiplexer is
+    /// waiting for a key.
+    private func sendPendingMacPrefixTextInput(_ text: String) -> Bool {
+        guard let keyCode = macPendingPrefixKeyCode else { return false }
+        let fallback = macPendingPrefixFallback
+        let shifted = macPendingPrefixShifted
+        macPendingPrefixKeyCode = nil
+        macPendingPrefixGeneration += 1
+        sendMacPrefixFollowUp(
+            keyCode: keyCode,
+            text: text.isEmpty ? fallback : text,
+            shifted: shifted
+        )
+        return true
+    }
+
+    private func cancelMacPrefixFollowUpForTextInput() {
+        guard macPendingPrefixKeyCode != nil else { return }
+        macPendingPrefixKeyCode = nil
+        macPendingPrefixGeneration += 1
+    }
+
+    /// A raw printable byte is a text event under Kitty's report-all-keys mode;
+    /// Herdr inserts it into the pane and leaves PREFIX armed. Reconstruct the
+    /// same Unicode key event UIKit would have emitted so the multiplexer sees
+    /// its binding. Legacy terminals still receive the ordinary text byte.
+    private func sendMacPrefixFollowUp(
+        keyCode: GCKeyCode,
+        text: String,
+        shifted: Bool
+    ) {
+        guard !terminal.keyboardEnhancementFlags.isEmpty,
+              text.unicodeScalars.count == 1,
+              let textScalar = text.unicodeScalars.first,
+              let physicalBase = Self.macPlainCharacter(for: keyCode, shifted: false)?
+                .unicodeScalars.first
+        else {
+            send(txt: text)
+            return
+        }
+
+        let baseScalar = String(textScalar).lowercased().unicodeScalars.first ?? textScalar
+        let baseLayoutKey = physicalBase == baseScalar ? nil : physicalBase
+        _ = sendKittyEvent(KittyKeyEvent(
+            key: .unicode(baseScalar.value),
+            modifiers: shifted ? [.shift] : [],
+            eventType: .press,
+            text: text,
+            shiftedKey: shifted ? textScalar : nil,
+            baseLayoutKey: baseLayoutKey,
+            composing: false
+        ))
+    }
+
+    private func recordMacBridgedPress(keyCode: GCKeyCode, text: String) {
+        pruneMacBridgedPresses()
+        let usage = Int(keyCode.rawValue)
+        macBridgedPresses.removeAll { $0.hidUsage == usage }
+        macBridgedPresses.append(MacBridgedPress(
+            hidUsage: usage,
+            text: text,
+            expiresAt: ProcessInfo.processInfo.systemUptime + Self.macBridgedPressLifetime
+        ))
+    }
+
+    private func consumeMacBridgedPress(keyCode: UIKeyboardHIDUsage) -> Bool {
+        guard ProcessInfo.processInfo.isiOSAppOnMac else { return false }
+        pruneMacBridgedPresses()
+        guard let index = macBridgedPresses.firstIndex(where: {
+            $0.hidUsage == Int(keyCode.rawValue)
+        }) else { return false }
+        macBridgedPresses.remove(at: index)
+        return true
+    }
+
+    private func consumeMacBridgedText(_ text: String) -> Bool {
+        guard ProcessInfo.processInfo.isiOSAppOnMac else { return false }
+        pruneMacBridgedPresses()
+        guard let index = macBridgedPresses.firstIndex(where: { $0.text == text })
+        else { return false }
+        macBridgedPresses.remove(at: index)
+        return true
+    }
+
+    private func pruneMacBridgedPresses() {
+        let now = ProcessInfo.processInfo.systemUptime
+        macBridgedPresses.removeAll { $0.expiresAt < now }
     }
 
     /// Multiplex patch: synchronous HID-level read of the physical Shift keys
@@ -3122,6 +3864,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 commandActive = true
             }
             uitiLog("pressesBegan keyCode:\(key.keyCode) chars:\(key.characters.debugDescription) ignoring:\(key.charactersIgnoringModifiers.debugDescription) modifiers:\(key.modifierFlags)")
+            // Multiplex patch: GameController already sent this Mac hardware
+            // key. Consume UIKit's duplicate before either the kitty or legacy
+            // branch can emit it a second time.
+            if consumeMacBridgedPress(keyCode: key.keyCode) {
+                didHandleEvent = true
+                continue
+            }
+            macPrefixFollowUpWillUseUIKit(key)
             if !kittyFlags.isEmpty {
                 if key.modifierFlags.contains([.alternate, .command]) && key.charactersIgnoringModifiers == "o" {
                     optionAsMetaKey.toggle()
@@ -3485,9 +4235,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         pendingSelectionChanged = true
         DispatchQueue.main.async {
             self.pendingSelectionChanged = false
-            
+
             self.inputDelegate?.selectionWillChange (self)
             self.inputDelegate?.selectionDidChange(self)
+
+            // Multiplex patch: report the selection's screen box to the
+            // app-owned selection chrome (nil = selection cleared).
+            self.selectionUIHandler?(self.selectionUIRect())
  
 #if canImport(MetalKit)
             if self.metalView != nil {

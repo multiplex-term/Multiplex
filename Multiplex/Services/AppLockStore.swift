@@ -25,7 +25,21 @@ import UIKit
 @Observable
 final class AppLockStore {
     private(set) var isEnabled: Bool
-    private(set) var isLocked: Bool
+    private(set) var isLocked: Bool {
+        didSet {
+            guard isLocked != oldValue else { return }
+            // Observation's onChange callback fires before the stored value
+            // changes, so view observers normally hop to a later main-actor
+            // turn. The privacy shield cannot wait for that turn: background
+            // snapshots are allowed as soon as the notification returns.
+            // This app-owned notification is posted synchronously after the
+            // new verdict is stored.
+            NotificationCenter.default.post(
+                name: Self.stateDidChangeNotification,
+                object: self
+            )
+        }
+    }
     private(set) var isAuthenticating = false
 
     /// One system prompt per lock, not per scene appearance: every window
@@ -38,6 +52,9 @@ final class AppLockStore {
     private let authenticate: (String) async -> Bool
     private nonisolated(unsafe) var backgroundObserver: NSObjectProtocol?
     private static let enabledKey = "MultiplexAppLockEnabled"
+    static let stateDidChangeNotification = Notification.Name(
+        "app.multiplexterm.multiplex.appLockStateDidChange"
+    )
 
     /// `defaults`/`authenticate` are injectable for tests; the app uses the
     /// standard defaults and the LocalAuthentication check below.

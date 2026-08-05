@@ -10,6 +10,16 @@ even installed), tmux + mosh-server, and demo sessions (`main`/`build`/
 `logs`/`agent` with the disclosed agent-detection stubs) reseeded on
 boot/start and nightly.
 
+The app's second session backend is demoable too: `scripts/install-herdr`
+puts a **pinned, sha256-verified** herdr on the box (0.7.5 — the protocol the
+app's `HerdrProbe` was written against; bump the version and both hashes
+together), and the same reseed runs `scripts/seed-review-herdr` as `review`
+for three herdr sessions — `default` (herdr's protected primary), `main` (two
+workspaces, one streaming the worker log), and `agent` (cc/cx/pi workspaces
+running the same stubs, each reporting a herdr lifecycle state, so
+RUNNING / NEEDS YOU / idle are reproducible). Everything herdr is
+skip-if-absent: a failed download leaves the tmux demo untouched.
+
 ## Platform
 
 Needs a real VM with **UDP 60000–60010 reachable** (mosh) — rules out

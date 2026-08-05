@@ -11,7 +11,8 @@ import Foundation
 ///
 /// Pure classification. What it accepts mirrors what the fork's matcher can
 /// hand it: rooted (`/x`), home (`~/x`, `$HOME/x`), dot-relative (`./x`,
-/// `../x`, `.config/x`), and bare relative with a slash (`src/foo.ts`).
+/// `../x`, `.config/x`), bare relative with a slash (`src/foo.ts`), and a
+/// local-authority `file:` URI naming an absolute path on the SSH host.
 /// Other `$VAR/…` shapes resolve to nil — the app cannot know the remote's
 /// environment, and a wrong guess opens the wrong file — so those keep
 /// falling through to selection.
@@ -26,7 +27,8 @@ struct TerminalPathTarget: Equatable, Identifiable {
         case workingDirectory
     }
 
-    /// The text as pressed, before any cleanup — what COPY copies.
+    /// The text as pressed, before any cleanup. Used for activation identity;
+    /// the confirmation field starts at `spelling`, the path VIEW will use.
     var raw: String
     /// The path with the base marker kept (`~/x` stays `~/x`) and any
     /// trailing `:line[:column]` suffix removed.
@@ -63,18 +65,85 @@ struct TerminalPathTarget: Equatable, Identifiable {
     }
 
     static func resolve(_ raw: String) -> TerminalPathTarget? {
-        var text = raw.trimmingCharacters(in: .whitespaces)
+        let text = raw.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty, text.count <= 1024 else { return nil }
-        // URLs belong to TerminalLink; anything scheme-shaped is not a path.
+        if hasFileScheme(text) { return resolveFileURL(raw) }
+        // Other URLs belong to TerminalLink; anything scheme-shaped is not
+        // a path. `file:` is the one deliberate exception above.
         if text.contains("://") { return nil }
-        // One pass: controls and non-space whitespace (tabs, line breaks,
-        // Unicode spaces) are never part of a target; plain spaces are
-        // judged by the marker gate below.
+        return resolvePath(raw: raw, text: text, syntax: .implicitMatch)
+    }
+
+    /// Resolves the `file:` shape before `TerminalLink` gets first refusal in
+    /// a terminal pane. Only an empty/localhost authority is meaningful: the
+    /// URI came from this SSH host, and the viewer cannot honestly follow a
+    /// URI naming some other machine. Query and fragment components are not
+    /// filename bytes; percent-encode them when they are part of the path.
+    ///
+    /// Invalid or non-local file URIs return nil here, then remain blocked,
+    /// copyable links under `TerminalLink` rather than opening the wrong file.
+    static func resolveFileURL(_ raw: String) -> TerminalPathTarget? {
+        let text = raw.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty, text.count <= 1024, hasFileScheme(text) else { return nil }
+        // URI whitespace must be escaped. The decoded absolute path may
+        // contain ordinary spaces; `resolvePath` admits those below.
+        guard !text.contains(where: \.isWhitespace),
+              !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              // URLComponents repairs stray percent signs. Validate first so
+              // a malformed URI never silently changes into a different path.
+              text.removingPercentEncoding != nil,
+              let components = URLComponents(string: text),
+              components.scheme?.lowercased() == "file",
+              components.user == nil,
+              components.password == nil,
+              components.port == nil,
+              components.query == nil,
+              components.fragment == nil
+        else { return nil }
+
+        if let authority = components.host,
+           !authority.isEmpty,
+           authority.caseInsensitiveCompare("localhost") != .orderedSame {
+            return nil
+        }
+        // Parse the compiler-style suffix while it is still encoded. A `%3A`
+        // is filename data, whereas a literal trailing `:42[:5]` is the line
+        // convention the ordinary path resolver supports.
+        let encoded = splittingLineSuffix(components.percentEncodedPath)
+        guard let path = encoded.path.removingPercentEncoding,
+              path.hasPrefix("/")
+        else { return nil }
+        // URI syntax already proves every decoded space, colon, and trailing
+        // mark is part of the path. Do not apply the implicit matcher's prose
+        // cleanup (`file:///tmp/My%20Folder` must keep "Folder").
+        return resolvePath(
+            raw: raw,
+            text: path,
+            syntax: .fileURL(line: encoded.line)
+        )
+    }
+
+    private enum PathSyntax {
+        case implicitMatch
+        case fileURL(line: Int?)
+    }
+
+    private static func resolvePath(
+        raw: String,
+        text input: String,
+        syntax: PathSyntax
+    ) -> TerminalPathTarget? {
+        var text = input
+        guard !text.isEmpty, text.count <= 1024,
+              !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else { return nil }
+        // One pass: non-space whitespace (tabs, line breaks, Unicode spaces)
+        // is never part of a target; plain spaces are judged by the marker
+        // gate below.
         var hasSpace = false
         for character in text {
             if character == " " { hasSpace = true; continue }
             if character.isWhitespace { return nil }
-            if character.asciiValue.map({ $0 < 0x20 }) == true { return nil }
         }
 
         // A spaced target is admitted only when it roots itself with a
@@ -83,38 +152,51 @@ struct TerminalPathTarget: Equatable, Identifiable {
         // keeps the prose guard — "see src/foo.ts and lib/bar.rs" must not
         // classify as one spaced path.
         if hasSpace, !hasBaseMarker(text) { return nil }
-        // Shed trailing sentence punctuation, and — because the matcher's
-        // space-segment branches swallow trailing prose whenever the first
-        // chunk is dot-free ("/etc/hosts is missing" arrives whole) —
-        // prose-shaped tail chunks too. A spaced directory whose last
-        // segment is markerless ("~/My Folder") loses that segment to the
-        // same rule; the sheet's editable field is the recovery.
-        text = trimmingProseTail(text)
-        guard !text.isEmpty else { return nil }
-        text = strippingWrappedProseHead(text)
-
-        // `path:12` / `path:12:5` — strip, keep the line.
-        var line: Int?
-        let pieces = text.split(separator: ":", omittingEmptySubsequences: false)
-        if pieces.count >= 2 {
-            let tail = pieces.suffix(2)
-            let numbers = tail.compactMap { Int($0) }
-            if numbers.count == tail.count, pieces.count >= 3, let first = numbers.first {
-                // path:line:column
-                line = first
-                text = pieces.dropLast(2).joined(separator: ":")
-            } else if let only = Int(pieces.last!) {
-                line = only
-                text = pieces.dropLast().joined(separator: ":")
-            }
+        let line: Int?
+        switch syntax {
+        case .implicitMatch:
+            // Shed trailing sentence punctuation, and — because the
+            // matcher's space-segment branches swallow trailing prose when
+            // the first chunk is dot-free ("/etc/hosts is missing" arrives
+            // whole) — prose-shaped tail chunks too.
+            text = trimmingProseTail(text)
+            guard !text.isEmpty else { return nil }
+            text = strippingWrappedProseHead(text)
+            let split = splittingLineSuffix(text)
+            text = split.path
+            line = split.line
+        case .fileURL(let targetLine):
+            line = targetLine
         }
+
         guard !text.isEmpty, text != "/" else { return nil }
-        // A colon that survives suffix-stripping is prose ("warning:") or a
-        // scheme-ish shape — a colon is legal in a unix filename, but rare
-        // enough that guessing wrong (and opening the wrong file) costs
-        // more than declining into text selection.
-        guard !text.contains(":") else { return nil }
+        if case .implicitMatch = syntax {
+            // A colon that survives suffix-stripping is prose ("warning:")
+            // or a scheme-ish shape — legal in a unix filename, but too
+            // ambiguous in an implicit match. An explicit file URI may keep
+            // one because its syntax already proved the whole target.
+            guard !text.contains(":") else { return nil }
+        }
         return classified(raw: raw, path: text, line: line)
+    }
+
+    /// `path:line[:column]`: the column does not affect a line-oriented
+    /// viewer, but stripping it makes compiler and runtime file URIs useful.
+    /// Run this on a file URI's *encoded* path so `%3A42` remains a literal
+    /// filename while an unescaped `:42` becomes a target line.
+    private static func splittingLineSuffix(_ text: String) -> (path: String, line: Int?) {
+        let pieces = text.split(separator: ":", omittingEmptySubsequences: false)
+        guard let last = pieces.last, let lastNumber = Int(last) else {
+            return (text, nil)
+        }
+        if pieces.count >= 3, let line = Int(pieces[pieces.count - 2]) {
+            return (pieces.dropLast(2).joined(separator: ":"), line)
+        }
+        return (pieces.dropLast().joined(separator: ":"), lastNumber)
+    }
+
+    private static func hasFileScheme(_ text: String) -> Bool {
+        text.range(of: "file:", options: [.anchored, .caseInsensitive]) != nil
     }
 
     /// The self-rooting first characters — absolute, home, dot-relative,

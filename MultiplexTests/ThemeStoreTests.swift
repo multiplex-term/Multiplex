@@ -1,4 +1,3 @@
-import SwiftUI
 import XCTest
 @testable import Multiplex
 
@@ -37,10 +36,30 @@ final class ThemeStoreTests: XCTestCase {
         XCTAssertEqual(makeStore().appearance, .light, "appearance survives relaunch")
     }
 
-    func testColorSchemeOverrideMapping() {
-        XCTAssertNil(AppAppearance.system.colorSchemeOverride, "system follows the device")
-        XCTAssertEqual(AppAppearance.light.colorSchemeOverride, .light)
-        XCTAssertEqual(AppAppearance.dark.colorSchemeOverride, .dark)
+    func testResolvedOverrideMapping() {
+        XCTAssertNil(AppAppearance.system.resolvedOverride, "system follows the device")
+        XCTAssertEqual(AppAppearance.light.resolvedOverride, .light)
+        XCTAssertEqual(AppAppearance.dark.resolvedOverride, .dark)
+        XCTAssertEqual(AppAppearance.glass.resolvedOverride, .dark)
+    }
+
+    func testGlassAvailabilityIsPlatformBased() {
+        #if os(visionOS)
+        XCTAssertTrue(GlassPrototype.enabled)
+        XCTAssertEqual(AppAppearance.availableCases, AppAppearance.allCases)
+        #else
+        XCTAssertFalse(GlassPrototype.enabled)
+        XCTAssertEqual(AppAppearance.availableCases, [.system, .light, .dark])
+        #endif
+    }
+
+    func testPersistedGlassFallsBackOffVisionOS() {
+        defaults.set(AppAppearance.glass.rawValue, forKey: "MultiplexAppearance")
+
+        XCTAssertEqual(
+            makeStore().appearance,
+            GlassPrototype.enabled ? .glass : .system
+        )
     }
 
     // MARK: Per-appearance selection

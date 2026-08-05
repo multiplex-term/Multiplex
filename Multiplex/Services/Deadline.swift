@@ -16,12 +16,14 @@ func deadlined<T: Sendable>(
     try await withCheckedThrowingContinuation { continuation in
         let gate = DeadlineGate(continuation)
         let work = Task {
-            do { gate.finish(.success(try await operation()), winner: .work) }
-            catch { gate.finish(.failure(error), winner: .work) }
+            do {
+                gate.finish(.success(try await operation()), winner: .work)
+            } catch {
+                gate.finish(.failure(error), winner: .work)
+            }
         }
         let timer = Task {
-            do { try await Task.sleep(for: .seconds(seconds)) }
-            catch { return }
+            do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
             gate.finish(.failure(DeadlineExceeded()), winner: .timer)
         }
         gate.install(work: work, timer: timer)

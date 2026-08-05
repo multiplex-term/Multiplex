@@ -142,9 +142,16 @@ final class KittyGraphicsState {
 }
 
 extension Terminal {
-    private static let kittyMaxImageBytes = 400 * 1024 * 1024
+    // Multiplex patch: mobile-scale budgets. Upstream's 400 MiB per image and
+    // 4 GiB cache ceiling are desktop numbers — on iOS/visionOS a remote that
+    // sends one such image gets the app jetsam-killed, so a hostile host could
+    // terminate it at will. 64 MiB still covers a 4000x4000 RGBA image.
+    static let kittyMaxImageBytes = 64 * 1024 * 1024
     private static let kittyMaxImageDimension = 10000
-    private static let kittyMaxImageCacheBytes = 4 * 1024 * 1024 * 1024
+    private static let kittyMaxImageCacheBytes = 128 * 1024 * 1024
+    /// Multiplex patch: the widest placement any real terminal asks for, in
+    /// cells. Remote `c`/`r` controls size images and drive cursor loops.
+    static let kittyMaxPlacementCells = 1000
 
     func handleKittyGraphics(_ data: ArraySlice<UInt8>) {
         guard let (control, payload) = parseKittyGraphicsControl(data) else {
@@ -159,6 +166,15 @@ extension Terminal {
             if kittyGraphicsState.pending == nil {
                 kittyGraphicsState.pending = KittyGraphicsPending(control: control, base64Payload: Array(payload))
             } else {
+                // Multiplex patch: a remote that never sends the final chunk
+                // used to grow this buffer for the life of the session. Cap
+                // it at the encoded size of the largest image we would
+                // accept and drop the transfer once it is exceeded.
+                let encodedCeiling = Terminal.kittyMaxImageBytes / 3 * 4
+                if (kittyGraphicsState.pending?.base64Payload.count ?? 0) + payload.count > encodedCeiling {
+                    kittyGraphicsState.pending = nil
+                    return
+                }
                 kittyGraphicsState.pending?.base64Payload.append(contentsOf: payload)
             }
             return
@@ -202,11 +218,24 @@ extension Terminal {
             start = end == controlBytes.endIndex ? end : end + 1
         }
 
+        // Multiplex patch: every control value here is remote text parsed as a
+        // full-range `Int`. Downstream code converts some of them to `UInt32`
+        // (the delete-by-id range) and adds others to cursor coordinates, both
+        // of which trapped on out-of-range input. The protocol's own widest
+        // field is 32-bit, so clamping there keeps every legal value —
+        // including large image ids — while removing the trap.
         func intValue(_ key: String, default value: Int = 0) -> Int {
             guard let raw = values[key], let val = Int(raw) else {
                 return value
             }
-            return val
+            let ceiling = Int(UInt32.max)
+            return max(-ceiling, min(val, ceiling))
+        }
+
+        /// Multiplex patch: cell counts additionally stay terminal-plausible —
+        /// they size images and drive per-row cursor loops.
+        func cellCountValue(_ key: String) -> Int {
+            max(0, min(intValue(key, default: 0), Terminal.kittyMaxPlacementCells))
         }
 
         func uintValue(_ key: String) -> UInt32? {
@@ -246,8 +275,8 @@ extension Terminal {
         let zIndex = intValue("z", default: 0)
         var more = intValue("m", default: 0)
         let compression = values["o"]?.first
-        let columns = intValue("c", default: 0)
-        let rows = intValue("r", default: 0)
+        let columns = cellCountValue("c")
+        let rows = cellCountValue("r")
         let cursorPolicy = intValue("C", default: 0)
         let deleteMode = values["d"]?.first
         let dataSize = intValue("S", default: 0)
@@ -612,7 +641,9 @@ extension Terminal {
         if useIndex {
             buffer.x = startCol
             buffer.y = startRow - buffer.yBase
-            for _ in 0..<rows {
+            // Multiplex patch: one remote placement must not drive more
+            // scrolls than a screenful — the row count comes off the wire.
+            for _ in 0..<min(max(0, rows), self.rows) {
                 cmdIndex()
             }
             buffer.x = startCol + cols
@@ -1895,6 +1926,11 @@ extension Terminal {
         }
 
         var output = Data()
+        // Multiplex patch: stop inflating as soon as the output passes the
+        // image ceiling. Upstream inflated the whole stream and only then
+        // compared its size, so a few kilobytes of hostile zlib could
+        // allocate gigabytes first.
+        let outputLimit = Terminal.kittyMaxImageBytes
         let dstSize = 64 * 1024
         var dstBuffer = [UInt8](repeating: 0, count: dstSize)
 
@@ -1917,6 +1953,9 @@ extension Terminal {
                 let produced = dstSize - stream.dst_size
                 if produced > 0 {
                     output.append(dstBuffer, count: produced)
+                    if output.count > outputLimit {
+                        return nil
+                    }
                 }
 
                 switch status {

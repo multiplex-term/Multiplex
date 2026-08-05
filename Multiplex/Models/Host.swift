@@ -15,6 +15,39 @@ struct Host: Identifiable, Codable, Hashable {
         }
     }
 
+    /// Which multiplexer this host's deck tiles and terminals speak —
+    /// remote tmux (the default) or herdr (herdr.dev). One backend per
+    /// host, chosen explicitly in Host Settings / manual Add; the dead-tmux
+    /// tile may *offer* a switch when it sees herdr installed, but nothing
+    /// ever flips this automatically.
+    /// The raw value doubles as the user-facing noun ("tmux"/"herdr") —
+    /// wire format and vocabulary are the same word on purpose.
+    enum SessionBackend: String, Codable, CaseIterable {
+        case tmux
+        case herdr
+
+        /// Whether the probe can state how many clients a session has.
+        /// tmux answers `#{session_attached}`; herdr 0.7.5 / protocol 17
+        /// exposes no attached-client surface at all (verified 2026-08-02
+        /// across `session list --json`, `api snapshot`, `status --json`,
+        /// and the bundled API schema — only the socket-only
+        /// `client.window_title` reply leaks a `no_foreground_client`
+        /// reason, and no CLI verb reaches it), so its records carry
+        /// `clientCount == 0` whatever is really attached.
+        var reportsClientCount: Bool { self == .tmux }
+
+        /// Whether a session is live right now — said only where it can be
+        /// verified. tmux counts every client on the host. herdr can answer
+        /// for exactly one client: the one this app is, which is what an
+        /// open terminal tab means. A shell on the host attached to the same
+        /// herdr session therefore stays invisible; the tile understates
+        /// rather than guesses, the same choice its missing client count and
+        /// session age already make.
+        func isSessionLive(clientCount: Int, hasOpenTab: Bool) -> Bool {
+            reportsClientCount ? clientCount > 0 : hasOpenTab
+        }
+    }
+
     var id: UUID = UUID()
     var name: String
     var hostname: String
@@ -28,10 +61,31 @@ struct Host: Identifiable, Codable, Hashable {
     /// press on its tile. Rides the synced record, so a host switched off
     /// stays off on the user's other devices.
     var isEnabled: Bool = true
+    /// Keep this host's sessions and probing alive when the app leaves the
+    /// screen. Off (the default) is the plain iOS contract: the app suspends,
+    /// its sockets die, and `SessionResumePolicy` reattaches on the way back.
+    /// On, the app takes a background-task assertion as it leaves and keeps
+    /// this host's transports and probes running until the grant runs out —
+    /// tens of seconds, never indefinite, and never a `UIBackgroundModes`
+    /// declaration (`BackgroundActivityPolicy` records why). What it buys: a
+    /// quick trip to another app costs no reattach, and an agent that finishes
+    /// just after you look away still reaches `AttentionCenter` in time to
+    /// ping you. Rides the synced record. A flip reaches a running probe
+    /// through `BackgroundActivity.keepAliveLookup`, which resolves the switch
+    /// against the live store — deliberately not through the feed rebuild the
+    /// field's place in `connectionModelConfiguration` also causes, because
+    /// every asking loop holds a host snapshot of its own.
+    var backgroundKeepAlive: Bool = false
     /// Attach terminals over mosh (SSP over UDP) instead of the SSH PTY.
     /// The credentials above still authenticate the SSH bootstrap that
     /// launches `mosh-server`; deck probing stays on SSH either way.
     var useMosh: Bool = false
+    /// The session backend the probe and attach paths use. Rides the synced
+    /// record, and deliberately participates in
+    /// `connectionModelConfiguration`: flipping it must tear down and
+    /// rebuild the probe connection, because the probe command itself is
+    /// backend-shaped.
+    var sessionBackend: SessionBackend = .tmux
     /// Absolute path to `mosh-server` when it isn't on the exec PATH.
     var moshServerPath: String?
     /// UDP port or range ("60000:61000") handed to `mosh-server -p`.
@@ -138,7 +192,18 @@ extension Host {
         // Records written before the switch existed are hosts the user
         // expects to see probing: absent means enabled.
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        // Absent means off: background keep-alive spends battery and radio on
+        // a host's behalf, so it is never inherited by a record that predates
+        // the switch — the user opts each host in.
+        backgroundKeepAlive = try container.decodeIfPresent(
+            Bool.self, forKey: .backgroundKeepAlive
+        ) ?? false
         useMosh = try container.decodeIfPresent(Bool.self, forKey: .useMosh) ?? false
+        // Decode via the raw string so an unknown value — a record written
+        // by a newer schema that grew a third backend — degrades to tmux
+        // instead of throwing this host (and with it the whole list) away.
+        sessionBackend = (try container.decodeIfPresent(String.self, forKey: .sessionBackend))
+            .flatMap(SessionBackend.init(rawValue:)) ?? .tmux
         moshServerPath = try container.decodeIfPresent(String.self, forKey: .moshServerPath)
         moshPorts = try container.decodeIfPresent(String.self, forKey: .moshPorts)
         workingDirs = try container.decodeIfPresent([String].self, forKey: .workingDirs) ?? []
@@ -168,6 +233,9 @@ extension Host {
     /// current/future Host field remains part of the identity — `isEnabled`
     /// deliberately included, so a host switched off on another device
     /// restarts the wall feed here, which is where the live probe is dropped.
+    /// (`backgroundKeepAlive` is in the identity only by that default rule —
+    /// nothing depends on the rebuild, because the loops resolve that switch
+    /// live through `BackgroundActivity.keepAliveLookup`.)
     var connectionModelConfiguration: Host {
         var configuration = self
         configuration.agentCommandConfiguration = AgentCommandConfiguration()

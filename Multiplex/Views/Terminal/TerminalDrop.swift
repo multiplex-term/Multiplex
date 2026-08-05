@@ -1,104 +1,172 @@
-import SwiftUI
-import UniformTypeIdentifiers
+import UIKit
 
-/// Turns a drop's `NSItemProvider`s into `DroppedFile`s.
-/// `loadFileRepresentation` handles both Files-app drops and dragged
-/// images (Photos, screenshots): it writes a temp copy — no security-scope
-/// dance — valid only inside the completion, so bytes are read there.
-enum TerminalDropCatcher {
-    static func load(_ providers: [NSItemProvider]) async -> [DroppedFile] {
-        var files: [DroppedFile] = []
-        for provider in providers {
-            guard let type = provider.registeredContentTypes
-                .first(where: { $0.conforms(to: .data) })
-            else { continue }   // folders etc. — unsupported v1
-            let suggested = provider.suggestedName
-            let loaded: DroppedFile? = await withCheckedContinuation { continuation in
-                _ = provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, _ in
-                    guard let url, let data = try? Data(contentsOf: url) else {
-                        continuation.resume(returning: nil)
-                        return
-                    }
-                    var name = suggested ?? url.lastPathComponent
-                    if !name.contains("."), let ext = type.preferredFilenameExtension {
-                        name += ".\(ext)"
-                    }
-                    continuation.resume(returning: DroppedFile(name: name, data: data))
-                }
-            }
-            if let loaded { files.append(loaded) }
+/// Upload progress/failure surface used directly by the native terminal pane.
+/// It preserves the compact TALLY pill metrics and combined
+/// accessibility announcement.
+@MainActor
+final class DropStatusPillView: UIView {
+    private let stack = UIStackView()
+    private let progress = UIProgressView(progressViewStyle: .default)
+    private let failureDot = UIView()
+    private let label = UILabel()
+
+    init(state: TerminalSessionController.DropState) {
+        super.init(frame: .zero)
+        backgroundColor = TallyPalette.bezel
+        layer.borderWidth = 1
+        isAccessibilityElement = true
+
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 8
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 7),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7),
+        ])
+
+        progress.progressTintColor = TallyPalette.signal
+        progress.trackTintColor = TallyPalette.signal3
+        progress.translatesAutoresizingMaskIntoConstraints = false
+        progress.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        stack.addArrangedSubview(progress)
+
+        failureDot.backgroundColor = TallyPalette.caution
+        failureDot.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            failureDot.widthAnchor.constraint(equalToConstant: 5),
+            failureDot.heightAnchor.constraint(equalToConstant: 5),
+        ])
+        stack.addArrangedSubview(failureDot)
+
+        label.font = .monospacedSystemFont(
+            ofSize: 10 * Theme.typeScale,
+            weight: .regular
+        )
+        label.textColor = TallyPalette.signal2
+        label.numberOfLines = 1
+        label.lineBreakMode = .byTruncatingTail
+        stack.addArrangedSubview(label)
+
+        apply(state)
+        refreshResolvedLayerColors()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func apply(_ state: TerminalSessionController.DropState) {
+        switch state {
+        case .uploading(let name, let fraction):
+            progress.isHidden = false
+            failureDot.isHidden = true
+            progress.setProgress(Float(fraction), animated: false)
+            label.text = "\(name) · \(Int(fraction * 100))%"
+        case .failed(let message):
+            progress.isHidden = true
+            failureDot.isHidden = false
+            label.text = message
         }
-        return files
+        accessibilityLabel = label.text
+        invalidateIntrinsicContentSize()
+    }
+
+    func fittingSize(maximumWidth: CGFloat?) -> CGSize {
+        let contentSize = stack.systemLayoutSizeFitting(
+            UIView.layoutFittingCompressedSize,
+            withHorizontalFittingPriority: .fittingSizeLevel,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        let natural = CGSize(width: contentSize.width + 24, height: contentSize.height + 14)
+        guard let maximumWidth else { return natural }
+        return CGSize(width: min(natural.width, maximumWidth), height: natural.height)
+    }
+
+    override var intrinsicContentSize: CGSize {
+        fittingSize(maximumWidth: nil)
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        refreshResolvedLayerColors()
+    }
+
+    private func refreshResolvedLayerColors() {
+        layer.borderColor = TallyPalette.bezelHi
+            .resolvedColor(with: traitCollection).cgColor
     }
 }
 
-/// Upload progress / failure, floating at the pane's bottom edge.
-struct DropStatusPill: View {
-    let state: TerminalSessionController.DropState
+/// Full-pane upload target highlight used by the native terminal pane.
+@MainActor
+final class DropTargetVeilView: UIView {
+    private let icon = UIImageView()
 
-    var body: some View {
-        HStack(spacing: 8) {
-            switch state {
-            case .uploading(let name, let fraction):
-                ProgressView(value: fraction)
-                    .progressViewStyle(.linear)
-                    .tint(Theme.signal)
-                    .frame(width: 64)
-                Text("\(name) · \(Int(fraction * 100))%")
-                    .font(.mono(10))
-                    .foregroundStyle(Theme.signal2)
-                    .lineLimit(1)
-            case .failed(let message):
-                Rectangle().fill(Theme.caution).frame(width: 5, height: 5)
-                Text(message)
-                    .font(.mono(10))
-                    .foregroundStyle(Theme.signal2)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(Theme.bezel)
-        .overlay(Rectangle().strokeBorder(Theme.bezelHi, lineWidth: 1))
-        .accessibilityElement(children: .combine)
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = TallyPalette.chassis.withAlphaComponent(0.35)
+        isUserInteractionEnabled = false
+        layer.borderWidth = 2
+
+        icon.image = UIImage(
+            systemName: "arrow.down.doc",
+            withConfiguration: UIImage.SymbolConfiguration(
+                pointSize: 22 * Theme.typeScale,
+                weight: .semibold
+            )
+        )
+        icon.tintColor = TallyPalette.signal
+        icon.contentMode = .scaleAspectFit
+
+        let caption = UILabel()
+        let scaled = 11 * Theme.typeScale
+        caption.attributedText = NSAttributedString(
+            string: "DROP TO UPLOAD",
+            attributes: [
+                .font: UIFont.systemFont(
+                    ofSize: scaled,
+                    weight: .bold,
+                    width: .compressed
+                ),
+                .kern: scaled * 0.09,
+                .foregroundColor: TallyPalette.signal2,
+            ]
+        )
+        caption.numberOfLines = 1
+
+        let stack = UIStackView(arrangedSubviews: [icon, caption])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 8
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
+        isAccessibilityElement = true
+        accessibilityLabel = "Drop to upload"
+        refreshResolvedLayerColors()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        refreshResolvedLayerColors()
+    }
+
+    private func refreshResolvedLayerColors() {
+        layer.borderColor = TallyPalette.signal2
+            .resolvedColor(with: traitCollection).cgColor
     }
 }
-
-/// Full-pane target highlight while a drag hovers.
-struct DropTargetVeil: View {
-    var body: some View {
-        ZStack {
-            Theme.chassis.opacity(0.35)
-            VStack(spacing: 8) {
-                Image(systemName: "arrow.down.doc")
-                    .font(.ui(22, weight: .semibold))
-                    .foregroundStyle(Theme.signal)
-                ChassisLabel("Drop to upload", size: 11, color: Theme.signal2)
-            }
-        }
-        .overlay(Rectangle().strokeBorder(Theme.signal2, lineWidth: 2))
-        .allowsHitTesting(false)
-    }
-}
-
-#if DEBUG
-#Preview("Upload progress") {
-    DropStatusPill(
-        state: .uploading(name: "release-notes.md", fraction: 0.62)
-    )
-    .padding()
-    .background(Theme.chassis)
-}
-
-#Preview("Upload failed") {
-    DropStatusPill(state: .failed("File upload requires tmux over SSH"))
-        .padding()
-        .background(Theme.chassis)
-}
-
-#Preview("Drop target") {
-    DropTargetVeil()
-        .frame(width: 480, height: 280)
-        .background(Theme.screen)
-}
-#endif

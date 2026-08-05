@@ -25,19 +25,45 @@ final class ExternalActionRouter {
         var open: (TerminalWindowRoute) -> Void
         var presentAgentPrompt: (AgentPromptRequest) -> Void
         var presentFailure: (ExternalActionFailure) -> Void
+        var presentConfirmation: (ExternalActionConfirmation) -> Void
     }
 
     /// Bumped on every submit — the scene roots' raise-the-deck trigger.
     private(set) var pendingSignal = 0
     private(set) var hasContext = false
 
-    @ObservationIgnored private var queue: [ExternalAction] = []
+    @ObservationIgnored private var queue: [(action: ExternalAction, trusted: Bool)] = []
     @ObservationIgnored private var context: Context?
     @ObservationIgnored private var contextToken: UUID?
     @ObservationIgnored private var drainTask: Task<Void, Never>?
 
-    func submit(_ action: ExternalAction) {
-        queue.append(action)
+    /// A newly resolved terminal-only scene uses this to recover work that
+    /// arrived while UIKit was still withholding its restoration payload.
+    /// `pendingSignal` alone is historical and cannot distinguish queued work
+    /// from an action a Deck already drained.
+    var hasPendingActions: Bool { !queue.isEmpty }
+
+    /// The app lock holds the queue. Actions arrive from outside the app —
+    /// a widget tap, a Shortcut, a `multiplex://` URL any other app can
+    /// open — and performing one connects to a host, mints a tmux session,
+    /// runs the host's setup script, and types an agent prompt. None of that
+    /// may happen behind the veil: the veil's promise is that the device
+    /// owner authenticates before this app acts on their hosts. Work waits
+    /// (it is not dropped) and drains on unlock.
+    var isHeldByAppLock = false {
+        didSet {
+            guard isHeldByAppLock != oldValue, !isHeldByAppLock else { return }
+            drainIfReady()
+        }
+    }
+
+    /// `trusted` is the URL-origin verdict (`ExternalActionTrust`). App
+    /// Intents, the agent-prompt sheet's resubmit, and the confirmation's own
+    /// approval are trusted by construction — the person ran them from inside
+    /// the app. A `multiplex://` URL is trusted only when it carries this
+    /// install's widget token; everything else is confirmed first.
+    func submit(_ action: ExternalAction, trusted: Bool = true) {
+        queue.append((action, trusted))
         pendingSignal &+= 1
         drainIfReady()
     }
@@ -64,7 +90,8 @@ final class ExternalActionRouter {
     }
 
     private func drainIfReady() {
-        guard drainTask == nil, context != nil, !queue.isEmpty else { return }
+        guard drainTask == nil, context != nil, !queue.isEmpty,
+              !isHeldByAppLock else { return }
         drainTask = Task { [weak self] in
             await self?.drain()
             guard let self else { return }
@@ -76,9 +103,10 @@ final class ExternalActionRouter {
     }
 
     private func drain() async {
-        while let context, !queue.isEmpty {
-            let action = queue.removeFirst()
-            await ExternalActionPerformer.perform(action, context: context)
+        while let context, !queue.isEmpty, !isHeldByAppLock {
+            let entry = queue.removeFirst()
+            await ExternalActionPerformer.perform(
+                entry.action, trusted: entry.trusted, context: context)
         }
     }
 }
@@ -90,7 +118,11 @@ final class ExternalActionRouter {
 /// sheet's path) for minting shell and agent sessions.
 @MainActor
 enum ExternalActionPerformer {
-    static func perform(_ action: ExternalAction, context: ExternalActionRouter.Context) async {
+    static func perform(
+        _ action: ExternalAction,
+        trusted: Bool = true,
+        context: ExternalActionRouter.Context
+    ) async {
         guard let host = resolveHost(action.hostRef, in: context.store) else {
             context.presentFailure(ExternalActionFailure(
                 hostName: action.hostRef.displayName,
@@ -109,12 +141,20 @@ enum ExternalActionPerformer {
             ))
             return
         }
+        // Host resolution and the enabled check run first so the
+        // confirmation can name the machine and never appears for a link
+        // that could not have run anyway.
+        guard trusted || !action.needsOriginConfirmation else {
+            context.presentConfirmation(
+                ExternalActionConfirmation.make(for: action, hostName: host.name))
+            return
+        }
         switch action {
         case .openShell(_, let sessionName):
             await openShell(on: host, requestedSession: sessionName, context: context)
         case .openAgent(
             _, let agent, let prompt, let askForPrompt, let directory,
-            let setupScript, let model
+            let setupScript, let model, let target
         ):
             if askForPrompt {
                 context.presentAgentPrompt(AgentPromptRequest(
@@ -122,7 +162,8 @@ enum ExternalActionPerformer {
                     agent: agent,
                     directory: directory,
                     setupScript: setupScript,
-                    model: model
+                    model: model,
+                    target: target
                 ))
                 return
             }
@@ -132,6 +173,7 @@ enum ExternalActionPerformer {
                 directory: directory,
                 setupScript: setupScript,
                 model: model,
+                target: target,
                 on: host,
                 context: context
             )
@@ -161,8 +203,12 @@ enum ExternalActionPerformer {
             sessions.first { $0.name == name }?.name
         }
         if let target = requested ?? ExternalActionPlan.mostRecentSessionName(in: sessions) {
-            if context.workspace.focusTab(hostID: host.id, sessionName: target) { return }
-            open(sessionName: target, on: host, context: context)
+            if context.workspace.focusTab(
+                hostID: host.id,
+                sessionName: target,
+                backend: host.sessionBackend
+            ) { return }
+            open(mode: .attach(host: host, sessionName: target), on: host, context: context)
         } else {
             // Headless creation inherits the New Session sheet's remembered
             // setup script (nil unless its REMEMBER opt-in is on) — a widget
@@ -178,7 +224,7 @@ enum ExternalActionPerformer {
                 presentCreateFailure(for: model, host: host, context: context)
                 return
             }
-            open(sessionName: created, on: host, context: context)
+            open(mode: created, on: host, context: context)
         }
     }
 
@@ -188,6 +234,7 @@ enum ExternalActionPerformer {
         directory: String?,
         setupScript: ExternalSetupScriptSelection,
         model launchModel: String?,
+        target: ExternalSessionTarget,
         on host: Host,
         context: ExternalActionRouter.Context
     ) async {
@@ -203,18 +250,53 @@ enum ExternalActionPerformer {
             available: host.sessionScripts,
             remembered: NewSessionPreferences().rememberedScript(for: host)
         )
+        let launch = agent.launchCommand(model: launchModel, initialPrompt: prompt ?? "")
+        // A configured target names the exact session it was set up with; a
+        // session that died since falls through to the fresh-session mint
+        // (fail-soft, openShell's rule). An in-session create that FAILS
+        // stays a visible failure instead — a fallback mint there would
+        // hide it behind a surprise second session.
+        if case .existingSession(let name, let placement) = target,
+           let session = model.tmux.sessions.first(where: { $0.name == name }) {
+            guard let mode = await model.launchInSession(
+                named: session.name,
+                placement: placement,
+                // Same rule as the fresh-session mint below: the Working
+                // Directory field, else the host's first configured dir —
+                // one field, one meaning, wherever the agent lands.
+                directory: directory ?? host.workingDirs.first,
+                label: agent.launchCommand,
+                running: script?.normalizedBody,
+                typing: launch
+            ) else {
+                presentLaunchInSessionFailure(
+                    session: session.name, placement: placement,
+                    for: model, host: host, context: context)
+                return
+            }
+            // Created first, revealed second: the fresh pane is already the
+            // session's current window/focus, so an existing tab needs only
+            // the reveal and a missing one attaches straight onto it.
+            if context.workspace.focusTab(
+                hostID: host.id,
+                sessionName: session.name,
+                backend: host.sessionBackend
+            ) { return }
+            open(mode: mode, on: host, context: context)
+            return
+        }
         guard let created = await model.createSession(
             base: agent.launchCommand,
             inDirectoryOf: nil,
             startingIn: directory ?? host.workingDirs.first,
             applying: host.newSessionTmuxConf,
             running: script?.normalizedBody,
-            typing: agent.launchCommand(model: launchModel, initialPrompt: prompt ?? "")
+            typing: launch
         ) else {
             presentCreateFailure(for: model, host: host, context: context)
             return
         }
-        open(sessionName: created, on: host, context: context)
+        open(mode: created, on: host, context: context)
     }
 
     /// The status guard: one fresh (or joined in-flight) probe, then the
@@ -237,12 +319,32 @@ enum ExternalActionPerformer {
     }
 
     private static func open(
-        sessionName: String, on host: Host, context: ExternalActionRouter.Context
+        mode: TerminalRoute.Mode, on host: Host, context: ExternalActionRouter.Context
     ) {
-        context.open(TerminalWindowRoute(tab: TerminalRoute(
-            hostID: host.id,
-            mode: .attach(sessionName: sessionName)
-        )))
+        context.open(TerminalWindowRoute(tab: TerminalRoute(hostID: host.id, mode: mode)))
+    }
+
+    /// Failure copy for an in-session launch, in the backend's own noun —
+    /// the person configured "New Tab"/"New Workspace"/"New Window" and the
+    /// alert should say which one didn't happen.
+    private static func presentLaunchInSessionFailure(
+        session: String, placement: ExternalSessionPlacement,
+        for model: HostConnectionModel, host: Host,
+        context: ExternalActionRouter.Context
+    ) {
+        let noun: String
+        switch (host.sessionBackend, placement) {
+        case (.tmux, _): noun = "window"
+        case (.herdr, .tab): noun = "tab"
+        case (.herdr, .workspace): noun = "workspace"
+        }
+        let message: String
+        if case .failed(let reason) = model.phase {
+            message = reason
+        } else {
+            message = "Couldn't open a new \(noun) in session \(session) on \(host.name)."
+        }
+        context.presentFailure(ExternalActionFailure(hostName: host.name, message: message))
     }
 
     private static func presentCreateFailure(

@@ -40,13 +40,13 @@ uniform downscale, never a crop.
 | 1 | `wall` | Deck, 2 hosts, ~6 live tiles, one LIVE lamp, agent glyph | EVERY TMUX SESSION, LIVE ON THE WALL | `2 HOSTS · 6 SESSIONS` ● LIVE |
 | 2 | `windows` | 3 terminals around the room (visionOS) / Stage Manager scenes (iPad) | A SPATIAL WINDOW PER SESSION *(iPad: REAL SCENES, STAGE MANAGER READY)* | `3 WINDOWS` ● LIVE |
 | 3 | `agents` | Wall with agent glyph + NEEDS YOU; notification banner in frame | KNOW WHEN YOUR AGENT NEEDS YOU | `✳ CLAUDE CODE` ● NEEDS YOU |
-| 4 | `strip` | Real Claude Code, chip strip + one custom chip visible | ONE-TAP AGENT COMMANDS — PLUS YOUR OWN | `/CLEAR · /COMPACT · STOP` |
+| 4 | `strip` | Real Claude Code, chip strip + one custom chip visible | ONE-TAP AGENT COMMANDS — PLUS YOUR OWN | `/CLEAR · /COMPACT · /MODEL` |
 | 5 | `launch` | New Session sheet over the wall: Claude Code selected, prompt + setup script + dir filled | START AN AGENT SESSION IN ONE STEP | `CLAUDE CODE · CODEX · PI` |
 | 6 | `drop` | FILE menu open over a live agent session | ATTACH FILES STRAIGHT INTO THE SESSION | iPad `CAMERA · PHOTOS · FILES` / visionOS `PHOTOS · FILES · DRAG & DROP` |
 | 7 | `widgets` | Home Screen widgets (iPad) / widget pinned in the room (visionOS 26) | THE WALL, ON YOUR HOME SCREEN *(visionOS: PINNED IN YOUR SPACE)* | `WIDGETS · APP SHORTCUTS` |
 | 8 | `mosh` | Host sheet with MOSH toggle on + attached session behind | MOSH BUILT IN — ROAM, SLEEP, RESUME | `UDP · PRO` ● LIVE |
 | 9 | `keys` | iPad: docked keyboard raised, TALLY key rail + helper strip above it / visionOS: ornament key cluster beside the UMD, floating keyboard below | REAL TERMINAL KEYS, ABOVE THE KEYBOARD *(visionOS: ESC, CTRL, TAB — ALWAYS IN REACH)* | `ESC · CTRL · TAB · ARROWS · RET · TMUX` / visionOS `ESC · CTRL · TAB` ● LIVE |
-| 10 | `themes` | iPad: LIGHT appearance, Frost chassis + Tally Frost / visionOS: Gruvbox dark | LIGHT OR DARK — TEN THEMES, PLUS YOUR OWN | `TALLY FROST · LIGHT` / `GRUVBOX DARK` |
+| 10 | `themes` | iPad: LIGHT appearance, Frost chassis + Tally Frost / visionOS: Settings on GLASS over the wall | iPad: LIGHT OR DARK — TEN THEMES, PLUS YOUR OWN / visionOS: GRAPHITE OR SMOKED GLASS | iPad `TALLY FROST · LIGHT` / visionOS `TALLY · GLASS` |
 
 Exactly 10 = the ASC cap. The 2026-07-18 re-plan (widgets/Shortcuts, agent
 history, file attach, the light appearance, iPhone) added `history`, `drop`,
@@ -60,6 +60,13 @@ visionOS sim, ship visionOS with 9 or revive `shortcuts` from git history as
 its 10th. The 2026-07-21 capture pass retired `tabs` (the merge story reads
 as ordinary tab UI in a still) for `keys` on every platform — each device
 class shows its own key surface (rail / ornament cluster).
+
+⚠ **The shipped `strip` frames are stale as of 2026-08-05**: the STOP chip was
+withdrawn from every agent's built-in set, so `ipad-04-strip`, `iphone-04-strip`,
+and `visionos-04-strip` all show a chip the binary no longer draws, and their
+telemetry caption read `/CLEAR · /COMPACT · STOP`. The caption above is
+corrected; the three images must be re-captured before the next `deliver` run
+that ships screenshots. Nothing else in the set depends on the strip's contents.
 
 ## Shot list — iPhone (portrait, 9 shots)
 
@@ -86,9 +93,10 @@ is deliberately a one-window shell); `keys` moves up to slot 2:
   `xcrun simctl status_bar <UDID> override --time 9:41 --batteryState charged
   --batteryLevel 100 --cellularMode active --cellularBars 4 --operatorName ""`
   (visionOS has no status bar).
-- **Nothing behind the app** on visionOS — the Files window ghosting through
-  glass in `docs/visionos-deck.png` reads as clutter. One consistent
-  environment for the whole set (the day living room reads best).
+- **No other app windows behind Multiplex** on visionOS — Files ghosting
+  through GLASS reads as clutter. The room itself is intentional material;
+  use one consistent environment for the whole set (the day living room reads
+  best).
 - **No dev tells**: host must not read `jhen@127.0.0.1:2222`. Alias the
   harness: add `127.0.0.1 atlas.internal` to the Mac's `/etc/hosts` (the sim
   uses the Mac's resolver) and seed via `stage-sessions.sh`'s
@@ -110,8 +118,9 @@ is deliberately a one-window shell); `keys` moves up to slot 2:
   fleet first (the App Group `widget-state.json` publishes off the live
   probe), then add widgets on a **plain dark wallpaper** Home Screen. SEEN
   stamps in frame are honest and deliberate — widgets never claim liveness.
-- **Light-appearance shots** flip via the `debug.appearance` notification
-  (SYSTEM → LIGHT → DARK, persisted); flip back after the `themes` capture.
+- **Appearance shots** flip via the `debug.appearance` notification
+  (SYSTEM → LIGHT → DARK → GLASS on visionOS, persisted). Stage `themes` on
+  GLASS there, LIGHT on iPad, then restore SYSTEM after capture.
 - **Pro surfaces** (`mosh`, custom themes) are live by default in DEBUG
   builds (`isPro` defaults true); the telemetry marks them `PRO` honestly.
   The chip strip is free (10 taps/day) and carries no PRO mark, and the

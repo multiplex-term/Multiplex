@@ -96,8 +96,9 @@ final class MoshBootstrapTests: XCTestCase {
     }
 
     func testTargetBudgetMatchesAddressFamily() {
-        let v4 = MoshBootstrap.Target(ip: "1.2.3.4", port: 60001, key: MoshKey(base64: "bmCuIRYJHSUF4dcm/qJt2w")!, isIPv6: false)
-        let v6 = MoshBootstrap.Target(ip: "::1", port: 60001, key: MoshKey(base64: "bmCuIRYJHSUF4dcm/qJt2w")!, isIPv6: true)
+        let key = MoshKey(base64: "bmCuIRYJHSUF4dcm/qJt2w")!
+        let v4 = MoshBootstrap.Target(ip: "1.2.3.4", port: 60001, key: key, isIPv6: false)
+        let v6 = MoshBootstrap.Target(ip: "::1", port: 60001, key: key, isIPv6: true)
         XCTAssertEqual(v4.datagramBudget, 1252 - 28)
         XCTAssertEqual(v6.datagramBudget, 1216 - 28)
     }

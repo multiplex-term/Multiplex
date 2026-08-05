@@ -1,33 +1,35 @@
-Multiplex is an SSH client: the live wall and persistent sessions need a remote host running tmux. A demo tmux server is provisioned for review — nothing to install on your side.
+Multiplex is an SSH client; its live wall needs a remote tmux host. A review server is ready — nothing to install.
 
 CONNECT
-1. Launch Multiplex and tap + HOST.
+1. Launch Multiplex, tap + HOST, then MANUAL (the sheet opens on BIND, which is for machines you own).
 2. Name: demo — Address: demo-for-review.multiplexterm.dev — Port: 22 — User and password: the demo credentials above (Auth: Password).
 3. Save. Live session tiles appear within seconds, each streaming that session's actual last screen lines.
 
 CORE FLOW
 - The free tier saves two hosts; Multiplex Pro removes the limit.
-- + NEW SESSION starts a plain tmux shell or launches Claude Code, Codex, or Pi with an optional first prompt, passed once as the CLI's first message and not retained.
-- Tap a tile to attach: the session opens in its own window with a red LIVE lamp. Attach a second and place them side by side (its own spatial window on Vision Pro; Stage Manager on iPad).
-- MERGE in a terminal's bottom bar pulls another window's session in as a tab; a tab's context menu moves it back out, still connected.
-- TMUX in the Vision Pro bottom bar or iPad/iPhone key bar opens the shortcut menu (top-right on narrow iPhones): New Window, Split, or Copy Mode send the displayed Ctrl-B binding. In Copy Mode, swipe history, hold to select/copy, press Done.
-- The dictation (microphone) key appears with a physical keyboard (including Simulator), or in the top-right KEYBOARD LOCKED tip after holding the keyboard key. Press it; speech is typed into the session, with STOP/CANCEL on its bar.
+- + NEW SESSION starts a plain tmux shell, or launches Claude Code, Codex, or Pi with an optional first prompt — passed once as the CLI's first message and not retained.
+- Tap a tile to attach: the session opens in its own window with a red LIVE lamp. Attach a second and place them side by side (a spatial window on Vision Pro; Stage Manager on iPad).
+- MERGE pulls another window's session in as a tab; a tab's context menu moves it back out, still connected.
+- TMUX in the bottom/key bar (top-right on narrow iPhones) opens New Window, Split, and Copy Mode. In Copy Mode, swipe history, hold to select, press Done.
+- Outside Copy Mode, long-press or double-tap terminal text for the pane-clamped SELECT / SELECT ALL / PASTE block; a pointer's secondary click opens it too.
 - FILE attaches Photos/Files (Camera on iPad), uploads into the active pane's working directory, and types the remote path without Return. Drops use the same pipeline.
 - DETACH closes the window; tmux keeps the session running, so its tile stays on the wall.
+- [Optional] The demo host also runs herdr, a tmux alternative: edit the host, set BACKEND to HERDR and the wall redraws from herdr sessions, agent states included; TMUX switches back.
+- [Vision Pro] Settings → Appearance → GLASS applies smoked spatial material live; SYSTEM/LIGHT/DARK remain.
 
 AGENT FEATURES (Pro)
-- Multiplex Pro is a one-time in-app purchase; in review it completes as a free sandbox transaction (the strip's PRO pill or Settings opens the paywall). The free tier also allows a few command-chip taps daily, so the strip is demonstrable without purchasing.
-- The session named "agent" runs stub processes reproducing the Claude Code, Codex, and Pi terminal signatures, so detection is reproducible; real installs use the same code paths.
-- Its tile carries an agent glyph. Attach, and the command strip appears at the bottom of the window; tapping a chip types that command into the session (you'll see it echoed). MORE → Customize Commands opens Command Setup, where stock commands take a Bar/More placement and custom commands can be added, reordered, and shared across the three agents; each host keeps its own setup, synced by iCloud Keychain.
-- Notifications permission is requested only to alert you when Claude Code or Codex finishes or asks something while its window isn't focused (Settings → AGENT ALERTS). Optional.
+- Multiplex Pro is a one-time in-app purchase; in review it completes as a free sandbox transaction (the strip's PRO pill or Settings opens the paywall). The free tier allows a few chip taps daily, so the strip is demonstrable without purchase.
+- The session named "agent" runs stubs reproducing the Claude Code, Codex, and Pi terminal signatures, so detection is reproducible; real installs use the same code paths.
+- Its tile carries an agent glyph. Attach, and the command strip appears; tapping a chip types that command into the session (you'll see it echoed). MORE → Customize Commands opens Command Setup: built-ins take a Bar/More placement, custom commands can be added and reordered, and each host's setup syncs by iCloud Keychain.
 
 MOSH (Pro)
-- With Pro unlocked, edit the demo host, enable MOSH, and re-attach: the connection bootstraps over SSH, then runs over UDP and survives network changes.
+- With Pro unlocked, edit the demo host, enable MOSH, and re-attach: it bootstraps over SSH, then runs over UDP and survives network changes.
 
-PERMISSIONS
+PERMISSIONS AND BACKGROUND USE
 - Camera: only after FILE → Camera on iPad; capture goes directly to the SSH host. Photos/Files need no library access.
-- Microphone and Speech Recognition: only after either dictation key above. It restores the mic affordance iOS suppresses with a physical keyboard or a locked software keyboard. Apple's Speech framework transcribes on device where supported and types without Return; Multiplex stores/transmits neither audio nor text.
+- Microphone and Speech Recognition: only after a dictation key (shown with a physical keyboard, or in the KEYBOARD LOCKED tip). Apple's Speech framework transcribes on device where supported; Multiplex stores and transmits neither audio nor text.
 - Local Network: only for a host on the local network; the demo host is public, so you may not see this prompt.
-- Notifications: agent alerts, as above.
+- Notifications: only to alert you when an agent finishes or asks something while its window isn't focused (Settings → AGENT ALERTS). Optional.
+- Background App Refresh ("fetch", the app's only background mode): re-probes only hosts with Keep alive in background switched on (Host Settings → Monitoring, off by default), so a late agent alert can still arrive.
 
-The demo server is an isolated VM provisioned only for App Review: unprivileged account, firewalled outbound traffic. It stays online for the whole review period — if it is ever unreachable, contact the review email and it will be fixed within hours.
+The demo server is an isolated VM provisioned only for App Review: unprivileged account, firewalled outbound traffic. It stays online for the whole review period — if unreachable, contact the review email and it will be fixed within hours.

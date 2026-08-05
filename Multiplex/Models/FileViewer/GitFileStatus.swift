@@ -89,9 +89,13 @@ struct GitShortStat: Equatable {
             let words = clause.split(separator: " ")
             guard let number = words.first.flatMap({ Int($0) }) else { continue }
             let clauseText = clause.lowercased()
-            if clauseText.contains("file") { stat.filesChanged = number }
-            else if clauseText.contains("insertion") { stat.insertions = number }
-            else if clauseText.contains("deletion") { stat.deletions = number }
+            if clauseText.contains("file") {
+                stat.filesChanged = number
+            } else if clauseText.contains("insertion") {
+                stat.insertions = number
+            } else if clauseText.contains("deletion") {
+                stat.deletions = number
+            }
         }
         return stat
     }

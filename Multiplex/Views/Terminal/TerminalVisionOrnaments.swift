@@ -1,0 +1,977 @@
+#if os(visionOS)
+import Observation
+import SwiftUI
+import UIKit
+
+/// The value-only spatial layout contract for a classic visionOS terminal.
+/// Keeping this separate from `UIHostingOrnament` lets focused tests pin the
+/// visibility and anchor geometry without constructing a compositor scene.
+struct TerminalVisionOrnamentPresentation: Equatable {
+    enum Bottom: Equatable {
+        case hidden
+        case terminal(showsHelper: Bool)
+        case auxiliary
+    }
+
+    var showsTopSourceLabels: Bool
+    var bottom: Bottom
+    var maximumConsoleWidth: CGFloat
+
+    static func resolve(
+        tabCount: Int,
+        isAuxiliary: Bool,
+        hasUMD: Bool,
+        hasHelper: Bool,
+        windowWidth: CGFloat
+    ) -> Self {
+        let bottom: Bottom
+        if !hasUMD {
+            bottom = .hidden
+        } else if isAuxiliary {
+            bottom = .auxiliary
+        } else {
+            bottom = .terminal(showsHelper: hasHelper)
+        }
+        return Self(
+            showsTopSourceLabels: tabCount > 1,
+            bottom: bottom,
+            maximumConsoleWidth: max(1, windowWidth - 24)
+        )
+    }
+}
+
+/// Geometric contract for the scene-bottom console ornament. The console's
+/// top is always the exact vertical midpoint of the reported bounds; that is
+/// the point `UIHostingOrnament(contentAlignment: .center)` actually honors.
+struct TerminalVisionConsoleGeometry: Equatable {
+    var size: CGSize
+    var helperOrigin: CGPoint?
+    var consoleOrigin: CGPoint
+
+    static func resolve(
+        helperSize: CGSize?,
+        consoleSize: CGSize,
+        helperLeading: Bool,
+        spacing: CGFloat
+    ) -> Self {
+        let helperSize = helperSize.map(Self.normalized)
+        let consoleSize = Self.normalized(consoleSize)
+        let spacing = spacing.isFinite ? max(0, spacing) : 0
+        let upperExtent = helperSize.map { $0.height + spacing } ?? 0
+        let halfHeight = max(upperExtent, consoleSize.height)
+        let width = max(helperSize?.width ?? 0, consoleSize.width)
+        let helperOrigin = helperSize.map { helperSize in
+            CGPoint(
+                x: helperLeading ? 0 : (width - helperSize.width) / 2,
+                y: halfHeight - spacing - helperSize.height
+            )
+        }
+        return Self(
+            size: CGSize(width: width, height: halfHeight * 2),
+            helperOrigin: helperOrigin,
+            consoleOrigin: CGPoint(
+                x: (width - consoleSize.width) / 2,
+                y: halfHeight
+            )
+        )
+    }
+
+    private static func normalized(_ size: CGSize) -> CGSize {
+        CGSize(
+            width: size.width.isFinite ? max(0, size.width) : 0,
+            height: size.height.isFinite ? max(0, size.height) : 0
+        )
+    }
+}
+
+/// Mutable handoff from the native terminal owner to the two hosting
+/// ornaments. Controller and view identities are native; SwiftUI observes
+/// only this placement snapshot and mounts those identities into space.
+@MainActor
+@Observable
+final class TerminalVisionOrnamentState {
+    private(set) var presentation = TerminalVisionOrnamentPresentation(
+        showsTopSourceLabels: false,
+        bottom: .hidden,
+        maximumConsoleWidth: 1
+    )
+    private(set) var revision = 0
+    private(set) var activeTerminalController: TerminalSessionController?
+    private(set) var umdController: UIViewController?
+    private(set) var helperController: AgentHelperStripViewController?
+    /// The helper controller is native UIKit, so its app-wide collapse choice
+    /// is not observable by SwiftUI on its own. Mirror it into ornament state:
+    /// this value is the animation trigger for the full rail ↔ corner dot
+    /// geometry instead of relying on an unrelated revision redraw.
+    private(set) var helperCollapsed = false
+    /// The width the console row reserves for the mounted UMD. Held here
+    /// rather than measured inside the ornament body: the bar re-renders on
+    /// its own observations (a mosh contact loss swaps LIVE for the wider
+    /// NO LINK lamp) that the window's render pass never sees, and a stale
+    /// reservation squeezes the bar the UMD must never compress.
+    private(set) var umdContentSize: CGSize = .zero
+    /// The applied appearance choice. Ornaments host in their own UIKit
+    /// windows, so the scene window's `overrideUserInterfaceStyle` never
+    /// reaches this content on its own — without re-applying it at every
+    /// mount, a pinned LIGHT leaves the whole bottom bar dark.
+    private(set) var interfaceStyle: UIUserInterfaceStyle = .unspecified
+
+    let topHostView: TerminalVisionTabOrnamentHostView
+    /// One key-cluster owner per ornament — the latch state and the DEBUG
+    /// proof hook stay single-owner across every fitting candidate.
+    let keyClusterContext = TerminalKeyClusterContext()
+
+    init(tabStrip: TerminalTabStripView) {
+        topHostView = TerminalVisionTabOrnamentHostView(tabStrip: tabStrip)
+    }
+
+    func update(
+        tabCount: Int,
+        isAuxiliary: Bool,
+        activeTerminalController: TerminalSessionController?,
+        umdController: UIViewController?,
+        helperController: AgentHelperStripViewController?,
+        windowWidth: CGFloat,
+        interfaceStyle: UIUserInterfaceStyle,
+        forceRevision: Bool
+    ) {
+        self.interfaceStyle = interfaceStyle
+        let nextHelper = isAuxiliary ? nil : helperController
+        let nextPresentation = TerminalVisionOrnamentPresentation.resolve(
+            tabCount: tabCount,
+            isAuxiliary: isAuxiliary,
+            hasUMD: umdController != nil,
+            hasHelper: nextHelper != nil,
+            windowWidth: windowWidth
+        )
+        let nextHelperCollapsed = nextHelper?.isCollapsed == true
+        let changed = presentation != nextPresentation
+            || self.activeTerminalController !== activeTerminalController
+            || self.umdController !== umdController
+            || self.helperController !== nextHelper
+            || helperCollapsed != nextHelperCollapsed
+        self.activeTerminalController = activeTerminalController
+        self.umdController = umdController
+        self.helperController = nextHelper
+        helperCollapsed = nextHelperCollapsed
+        presentation = nextPresentation
+        refreshUMDContentSize()
+        guard changed || forceRevision else { return }
+        revision &+= 1
+        topHostView.refreshFittingSize()
+    }
+
+    /// Re-derives the console row's reserved UMD geometry. Called on every
+    /// window render and whenever the mounted bar reports its own size change,
+    /// so the ornament never frames new status content at the old width.
+    func refreshUMDContentSize() {
+        let size = (umdController as? UMDBarViewController)?
+            .fittingContentSize(for: nil) ?? .zero
+        guard umdContentSize != size else { return }
+        umdContentSize = size
+    }
+
+    func clear() {
+        activeTerminalController = nil
+        umdController = nil
+        helperController = nil
+        helperCollapsed = false
+        umdContentSize = .zero
+        presentation = TerminalVisionOrnamentPresentation(
+            showsTopSourceLabels: false,
+            bottom: .hidden,
+            maximumConsoleWidth: 1
+        )
+        revision &+= 1
+        topHostView.refreshFittingSize()
+    }
+}
+
+/// The sole main-app SwiftUI boundary left by WidgetKit-independent UIKit.
+/// visionOS exposes ornaments through SwiftUI's `UIHostingOrnament` even when
+/// a UIKit view controller owns the window. Every visible child supplied to
+/// these ornaments is a native UIKit view/controller.
+@MainActor
+final class TerminalVisionOrnamentCoordinator {
+    let state: TerminalVisionOrnamentState
+
+    private weak var owner: UIViewController?
+    private var installed = false
+
+    init(tabStrip: TerminalTabStripView) {
+        state = TerminalVisionOrnamentState(tabStrip: tabStrip)
+    }
+
+    func install(on owner: UIViewController) {
+        guard !installed || self.owner !== owner else { return }
+        remove()
+        self.owner = owner
+
+        let top = UIHostingOrnament(
+            sceneAnchor: UnitPoint.top,
+            contentAlignment: SwiftUI.Alignment.center
+        ) {
+            TerminalVisionTopOrnament(state: state)
+        }
+        let bottom = UIHostingOrnament(
+            sceneAnchor: UnitPoint.bottom,
+            contentAlignment: SwiftUI.Alignment.center
+        ) {
+            TerminalVisionBottomOrnament(state: state)
+        }
+        owner.ornaments = [top, bottom]
+        installed = true
+    }
+
+    func update(
+        tabCount: Int,
+        isAuxiliary: Bool,
+        activeTerminalController: TerminalSessionController?,
+        umdController: UIViewController?,
+        helperController: AgentHelperStripViewController?,
+        windowWidth: CGFloat,
+        interfaceStyle: UIUserInterfaceStyle,
+        forceRevision: Bool = false
+    ) {
+        state.update(
+            tabCount: tabCount,
+            isAuxiliary: isAuxiliary,
+            activeTerminalController: activeTerminalController,
+            umdController: umdController,
+            helperController: helperController,
+            windowWidth: windowWidth,
+            interfaceStyle: interfaceStyle,
+            forceRevision: forceRevision
+        )
+    }
+
+    func remove() {
+        state.clear()
+        guard installed else {
+            owner = nil
+            return
+        }
+        owner?.ornaments = []
+        owner = nil
+        installed = false
+    }
+}
+
+// MARK: - Spatial layout only
+
+private struct TerminalVisionTopOrnament: View {
+    @Bindable var state: TerminalVisionOrnamentState
+
+    @ViewBuilder
+    var body: some View {
+        if state.presentation.showsTopSourceLabels {
+            TerminalVisionTabOrnamentMount(
+                hostView: state.topHostView,
+                revision: state.revision,
+                interfaceStyle: state.interfaceStyle
+            )
+            .fixedSize()
+            .modifier(GlassPrototypeSlabGround(cornerRadius: 10))
+        }
+    }
+}
+
+private struct TerminalVisionBottomOrnament: View {
+    @Bindable var state: TerminalVisionOrnamentState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @ViewBuilder
+    var body: some View {
+        switch state.presentation.bottom {
+        case .hidden:
+            EmptyView()
+
+        case .auxiliary:
+            if let umd = state.umdController {
+                TerminalVisionControllerMount(
+                    controller: umd,
+                    sizing: .auxiliaryUMD,
+                    revision: state.revision,
+                    interfaceStyle: state.interfaceStyle
+                )
+                .fixedSize()
+                .modifier(GlassPrototypeSlabGround())
+            }
+
+        case .terminal(let showsHelper):
+            // Collapsed, the helper is a small dot leaning on the console
+            // row's leading edge — the ornament analog of the flat platforms'
+            // bottom-left corner. Ornament state mirrors the app-wide choice
+            // so every window follows it through its own animation transaction.
+            let helperCollapsed = state.helperCollapsed
+            // `UIHostingOrnament` centers the root's geometric bounds but
+            // does not consume a descendant alignment guide. Make the console
+            // top the root's actual midpoint instead: the row then starts at
+            // the scene edge whether or not a helper exists above it.
+            TerminalVisionConsoleLayout(
+                helperLeading: helperCollapsed,
+                spacing: 10
+            ) {
+                if showsHelper, let helper = state.helperController {
+                    TerminalVisionControllerMount(
+                        controller: helper,
+                        sizing: .helper,
+                        revision: state.revision,
+                        interfaceStyle: state.interfaceStyle
+                    )
+                    .fixedSize()
+                    .modifier(GlassPrototypeSlabGround(
+                        cornerRadius: helperCollapsed
+                            ? AgentHelperStripViewController.collapsedDotDiameter / 2
+                            : 12
+                    ))
+                    .layoutValue(
+                        key: TerminalVisionConsoleRoleKey.self,
+                        value: .helper
+                    )
+                }
+
+                TerminalVisionOrnamentWidthClamp(
+                    maxWidth: state.presentation.maximumConsoleWidth
+                ) {
+                    // Observed, not measured here: the bar's own re-renders
+                    // move this width without a window render behind them.
+                    TerminalKeyCluster(
+                        controller: state.activeTerminalController,
+                        centerSize: state.umdContentSize,
+                        context: state.keyClusterContext,
+                        interfaceStyle: state.interfaceStyle
+                    ) {
+                        if let umd = state.umdController {
+                            TerminalVisionControllerMount(
+                                controller: umd,
+                                sizing: .terminalUMD,
+                                revision: state.revision,
+                                interfaceStyle: state.interfaceStyle,
+                                onContentSizeChange: { [state] in
+                                    // The bar reports mid-layout; take the
+                                    // new reservation on the next turn so
+                                    // the ornament is never re-entered
+                                    // during its own update.
+                                    Task { @MainActor in
+                                        state.refreshUMDContentSize()
+                                    }
+                                }
+                            )
+                            .fixedSize()
+                            .modifier(GlassPrototypeSlabGround())
+                        }
+                    }
+                }
+                .layoutValue(
+                    key: TerminalVisionConsoleRoleKey.self,
+                    value: .console
+                )
+            }
+            // The terminal owner previously wrapped this change in a UIKit
+            // animator, but a classic ornament lives in a separate SwiftUI
+            // host window: laying out the terminal scene cannot animate it.
+            // Drive the spatial host's own transaction from the mirrored
+            // collapse value. The native strip still cross-dissolves its
+            // content while this folds its slab along the same path.
+            .animation(
+                reduceMotion
+                    ? nil
+                    : .spring(response: 0.35, dampingFraction: 0.85),
+                value: helperCollapsed
+            )
+        }
+    }
+}
+
+private enum TerminalVisionConsoleRole: Equatable {
+    case helper
+    case console
+}
+
+private struct TerminalVisionConsoleRoleKey: LayoutValueKey {
+    static let defaultValue = TerminalVisionConsoleRole.console
+}
+
+/// Gives the hosting ornament real, symmetric bounds around the console seam.
+/// A descendant `.alignmentGuide` does not cross `UIHostingOrnament`'s root
+/// boundary, which is why the helper-less row used to remain half in-window.
+private struct TerminalVisionConsoleLayout: Layout {
+    var helperLeading: Bool
+    var spacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let console = console(in: subviews) else { return .zero }
+        return TerminalVisionConsoleGeometry.resolve(
+            helperSize: helper(in: subviews)?.sizeThatFits(proposal),
+            consoleSize: console.sizeThatFits(proposal),
+            helperLeading: helperLeading,
+            spacing: spacing
+        ).size
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let console = console(in: subviews) else { return }
+        let helper = helper(in: subviews)
+        let helperSize = helper?.sizeThatFits(proposal)
+        let consoleSize = console.sizeThatFits(proposal)
+        let geometry = TerminalVisionConsoleGeometry.resolve(
+            helperSize: helperSize,
+            consoleSize: consoleSize,
+            helperLeading: helperLeading,
+            spacing: spacing
+        )
+        let origin = CGPoint(
+            x: bounds.midX - geometry.size.width / 2,
+            y: bounds.midY - geometry.size.height / 2
+        )
+        console.place(
+            at: CGPoint(
+                x: origin.x + geometry.consoleOrigin.x,
+                y: origin.y + geometry.consoleOrigin.y
+            ),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(
+                width: consoleSize.width,
+                height: consoleSize.height
+            )
+        )
+        if let helper,
+           let helperSize,
+           let helperOrigin = geometry.helperOrigin {
+            helper.place(
+                at: CGPoint(
+                    x: origin.x + helperOrigin.x,
+                    y: origin.y + helperOrigin.y
+                ),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(
+                    width: helperSize.width,
+                    height: helperSize.height
+                )
+            )
+        }
+    }
+
+    private func helper(in subviews: Subviews) -> LayoutSubview? {
+        subviews.first {
+            $0[TerminalVisionConsoleRoleKey.self] == .helper
+        }
+    }
+
+    private func console(in subviews: Subviews) -> LayoutSubview? {
+        subviews.first {
+            $0[TerminalVisionConsoleRoleKey.self] == .console
+        }
+    }
+}
+
+/// Proposes at most the live scene width to the console row while reporting
+/// the row's actual chosen size. Reporting a capped frame makes visionOS clip
+/// the key slabs when `ViewThatFits` reaches its fixed-size compact tier.
+private struct TerminalVisionOrnamentWidthClamp: Layout {
+    var maxWidth: CGFloat
+
+    private func clamped(_ proposal: ProposedViewSize) -> ProposedViewSize {
+        ProposedViewSize(
+            width: min(proposal.width ?? maxWidth, maxWidth),
+            height: proposal.height
+        )
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let content = subviews.first else { return .zero }
+        return content.sizeThatFits(clamped(proposal))
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let content = subviews.first else { return }
+        content.place(
+            at: CGPoint(x: bounds.midX, y: bounds.midY),
+            anchor: .center,
+            proposal: clamped(proposal)
+        )
+    }
+}
+
+private enum TerminalVisionConsoleCenterAlignment: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat {
+        context[HorizontalAlignment.center]
+    }
+}
+
+private extension HorizontalAlignment {
+    static let terminalVisionConsoleCenter = HorizontalAlignment(
+        TerminalVisionConsoleCenterAlignment.self
+    )
+}
+
+/// Thin ornament adapter around native key slabs. The generic center remains
+/// a SwiftUI value only because the native UMD is supplied by the ornament
+/// builder; every key, state transition, popover, and action is UIKit.
+@MainActor
+private struct TerminalKeyClusterGroupRepresentable: UIViewRepresentable {
+    var role: TerminalKeyClusterGroupView.Role
+    var metric: TerminalKeyClusterMetric
+    var context: TerminalKeyClusterContext
+    var controller: TerminalSessionController?
+    var interfaceStyle: UIUserInterfaceStyle = .unspecified
+
+    func makeUIView(context _: Context) -> TerminalKeyClusterGroupView {
+        let view = TerminalKeyClusterGroupView(
+            role: role,
+            metric: metric,
+            context: context
+        )
+        view.overrideUserInterfaceStyle = interfaceStyle
+        applyGlassTrait(to: view)
+        return view
+    }
+
+    func updateUIView(_ view: TerminalKeyClusterGroupView, context _: Context) {
+        view.overrideUserInterfaceStyle = interfaceStyle
+        applyGlassTrait(to: view)
+        view.update(controller: controller)
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: TerminalKeyClusterGroupView,
+        context _: Context
+    ) -> CGSize? {
+        uiView.fittingSize(maximumWidth: proposal.width)
+    }
+}
+
+@MainActor
+struct TerminalKeyCluster<Center: View>: View {
+    var controller: TerminalSessionController?
+    private let center: Center?
+    private let centerSize: CGSize
+    /// Supplied by the owner, never `@State`: the struct is rebuilt on every
+    /// ornament revision, and a default-expression context would mint (and
+    /// register) a throwaway owner each time. One instance per ornament keeps
+    /// the CTRL latch and the DEBUG proof hook single-owner, as the shell
+    /// layout's own long-lived context does.
+    private let context: TerminalKeyClusterContext
+    /// See `TerminalVisionOrnamentState.interfaceStyle` — the ornament window
+    /// never inherits the scene's appearance override, so every UIKit mount
+    /// carries it explicitly.
+    private let interfaceStyle: UIUserInterfaceStyle
+
+    init(
+        controller: TerminalSessionController?,
+        centerSize: CGSize,
+        context: TerminalKeyClusterContext? = nil,
+        interfaceStyle: UIUserInterfaceStyle = .unspecified,
+        @ViewBuilder center: () -> Center
+    ) {
+        self.controller = controller
+        self.centerSize = centerSize
+        self.context = context ?? TerminalKeyClusterContext()
+        self.interfaceStyle = interfaceStyle
+        self.center = center()
+    }
+
+    var body: some View {
+        if let center {
+            // The three fitting candidates may coexist while SwiftUI measures
+            // them. A native UMD controller can have only one parent, so each
+            // candidate reserves its exact geometry and the real controller
+            // mounts once above the selected row. Duplicating the controller
+            // here let a discarded candidate steal it during the helper-strip
+            // transition, leaving the visible bottom-center control empty.
+            ZStack(alignment: Alignment(
+                horizontal: .terminalVisionConsoleCenter,
+                vertical: .center
+            )) {
+                ViewThatFits(in: .horizontal) {
+                    consoleRowPlaceholder(metric: .regular)
+                    consoleRowPlaceholder(metric: .compact)
+                    consoleRowPlaceholder(metric: .compact)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                center
+                    .frame(
+                        width: normalizedCenterSize.width,
+                        height: normalizedCenterSize.height
+                    )
+                    .alignmentGuide(.terminalVisionConsoleCenter) { dimensions in
+                        dimensions.width / 2
+                    }
+            }
+        } else {
+            TerminalKeyClusterGroupRepresentable(
+                role: .standalone,
+                metric: .regular,
+                context: context,
+                controller: controller,
+                interfaceStyle: interfaceStyle
+            )
+            .modifier(GlassPrototypeSlabGround())
+        }
+    }
+
+    private var normalizedCenterSize: CGSize {
+        CGSize(
+            width: centerSize.width.isFinite ? max(0, centerSize.width) : 0,
+            height: centerSize.height.isFinite ? max(0, centerSize.height) : 0
+        )
+    }
+
+    private func consoleRowPlaceholder(
+        metric: TerminalKeyClusterMetric
+    ) -> some View {
+        HStack(spacing: 10) {
+            TerminalKeyClusterGroupRepresentable(
+                role: .leading,
+                metric: metric,
+                context: context,
+                controller: controller,
+                interfaceStyle: interfaceStyle
+            )
+            .modifier(GlassPrototypeSlabGround())
+            Color.clear
+                .frame(
+                    width: normalizedCenterSize.width,
+                    height: normalizedCenterSize.height
+                )
+                .alignmentGuide(.terminalVisionConsoleCenter) { dimensions in
+                    dimensions.width / 2
+                }
+                .accessibilityHidden(true)
+                .allowsHitTesting(false)
+            TerminalKeyClusterGroupRepresentable(
+                role: .trailing,
+                metric: metric,
+                context: context,
+                controller: controller,
+                interfaceStyle: interfaceStyle
+            )
+            .modifier(GlassPrototypeSlabGround())
+        }
+    }
+}
+
+extension TerminalKeyCluster where Center == EmptyView {
+    init(
+        controller: TerminalSessionController?,
+        context: TerminalKeyClusterContext? = nil,
+        interfaceStyle: UIUserInterfaceStyle = .unspecified
+    ) {
+        self.controller = controller
+        self.context = context ?? TerminalKeyClusterContext()
+        self.interfaceStyle = interfaceStyle
+        centerSize = .zero
+        center = nil
+    }
+}
+
+/// PROTOTYPE(GLASS): each ornament bar is its own smoked-glass slab — UMD
+/// console, key clusters, the agent helper strip, and the tab strip — never
+/// one platter behind the whole ornament (user feedback: an area-wide glass
+/// background read as noise). Ornaments get no platter of their own; the
+/// app supplies one per bar.
+private struct GlassPrototypeSlabGround: ViewModifier {
+    var cornerRadius: CGFloat = 12
+
+    func body(content: Content) -> some View {
+        if GlassPrototype.enabled && GlassSelectionState.shared.isGlass {
+            content
+                .background(
+                    Color(uiColor: GlassPrototype.smokeMaterial),
+                    in: RoundedRectangle(cornerRadius: cornerRadius)
+                )
+                .glassBackgroundEffect(
+                    in: RoundedRectangle(cornerRadius: cornerRadius)
+                )
+        } else {
+            content
+        }
+    }
+}
+
+/// PROTOTYPE(GLASS): custom traits do not cross `UIHostingOrnament` — the
+/// mounted native chrome must be handed the glass trait explicitly, or its
+/// materials resolve to the opaque baseline (the "dark theme" bars).
+/// View-level on purpose, like the interface-style handoff beside it:
+/// SwiftUI clobbers controller-level overrides.
+@MainActor
+private func applyGlassTrait(to view: UIView) {
+    view.traitOverrides[GlassAppearanceTrait.self] =
+        GlassPrototype.enabled && GlassSelectionState.shared.isGlass
+}
+
+// MARK: - UIKit mounts
+
+@MainActor
+final class TerminalVisionTabOrnamentHostView: UIView {
+    let tabStrip: TerminalTabStripView
+
+    init(tabStrip: TerminalTabStripView) {
+        self.tabStrip = tabStrip
+        super.init(frame: .zero)
+        // PROTOTYPE(GLASS): the ornament's glass ground provides the slab.
+        backgroundColor =
+            GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis
+        layer.cornerRadius = 10
+        layer.cornerCurve = .continuous
+        accessibilityIdentifier = "terminal.vision.topOrnament"
+        tabStrip.installDropTarget(on: self)
+        adoptTabStripIfNeeded()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override var intrinsicContentSize: CGSize { fittingSize() }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        adoptTabStripIfNeeded()
+        let content = tabStripSize()
+        tabStrip.frame = CGRect(
+            x: 12,
+            y: 8,
+            width: content.width,
+            height: content.height
+        )
+    }
+
+    func fittingSize() -> CGSize {
+        let content = tabStripSize()
+        return CGSize(width: ceil(content.width + 24), height: ceil(content.height + 16))
+    }
+
+    func refreshFittingSize() {
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+    }
+
+    private func adoptTabStripIfNeeded() {
+        guard tabStrip.superview !== self else { return }
+        tabStrip.removeFromSuperview()
+        addSubview(tabStrip)
+    }
+
+    private func tabStripSize() -> CGSize {
+        // `TerminalTabStripView` owns an arithmetic fitting contract. Do not
+        // feed its live, edge-pinned stack back through Auto Layout while a
+        // pinch action may be updating the selected cell in place.
+        let measured = tabStrip.fittingContentSize()
+        return CGSize(width: max(1, ceil(measured.width)), height: 30)
+    }
+}
+
+private struct TerminalVisionTabOrnamentMount: UIViewRepresentable {
+    let hostView: TerminalVisionTabOrnamentHostView
+    let revision: Int
+    let interfaceStyle: UIUserInterfaceStyle
+
+    func makeUIView(context: Context) -> TerminalVisionTabOrnamentHostView {
+        hostView.removeFromSuperview()
+        hostView.overrideUserInterfaceStyle = interfaceStyle
+        applyGlassTrait(to: hostView)
+        return hostView
+    }
+
+    func updateUIView(
+        _ view: TerminalVisionTabOrnamentHostView,
+        context: Context
+    ) {
+        _ = revision
+        view.overrideUserInterfaceStyle = interfaceStyle
+        applyGlassTrait(to: view)
+        view.refreshFittingSize()
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: TerminalVisionTabOrnamentHostView,
+        context: Context
+    ) -> CGSize? {
+        uiView.fittingSize()
+    }
+}
+
+private enum TerminalVisionControllerSizing: Equatable {
+    case helper
+    case terminalUMD
+    case auxiliaryUMD
+}
+
+private struct TerminalVisionControllerMount: UIViewControllerRepresentable {
+    let controller: UIViewController
+    let sizing: TerminalVisionControllerSizing
+    let revision: Int
+    var interfaceStyle: UIUserInterfaceStyle = .unspecified
+    var onContentSizeChange: (() -> Void)?
+
+    func makeUIViewController(context: Context) -> TerminalVisionControllerHost {
+        let host = TerminalVisionControllerHost()
+        host.onContentSizeChange = onContentSizeChange
+        host.update(content: controller, sizing: sizing)
+        host.apply(interfaceStyle: interfaceStyle)
+        applyGlassTrait(to: host.view)
+        return host
+    }
+
+    func updateUIViewController(
+        _ host: TerminalVisionControllerHost,
+        context: Context
+    ) {
+        _ = revision
+        host.apply(interfaceStyle: interfaceStyle)
+        applyGlassTrait(to: host.view)
+        host.onContentSizeChange = onContentSizeChange
+        host.update(content: controller, sizing: sizing)
+    }
+
+    static func dismantleUIViewController(
+        _ host: TerminalVisionControllerHost,
+        coordinator: Void
+    ) {
+        host.onContentSizeChange = nil
+        host.update(content: nil, sizing: .terminalUMD)
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiViewController host: TerminalVisionControllerHost,
+        context: Context
+    ) -> CGSize? {
+        host.fittingSize(proposedWidth: proposal.width)
+    }
+}
+
+@MainActor
+private final class TerminalVisionControllerHost: UIViewController {
+    /// The mounted child is the only witness to its own content changes; the
+    /// ornament reserves its geometry and has to hear about them.
+    var onContentSizeChange: (() -> Void)?
+
+    private var content: UIViewController?
+    private var sizing = TerminalVisionControllerSizing.terminalUMD
+
+    override func loadView() {
+        let view = UIView()
+        view.backgroundColor = .clear
+        self.view = view
+    }
+
+    /// Both levels on purpose. SwiftUI re-asserts the traits it vends to an
+    /// embedded controller, which can leave a controller-level override
+    /// unapplied to the mounted subtree — the view-level write is the one the
+    /// content reliably inherits (the key-cluster mounts flip through exactly
+    /// this mechanism). The controller-level write stays because
+    /// `inheritedInterfaceStyleOverride` walks the controller chain for
+    /// popovers presented from this content.
+    func apply(interfaceStyle: UIUserInterfaceStyle) {
+        overrideUserInterfaceStyle = interfaceStyle
+        viewIfLoaded?.overrideUserInterfaceStyle = interfaceStyle
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        content?.view.frame = view.bounds
+    }
+
+    override func preferredContentSizeDidChange(
+        forChildContentContainer container: any UIContentContainer
+    ) {
+        super.preferredContentSizeDidChange(forChildContentContainer: container)
+        let size = fittingSize(proposedWidth: nil)
+        if preferredContentSize != size { preferredContentSize = size }
+        parent?.preferredContentSizeDidChange(forChildContentContainer: self)
+        onContentSizeChange?()
+    }
+
+    func update(
+        content replacement: UIViewController?,
+        sizing: TerminalVisionControllerSizing
+    ) {
+        self.sizing = sizing
+        guard content !== replacement else {
+            refreshPreferredSize()
+            return
+        }
+        if let content, content.parent === self {
+            content.willMove(toParent: nil)
+            content.view.removeFromSuperview()
+            content.removeFromParent()
+        }
+        content = replacement
+        guard let replacement else {
+            refreshPreferredSize()
+            return
+        }
+        if replacement.parent != nil {
+            replacement.willMove(toParent: nil)
+            replacement.view.removeFromSuperview()
+            replacement.removeFromParent()
+        }
+        addChild(replacement)
+        view.addSubview(replacement.view)
+        replacement.view.frame = view.bounds
+        replacement.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        replacement.didMove(toParent: self)
+        refreshPreferredSize()
+    }
+
+    func fittingSize(proposedWidth: CGFloat?) -> CGSize {
+        guard let content else { return .zero }
+        switch sizing {
+        case .helper:
+            if let helper = content as? AgentHelperStripViewController {
+                return helper.fittingContentSize(for: proposedWidth)
+            }
+        case .terminalUMD:
+            if let umd = content as? UMDBarViewController {
+                // A regular UMD keeps its intrinsic width; the surrounding
+                // key-cluster layout decides which metric tier fits.
+                return umd.fittingContentSize(for: nil)
+            }
+        case .auxiliaryUMD:
+            if let umd = content as? ViewportUMDViewController {
+                return umd.fittingContentSize(for: proposedWidth)
+            }
+        }
+        content.loadViewIfNeeded()
+        return content.view.systemLayoutSizeFitting(
+            CGSize(
+                width: proposedWidth ?? UIView.layoutFittingCompressedSize.width,
+                height: UIView.layoutFittingCompressedSize.height
+            ),
+            withHorizontalFittingPriority: proposedWidth == nil
+                ? .fittingSizeLevel : .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+    }
+
+    private func refreshPreferredSize() {
+        guard isViewLoaded else { return }
+        let size = fittingSize(proposedWidth: nil)
+        if preferredContentSize != size { preferredContentSize = size }
+        view.invalidateIntrinsicContentSize()
+        view.setNeedsLayout()
+    }
+}
+#endif

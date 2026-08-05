@@ -1,23 +1,41 @@
-import SwiftUI
+import UIKit
 
-/// Confirmation for a filesystem path activated in a terminal pane — the
-/// file viewer's twin of `TerminalLinkSheet`, holding the same line: pane
-/// bytes are untrusted, so the resolved target is shown before anything
-/// opens. The ▤ VIEW chip docks a read-only viewer tab; COPY stays the
-/// answer for a path wanted elsewhere.
-struct TerminalFilePathSheet: View {
-    let target: TerminalPathTarget
-    let hostName: String
-    let onView: (TerminalPathTarget) -> Void
-    let onCopy: (String) -> Void
+// MARK: - Native file-path confirmation
 
-    @Environment(\.dismiss) private var dismiss
-    /// The path as the sheet shows it, editable. Detection reads *rendered
-    /// rows*, and a hard wrap glues a sentence's tail to the path beneath it
-    /// with no space at the seam; the model strips what it can prove and the
-    /// person fixes the rest here, before a viewer tab is docked at the
-    /// wrong file.
-    @State private var text: String
+/// UIKit confirmation for a filesystem path activated in terminal output.
+/// It mirrors the link confirmation's trust boundary: the remote path stays
+/// visible and editable, nothing executes, and VIEW only exists while the
+/// edited spelling resolves to a path Multiplex can read.
+@MainActor
+final class TerminalFilePathSheetViewController: UIViewController {
+    enum Metrics {
+        static let contentMaximumWidth: CGFloat = 560
+        static let outerInset: CGFloat = 18
+        static let rowSpacing: CGFloat = 12
+        static let actionSpacing: CGFloat = 10
+    }
+
+    private(set) var sourceTarget: TerminalPathTarget
+    private(set) var hostName: String
+    var onView: (TerminalPathTarget) -> Void
+    var onCopy: (String) -> Void
+    var onDismiss: (() -> Void)?
+
+    private(set) var scrollView = UIScrollView()
+    private(set) var rowStack = UIStackView()
+    private let hostNameLabel = UILabel()
+    private let opensStack = UIStackView()
+    private let opensValueLabel = UILabel()
+    private let lineStack = UIStackView()
+    private let lineValueLabel = UILabel()
+    private(set) var actionStack = UIStackView()
+    private(set) var editor: UIKitTerminalEditableValueBox
+    private(set) var sectionView: UIKitTallyFormSectionView!
+    private var viewChip: UIKitChassisChip!
+    private var copyChip: UIKitChassisChip!
+
+    var editedText: String { editor.text }
+    var editedTarget: TerminalPathTarget? { TerminalPathTarget.resolve(editor.text) }
 
     init(
         target: TerminalPathTarget,
@@ -25,108 +43,240 @@ struct TerminalFilePathSheet: View {
         onView: @escaping (TerminalPathTarget) -> Void,
         onCopy: @escaping (String) -> Void
     ) {
-        self.target = target
+        sourceTarget = target
         self.hostName = hostName
         self.onView = onView
         self.onCopy = onCopy
         // The field starts at the model's canonical spelling, so an
         // untouched field re-resolves to the same target.
-        _text = State(initialValue: target.spelling)
+        editor = UIKitTerminalEditableValueBox(
+            label: "PATH",
+            text: target.spelling
+        )
+        super.init(nibName: nil, bundle: nil)
     }
 
-    var body: some View {
-        // Resolved once per body pass — the field re-resolves per
-        // keystroke, and every row below reads the same verdict. nil while
-        // the field holds nothing that classifies; VIEW then goes quiet
-        // rather than opening the pressed path behind the person's back.
-        let edited = TerminalPathTarget.resolve(text)
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    TallyFormSection(sectionTitle(edited), detail: detail(edited)) {
-                        TallyFormRow {
-                            VStack(alignment: .leading, spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    ChassisLabel("HOST", size: 9, color: Theme.signal3)
-                                    Text(hostName)
-                                        .font(.mono(13, weight: .semibold))
-                                        .foregroundStyle(Theme.signal)
-                                }
-                                TerminalSheetEditableValueBox(
-                                    label: "PATH",
-                                    value: $text,
-                                    note: edited == nil
-                                        ? "NOT A PATH MULTIPLEX CAN READ"
-                                        : nil
-                                )
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
 
-                                // Resolution can shed what it reads as prose
-                                // (a spaced press arrives with its sentence
-                                // tail), so when the opened path is not the
-                                // field's text, say so — verbatim, mono:
-                                // a path is screen content.
-                                if let divergence = resolvedDivergence(edited) {
-                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                        ChassisLabel("OPENS", size: 9, color: Theme.caution)
-                                        Text(divergence)
-                                            .font(.mono(11))
-                                            .foregroundStyle(Theme.signal2)
-                                    }
-                                }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "View file"
+        view.backgroundColor = GlassPrototype.sheetGround
+        configureNavigation()
+        configureContent()
+        editor.onTextChange = { [weak self] _ in self?.refreshState() }
+        refreshState()
+    }
 
-                                if let line = edited?.line {
-                                    HStack(spacing: 8) {
-                                        ChassisLabel("LINE", size: 9, color: Theme.signal3)
-                                        Text("\(line)")
-                                            .font(.mono(11))
-                                            .foregroundStyle(Theme.signal2)
-                                    }
-                                }
-
-                                HStack(spacing: 10) {
-                                    if let edited {
-                                        ChassisChip("▤ VIEW", prominent: true) {
-                                            onView(edited)
-                                            dismiss()
-                                        }
-                                    }
-                                    ChassisChip("COPY", systemImage: "doc.on.doc") {
-                                        onCopy(text)
-                                        dismiss()
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: 560)
-                .padding(18)
-                .frame(maxWidth: .infinity)
-            }
-            .chassisSheetGround()
-            .navigationTitle("View file")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ChassisSheetTitle("View file")
-                ToolbarItem(placement: .cancellationAction) {
-                    ChassisBarButton("Cancel") { dismiss() }
-                }
-            }
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if let navigationBar = navigationController?.navigationBar {
+            UIKitChassis.configureSheetNavigationBar(navigationBar)
         }
+    }
+
+    func updateSource(target: TerminalPathTarget, hostName: String) {
+        guard target != sourceTarget || hostName != self.hostName else { return }
+        let targetChanged = target != sourceTarget
+        sourceTarget = target
+        self.hostName = hostName
+        if targetChanged {
+            editor.setText(target.spelling, notify: false)
+        }
+        if isViewLoaded { refreshState() }
+    }
+
+    func setEditedText(_ text: String) {
+        editor.setText(text)
+    }
+
+    func refreshActions(
+        onView: @escaping (TerminalPathTarget) -> Void,
+        onCopy: @escaping (String) -> Void
+    ) {
+        self.onView = onView
+        self.onCopy = onCopy
+    }
+
+    private func configureNavigation() {
+        navigationItem.largeTitleDisplayMode = .never
+        #if os(visionOS)
+        navigationItem.titleView = UIKitChassisLabel("View file", size: 12)
+        #endif
+        let cancel = UIBarButtonItem(
+            title: "Cancel",
+            style: .plain,
+            target: self,
+            action: #selector(cancelPressed)
+        )
+        cancel.tintColor = UIKitChassis.signal
+        navigationItem.leftBarButtonItem = cancel
+    }
+
+    private func configureContent() {
+        scrollView.alwaysBounceVertical = true
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
+        view.addSubview(scrollView)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            scrollView.contentLayoutGuide.widthAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.widthAnchor
+            ),
+        ])
+
+        let hostStack = UIStackView(arrangedSubviews: [
+            UIKitChassisLabel("HOST", size: 9, color: UIKitChassis.signal3),
+            hostNameLabel,
+        ])
+        hostStack.axis = .vertical
+        hostStack.alignment = .fill
+        hostStack.spacing = 4
+        hostNameLabel.font = UIKitChassis.monoFont(13, weight: .semibold)
+        hostNameLabel.textColor = UIKitChassis.signal
+        hostNameLabel.numberOfLines = 0
+        hostNameLabel.accessibilityIdentifier = "terminal.path.hostValue"
+
+        let opensTitle = UIKitChassisLabel("OPENS", size: 9, color: TallyPalette.caution)
+        opensValueLabel.font = UIKitChassis.monoFont(11)
+        opensValueLabel.textColor = UIKitChassis.signal2
+        opensValueLabel.numberOfLines = 0
+        opensValueLabel.accessibilityIdentifier = "terminal.path.opensValue"
+        opensStack.axis = .horizontal
+        opensStack.alignment = .firstBaseline
+        opensStack.spacing = 8
+        opensStack.addArrangedSubview(opensTitle)
+        opensStack.addArrangedSubview(opensValueLabel)
+
+        let lineTitle = UIKitChassisLabel("LINE", size: 9, color: UIKitChassis.signal3)
+        lineValueLabel.font = UIKitChassis.monoFont(11)
+        lineValueLabel.textColor = UIKitChassis.signal2
+        lineValueLabel.accessibilityIdentifier = "terminal.path.lineValue"
+        lineStack.axis = .horizontal
+        lineStack.alignment = .center
+        lineStack.spacing = 8
+        lineStack.addArrangedSubview(lineTitle)
+        lineStack.addArrangedSubview(lineValueLabel)
+        lineStack.addArrangedSubview(UIView())
+
+        actionStack.axis = .horizontal
+        actionStack.alignment = .center
+        actionStack.spacing = Metrics.actionSpacing
+        viewChip = UIKitChassisChip(
+            "▤ VIEW",
+            prominent: true,
+            accessibilityLabel: "View"
+        ) { [weak self] in self?.viewPressed() }
+        copyChip = UIKitChassisChip(
+            "COPY",
+            systemImage: "doc.on.doc",
+            accessibilityLabel: "Copy"
+        ) { [weak self] in self?.copyPressed() }
+        for chip in [viewChip, copyChip] {
+            chip?.setContentHuggingPriority(.required, for: .horizontal)
+            actionStack.addArrangedSubview(chip!)
+        }
+        // SwiftUI's HStack leaves surplus width after its ideal-size
+        // children. UIStackView instead must assign that width to an
+        // arranged subview; without this flexible tail it breaks the
+        // section's fill constraint because both chips require hugging.
+        // The result was a card only as wide as VIEW + COPY on iPhone.
+        let actionSpacer = UIView()
+        actionSpacer.isAccessibilityElement = false
+        actionSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        actionSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        actionStack.addArrangedSubview(actionSpacer)
+
+        rowStack.axis = .vertical
+        rowStack.alignment = .fill
+        rowStack.spacing = Metrics.rowSpacing
+        rowStack.addArrangedSubview(hostStack)
+        rowStack.addArrangedSubview(editor)
+        rowStack.addArrangedSubview(opensStack)
+        rowStack.addArrangedSubview(lineStack)
+        rowStack.addArrangedSubview(actionStack)
+
+        sectionView = UIKitTallyFormSectionView(
+            title: "",
+            detail: nil,
+            contentView: rowStack
+        )
+        scrollView.addSubview(sectionView)
+        sectionView.translatesAutoresizingMaskIntoConstraints = false
+
+        let fillWidth = sectionView.widthAnchor.constraint(
+            equalTo: scrollView.frameLayoutGuide.widthAnchor,
+            constant: -(Metrics.outerInset * 2)
+        )
+        // The required 560-point cap wins on wide sheets; everywhere below
+        // that cap the legacy 18-point phone inset is exact.
+        fillWidth.priority = UILayoutPriority(rawValue: 999)
+        NSLayoutConstraint.activate([
+            sectionView.topAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.topAnchor,
+                constant: Metrics.outerInset
+            ),
+            sectionView.bottomAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.bottomAnchor,
+                constant: -Metrics.outerInset
+            ),
+            sectionView.centerXAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.centerXAnchor
+            ),
+            sectionView.leadingAnchor.constraint(
+                greaterThanOrEqualTo: scrollView.contentLayoutGuide.leadingAnchor,
+                constant: Metrics.outerInset
+            ),
+            sectionView.trailingAnchor.constraint(
+                lessThanOrEqualTo: scrollView.contentLayoutGuide.trailingAnchor,
+                constant: -Metrics.outerInset
+            ),
+            sectionView.widthAnchor.constraint(
+                lessThanOrEqualToConstant: Metrics.contentMaximumWidth
+            ),
+            fillWidth,
+        ])
+    }
+
+    private func refreshState() {
+        guard isViewLoaded else { return }
+        let target = editedTarget
+        hostNameLabel.text = hostName
+        hostNameLabel.accessibilityLabel = hostName
+        editor.setNote(target == nil ? "NOT A PATH MULTIPLEX CAN READ" : nil)
+        // Resolution can shed what it reads as prose (a spaced press
+        // arrives with its sentence tail), so when the opened path is not
+        // the field's text, say so — verbatim, mono: a path is screen
+        // content.
+        let divergence = resolvedDivergence(target)
+        opensValueLabel.text = divergence
+        opensValueLabel.accessibilityLabel = divergence
+        opensStack.isHidden = divergence == nil
+        lineValueLabel.text = target?.line.map(String.init)
+        lineValueLabel.accessibilityLabel = target?.line.map(String.init)
+        lineStack.isHidden = target?.line == nil
+        viewChip.isHidden = target == nil
+        sectionView.setTitle(sectionTitle(for: target))
+        sectionView.setDetail(detail(for: target))
     }
 
     /// The spelling VIEW will actually open when it differs from what the
     /// field holds — trailing punctuation trimmed, a prose tail shed from a
     /// spaced press. nil while they agree (the common case) or nothing
     /// resolves (the note already says so).
-    private func resolvedDivergence(_ edited: TerminalPathTarget?) -> String? {
-        guard let edited else { return nil }
-        let resolved = edited.spelling
-        return resolved == text.trimmingCharacters(in: .whitespaces) ? nil : resolved
+    private func resolvedDivergence(_ target: TerminalPathTarget?) -> String? {
+        guard let target else { return nil }
+        let resolved = target.spelling
+        return resolved == editor.text.trimmingCharacters(in: .whitespaces)
+            ? nil : resolved
     }
 
-    private func sectionTitle(_ edited: TerminalPathTarget?) -> String {
-        switch edited?.base {
+    private func sectionTitle(for target: TerminalPathTarget?) -> String {
+        switch target?.base {
         case .absolute: "A path on \(hostName)"
         case .home: "In \(hostName)'s home"
         case .workingDirectory: "Relative to the pane's directory"
@@ -134,8 +284,8 @@ struct TerminalFilePathSheet: View {
         }
     }
 
-    private func detail(_ edited: TerminalPathTarget?) -> String {
-        guard let edited else {
+    private func detail(for target: TerminalPathTarget?) -> String {
+        guard let target else {
             return "The field holds nothing the viewer can resolve — a "
                 + "relative path needs a directory in it, and spaces only "
                 + "work behind /, ~/, ./ or $HOME/. Edit it, or copy the "
@@ -144,46 +294,32 @@ struct TerminalFilePathSheet: View {
         var text = "VIEW opens it read-only in the file viewer, beside this "
             + "session — nothing runs, nothing is written. The path is "
             + "editable when detection caught the wrong text."
-        if edited.base == .workingDirectory {
+        if target.base == .workingDirectory {
             text += " It resolves against the pane's current directory."
         }
         return text
     }
-}
 
-extension View {
-    /// Presents `controller`'s pending path confirmation — the sibling of
-    /// `terminalLinkConfirmation`, packaged the same way for the same
-    /// type-checker reason.
-    func terminalPathConfirmation(
-        for controller: TerminalSessionController?,
-        hostName: String?,
-        openViewer: ((TerminalPathTarget) -> Void)?
-    ) -> some View {
-        let binding = Binding<TerminalPathTarget?>(
-            get: { controller?.pendingPath },
-            set: { if $0 == nil { controller?.dismissPendingPath() } }
-        )
-        return sheet(item: binding) { target in
-            TerminalFilePathSheet(
-                target: target,
-                hostName: hostName ?? "the host",
-                onView: { openViewer?($0) },
-                onCopy: { controller?.copyConfirmedTarget($0) }
-            )
+    @objc private func cancelPressed() {
+        dismissSheet()
+    }
+
+    private func viewPressed() {
+        guard let target = editedTarget else { return }
+        onView(target)
+        dismissSheet()
+    }
+
+    private func copyPressed() {
+        onCopy(editor.text)
+        dismissSheet()
+    }
+
+    private func dismissSheet() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            navigationController?.dismiss(animated: true)
         }
     }
 }
-
-#if DEBUG
-#Preview("Path press") {
-    TerminalFilePathSheet(
-        target: TerminalPathTarget.resolve("Multiplex/Services/TmuxProbe.swift:42")!,
-        hostName: "devbox",
-        onView: { _ in },
-        onCopy: { _ in }
-    )
-    .frame(width: 720, height: 620)
-    .preferredColorScheme(.dark)
-}
-#endif

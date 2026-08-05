@@ -1705,7 +1705,10 @@ open class Terminal {
     
     func resetColor (_ number: Int)
     {
-        if number > 255 {
+        // Multiplex patch: the index comes from remote OSC 104 text, which
+        // `Int(_:)` happily parses as negative — upstream only rejected the
+        // high side and the negative index trapped on the array access.
+        if number < 0 || number > 255 {
             return
         }
         ansiColors [number] = defaultAnsiColors [number]
@@ -2429,7 +2432,11 @@ open class Terminal {
             updateRange (j)
             // Deleted front part of line and everything before. This line will no longer be wrapped.
             eraseInBufferLine (y: j, start: 0, end: buffer.x + 1, clearWrap: true)
-            if buffer.x + 1 >= cols {
+            // Multiplex patch: on the alternate screen (no scrollback) the
+            // cursor's line can be the last one in the buffer, and the
+            // unguarded `j + 1` trapped — remote output alone could reach it
+            // with `CSI 1 J` at the bottom-right cell.
+            if buffer.x + 1 >= cols && j + 1 < buffer.lines.count {
                 // Deleted entire previous line. This next line can no longer be wrapped.
                 buffer.lines [j + 1].isWrapped = false
             }
@@ -3135,13 +3142,17 @@ open class Terminal {
             // Do not report the actual content of the title back, as it can be exploited,
             // https://marc.info/?l=bugtraq&m=104612710031920&w=2
             sendResponse (cc.OSC, "l", cc.ST)
+        // Multiplex patch: the remote both sets these titles and decides how
+        // often to push them, so the stacks are depth-limited — xterm caps
+        // them the same way. Pushing at the cap drops the oldest entry
+        // rather than refusing, so a legitimate push/pop pair still balances.
         case [22, 0], [22, 0, 0]:
-            terminalTitleStack = terminalTitleStack + [terminalTitle]
-            terminalIconStack = terminalIconStack + [iconTitle]
+            terminalTitleStack = pushingTitle (terminalTitle, onto: terminalTitleStack)
+            terminalIconStack = pushingTitle (iconTitle, onto: terminalIconStack)
         case [22, 1]:
-            terminalIconStack = terminalIconStack + [iconTitle]
+            terminalIconStack = pushingTitle (iconTitle, onto: terminalIconStack)
         case [22, 2]:
-            terminalTitleStack = terminalTitleStack + [terminalTitle]
+            terminalTitleStack = pushingTitle (terminalTitle, onto: terminalTitleStack)
         case [23, 0], [23, 0, 0]:
             if let nt = terminalTitleStack.last {
                 terminalTitleStack = terminalTitleStack.dropLast()
@@ -5772,6 +5783,26 @@ open class Terminal {
     {
         sendEvent(buttonFlags: buttonFlags+32, x: x, y: y, pixelX: pixelX, pixelY: pixelY)
     }
+
+    /// Multiplex patch: a button release that names the released button in
+    /// SGR modes, as xterm does — `sendEvent`'s release encoding masks the
+    /// button bits to 0, which a client reads as a *left*-button up. Needed
+    /// for synthesized non-left clicks (a TUI's right-click menu); non-SGR
+    /// protocols keep the legacy release encoding, which cannot carry the
+    /// button at all.
+    public func sendButtonReleaseEvent (button: Int, x: Int, y: Int, pixelX: Int, pixelY: Int)
+    {
+        switch mouseProtocol {
+        case .sgr:
+            sendResponse(cc.CSI, "<\(button);\(x+1);\(y+1)m")
+        case .sgrPixel:
+            sendResponse(cc.CSI, "<\(button);\(pixelX);\(pixelY)m")
+        default:
+            let flags = encodeButton(button: button, release: true,
+                                     shift: false, meta: false, control: false)
+            sendEvent(buttonFlags: flags, x: x, y: y, pixelX: pixelX, pixelY: pixelY)
+        }
+    }
     
     static var matchColorCache : [Int:Int] = [:]
     func matchColor (_ r1: Int, _ g1: Int, _ b1: Int) -> Int32
@@ -5784,6 +5815,19 @@ open class Terminal {
     var iconTitle: String = ""                  // The Xterm minimized window title
     var terminalTitleStack: [String] = []
     var terminalIconStack: [String] = []
+
+    /// Multiplex patch: bound for the title stacks above (xterm's own limit).
+    static let maxTitleStackDepth = 10
+
+    /// Multiplex patch: bounded push — see `[22, …]` in `cmdSetMargins`.
+    func pushingTitle (_ title: String, onto stack: [String]) -> [String] {
+        var stack = stack
+        stack.append (title)
+        if stack.count > Terminal.maxTitleStackDepth {
+            stack.removeFirst (stack.count - Terminal.maxTitleStackDepth)
+        }
+        return stack
+    }
     
     public func setTitle (text: String)
     {

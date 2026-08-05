@@ -154,6 +154,24 @@ final class SingleWindowShellPolicyTests: XCTestCase {
         ))
     }
 
+    func testBackSwipeAvailabilityDoesNotDependOnMotionPreference() {
+        XCTAssertTrue(SingleWindowShellBackSwipe.isAvailable(
+            idiom: .phone,
+            expanded: false,
+            compactShowsTerminal: true
+        ))
+        XCTAssertFalse(SingleWindowShellBackSwipe.isAvailable(
+            idiom: .phone,
+            expanded: true,
+            compactShowsTerminal: true
+        ))
+        XCTAssertFalse(SingleWindowShellBackSwipe.isAvailable(
+            idiom: .pad,
+            expanded: false,
+            compactShowsTerminal: true
+        ))
+    }
+
     func testBackSwipeTranslationStaysWithinTheStage() {
         XCTAssertEqual(
             SingleWindowShellBackSwipe.constrainedTranslation(-20, width: 390),

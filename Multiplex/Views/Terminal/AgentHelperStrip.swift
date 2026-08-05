@@ -1,534 +1,1044 @@
-import SwiftUI
-#if !os(visionOS)
+import CoreText
+import Observation
 import UIKit
-#endif
 #if DEBUG
 import notify
 #endif
 
-/// Quick commands for the CLI agent (Claude Code / Codex / Pi) detected in the
-/// attached session's active pane — a lower bezel under the screen. Chips
-/// only ever travel through the shell's ordered input pump, so a stale command
-/// fails visibly in the agent's own input box. Auto Submit follows the text
-/// with a delayed Return. Free users receive a daily agent-command taste;
-/// after it is spent, the strip passively becomes the Pro pill until the next
-/// local day (no modal interrupts the terminal).
-struct AgentHelperStrip: View {
-    static let dockedHeight: CGFloat = 48
-    /// ChassisBadge's 9 pt mono label plus 5 pt vertical padding per side.
-    /// The horizontal scroll viewport must own this cross-axis size; leaving
-    /// it unconstrained lets iPadOS stretch the button container below its
-    /// bordered face.
-    private static let chipHeight: CGFloat = 22
-    #if os(visionOS)
-    /// Keep the ornament inside the window's resize controls at either
-    /// bottom corner. The command row scrolls inside this narrower slab.
-    static let maximumFloatingWidth: CGFloat = 760
-    static let floatingEdgeClearance: CGFloat = 60
+/// App-wide collapse choice for the agent helper strip. Tapping the strip's
+/// agent title folds the whole strip into a small agent dot parked at the
+/// bottom-leading corner; tapping the dot restores it. Shared across windows
+/// like the keyboard lock — the choice is about chrome density, not one tab —
+/// and never persisted: a fresh launch starts expanded.
+@MainActor
+final class AgentHelperStripCollapse {
+    static let shared = AgentHelperStripCollapse()
+
+    private(set) var isCollapsed = false
+
+    func setCollapsed(_ collapsed: Bool) {
+        guard collapsed != isCollapsed else { return }
+        isCollapsed = collapsed
+        NotificationCenter.default.post(
+            name: .agentHelperStripCollapseDidChange,
+            object: nil
+        )
+    }
+}
+
+extension Notification.Name {
+    static let agentHelperStripCollapseDidChange = Notification.Name(
+        "MultiplexAgentHelperStripCollapseDidChange"
+    )
+}
+
+@MainActor
+struct AgentHelperStripConfiguration {
+    var agent: AgentKind
+    var canShowCommands: Bool
+    var builtInPlacements: [String: AgentCommandPlacement]
+    var customCommands: [CustomAgentCommand]
+    var historyController: TerminalSessionController?
+    var historyLocked: Bool
+    var floating: Bool
+    var floatingMaximumWidth: CGFloat?
+    var contentSafeArea: UIEdgeInsets
+    var send: (AgentCommand) -> Void
+    var saveCommandConfiguration: (
+        [CustomAgentCommand],
+        [String: AgentCommandPlacement]
+    ) -> Void
+    var openPaywall: () -> Void
+    var isFocusOwner: () -> Bool
+}
+
+enum AgentHelperStripAction: Equatable {
+    case send(AgentCommand)
+    case openPaywall
+    case customize
+    case history
+    case collapse
+    case expand
+}
+
+/// Native quick-command bezel for the CLI agent detected in the attached
+/// tmux pane. UIKit owns its horizontal command rail, MORE menu, HISTORY and
+/// command-editor popovers, accessibility, live observation, and sizing.
+@MainActor
+final class AgentHelperStripViewController: UIViewController,
+    UIPopoverPresentationControllerDelegate
+{
+    /// Callbacks and controller references are read from `configuration` when
+    /// used. Only values that change the rendered hierarchy, menu, or layout
+    /// belong here, so routine parent updates keep popover anchors stable.
+    private struct RenderKey: Equatable {
+        let agent: AgentKind
+        let canShowCommands: Bool
+        let builtInPlacements: [String: AgentCommandPlacement]
+        let customCommands: [CustomAgentCommand]
+        let historyAvailable: Bool
+        let floating: Bool
+        let floatingMaximumWidth: CGFloat
+        let safeAreaLeft: CGFloat
+        let safeAreaRight: CGFloat
+        let collapsed: Bool
+    }
+
+    /// What the live Observation registration is armed against. Everything
+    /// else a configuration carries is read at render time, so only a move
+    /// here needs a fresh — and uncancellable — tracking.
+    private struct ObservationKey: Equatable {
+        let agent: AgentKind
+        let historyController: ObjectIdentifier?
+    }
+
+    nonisolated static let dockedHeight: CGFloat = 48
+    nonisolated static let chipHeight: CGFloat = 22
+    nonisolated static let maximumFloatingWidth: CGFloat = 760
+    nonisolated static let floatingEdgeClearance: CGFloat = 60
+    nonisolated static let collapsedDotDiameter: CGFloat = 30
+
+    /// The app-wide collapse choice, read live so a probe-tick re-render in
+    /// any window picks up a toggle made in another.
+    var isCollapsed: Bool { AgentHelperStripCollapse.shared.isCollapsed }
+
+    private(set) var configuration: AgentHelperStripConfiguration
+    private let rootView = AgentHelperStripRootView()
+    private weak var moreButton: AgentHelperStripButton?
+    private weak var historyButton: AgentHelperStripButton?
+    private weak var customPanelController: CustomAgentCommandPanelViewController?
+    private weak var historyPanelController: AgentHistoryPanelViewController?
+    private var observationGeneration = 0
+    private var observedKey: ObservationKey?
+    private var renderedKey: RenderKey?
+    private(set) var historyAvailable = false
+    #if DEBUG
+    private var debugObservers: [NSObjectProtocol] = []
     #endif
 
-    let agent: AgentKind
-    let canShowCommands: Bool
-    let builtInPlacements: [String: AgentCommandPlacement]
-    let customCommands: [CustomAgentCommand]
-    /// Backs the HISTORY chip (session-file prompts + jump). nil when the
-    /// tab can't read session files (mosh plain shells, unresolved cwd).
-    var historyController: TerminalSessionController? = nil
-    /// Free tier: the chip shows but routes to the paywall — HISTORY is a
-    /// Pro helper like agent alerts.
-    var historyLocked = false
-    /// Floating slab (visionOS ornament, UMD chrome) vs full-width bar
-    /// (iPad, docked under the screen).
-    var floating = false
-    /// Live scene-width constraint supplied by the visionOS terminal window.
-    /// Ornaments otherwise size from their contents and can outgrow a window
-    /// after the user narrows it.
-    var floatingMaximumWidth: CGFloat? = nil
-    /// Side safe areas the docked strip's pane spans. Its chassis fills them;
-    /// its chips keep clear, like the key rail directly below.
-    var contentSafeArea = EdgeInsets()
-    let send: (AgentCommand) -> Void
-    let saveCommandConfiguration: (
-        [CustomAgentCommand],
-        [String: AgentCommandPlacement]
-    ) -> Void
-    let openPaywall: () -> Void
-    /// Lets DEBUG layout hooks select the one helper strip whose terminal
-    /// owns app-wide focus without introducing another focus authority.
-    let isFocusOwner: () -> Bool
+    init(configuration: AgentHelperStripConfiguration) {
+        self.configuration = configuration
+        super.init(nibName: nil, bundle: nil)
+    }
 
-    @State private var showingCustomCommands = false
-    @State private var customCommandEditorID = UUID()
-    @State private var showingHistory = false
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
 
-    var body: some View {
-        Group {
-            if floating {
-                // Chips keep their 22 pt faces; the slab hugs them so the
-                // ornament stack stays low over the tmux status row.
-                row
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 5)
-                    .frame(maxWidth: floatingMaximumWidth ?? 760)
-                    .background(Theme.bezel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Theme.bezelHi, lineWidth: 1))
-            } else {
-                row
-                    .padding(.leading, 12 + contentSafeArea.leading)
-                    .padding(.trailing, 12 + contentSafeArea.trailing)
-                    .padding(.vertical, 7)
-                    .frame(height: Self.dockedHeight)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.bezel)
-                    .overlay(alignment: .top) {
-                        Rectangle().fill(Theme.bezelHi).frame(height: 1)
-                    }
-                    // This strip is overlaid above the UIKit key rail with a
-                    // transparent bottom spacer. A horizontal ScrollView can
-                    // retain the overlay's taller proposal on iPadOS and let its
-                    // chip faces paint through that spacer, covering the rail.
-                    // The docked chassis is physically 48 pt tall; contain every
-                    // descendant's pixels and hit testing to that declared
-                    // surface. Clipping alone does not bound SwiftUI's
-                    // interaction region.
-                    .clipped()
-                    .contentShape(.interaction, Rectangle())
-            }
-        }
-        // A pane switch may replace one agent with another in the same view
-        // identity. Never let one agent's open drafts relabel or save into a
-        // different agent's profile — or keep another agent's history open.
-        .onChange(of: agent) {
-            showingCustomCommands = false
-            showingHistory = false
-        }
+    override func loadView() {
+        view = rootView
         #if DEBUG
-        .onAppear {
-            CustomCommandsDebugHook.install()
-            AgentHistoryDebugHook.install()
+        installDebugObservers()
+        #endif
+        renderAndObserve()
+    }
+
+    func update(configuration: AgentHelperStripConfiguration) {
+        let changedAgent = self.configuration.agent != configuration.agent
+        self.configuration = configuration
+        if changedAgent {
+            dismissOpenPanels(animated: false)
         }
-        .onReceive(NotificationCenter.default.publisher(
-            for: .multiplexDebugCustomCommands
-        )) { _ in
-            guard isFocusOwner() else { return }
-            openCustomCommandEditor()
+        guard isViewLoaded else { return }
+        // A tracking is one-shot and cannot be cancelled, while the parent
+        // re-renders on every probe tick — re-arming here stranded one dead
+        // registration per render on a controller whose status stays `.live`
+        // for hours. The live one still speaks for an unchanged identity, so
+        // routine updates only re-render.
+        guard observationKey != observedKey else {
+            renderIfNeeded(available: historyAvailable)
+            return
         }
-        .onReceive(NotificationCenter.default.publisher(
-            for: .multiplexDebugAgentHistory
-        )) { _ in
-            guard isFocusOwner(),
-                  agent == .claudeCode,
-                  let historyController,
-                  historyController.canOfferAgentHistory,
-                  !historyLocked
-            else { return }
-            showingHistory = true
+        observationGeneration &+= 1
+        renderAndObserve(generation: observationGeneration)
+    }
+
+    func fittingContentSize(for proposedWidth: CGFloat? = nil) -> CGSize {
+        loadViewIfNeeded()
+        return rootView.fittingSize(proposedWidth: proposedWidth)
+    }
+
+    func prepareForRemoval() {
+        observationGeneration &+= 1
+        // The bump retires the live chain, so a later update must re-arm.
+        observedKey = nil
+        dismissOpenPanels(animated: false)
+        #if DEBUG
+        for observer in debugObservers {
+            NotificationCenter.default.removeObserver(observer)
         }
+        debugObservers.removeAll()
         #endif
     }
 
-    private var row: some View {
-        HStack(spacing: 10) {
-            ChassisLabel(agent.displayName, size: 10, color: Theme.signal2)
-            Rectangle().fill(Theme.bezelHi).frame(width: 1, height: 14)
-            if canShowCommands {
-                chips
+    /// One action seam backs direct chips, menu actions, lock routing, and
+    /// focused UIKit tests.
+    func perform(_ action: AgentHelperStripAction) {
+        switch action {
+        case .send(let command):
+            configuration.send(command)
+        case .openPaywall:
+            configuration.openPaywall()
+        case .customize:
+            scheduleCustomCommandEditor()
+        case .history:
+            guard historyAvailable else { return }
+            if configuration.historyLocked {
+                configuration.openPaywall()
             } else {
-                VStack(alignment: .leading, spacing: 3) {
-                    ChassisChip("✳ AGENT HELPERS · PRO", prominent: true, action: openPaywall)
-                    Text("Free daily command taps return tomorrow")
-                        .font(.mono(8, weight: .medium))
-                        .foregroundStyle(Theme.signal3)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 0)
+                presentHistory()
             }
+        case .collapse:
+            setCollapsed(true)
+        case .expand:
+            setCollapsed(false)
         }
     }
 
-    private var chips: some View {
-        HStack(spacing: 6) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(barCustomCommands) { command in
-                        customCommandChip(command)
-                    }
-                    ForEach(barBuiltInCommands) { command in
-                        commandChip(command)
-                    }
-                }
-                .frame(height: Self.chipHeight)
-            }
-            .frame(height: Self.chipHeight)
-            .clipped()
-            #if os(visionOS)
-            moreMenu
-            .popover(
-                isPresented: $showingCustomCommands,
-                attachmentAnchor: .rect(.bounds),
-                arrowEdge: .bottom
-            ) {
-                CustomAgentCommandPanel(
-                    agent: agent,
-                    commands: customCommands,
-                    builtInPlacements: builtInPlacements,
-                    save: { commands, placements in
-                        saveCommandConfiguration(commands, placements)
-                        showingCustomCommands = false
-                    },
-                    cancel: { showingCustomCommands = false }
-                )
-                .id(customCommandEditorID)
-                .presentationCompactAdaptation(.popover)
-                .customCommandPresentationSizing()
-                .followsAppAppearance()
-            }
-            #else
-            moreMenu
-                .background {
-                    CustomAgentCommandPopoverPresenter(
-                        isPresented: $showingCustomCommands,
-                        agent: agent,
-                        commands: customCommands,
-                        builtInPlacements: builtInPlacements,
-                        editorID: customCommandEditorID,
-                        save: { commands, placements in
-                            saveCommandConfiguration(commands, placements)
-                            showingCustomCommands = false
-                        },
-                        cancel: { showingCustomCommands = false }
-                    )
-                    .allowsHitTesting(false)
-                }
-            #endif
-            historyButton
-        }
+    private func setCollapsed(_ collapsed: Bool) {
+        guard AgentHelperStripCollapse.shared.isCollapsed != collapsed else { return }
+        // Popovers anchor on chips the collapsed render removes.
+        dismissOpenPanels(animated: true)
+        // The post reaches every terminal window, whose animated re-render
+        // normally re-renders this strip too; the direct call covers a strip
+        // with no listening parent (focused tests) and no-ops otherwise.
+        AgentHelperStripCollapse.shared.setCollapsed(collapsed)
+        renderIfNeeded(available: historyAvailable)
     }
 
-    /// The HISTORY chip: session-file prompts for the pane's Claude Code
-    /// conversation (the one agent whose pager jump is exact — Codex/Pi
-    /// support was withdrawn to keep this surface precise). Free tier routes
-    /// to the paywall; hidden entirely when the tab has no way to read
-    /// session files.
-    @ViewBuilder
-    private var historyButton: some View {
-        if agent == .claudeCode,
-           let historyController, historyController.canOfferAgentHistory {
-            let button = Button {
-                if historyLocked {
-                    openPaywall()
-                } else {
-                    showingHistory = true
-                }
-            } label: {
-                ChassisBadge("HIST")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Message history for \(agent.displayName)")
-
-            #if os(visionOS)
-            button
-                .chassisHover(2)
-                .popover(
-                    isPresented: $showingHistory,
-                    attachmentAnchor: .rect(.bounds),
-                    arrowEdge: .bottom
-                ) {
-                    AgentHistoryPanel(
-                        agent: agent,
-                        controller: historyController,
-                        dismiss: { showingHistory = false }
-                    )
-                    .presentationCompactAdaptation(.popover)
-                    .followsAppAppearance()
-                }
-            #else
-            button
-                .background {
-                    AgentHistoryPopoverPresenter(
-                        isPresented: $showingHistory,
-                        agent: agent,
-                        controller: historyController
-                    )
-                    .allowsHitTesting(false)
-                }
-            #endif
-        }
-    }
-
-    private var moreMenu: some View {
-        Menu {
-            ForEach(moreBuiltInCommands) { command in
-                Button(command.label) { send(command) }
-            }
-            if !moreCustomCommands.isEmpty {
-                Divider()
-                Section("Custom") {
-                    ForEach(moreCustomCommands) { command in
-                        Button(command.menuLabel) { send(command.agentCommand) }
-                    }
-                }
-            }
-            Divider()
-            Button {
-                openCustomCommandEditor()
-            } label: {
-                Label("Customize Commands…", systemImage: "slider.horizontal.3")
-            }
-        } label: {
-            ChassisBadge("MORE")
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .chassisHover(2)
-        .accessibilityLabel("More \(agent.displayName) commands")
-    }
-
-    private func openCustomCommandEditor() {
-        // A fresh identity makes CANCEL genuinely discard drafts when the
-        // same editor is opened again, including a DEBUG notification reopen.
-        customCommandEditorID = UUID()
-        showingCustomCommands = true
-    }
-
-    private var barBuiltInCommands: [AgentCommand] {
+    var barBuiltInCommands: [AgentCommand] {
         AgentCommandSet.commands(
             in: .bar,
-            for: agent,
-            placementOverrides: builtInPlacements
+            for: configuration.agent,
+            placementOverrides: configuration.builtInPlacements
         )
     }
 
-    private var moreBuiltInCommands: [AgentCommand] {
+    var moreBuiltInCommands: [AgentCommand] {
         AgentCommandSet.commands(
             in: .more,
-            for: agent,
-            placementOverrides: builtInPlacements
+            for: configuration.agent,
+            placementOverrides: configuration.builtInPlacements
         )
     }
 
-    private var barCustomCommands: [CustomAgentCommand] {
-        customCommands.filter { $0.barLabel != nil }
+    var barCustomCommands: [CustomAgentCommand] {
+        configuration.customCommands.filter { $0.barLabel != nil }
     }
 
-    private var moreCustomCommands: [CustomAgentCommand] {
-        customCommands.filter { $0.barLabel == nil }
+    var moreCustomCommands: [CustomAgentCommand] {
+        configuration.customCommands.filter { $0.barLabel == nil }
     }
 
-    /// Keep the design-system face while owning the button's physical height
-    /// directly. `ChassisChip`'s cross-platform hover wrapper can accept the
-    /// horizontal ScrollView's taller iPad proposal and paint a second dark
-    /// block beneath its bordered label. visionOS still receives the required
-    /// chassis hover treatment; iPad gets the plain touch button it needs.
-    @ViewBuilder
-    private func commandChip(_ command: AgentCommand) -> some View {
-        let button = Button {
-            send(command)
-        } label: {
-            ChassisBadge(command.label)
-        }
-        .buttonStyle(.plain)
-        .fixedSize()
-        .frame(height: Self.chipHeight)
-        .clipped()
-        .accessibilityLabel(command.label.capitalized)
-
-        #if os(visionOS)
-        button.chassisHover(2)
-        #else
-        button
-        #endif
-    }
-
-    /// User-authored commands use a warmer neutral than stock actions. The
-    /// color carries provenance, not state; auto-submit behavior remains in
-    /// the editor and accessibility copy rather than a semantic signal hue.
-    @ViewBuilder
-    private func customCommandChip(_ command: CustomAgentCommand) -> some View {
-        let button = Button {
-            send(command.agentCommand)
-        } label: {
-            ChassisBadge(command.barLabel ?? command.menuLabel, color: Theme.customCommand)
-        }
-        .buttonStyle(.plain)
-        .fixedSize()
-        .frame(height: Self.chipHeight)
-        .clipped()
-        .accessibilityLabel(
-            "Custom command \(command.menuLabel), \(command.autoSubmit ? "auto submit" : "type only")"
-        )
-
-        #if os(visionOS)
-        button.chassisHover(2)
-        #else
-        button
-        #endif
-    }
-}
-
-#if !os(visionOS)
-/// UIKit-backed iPad presentation for the Command Setup editor. SwiftUI's
-/// popover host accepts a keyboard-adjusted, full-height proposal when the
-/// floating keyboard sits near MORE, inflating the panel with a blank bottom
-/// tail. As with the tmux shortcuts panel, the measured content size is the
-/// boundary and only the popover container contributes a safe area.
-private struct CustomAgentCommandPopoverPresenter: UIViewRepresentable {
-    @Binding var isPresented: Bool
-
-    let agent: AgentKind
-    let commands: [CustomAgentCommand]
-    let builtInPlacements: [String: AgentCommandPlacement]
-    let editorID: UUID
-    let save: (
-        [CustomAgentCommand],
-        [String: AgentCommandPlacement]
-    ) -> Void
-    let cancel: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
-    }
-
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        view.backgroundColor = .clear
-        view.isUserInteractionEnabled = false
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.parent = self
-        context.coordinator.update(anchor: uiView)
-    }
-
-    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
-        coordinator.dismiss(animated: false)
-    }
-
-    @MainActor
-    final class Coordinator: NSObject, UIPopoverPresentationControllerDelegate {
-        var parent: CustomAgentCommandPopoverPresenter
-
-        private weak var controller: UIViewController?
-        private var presentationScheduled = false
-
-        init(parent: CustomAgentCommandPopoverPresenter) {
-            self.parent = parent
-        }
-
-        func update(anchor: UIView) {
-            guard parent.isPresented else {
-                dismiss(animated: true)
-                return
-            }
-            guard controller == nil, !presentationScheduled else { return }
-
-            // Let the Menu finish its selection transaction before presenting
-            // another controller from the same SwiftUI host.
-            presentationScheduled = true
-            DispatchQueue.main.async { [weak self, weak anchor] in
-                guard let self else { return }
-                self.presentationScheduled = false
-                guard self.parent.isPresented,
-                      self.controller == nil,
-                      let anchor
-                else { return }
-                self.present(from: anchor)
+    func makeMoreMenu() -> UIMenu {
+        var groups: [UIMenuElement] = []
+        let builtIns = moreBuiltInCommands.map { command in
+            UIAction(title: command.label) { [weak self] _ in
+                self?.perform(.send(command))
             }
         }
-
-        func dismiss(animated: Bool) {
-            presentationScheduled = false
-            guard let controller else { return }
-            self.controller = nil
-            controller.dismiss(animated: animated)
+        if !builtIns.isEmpty {
+            groups.append(UIMenu(options: .displayInline, children: builtIns))
         }
 
-        private func present(from anchor: UIView) {
-            guard let presenter = presentingViewController(from: anchor) else { return }
-
-            let sceneWidth = anchor.window?.bounds.width ?? presenter.view.bounds.width
-            let panelWidth = min(
-                CustomAgentCommandPanel.preferredWidth,
-                max(280, sceneWidth - 24)
-            )
-            let panel = CustomAgentCommandPanel(
-                agent: parent.agent,
-                commands: parent.commands,
-                builtInPlacements: parent.builtInPlacements,
-                width: panelWidth,
-                save: { [weak self] commands, placements in
-                    self?.parent.save(commands, placements)
-                },
-                cancel: { [weak self] in self?.parent.cancel() }
-            )
-            .id(parent.editorID)
-
-            let controller = UIHostingController(rootView: panel)
-            self.controller = controller
-            // Keep the ordinary rounded-window/popover boundary, but exclude
-            // the floating keyboard from SwiftUI's content-safe-area proposal.
-            controller.safeAreaRegions = .container
-            // ADD/DELETE changes the editor's intrinsic height after the
-            // controller is already presented. Keep UIKit's popover boundary
-            // synchronized with each SwiftUI measurement instead of freezing
-            // the one-row size calculated below.
-            controller.sizingOptions = .preferredContentSize
-            controller.modalPresentationStyle = .popover
-            controller.view.backgroundColor = UIColor(Theme.bezel)
-
-            let fittingSize = controller.sizeThatFits(in: CGSize(
-                width: panelWidth,
-                height: anchor.window?.bounds.height ?? presenter.view.bounds.height
+        let customs = moreCustomCommands.map { command in
+            UIAction(title: command.menuLabel) { [weak self] _ in
+                self?.perform(.send(command.agentCommand))
+            }
+        }
+        if !customs.isEmpty {
+            groups.append(UIMenu(
+                title: "Custom",
+                options: .displayInline,
+                children: customs
             ))
-            controller.preferredContentSize = CGSize(
-                width: panelWidth,
-                height: fittingSize.height
+        }
+
+        let customize = UIAction(
+            title: "Customize Commands…",
+            image: UIImage(systemName: "slider.horizontal.3")
+        ) { [weak self] _ in
+            self?.perform(.customize)
+        }
+        groups.append(UIMenu(options: .displayInline, children: [customize]))
+        return UIMenu(children: groups)
+    }
+
+    /// Injectable observation boundary for focused native tests. Production
+    /// continuously derives this value from the @Observable session.
+    func applyHistoryAvailability(_ available: Bool) {
+        historyAvailable = available
+        renderIfNeeded(available: available)
+    }
+
+    private var observationKey: ObservationKey {
+        ObservationKey(
+            agent: configuration.agent,
+            historyController: configuration.historyController
+                .map(ObjectIdentifier.init)
+        )
+    }
+
+    private func renderAndObserve(generation: Int? = nil) {
+        let generation = generation ?? {
+            observationGeneration &+= 1
+            return observationGeneration
+        }()
+        guard generation == observationGeneration else { return }
+        observedKey = observationKey
+
+        let available = withObservationTracking {
+            configuration.agent == .claudeCode
+                && configuration.historyController?.canOfferAgentHistory == true
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.renderAndObserve(generation: generation)
+            }
+        }
+        historyAvailable = available
+        renderIfNeeded(available: available)
+    }
+
+    private func renderIfNeeded(available: Bool) {
+        let key = RenderKey(
+            agent: configuration.agent,
+            canShowCommands: configuration.canShowCommands,
+            builtInPlacements: configuration.builtInPlacements,
+            customCommands: configuration.customCommands,
+            historyAvailable: available,
+            floating: configuration.floating,
+            floatingMaximumWidth: configuration.floatingMaximumWidth
+                ?? Self.maximumFloatingWidth,
+            safeAreaLeft: configuration.contentSafeArea.left,
+            safeAreaRight: configuration.contentSafeArea.right,
+            collapsed: isCollapsed
+        )
+        let previous = renderedKey
+        guard key != previous else { return }
+        renderedKey = key
+        if let previous, previous.collapsed != key.collapsed, rootView.window != nil {
+            UIView.transition(
+                with: rootView,
+                duration: 0.22,
+                options: [.transitionCrossDissolve, .allowAnimatedContent]
+            ) {
+                self.render(available: available)
+            }
+        } else {
+            render(available: available)
+        }
+    }
+
+    private func render(available: Bool) {
+        moreButton = nil
+        historyButton = nil
+
+        if isCollapsed {
+            let dot = AgentHelperStripDotButton(
+                glyph: configuration.agent.dotGlyph,
+                accessibilityLabel: "Show \(configuration.agent.displayName) helpers",
+                action: { [weak self] in self?.perform(.expand) }
             )
+            dot.accessibilityIdentifier = "agentHelpers.dot"
+            rootView.apply(
+                content: dot,
+                floating: configuration.floating,
+                floatingMaximumWidth: configuration.floatingMaximumWidth
+                    ?? Self.maximumFloatingWidth,
+                safeArea: configuration.contentSafeArea,
+                collapsed: true
+            )
+            rootView.setNeedsLayout()
+            rootView.layoutIfNeeded()
+            preferredContentSize = fittingContentSize()
+            return
+        }
 
-            if let popover = controller.popoverPresentationController {
-                popover.sourceView = anchor
-                popover.sourceRect = anchor.bounds
-                popover.permittedArrowDirections = .down
-                popover.backgroundColor = UIColor(Theme.bezel)
-                popover.delegate = self
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 10
+
+        let agent = AgentHelperStripTitleButton(
+            title: configuration.agent.displayName,
+            accessibilityLabel: "Hide \(configuration.agent.displayName) helpers",
+            action: { [weak self] in self?.perform(.collapse) }
+        )
+        agent.accessibilityIdentifier = "agentHelpers.agent"
+        agent.setContentHuggingPriority(.required, for: .horizontal)
+        row.addArrangedSubview(agent)
+
+        let divider = UIView()
+        divider.backgroundColor = UIKitChassis.bezelHi
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            divider.widthAnchor.constraint(equalToConstant: 1),
+            divider.heightAnchor.constraint(equalToConstant: 14),
+        ])
+        row.addArrangedSubview(divider)
+
+        if configuration.canShowCommands {
+            row.addArrangedSubview(makeCommandRail(historyAvailable: available))
+        } else {
+            let pro = AgentHelperStripButton(
+                caption: "✳ AGENT HELPERS · PRO",
+                prominent: true,
+                accessibilityLabel: "Agent helpers Pro",
+                action: { [weak self] in self?.perform(.openPaywall) }
+            )
+            pro.accessibilityIdentifier = "agentHelpers.pro"
+            let detail = UILabel()
+            detail.text = "Free daily command taps return tomorrow"
+            detail.font = UIKitChassis.monoFont(8, weight: .medium)
+            detail.textColor = UIKitChassis.signal3
+            detail.numberOfLines = 1
+            detail.lineBreakMode = .byTruncatingTail
+            let locked = UIStackView(arrangedSubviews: [pro, detail])
+            locked.axis = .vertical
+            locked.alignment = .leading
+            locked.spacing = 3
+            row.addArrangedSubview(locked)
+            let spacer = UIView()
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            row.addArrangedSubview(spacer)
+        }
+
+        rootView.apply(
+            content: row,
+            floating: configuration.floating,
+            floatingMaximumWidth: configuration.floatingMaximumWidth
+                ?? Self.maximumFloatingWidth,
+            safeArea: configuration.contentSafeArea,
+            collapsed: false
+        )
+        rootView.setNeedsLayout()
+        rootView.layoutIfNeeded()
+        preferredContentSize = fittingContentSize()
+    }
+
+    private func makeCommandRail(historyAvailable: Bool) -> UIView {
+        let rail = UIStackView()
+        rail.axis = .horizontal
+        rail.alignment = .center
+        rail.spacing = 6
+
+        let scroll = AgentHelperCommandScrollView()
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.showsVerticalScrollIndicator = false
+        scroll.alwaysBounceHorizontal = false
+        scroll.clipsToBounds = true
+        scroll.accessibilityIdentifier = "agentHelpers.commandScroll"
+        scroll.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        scroll.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.heightAnchor.constraint(equalToConstant: Self.chipHeight).isActive = true
+
+        let commands = UIStackView()
+        commands.axis = .horizontal
+        commands.alignment = .center
+        commands.spacing = 6
+        scroll.addSubview(commands)
+        commands.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            commands.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            commands.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            commands.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            commands.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            commands.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor),
+        ])
+
+        for command in barCustomCommands {
+            let button = AgentHelperStripButton(
+                caption: command.barLabel ?? command.menuLabel,
+                color: TallyPalette.customCommand,
+                accessibilityLabel: "Custom command \(command.menuLabel), \(command.autoSubmit ? "auto submit" : "type only")",
+                action: { [weak self] in self?.perform(.send(command.agentCommand)) }
+            )
+            button.accessibilityIdentifier = "agentHelpers.custom.\(command.id.uuidString)"
+            commands.addArrangedSubview(button)
+        }
+        for command in barBuiltInCommands {
+            let button = AgentHelperStripButton(
+                caption: command.label,
+                accessibilityLabel: command.label.capitalized,
+                action: { [weak self] in self?.perform(.send(command)) }
+            )
+            button.accessibilityIdentifier = "agentHelpers.command.\(command.id)"
+            commands.addArrangedSubview(button)
+        }
+        rail.addArrangedSubview(scroll)
+
+        let more = AgentHelperStripButton(
+            caption: "MORE",
+            accessibilityLabel: "More \(configuration.agent.displayName) commands"
+        )
+        more.accessibilityIdentifier = "agentHelpers.more"
+        more.menu = makeMoreMenu()
+        more.showsMenuAsPrimaryAction = true
+        more.setContentHuggingPriority(.required, for: .horizontal)
+        more.setContentCompressionResistancePriority(.required, for: .horizontal)
+        moreButton = more
+        rail.addArrangedSubview(more)
+
+        if historyAvailable {
+            let history = AgentHelperStripButton(
+                caption: "HIST",
+                accessibilityLabel: "Message history for \(configuration.agent.displayName)",
+                action: { [weak self] in self?.perform(.history) }
+            )
+            history.accessibilityIdentifier = "agentHelpers.history"
+            history.setContentHuggingPriority(.required, for: .horizontal)
+            history.setContentCompressionResistancePriority(.required, for: .horizontal)
+            historyButton = history
+            rail.addArrangedSubview(history)
+        }
+        return rail
+    }
+
+    // MARK: Native presentation
+
+    private func scheduleCustomCommandEditor() {
+        guard customPanelController == nil else { return }
+        // MORE is still completing its menu-selection transaction here.
+        DispatchQueue.main.async { [weak self] in
+            self?.presentCustomCommandEditor()
+        }
+    }
+
+    private func presentCustomCommandEditor() {
+        guard customPanelController == nil,
+              let anchor = moreButton,
+              anchor.window != nil
+        else { return }
+        let sceneWidth = anchor.window?.bounds.width ?? view.bounds.width
+        let width = min(
+            CustomAgentCommandPanelViewController.preferredWidth,
+            max(280, sceneWidth - 24)
+        )
+        let panel = CustomAgentCommandPanelViewController(
+            agent: configuration.agent,
+            commands: configuration.customCommands,
+            builtInPlacements: configuration.builtInPlacements,
+            width: width,
+            save: { [weak self] commands, placements in
+                guard let self else { return }
+                self.configuration.saveCommandConfiguration(commands, placements)
+                self.dismissCustomPanel(animated: true)
+            },
+            cancel: { [weak self] in
+                self?.dismissCustomPanel(animated: true)
             }
-            presenter.present(controller, animated: true)
-        }
+        )
+        customPanelController = panel
+        panel.modalPresentationStyle = .popover
+        // PROTOTYPE(GLASS): smoke over the popover's own platter.
+        panel.view.backgroundColor = GlassPrototype.popoverGround(
+            fallback: TallyPalette.bezel
+        )
+        panel.preferredContentSize = panel.fittingContentSize()
+        configurePopover(panel, sourceView: anchor)
+        present(panel, animated: true)
+    }
 
-        private func presentingViewController(from anchor: UIView) -> UIViewController? {
-            var responder: UIResponder? = anchor
-            while let current = responder {
-                if let controller = current as? UIViewController { return controller }
-                responder = current.next
+    private func presentHistory() {
+        guard historyPanelController == nil,
+              let controller = configuration.historyController,
+              let anchor = historyButton,
+              anchor.window != nil
+        else { return }
+        let sceneWidth = anchor.window?.bounds.width ?? view.bounds.width
+        let width = min(
+            AgentHistoryPanelViewController.preferredWidth,
+            max(280, sceneWidth - 24)
+        )
+        let panel = AgentHistoryPanelViewController(
+            agent: configuration.agent,
+            controller: controller,
+            width: width,
+            dismiss: { [weak self] in
+                self?.dismissHistoryPanel(animated: true)
             }
-            return nil
-        }
+        )
+        historyPanelController = panel
+        panel.modalPresentationStyle = .popover
+        // PROTOTYPE(GLASS): smoke over the popover's own platter.
+        panel.view.backgroundColor = GlassPrototype.popoverGround(
+            fallback: TallyPalette.bezel
+        )
+        panel.preferredContentSize = panel.fittingContentSize()
+        configurePopover(panel, sourceView: anchor)
+        present(panel, animated: true)
+    }
 
-        func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-            controller = nil
-            if parent.isPresented { parent.isPresented = false }
-        }
+    private func configurePopover(_ panel: UIViewController, sourceView: UIView) {
+        // visionOS hosts these popovers in windows of their own; carry the
+        // ornament mount's appearance override across or a pinned LIGHT
+        // presents dark panels. Inert wherever inheritance already works.
+        panel.overrideUserInterfaceStyle = inheritedInterfaceStyleOverride
+        // PROTOTYPE(GLASS): mirror the glass selection across the popover's
+        // window the same way, so its materials resolve the smoke recipe.
+        panel.view.traitOverrides[GlassAppearanceTrait.self] =
+            view.traitCollection[GlassAppearanceTrait.self]
+        guard let popover = panel.popoverPresentationController else { return }
+        popover.sourceView = sourceView
+        popover.sourceRect = sourceView.bounds
+        popover.permittedArrowDirections = .down
+        #if !os(visionOS)
+        popover.backgroundColor = UIKitChassis.bezel
+        #endif
+        popover.delegate = self
+        // Labels built before the window attach can retain ink resolved
+        // against the wrong traits (the visionOS retained-ink defect);
+        // re-resolve once trait delivery has settled.
+        panel.refreshDynamicTextColorsAfterTraitPropagation()
+    }
 
-        /// Compact Stage Manager scenes still have room for this fitted
-        /// editor; never replace the terminal with an adaptive form sheet.
-        func adaptivePresentationStyle(
-            for controller: UIPresentationController
-        ) -> UIModalPresentationStyle {
-            .none
-        }
+    private func dismissCustomPanel(animated: Bool) {
+        guard let panel = customPanelController else { return }
+        customPanelController = nil
+        panel.prepareForRemoval()
+        panel.dismiss(animated: animated)
+    }
 
-        func adaptivePresentationStyle(
-            for controller: UIPresentationController,
-            traitCollection: UITraitCollection
-        ) -> UIModalPresentationStyle {
-            .none
+    private func dismissHistoryPanel(animated: Bool) {
+        guard let panel = historyPanelController else { return }
+        historyPanelController = nil
+        panel.prepareForRemoval()
+        panel.dismiss(animated: animated)
+    }
+
+    private func dismissOpenPanels(animated: Bool) {
+        dismissCustomPanel(animated: animated)
+        dismissHistoryPanel(animated: animated)
+    }
+
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        let presented = presentationController.presentedViewController
+        if presented === customPanelController {
+            customPanelController?.prepareForRemoval()
+            customPanelController = nil
+        } else if presented === historyPanelController {
+            historyPanelController?.prepareForRemoval()
+            historyPanelController = nil
+        }
+    }
+
+    func adaptivePresentationStyle(
+        for controller: UIPresentationController
+    ) -> UIModalPresentationStyle {
+        .none
+    }
+
+    func adaptivePresentationStyle(
+        for controller: UIPresentationController,
+        traitCollection: UITraitCollection
+    ) -> UIModalPresentationStyle {
+        .none
+    }
+
+    #if DEBUG
+    private func installDebugObservers() {
+        CustomCommandsDebugHook.install()
+        AgentHistoryDebugHook.install()
+
+        debugObservers.append(NotificationCenter.default.addObserver(
+            forName: .multiplexDebugCustomCommands,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.configuration.isFocusOwner() else { return }
+                self.perform(.customize)
+            }
+        })
+        debugObservers.append(NotificationCenter.default.addObserver(
+            forName: .multiplexDebugAgentHistory,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      self.configuration.isFocusOwner(),
+                      self.configuration.agent == .claudeCode,
+                      self.historyAvailable,
+                      !self.configuration.historyLocked
+                else { return }
+                self.perform(.history)
+            }
+        })
+    }
+    #endif
+}
+
+// MARK: - Native strip components
+
+@MainActor
+private final class AgentHelperStripRootView: UIKitTallyBorderedView {
+    private weak var content: UIView?
+    private let topRule = UIView()
+    private var floating = false
+    private var floatingMaximumWidth = AgentHelperStripViewController.maximumFloatingWidth
+    private var safeAreaInsetsForContent = UIEdgeInsets.zero
+    private var collapsed = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        clipsToBounds = true
+        topRule.backgroundColor = UIKitChassis.bezelHi
+        topRule.isUserInteractionEnabled = false
+        addSubview(topRule)
+        topRule.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            topRule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            topRule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            topRule.topAnchor.constraint(equalTo: topAnchor),
+            topRule.heightAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func apply(
+        content: UIView,
+        floating: Bool,
+        floatingMaximumWidth: CGFloat,
+        safeArea: UIEdgeInsets,
+        collapsed: Bool
+    ) {
+        self.content?.removeFromSuperview()
+        self.content = content
+        self.floating = floating
+        self.floatingMaximumWidth = floatingMaximumWidth
+        self.collapsed = collapsed
+        safeAreaInsetsForContent = safeArea
+        backgroundColor = UIKitChassis.bezel
+        layer.cornerRadius = collapsed
+            ? AgentHelperStripViewController.collapsedDotDiameter / 2
+            : (floating ? 12 : 0)
+        layer.cornerCurve = .continuous
+        // A collapsed dot floats over the terminal on every platform, so the
+        // docked strip's edge-to-edge treatment gives way to the bordered pill.
+        layer.borderWidth = (floating || collapsed) ? 1 : 0
+        tallyBorderColor = UIKitChassis.bezelHi
+        topRule.isHidden = floating || collapsed
+
+        addSubview(content)
+        bringSubviewToFront(topRule)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        if collapsed {
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: leadingAnchor),
+                content.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+        } else if floating {
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+                content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+                content.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+                content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(
+                    equalTo: leadingAnchor,
+                    constant: 12 + safeArea.left
+                ),
+                content.trailingAnchor.constraint(
+                    equalTo: trailingAnchor,
+                    constant: -(12 + safeArea.right)
+                ),
+                content.centerYAnchor.constraint(equalTo: centerYAnchor),
+                content.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 1),
+            ])
+        }
+        invalidateIntrinsicContentSize()
+    }
+
+    override var intrinsicContentSize: CGSize {
+        fittingSize(proposedWidth: nil)
+    }
+
+    func fittingSize(proposedWidth: CGFloat?) -> CGSize {
+        if collapsed, content != nil {
+            let diameter = AgentHelperStripViewController.collapsedDotDiameter
+            return CGSize(width: diameter, height: diameter)
+        }
+        guard let content else {
+            return CGSize(
+                width: proposedWidth ?? UIView.noIntrinsicMetric,
+                height: floating ? 0 : AgentHelperStripViewController.dockedHeight
+            )
+        }
+        let horizontalInsets: CGFloat = floating
+            ? 32
+            : 24 + safeAreaInsetsForContent.left + safeAreaInsetsForContent.right
+        let maximum = floating ? floatingMaximumWidth : (proposedWidth ?? .greatestFiniteMagnitude)
+        let available = max(1, min(proposedWidth ?? maximum, maximum) - horizontalInsets)
+        let measured = content.systemLayoutSizeFitting(
+            CGSize(width: available, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: proposedWidth == nil ? .fittingSizeLevel : .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        if floating {
+            let width = min(
+                floatingMaximumWidth,
+                proposedWidth ?? ceil(measured.width + horizontalInsets)
+            )
+            return CGSize(width: width, height: ceil(measured.height + 10))
+        }
+        return CGSize(
+            width: proposedWidth ?? ceil(measured.width + horizontalInsets),
+            height: AgentHelperStripViewController.dockedHeight
+        )
+    }
+}
+
+/// The strip header's agent title, now also the collapse control. Keeps the
+/// exact `UIKitChassisLabel` rendering while growing an honest hit target.
+@MainActor
+private final class AgentHelperStripTitleButton: UIControl {
+    private let storedAction: () -> Void
+
+    init(title: String, accessibilityLabel: String, action: @escaping () -> Void) {
+        storedAction = action
+        super.init(frame: .zero)
+        let label = UIKitChassisLabel(title, size: 10, color: UIKitChassis.signal2)
+        label.isUserInteractionEnabled = false
+        addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor),
+            label.topAnchor.constraint(equalTo: topAnchor),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        self.accessibilityLabel = accessibilityLabel
+        accessibilityTraits = .button
+        addTarget(self, action: #selector(pressed), for: .touchUpInside)
+        #if os(visionOS)
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        #endif
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    @objc private func pressed() {
+        storedAction()
+    }
+
+    /// The label alone is ~12 points tall; answer presses for the strip's
+    /// whole vertical band around it.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        bounds.insetBy(dx: -10, dy: -14).contains(point)
+    }
+}
+
+/// The collapsed strip: one round agent badge parked at the bottom-leading
+/// corner. Tapping it restores the full strip.
+@MainActor
+private final class AgentHelperStripDotButton: UIButton {
+    private let storedAction: () -> Void
+
+    init(glyph: String, accessibilityLabel: String, action: @escaping () -> Void) {
+        storedAction = action
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        let glyphView = AgentHelperStripDotGlyphView(glyph: glyph)
+        addSubview(glyphView)
+        glyphView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            glyphView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            glyphView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            glyphView.topAnchor.constraint(equalTo: topAnchor),
+            glyphView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        self.accessibilityLabel = accessibilityLabel
+        accessibilityTraits = .button
+        addTarget(self, action: #selector(pressed), for: .touchUpInside)
+        translatesAutoresizingMaskIntoConstraints = false
+        let diameter = AgentHelperStripViewController.collapsedDotDiameter
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: diameter),
+            heightAnchor.constraint(equalToConstant: diameter),
+        ])
+        #if os(visionOS)
+        hoverStyle = UIHoverStyle(
+            effect: .highlight,
+            shape: .capsule
+        )
+        #endif
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    @objc private func pressed() {
+        storedAction()
+    }
+}
+
+/// Draws the dot's agent mark centered on its rendered ink bounds. ✳ and ◆
+/// are not in the mono face — they render through fallback fonts whose line
+/// metrics disagree with SF Mono's, so a label or button title centers the
+/// line box and leaves the visible glyph noticeably off the dot's center.
+@MainActor
+private final class AgentHelperStripDotGlyphView: UIView {
+    private let glyph: String
+
+    init(glyph: String) {
+        self.glyph = glyph
+        super.init(frame: .zero)
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+        contentMode = .redraw
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        setNeedsDisplay()
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        let attributed = NSAttributedString(
+            string: glyph,
+            attributes: [
+                .font: UIKitChassis.monoFont(12, weight: .semibold),
+                // Fill from the context: CoreText's own color key is the
+                // only spelling every fallback path honors.
+                kCTForegroundColorFromContextAttributeName
+                    as NSAttributedString.Key: true,
+            ]
+        )
+        let line = CTLineCreateWithAttributedString(attributed)
+        context.saveGState()
+        context.translateBy(x: 0, y: bounds.height)
+        context.scaleBy(x: 1, y: -1)
+        context.textMatrix = .identity
+        context.setFillColor(
+            UIKitChassis.signal2.resolvedColor(with: traitCollection).cgColor
+        )
+        context.textPosition = .zero
+        let inkBounds = CTLineGetImageBounds(line, context)
+        context.textPosition = CGPoint(
+            x: bounds.midX - inkBounds.midX,
+            y: bounds.midY - inkBounds.midY
+        )
+        CTLineDraw(line, context)
+        context.restoreGState()
+    }
+}
+
+private extension AgentKind {
+    /// The collapsed dot's face — each agent's own mark where it has one.
+    var dotGlyph: String {
+        switch self {
+        case .claudeCode: "✳"
+        case .codex: "◆"
+        case .pi: "π"
         }
     }
 }
-#endif
+
+/// The command rail's scroller. Same contract as the tab rail's: a scroll
+/// view delays content touches by 150 ms and drops them if the finger drifts
+/// during that window, so an overflowing chip row loses ordinary presses.
+/// Track at once, and keep drag-to-scroll from a chip by answering the cancel
+/// question for controls, whose UIKit default (false) would otherwise pin the
+/// rail once touches are undelayed.
+@MainActor
+final class AgentHelperCommandScrollView: UIScrollView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        delaysContentTouches = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func touchesShouldCancel(in view: UIView) -> Bool {
+        if view is UIButton { return true }
+        return super.touchesShouldCancel(in: view)
+    }
+}
+
+/// Native spelling of the 22-point ChassisBadge button. Its ink can be the
+/// warmer custom-command neutral, and UIButton supplies primary-action menus.
+@MainActor
+private final class AgentHelperStripButton: UIButton {
+    private let caption: String
+    private let ink: UIColor
+    private let prominent: Bool
+    private var storedAction: (() -> Void)?
+
+    init(
+        caption: String,
+        color: UIColor? = nil,
+        prominent: Bool = false,
+        accessibilityLabel: String,
+        action: (() -> Void)? = nil
+    ) {
+        self.caption = caption
+        ink = color ?? UIKitChassis.signal2
+        self.prominent = prominent
+        storedAction = action
+        super.init(frame: .zero)
+        backgroundColor = GlassPrototype.strataChassis
+        layer.borderWidth = 1
+        contentEdgeInsets = UIEdgeInsets(top: 5, left: 9, bottom: 5, right: 9)
+        titleLabel?.numberOfLines = 1
+        self.accessibilityLabel = accessibilityLabel
+        accessibilityTraits = .button
+        if storedAction != nil {
+            addTarget(self, action: #selector(pressed), for: .touchUpInside)
+        }
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: AgentHelperStripViewController.chipHeight)
+            .isActive = true
+        #if os(visionOS)
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        #endif
+        refreshAppearance()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    @objc private func pressed() {
+        storedAction?()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        refreshAppearance()
+    }
+
+    private func refreshAppearance() {
+        layer.borderColor = (prominent ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
+            .resolvedColor(with: traitCollection).cgColor
+        setAttributedTitle(
+            NSAttributedString(
+                string: caption,
+                attributes: [
+                    .font: UIKitChassis.monoFont(9, weight: .semibold),
+                    .kern: 1.1,
+                    .foregroundColor: (prominent ? UIKitChassis.signal : ink)
+                        .resolvedColor(with: traitCollection),
+                ]
+            ),
+            for: .normal
+        )
+    }
+}
 
 #if DEBUG
 extension Notification.Name {
@@ -542,8 +1052,8 @@ extension Notification.Name {
 }
 
 /// Opens the focused terminal's HISTORY panel for layout capture and
-/// headless checks — the strip's focus-owner guard keeps one notification
-/// from presenting panels in several scenes.
+/// headless checks. The strip's focus-owner guard keeps one Darwin
+/// notification from presenting panels in several scenes.
 @MainActor
 enum AgentHistoryDebugHook {
     private static var installed = false
@@ -563,9 +1073,7 @@ enum AgentHistoryDebugHook {
     }
 }
 
-/// Opens the focused terminal's real Command Setup editor for layout
-/// capture. AgentHelperStrip performs the final focus-owner check so a Darwin
-/// notification never presents panels from several terminal scenes.
+/// Opens the focused terminal's real Command Setup editor for layout capture.
 @MainActor
 enum CustomCommandsDebugHook {
     private static var installed = false
@@ -585,11 +1093,7 @@ enum CustomCommandsDebugHook {
     }
 }
 
-/// Headless-verification hook: `xcrun simctl spawn <udid> notifyutil -p
-/// app.multiplexterm.multiplex.debug.agentchip` taps the focused terminal's
-/// first slash chip — the whole tap → pump → PTY → tmux → pane path without
-/// touching the screen. The Darwin notification fans out through
-/// NotificationCenter; the terminal window that owns keyboard focus reacts.
+/// Headless-verification hook for the first focused slash chip.
 @MainActor
 enum AgentChipDebugHook {
     private static var installed = false
@@ -606,47 +1110,4 @@ enum AgentChipDebugHook {
     }
 }
 
-#Preview("Agent Helpers") {
-    let commands = [
-        CustomAgentCommand(
-            content: "Review the current diff",
-            autoSubmit: true,
-            showInBar: true
-        ),
-        CustomAgentCommand(
-            content: "Explain the failing tests",
-            autoSubmit: false,
-            showInBar: false,
-            shared: true
-        ),
-    ]
-
-    #if os(visionOS)
-    AgentHelperStrip(
-        agent: .codex,
-        canShowCommands: true,
-        builtInPlacements: [:],
-        customCommands: commands,
-        floating: true,
-        floatingMaximumWidth: 720,
-        send: { _ in },
-        saveCommandConfiguration: { _, _ in },
-        openPaywall: {},
-        isFocusOwner: { false }
-    )
-    .padding()
-    #else
-    AgentHelperStrip(
-        agent: .codex,
-        canShowCommands: true,
-        builtInPlacements: [:],
-        customCommands: commands,
-        send: { _ in },
-        saveCommandConfiguration: { _, _ in },
-        openPaywall: {},
-        isFocusOwner: { false }
-    )
-    .frame(width: 760)
-    #endif
-}
 #endif

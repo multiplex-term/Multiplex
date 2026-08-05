@@ -81,8 +81,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         let normalizedLineEndings = prompt
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
-        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") {
-            result, scalar in
+        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") { result, scalar in
             let allowedControl = scalar.value == 0x09 || scalar.value == 0x0A
             if allowedControl || !CharacterSet.controlCharacters.contains(scalar) {
                 result.append(Character(scalar))
@@ -296,9 +295,6 @@ struct AgentCommand: Identifiable, Hashable {
         )
     }
 
-    /// Interrupt the running turn. Esc in every supported TUI.
-    static let stop = AgentCommand(label: "STOP", payload: Data([0x1B]))
-
     /// Cycle permission / collaboration mode — Shift+Tab, which terminals
     /// send as CSI Z. A fixed default binding in Claude Code and Codex. Never
     /// ship a Ctrl+B payload here: that's the remote tmux prefix and gets eaten.
@@ -341,7 +337,7 @@ enum AgentCommandSet {
         switch kind {
         case .claudeCode:
             var commands: [AgentCommand] = [
-                .stop, .slash("clear"), .slash("resume"), .slash("compact"),
+                .slash("clear"), .slash("resume"), .slash("compact"),
                 .slash("rewind"), .slash("model"), .slash("effort"), .mode,
             ]
             #if os(visionOS)
@@ -352,11 +348,11 @@ enum AgentCommandSet {
             #endif
             return commands
         case .codex:
-            return [.stop, .slash("new"), .slash("resume"), .slash("model"),
+            return [.slash("new"), .slash("resume"), .slash("model"),
                     .slash("permissions"), .slash("review"),
                     .transcript, .mode]
         case .pi:
-            return [.stop, .slash("new"), .slash("resume"), .slash("compact"),
+            return [.slash("new"), .slash("resume"), .slash("compact"),
                     .slash("model"), .slash("tree"), .think, .tools]
         }
     }

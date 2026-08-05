@@ -1030,9 +1030,16 @@ extension TerminalView {
             return nil
         }
 
-        let lowerBound = max(0, min(selectionRange.location, cols))
-        let upperBound = max(lowerBound, min(cols, selectionRange.location + selectionRange.length))
-        if lowerBound == upperBound {
+        var lowerBound = max(0, min(selectionRange.location, cols))
+        var upperBound = max(lowerBound, min(cols, selectionRange.location + selectionRange.length))
+        // Multiplex patch: with a clamp rectangle the highlight, like the
+        // extraction, covers only the pane's column span — full-width
+        // middle rows would wash over neighbor panes.
+        if let clamp = selection.clampRect {
+            lowerBound = max(lowerBound, clamp.columns.lowerBound)
+            upperBound = min(upperBound, clamp.columns.upperBound + 1)
+        }
+        if lowerBound >= upperBound {
             return nil
         }
         return lowerBound..<upperBound
@@ -1293,9 +1300,27 @@ extension TerminalView {
         // is non-zero. This causes SwiftTerm to draw scrollback-buffer rows at viewport
         // positions, producing garbled output. contentOffset.y is always correct because
         // the scroll view is kept in sync with yDisp (contentOffset.y == yDisp * cellHeight).
+        //
+        // Multiplex patch: within that contentOffset-anchored viewport, a
+        // WELL-FORMED sub-viewport rect (the damaged-row strip
+        // `updateDisplay` now sends per output batch) narrows the row loop
+        // — one echoed keystroke repaints its row band, not the screen.
+        // Any rect that reaches outside the viewport or spans it keeps the
+        // full-screen redraw above, so the coalescing workaround's
+        // semantics are unchanged for every other caller.
         let cellHeight = cellDimension.height
-        let firstRow = Int(contentOffset.y / cellHeight)
-        let lastRow = firstRow + Int(ceil(bounds.height / cellHeight))
+        let viewportFirst = Int(contentOffset.y / cellHeight)
+        let viewportLast = viewportFirst + Int(ceil(bounds.height / cellHeight))
+        let narrowed = TerminalView.partialRedrawRows(
+            dirtyRect: dirtyRect,
+            viewport: CGRect(
+                x: 0, y: contentOffset.y,
+                width: bounds.width, height: bounds.height
+            ),
+            cellHeight: cellHeight
+        )
+        let firstRow = narrowed?.lowerBound ?? viewportFirst
+        let lastRow = narrowed.map { min($0.upperBound, viewportLast) } ?? viewportLast
         #else
         // On Mac, we are drawing the terminal buffer
         let cellHeight = cellDimension.height
@@ -1758,6 +1783,51 @@ extension TerminalView {
 #endif
     }
     
+    #if os(iOS) || os(visionOS)
+    /// Multiplex patch: the invalidation rect for damaged viewport rows
+    /// `[rowStart, rowEnd]` (0-based, viewport-relative), padded one row
+    /// each side and clamped to the visible bounds. A scrolled
+    /// UIScrollView's `bounds.minY` IS its content offset, so the strip
+    /// lands in the same coordinate space `draw(_:)` receives.
+    func damagedRowStrip (rowStart: Int, rowEnd: Int) -> CGRect {
+        let cellHeight = cellDimension.height
+        guard cellHeight > 0, rowEnd >= rowStart else { return bounds }
+        let strip = CGRect (
+            x: bounds.minX,
+            y: bounds.minY + CGFloat (rowStart - 1) * cellHeight,
+            width: bounds.width,
+            height: CGFloat (rowEnd - rowStart + 3) * cellHeight
+        ).intersection (bounds)
+        return strip.isNull ? bounds : strip
+    }
+    #endif
+
+    /// Multiplex patch (pure; locked by the app's tests): the absolute
+    /// buffer rows a well-formed sub-viewport dirty rect covers, or nil
+    /// when the rect is anomalous — outside the viewport, empty, or
+    /// spanning it — in which case the caller keeps the shipped
+    /// full-screen redraw (the workaround for UIKit's scroll-coalesced
+    /// rects, which can arrive anchored at y=0 while the view is scrolled).
+    /// The viewport's minY is the content offset; buffer row 0 sits at
+    /// content offset 0.
+    public static func partialRedrawRows (
+        dirtyRect: CGRect, viewport: CGRect, cellHeight: CGFloat
+    ) -> ClosedRange<Int>? {
+        guard cellHeight > 0, !dirtyRect.isNull, dirtyRect.height > 0 else { return nil }
+        let eps: CGFloat = 0.5
+        guard dirtyRect.minY >= viewport.minY - eps,
+              dirtyRect.maxY <= viewport.maxY + eps
+        else { return nil }
+        if dirtyRect.minY <= viewport.minY + eps, dirtyRect.maxY >= viewport.maxY - eps {
+            return nil
+        }
+        let base = Int (viewport.minY / cellHeight)
+        let first = base + Int (floor ((dirtyRect.minY - viewport.minY) / cellHeight))
+        let last = base + Int (ceil ((dirtyRect.maxY - viewport.minY) / cellHeight)) - 1
+        guard last >= first else { return nil }
+        return first...last
+    }
+
     /// Update visible area
     func updateDisplay (notifyAccessibility: Bool)
     {
@@ -1857,8 +1927,18 @@ extension TerminalView {
         setNeedsDisplay(region)
 #endif
         #else
-        // TODO iOS: need to update the code above, but will do that when I get some real
-        // life data being fed into it.
+        // Multiplex patch (per-keystroke redraw cost): invalidate only the
+        // damaged rows instead of the whole viewport. The CG path redraws
+        // every invalidated row with CoreText, so a one-row echo used to
+        // re-lay-out the entire screen on each keystroke — and under the
+        // GLASS appearance the compositor then re-blended that whole
+        // translucent surface over live glass, which is where Vision Pro
+        // typing lost its frames. The strip pads one row each side so
+        // glyphs overhanging their cell (descenders, tall marks) are
+        // repainted by the neighbor rows that own them, and
+        // `drawTerminalContents` narrows its row loop only for a
+        // well-formed sub-viewport rect — anomalous rects (UIKit's
+        // scroll-coalesced ones) keep the full-screen redraw.
         #if canImport(MetalKit)
         if metalView != nil {
             metalDirtyRange = metalVisibleRange()
@@ -1866,10 +1946,10 @@ extension TerminalView {
             lastRenderedCursor = (x: buffer.x, y: buffer.yBase + buffer.y, hidden: terminal.cursorHidden)
             requestMetalDisplay()
         } else {
-            setNeedsDisplay(bounds)
+            setNeedsDisplay(damagedRowStrip(rowStart: rowStart, rowEnd: rowEnd))
         }
         #else
-        setNeedsDisplay(bounds)
+        setNeedsDisplay(damagedRowStrip(rowStart: rowStart, rowEnd: rowEnd))
         #endif
         #endif
 
@@ -2217,6 +2297,16 @@ extension TerminalView {
         return lastUserInputUptimeNs
     }
 
+    /// Multiplex patch: the uptime instant of the most recent user-input send
+    /// (0 before any input), exposed so app chrome can defer non-urgent work —
+    /// gaze hover-region rebuilds, focused-pane agent probes — while
+    /// keystrokes are actively flowing. Every input road funnels through
+    /// `send(data:)`, so IME commits, the key rail, kitty-encoded hardware
+    /// keys, and dictation all stamp it.
+    public var lastUserInputUptimeNanoseconds: UInt64 {
+        loadLastUserInputUptimeNs()
+    }
+
     private func displayImmediately() {
         #if os(iOS) || os(visionOS)
         guard renderUpdatesEnabled else { return }
@@ -2393,12 +2483,41 @@ extension TerminalView {
    
     public func createImage (source: Terminal, data: Data, width widthRequest: ImageSizeRequest, height heightRequest: ImageSizeRequest, preserveAspectRatio: Bool)
     {
-        guard let img = TTImage(data: data) else {
+        // Multiplex patch: these bytes are remote terminal output (OSC 1337
+        // `File=`), and encoded size says nothing about decoded size — a few
+        // hundred kilobytes of valid PNG can decode to gigabytes of bitmap.
+        // Decode through a bounded downsample; the image is drawn into text
+        // cells either way.
+        guard let img = TerminalView.boundedImage (from: data) else {
             return
         }
         insertImage (img, width: widthRequest, height: heightRequest, preserveAspectRatio: preserveAspectRatio)
     }
     
+    /// Multiplex patch: the longest edge an inline image decodes to.
+    static let maxInlineImagePixelEdge = 4096
+
+    /// Multiplex patch: ImageIO decode with a pixel ceiling — see
+    /// `createImage(source:data:...)`.
+    static func boundedImage (from data: Data) -> TTImage? {
+        guard let source = CGImageSourceCreateWithData (data as CFData, nil),
+              CGImageSourceGetCount (source) > 0 else {
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxInlineImagePixelEdge,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex (
+            source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return TTImage (
+            cgImage: cgImage,
+            size: CGSize (width: cgImage.width, height: cgImage.height))
+    }
+
     // Inserts the specified image at the current buffer position (x, y) using the specified size requests
     // and aspect ratio request.   The insertion is done by adding slices of the image, one per line
     // to the buffer.

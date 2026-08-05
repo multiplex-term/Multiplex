@@ -26,6 +26,22 @@ final class TerminalLinkHoverOverlay: UIView {
 
     private weak var terminalView: TerminalView?
     private var refreshScheduled = false
+    /// What the current subviews were built from — a rebuild is view
+    /// churn plus a cross-process hover-effect re-registration per region,
+    /// so an unchanged screen must be a comparison, not a rebuild.
+    private var builtRegions: [BuiltRegion] = []
+    private var builtBounds: CGRect = .null
+
+    private struct BuiltRegion: Equatable {
+        let target: String
+        let rects: [CGRect]
+    }
+
+    /// Typing echoes retrigger the output debounce ~3×/s, and every fire
+    /// used to re-scan the screen and re-register every hover region while
+    /// the user wasn't looking for links at all. Regions can settle one
+    /// quiet gap after the last keystroke instead.
+    private static let typingQuietWindow: Duration = .seconds(1)
 
     init(terminalView: TerminalView) {
         self.terminalView = terminalView
@@ -43,19 +59,28 @@ final class TerminalLinkHoverOverlay: UIView {
     }
 
     /// Debounced: output arrives in bursts, and one rebuild per settled
-    /// screen is enough for an affordance.
+    /// screen is enough for an affordance. While keystrokes are actively
+    /// flowing the fire re-arms itself instead of rebuilding — the timer
+    /// keeps ticking, the regex scan and region churn wait for quiet.
     func scheduleRefresh() {
         guard !refreshScheduled else { return }
         refreshScheduled = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self else { return }
             refreshScheduled = false
+            if let terminalView,
+               terminalView.hasRecentUserInput(within: Self.typingQuietWindow) {
+                scheduleRefresh()
+                return
+            }
             refresh()
         }
     }
 
     func clearRegions() {
         subviews.forEach { $0.removeFromSuperview() }
+        builtRegions = []
+        builtBounds = .null
     }
 
     private func refresh() {
@@ -63,14 +88,21 @@ final class TerminalLinkHoverOverlay: UIView {
             clearRegions()
             return
         }
+        // Only what the app would confirm gets an affordance — paths and
+        // prose stay dark.
+        let regions = terminalView.visibleLinkRegions()
+            .filter { TerminalLink.resolve($0.target) != nil }
+            .map { BuiltRegion(target: $0.target, rects: $0.rects) }
+        if regions == builtRegions, terminalView.bounds == builtBounds {
+            return
+        }
         // Track the scroll view's bounds so region frames land in the same
         // space `calculateTapHit` reads.
         frame = terminalView.bounds
-        clearRegions()
-        for region in terminalView.visibleLinkRegions() {
-            // Only what the app would confirm gets an affordance — paths
-            // and prose stay dark.
-            guard TerminalLink.resolve(region.target) != nil else { continue }
+        subviews.forEach { $0.removeFromSuperview() }
+        builtRegions = regions
+        builtBounds = terminalView.bounds
+        for region in regions {
             for rect in region.rects {
                 let control = LinkHoverRegion(target: region.target)
                 control.frame = rect.insetBy(dx: -2, dy: -1)

@@ -279,7 +279,11 @@ struct BindChannel {
 
     mutating func sealC2S(_ plain: Data) -> Data {
         defer { seqC2S += 1 }
-        // Sealing with a well-formed nonce cannot fail.
+        // Neither call can fail: `nonce` builds exactly the 12 bytes
+        // `ChaChaPoly.Nonce` requires (4 zero + BE64 sequence), and sealing
+        // with a well-formed key and nonce has no failure mode. Surfacing an
+        // `Error` here would put an unreachable branch in every caller.
+        // swiftlint:disable:next force_try
         let box = try! ChaChaPoly.seal(plain, using: keyC2S, nonce: Self.nonce(seqC2S))
         return box.ciphertext + box.tag
     }

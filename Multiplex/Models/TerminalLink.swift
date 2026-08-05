@@ -9,11 +9,13 @@ import Foundation
 /// hyperlink's visible label is independent of its target. Two consequences
 /// shape this type:
 ///
-/// - **The allowlist is the gate.** Only schemes the system can open
-///   harmlessly resolve to `.openable`. Everything else is reported, not
-///   opened — including `multiplex:`, which `ExternalActionRouter` would
+/// - **The allowlist is the system-open gate.** Only schemes the system can
+///   open harmlessly resolve to `.openable`. Everything else is reported,
+///   not opened — including `multiplex:`, which `ExternalActionRouter` would
 ///   otherwise accept as a widget-grade command (`open?host=…&action=agent&
-///   prompt=…`), letting pane output launch an agent on another host.
+///   prompt=…`), letting pane output launch an agent on another host. The
+///   terminal coordinator intercepts a valid local-authority `file:` URI
+///   first and confirms its remote path into the file viewer instead.
 /// - **The target is what gets shown.** The confirmation surface renders
 ///   `raw` and `host` from this model, never the text the user tapped, so a
 ///   label that reads `docs.example.com` cannot hide a different destination.
@@ -54,9 +56,10 @@ struct TerminalLink: Equatable, Identifiable {
 extension TerminalLink {
     /// Schemes Multiplex hands to the system. Deliberately short: every
     /// addition is a new way for remote output to reach another app. `file:`
-    /// and `ssh:` are excluded because a link naming a *local* resource, from
-    /// a *remote* host, is meaningless at best; `tel:` because a tap that
-    /// starts dialling from a build log is not a trade worth making.
+    /// is excluded here because it names the *remote* host's resource (the
+    /// terminal's activation policy can hand a valid one to the in-app file
+    /// viewer); `ssh:` is never meaningful to open locally; `tel:` because a
+    /// tap that starts dialling from a build log is not a trade worth making.
     static let allowedSchemes: Set<String> = ["http", "https", "mailto"]
 
     /// Longer than any URL worth confirming, and a bound on what the sheet

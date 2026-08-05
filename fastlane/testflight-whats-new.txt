@@ -1,188 +1,27 @@
-CTRL QUICK COMBOS — press CTRL, get C / B
+NEW IN 1.3.0
+• HERDR BACKEND — Host Settings ▸ Backend switches a host between TMUX and HERDR (herdr 0.7.5+). One deck tile per herdr session, its workspaces on the spine, HRDR shortcut panel, FILE attach and drop, MENU for herdr's own pane menu, long-press a divider to resize a split, and Claude Code HISTORY + JUMP. Add Host ▸ BIND carries the same choice.
+• SELECT TEXT — long-press, double-tap, or secondary-click terminal text on either backend: SELECT / SELECT ALL / PASTE at the gesture, selection clamped to the pane you pressed, floating COPY / SELECT ALL / DONE beside it.
+• KEEP ALIVE IN BACKGROUND (iPhone/iPad) — Host Settings ▸ Monitoring, off by default. Leaving no longer drops that host straight away, and iOS can wake the app later to re-check it, so a turn that ends after you left can still notify you.
+• AGENT ALERTS — now fire for the session you walked away from, which used to be the one case that stayed silent. Notification permission is asked while the app is on screen instead of riding your first alert.
+• VISION PRO GLASS — Settings ▸ Appearance adds GLASS beside SYSTEM / LIGHT / DARK, applied live to deck, terminals, forms, and popovers. Typing under GLASS now repaints only the rows that changed.
+• TERMINAL TITLE BAR (iPad, Designed for iPad) — the system bar is replaced by the app's own slim rail, matching the key rail at the pane's other end; the window pill rides the top edge.
+• FILE VIEWER — its own tabs (long-press a file ▸ Open in New Tab), ◂ ▸ browse history, and DIFF stays selected as you move between changed files.
+• WINDOW TABS — drag to reorder, on every platform.
+• GUIDE — a terminal's ⋯ ▸ Guide, an illustrated field manual of that tab's gestures.
+• OPEN SOURCE LICENSES — Settings ▸ About, all 13 shipped components with full text.
+• FASTER TAPS — under mouse reporting each tap reaches the remote immediately, one click per tap, so a TUI's own double-click works.
+• The agent strip's STOP chip is gone; ESC on the key rail (or the Vision Pro key cluster) interrupts a turn.
+• Every surface was rewritten on UIKit, so anything that looks or behaves differently from 1.2 is worth reporting.
 
-Holding the rail's CTRL latch (or the visionOS cluster's) raises a C / B
-strip over the key: one tap sends Ctrl+C or Ctrl+B, no keyboard needed.
+PLEASE TRY
+1. Add your own host (key or password) — did the wall probe everything?
+2. Attach two sessions, place the windows apart, type in both. Merge one in as a tab, then move it back out; it must not reconnect.
+3. On a herdr host, switch the backend both ways, then attach, split, close a pane, and work through the HRDR panel.
+4. Long-press / double-tap / right-click terminal text on both backends, and copy something out of one pane of a split.
+5. Turn Keep alive in background on for one host, attach a Claude Code / Codex / Pi session, start a turn, and leave the app. Did the alert arrive, and roughly how long after?
+6. Vision Pro: switch to GLASS and type fast in a busy session, then compare with DARK.
 
-- CTRL then C at a shell prompt: the line aborts with ^C, latch releases.
-- Mash CTRL: the strip follows the latch every time, never sticks.
-- With agent chips on screen, the strip sits on top of them, tappable.
-
-IPHONE LOCKED RETURN — keep RET on the rail with the keyboard closed
-
-Locking the software keyboard on iPhone adds RET after the arrow keys.
-iPhone Air keeps RET, padlock, and TMUX together; narrower phones move
-TMUX to its top-right button while locked.
-
-- Hold the keyboard key on iPhone Air: RET appears, nothing clips.
-- Press RET: it sends Return while the keyboard stays locked shut.
-- Unlock: the previous rail returns, with no duplicate TMUX.
-
-LOCKED DICTATION — use the mic with the software keyboard closed
-
-The KEYBOARD LOCKED tip carries a mic, so a phone with no physical keyboard
-can still dictate while the keyboard is locked.
-
-- Tap the mic: LISTENING replaces the tip (see CONTINUOUS DICTATION below
-  for what it now types).
-- The mic latches immediately during the permission prompts; tapping it
-  again cancels the pending attempt.
-
-FILE VIEWER SELECTION — select and copy like a document
-
-Code files and git diffs are one selectable surface. Line numbers and diff
-gutters never come along: code copies as code, a diff as a real unified
-diff (+/- prefixes, @@ headers).
-
-- Drag a selection across several lines, Copy, paste: no line numbers.
-- Copy across a hunk header in DIFF: pastes as an applicable diff.
-- Rendered Markdown keeps its layout; the rail's SELECT chip swaps in raw
-  source for cross-line selection, DONE returns.
-- Scroll a big file while a change lands host-side: no jump to the top.
-
-The viewer also finds the right directory on mosh hosts — it asks over its
-own SSH connection instead of falling back to your home directory.
-
-- mosh host, pane in a git worktree, + TAB ▸ File Viewer: the tree roots at
-  that project, and pressed relative paths resolve inside it.
-
-KEYBOARD LOCK, FINDABLE — a named action in the ⋯ menu
-
-"Lock Keyboard Closed" / "Unlock Keyboard" is the first item in the
-terminal's ⋯ menu, and ⋯ is now present at every window width.
-
-- Full-screen iPad/iPhone: ⋯ sits beside DETACH and locks the keyboard.
-- While locked, terminal taps must not raise the keyboard; rail and
-  hardware keys keep typing.
-- Wide windows: ⋯ carries ONLY the lock — no duplicate A−/A+, + TAB, FILE,
-  MERGE, DETACH. Vision Pro has neither ⋯ nor the lock.
-
-PRESSED LINKS AND PATHS ARE EDITABLE — AND STOP EATING THE LINE ABOVE
-
-The link/path confirmation sheet shows its target in an editable field, and
-OPEN / ⌗ VIEWPORT / ▤ VIEW / COPY act on what the sheet shows. A wrapped
-sentence glued to a path ("…the file./etc/hosts") is trimmed to the path.
-
-- Long-press a path on a wrapped line: PATH reads /etc/hosts.
-- Edit the field: host line, REACH row, and title follow live; clearing it
-  hides the action chips.
-- Real paths are untouched: ./src/main.rs, ~/notes/todo.md, src/app.ts:42.
-
-CHIP TAILS IN LANDSCAPE — no smear under the bottom-rail buttons
-
-A phone in landscape printed a tail of chip fill through the home-indicator
-strip under every bottom-rail button.
-
-- iPhone landscape, + TAB ▸ File Viewer: each rail button is a clean square
-  with rail ground below it. Same for a ⌗ viewport rail, light and dark.
-- Portrait, and chips elsewhere (deck rail, UMD, sheets), look as before.
-
-FILE VIEWER DRAWER SHADOW IN LIGHT — the tree reads as a lifted panel
-
-In the light appearance the tree drawer's drop shadow was a heavy black
-smudge over the near-white screen. It is now a cooler, weaker cast plus a
-tight edge shadow, so the drawer separates without muddying the ground.
-
-- Light appearance, narrow window (iPhone, or a narrow iPad window),
-  + TAB ▸ File Viewer: the open drawer sits above the content screen with
-  a soft cool shadow, not a grey wash.
-- Slide it open and closed: the shadow follows the animation cleanly.
-- Dark appearance: unchanged.
-
-SINGLE-COLUMN DECK CENTERS — tiles stop hugging the left edge
-
-When the deck is narrow enough to show one tile per row, the column now sits
-in the middle of the window instead of against the left edge. Two or more
-columns are unchanged.
-
-- Narrow the deck window (visionOS) or watch a lone host connect: the tiles
-  and the + NEW SESSION tile are centered under the host rail.
-- Widen it back until two tiles fit per row: the grid returns to the left,
-  tiles lined up across hosts exactly as before.
-- A single ACQUIRING SIGNAL / NO SIGNAL / DISABLED tile centers at any width.
-
-CONTINUOUS DICTATION — words land while you are still talking
-
-Dictation used to hold everything back and type it in one go at the end. It
-now types each word once the recognizer stops second-guessing it, keeps
-going through pauses (and through the recognizer's own internal restarts),
-and punctuates like the system keyboard. The bar beside LISTENING is no
-longer the transcript — it is only the few words heard but not typed yet.
-
-- Attach a session, open a composer (an agent prompt, or just a shell
-  prompt), press the mic (rail key with a keyboard attached, or the mic in
-  the KEYBOARD LOCKED tip) and talk for a while without stopping: text
-  appears in the composer as you speak, a word or two behind your voice.
-- Pause mid-dictation: the last words land within about a second, then keep
-  talking — the same dictation continues, with a space at the join. Do this
-  several times in one take; it must keep hearing you after every pause.
-- Talk for two or three minutes straight: it must not stop on its own or
-  start a second copy of anything.
-- Nothing is ever submitted: no Return, at any point, including at the end.
-- STOP types the last queued words; CANCEL drops them. Neither can undo
-  what is already in the composer — a terminal has no take-backs, which is
-  why the app holds each word until it is settled.
-- Read back what landed: no duplicated word at a pause, no word typed twice
-  when the recognizer corrects itself mid-sentence.
-- Plug in AirPods (or take a call) mid-dictation: what was heard stays
-  typed, and the take either continues or ends cleanly — no crash, no
-  half-word.
-
-SETTINGS RESPONDS INSTANTLY — no third-of-a-second freeze per tap
-
-Every tap in Settings — picking a terminal theme, switching SYSTEM/LIGHT/
-DARK, flipping a switch — blocked the app for about a third of a second on
-iPhone. The App lock section was asking the system which authenticator the
-device has (Face ID / Touch ID / passcode) three times on every redraw, and
-each ask is a slow round trip. It is now asked once per launch.
-
-- Open Settings and tap down the built-in theme list quickly: each row
-  becomes ACTIVE the instant you touch it, and the list scrolls smoothly
-  while you do it. No pause between the tap and the ACTIVE badge moving.
-- Tap SYSTEM / LIGHT / DARK back and forth: the chrome flips immediately.
-- The App lock row still names your device's real method ("Require Face
-  ID" on a Face ID phone, "Require device passcode" without biometry), and
-  the lock itself still prompts correctly when you turn it on.
-
-PATHS WITH SPACES OPEN — and prose stops riding along
-
-Long-pressing a path that contains spaces (/Users/me/My Documents/x.txt,
-~/My Folder/notes.md) now raises the file-viewer sheet instead of doing
-nothing. Rooted paths followed by a sentence ("/etc/hosts is missing") shed
-the prose and open the path alone; when the opened spelling differs from
-the field, the sheet says OPENS with the exact path.
-
-- Print a spaced path (ls a directory with spaces), long-press it: the
-  sheet shows the full path, ▤ VIEW opens it.
-- Long-press /etc/hosts inside "error: /etc/hosts is missing": PATH reads
-  /etc/hosts, no prose.
-- "see src/foo.ts and lib/bar.rs" still falls through to text selection —
-  bare relative paths never absorb spaces.
-
-BARE URLS ARE LINKS — example.com/docs stops opening as a file
-
-A URL printed without its scheme (example.com/docs, docs.rs/serde,
-www.example.com, 192.168.1.5:3000/app) now raises the link sheet — OPEN,
-⌗ VIEWPORT, the host line — instead of the file-viewer sheet or nothing.
-LAN and loopback addresses open as http (dev servers), everything else as
-https.
-
-- echo example.com/anything, long-press it: link sheet, HOST example.com,
-  OPEN goes to https.
-- A LAN dev server address (192.168.x.x:3000/app) offers the viewport and
-  opens as http.
-- setup.md in a rendered markdown doc still navigates inside the file
-  viewer; src/foo.ts still confirms as a file, not a link.
-
-WRAPPED PROSE STOPS GLUING TO PATHS — and<newline>local-plan/x opens local-plan/x
-
-A hard-wrapped line ending in a plain word above a path used to press as one
-glued target (andlocal-plan/…). The press now cuts at the wrap seam when the
-text butting it is a word with no slash or dot, so the path below opens as
-itself. Genuinely wrapped long paths and URLs still join.
-
-- cat a doc whose line ends exactly at the pane edge with a word, path on
-  the next line: long-press the path — the sheet shows the path alone.
-- A long absolute path wrapped mid-segment still presses as the full path.
-- A schemeless URL below wrapped prose raises the link sheet, not a glued
-  file path.
-- PAYWALL ERRORS SAY WHY: if a Pro purchase or restore fails, the paywall now names the actual App Store problem (no network, storefront availability, purchases not allowed) instead of "An unknown error occurred". If you can, try the paywall in Airplane Mode and confirm the message tells you to check the connection.
+KNOWN
+• Background wake timing is entirely iOS's call — minutes or tens of minutes — and nothing arrives at all if Background App Refresh is off for Multiplex.
+• If iOS terminated the app rather than suspending it, the first background check after relaunch can only establish a baseline; the one after that can alert.
+Feedback: screenshot in TestFlight, or iainst0409@gmail.com

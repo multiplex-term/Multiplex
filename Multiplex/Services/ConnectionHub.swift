@@ -127,11 +127,14 @@ final class ConnectionHub {
             if let model, model.hasLiveProbe {
                 snapshot = DeckSnapshot(
                     sessions: model.tmux.sessions,
-                    miniatures: model.miniatures
+                    miniatures: model.miniatures,
+                    sessionBackend: host.sessionBackend
                 )
                 widgetProbeDates[host.id] = Date()
             } else {
-                snapshot = snapshots.snapshot(for: host.id)
+                let cached = snapshots.snapshot(for: host.id)
+                snapshot = cached?.sessionBackend == host.sessionBackend
+                    ? cached : nil
             }
             return WidgetStateBuilder.hostState(
                 host: host,
@@ -168,6 +171,9 @@ final class HostConnectionModel {
     /// badge count should not subscribe to the full pane/process tree.
     private(set) var hasLiveProbe = false
     private(set) var sessionCount = 0
+    /// herdr is installed on this host (the tmux probe checks presence
+    /// every tick). Read only by the dead-tmux tile's switch hint.
+    private(set) var herdrPresent = false
     /// Session name → last visible lines of its active pane; the deck
     /// wall's live miniatures, refreshed by every probe (the probe's single
     /// exec carries the capture tails).
@@ -220,6 +226,25 @@ final class HostConnectionModel {
     /// Deeper, unclipped capture tails (the miniatures' source parse) —
     /// what the question detector reads.
     @ObservationIgnored private var attentionTails: [String: [String]] = [:]
+    /// herdr mode: the two sets the NEXT probe bakes into its command —
+    /// the running sessions to snapshot and the pane each one fronts for
+    /// its miniature read. A shell can't join JSON, so the app bakes last
+    /// tick's answer into this tick's command (one tick of lag, inside
+    /// the wall's staleness budget).
+    /// nil is the cold-tick sentinel; [] means a parsed list proved no
+    /// session is running. Conflating those states would probe a stopped
+    /// default session forever.
+    @ObservationIgnored private var herdrSessionNames: [String]?
+    @ObservationIgnored private var herdrTailTargets: [HerdrProbe.TailTarget] = []
+    /// herdr mode: session name → pane id → lifecycle status from the
+    /// last snapshots, EVERY pane included (pane ids collide across
+    /// sessions, so a pane is never keyed without its session) — the
+    /// attention authority. Never persisted; NEEDS YOU is re-earned live.
+    @ObservationIgnored private var herdrPaneStatuses: [String: [String: HerdrProbe.AgentStatus]] = [:]
+    /// The immediately preceding status table, retained only long enough to
+    /// attribute an aggregate busy → idle edge to the front pane without
+    /// borrowing its agent name when a background pane actually finished.
+    @ObservationIgnored private var previousHerdrPaneStatuses: [String: [String: HerdrProbe.AgentStatus]] = [:]
     /// Last keychain check answer + when it landed. `.notMacOS` is
     /// structural and never re-asked on this connection; other verdicts
     /// refresh after `keychainVerdictTTL` while the symptom persists.
@@ -240,7 +265,9 @@ final class HostConnectionModel {
     /// untouched: the rail's STANDBY → LINKING → CONNECTED stays the truth
     /// about liveness while the tiles show last-known content.
     func restore(from snapshot: DeckSnapshot) {
-        guard case .unknown = tmux else { return }
+        guard snapshot.sessionBackend == host.sessionBackend,
+              case .unknown = tmux
+        else { return }
         tmux = .sessions(snapshot.sessions)
         miniatures = snapshot.miniatures
         sessionCount = snapshot.sessions.count
@@ -278,10 +305,10 @@ final class HostConnectionModel {
         await task?.value
     }
 
-    /// Fast path for the terminal that currently owns keyboard focus. One
-    /// tiny list-panes exec identifies the pane receiving keystrokes. Direct
-    /// signals resolve most agents immediately; only a changed/expired
-    /// ambiguous pane runs a second query scoped to that pane's TTY.
+    /// Fast path for the terminal that currently owns keyboard focus. Tmux
+    /// uses one tiny list-panes exec, then a TTY-scoped process query only for
+    /// a changed/expired ambiguous pane. Herdr's `pane current` returns its
+    /// globally focused pane and canonical agent id directly.
     ///
     /// nil means the lightweight check itself was unavailable. A nonnil,
     /// non-definitive result still carries the new fingerprint so the UI can
@@ -295,6 +322,20 @@ final class HostConnectionModel {
 
         activePaneProbeInFlight = true
         defer { activePaneProbeInFlight = false }
+
+        if host.sessionBackend == .herdr {
+            // `pane current` carries no protocol field. Require a supported
+            // full probe first; that pass owns the version gate and proves
+            // the backend is serving sessions before the one-second path.
+            guard HerdrProbe.bakeableSessionName(sessionName),
+                  case .sessions = tmux,
+                  let output = try? await deadlined(seconds: 3, {
+                      try await connection.exec(
+                          HerdrProbe.activePaneCommand(sessionName: sessionName))
+                  })
+            else { return nil }
+            return HerdrProbe.parseActiveAgent(output)
+        }
 
         guard let output = try? await deadlined(seconds: 3, {
             try await connection.exec(TmuxProbe.activePaneCommand(sessionName: sessionName))
@@ -405,25 +446,65 @@ final class HostConnectionModel {
             // makes the wall shake; the next parse/failure overwrites it.
             if case .unknown = tmux { tmux = .probing }
             let execStart = ContinuousClock.now
-            let output = try await deadlined { try await connection.exec(TmuxProbe.probeCommand) }
-            let execEnd = ContinuousClock.now
-            guard refreshGeneration == generation, !Task.isCancelled else { return }
-            let parsed = await Task.detached(priority: .userInitiated) {
-                TmuxProbe.parseProbe(output)
-            }.value
+            let parsed: TmuxProbe.ParsedProbe
+            let execEnd: ContinuousClock.Instant
+            let outputBytes: Int
+            switch host.sessionBackend {
+            case .tmux:
+                let output = try await deadlined {
+                    try await connection.exec(TmuxProbe.probeCommand)
+                }
+                execEnd = ContinuousClock.now
+                outputBytes = output.utf8.count
+                guard refreshGeneration == generation, !Task.isCancelled else { return }
+                parsed = await Task.detached(priority: .userInitiated) {
+                    TmuxProbe.parseProbe(output)
+                }.value
+            case .herdr:
+                let command = HerdrProbe.probeCommand(
+                    sessionNames: herdrSessionNames,
+                    tailTargets: herdrTailTargets
+                )
+                let output = try await deadlined { try await connection.exec(command) }
+                execEnd = ContinuousClock.now
+                outputBytes = output.utf8.count
+                guard refreshGeneration == generation, !Task.isCancelled else { return }
+                let herdrParsed = await Task.detached(priority: .userInitiated) {
+                    HerdrProbe.parseProbe(output)
+                }.value
+                // Parsing runs off-actor; a backend switch or suspension can
+                // invalidate this generation while it is in flight. Do not
+                // let that stale pass prime the next herdr command or its
+                // attention-edge baseline.
+                guard refreshGeneration == generation, !Task.isCancelled else { return }
+                herdrSessionNames = herdrParsed.sessionNames
+                herdrTailTargets = herdrParsed.tailTargets
+                previousHerdrPaneStatuses = herdrPaneStatuses
+                herdrPaneStatuses = herdrParsed.paneStatuses
+                parsed = TmuxProbe.ParsedProbe(
+                    state: herdrParsed.state.tmuxState,
+                    tails: herdrParsed.tails,
+                    miniatures: herdrParsed.miniatures
+                )
+            }
             let parseEnd = ContinuousClock.now
             guard refreshGeneration == generation, !Task.isCancelled else { return }
 
             if tmux != parsed.state { tmux = parsed.state }
             if attentionTails != parsed.tails { attentionTails = parsed.tails }
             if miniatures != parsed.miniatures { miniatures = parsed.miniatures }
+            if herdrPresent != parsed.herdrPresent { herdrPresent = parsed.herdrPresent }
             if !hasLiveProbe { hasLiveProbe = true }
             let nextSessionCount = parsed.state.sessions.count
             if sessionCount != nextSessionCount { sessionCount = nextSessionCount }
             switch parsed.state {
             case .sessions(let sessions):
                 seedActiveAgentCache(from: sessions)
-                onSnapshot?(DeckSnapshot(sessions: sessions, miniatures: miniatures))
+                onSnapshot?(DeckSnapshot(
+                    sessions: sessions,
+                    miniatures: miniatures,
+                    sessionBackend: host.sessionBackend
+                ))
             case .noServer, .tmuxMissing:
                 // A settled "nothing there" clears the cache — ghost tiles
                 // at the next launch would outlive the sessions they show.
@@ -435,7 +516,7 @@ final class HostConnectionModel {
                 \(self.host.name, privacy: .public) probe: exec \
                 \(Self.ms(execStart, execEnd), privacy: .public)ms, parse \
                 \(Self.ms(execEnd, parseEnd), privacy: .public)ms, \
-                \(output.utf8.count, privacy: .public)B
+                \(outputBytes, privacy: .public)B
                 """)
             lastRefreshed = Date()
             evaluateAttention()
@@ -542,7 +623,7 @@ final class HostConnectionModel {
         } else {
             let loaded = await HostSecrets.loadOffMain(for: host)
             if let expectedGeneration,
-               (expectedGeneration != refreshGeneration || Task.isCancelled) {
+               expectedGeneration != refreshGeneration || Task.isCancelled {
                 throw CancellationError()
             }
             cachedSecrets = loaded
@@ -550,7 +631,7 @@ final class HostConnectionModel {
             secrets = loaded
         }
         if let expectedGeneration,
-           (expectedGeneration != refreshGeneration || Task.isCancelled) {
+           expectedGeneration != refreshGeneration || Task.isCancelled {
             throw CancellationError()
         }
         let fresh = SSHConnection(host: host, secrets: secrets)
@@ -562,7 +643,7 @@ final class HostConnectionModel {
             throw error
         }
         if let expectedGeneration,
-           (expectedGeneration != refreshGeneration || Task.isCancelled) {
+           expectedGeneration != refreshGeneration || Task.isCancelled {
             await fresh.close()
             throw CancellationError()
         }
@@ -601,12 +682,14 @@ final class HostConnectionModel {
         return try await withCheckedThrowingContinuation { continuation in
             let gate = DeadlineGate(continuation)
             let work = Task {
-                do { gate.finish(.success(try await operation()), winner: .work) }
-                catch { gate.finish(.failure(error), winner: .work) }
+                do {
+                    gate.finish(.success(try await operation()), winner: .work)
+                } catch {
+                    gate.finish(.failure(error), winner: .work)
+                }
             }
             let timer = Task {
-                do { try await Task.sleep(for: .seconds(seconds)) }
-                catch { return }
+                do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
                 gate.finish(.failure(ProbeTimeoutError()), winner: .timer)
             }
             gate.install(work: work, timer: timer)
@@ -618,51 +701,121 @@ final class HostConnectionModel {
     /// probe pass — title and tail inputs arrive together.
     private func evaluateAttention() {
         guard case .sessions(let sessions) = tmux else {
+            // Stop *claiming* attention we can no longer see — NEEDS YOU is
+            // re-earned live, never asserted from a dead probe.
             if !attention.isEmpty { attention = [:] }
-            attentionTracker.reset()
+            // But keep the edge baseline. A lost connection is not evidence
+            // that an agent's state changed, and the baseline is the only
+            // record of what it was: reset here, the reconnect's first pass
+            // has nothing to compare against and emits nothing. That is
+            // precisely the suspend → socket dies → wake → reconnect path,
+            // so clearing it made "the agent finished while you were away"
+            // unannounceable — the case background keep-alive and the
+            // background refresh both exist to serve. A session that really
+            // is gone is dropped by `prune` on the next successful pass.
             return
         }
         var next: [String: PaneAgentState] = [:]
         for session in sessions {
-            let window = session.activeWindow
-            let activeAgent = window?.activeAgent
-            let activeTitle = window?.activePane?.title ?? window?.paneTitle ?? ""
-            // No detected agent, or an agent without verified attention
-            // signals, means no state (bells are still tracked below).
-            let state = AgentAttention.classifyVerified(
-                title: activeTitle,
-                tail: attentionTails[session.name] ?? [],
-                agent: activeAgent
-            )
-            if let state {
+            let verdict = sessionAttentionVerdict(for: session)
+            if let state = verdict.state {
                 next[session.name] = state
             }
             let events = attentionTracker.update(
                 session: session.name,
-                state: state,
-                hasBell: session.windows.contains(where: \.hasBell)
+                state: verdict.state,
+                hasBell: verdict.hasBell
             )
             // One banner per session per tick — the most actionable edge
             // wins (they share a notification slot, and delivery order
             // across independent posts isn't guaranteed).
             if let event = events.max(by: { $0.priority < $1.priority }) {
                 var dialogSummary: String?
-                if case .needsInput(let kind) = event {
+                if verdict.offersDialogSummary, case .needsInput(let kind) = event {
                     dialogSummary = AgentAttention.dialogSummary(
                         in: attentionTails[session.name] ?? [], kind: kind)
                 }
                 onAttentionAlert?(AttentionAlert(
                     host: host,
                     sessionName: session.name,
-                    agent: activeAgent,
+                    agent: verdict.agent,
                     event: event,
-                    paneTitle: activeTitle,
+                    paneTitle: verdict.paneTitle,
                     dialogSummary: dialogSummary
                 ))
             }
         }
         attentionTracker.prune(keeping: Set(sessions.map(\.name)))
         if attention != next { attention = next }
+    }
+
+    private struct AttentionVerdict {
+        var state: PaneAgentState?
+        var agent: AgentKind?
+        var paneTitle: String
+        var hasBell: Bool
+        var offersDialogSummary: Bool
+    }
+
+    /// The ONE per-backend step of `evaluateAttention` — everything
+    /// downstream (tracker edges, one-banner-per-tick selection, pruning)
+    /// is shared so alert policy can't drift by backend. tmux classifies
+    /// the fronted pane's title + capture through the needle heuristics.
+    /// herdr's reported lifecycle statuses are authoritative instead —
+    /// which is what makes Pi's alerts real there — and fold across EVERY
+    /// pane in the session, background tabs included: a blocked agent the
+    /// session isn't fronting still needs you. herdr offers no dialog
+    /// summary (0.7.5 surfaces the blocked message nowhere readable,
+    /// verified 2026-08-01) and no bells; its derived `done` arrives as
+    /// the busy → idle edge, exactly the turn-ended shape.
+    private func sessionAttentionVerdict(for session: TmuxSession) -> AttentionVerdict {
+        switch host.sessionBackend {
+        case .tmux:
+            let window = session.activeWindow
+            let agent = window?.activeAgent
+            let title = window?.activePane?.title ?? window?.paneTitle ?? ""
+            return AttentionVerdict(
+                // No detected agent, or an agent without verified attention
+                // signals, means no state (bells are still tracked).
+                state: AgentAttention.classifyVerified(
+                    title: title,
+                    tail: attentionTails[session.name] ?? [],
+                    agent: agent
+                ),
+                agent: agent,
+                paneTitle: title,
+                hasBell: session.windows.contains(where: \.hasBell),
+                offersDialogSummary: true
+            )
+        case .herdr:
+            let statuses = herdrPaneStatuses[session.name] ?? [:]
+            let state = HerdrProbe.sessionAgentState(statuses.values)
+            // Alert metadata speaks for the fronted pane only when its own
+            // status produced the session's verdict — a blocked background
+            // tab must not borrow the front pane's agent name.
+            let pane = session.activeWindow?.activePane
+            let frontStatus = pane.flatMap { statuses[$0.tmuxID] }
+            let previousFrontStatus = pane.flatMap {
+                previousHerdrPaneStatuses[session.name]?[$0.tmuxID]
+            }
+            // Busy/blocked are winning states, so a matching front pane
+            // participated in the verdict. Idle is different: a background
+            // pane may have produced the aggregate busy → idle edge while
+            // the front pane merely stayed idle. Herdr's explicit `done`, or
+            // this pane's own observed working → idle edge, proves it did.
+            let front = HerdrProbe.paneProducedSessionState(
+                state,
+                current: frontStatus,
+                previous: previousFrontStatus
+            ) ? pane : nil
+            return AttentionVerdict(
+                state: state,
+                agent: front?.agent,
+                paneTitle: front?.title ?? "",
+                hasBell: false,
+                offersDialogSummary: false
+            )
+        }
     }
 
     /// Re-derive the wall's KEYCHAIN LOCKED tip after a settled probe.
@@ -763,15 +916,28 @@ final class HostConnectionModel {
     /// `TmuxProbe.newSessionCommand`). Unlike the fail-soft probe helpers
     /// this connects on demand — it's a user-initiated action — and returns
     /// nil on failure.
+    /// Returns the attach mode for the created session — the one value every
+    /// caller actually wants, and what preserves the selected backend in the
+    /// terminal route before the next probe has seen the new session.
     func createSession(
         base: String, inDirectoryOf sourceSession: String?,
         startingIn directory: String? = nil, applying tmuxConf: String? = nil,
         running script: String? = nil, typing launch: String?
-    ) async -> String? {
+    ) async -> TerminalRoute.Mode? {
         resetConnectRetryBackoff()
         let reusedLink = connection != nil && phase == .connected
         do {
             let connection = try await ensureConnection()
+            if host.sessionBackend == .herdr {
+                // The tmux conf rider applies to the tmux path only; the
+                // two directory riders resolve inside the herdr mint (the
+                // session server inherits the spawn's cwd).
+                return await createHerdrSession(
+                    base: base, inDirectoryOf: sourceSession,
+                    startingIn: directory, running: script, typing: launch,
+                    over: connection
+                )
+            }
             let command = TmuxProbe.newSessionCommand(
                 name: TmuxProbe.uniqueSessionName(
                     base: base, existing: tmux.sessions.map(\.name)),
@@ -786,11 +952,247 @@ final class HostConnectionModel {
             // The wall and every open window should see the session now,
             // not on their next tick.
             refresh()
-            return name
+            return name.map { .attach(sessionName: $0) }
         } catch {
             markFailed(error, registerConnectFailure: !reusedLink)
             return nil
         }
+    }
+
+    /// The herdr mint: a session is created by attaching to it, so the
+    /// mint IS the attach route — but the client needs a PTY, and setup
+    /// typing needs the fresh session's pane id. `spawnSessionCommand`
+    /// bridges: it brings the session's server up headlessly and prints
+    /// its snapshot, so create-and-type completes over the control
+    /// connection BEFORE the terminal window dials in — the script lands
+    /// first, the tmux mint's own ordering. If the spawn can't confirm a
+    /// pane (a future herdr may die before daemonizing), the route still
+    /// attaches — the PTY client creates the session — and a short poll
+    /// types the setup lines once a pane exists (that fallback spawns at
+    /// the PTY's login $HOME: the directory riders are best-effort). A
+    /// live list is read first and the requested name is uniqued against
+    /// it: typing must only ever aim at a session this mint brought into
+    /// being.
+    ///
+    /// The directory riders are the tmux mint's, one exec louder: a
+    /// source session's focused-pane cwd is asked from the snapshot the
+    /// drop path already reads (tmux gets it server-side in the create),
+    /// and an explicit directory is consulted only without a source —
+    /// `newSessionCommand`'s own precedence. Either rides the spawn as a
+    /// guarded cd; every miss is $HOME, never a failed mint.
+    private func createHerdrSession(
+        base: String, inDirectoryOf sourceSession: String?,
+        startingIn directory: String?, running script: String?,
+        typing launch: String?, over connection: SSHConnection
+    ) async -> TerminalRoute.Mode? {
+        let lines = [script, launch].compactMap { $0 }
+        // The probe's tile list can be a tick stale. Read the live list and
+        // distinguish a valid empty result from garbage: setup text may only
+        // target a name whose absence this mint actually proved. Re-unique
+        // against that live answer rather than silently attaching a session
+        // another device created after the last wall tick.
+        let listOutput = try? await deadlined {
+            try await connection.exec(HerdrProbe.sessionListCommand)
+        }
+        guard let listOutput,
+              let existing = HerdrProbe.parseSessionNames(listOutput)
+        else { return nil }
+        let name = HerdrProbe.uniqueSessionName(base: base, existing: existing)
+        var startDirectory: String?
+        if let sourceSession {
+            let snapshot = try? await deadlined {
+                try await connection.exec(
+                    HerdrProbe.snapshotCommand(sessionName: sourceSession))
+            }
+            startDirectory = snapshot.flatMap(
+                HerdrProbe.parseFocusedPaneWorkingDirectory)
+        } else {
+            startDirectory = directory
+        }
+        let spawn = try? await deadlined {
+            try await connection.exec(HerdrProbe.spawnSessionCommand(
+                sessionName: name, directory: startDirectory))
+        }
+        if !lines.isEmpty {
+            if let pane = spawn.flatMap(HerdrProbe.parseFocusedPane),
+               let typing = HerdrProbe.typeCommand(
+                sessionName: name, paneID: pane, lines: lines) {
+                _ = try? await deadlined { try await connection.exec(typing) }
+            } else {
+                schedulePendingHerdrTyping(session: name, lines: lines)
+            }
+        }
+        refresh()
+        return .herdrAttach(sessionName: name)
+    }
+
+    /// Create a tab in `session`'s focused workspace, typing the same
+    /// setup `script` a freshly minted session gets — the `+ TAB` menu's
+    /// herdr-only New Tab in Workspace entry. The already-attached client
+    /// renders it, so nothing here mints a route; the entries that DO mint
+    /// one (New Session and the agents, the menu's leading rows on every
+    /// backend) go through `createSession`, which is also the agent road —
+    /// this row types no launch (external `in=tab` launches keep
+    /// `launchInHerdrSession`).
+    ///
+    /// The backend is the caller's, read off the tab's own route rather
+    /// than `host.sessionBackend` (same rule as `killSession(named:
+    /// backend:)`): an open herdr tab keeps meaning herdr after Host
+    /// Settings switches the deck's backend, and these are herdr commands
+    /// either way. Connects on demand like `createSession`, and returns
+    /// false when the create answered with no pane — a stopped session,
+    /// or a herdr too old for `tab create`.
+    ///
+    /// Unlike `launchInHerdrSession` this does NOT spawn first: an external
+    /// launch names a session it may have to revive, while a press means
+    /// "another tab in what I'm looking at". A session that isn't running
+    /// fails the create, and the window says so — reviving it headlessly
+    /// would put the new tab somewhere nobody is attached.
+    func createHerdrTab(
+        inSession session: String, running script: String?
+    ) async -> Bool {
+        guard HerdrProbe.bakeableSessionName(session) else { return false }
+        resetConnectRetryBackoff()
+        let reusedLink = connection != nil && phase == .connected
+        do {
+            let connection = try await ensureConnection()
+            let created = try await deadlined {
+                try await connection.exec(HerdrProbe.createTabCommand(
+                    sessionName: session, label: nil, directory: nil))
+            }
+            guard let pane = HerdrProbe.parseCreatedPane(created) else { return false }
+            if let typing = HerdrProbe.typeCommand(
+                sessionName: session,
+                paneID: pane,
+                lines: [script].compactMap { $0 }
+            ) {
+                _ = try? await deadlined { try await connection.exec(typing) }
+            }
+            // The wall's miniature and pane counts moved with the press.
+            refresh()
+            return true
+        } catch {
+            markFailed(error, registerConnectFailure: !reusedLink)
+            return false
+        }
+    }
+
+    /// Setup lines waiting for a pane: the PTY attach is creating the
+    /// session, so poll its snapshot over the control connection and type
+    /// once. Bounded — a session that never comes up types nothing, and
+    /// the window's own failure is the visible story. The user can beat
+    /// this to the fresh prompt; the tmux path's stdin-reading-script
+    /// footgun already documents that shape.
+    private func schedulePendingHerdrTyping(session: String, lines: [String]) {
+        Task { [weak self] in
+            for attempt in 1...8 {
+                try? await Task.sleep(for: .milliseconds(attempt == 1 ? 1500 : 1200))
+                guard let self, self.phase == .connected, let connection = self.connection
+                else { return }
+                guard let output = try? await self.deadlined({
+                    try await connection.exec(
+                        HerdrProbe.snapshotCommand(sessionName: session))
+                }), let pane = HerdrProbe.parseFocusedPane(output)
+                else { continue }
+                if let typing = HerdrProbe.typeCommand(
+                    sessionName: session, paneID: pane, lines: lines) {
+                    _ = try? await self.deadlined { try await connection.exec(typing) }
+                }
+                return
+            }
+        }
+    }
+
+    /// Launch inside an EXISTING session — the external action's session
+    /// target. tmux: one exec opens a new window in the session and types
+    /// `script` then `launch` into its fresh pane. herdr: make sure the
+    /// session's server is up (attach auto-restarts a stopped one — the
+    /// tile list keeps stopped sessions pressable, and this path honors
+    /// that), create a new tab in the focused workspace or a new workspace
+    /// per `placement`, then type into the pane the create envelope named.
+    /// `label` names the herdr tab/workspace (tmux windows name themselves
+    /// from the running command); nil leaves herdr's own tab numbering —
+    /// the deck's shell-only tab creates; `directory` carries the Working Directory
+    /// semantics — callers pass the explicit choice or the host's first
+    /// configured dir, exactly like the fresh-session mint, so the one
+    /// field means the same thing wherever the agent lands. Only a host
+    /// with nothing configured reaches nil, which falls to the session's
+    /// own world (tmux: the active-pane cwd; herdr: the server default).
+    /// Returns the session's attach mode (the fresh pane is now what the
+    /// session fronts); nil on failure — never a fallback mint, which
+    /// would hide the failure behind a surprise second session.
+    func launchInSession(
+        named sessionName: String,
+        placement: ExternalSessionPlacement,
+        directory: String?,
+        label: String?,
+        running script: String? = nil,
+        typing launch: String?
+    ) async -> TerminalRoute.Mode? {
+        resetConnectRetryBackoff()
+        let reusedLink = connection != nil && phase == .connected
+        do {
+            let connection = try await ensureConnection()
+            if host.sessionBackend == .herdr {
+                return await launchInHerdrSession(
+                    named: sessionName, placement: placement,
+                    directory: directory, label: label,
+                    running: script, typing: launch,
+                    over: connection)
+            }
+            let command = TmuxProbe.newWindowCommand(
+                sessionName: sessionName,
+                startDirectory: directory,
+                script: script,
+                launch: launch
+            )
+            guard TmuxProbe.parseNewWindow(
+                try await deadlined { try await connection.exec(command) }
+            ) != nil else { return nil }
+            refresh()
+            return .attach(sessionName: sessionName)
+        } catch {
+            markFailed(error, registerConnectFailure: !reusedLink)
+            return nil
+        }
+    }
+
+    /// The herdr side of `launchInSession`. The spawn is the liveness step,
+    /// not a mint: `session attach` no-ops on a running server and revives
+    /// a stopped one, and the create verbs need the socket answering. The
+    /// typed lines aim at the pane id the CREATE itself returned, so —
+    /// unlike the mint, whose attach auto-creates — there is no stale-name
+    /// window where typing could land in somebody else's shell.
+    private func launchInHerdrSession(
+        named sessionName: String, placement: ExternalSessionPlacement,
+        directory: String?, label: String?,
+        running script: String?, typing launch: String?,
+        over connection: SSHConnection
+    ) async -> TerminalRoute.Mode? {
+        // The name arrived from a URL/Shortcut value. Callers match it
+        // against the probe list first, but only a name herdr itself could
+        // list may ever be spliced into a shell line.
+        guard HerdrProbe.bakeableSessionName(sessionName) else { return nil }
+        _ = try? await deadlined {
+            try await connection.exec(
+                HerdrProbe.spawnSessionCommand(sessionName: sessionName))
+        }
+        let create = placement == .workspace
+            ? HerdrProbe.createWorkspaceCommand(
+                sessionName: sessionName, label: label ?? "", directory: directory)
+            : HerdrProbe.createTabCommand(
+                sessionName: sessionName, label: label, directory: directory)
+        guard let output = try? await deadlined({
+            try await connection.exec(create)
+        }), let pane = HerdrProbe.parseCreatedPane(output)
+        else { return nil }
+        let lines = [script, launch].compactMap { $0 }
+        if let typing = HerdrProbe.typeCommand(
+            sessionName: sessionName, paneID: pane, lines: lines) {
+            _ = try? await deadlined { try await connection.exec(typing) }
+        }
+        refresh()
+        return .herdrAttach(sessionName: sessionName)
     }
 
     /// Kill a tmux session on the host over the control connection, then
@@ -801,7 +1203,7 @@ final class HostConnectionModel {
     func killSession(_ session: TmuxSession) async {
         resetConnectRetryBackoff()
         guard phase == .connected, let connection else { return }
-        await kill(session, over: connection)
+        await kill(session, backend: host.sessionBackend, over: connection)
     }
 
     /// Kill a session by name — the terminal window's CLOSE SESSION action.
@@ -810,17 +1212,22 @@ final class HostConnectionModel {
     /// same policy as `createSession`). The latest probe supplies the
     /// session's tmux id when it has one; otherwise `killCommand` falls back
     /// to an `=name` exact match.
-    func killSession(named name: String) async {
+    func killSession(named name: String, backend: Host.SessionBackend) async {
         resetConnectRetryBackoff()
         let reusedLink = connection != nil && phase == .connected
         do {
             let connection = try await ensureConnection()
             var session = TmuxSession(name: name, windows: [], created: .distantPast)
-            if case .sessions(let list) = tmux,
+            // The model's probe records only belong to its configured
+            // backend. An older open tab may intentionally belong to the
+            // other backend after Host Settings changes, so never borrow a
+            // same-named record across that boundary.
+            if backend == host.sessionBackend,
+               case .sessions(let list) = tmux,
                let match = list.first(where: { $0.name == name }) {
                 session = match
             }
-            await kill(session, over: connection)
+            await kill(session, backend: backend, over: connection)
         } catch {
             markFailed(error, registerConnectFailure: !reusedLink)
         }
@@ -889,8 +1296,25 @@ final class HostConnectionModel {
         refresh()
     }
 
-    private func kill(_ session: TmuxSession, over connection: SSHConnection) async {
-        _ = try? await deadlined { try await connection.exec(TmuxProbe.killCommand(for: session)) }
+    private func kill(
+        _ session: TmuxSession, backend: Host.SessionBackend,
+        over connection: SSHConnection
+    ) async {
+        let command: String?
+        switch backend {
+        case .tmux:
+            command = TmuxProbe.killCommand(for: session)
+        case .herdr:
+            // Stop the session's server (everything in it dies —
+            // kill-session's analog), then delete its state dir. herdr
+            // itself refuses deleting the default session; that tile just
+            // parks as stopped. Session names are herdr's own unique
+            // identity, so the name is the target.
+            command = HerdrProbe.closeSessionCommand(for: session)
+        }
+        if let command {
+            _ = try? await deadlined { try await connection.exec(command) }
+        }
         if case .sessions(let list) = tmux {
             let remaining = list.filter { $0.id != session.id }
             tmux = .sessions(remaining)
@@ -922,6 +1346,11 @@ final class HostConnectionModel {
         attentionTails = [:]
         attention = [:]
         attentionTracker.reset()
+        herdrSessionNames = nil
+        herdrTailTargets = []
+        herdrPaneStatuses = [:]
+        previousHerdrPaneStatuses = [:]
+        herdrPresent = false
         keychainNotice = nil
         keychainVerdict = nil
     }

@@ -70,6 +70,7 @@ enum BindCBOR {
         case unsupported(UInt8)
         case invalidText
         case nonTextMapKey
+        case nestingTooDeep
     }
 
     // MARK: Encode
@@ -187,7 +188,19 @@ enum BindCBOR {
             return Int(length)
         }
 
+        /// The protocol's own payloads nest two or three deep; anything
+        /// past this is a peer spending our stack. Bytes bound the element
+        /// counts, but not how deeply one-element containers can nest.
+        static let maxNestingDepth = 16
+
         mutating func readValue() throws -> Value {
+            try readValue(depth: 0)
+        }
+
+        mutating func readValue(depth: Int) throws -> Value {
+            guard depth <= Reader.maxNestingDepth else {
+                throw DecodeError.nestingTooDeep
+            }
             let initial = try readByte()
             let major = initial >> 5
             let additional = initial & 0x1F
@@ -205,17 +218,17 @@ enum BindCBOR {
                 let count = try readCount(additional: additional)
                 var items: [Value] = []
                 items.reserveCapacity(count)
-                for _ in 0..<count { items.append(try readValue()) }
+                for _ in 0..<count { items.append(try readValue(depth: depth + 1)) }
                 return .array(items)
             case 5:
                 let count = try readCount(additional: additional)
                 var entries: [(key: String, value: Value)] = []
                 entries.reserveCapacity(count)
                 for _ in 0..<count {
-                    guard case .text(let key) = try readValue() else {
+                    guard case .text(let key) = try readValue(depth: depth + 1) else {
                         throw DecodeError.nonTextMapKey
                     }
-                    entries.append((key, try readValue()))
+                    entries.append((key, try readValue(depth: depth + 1)))
                 }
                 return .map(entries)
             case 7 where additional == 20:

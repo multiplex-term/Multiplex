@@ -127,8 +127,14 @@ final class BindController {
         didSet {
             // A closed pane forgets its passphrase: the field is bind-flow
             // state, not something to find pre-filled next week. In-flight
-            // binds already snapshotted their copy at confirm time.
-            if !bindSurfaceOpen { keyPassphrase = "" }
+            // binds already snapshotted their copy at confirm time. The
+            // backend choice resets with it for the same reason — a pane
+            // opened next week must state what it is about to do, never
+            // carry a silent choice from a session nobody remembers.
+            if !bindSurfaceOpen {
+                keyPassphrase = ""
+                sessionBackend = .tmux
+            }
         }
     }
     /// The pane's optional KEY PASSPHRASE — ssh-keygen's passphrase ask,
@@ -143,6 +149,13 @@ final class BindController {
     /// the Host Settings Passphrase field (synced Keychain, visible and
     /// clearable there), so connecting keeps working without a re-ask.
     var keyPassphrase = ""
+    /// Which multiplexer the machines bound from this pane run their sessions
+    /// on. Bind proves who the machine is; it says nothing about what runs on
+    /// it, and `mpx bind` doesn't report a backend — so this is the person's
+    /// choice, made where the host record is minted rather than found wrong on
+    /// the deck afterwards. Never auto-switched (`Host.sessionBackend`'s rule),
+    /// and changeable later in Host Settings → Backend.
+    var sessionBackend: Host.SessionBackend = .tmux
 
     private let discovery = BindDiscovery()
 
@@ -320,17 +333,24 @@ final class BindController {
     }
 
     private func performBind(_ candidate: Pending) async {
-        // Snapshot the pane's passphrase now: the pane may close (and clear
-        // the field) while this bind is still talking to the machine.
+        // Snapshot the pane's passphrase and backend now: the pane may close
+        // (and reset both) while this bind is still talking to the machine.
         let passphrase = keyPassphrase
+        let backend = sessionBackend
         if case .payload(let payload) = candidate.source, payload.isOffline {
-            await importOffline(payload, id: candidate.id, keyPassphrase: passphrase)
+            await importOffline(
+                payload, id: candidate.id, keyPassphrase: passphrase, backend: backend
+            )
         } else {
-            await handshake(for: candidate, keyPassphrase: passphrase)
+            await handshake(for: candidate, keyPassphrase: passphrase, backend: backend)
         }
     }
 
-    private func handshake(for candidate: Pending, keyPassphrase: String) async {
+    private func handshake(
+        for candidate: Pending,
+        keyPassphrase: String,
+        backend: Host.SessionBackend
+    ) async {
         let id = candidate.id
         let raw = Curve25519.Signing.PrivateKey()
         let key = BindSSHKey.make(from: raw)
@@ -388,7 +408,8 @@ final class BindController {
                 privateKey: storedPrivateKey,
                 pins: completion.offer.hostkeys,
                 rotation: nil,
-                savedPassphrase: keyPassphrase.isEmpty ? nil : keyPassphrase
+                savedPassphrase: keyPassphrase.isEmpty ? nil : keyPassphrase,
+                backend: backend
             )
         } catch {
             fail(id: id, (error as? LocalizedError)?.errorDescription
@@ -414,7 +435,10 @@ final class BindController {
     /// rotated: swapping it for a device-generated plaintext key would
     /// trade the person's own protection away.
     private func importOffline(
-        _ payload: BindPayload, id: String, keyPassphrase: String
+        _ payload: BindPayload,
+        id: String,
+        keyPassphrase: String,
+        backend: Host.SessionBackend
     ) async {
         guard let offline = payload.offline,
               let raw = try? Curve25519.Signing.PrivateKey(rawRepresentation: offline.seed)
@@ -452,7 +476,8 @@ final class BindController {
             privateKey: privateKey,
             pins: offline.pinnedHostKey.map { [$0] } ?? [],
             rotation: rotation,
-            savedPassphrase: savedPassphrase
+            savedPassphrase: savedPassphrase,
+            backend: backend
         )
     }
 
@@ -465,7 +490,8 @@ final class BindController {
         privateKey: String,
         pins: [String],
         rotation: BindRotationStore.Request?,
-        savedPassphrase: String?
+        savedPassphrase: String?,
+        backend: Host.SessionBackend
     ) async {
         guard let store else { return }
         var host = Host(
@@ -476,6 +502,9 @@ final class BindController {
         host.port = Int(port)
         host.authMethod = .privateKey
         host.pinnedHostKeys = pins
+        // Set before the test connect below: `HostTest` looks for the host's
+        // own multiplexer on the exec PATH.
+        host.sessionBackend = backend
         KeychainStore.set(privateKey, for: host.id, kind: .privateKey)
         store.add(host)
         if let savedPassphrase {
@@ -618,6 +647,8 @@ final class BindController {
     ///                                             machine with that PIN
     ///   MULTIPLEX_BIND_PASSPHRASE=<text>          preset the pane's KEY
     ///                                             PASSPHRASE for that bind
+    ///   MULTIPLEX_BIND_BACKEND=tmux|herdr         preset the pane's backend
+    ///                                             choice for that bind
     /// plus notification `…debug.bind` to open discovery on demand.
     private static var autoBindFired = false
 
@@ -648,6 +679,11 @@ final class BindController {
         if let passphrase = environment["MULTIPLEX_BIND_PASSPHRASE"], !passphrase.isEmpty {
             keyPassphrase = passphrase
             log.debug("bind automation: pane passphrase preset")
+        }
+        if let raw = environment["MULTIPLEX_BIND_BACKEND"],
+           let backend = Host.SessionBackend(rawValue: raw) {
+            sessionBackend = backend
+            log.debug("bind automation: backend preset to \(raw, privacy: .public)")
         }
         // Let the store finish its first load (and any seeded host land).
         try? await Task.sleep(for: .seconds(2))

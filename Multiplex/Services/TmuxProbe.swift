@@ -1,5 +1,43 @@
 import Foundation
 
+/// One pane's rectangle in the attached client's screen cells, both ends
+/// inclusive — the select-text mode's clamp for local selection. tmux
+/// answers it from `list-panes -F` geometry; herdr from its snapshot's
+/// layout rects (border-inset by the viewport oracle). Screen-relative on
+/// purpose: the pane is fixed on screen while the buffer may scroll.
+struct PaneScreenRect: Equatable, Sendable {
+    var columns: ClosedRange<Int>
+    var rows: ClosedRange<Int>
+
+    func contains(col: Int, row: Int) -> Bool {
+        columns.contains(col) && rows.contains(row)
+    }
+
+    /// The dominant screen direction from one pane to another (rect-center
+    /// comparison) — herdr's only focus verb is directional, so this is
+    /// how a two-pane layout's "other" pane gets focused.
+    static func direction(from: PaneScreenRect, to: PaneScreenRect) -> String? {
+        let dx = (to.columns.lowerBound + to.columns.upperBound)
+            - (from.columns.lowerBound + from.columns.upperBound)
+        let dy = (to.rows.lowerBound + to.rows.upperBound)
+            - (from.rows.lowerBound + from.rows.upperBound)
+        if dx == 0 && dy == 0 { return nil }
+        if abs(dx) >= abs(dy) {
+            return dx > 0 ? "right" : "left"
+        }
+        return dy > 0 ? "down" : "up"
+    }
+}
+
+/// One visible pane's identity + rectangle + focus flag, both backends'
+/// geometry answers normalized: what the select-text mode picks its clamp
+/// (and its focus switch) from.
+struct PaneScreenRectEntry: Equatable, Sendable {
+    var id: String
+    var rect: PaneScreenRect
+    var isFocused: Bool
+}
+
 /// Builds and parses the `tmux` commands used to discover remote sessions.
 /// Pure functions — exercised directly by unit tests.
 ///
@@ -33,8 +71,7 @@ enum TmuxProbe {
     /// locations (Homebrew, /usr/local) are appended before any command.
     /// Shared with the mosh bootstrap, which has the same problem for
     /// mosh-server (and for the tmux it wraps).
-    static let pathPrefix =
-        "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin\"; export PATH; "
+    static let pathPrefix = RemoteCommandEnvironment.pathPrefix
 
     /// Every tmux invocation the app makes over an exec channel. An SSH *exec*
     /// channel inherits no locale — `LANG` and `LC_ALL` are both empty — so
@@ -59,9 +96,17 @@ enum TmuxProbe {
     /// opens, login-shell spawns, and round-trips.
     static let probeCommand: String = {
         let sessionFormat = "S #{session_id} #{session_attached} #{session_created} #{session_name}"
-        let windowFormat = "W #{session_id} #{window_index} #{window_active} #{window_bell_flag} #{window_activity_flag} #{window_name}"
+        let windowFormat = "W #{session_id} #{window_index} #{window_active} "
+            + "#{window_bell_flag} #{window_activity_flag} #{window_name}"
         let paneLineFormat = paneFormat(tag: "P")
         return pathPrefix
+            // One extra `command -v` per tick so a dead-tmux tile can offer
+            // the herdr switch only when herdr is actually installed
+            // (`Host.SessionBackend` — the hint is one tap, never an
+            // auto-flip). Before the tmux guard on purpose: the guard exits.
+            + "{ command -v herdr >/dev/null 2>&1"
+            + " || [ -x \"$HOME/.cargo/bin/herdr\" ]; }"
+            + " && echo \(herdrPresentMarker); "
             + "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
             // The server's own hostname — the exact string tmux seeded every
             // untouched pane title with (see `PaneTitleDisplay`). Its own
@@ -94,18 +139,36 @@ enum TmuxProbe {
         var state: TmuxState
         var tails: [String: [String]]
         var miniatures: [String: [String]]
+        /// herdr is installed on this host — the dead-tmux tile's switch
+        /// hint. Presence only; nothing reads it while tmux is healthy.
+        var herdrPresent: Bool = false
     }
 
+    private static let herdrPresentMarker = "MULTIPLEX_HERDR_PRESENT"
+
     static func parseProbe(_ output: String) -> ParsedProbe {
+        // The presence marker prints before the tmux guard, so it can only
+        // live in the record region — scan up to the tails marker, never
+        // the capture section (the bulk of every response, re-walked each
+        // 5 s tick otherwise).
+        let head = tailsMarker(in: output).map { output[..<$0.lowerBound] }
+            ?? Substring(output)
+        let herdrPresent = head.hasPrefix(herdrPresentMarker + "\n")
+            || head.contains("\n" + herdrPresentMarker + "\n")
+            || head.hasSuffix("\n" + herdrPresentMarker)
         let state = parse(output)
         guard case .sessions(let sessions) = state else {
-            return ParsedProbe(state: state, tails: [:], miniatures: [:])
+            return ParsedProbe(
+                state: state, tails: [:], miniatures: [:],
+                herdrPresent: herdrPresent
+            )
         }
         let tails = parseTails(output, sessions: sessions)
         return ParsedProbe(
             state: state,
             tails: tails,
-            miniatures: tails.mapValues(miniatureTail)
+            miniatures: tails.mapValues(miniatureTail),
+            herdrPresent: herdrPresent
         )
     }
 
@@ -275,6 +338,46 @@ enum TmuxProbe {
         return nil
     }
 
+    /// Every visible pane's screen rectangle — what the select-text mode
+    /// picks its clamp (pressed pane first, focused pane otherwise) from.
+    /// Current window only (that is what the attached client shows);
+    /// `list-panes -F`, never `display-message` (3.6a renders `pane_*`
+    /// empty for outside clients). tmux pane geometry is content cells in
+    /// the client's coordinate space — no border inset needed.
+    static func paneRectsCommand(sessionName: String) -> String {
+        pathPrefix
+            + "\(tmuxCommand) list-panes -t \("=\(sessionName)".shellQuoted) "
+            + "-F 'MPXRECT #{pane_id} #{pane_active} #{pane_left} #{pane_top} "
+            + "#{pane_width} #{pane_height}' 2>/dev/null"
+    }
+
+    static func parsePaneRects(_ output: String) -> [PaneScreenRectEntry] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: " ").map(String.init)
+            guard fields.count == 7, fields[0] == "MPXRECT",
+                  fields[1].hasPrefix("%"),
+                  let left = Int(fields[3]), let top = Int(fields[4]),
+                  let width = Int(fields[5]), let height = Int(fields[6]),
+                  left >= 0, top >= 0, width > 0, height > 0
+            else { return nil }
+            return PaneScreenRectEntry(
+                id: fields[1],
+                rect: PaneScreenRect(
+                    columns: left...(left + width - 1),
+                    rows: top...(top + height - 1)
+                ),
+                isFocused: fields[2] == "1"
+            )
+        }
+    }
+
+    /// Focus one pane by id — what a click would have done had the
+    /// select-text mode not kept the tap local. `%id` pane targets are
+    /// exact on 3.6a (only `=name` pane targets misbehave).
+    static func focusPaneCommand(paneID: String) -> String {
+        pathPrefix + "\(tmuxCommand) select-pane -t \(paneID.shellQuoted) 2>/dev/null"
+    }
+
     /// Process rows for one pane TTY. This is separate from the one-second
     /// pane query and runs only on a pane/foreground-command change or short
     /// cache expiry, not every tick.
@@ -413,9 +516,26 @@ enum TmuxProbe {
             + "p=$(\(tmuxCommand) list-panes -t \("=\(sessionName)".shellQuoted)"
             + " -F '#{?pane_active,#{pane_current_path},}' 2>/dev/null | grep -m1 .); "
             + "printf '%s\\n' \"$p\"; "
-            + "if [ -n \"$p\" ] && command -v git >/dev/null 2>&1"
-            + " && [ \"$(git -C \"$p\" rev-parse --is-inside-work-tree 2>/dev/null)\" = true ]; "
+            + "if [ -n \"$p\" ] && \(gitWorktreeCondition(target: "\"$p\"")); "
             + "then echo \(gitWorktreeMarker); fi"
+    }
+
+    /// The corral decision when the pane's cwd was already resolved
+    /// app-side — the herdr drop path, whose cwd comes home in snapshot
+    /// JSON instead of staying in a shell variable. Prints the same
+    /// MULTIPLEX_GIT marker so `parseDropDestination` stays the wire
+    /// format's one parser (its cwd line simply isn't there to find).
+    static func gitWorktreeCheckCommand(directory: String) -> String {
+        pathPrefix
+            + "if \(gitWorktreeCondition(target: directory.shellQuoted)); "
+            + "then echo \(gitWorktreeMarker); fi"
+    }
+
+    /// One spelling of "that directory sits inside a git worktree" for
+    /// both builders above; `target` arrives already shell-quoted.
+    private static func gitWorktreeCondition(target: String) -> String {
+        "command -v git >/dev/null 2>&1"
+            + " && [ \"$(git -C \(target) rev-parse --is-inside-work-tree 2>/dev/null)\" = true ]"
     }
 
     private static let gitWorktreeMarker = "MULTIPLEX_GIT"
@@ -536,6 +656,55 @@ enum TmuxProbe {
         return nil
     }
 
+    /// Open a new window in an EXISTING session over the control connection
+    /// — the external action's "launch inside this session" placement (a
+    /// window is tmux's one granularity below a session, so herdr's
+    /// tab/workspace split both land here). Same discipline as
+    /// `newSessionCommand`: `-c` comes from the explicit directory (falling
+    /// back to $HOME when it doesn't exist) or from the target session's own
+    /// active-pane cwd; `-P` prints the fresh pane id and script/launch
+    /// lines are typed at that id (3.6a rejects `=name` for *pane* targets).
+    /// No `-d`: the window becomes the session's current window, so clients
+    /// already attached — and the attach this triggers — front the agent.
+    /// The session's server already exists, so the systemd-scope runner and
+    /// the tmux-conf riders deliberately don't apply here. Always exits 0
+    /// (Citadel throws on nonzero); failure reads as "no sentinel".
+    static func newWindowCommand(
+        sessionName: String, startDirectory: String? = nil,
+        script: String? = nil, launch: String?
+    ) -> String {
+        var command = pathPrefix
+        let target = "=\(sessionName)".shellQuoted
+        if let directory = startDirectory {
+            command += "d=\(directory.shellQuotedDirectory); [ -d \"$d\" ] || d=\"$HOME\"; "
+        } else {
+            command += "p=$(\(tmuxCommand) list-panes -t \(target)"
+                + " -F '#{?pane_active,#{pane_current_path},}' 2>/dev/null | grep -m1 .); "
+                + "d=\"${p:-$HOME}\"; "
+        }
+        command += "i=$(\(tmuxCommand) new-window -t \(target)"
+            + " -P -F '#{pane_id}' -c \"$d\" 2>/dev/null); "
+        var onSuccess = ""
+        for typed in [script, launch].compactMap({ $0 }) {
+            onSuccess += "\(tmuxCommand) send-keys -t \"$i\" -l -- \(typed.shellQuoted); "
+                + "\(tmuxCommand) send-keys -t \"$i\" Enter; "
+        }
+        onSuccess += "printf 'MULTIPLEX_NEWWIN %s\\n' \"$i\""
+        command += "[ -n \"$i\" ] && { \(onSuccess); }; true"
+        return command
+    }
+
+    /// The pane id minted by `newWindowCommand`, or nil when the window
+    /// wasn't created (session gone, tmux gone, control link noise).
+    static func parseNewWindow(_ output: String) -> String? {
+        let sentinel = "MULTIPLEX_NEWWIN "
+        for line in output.split(separator: "\n") where line.hasPrefix(sentinel) {
+            let pane = String(line.dropFirst(sentinel.count))
+            if !pane.isEmpty { return pane }
+        }
+        return nil
+    }
+
     /// One parsed new-session conf line, applied as
     /// `set-option -t <session id> -- name [value]`. A nil value is a
     /// deliberate emission: tmux toggles boolean options given no value.
@@ -553,8 +722,7 @@ enum TmuxProbe {
         let normalizedLineEndings = conf
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
-        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") {
-            result, scalar in
+        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") { result, scalar in
             let allowedControl = scalar.value == 0x09 || scalar.value == 0x0A
             if allowedControl || !CharacterSet.controlCharacters.contains(scalar) {
                 result.append(Character(scalar))
@@ -709,7 +877,9 @@ enum TmuxProbe {
         lines.suffix(miniatureLines).map { String($0.prefix(miniatureWidth)) }
     }
 
-    private static func visibleTail(_ lines: [String]) -> [String] {
+    /// Internal, not private: `HerdrProbe` trims its pane reads with the
+    /// same rules, so what counts as a blank tail row is decided once.
+    static func visibleTail(_ lines: [String]) -> [String] {
         var trimmed = lines.map(rightTrim)
         while let last = trimmed.last, last.isEmpty { trimmed.removeLast() }
         return trimmed

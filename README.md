@@ -1,7 +1,8 @@
 # Multiplex
 
-A spatial SSH terminal for people who live inside remote tmux sessions.
-**visionOS first, iPadOS alongside.** Every tmux session gets its own window
+A spatial SSH terminal for people who live inside remote tmux sessions —
+with [herdr](https://herdr.dev) available as a per-host session backend.
+**visionOS first, iPadOS alongside.** Every session gets its own window
 you can place around the room; the deck is a fleet-wide **monitor wall** that
 shows every session live — its actual last lines, window spine, and a tally
 lamp when it's attached — before you ever attach.
@@ -38,16 +39,24 @@ bake-off is recorded in [docs/landing/](docs/landing/).*
   in its fresh shell before starting Claude Code, Codex, or Pi with an
   optional first prompt. The Open Agent Shortcut offers the same directory,
   setup-script, and prompt choices. **Shell** opens a plain login
-  shell, no tmux.
+  shell, no multiplexer.
+- **herdr mode** — set a host's BACKEND to HERDR and the same wall shows one
+  tile per herdr session, with its workspaces as the window spine. Live
+  miniatures and agent RUNNING / NEEDS YOU state come from herdr's own
+  protocol; a tile attaches the full client, stopped sessions restart on
+  press, and New Session can type the selected setup script and agent launch
+  before the window attaches. Requires herdr 0.7.5+ (protocol 17). tmux-only
+  controls, file upload, and Claude HISTORY stay hidden on herdr tabs.
 - **Terminal windows & tabs** — each terminal is its own SwiftUI scene
   (`WindowGroup(for: TerminalWindowRoute.self)` + `openWindow`): independent
   placement on visionOS, real multiple scenes on iPadOS (Stage Manager /
   split screen). A window holds one or more sessions as **tabs**: **Merge**
   pulls another window's sessions in as tabs (the emptied window closes
-  itself), and a tab's context menu moves it back out into its own window.
-  Moving a tab never drops the shell — the live SSH connection, buffer, and
-  scrollback travel with it. Tabs render as multiviewer source labels (square
-  cells, a tally dot per tab) on a top ornament (visionOS) / top bar (iPad),
+  itself). Drag a tab onto another to reorder the window; its context menu
+  moves it back out into its own window. Moving a tab never drops the shell —
+  the live SSH connection, buffer, and scrollback travel with it. Tabs render
+  as multiviewer source labels (square cells, a tally dot per tab) on a top
+  ornament (visionOS) / top bar (iPad),
   shown only when a window holds more than one tab; below the window sits the
   **UMD** — the under-monitor display carrying the source label, status lamp,
   and controls. A custom TALLY dropdown in the UMD on visionOS and the bottom
@@ -62,13 +71,21 @@ bake-off is recorded in [docs/landing/](docs/landing/).*
   together below; narrower locked phones move TMUX above. Shortcuts send
   their default `Ctrl-B` bindings through the same ordered input path as the
   keyboard. Copy mode becomes a clear contextual
-  state: swipe through remote history, hold text for native selection/copy,
-  then press **Done** to return to the shell. On SSH-backed tmux tabs,
+  state: swipe through remote history, hold or double-tap text for native
+  selection/copy, then press **Done** to return to the shell. Outside Copy
+  Mode, long-press or touch double-tap for pane-clamped **Select Text** on
+  tmux or herdr. On SSH-backed tmux tabs,
   **FILE** attaches from Photos or Files (plus Camera on iPad), uploads into
   the active pane's working directory, and types the remote path without
-  submitting; dropping a file on the terminal uses the same path. SwiftTerm
-  renders xterm-256color, sends taps and pointer clicks to mouse-aware TUIs as
-  primary-button events, and reports window resizing to the remote PTY.
+  submitting; dropping a file on the terminal uses the same path. Long-press a
+  host path — including a percent-encoded `file:///…` URI — to confirm its
+  decoded remote path, then open it read-only in a **File Viewer** tab with
+  source, rendered Markdown, images, and git diffs; + TAB opens the same viewer
+  for browsing. Long-press a file in its tree to open it in another viewer tab;
+  while reviewing diffs, choosing another changed file keeps DIFF selected.
+  SwiftTerm renders xterm-256color, sends taps and pointer clicks
+  to mouse-aware TUIs as primary-button events, and reports window resizing to
+  the remote PTY.
   **Detach** closes the active tab's channel — tmux keeps the session; the wall
   still shows it.
 - **Agent helpers** — when the active tmux pane **or a plain SSH shell** runs
@@ -95,12 +112,14 @@ bake-off is recorded in [docs/landing/](docs/landing/).*
   re-summons a dismissed keyboard. The system keyboard preserves the user's
   selected language and multistage IMEs; a shell that (re)connects claims
   focus. Keystrokes flow through a single ordered AsyncStream per shell.
-- **Terminal themes** — Settings (chip on the wall) picks the terminal color
-  scheme: seven built-ins (Tally — the default, Multiplex amber, Gruvbox
-  Dark, Dracula, Nord, Solarized Dark/Light) plus user-created themes with a
-  full background / text / cursor / 16-ANSI editor. Applies to every open
-  terminal live; themes recolor the terminal surface only — the wall and
-  window chrome keep the Tally chassis.
+- **Appearance + terminal themes** — Settings switches the whole chassis
+  between System, Light, and Dark; Vision Pro also offers Glass, a smoked
+  spatial material that keeps the TALLY hierarchy while letting the room
+  through. The terminal scheme is independent: seven built-ins (Tally — the
+  default, Multiplex amber, Gruvbox Dark, Dracula, Nord, Solarized Dark/Light)
+  plus user-created themes with a full background / text / cursor / 16-ANSI
+  editor. Changes apply to every open window live; Glass shares Dark's
+  terminal-theme selection.
 
 ## Architecture
 
@@ -113,7 +132,8 @@ SwiftUI (Deck window + N Terminal windows, each an ordered set of tabs)
    ├── ThemeStore           terminal color schemes: built-ins + custom
    │                        (themes.json), selection in UserDefaults
    ├── ConnectionHub        one HostConnectionModel per host (probe connection)
-   │      └── TmuxProbe     list-sessions/-windows format strings + parser
+   │      ├── TmuxProbe     list-sessions/-windows format strings + parser
+   │      └── HerdrProbe    session snapshots + pane lifecycle adapter
    ├── TerminalWorkspace    tab controllers keyed by tab id + window directory;
    │                        merge/split move tabs across windows, shells stay live
    └── TerminalSessionController   one per tab
@@ -163,7 +183,7 @@ xcodebuild -project Multiplex.xcodeproj -scheme Multiplex \
 ```
 
 The `Multiplex` scheme also builds for iPad (`platform=iOS Simulator,name=iPad
-Pro 13-inch (M5)`). Unit tests cover the tmux probe parser and route commands:
+Pro 13-inch (M5)`). Unit tests cover both backend probes and route commands:
 
 ```sh
 xcodebuild -project Multiplex.xcodeproj -scheme MultiplexTests \
@@ -179,6 +199,7 @@ never touching `~/.ssh`) and seeds demo tmux sessions:
 ```sh
 ./Tools/dev-sshd/harness.sh start   # keys + sshd + writes state/seed.json
 ./Tools/dev-sshd/harness.sh demo    # tmux sessions: main, scratch, deploy
+./Tools/dev-sshd/harness.sh herdr   # herdr sessions + deterministic agent states
 ./Tools/dev-sshd/harness.sh stop
 ```
 

@@ -39,9 +39,10 @@ struct TmuxPaneFingerprint: Hashable {
     var command: String
 }
 
-/// Result of the terminal window's lightweight focused-pane check.
-/// `isDefinitive == false` means direct signals were inconclusive and the
-/// scoped process query failed; callers retain a result only while the pane
+/// Result of the terminal window's lightweight focused-pane check. Tmux may
+/// return `isDefinitive == false` when direct signals were inconclusive and
+/// the scoped process query failed; herdr's canonical agent field is always
+/// definitive. Callers retain an inconclusive result only while the pane
 /// fingerprint itself remains unchanged.
 struct ActivePaneAgentDetection: Equatable {
     var fingerprint: TmuxPaneFingerprint
@@ -65,7 +66,7 @@ struct TmuxWindow: Identifiable, Hashable, Codable {
     /// All panes from a live probe. Optional only so device-local snapshots
     /// written before multi-pane detection continue to decode; new probes
     /// always populate it.
-    var panes: [TmuxPane]? = nil
+    var panes: [TmuxPane]?
 
     var id: Int { index }
 
@@ -265,6 +266,25 @@ enum SessionOrdering {
 struct DeckSnapshot: Codable, Equatable {
     var sessions: [TmuxSession]
     var miniatures: [String: [String]]
+    /// The namespace these adapted session records came from. A host can
+    /// switch between tmux and herdr while this device is offline; tagging
+    /// the presentation cache prevents a cold launch from painting the old
+    /// backend's same-named sessions under the new one.
+    var sessionBackend: Host.SessionBackend = .tmux
+}
+
+extension DeckSnapshot {
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            sessions: try container.decode([TmuxSession].self, forKey: .sessions),
+            miniatures: try container.decode(
+                [String: [String]].self, forKey: .miniatures),
+            // Every snapshot written before herdr support is a tmux snapshot.
+            sessionBackend: try container.decodeIfPresent(
+                Host.SessionBackend.self, forKey: .sessionBackend) ?? .tmux
+        )
+    }
 }
 
 /// What a host's tmux server currently looks like.

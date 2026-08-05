@@ -37,7 +37,8 @@ final class TerminalThemeTests: XCTestCase {
     }
 
     func testCorruptColorFailsDecoding() {
-        let json = Data(##"{"id":"custom-x","name":"Bad","background":"nope","foreground":"#FFFFFF","cursor":"#FFFFFF","ansi":[]}"##.utf8)
+        let json = Data((##"{"id":"custom-x","name":"Bad","background":"nope","##
+            + ##""foreground":"#FFFFFF","cursor":"#FFFFFF","ansi":[]}"##).utf8)
         XCTAssertThrowsError(try JSONDecoder().decode(TerminalTheme.self, from: json))
     }
 

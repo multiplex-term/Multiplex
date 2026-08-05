@@ -19,6 +19,29 @@ struct HostWidgetConfigurationIntent: WidgetConfigurationIntent {
     @Parameter(title: "Agent", default: .claudeCode)
     var agent: AgentChoice
 
+    /// The AGENT key launches inside this existing session; unset/empty
+    /// mints a fresh one (the original behavior). Choices are the
+    /// snapshot's last-known session names; the app revalidates against
+    /// the live probe and a dead name falls back to a fresh session.
+    /// Declared before Model on purpose: the config sheet renders fields
+    /// in declaration order, and where the agent lands reads before how
+    /// it launches.
+    @Parameter(title: "Session", optionsProvider: WidgetSessionOptionsProvider())
+    var session: String?
+
+    /// Where an existing-session launch opens, as a placement token the
+    /// app-side URL parser owns (unset = the tab default). Rows adapt to
+    /// the host's backend: tmux's one honest choice is a new window.
+    @Parameter(title: "Open In", optionsProvider: WidgetPlacementOptionsProvider())
+    var placement: String?
+
+    /// Where the launch starts — fresh sessions and in-session placements
+    /// alike, the Shortcut's Working Directory semantics: unset/empty is
+    /// the host's default (first configured dir), `"~"` is explicitly
+    /// Home. Choices are the snapshot's configured dirs.
+    @Parameter(title: "Working Directory", optionsProvider: WidgetWorkingDirectoryOptionsProvider())
+    var directory: String?
+
     /// Rides the launch as `--model <value>`; unset means the agent's
     /// default. Choices are the host's pre-configured launch models from the
     /// published snapshot — full Codex/Pi ids are typed once in Host
@@ -30,6 +53,20 @@ struct HostWidgetConfigurationIntent: WidgetConfigurationIntent {
 
     @Parameter(title: "Ask for Prompt", default: false)
     var askForPrompt: Bool
+}
+
+/// The snapshot host a widget-configuration provider should answer for: the
+/// explicitly chosen one, else — with Host UNSET, the common case — the
+/// FIRST host, mirroring `HostWidgetProvider.entry`'s own fallback. An
+/// explicitly chosen host that has left the snapshot resolves to nil (the
+/// widget face shows Awaiting data for it; the pickers offer only their
+/// leading defaults). Unset-host handling matters twice: the rows should
+/// describe the host the widget will actually monitor, and a dependency the
+/// sheet considers unresolved must never leave the picker empty-handed.
+private func widgetConfiguredHost(_ chosen: HostEntity?) -> WidgetHostState? {
+    let hosts = SharedStateStore.load()?.hosts ?? []
+    guard let chosen else { return hosts.first }
+    return hosts.first { $0.id == chosen.id }
 }
 
 /// Widget-process provider: reads the same `HostEntityProvider` surface the
@@ -51,6 +88,57 @@ struct WidgetAgentModelOptionsProvider: DynamicOptionsProvider {
             .map { IntentItem($0.value, title: "\($0.title)") }
         return IntentItemCollection(
             promptLabel: "Choose a model",
+            sections: [IntentItemSection(items: items)]
+        )
+    }
+}
+
+/// Snapshot-backed session rows for the widget's Session setting — the
+/// same last-known list the widget itself renders, led by New Session.
+struct WidgetSessionOptionsProvider: DynamicOptionsProvider {
+    @IntentParameterDependency<HostWidgetConfigurationIntent>(\.$host)
+    private var intent
+
+    func results() async throws -> IntentItemCollection<String> {
+        let names = widgetConfiguredHost(intent?.host)?.sessions.map(\.name) ?? []
+        let items = SessionTargetChoices.sessionChoices(names: names)
+            .map { IntentItem($0.value, title: "\($0.title)") }
+        return IntentItemCollection(
+            promptLabel: "Choose a session",
+            sections: [IntentItemSection(items: items)]
+        )
+    }
+}
+
+/// Snapshot-backed directory rows: Host Default, the host's configured
+/// working dirs, Home — same shared normalization as the Shortcut's picker.
+struct WidgetWorkingDirectoryOptionsProvider: DynamicOptionsProvider {
+    @IntentParameterDependency<HostWidgetConfigurationIntent>(\.$host)
+    private var intent
+
+    func results() async throws -> IntentItemCollection<String> {
+        let configured = widgetConfiguredHost(intent?.host)?.workingDirs ?? []
+        let items = ShortcutWorkingDirectoryOptions.choices(configured: configured)
+            .map { IntentItem($0.value, title: "\($0.title)") }
+        return IntentItemCollection(
+            promptLabel: "Choose a working directory",
+            sections: [IntentItemSection(items: items)]
+        )
+    }
+}
+
+/// Placement rows in the host's backend vocabulary, from the published
+/// `backendRaw` — same shared builder as the Shortcut's provider.
+struct WidgetPlacementOptionsProvider: DynamicOptionsProvider {
+    @IntentParameterDependency<HostWidgetConfigurationIntent>(\.$host)
+    private var intent
+
+    func results() async throws -> IntentItemCollection<String> {
+        let backend = widgetConfiguredHost(intent?.host)?.backendRaw
+        let items = SessionTargetChoices.placementChoices(backendRaw: backend)
+            .map { IntentItem($0.value, title: "\($0.title)") }
+        return IntentItemCollection(
+            promptLabel: "Choose where the agent opens",
             sections: [IntentItemSection(items: items)]
         )
     }

@@ -1,46 +1,10 @@
-import SwiftUI
 import UIKit
 
-/// The code and diff screens' shared text surface: ONE selectable
-/// UITextView, so selecting works by default and can cross lines — the
-/// former lazy SwiftUI screens rendered each line as its own `Text`, and
-/// `.textSelection(.enabled)` cannot reach past the Text it sits on.
-/// Everything that must never enter a copy — line numbers, diff old/new
-/// numbers, row grounds, the target-line highlight — is *decor*, drawn by
-/// pinned companion views from the layout fragments, not text. What IS
-/// text is exactly what a copy should carry: the file's characters, and
-/// for diffs real unified-diff lines (ASCII `+`/`-`/` ` prefixes and `@@`
-/// headers). Rendered markdown deliberately stays on its SwiftUI blocks
-/// (per-block selection); RAW rides this screen like any code file.
-struct FileViewerTextScreen: UIViewRepresentable {
-    let content: FileViewerTextContent
-    var targetLine: Int?
-
-    func makeUIView(context: Context) -> FileViewerTextView {
-        let view = FileViewerTextView()
-        view.isEditable = false
-        view.isSelectable = true
-        view.backgroundColor = .clear
-        view.alwaysBounceVertical = true
-        // A detected link would open straight into Safari; every link in
-        // this app goes through the confirmation sheet.
-        view.dataDetectorTypes = []
-        view.textContainer.lineFragmentPadding = 0
-        view.installDecor()
-        view.setContent(content, targetLine: targetLine)
-        return view
-    }
-
-    func updateUIView(_ view: FileViewerTextView, context: Context) {
-        // The content instance is the generation marker — a rebuild hands
-        // over a fresh NSAttributedString. Re-setting on every SwiftUI
-        // update would drop the live selection.
-        guard view.content?.text !== content.text else { return }
-        // A quiet watch swap must not reset the reading position (the
-        // lazy screens' row-id rule, carried over).
-        view.setContent(content, targetLine: nil, preservingOffset: true)
-    }
-}
+// The code and diff screens share one selectable UITextView, so selection can
+// cross lines. Line numbers, diff old/new numbers, row grounds, and the target
+// highlight are decor drawn by companion views, never copied. The text itself
+// is exactly what copy should carry: file characters or real unified-diff
+// lines with ASCII prefixes and hunk headers.
 
 // MARK: - Content model
 
@@ -77,8 +41,8 @@ struct FileViewerTextContent {
         return low
     }
 
-    private static let gutterInk = UIColor(CodePalette.gutter)
-    private static let plainInk = UIColor(CodePalette.plain)
+    private static let gutterInk = CodePalette.gutter
+    private static let plainInk = CodePalette.plain
 
     private static func mono(_ size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
         .monospacedSystemFont(ofSize: size * Theme.typeScale, weight: weight)
@@ -135,8 +99,8 @@ struct FileViewerTextContent {
     static func code(_ lines: [HighlightedLine], targetLine: Int?) -> FileViewerTextContent {
         let font = mono(11)
         let comment = italic(font)
-        let target = UIColor(Theme.caution)
-        let targetGround = UIColor(Theme.caution).withAlphaComponent(0.12)
+        let target = TallyPalette.caution
+        let targetGround = TallyPalette.caution.withAlphaComponent(0.12)
         let inks: [CodeTokenKind: UIColor] = tokenInks()
 
         var builder = Builder()
@@ -167,15 +131,15 @@ struct FileViewerTextContent {
         let headerFont = mono(9)
         let signFont = mono(10.5, weight: .semibold)
         let inks: [CodeTokenKind: UIColor] = tokenInks()
-        let addInk = UIColor(CodePalette.diffAddText)
-        let deleteInk = UIColor(CodePalette.diffDeleteText)
-        let addGround = UIColor(CodePalette.diffAddGround)
-        let deleteGround = UIColor(CodePalette.diffDeleteGround)
-        let headerInk = UIColor(CodePalette.hunkHeader)
-        let headerGround = UIColor(Theme.bezel).withAlphaComponent(0.5)
-        let fileInk = UIColor(Theme.signal)
-        let fileGround = UIColor(Theme.bezel)
-        let quietInk = UIColor(Theme.signal3)
+        let addInk = CodePalette.diffAddText
+        let deleteInk = CodePalette.diffDeleteText
+        let addGround = CodePalette.diffAddGround
+        let deleteGround = CodePalette.diffDeleteGround
+        let headerInk = CodePalette.hunkHeader
+        let headerGround = TallyPalette.bezel.withAlphaComponent(0.5)
+        let fileInk = TallyPalette.signal
+        let fileGround = TallyPalette.bezel
+        let quietInk = TallyPalette.signal3
 
         func pad(_ number: Int?) -> String {
             let text = number.map(String.init) ?? ""
@@ -264,7 +228,7 @@ struct FileViewerTextContent {
             .number, .function, .property, .meta,
         ]
         return Dictionary(uniqueKeysWithValues: kinds.map {
-            ($0, UIColor(CodePalette.color(for: $0)))
+            ($0, CodePalette.color(for: $0))
         })
     }
 }
@@ -318,8 +282,7 @@ final class FileViewerTextView: UITextView {
         // glyphs render over the grounds.
         insertSubview(backdrop, at: 0)
         addSubview(gutter)
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-            (view: FileViewerTextView, _: UITraitCollection) in
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: FileViewerTextView, _: UITraitCollection) in
             // Re-setting the text re-resolves its dynamic inks — TextKit
             // caches attributed colors and an appearance flip must reach
             // token colors, not just the drawn decor.
@@ -360,8 +323,8 @@ final class FileViewerTextView: UITextView {
         backdrop.setNeedsDisplay()
         gutter.setNeedsDisplay()
         // One main-queue hop after the first real layout pass: applying
-        // inside this pass reads pre-settle geometry (SwiftUI sizes the
-        // view in stages) and the centered offset lands short.
+        // inside this pass reads pre-settle container geometry and the
+        // centered offset lands short.
         if pendingTargetLine != nil, bounds.height > 0, bounds.width > 0 {
             let line = pendingTargetLine
             pendingTargetLine = nil
@@ -434,7 +397,7 @@ final class FileViewerTextView: UITextView {
             guard line < content.rows.count,
                   let text = content.rows[line].gutter
             else { return }
-            let color = (content.rows[line].gutterColor ?? UIColor(CodePalette.gutter))
+            let color = content.rows[line].gutterColor ?? CodePalette.gutter
                 .resolvedColor(with: traitCollection)
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: content.gutterFont, .foregroundColor: color,

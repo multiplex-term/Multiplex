@@ -123,13 +123,22 @@ struct HostWidgetView: View {
                 sessionName: host.mostRecentSession?.name
             )
         case .agent:
-            WidgetLink.agentURL(
-                hostID: host.id,
-                agentRaw: entry.configuration.agent.rawValue,
-                askForPrompt: entry.configuration.askForPrompt,
-                model: entry.configuration.model
-            )
+            agentURL(for: host)
         }
+    }
+
+    /// The AGENT key/tap link — one builder for both families so the
+    /// configured session target can never diverge between them.
+    private func agentURL(for host: WidgetHostState) -> URL {
+        WidgetLink.agentURL(
+            hostID: host.id,
+            agentRaw: entry.configuration.agent.rawValue,
+            askForPrompt: entry.configuration.askForPrompt,
+            model: entry.configuration.model,
+            sessionName: entry.configuration.session,
+            placementRaw: entry.configuration.placement,
+            directory: entry.configuration.directory
+        )
     }
 
     // MARK: Medium — hybrid (Monitor left, Switchboard keys right)
@@ -192,12 +201,7 @@ struct HostWidgetView: View {
                     )) {
                         ActionKey(glyph: "❯_", caption: "shell")
                     }
-                    Link(destination: WidgetLink.agentURL(
-                        hostID: host.id,
-                        agentRaw: entry.configuration.agent.rawValue,
-                        askForPrompt: entry.configuration.askForPrompt,
-                        model: entry.configuration.model
-                    )) {
+                    Link(destination: agentURL(for: host)) {
                         ActionKey(
                             glyph: "✳",
                             caption: "agent",

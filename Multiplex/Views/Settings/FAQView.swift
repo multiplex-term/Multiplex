@@ -1,85 +1,237 @@
-import SwiftUI
 import UIKit
 
-/// Frequently asked questions, opened from the deck's FAQ chip. Static
-/// troubleshooting notes — append new entries to `FAQEntry.all`.
-struct FAQView: View {
-    @Environment(\.dismiss) private var dismiss
+// MARK: - Native UIKit screen
 
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    ForEach(FAQEntry.all) { entry in
-                        FAQEntryCard(entry: entry)
-                    }
-                }
-                .frame(maxWidth: 680)
-                .padding(18)
-                .frame(maxWidth: .infinity)
-            }
-            .chassisSheetGround()
-            .navigationTitle("FAQ")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ChassisSheetTitle("FAQ")
-                ToolbarItem(placement: .confirmationAction) {
-                    ChassisBarButton("Done") { dismiss() }
-                }
-            }
+/// Frequently asked questions, opened from the deck's FAQ chip. The screen and
+/// all of its content are UIKit.
+@MainActor
+final class FAQViewController: UIViewController, AppAppearanceFollowing {
+    var onDone: (() -> Void)?
+
+    var appAppearance = AppAppearance.system {
+        didSet { applyAppAppearance() }
+    }
+    let appAppearanceFollower = AppAppearanceFollower()
+
+    private let scrollView = UIScrollView()
+    private let contentStack = UIStackView()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "FAQ"
+        view.backgroundColor = GlassPrototype.sheetGround
+
+        navigationItem.largeTitleDisplayMode = .never
+        #if os(visionOS)
+        // SwiftUI's sheet title needed the same explicit TALLY ink on visionOS;
+        // the native controller keeps that principal-title treatment.
+        navigationItem.titleView = UIKitChassisLabel("FAQ", size: 12)
+        #endif
+        let done = UIBarButtonItem(
+            title: "Done",
+            style: .plain,
+            target: self,
+            action: #selector(donePressed)
+        )
+        done.tintColor = UIKitChassis.signal
+        done.accessibilityLabel = "Done"
+        navigationItem.rightBarButtonItem = done
+
+        configureContent()
+        applyAppAppearance()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        applyAppAppearance()
+    }
+
+    private func configureContent() {
+        scrollView.alwaysBounceVertical = true
+        scrollView.backgroundColor = GlassPrototype.clearedChassis
+        view.addSubview(scrollView)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            // The SwiftUI sheet never scrolled horizontally; lock the content
+            // guide to the visible frame before applying the 680-point cap.
+            scrollView.contentLayoutGuide.widthAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.widthAnchor
+            ),
+        ])
+
+        contentStack.axis = .vertical
+        contentStack.spacing = 18
+        for entry in FAQEntry.all {
+            contentStack.addArrangedSubview(makeSection(for: entry))
+        }
+        scrollView.addSubview(contentStack)
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let fillVisibleWidth = contentStack.widthAnchor.constraint(
+            equalTo: scrollView.frameLayoutGuide.widthAnchor,
+            constant: -36
+        )
+        fillVisibleWidth.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            contentStack.topAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.topAnchor,
+                constant: 18
+            ),
+            contentStack.bottomAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.bottomAnchor,
+                constant: -18
+            ),
+            contentStack.centerXAnchor.constraint(
+                equalTo: scrollView.frameLayoutGuide.centerXAnchor
+            ),
+            contentStack.leadingAnchor.constraint(
+                greaterThanOrEqualTo: scrollView.contentLayoutGuide.leadingAnchor,
+                constant: 18
+            ),
+            contentStack.trailingAnchor.constraint(
+                lessThanOrEqualTo: scrollView.contentLayoutGuide.trailingAnchor,
+                constant: -18
+            ),
+            contentStack.widthAnchor.constraint(lessThanOrEqualToConstant: 680),
+            fillVisibleWidth,
+        ])
+    }
+
+    private func makeSection(for entry: FAQEntry) -> UIView {
+        let answer = UILabel()
+        answer.font = UIKitChassis.uiFont(11)
+        answer.textColor = UIKitChassis.signal
+        answer.text = entry.answer
+        answer.numberOfLines = 0
+
+        let rowStack = UIStackView(arrangedSubviews: [answer])
+        rowStack.axis = .vertical
+        rowStack.spacing = 12
+        if entry.offersMultiplexerInstall {
+            rowStack.addArrangedSubview(FAQMultiplexerInstallView())
+        }
+        for command in entry.commands {
+            rowStack.addArrangedSubview(UIKitCopyableCommandField(
+                label: command.label,
+                command: command.command
+            ))
+        }
+
+        return UIKitTallyFormSectionView(
+            title: entry.question,
+            detail: entry.postscript,
+            contentView: rowStack
+        )
+    }
+
+    @objc private func donePressed() {
+        if let onDone {
+            onDone()
+        } else {
+            navigationController?.dismiss(animated: true)
         }
     }
 }
 
-/// One FAQ entry as a Tally form section: the question is the section title,
-/// the answer is prose, and each command sits on its own screen well with a
-/// copy chip (`CopyableCommandField` — shared with the deck's guide sheets).
-private struct FAQEntryCard: View {
-    let entry: FAQEntry
+// MARK: - Multiplexer install
 
-    var body: some View {
-        TallyFormSection(entry.question, detail: entry.postscript) {
-            TallyFormRow {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(entry.answer)
-                        .font(.ui(11))
-                        .foregroundStyle(Theme.signal)
-                        .fixedSize(horizontal: false, vertical: true)
-                    ForEach(entry.commands) { command in
-                        CopyableCommandField(
-                            label: command.label,
-                            command: command.command
-                        )
-                    }
-                }
-            }
+/// The install commands for both session backends behind a tmux | herdr
+/// choice bar. The backend is a per-host setting, so the FAQ cannot know
+/// which one the reader needs — showing one road at a time beats stacking
+/// six command fields, and the choice bar is the same control Add Host and
+/// Host Settings use to pick the backend in the first place.
+@MainActor
+private final class FAQMultiplexerInstallView: UIView {
+    private let commandStack = UIStackView()
+    private let pathNote = UILabel()
+
+    init(backend: Host.SessionBackend = .tmux) {
+        super.init(frame: .zero)
+
+        let bar = AddHostChoiceBar<Host.SessionBackend>(
+            // The button face uppercases; pass the natural spelling so
+            // VoiceOver reads "tmux", not the letters T-M-U-X.
+            choices: Host.SessionBackend.allCases.map { ($0.rawValue, $0) },
+            selection: backend
+        ) { [weak self] backend in
+            self?.show(backend)
         }
+        bar.accessibilityIdentifier = "faq.backendBar"
+
+        commandStack.axis = .vertical
+        commandStack.spacing = 12
+
+        pathNote.font = UIKitChassis.uiFont(10)
+        pathNote.textColor = UIKitChassis.signal2
+        pathNote.numberOfLines = 0
+
+        let stack = UIStackView(arrangedSubviews: [bar, commandStack, pathNote])
+        stack.axis = .vertical
+        stack.spacing = 12
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        show(backend)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    private func show(_ backend: Host.SessionBackend) {
+        for view in commandStack.arrangedSubviews {
+            commandStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        for command in HostGuide.multiplexerInstall(for: backend) {
+            commandStack.addArrangedSubview(UIKitCopyableCommandField(
+                label: command.label,
+                command: command.command
+            ))
+        }
+        pathNote.text = HostGuide.probePathDetail(for: backend)
     }
 }
 
-/// Static FAQ content. Questions render as compressed-caps section titles,
-/// so keep them short enough for one line at phone-sheet width. Commands
-/// shared with a deck tip surface live in `HostGuide` so they can't drift.
-private struct FAQEntry: Identifiable {
+// MARK: - Static content
+
+/// Questions render as compressed-caps section titles, so keep them short
+/// enough for one line at phone-sheet width. Commands shared with a deck tip
+/// surface live in `HostGuide` so they cannot drift.
+private struct FAQEntry {
     let id: String
     let question: String
     let answer: String
     var commands: [HostGuide.Command] = []
+    /// Renders the tmux | herdr install area instead of a flat command list:
+    /// the answer covers both backends, so the reader picks their host's.
+    var offersMultiplexerInstall = false
     var postscript: String?
 
     static let all: [FAQEntry] = [
         FAQEntry(
-            id: "host-needs-tmux",
-            question: "A host shows no tmux on the deck",
-            answer: "The deck is built around a tmux server on each host — "
-                + "sessions, live tiles, and attach all come from it. A host "
-                + "without tmux still works as a plain shell (the SHELL chip "
-                + "on its rail), it just has no session tiles. To get the "
-                + "full deck, install tmux on the host:",
-            commands: HostGuide.tmuxInstall,
-            postscript: "The deck re-probes every few seconds and finds tmux "
-                + "as soon as it lands — Homebrew and /usr/local installs "
-                + "are already on the probe's PATH."
+            id: "host-needs-multiplexer",
+            question: "A host shows no tmux or herdr",
+            answer: "The deck is built around a session multiplexer on each "
+                + "host — sessions, live tiles, and attach all come from it. "
+                + "Each host runs one, tmux or herdr, chosen in its settings "
+                + "under Sessions run on. A host without that multiplexer "
+                + "still works as a plain shell (the SHELL chip on its rail), "
+                + "it just has no session tiles. To get the full deck, "
+                + "install the one the host is set to:",
+            offersMultiplexerInstall: true,
+            postscript: "The deck re-probes every few seconds and lights the "
+                + "tile as soon as the multiplexer lands — no restart, and "
+                + "nothing to configure on the host."
         ),
         FAQEntry(
             id: "claude-code-tmux-keychain",
@@ -99,11 +251,3 @@ private struct FAQEntry: Identifiable {
         )
     ]
 }
-
-#if DEBUG
-#Preview("FAQ") {
-    FAQView()
-        .frame(width: 720, height: 640)
-        .preferredColorScheme(.dark)
-}
-#endif

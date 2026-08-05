@@ -479,6 +479,115 @@ final class AgentAttentionTests: XCTestCase {
         XCTAssertEqual(sessions.first?.activeAgent, .claudeCode)
     }
 
+    // MARK: Notification tap
+
+    func testTapTargetUserInfoRoundTrip() {
+        let session = AttentionTapTarget(
+            hostID: UUID(), sessionName: "main", backend: .herdr)
+        XCTAssertEqual(AttentionTapTarget(userInfo: session.userInfo), session)
+        XCTAssertTrue(session.sessionIsAttachable)
+
+        let tab = AttentionTapTarget(
+            hostID: UUID(), sessionName: "shell", backend: .tmux, tabID: UUID())
+        XCTAssertEqual(AttentionTapTarget(userInfo: tab.userInfo), tab)
+        // A tab-scoped alert's session name is display copy — pressing its
+        // banner must never mint an attach to a namesake session.
+        XCTAssertFalse(tab.sessionIsAttachable)
+
+        // A banner from another payload shape decodes to nil (the press
+        // just foregrounds the app), and so does a corrupted backend.
+        XCTAssertNil(AttentionTapTarget(userInfo: [:]))
+        var corrupted = session.userInfo
+        corrupted["attentionBackend"] = "screen"
+        XCTAssertNil(AttentionTapTarget(userInfo: corrupted))
+    }
+
+    func testAlertBuildsTapTargetFromHostIdentity() {
+        var host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        host.sessionBackend = .herdr
+        let target = AttentionAlert(
+            host: host,
+            sessionName: "deploy",
+            agent: .pi,
+            event: .turnEnded,
+            paneTitle: ""
+        ).tapTarget
+        XCTAssertEqual(target.hostID, host.id)
+        XCTAssertEqual(target.sessionName, "deploy")
+        XCTAssertEqual(target.backend, .herdr)
+        XCTAssertNil(target.tabID)
+    }
+
+    @MainActor
+    func testTapRevealsOpenTabBySessionIdentity() {
+        let center = AttentionCenter()
+        let workspace = TerminalWorkspace()
+        center.workspace = workspace
+        let host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        let tmuxTab = TerminalRoute(hostID: host.id, mode: .attach(sessionName: "main"))
+        let herdrTab = TerminalRoute(hostID: host.id, mode: .herdrAttach(sessionName: "main"))
+        var revealed: [UUID] = []
+        workspace.registerWindow(TerminalWorkspace.WindowEntry(
+            id: UUID(),
+            tabs: [tmuxTab, herdrTab],
+            label: "terminal",
+            reveal: { revealed.append($0) },
+            surrender: { [] },
+            adopt: { _ in }
+        ))
+        var submitted: [ExternalAction] = []
+        center.performExternalAction = { submitted.append($0) }
+
+        // Backend is identity: both namespaces hold "main", and each press
+        // must reveal its own backend's tab.
+        center.handleTap(AttentionTapTarget(
+            hostID: host.id, sessionName: "main", backend: .herdr))
+        XCTAssertEqual(revealed, [herdrTab.id])
+        center.handleTap(AttentionTapTarget(
+            hostID: host.id, sessionName: "main", backend: .tmux))
+        XCTAssertEqual(revealed, [herdrTab.id, tmuxTab.id])
+
+        // A tab-scoped alert reveals its exact tab even though a plain
+        // shell has no session identity to match.
+        let shellTab = TerminalRoute(hostID: host.id, mode: .shell)
+        workspace.registerWindow(TerminalWorkspace.WindowEntry(
+            id: UUID(),
+            tabs: [shellTab],
+            label: "shell",
+            reveal: { revealed.append($0) },
+            surrender: { [] },
+            adopt: { _ in }
+        ))
+        center.handleTap(AttentionTapTarget(
+            hostID: host.id, sessionName: "shell", backend: .tmux, tabID: shellTab.id))
+        XCTAssertEqual(revealed.last, shellTab.id)
+
+        // Every press above found its window — none may fall through to
+        // the external-action seam.
+        XCTAssertTrue(submitted.isEmpty)
+    }
+
+    @MainActor
+    func testTapWithoutOpenWindowAttachesViaExternalSeam() {
+        let center = AttentionCenter()
+        center.workspace = TerminalWorkspace()
+        var submitted: [ExternalAction] = []
+        center.performExternalAction = { submitted.append($0) }
+        let hostID = UUID()
+
+        // A session-scoped alert re-attaches through the widget seam (the
+        // router queues behind the app lock and raises the deck itself).
+        center.handleTap(AttentionTapTarget(
+            hostID: hostID, sessionName: "deploy", backend: .herdr))
+        XCTAssertEqual(submitted, [.openShell(host: .id(hostID), sessionName: "deploy")])
+
+        // A tab-scoped alert whose tab died stops at the reveal attempt:
+        // its "shell" display name is not an attachable session.
+        center.handleTap(AttentionTapTarget(
+            hostID: hostID, sessionName: "shell", backend: .tmux, tabID: UUID()))
+        XCTAssertEqual(submitted.count, 1)
+    }
+
     // MARK: Pro gate
 
     @MainActor
@@ -508,6 +617,41 @@ final class AgentAttentionTests: XCTestCase {
         center.alertsEnabled = false
         XCTAssertFalse(center.isActive)
         defaults.removePersistentDomain(forName: "attention-pro-test")
+    }
+
+    /// The bug behind "agent alerts never arrive when I switch away": keyboard
+    /// focus stands in for "you are watching this session", but the arbiter
+    /// keeps its owner when the app leaves the screen — so the session you
+    /// walked away from stayed silent, and it is the one most likely running
+    /// an agent. Focus may only silence an alert while the app is frontmost.
+    func testFocusSilencesAnAlertOnlyWhileTheAppIsFrontmost() {
+        XCTAssertTrue(
+            AttentionFocusPolicy.suppressesAlert(
+                appIsFrontmost: true,
+                sessionOwnsKeyboardFocus: true
+            ),
+            "the pane under your fingers must not banner at you"
+        )
+        XCTAssertFalse(
+            AttentionFocusPolicy.suppressesAlert(
+                appIsFrontmost: false,
+                sessionOwnsKeyboardFocus: true
+            ),
+            "walked away: retained keyboard focus is not engagement"
+        )
+        XCTAssertFalse(
+            AttentionFocusPolicy.suppressesAlert(
+                appIsFrontmost: true,
+                sessionOwnsKeyboardFocus: false
+            ),
+            "another window, a background tab, or no open tab always alerts"
+        )
+        XCTAssertFalse(
+            AttentionFocusPolicy.suppressesAlert(
+                appIsFrontmost: false,
+                sessionOwnsKeyboardFocus: false
+            )
+        )
     }
 
     func testParseTailsKeepsFullDialogWhileMiniatureClips() {

@@ -29,6 +29,9 @@ struct HostEntity: AppEntity, Identifiable, Hashable {
     /// Pre-configured launch models per agent, keyed by the agent raw value
     /// (`AgentChoice`/`AgentKind` mirror one-to-one, unit-tested).
     var agentModels: [String: [String]] = [:]
+    /// The host's session backend raw value — what the placement picker
+    /// labels its rows with; nil (a pre-backend snapshot) reads as tmux.
+    var backendRaw: String?
 
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(title: "\(name)", subtitle: "\(address)")
@@ -47,7 +50,8 @@ enum HostEntityProvider {
         return (SharedStateStore.load()?.hosts ?? []).map {
             HostEntity(
                 id: $0.id, name: $0.name, address: $0.address,
-                agentModels: $0.agentModels ?? [:]
+                agentModels: $0.agentModels ?? [:],
+                backendRaw: $0.backendRaw
             )
         }
     }

@@ -3,7 +3,7 @@
 /// Keeping the destination alongside the closure also lets the tile's
 /// duplicate-client context action use truthful copy.
 struct TerminalRouteOpener {
-    enum Destination {
+    enum Destination: Equatable {
         case window
         case shell
     }

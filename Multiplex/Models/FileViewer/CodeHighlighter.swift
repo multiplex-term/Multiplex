@@ -68,7 +68,7 @@ enum CodeHighlighter {
         /// `#` starts a comment only at line start or after whitespace —
         /// keeps `foo#bar` and shell parameter forms intact.
         var hashCommentNeedsBoundary = true
-        var blockComment: (open: String, close: String)? = nil
+        var blockComment: (open: String, close: String)?
         var nestedBlockComments = false
         /// Plain quote characters with backslash escapes; unterminated ones
         /// end at the line break (single-line strings don't carry).

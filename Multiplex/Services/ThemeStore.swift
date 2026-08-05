@@ -1,27 +1,50 @@
 import Foundation
 import Observation
-import SwiftUI
 #if DEBUG
 import notify
 #endif
 
+/// The resolved light/dark appearance currently painting a scene. This is an
+/// app-owned value instead of SwiftUI's `ColorScheme`, so theme selection is
+/// equally usable from UIKit scene/view-controller code and pure tests.
+enum ResolvedAppearance: String, CaseIterable {
+    case light
+    case dark
+}
+
 /// The app-wide appearance choice, persisted by `ThemeStore` and applied at
 /// every scene root by `PlatformChrome`. `.system` follows the device (and on
-/// visionOS keeps the platform's native appearance); the other two pin the
-/// chassis. Chassis tokens themselves are trait-dynamic (`Theme`), so the
-/// whole chrome — deck, terminal windows, sheets, launch handoff — flips
+/// visionOS keeps the platform's native appearance); the other choices pin the
+/// chassis (GLASS to dark traits). Chassis tokens themselves are trait-dynamic
+/// (`Theme`), so the whole chrome — deck, terminal windows, sheets, launch
+/// handoff — flips
 /// together.
 enum AppAppearance: String, CaseIterable {
     case system
     case light
     case dark
+    /// PROTOTYPE(GLASS): the SMOKE glass chassis as an independent choice —
+    /// visionOS only, derived from the dark palette (dark traits + the dark
+    /// terminal-theme slot). Available in every visionOS configuration.
+    case glass
 
-    /// What `preferredColorScheme` receives: nil means "follow the system".
-    var colorSchemeOverride: ColorScheme? {
+    /// The choices a platform's Settings bar offers and the DEBUG appearance
+    /// hook cycles. GLASS is visionOS-only, in both Debug and Release.
+    static var availableCases: [AppAppearance] {
+        #if os(visionOS)
+        allCases
+        #else
+        [.system, .light, .dark]
+        #endif
+    }
+
+    /// The pinned appearance, when there is one. `nil` means follow the
+    /// scene's UIKit traits.
+    var resolvedOverride: ResolvedAppearance? {
         switch self {
         case .system: return nil
         case .light: return .light
-        case .dark: return .dark
+        case .dark, .glass: return .dark
         }
     }
 }
@@ -69,8 +92,12 @@ final class ThemeStore {
             ?? TerminalTheme.tally.id
         selectedLightID = defaults.string(forKey: Self.selectedLightIDKey)
             ?? TerminalTheme.lightDefault.id
-        appearance = defaults.string(forKey: Self.appearanceKey)
+        let storedAppearance = defaults.string(forKey: Self.appearanceKey)
             .flatMap(AppAppearance.init(rawValue:)) ?? .system
+        // A persisted GLASS choice on a non-visionOS platform falls back to
+        // SYSTEM rather than acting as a hidden DARK.
+        appearance = AppAppearance.availableCases.contains(storedAppearance)
+            ? storedAppearance : .system
         load()
         #if DEBUG
         installDebugAppearanceHook()
@@ -81,8 +108,8 @@ final class ThemeStore {
     /// Headless-verification hook: the appearance choice bar can't be tapped
     /// from the CLI, so
     /// `xcrun simctl spawn <udid> notifyutil -p app.multiplexterm.multiplex.debug.appearance`
-    /// cycles SYSTEM → LIGHT → DARK through the exact property the Settings
-    /// bar sets — proving the live window-override flip (open sheets
+    /// cycles the platform's available choices through the exact property the
+    /// Settings bar sets — proving the live window-override flip (open sheets
     /// included) and the persisted choice.
     private func installDebugAppearanceHook() {
         var token: Int32 = 0
@@ -91,7 +118,7 @@ final class ThemeStore {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let all = AppAppearance.allCases
+                let all = AppAppearance.availableCases
                 let index = all.firstIndex(of: self.appearance) ?? 0
                 self.appearance = all[(index + 1) % all.count]
             }
@@ -102,12 +129,12 @@ final class ThemeStore {
     /// The active theme for a chassis appearance; a stale selection (deleted
     /// custom theme, renamed built-in) falls back to that appearance's house
     /// default rather than a blank screen.
-    func selected(for scheme: ColorScheme) -> TerminalTheme {
-        theme(id: selectedID(for: scheme)) ?? Self.fallback(for: scheme)
+    func selected(for appearance: ResolvedAppearance) -> TerminalTheme {
+        theme(id: selectedID(for: appearance)) ?? Self.fallback(for: appearance)
     }
 
-    func selectedID(for scheme: ColorScheme) -> String {
-        scheme == .light ? selectedLightID : selectedID
+    func selectedID(for appearance: ResolvedAppearance) -> String {
+        appearance == .light ? selectedLightID : selectedID
     }
 
     var allThemes: [TerminalTheme] {
@@ -118,8 +145,8 @@ final class ThemeStore {
         TerminalTheme.builtIn(id: id) ?? customThemes.first { $0.id == id }
     }
 
-    func select(_ theme: TerminalTheme, for scheme: ColorScheme) {
-        if scheme == .light {
+    func select(_ theme: TerminalTheme, for appearance: ResolvedAppearance) {
+        if appearance == .light {
             selectedLightID = theme.id
             defaults.set(selectedLightID, forKey: Self.selectedLightIDKey)
         } else {
@@ -154,8 +181,8 @@ final class ThemeStore {
         save()
     }
 
-    private static func fallback(for scheme: ColorScheme) -> TerminalTheme {
-        scheme == .light ? .lightDefault : .tally
+    private static func fallback(for appearance: ResolvedAppearance) -> TerminalTheme {
+        appearance == .light ? .lightDefault : .tally
     }
 
     private func load() {

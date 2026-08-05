@@ -49,8 +49,9 @@ visionOS in fastlane rides the `xros` platform value (pilot/gym support it;
 current fastlane required — `bundle update fastlane` if pilot rejects the
 platform). `store_metadata` uploads to both platform versions by default;
 pass `platform:ios` or `platform:visionos` to update only one. Shared listing
-copy lives in `fastlane/metadata`, while each locale's
-`release_notes_ios.txt` and `release_notes_visionos.txt` are selected for the
+fields live in `fastlane/metadata`, while each locale's
+`description_ios.txt` / `description_visionos.txt` and
+`release_notes_ios.txt` / `release_notes_visionos.txt` are selected for the
 matching version. The lane maps the public `visionos` option to deliver's
 `xros` value. `store_screenshots` also runs one deliver per platform — pushing
 the 3840×2160 set at the iOS version fails with "Display Type Not Allowed"

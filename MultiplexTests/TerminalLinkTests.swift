@@ -67,6 +67,8 @@ final class TerminalLinkTests: XCTestCase {
     }
 
     func testNonWebSchemesAreReportedNotOpened() {
+        // This is the system-open policy in isolation. A terminal activation
+        // offers valid file URIs to TerminalPathTarget before it reaches here.
         for (target, scheme) in [
             ("file:///etc/shadow", "file"),
             ("ssh://root@box.example", "ssh"),
