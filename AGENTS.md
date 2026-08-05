@@ -331,7 +331,7 @@ logic belongs — keep parsing/command-building out of views.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5),
     patched to declare the `NIO` product it imports (Xcode 27 rejects the
     undeclared import); also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in eleven behavior groups
+  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in twelve behavior groups
     (marked `Multiplex patch`):
     - `keyboardType` settable; kept `.default` so the user's language and
       multistage IME survive.
@@ -365,6 +365,21 @@ logic belongs — keep parsing/command-building out of views.
     - Fully obscured tabs keep parsing bytes but suppress UIKit,
       accessibility, and Metal invalidations until visible (one full
       refresh then).
+    - iOS/visionOS output damage invalidates a padded row STRIP, not the
+      whole viewport (`damagedRowStrip`; the CG renderer is the live path
+      — nothing calls `setUseMetal`). `drawTerminalContents` narrows its
+      row loop only for a well-formed sub-viewport rect
+      (`partialRedrawRows`, pure + app-tested); anomalous rects — UIKit's
+      scroll-coalesced y=0 shapes, viewport-spanning unions, the
+      `setNeedsDisplay(frame)` legacy callers — keep the full-screen
+      redraw, so the contentOffset workaround's semantics are unchanged.
+      Why it exists: a one-row keystroke echo used to re-run CoreText for
+      every visible row and hand the compositor the entire translucent
+      surface to re-blend over live glass — the measured cause of GLASS
+      typing jank on real Vision Pro (2026-08-05), and wasted CPU on
+      every appearance. Glyph overhang is covered by the ±1-row pad;
+      partial repaints stay correct because `clearsContextBeforeDrawing`
+      (default true) clears the strip before `draw(_:)` refills it.
     - iOS-app-on-Mac: hardware Escape is claimed by a priority no-op
       `UIKeyCommand` (stops Cocoa's `cancelOperation:` resigning focus).
       Ctrl+character chords need the separate `GCKeyboard` HID bridge —
