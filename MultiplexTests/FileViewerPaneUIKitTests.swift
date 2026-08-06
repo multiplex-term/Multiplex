@@ -180,6 +180,40 @@ final class FileViewerPaneUIKitTests: XCTestCase {
         XCTAssertTrue(screen.zoomChip.accessibilityActivate())
     }
 
+    /// Replacing the text of a POPULATED TextKit view makes it reconcile the
+    /// new document against the old one — 1.4 s for this file on the iPad sim,
+    /// against ~20 ms when the view is emptied first (measured 2026-08-06;
+    /// `FileViewerTextView.setContent` clears before it fills). Every screen
+    /// swap pays this: a resize, an appearance flip, and every QUIET watch
+    /// tick over an edited file. The bound is two orders of magnitude above
+    /// the fast path and one below the slow one, so it catches a regression
+    /// without being a stopwatch.
+    func testReplacingATextScreenDoesNotReconcileAgainstTheOldDocument() throws {
+        let source = (0..<8000)
+            .map { "    let value\($0) = compute(\"literal \($0)\") // note" }
+            .joined(separator: "\n")
+        let lines = CodeHighlighter.highlight(source, language: .swift)
+        let view = FileViewerTextView()
+        view.isEditable = false
+        view.installDecor()
+        view.frame = CGRect(x: 0, y: 0, width: 900, height: 800)
+        view.layoutIfNeeded()
+        view.setContent(
+            FileViewerTextContent.code(lines, targetLine: nil, scale: 1),
+            targetLine: nil
+        )
+        view.layoutIfNeeded()
+
+        let resized = FileViewerTextContent.code(lines, targetLine: nil, scale: 1.5)
+        let started = CFAbsoluteTimeGetCurrent()
+        view.setContent(resized, targetLine: nil, preservingOffset: true)
+        let elapsed = CFAbsoluteTimeGetCurrent() - started
+
+        XCTAssertLessThan(elapsed, 0.3, "screen swap regressed to a full reconcile")
+        XCTAssertEqual(view.attributedText.length, resized.text.length)
+        XCTAssertEqual(view.content?.bodyFont.pointSize, resized.bodyFont.pointSize)
+    }
+
     private func makePane(close: @escaping () -> Void) -> FileViewerPaneViewController {
         let controller = FileViewerController(
             tabID: UUID(),

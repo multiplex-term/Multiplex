@@ -35,9 +35,13 @@ private struct FileViewerPaneObservedState {
     var isBusy: Bool
     var canGoBack: Bool
     var canGoForward: Bool
+    /// The reader's text size. Read inside the pane's observation, so a pinch
+    /// in one ▤ tab resizes every open one.
+    var textScale: CGFloat
 
     @MainActor
-    init(controller: FileViewerController) {
+    init(controller: FileViewerController, textScales: FileViewerTextScaleStore) {
+        textScale = textScales.scale
         body = FileViewerPaneBodyState(controller.content)
         hostName = controller.hostName
         rootPath = controller.rootPath
@@ -68,6 +72,7 @@ final class FileViewerPaneViewController: UIViewController {
     static let drawerClearance: CGFloat = 56
 
     private let controller: FileViewerController
+    let textScaleStore: FileViewerTextScaleStore
     private var contentSafeArea: UIEdgeInsets
     private var isActive: Bool
     private var openInNewTabAction: (FileTree.Row) -> Void
@@ -116,6 +121,7 @@ final class FileViewerPaneViewController: UIViewController {
     private var observedState: FileViewerPaneObservedState?
     private var renderedBodyState: FileViewerPaneBodyState?
     private var renderedBodyKey: BodyKey?
+    private var renderedTextScale = FileViewerTextScale.default
     private var markdownSelectKey: String?
     private var observationGeneration = 0
     private var startTask: Task<Void, Never>?
@@ -130,10 +136,12 @@ final class FileViewerPaneViewController: UIViewController {
         contentSafeArea: UIEdgeInsets = .zero,
         isActive: Bool = true,
         startsController: Bool = true,
+        textScaleStore: FileViewerTextScaleStore = .shared,
         openInNewTab: @escaping (FileTree.Row) -> Void = { _ in },
         close: @escaping () -> Void
     ) {
         self.controller = controller
+        self.textScaleStore = textScaleStore
         self.contentSafeArea = contentSafeArea
         self.isActive = isActive
         self.startsController = startsController
@@ -416,7 +424,7 @@ final class FileViewerPaneViewController: UIViewController {
     private func observeAndRender(generation: Int) {
         guard generation == observationGeneration else { return }
         let state = withObservationTracking {
-            FileViewerPaneObservedState(controller: controller)
+            FileViewerPaneObservedState(controller: controller, textScales: textScaleStore)
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.observeAndRender(generation: generation)
@@ -443,6 +451,13 @@ final class FileViewerPaneViewController: UIViewController {
         observedState = state
         updateHeader(state)
         updateBody(state)
+        // A pure size change leaves the body state untouched, so `updateBody`
+        // keeps the live view (scroll position and selection with it) and the
+        // screen rebuilds itself at the new size in place.
+        if renderedTextScale != state.textScale {
+            renderedTextScale = state.textScale
+            applyTextScale(state.textScale, to: currentBodyView)
+        }
         rebuildRail(state)
         workingLine.isHidden = !isWorking(state)
     }
@@ -942,14 +957,20 @@ final class FileViewerPaneViewController: UIViewController {
             )
         case .diff(let diff, let scope):
             let view = FileViewerDiffContentView()
+            view.setTextScale(state.textScale)
             view.apply(diff: diff, scope: scope)
             return view
         case .document(let document):
-            return makeDocumentBody(document)
+            return makeDocumentBody(document, scale: state.textScale)
         }
     }
 
-    private func makeDocumentBody(_ document: FileViewerController.Document) -> UIView {
+    /// Fresh screens are told their size before their content, so a resized
+    /// reader never sees one build at the authored size and rebuild.
+    private func makeDocumentBody(
+        _ document: FileViewerController.Document,
+        scale: CGFloat
+    ) -> UIView {
         switch document.kind {
         case .binary:
             return binaryBody(document)
@@ -961,15 +982,18 @@ final class FileViewerPaneViewController: UIViewController {
         case .markdown where !document.markdown.isEmpty:
             if selectingMarkdownSource, let text = document.sourceText {
                 let view = FileViewerMarkdownSourceContentView()
+                view.setTextScale(scale)
                 view.apply(text: text)
                 return view
             }
             let view = FileViewerMarkdownContentView()
+            view.setTextScale(scale)
             view.openLink = { [weak self] in self?.openMarkdownLink($0) }
             view.apply(blocks: document.markdown)
             return view
         case .markdown, .code:
             let view = FileViewerCodeContentView()
+            view.setTextScale(scale)
             view.apply(
                 lines: document.codeLines,
                 truncated: document.truncated,
@@ -995,6 +1019,19 @@ final class FileViewerPaneViewController: UIViewController {
                 ),
             ]
         ))
+    }
+
+    private func applyTextScale(_ scale: CGFloat, to view: UIView?) {
+        switch view {
+        case let code as FileViewerCodeContentView: code.setTextScale(scale)
+        case let markdown as FileViewerMarkdownContentView: markdown.setTextScale(scale)
+        case let source as FileViewerMarkdownSourceContentView: source.setTextScale(scale)
+        case let diff as FileViewerDiffContentView: diff.setTextScale(scale)
+        default:
+            // Image screens carry their own zoom and the state panels are
+            // chassis chrome — neither answers to the reading size.
+            break
+        }
     }
 
     private func apply(_ body: FileViewerPaneBodyState, to view: UIView) {
@@ -1313,6 +1350,8 @@ final class FileViewerCodeContentView: UIView {
     private(set) var textView = makeFileViewerTextView()
     private var buildTask: Task<Void, Never>?
     private var generation = 0
+    private var textScale = FileViewerTextScale.default
+    private var lastInput: (lines: [HighlightedLine], truncated: Bool, targetLine: Int?)?
 
     override init(frame: CGRect) {
         let caption = UIKitChassisLabel("TRUNCATED", size: 8, color: TallyPalette.caution)
@@ -1358,19 +1397,32 @@ final class FileViewerCodeContentView: UIView {
 
     deinit { buildTask?.cancel() }
 
+    func setTextScale(_ scale: CGFloat) {
+        guard scale != textScale else { return }
+        textScale = scale
+        guard let lastInput else { return }
+        apply(
+            lines: lastInput.lines,
+            truncated: lastInput.truncated,
+            targetLine: lastInput.targetLine
+        )
+    }
+
     func apply(
         lines: [HighlightedLine],
         truncated: Bool = false,
         targetLine: Int? = nil
     ) {
+        lastInput = (lines, truncated, targetLine)
         truncatedBanner.isHidden = !truncated
         generation &+= 1
         let expected = generation
         let preservingOffset = textView.content != nil
+        let scale = textScale
         buildTask?.cancel()
         buildTask = Task { [weak self] in
             let built = await Task.detached {
-                FileViewerTextContent.code(lines, targetLine: targetLine)
+                FileViewerTextContent.code(lines, targetLine: targetLine, scale: scale)
             }.value
             guard !Task.isCancelled, let self, self.generation == expected else { return }
             self.textView.setContent(
@@ -1389,6 +1441,8 @@ final class FileViewerMarkdownSourceContentView: UIView {
     private(set) var textView = makeFileViewerTextView()
     private var buildTask: Task<Void, Never>?
     private var generation = 0
+    private var textScale = FileViewerTextScale.default
+    private var lastText: String?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1408,15 +1462,23 @@ final class FileViewerMarkdownSourceContentView: UIView {
 
     deinit { buildTask?.cancel() }
 
+    func setTextScale(_ scale: CGFloat) {
+        guard scale != textScale else { return }
+        textScale = scale
+        if let lastText { apply(text: lastText) }
+    }
+
     func apply(text: String) {
+        lastText = text
         generation &+= 1
         let expected = generation
         let preservingOffset = textView.content != nil
+        let scale = textScale
         buildTask?.cancel()
         buildTask = Task { [weak self] in
             let built = await Task.detached {
                 let lines = CodeHighlighter.highlight(text, language: nil)
-                return FileViewerTextContent.code(lines, targetLine: nil)
+                return FileViewerTextContent.code(lines, targetLine: nil, scale: scale)
             }.value
             guard !Task.isCancelled, let self, self.generation == expected else { return }
             self.textView.setContent(
@@ -1441,6 +1503,8 @@ final class FileViewerDiffContentView: UIView {
     private var visibleView: UIView?
     private var buildTask: Task<Void, Never>?
     private var generation = 0
+    private var textScale = FileViewerTextScale.default
+    private var lastInput: (diff: GitDiff, scope: FileViewerController.DiffScope)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1452,7 +1516,14 @@ final class FileViewerDiffContentView: UIView {
 
     deinit { buildTask?.cancel() }
 
+    func setTextScale(_ scale: CGFloat) {
+        guard scale != textScale else { return }
+        textScale = scale
+        if let lastInput { apply(diff: lastInput.diff, scope: lastInput.scope) }
+    }
+
     func apply(diff: GitDiff, scope: FileViewerController.DiffScope) {
+        lastInput = (diff, scope)
         generation &+= 1
         let expected = generation
         buildTask?.cancel()
@@ -1464,9 +1535,10 @@ final class FileViewerDiffContentView: UIView {
         let preservingOffset = textView.content != nil
         let repoScope: Bool
         if case .repo = scope { repoScope = true } else { repoScope = false }
+        let scale = textScale
         buildTask = Task { [weak self] in
             let built = await Task.detached {
-                FileViewerTextContent.diff(diff, repoScope: repoScope)
+                FileViewerTextContent.diff(diff, repoScope: repoScope, scale: scale)
             }.value
             guard !Task.isCancelled, let self, self.generation == expected else { return }
             self.textView.setContent(
@@ -1640,7 +1712,8 @@ private enum FileViewerMarkdownInlineRenderer {
     static func render(
         _ inlines: [MarkdownInline],
         baseFont: UIFont,
-        lineSpacing: CGFloat = 0
+        lineSpacing: CGFloat = 0,
+        scale: CGFloat = FileViewerTextScale.default
     ) -> FileViewerMarkdownAttributedText {
         let result = NSMutableAttributedString(string: "")
         var destinations: [URL: String] = [:]
@@ -1660,7 +1733,7 @@ private enum FileViewerMarkdownInlineRenderer {
                 result.append(NSAttributedString(
                     string: value,
                     attributes: [
-                        .font: UIKitChassis.monoFont(11),
+                        .font: UIKitChassis.monoFont(11 * scale),
                         .foregroundColor: CodePalette.string,
                         .backgroundColor: UIKitChassis.bezel,
                     ]
@@ -1682,7 +1755,7 @@ private enum FileViewerMarkdownInlineRenderer {
                 result.append(NSAttributedString(
                     string: "⟨image\(alt.isEmpty ? "" : ": \(alt)")⟩",
                     attributes: [
-                        .font: UIKitChassis.monoFont(10),
+                        .font: UIKitChassis.monoFont(10 * scale),
                         .foregroundColor: UIKitChassis.signal3,
                     ]
                 ))
@@ -1723,7 +1796,7 @@ final class FileViewerMarkdownTextView: UITextView, UITextViewDelegate {
     private var destinations: [URL: String] = [:]
     var openLink: (String) -> Void = { _ in }
     private var lastMeasuredWidth: CGFloat = -1
-    private let attributed: FileViewerMarkdownAttributedText
+    private var attributed: FileViewerMarkdownAttributedText
 
     init(
         attributed: FileViewerMarkdownAttributedText,
@@ -1761,18 +1834,50 @@ final class FileViewerMarkdownTextView: UITextView, UITextViewDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
+    /// Re-renders this block at a new size WITHOUT building another TextKit
+    /// surface — the whole point of restyling a mounted stack in place
+    /// (measured: ~0.9 ms here against ~2.3 ms to create, add and lay out a
+    /// replacement). Clearing first is the same rule `FileViewerTextView`
+    /// documents: assigning over a populated document makes TextKit
+    /// reconcile the two.
+    func update(attributed: FileViewerMarkdownAttributedText) {
+        self.attributed = attributed
+        destinations = attributed.destinations
+        if attributedText.length > 0 {
+            attributedText = NSAttributedString()
+        }
+        attributedText = attributed.text
+        accessibilityLabel = attributed.text.string
+        lastMeasuredWidth = -1
+        measuredHeight = nil
+        invalidateIntrinsicContentSize()
+    }
+
+    /// Measured height per width, because a stack view asks EVERY arranged
+    /// subview for its intrinsic size on any layout pass — without the cache
+    /// one restyled block re-ran CoreText over every other mounted block on
+    /// the screen (the second half of the slow resize, measured 2026-08-06).
+    private var measuredWidth: CGFloat = -1
+    private var measuredHeight: CGFloat?
+
     override var intrinsicContentSize: CGSize {
         let width = bounds.width > 0 ? bounds.width : 320
-        let height = ceil(sizeThatFits(
+        if let measuredHeight, abs(width - measuredWidth) <= 0.5 {
+            return CGSize(width: UIView.noIntrinsicMetric, height: measuredHeight)
+        }
+        let height = max(1, ceil(sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
-        ).height)
-        return CGSize(width: UIView.noIntrinsicMetric, height: max(1, height))
+        ).height))
+        measuredWidth = width
+        measuredHeight = height
+        return CGSize(width: UIView.noIntrinsicMetric, height: height)
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         if abs(bounds.width - lastMeasuredWidth) > 0.5 {
             lastMeasuredWidth = bounds.width
+            measuredHeight = nil
             invalidateIntrinsicContentSize()
         }
     }
@@ -1806,16 +1911,36 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
     /// and mounted blocks are kept (never recycled) so scrolling back is
     /// instant and a live text selection survives.
     private static let mountAhead: CGFloat = 600
+    /// How far past the viewport a resize reaches. Deliberately much smaller
+    /// than `mountAhead`: mounting ahead buys smooth scrolling, while
+    /// restyling ahead only buys work the reader cannot see yet — and a
+    /// resize is a keypress, so what it costs is what it feels like.
+    private static let restyleAhead: CGFloat = 120
     private static let mountBatch = 8
     private static let maximumMountPasses = 24
+
+    /// A mounted block: the view in the stack, and — for prose — the way to
+    /// re-render it at another size in place.
+    private struct MountedBlock {
+        let view: UIView
+        let restyle: ((CGFloat) -> Void)?
+        /// The size this block is currently drawn at. A resize only touches
+        /// what the reader can see, so the rest stay behind until they are
+        /// scrolled toward.
+        var scale: CGFloat
+    }
 
     var openLink: (String) -> Void = { _ in }
     private(set) var scrollView = UIScrollView()
     private(set) var blockStack = UIStackView()
     private var blocks: [MarkdownBlock] = []
+    private var mounted: [MountedBlock] = []
     private var mountedCount = 0
     private var mounting = false
+    private var restyling = false
     private var pendingRestoreOffset: CGFloat?
+    private var textScale = FileViewerTextScale.default
+    private var pinch: FileViewerTextScalePinch?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1857,10 +1982,105 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
             blockStack.widthAnchor.constraint(lessThanOrEqualToConstant: 760),
             pageWidth,
         ])
+        pinch = FileViewerTextScalePinch.install(on: scrollView)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
+
+    /// Resizes what the reader can see, and lets the rest follow.
+    ///
+    /// Two costs make a naive resize slow, both measured on the iPad sim
+    /// (2026-08-06, 160 mounted blocks): tearing the stack down and refilling
+    /// it pays the whole scroll depth before the reader's own block has a
+    /// position (2.7 s), and even restyling every mounted block in place
+    /// still re-measures every TextKit surface in one layout pass (1.5 s).
+    /// So a resize touches only the blocks within a screen of the viewport —
+    /// bounded work, ~20 blocks — and marks the others behind. They catch up
+    /// in `restyleNearViewport` as they are scrolled toward, each batch
+    /// holding the reader's anchor block still so a block finishing above
+    /// them cannot shove the page.
+    func setTextScale(_ scale: CGFloat) {
+        guard scale != textScale else { return }
+        textScale = scale
+        guard mountedCount > 0 else { return }
+        restyleNearViewport()
+        // A smaller size can expose blocks that were never mounted — but that
+        // is the layout cycle's job, not the keypress's: every extra
+        // synchronous pass over a mounted stack of hundreds of TextKit views
+        // is another ~100 ms the reader waits for their own keystroke.
+        setNeedsLayout()
+    }
+
+    /// Brings every mounted block within a screen of the viewport up to the
+    /// current size. Cheap when there is nothing to do — the common case on
+    /// a scroll tick is one comparison per mounted block.
+    private func restyleNearViewport() {
+        guard !restyling, mountedCount > 0 else { return }
+        let top = scrollView.contentOffset.y - Self.restyleAhead
+        let bottom = scrollView.contentOffset.y
+            + max(scrollView.bounds.height, 1) + Self.restyleAhead
+        var indexes: [Int] = []
+        for index in 0..<mountedCount where mounted[index].scale != textScale {
+            let frame = mounted[index].view.convert(
+                mounted[index].view.bounds, to: scrollView
+            )
+            // The stack is ordered, so once a stale block starts below the
+            // window every later one does too.
+            if frame.minY > bottom { break }
+            if frame.maxY >= top { indexes.append(index) }
+        }
+        guard !indexes.isEmpty else { return }
+        restyling = true
+        defer { restyling = false }
+
+        let scale = textScale
+        let anchor = currentAnchor()
+        for index in indexes {
+            if let restyle = mounted[index].restyle {
+                restyle(scale)
+                mounted[index].scale = scale
+                continue
+            }
+            // A fence's row heights and a table's column widths are measured
+            // into constraints at build time — those two are rebuilt.
+            let replacement = makeBlock(blocks[index])
+            let previous = mounted[index].view
+            blockStack.removeArrangedSubview(previous)
+            previous.removeFromSuperview()
+            blockStack.insertArrangedSubview(replacement.view, at: index)
+            mounted[index] = replacement
+        }
+        scrollView.setNeedsLayout()
+        scrollView.layoutIfNeeded()
+        restore(anchor)
+    }
+
+    /// The first mounted block the reader can see, and how far into it they
+    /// are — the pair that survives a reflow.
+    private func currentAnchor() -> (index: Int, offsetInBlock: CGFloat)? {
+        let top = scrollView.contentOffset.y
+        for index in 0..<mountedCount {
+            let frame = mounted[index].view.convert(
+                mounted[index].view.bounds, to: scrollView
+            )
+            if frame.maxY > top {
+                return (index, top - frame.minY)
+            }
+        }
+        return nil
+    }
+
+    private func restore(_ anchor: (index: Int, offsetInBlock: CGFloat)?) {
+        guard let anchor, anchor.index < mountedCount else { return }
+        let view = mounted[anchor.index].view
+        let frame = view.convert(view.bounds, to: scrollView)
+        let limit = max(0, scrollView.contentSize.height - scrollView.bounds.height)
+        scrollView.contentOffset = CGPoint(
+            x: 0,
+            y: min(max(0, frame.minY + anchor.offsetInBlock), limit)
+        )
+    }
 
     func apply(blocks: [MarkdownBlock]) {
         guard self.blocks != blocks else { return }
@@ -1870,6 +2090,7 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
             blockStack.removeArrangedSubview(child)
             child.removeFromSuperview()
         }
+        mounted.removeAll()
         mountedCount = 0
         // The QUIET watch swap keeps the reader where they were, so the fill
         // has to reach the restored offset before it can be applied.
@@ -1884,22 +2105,32 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
         super.layoutSubviews()
         // A width or height change moves the fill line — the pane sizes this
         // view only after `apply(blocks:)` has already run.
+        restyleNearViewport()
         mountBlocksIfNeeded()
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        restyleNearViewport()
         mountBlocksIfNeeded()
     }
 
     private func mountBlocksIfNeeded() {
-        guard !mounting, mountedCount < blocks.count else { return }
+        // A restyle moves the scroll offset to hold the reader's anchor, and
+        // that lands here through `scrollViewDidScroll`. Mounting mid-restyle
+        // would buy a second full layout pass for nothing.
+        guard !mounting, !restyling, mountedCount < blocks.count else { return }
         mounting = true
         defer { mounting = false }
         // contentSize can be stale here: a width change reflows the mounted
         // text to a shorter height only during the scroll view's NEXT layout
         // pass, and reading the old (taller) height makes the reach check
         // decide the viewport is already filled — leaving a half-rendered
-        // page until a scroll re-enters this method.
+        // page until a scroll re-enters this method. The `setNeedsLayout` is
+        // load-bearing: tearing the stack down (a resize remount) leaves the
+        // scroll view itself unmarked, so `layoutIfNeeded` alone returns the
+        // OLD tall height, every batch check reads the viewport as already
+        // filled, and the screen stays blank until the reader scrolls.
+        scrollView.setNeedsLayout()
         scrollView.layoutIfNeeded()
         var passes = 0
         while mountedCount < blocks.count, passes < Self.maximumMountPasses {
@@ -1910,7 +2141,9 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
             guard scrollView.contentSize.height < reach else { break }
             let end = min(mountedCount + Self.mountBatch, blocks.count)
             while mountedCount < end {
-                blockStack.addArrangedSubview(makeBlock(blocks[mountedCount]))
+                let block = makeBlock(blocks[mountedCount])
+                mounted.append(block)
+                blockStack.addArrangedSubview(block.view)
                 mountedCount += 1
             }
             // Resolve the new content height before deciding on another batch.
@@ -1919,28 +2152,54 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
         }
     }
 
-    private func makeBlock(_ block: MarkdownBlock) -> UIView {
+    /// Builds a block's view and, where the block is prose, the cheap way to
+    /// re-render it at another size. A fence's row heights and a table's
+    /// column widths are measured into constraints at build time, so those
+    /// two are rebuilt instead.
+    private func makeBlock(_ block: MarkdownBlock) -> MountedBlock {
         switch block {
         case .heading(let level, let inlines):
-            let rendered = FileViewerMarkdownInlineRenderer.render(
-                inlines,
-                baseFont: Self.headingFont(level)
-            )
-            return inset(
-                FileViewerMarkdownTextView(attributed: rendered, openLink: openLink),
-                top: level <= 2 ? 8 : 4
-            )
-        case .paragraph(let inlines):
-            return FileViewerMarkdownTextView(
+            let text = FileViewerMarkdownTextView(
                 attributed: FileViewerMarkdownInlineRenderer.render(
                     inlines,
-                    baseFont: UIKitChassis.uiFont(13),
-                    lineSpacing: 3
+                    baseFont: Self.headingFont(level, scale: textScale),
+                    scale: textScale
                 ),
                 openLink: openLink
             )
+            return MountedBlock(
+                view: inset(text, top: level <= 2 ? 8 : 4),
+                restyle: { [weak text] scale in
+                    text?.update(attributed: FileViewerMarkdownInlineRenderer.render(
+                        inlines,
+                        baseFont: Self.headingFont(level, scale: scale),
+                        scale: scale
+                    ))
+                },
+                scale: textScale
+            )
+        case .paragraph(let inlines):
+            let text = FileViewerMarkdownTextView(
+                attributed: Self.proseText(inlines, scale: textScale),
+                openLink: openLink
+            )
+            return MountedBlock(
+                view: text,
+                restyle: { [weak text] scale in
+                    text?.update(attributed: Self.proseText(inlines, scale: scale))
+                },
+                scale: textScale
+            )
         case .code(let language, _, let lines):
-            return FileViewerMarkdownCodeFenceView(language: language, lines: lines)
+            return MountedBlock(
+                view: FileViewerMarkdownCodeFenceView(
+                    language: language,
+                    lines: lines,
+                    scale: textScale
+                ),
+                restyle: nil,
+                scale: textScale
+            )
         case .quote(let inner):
             let bar = UIView()
             bar.backgroundColor = UIKitChassis.bezelHi
@@ -1950,36 +2209,68 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
             innerStack.axis = .vertical
             innerStack.alignment = .fill
             innerStack.spacing = 10
-            inner.forEach { innerStack.addArrangedSubview(makeBlock($0)) }
+            let mounted = inner.map { makeBlock($0) }
+            mounted.forEach { innerStack.addArrangedSubview($0.view) }
             let row = UIStackView(arrangedSubviews: [bar, innerStack])
             row.axis = .horizontal
             row.alignment = .fill
             row.spacing = 12
-            return inset(row, left: 2)
+            let restylers = mounted.map(\.restyle)
+            return MountedBlock(
+                view: inset(row, left: 2),
+                // A quote restyles only if everything inside it can.
+                restyle: restylers.allSatisfy { $0 != nil }
+                    ? { scale in restylers.forEach { $0?(scale) } }
+                    : nil,
+                scale: textScale
+            )
         case .listItem(let marker, let level, let inlines):
             let markerLabel = UILabel()
             markerLabel.text = marker
-            markerLabel.font = UIKitChassis.monoFont(11)
+            markerLabel.font = UIKitChassis.monoFont(11 * textScale)
             markerLabel.textColor = UIKitChassis.signal3
             markerLabel.setContentHuggingPriority(.required, for: .horizontal)
             let text = FileViewerMarkdownTextView(
-                attributed: FileViewerMarkdownInlineRenderer.render(
-                    inlines,
-                    baseFont: UIKitChassis.uiFont(13),
-                    lineSpacing: 3
-                ),
+                attributed: Self.proseText(inlines, scale: textScale),
                 openLink: openLink
             )
             let row = UIStackView(arrangedSubviews: [markerLabel, text])
             row.axis = .horizontal
             row.alignment = .firstBaseline
-            row.spacing = 9
-            return inset(row, left: CGFloat(level) * 18)
+            row.spacing = 9 * textScale
+            let container = UIView()
+            container.addSubview(row)
+            row.translatesAutoresizingMaskIntoConstraints = false
+            let leading = row.leadingAnchor.constraint(
+                equalTo: container.leadingAnchor,
+                constant: CGFloat(level) * 18 * textScale
+            )
+            NSLayoutConstraint.activate([
+                leading,
+                row.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                row.topAnchor.constraint(equalTo: container.topAnchor),
+                row.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+            return MountedBlock(
+                view: container,
+                restyle: { [weak markerLabel, weak text, weak row] scale in
+                    markerLabel?.font = UIKitChassis.monoFont(11 * scale)
+                    text?.update(attributed: Self.proseText(inlines, scale: scale))
+                    row?.spacing = 9 * scale
+                    leading.constant = CGFloat(level) * 18 * scale
+                },
+                scale: textScale
+            )
         case .table(let header, let rows):
-            return FileViewerMarkdownTableView(
-                header: header,
-                rows: rows,
-                openLink: openLink
+            return MountedBlock(
+                view: FileViewerMarkdownTableView(
+                    header: header,
+                    rows: rows,
+                    scale: textScale,
+                    openLink: openLink
+                ),
+                restyle: nil,
+                scale: textScale
             )
         case .rule:
             let container = UIView()
@@ -1994,16 +2285,29 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
                 line.centerYAnchor.constraint(equalTo: container.centerYAnchor),
                 line.heightAnchor.constraint(equalToConstant: 1),
             ])
-            return container
+            // A rule carries no type; it is the same at every size.
+            return MountedBlock(view: container, restyle: { _ in }, scale: textScale)
         }
     }
 
-    private static func headingFont(_ level: Int) -> UIFont {
+    private static func proseText(
+        _ inlines: [MarkdownInline],
+        scale: CGFloat
+    ) -> FileViewerMarkdownAttributedText {
+        FileViewerMarkdownInlineRenderer.render(
+            inlines,
+            baseFont: UIKitChassis.uiFont(13 * scale),
+            lineSpacing: 3 * scale,
+            scale: scale
+        )
+    }
+
+    private static func headingFont(_ level: Int, scale: CGFloat) -> UIFont {
         switch level {
-        case 1: UIKitChassis.uiFont(22, weight: .bold)
-        case 2: UIKitChassis.uiFont(17, weight: .bold)
-        case 3: UIKitChassis.uiFont(14, weight: .semibold)
-        default: UIKitChassis.uiFont(13, weight: .semibold)
+        case 1: UIKitChassis.uiFont(22 * scale, weight: .bold)
+        case 2: UIKitChassis.uiFont(17 * scale, weight: .bold)
+        case 3: UIKitChassis.uiFont(14 * scale, weight: .semibold)
+        default: UIKitChassis.uiFont(13 * scale, weight: .semibold)
         }
     }
 
@@ -2032,12 +2336,16 @@ final class FileViewerMarkdownCodeFenceView: UIKitTallyBorderedView {
     private let fenceText: NSAttributedString
     private let textView = UITextView()
 
-    init(language: CodeLanguage?, lines: [String]) {
+    init(
+        language: CodeLanguage?,
+        lines: [String],
+        scale: CGFloat = FileViewerTextScale.default
+    ) {
         let highlighted = CodeHighlighter.highlight(
             lines.joined(separator: "\n"),
             language: language
         )
-        let font = UIKitChassis.monoFont(10.5)
+        let font = UIKitChassis.monoFont(10.5 * scale)
         let italic: UIFont = {
             guard let descriptor = font.fontDescriptor.withSymbolicTraits(.traitItalic)
             else { return font }
@@ -2117,6 +2425,7 @@ final class FileViewerMarkdownTableView: UIKitTallyBorderedView {
     init(
         header: [[MarkdownInline]],
         rows: [[[MarkdownInline]]],
+        scale: CGFloat = FileViewerTextScale.default,
         openLink: @escaping (String) -> Void
     ) {
         super.init(frame: .zero)
@@ -2127,26 +2436,30 @@ final class FileViewerMarkdownTableView: UIKitTallyBorderedView {
             return
         }
 
-        let headerFont = UIKitChassis.uiFont(12, weight: .semibold)
-        let bodyFont = UIKitChassis.uiFont(12)
+        let headerFont = UIKitChassis.uiFont(12 * scale, weight: .semibold)
+        let bodyFont = UIKitChassis.uiFont(12 * scale)
         let allRows = [header] + rows
         let rendered: [[FileViewerMarkdownAttributedText]] = allRows.enumerated().map { rowIndex, cells in
             (0..<columns).map { column in
                 FileViewerMarkdownInlineRenderer.render(
                     column < cells.count ? cells[column] : [],
-                    baseFont: rowIndex == 0 ? headerFont : bodyFont
+                    baseFont: rowIndex == 0 ? headerFont : bodyFont,
+                    scale: scale
                 )
             }
         }
+        // The column clamp travels with the type: a 320 pt ceiling authored
+        // for 12 pt text would wrap every cell at 200%.
+        let widthLimit = 320 * scale
         let widths: [CGFloat] = (0..<columns).map { column in
             let widest = rendered.map { row in
                 ceil(row[column].text.boundingRect(
-                    with: CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude),
+                    with: CGSize(width: widthLimit, height: CGFloat.greatestFiniteMagnitude),
                     options: [.usesLineFragmentOrigin, .usesFontLeading],
                     context: nil
                 ).width) + 20
             }.max() ?? 60
-            return widest.clamped(to: 60...320)
+            return widest.clamped(to: (60 * scale)...widthLimit)
         }
         var rowHeights: [CGFloat] = []
         for row in rendered {
@@ -2159,8 +2472,8 @@ final class FileViewerMarkdownTableView: UIKitTallyBorderedView {
                     options: [.usesLineFragmentOrigin, .usesFontLeading],
                     context: nil
                 ).height) + 12
-            }.max() ?? 32
-            rowHeights.append(max(32, height))
+            }.max() ?? 32 * scale
+            rowHeights.append(max(32 * scale, height))
         }
 
         let scroll = UIScrollView()

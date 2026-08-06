@@ -733,6 +733,17 @@ enum ViewportUMDStyle: Equatable {
 
 @MainActor
 struct ViewportUMDConfiguration {
+    /// A file-viewer tab's reading size, in the same trailing slot the
+    /// terminal's A− / A+ occupy. nil on a ⌗ viewport tab — a web page has
+    /// its own zoom.
+    struct TextScale {
+        var scale: CGFloat
+        var canDecrease: Bool
+        var canIncrease: Bool
+        var step: (Int) -> Void
+        var reset: () -> Void
+    }
+
     var title: String
     var mergeSources: [TerminalWorkspace.WindowEntry]
     var showDeck: () -> Void
@@ -748,12 +759,17 @@ struct ViewportUMDConfiguration {
     /// jumps when you switch between them.
     var minimumContentHeight: CGFloat = 0
     var closeAccessibilityLabel: String
+    /// nil (the default) is a rail with no reading size — every ⌗ viewport
+    /// tab, and any caller that has no file viewer under it.
+    var textScale: TextScale?
 }
 
 enum ViewportUMDAction: Equatable {
     case showDeck
     case merge(UUID)
     case close
+    case textScaleStep(Int)
+    case textScaleReset
 }
 
 /// Native monitor face shared by viewport and file-viewer tabs. Page/file
@@ -776,11 +792,17 @@ final class ViewportUMDViewController: UIViewController {
         private let shellVerticalPadding: CGFloat?
         private let shellMinimumHeight: CGFloat?
         private let closeAccessibilityLabel: String
+        private let textScale: CGFloat?
+        private let textScaleEnds: [Bool]
 
         init(_ configuration: ViewportUMDConfiguration) {
             title = configuration.title
             style = configuration.style
             closeAccessibilityLabel = configuration.closeAccessibilityLabel
+            textScale = configuration.textScale?.scale
+            textScaleEnds = configuration.textScale.map {
+                [$0.canDecrease, $0.canIncrease]
+            } ?? []
             switch configuration.style {
             case .regular:
                 mergeSources = configuration.mergeSources.map {
@@ -811,6 +833,9 @@ final class ViewportUMDViewController: UIViewController {
     private(set) var titleLabel: UIKitChassisLabel?
     private(set) var mergeButton: ViewportMenuButton?
     private(set) var closeChip: UIKitChassisChip?
+    private(set) var textScaleDownChip: UIKitChassisChip?
+    private(set) var textScaleUpChip: UIKitChassisChip?
+    private(set) var textScaleResetChip: UIKitChassisChip?
 
     init(configuration: ViewportUMDConfiguration) {
         self.configuration = configuration
@@ -837,6 +862,8 @@ final class ViewportUMDViewController: UIViewController {
         case .showDeck: configuration.showDeck()
         case .merge(let id): configuration.merge(id)
         case .close: configuration.close()
+        case .textScaleStep(let delta): configuration.textScale?.step(delta)
+        case .textScaleReset: configuration.textScale?.reset()
         }
     }
 
@@ -865,10 +892,15 @@ final class ViewportUMDViewController: UIViewController {
             action: .close
         )
 
+        let textScaleChips = makeTextScaleChips()
+
         let row: UIStackView
         switch configuration.style {
         case .regular:
             var views: [UIView] = [deckChip!, divider(), title]
+            if let textScaleChips {
+                views.append(textScaleChips)
+            }
             if !configuration.mergeSources.isEmpty {
                 let menu = ViewportMenuButton(
                     caption: "MERGE",
@@ -891,7 +923,12 @@ final class ViewportUMDViewController: UIViewController {
             spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
             spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             spacer.widthAnchor.constraint(greaterThanOrEqualToConstant: 4).isActive = true
-            row = UIStackView(arrangedSubviews: [deckChip!, title, spacer, closeChip!])
+            var views: [UIView] = [deckChip!, title, spacer]
+            if let textScaleChips {
+                views.append(textScaleChips)
+            }
+            views.append(closeChip!)
+            row = UIStackView(arrangedSubviews: views)
             row.spacing = 9
         }
         row.axis = .horizontal
@@ -904,6 +941,67 @@ final class ViewportUMDViewController: UIViewController {
             minimumHeight: configuration.minimumContentHeight
         )
         preferredContentSize = fittingContentSize()
+    }
+
+    /// A− / A+ in the trailing cluster, exactly where a terminal tab's rail
+    /// carries them, on every platform. The percentage rides in front of
+    /// them only once the reader has left 100% — it is the readout and the
+    /// way back, and a chip that says "100%" beside a control that just
+    /// moved off it would be the only state on this rail with nothing to
+    /// report.
+    private func makeTextScaleChips() -> UIView? {
+        textScaleDownChip = nil
+        textScaleUpChip = nil
+        textScaleResetChip = nil
+        guard let textScale = configuration.textScale else { return nil }
+
+        var chips: [UIView] = []
+        if textScale.scale != FileViewerTextScale.default {
+            let label = FileViewerTextScale.percentLabel(textScale.scale)
+            let reset = chip(
+                label,
+                accessibility: "Text size \(label); resets to 100 percent",
+                action: .textScaleReset
+            )
+            reset.accessibilityIdentifier = "viewportUMD.textScaleReset"
+            textScaleResetChip = reset
+            chips.append(reset)
+        }
+
+        let smaller = chip(
+            "A−",
+            accessibility: "Smaller text",
+            action: .textScaleStep(-1)
+        )
+        smaller.accessibilityIdentifier = "viewportUMD.textSmaller"
+        setChipEnabled(smaller, textScale.canDecrease)
+        textScaleDownChip = smaller
+        chips.append(smaller)
+
+        let larger = chip(
+            "A+",
+            accessibility: "Larger text",
+            action: .textScaleStep(1)
+        )
+        larger.accessibilityIdentifier = "viewportUMD.textLarger"
+        setChipEnabled(larger, textScale.canIncrease)
+        textScaleUpChip = larger
+        chips.append(larger)
+
+        let group = UIStackView(arrangedSubviews: chips)
+        group.axis = .horizontal
+        group.alignment = .center
+        group.spacing = 4
+        group.isAccessibilityElement = false
+        group.setContentHuggingPriority(.required, for: .horizontal)
+        group.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return group
+    }
+
+    private func setChipEnabled(_ chip: UIKitChassisChip, _ enabled: Bool) {
+        chip.isUserInteractionEnabled = enabled
+        chip.alpha = enabled ? 1 : 0.5
+        chip.accessibilityTraits = enabled ? .button : [.button, .notEnabled]
     }
 
     private func chip(

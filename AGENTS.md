@@ -890,6 +890,34 @@ logic belongs — keep parsing/command-building out of views.
   blips change nothing. Shared auxiliary-pane rules with the viewport: no
   tally dot, no focus claim, `syncTabs` strips controller-less tabs and
   must NEVER mint a `TerminalSessionController` for an auxiliary route.
+  **Reading size is a quantized ladder, app-wide and device-local**
+  (`FileViewerTextScale` pure + tested; `FileViewerTextScaleStore`, the
+  `ThemeStore` precedent): it multiplies the *authored* size,
+  `Theme.typeScale` still last. A pinch snaps to a rung and writes only on a
+  change (`FileViewerTextScalePinch` — a rung costs a rebuild, so never a
+  continuous multiplier); A− / A+ ride the tab's UMD rail
+  (`ViewportUMDConfiguration.textScale`) on EVERY platform —
+  Designed-for-iPad has no pinch — with the percentage in front of them,
+  readout and reset, only off 100%; a ⌗ viewport tab passes nil. The pane
+  reads the store inside its observation, so one pinch resizes every open ▤
+  tab, and the size stays out of `BodyKey`: the live screen rebuilds in
+  place, scroll position and selection with it. Three measured rules keep
+  that rebuild off a second (iPad sim, 2026-08-06). **Clear a TextKit view
+  before refilling it** (`FileViewerTextView.setContent`): assigning over a
+  populated document makes TextKit reconcile the two — 1.4 s for 8 000 lines
+  against 1 + 10 ms, and every screen swap pays it, watch ticks included.
+  **A rendered-markdown resize restyles mounted blocks in place, near the
+  viewport first** (`restyleNearViewport`/`restyleAhead`), the rest catching
+  up as they are scrolled toward with the anchor block held still —
+  remounting costs the whole scroll depth (2.7 s for 160 blocks: every block
+  above the reader is rebuilt before theirs has a position). Only fences and
+  tables are rebuilt, their geometry being measured into constraints.
+  **`FileViewerMarkdownTextView` caches its height per width** — a stack
+  view asks EVERY arranged subview for its intrinsic size on any layout
+  pass, so one restyled block re-ran CoreText over the whole screen.
+  ⚠ `mountBlocksIfNeeded` must `setNeedsLayout` the scroll view before
+  reading `contentSize`, or a teardown's stale tall height reads as a full
+  viewport and the screen stays BLANK until the reader scrolls.
 - **A bound host is one the machine itself vouched for; the app's key goes
   out, never a private key** (`Models/Bind/`, `Services/Bind/`; protocol +
   shared vectors in the companion repo `multiplex-term/multiplex-cli`,

@@ -44,8 +44,14 @@ struct FileViewerTextContent {
     private static let gutterInk = CodePalette.gutter
     private static let plainInk = CodePalette.plain
 
-    private static func mono(_ size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
-        .monospacedSystemFont(ofSize: size * Theme.typeScale, weight: weight)
+    /// `scale` is the reader's choice (`FileViewerTextScale`), authored size
+    /// first and `Theme.typeScale` last — the two never fold into each other.
+    private static func mono(
+        _ size: CGFloat,
+        _ scale: CGFloat,
+        weight: UIFont.Weight = .regular
+    ) -> UIFont {
+        .monospacedSystemFont(ofSize: size * scale * Theme.typeScale, weight: weight)
     }
 
     private static func italic(_ font: UIFont) -> UIFont {
@@ -54,15 +60,16 @@ struct FileViewerTextContent {
         return UIFont(descriptor: descriptor, size: 0)
     }
 
-    private static let paragraphStyle: NSParagraphStyle = {
+    private static func paragraphStyle(_ scale: CGFloat) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
-        style.lineSpacing = 2
+        style.lineSpacing = 2 * scale
         return style
-    }()
+    }
 
     /// Shared assembly: appends one visual line + its decor row, keeping
     /// `lineStarts` true to the joined text.
     private struct Builder {
+        let scale: CGFloat
         let text = NSMutableAttributedString()
         var lineStarts: [Int] = []
         var rows: [Row] = []
@@ -89,21 +96,25 @@ struct FileViewerTextContent {
         func finish() -> NSAttributedString {
             text.addAttribute(
                 .paragraphStyle,
-                value: paragraphStyle,
+                value: paragraphStyle(scale),
                 range: NSRange(location: 0, length: text.length)
             )
             return text
         }
     }
 
-    static func code(_ lines: [HighlightedLine], targetLine: Int?) -> FileViewerTextContent {
-        let font = mono(11)
+    static func code(
+        _ lines: [HighlightedLine],
+        targetLine: Int?,
+        scale: CGFloat = FileViewerTextScale.default
+    ) -> FileViewerTextContent {
+        let font = mono(11, scale)
         let comment = italic(font)
         let target = TallyPalette.caution
         let targetGround = TallyPalette.caution.withAlphaComponent(0.12)
         let inks: [CodeTokenKind: UIColor] = tokenInks()
 
-        var builder = Builder()
+        var builder = Builder(scale: scale)
         for (index, line) in lines.enumerated() {
             let number = index + 1
             builder.line(
@@ -119,17 +130,21 @@ struct FileViewerTextContent {
             text: builder.finish(),
             lineStarts: builder.lineStarts,
             rows: builder.rows,
-            gutterWidth: 56,
-            gutterFont: mono(9),
+            gutterWidth: 56 * scale,
+            gutterFont: mono(9, scale),
             bodyFont: font
         )
     }
 
-    static func diff(_ diff: GitDiff, repoScope: Bool) -> FileViewerTextContent {
-        let font = mono(10.5)
-        let fileFont = mono(10.5, weight: .semibold)
-        let headerFont = mono(9)
-        let signFont = mono(10.5, weight: .semibold)
+    static func diff(
+        _ diff: GitDiff,
+        repoScope: Bool,
+        scale: CGFloat = FileViewerTextScale.default
+    ) -> FileViewerTextContent {
+        let font = mono(10.5, scale)
+        let fileFont = mono(10.5, scale, weight: .semibold)
+        let headerFont = mono(9, scale)
+        let signFont = mono(10.5, scale, weight: .semibold)
         let inks: [CodeTokenKind: UIColor] = tokenInks()
         let addInk = CodePalette.diffAddText
         let deleteInk = CodePalette.diffDeleteText
@@ -146,7 +161,7 @@ struct FileViewerTextContent {
             return String(repeating: " ", count: max(0, 5 - text.count)) + text
         }
 
-        var builder = Builder()
+        var builder = Builder(scale: scale)
         for file in diff.files {
             let language: CodeLanguage? = {
                 if case .code(let detected) = FileKind.classify(
@@ -216,8 +231,8 @@ struct FileViewerTextContent {
             text: builder.finish(),
             lineStarts: builder.lineStarts,
             rows: builder.rows,
-            gutterWidth: 84,
-            gutterFont: mono(8.5),
+            gutterWidth: 84 * scale,
+            gutterFont: mono(8.5, scale),
             bodyFont: font
         )
     }
@@ -246,6 +261,8 @@ final class FileViewerTextView: UITextView {
     private let backdrop = DecorView()
     private let gutter = DecorView()
     private var pendingTargetLine: Int?
+    /// The pinch recognizer holds its target weakly — this is its owner.
+    private var scalePinch: FileViewerTextScalePinch?
     /// Keeps the hand-built TextKit 2 stack alive: the storage retains its
     /// layout managers, which retain the container.
     private let storage: NSTextContentStorage
@@ -271,6 +288,7 @@ final class FileViewerTextView: UITextView {
     required init?(coder: NSCoder) { fatalError("not restorable") }
 
     func installDecor() {
+        scalePinch = FileViewerTextScalePinch.install(on: self)
         for view in [backdrop, gutter] {
             view.backgroundColor = .clear
             view.isUserInteractionEnabled = false
@@ -302,6 +320,14 @@ final class FileViewerTextView: UITextView {
         textContainerInset = UIEdgeInsets(
             top: 10, left: content.gutterWidth, bottom: 12, right: 14
         )
+        // ⚠ Clear before setting. Assigning over a populated document makes
+        // TextKit reconcile the new text against the old one: measured 1.4 s
+        // for an 8 000-line file, against 1 ms to empty it + 10 ms to fill it
+        // (iPad sim, 2026-08-06 — the reported "wait a second for a resize").
+        // Both writes land in one main-thread turn, so nothing paints empty.
+        if attributedText.length > 0 {
+            attributedText = NSAttributedString()
+        }
         attributedText = content.text
         if preservingOffset {
             let limit = max(0, contentSize.height - bounds.height)

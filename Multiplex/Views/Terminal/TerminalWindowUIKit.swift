@@ -679,6 +679,11 @@ final class TerminalWindowViewController: UIViewController,
             for tab in route.tabs where tab.isAuxiliaryPane {
                 _ = workspace.auxiliaryController(for: tab.id)?.tabLabel
             }
+            // The rail's A− / A+ readout — a pinch inside the pane (or the
+            // same chips in another window) has to reach it.
+            if route.tabs.contains(where: \.isFileViewer) {
+                _ = FileViewerTextScaleStore.shared.scale
+            }
             return detectedAgent
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -1668,6 +1673,20 @@ extension TerminalWindowViewController {
         #endif
     }
 
+    /// The reading size a ▤ tab's rail exposes. A ⌗ viewport tab gets none —
+    /// a web page carries its own zoom.
+    private var auxiliaryTextScale: ViewportUMDConfiguration.TextScale? {
+        guard activeTab?.isFileViewer == true else { return nil }
+        let store = FileViewerTextScaleStore.shared
+        return ViewportUMDConfiguration.TextScale(
+            scale: store.scale,
+            canDecrease: store.canStep(by: -1),
+            canIncrease: store.canStep(by: 1),
+            step: { store.step(by: $0) },
+            reset: { store.set(FileViewerTextScale.default) }
+        )
+    }
+
     private func renderUMD() {
         let profile = railProfile
         if activeTab?.isAuxiliaryPane == true {
@@ -1685,7 +1704,8 @@ extension TerminalWindowViewController {
                 contentSafeArea: umdSafeArea,
                 contentVerticalPadding: profile.verticalPadding,
                 minimumContentHeight: profile.minimumHeight,
-                closeAccessibilityLabel: auxiliaryCloseLabel
+                closeAccessibilityLabel: auxiliaryCloseLabel,
+                textScale: auxiliaryTextScale
             )
             if let controller = umdController as? ViewportUMDViewController {
                 controller.update(configuration: configuration)
