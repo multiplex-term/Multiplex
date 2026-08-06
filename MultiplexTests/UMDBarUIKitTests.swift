@@ -137,8 +137,7 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertEqual(compactController.fittingContentSize(for: 375).width, 375)
     }
 
-    #if !os(visionOS)
-    func testWideShellKeepsTheUniversalGuideInOverflow() throws {
+    func testWideRailsCarryGuideAsItsOwnChipNeverInTheOverflow() throws {
         let terminal = terminalController(useMosh: false)
         let controller = UMDBarViewController(configuration: configuration(
             controller: terminal,
@@ -155,14 +154,14 @@ final class UMDBarUIKitTests: XCTestCase {
             hardwareKeyboardConnected: true
         ))
         XCTAssertNotNil(view("umd.shell.wide", in: controller.view))
-        let guideOnly = try XCTUnwrap(
-            control("umd.overflow", in: controller.view) as? UIButton
-        )
-        XCTAssertEqual(
-            actions(in: try XCTUnwrap(guideOnly.menu)).map(\.title),
-            ["Guide"]
-        )
+        let guide = try XCTUnwrap(control("umd.guide", in: controller.view))
+        XCTAssertEqual(guide.accessibilityLabel, "Guide")
+        // With GUIDE out of the menu the keyboard lock is its only other
+        // resident — hidden here (a hardware keyboard is connected, and on
+        // visionOS the row is compiled out), so the ⋯ has nothing to carry.
+        XCTAssertNil(control("umd.overflow", in: controller.view))
 
+        #if !os(visionOS)
         controller.applyObservedState(UMDBarObservedState(
             status: .live,
             contactLost: false,
@@ -175,25 +174,20 @@ final class UMDBarUIKitTests: XCTestCase {
         )
         XCTAssertEqual(
             actions(in: try XCTUnwrap(lock.menu)).map(\.title),
-            ["Lock Keyboard Closed", "Guide"]
+            ["Lock Keyboard Closed"]
         )
+        XCTAssertNotNil(control("umd.guide", in: controller.view))
+        #endif
 
-        controller.applyObservedState(UMDBarObservedState(
-            status: .live,
-            contactLost: false,
-            needsYou: false,
-            keyboardLocked: true,
-            hardwareKeyboardConnected: true
+        let regular = UMDBarViewController(configuration: configuration(
+            controller: terminal
         ))
-        let unlock = try XCTUnwrap(
-            control("umd.overflow", in: controller.view) as? UIButton
-        )
-        XCTAssertEqual(
-            actions(in: try XCTUnwrap(unlock.menu)).map(\.title),
-            ["Unlock Keyboard", "Guide"]
+        regular.loadViewIfNeeded()
+        XCTAssertNotNil(
+            control("umd.guide", in: regular.view),
+            "the classic window rail carries the chip too"
         )
     }
-    #endif
 
     func testCompactOverflowContainsDisplacedActionsMergeDestructionAndFileSources() throws {
         let terminal = terminalController(useMosh: false)
@@ -220,10 +214,14 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertEqual(menu.children.compactMap { ($0 as? UIMenu)?.title }, [
             "Text Size", "New Tab", "Send File…", "Merge Window", "",
         ])
+        XCTAssertNil(
+            control("umd.guide", in: controller.view),
+            "the compact row displaces every direct action, GUIDE included"
+        )
         XCTAssertTrue(allActions.map(\.title).contains("Guide"))
         XCTAssertEqual(
             allActions.first { $0.title == "Guide" }?.identifier,
-            UIAction.Identifier("umd.guide")
+            UIAction.Identifier("umd.guide.action")
         )
         #if os(visionOS)
         // Keyboard lock is an iPad software-keyboard affordance. The

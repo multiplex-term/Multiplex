@@ -6,7 +6,7 @@ Multiplex 1.3.0 — run herdr instead of tmux, select text in any pane, and hear
 • Agent alerts now reach you about the session you were last looking at — the one most likely to be running an agent, and the one that used to stay silent. Notification permission is asked while Multiplex is on screen instead of riding your first alert.
 • On iPad, a terminal window wears its own title bar: DECK, the session title, LIVE, A− A+, + TAB, FILE, TMUX, and DETACH on one slim row that matches the key rail at the other end of the pane.
 • Drag window tabs into the order you want. The File Viewer gains tabs of its own — long-press a file in the tree to open it beside the first — plus ◂ ▸ browse history, and it keeps DIFF selected as you move between changed files.
-• Every terminal's ⋯ menu leads to Guide, an illustrated field manual of that tab's gestures.
+• Every terminal carries a GUIDE chip, an illustrated field manual of that tab's gestures.
 • Under mouse reporting each tap now reaches the remote immediately, one click per tap, so a TUI's own double-click lands. Widgets and Shortcuts can launch agents on herdr hosts and into an existing session. Settings → About lists every open-source component in the binary with its full license text.
 • The agent strip no longer carries STOP: press ESC on the key rail to interrupt a turn.
 • Rebuilt on UIKit throughout, for steadier typing, scrolling, and window handling.

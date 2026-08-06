@@ -7,6 +7,6 @@ Multiplex 1.3.0 — a smoked Glass appearance, herdr as an alternative to tmux, 
 • The ESC / CTRL / TAB key cluster now sits wholly below the window instead of straddling its bottom edge, and the shortcut, Command Setup, and agent History popovers clear the rounded platter's corners.
 • Agent alerts now reach you about the session you were last looking at — the one most likely to be running an agent, and the one that used to stay silent. Notification permission is asked while Multiplex is on screen instead of riding your first alert, and Host Settings → Monitoring adds a Keep alive in background switch, off by default, that holds an opted-in host's sessions and probing open for the extra running time the system grants after you leave.
 • Drag window tabs into the order you want. The File Viewer gains tabs of its own — long-press a file in the tree to open it beside the first — plus ◂ ▸ browse history, and it keeps DIFF selected as you move between changed files.
-• Every terminal's ⋯ menu leads to Guide, an illustrated field manual of that tab's gestures. Settings → About lists every open-source component in the binary with its full license text.
+• Every terminal carries a GUIDE chip, an illustrated field manual of that tab's gestures. Settings → About lists every open-source component in the binary with its full license text.
 • The agent strip no longer carries STOP: press ESC in the key cluster to interrupt a turn.
 • Rebuilt on UIKit throughout, for steadier typing, scrolling, and window handling.

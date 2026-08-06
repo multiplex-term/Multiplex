@@ -7,7 +7,7 @@ NEW IN 1.3.0
 • TERMINAL TITLE BAR (iPad, Designed for iPad) — the system bar is replaced by the app's own slim rail, matching the key rail at the pane's other end; the window pill rides the top edge.
 • FILE VIEWER — its own tabs (long-press a file ▸ Open in New Tab), ◂ ▸ browse history, and DIFF stays selected as you move between changed files.
 • WINDOW TABS — drag to reorder, on every platform.
-• GUIDE — a terminal's ⋯ ▸ Guide, an illustrated field manual of that tab's gestures.
+• GUIDE — a chip on the terminal's title rail (⋯ ▸ Guide on a narrow window), an illustrated field manual of that tab's gestures.
 • OPEN SOURCE LICENSES — Settings ▸ About, all 13 shipped components with full text.
 • FASTER TAPS — under mouse reporting each tap reaches the remote immediately, one click per tap, so a TUI's own double-click works.
 • The agent strip's STOP chip is gone; ESC on the key rail (or the Vision Pro key cluster) interrupts a turn.

@@ -357,6 +357,7 @@ final class UMDBarViewController: UIViewController,
         if !configuration.mergeSources.isEmpty {
             views.append(mergeButton())
         }
+        views.append(guideButton())
         if let overflow = overflowButtonIfNeeded(displacesDirectActions: false) {
             views.append(overflow)
         }
@@ -441,6 +442,7 @@ final class UMDBarViewController: UIViewController,
             if !configuration.mergeSources.isEmpty {
                 views.append(mergeButton())
             }
+            views.append(guideButton())
             if let overflow = overflowButtonIfNeeded(
                 displacesDirectActions: false
             ) {
@@ -551,6 +553,17 @@ final class UMDBarViewController: UIViewController,
             identifier: "umd.merge",
             accessibilityLabel: "Merge another window into this one",
             menu: makeMergeMenu(titled: false)
+        )
+    }
+
+    /// GUIDE is a direct chip wherever the rail has room; only the compact
+    /// row — which displaces every direct action — carries it in the `⋯`.
+    private func guideButton() -> UMDBarButton {
+        actionButton(
+            caption: "GUIDE",
+            identifier: "umd.guide",
+            accessibilityLabel: "Guide",
+            action: .showGuide
         )
     }
 
@@ -778,14 +791,15 @@ final class UMDBarViewController: UIViewController,
             ))
         }
         #endif
-        children.append(menuAction(
-            title: "Guide",
-            image: UIImage(systemName: "questionmark.circle"),
-            identifier: "umd.guide",
-            action: .showGuide
-        ))
-
         if displacesDirectActions {
+            // The wide rows carry GUIDE as its own chip; it rides the menu
+            // only where the direct actions have been displaced.
+            children.append(menuAction(
+                title: "Guide",
+                image: UIImage(systemName: "questionmark.circle"),
+                identifier: "umd.guide.action",
+                action: .showGuide
+            ))
             children.append(UIMenu(
                 title: "Text Size",
                 options: .displayInline,

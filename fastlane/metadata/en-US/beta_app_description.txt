@@ -18,7 +18,7 @@ WHERE THINGS ARE
 - Long-press, double-tap, or secondary-click the terminal for SELECT / SELECT ALL / PASTE on either backend; the selection stays inside that pane. herdr tabs add MENU, which opens herdr's own pane menu at that cell.
 - FILE uploads from Photos, Files, or the camera into the active pane's working directory and types the remote path without pressing Return. Dragging a file in does the same.
 - + TAB → File Viewer browses host files and git diffs; long-press a path in terminal output to open that file beside the session.
-- A terminal's ⋯ → Guide is an illustrated field manual of the gestures for that tab.
+- A terminal's GUIDE chip is an illustrated field manual of the gestures for that tab.
 - DETACH closes the window; the remote session keeps running and its tile stays on the wall.
 - Home Screen widgets show a host's last-known sessions plus SHELL and AGENT keys; Shortcuts and Siri can open a shell or launch an agent.
 
