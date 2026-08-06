@@ -195,20 +195,30 @@ enum ExternalActionPerformer {
         context: ExternalActionRouter.Context
     ) async {
         guard let model = await connectedModel(for: host, context: context) else { return }
-        let sessions = model.tmux.sessions
+        // Every monitored backend's sessions. A name alone is ambiguous on
+        // a mixed host, so the record that matches carries the backend the
+        // attach must use — `host.sessionBackend` answers for the primary
+        // only, and is the tie-break rather than the assumption.
+        let sessions = model.allSessions
         // A widget tile names the exact session it showed; a session that
         // died since that snapshot falls back to the most recent (fail-soft,
         // same spirit as the deck's tiles resurrecting from a live probe).
         let requested = requestedSession.flatMap { name in
-            sessions.first { $0.name == name }?.name
+            sessions.first { $0.name == name }
         }
-        if let target = requested ?? ExternalActionPlan.mostRecentSessionName(in: sessions) {
+        let fallback = ExternalActionPlan.mostRecentSessionName(in: sessions)
+            .flatMap { name in sessions.first { $0.name == name } }
+        if let target = requested ?? fallback {
             if context.workspace.focusTab(
                 hostID: host.id,
-                sessionName: target,
-                backend: host.sessionBackend
+                sessionName: target.name,
+                backend: target.backend
             ) { return }
-            open(mode: .attach(host: host, sessionName: target), on: host, context: context)
+            open(
+                mode: .attach(host: host, session: target),
+                on: host,
+                context: context
+            )
         } else {
             // Headless creation inherits the New Session sheet's remembered
             // setup script (nil unless its REMEMBER opt-in is on) — a widget
@@ -257,9 +267,13 @@ enum ExternalActionPerformer {
         // stays a visible failure instead — a fallback mint there would
         // hide it behind a surprise second session.
         if case .existingSession(let name, let placement) = target,
-           let session = model.tmux.sessions.first(where: { $0.name == name }) {
+           let session = model.allSessions.first(where: { $0.name == name }) {
             guard let mode = await model.launchInSession(
                 named: session.name,
+                // The TARGET session's backend, not the host's: an `in=tab`
+                // launch aimed at a herdr session on a tmux-primary host
+                // must run herdr's verbs.
+                backend: session.backend,
                 placement: placement,
                 // Same rule as the fresh-session mint below: the Working
                 // Directory field, else the host's first configured dir —
@@ -270,7 +284,8 @@ enum ExternalActionPerformer {
                 typing: launch
             ) else {
                 presentLaunchInSessionFailure(
-                    session: session.name, placement: placement,
+                    session: session.name, backend: session.backend,
+                    placement: placement,
                     for: model, host: host, context: context)
                 return
             }
@@ -280,7 +295,7 @@ enum ExternalActionPerformer {
             if context.workspace.focusTab(
                 hostID: host.id,
                 sessionName: session.name,
-                backend: host.sessionBackend
+                backend: session.backend
             ) { return }
             open(mode: mode, on: host, context: context)
             return
@@ -328,12 +343,15 @@ enum ExternalActionPerformer {
     /// the person configured "New Tab"/"New Workspace"/"New Window" and the
     /// alert should say which one didn't happen.
     private static func presentLaunchInSessionFailure(
-        session: String, placement: ExternalSessionPlacement,
+        session: String, backend: Host.SessionBackend,
+        placement: ExternalSessionPlacement,
         for model: HostConnectionModel, host: Host,
         context: ExternalActionRouter.Context
     ) {
         let noun: String
-        switch (host.sessionBackend, placement) {
+        // The RESOLVED session's backend names the thing that didn't
+        // happen, not the host's primary.
+        switch (backend, placement) {
         case (.tmux, _): noun = "window"
         case (.herdr, .tab): noun = "tab"
         case (.herdr, .workspace): noun = "workspace"

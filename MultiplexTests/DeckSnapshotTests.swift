@@ -37,7 +37,7 @@ final class DeckSnapshotTests: XCTestCase {
                     serverHost: "Jhen-MBPr14.local"
                 ),
             ],
-            miniatures: ["main": ["$ make test", "ok"]]
+            miniatures: ["tmux:main": ["$ make test", "ok"]]
         )
     }
 
@@ -51,8 +51,10 @@ final class DeckSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.sessions[0].detectedAgents, [.claudeCode, .codex, .pi])
         XCTAssertEqual(decoded.sessions[0].paneCount, 3)
         XCTAssertTrue(decoded.sessions[0].isAttached)
-        XCTAssertEqual(decoded.miniatures["main"], ["$ make test", "ok"])
+        XCTAssertEqual(decoded.miniatures["tmux:main"], ["$ make test", "ok"])
         XCTAssertEqual(decoded.sessionBackend, .tmux)
+        XCTAssertEqual(decoded.sessions[0].backend, .tmux)
+        XCTAssertTrue(decoded.keysCarryBackend)
         // A cold launch must still be able to tell a real pane title from
         // tmux's seeded hostname, so the server host rides the snapshot.
         XCTAssertEqual(decoded.sessions[0].serverHost, "Jhen-MBPr14.local")
@@ -135,6 +137,59 @@ final class DeckSnapshotTests: XCTestCase {
         XCTAssertNil(DeckSnapshotStore(fileURL: file).snapshot(for: hostID))
     }
 
+    /// A file written before mixed hosts carries one whole-file backend,
+    /// session records with no `backend` key, and BARE-name miniature keys.
+    /// Read literally, a herdr host's cache would paint tmux-labelled tiles
+    /// with no miniatures until the first live probe — so the decoder
+    /// migrates it forward instead.
+    func testALegacySingleBackendSnapshotMigratesForward() throws {
+        let legacy = """
+        {
+          "sessions": [{
+            "name": "mpx-demo",
+            "windows": [],
+            "clientCount": 0,
+            "created": 763000000,
+            "tmuxID": "mpx-demo"
+          }],
+          "miniatures": { "mpx-demo": ["$ herdr", "ok"] },
+          "sessionBackend": "herdr"
+        }
+        """
+        let decoded = try JSONDecoder().decode(
+            DeckSnapshot.self, from: Data(legacy.utf8))
+
+        XCTAssertEqual(decoded.sessionBackend, .herdr)
+        XCTAssertEqual(decoded.sessions.map(\.backend), [.herdr])
+        XCTAssertEqual(decoded.sessions[0].id, SessionKey(backend: .herdr, name: "mpx-demo"))
+        XCTAssertEqual(decoded.miniatures["herdr:mpx-demo"], ["$ herdr", "ok"])
+        XCTAssertNil(decoded.miniatures["mpx-demo"])
+        XCTAssertTrue(decoded.keysCarryBackend)
+    }
+
+    /// The overwhelmingly common legacy file: a tmux host. It must land on
+    /// exactly what it always meant, with no key rewriting visible.
+    func testALegacyTmuxSnapshotDecodesUnchanged() throws {
+        let legacy = """
+        {
+          "sessions": [{
+            "name": "main",
+            "windows": [],
+            "clientCount": 1,
+            "created": 763000000,
+            "tmuxID": "$0"
+          }],
+          "miniatures": { "main": ["$ make test"] }
+        }
+        """
+        let decoded = try JSONDecoder().decode(
+            DeckSnapshot.self, from: Data(legacy.utf8))
+
+        XCTAssertEqual(decoded.sessionBackend, .tmux)
+        XCTAssertEqual(decoded.sessions[0].id, SessionKey(backend: .tmux, name: "main"))
+        XCTAssertEqual(decoded.miniatures["tmux:main"], ["$ make test"])
+    }
+
     @MainActor
     func testModelNeverRestoresAnotherBackendsCache() {
         var host = Host(name: "devbox", hostname: "example.test", username: "dev")
@@ -154,7 +209,10 @@ final class DeckSnapshotTests: XCTestCase {
 
         model.restore(from: sampleSnapshot())
         XCTAssertEqual(model.tmux.sessions.map(\.name), ["main"])
-        XCTAssertEqual(model.miniatures["main"], ["$ make test", "ok"])
+        XCTAssertEqual(
+            model.miniatures[SessionKey(backend: .tmux, name: "main")],
+            ["$ make test", "ok"]
+        )
         // Liveness stays untouched: the rail still reads STANDBY, and
         // attention is re-earned by a live capture, never restored.
         XCTAssertEqual(model.phase, .idle)

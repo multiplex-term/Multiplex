@@ -431,6 +431,7 @@ final class FleetWallUIKitTests: XCTestCase {
             usesTmuxAttentionFallback: true,
             hasOpenTab: true,
             sessionBackend: .tmux,
+            showsBackendIdentity: false,
             compact: false,
             selected: true,
             duplicateAttachTitle: "Attach in New Window",
@@ -468,6 +469,7 @@ final class FleetWallUIKitTests: XCTestCase {
             usesTmuxAttentionFallback: true,
             hasOpenTab: true,
             sessionBackend: .tmux,
+            showsBackendIdentity: false,
             compact: false,
             selected: false,
             duplicateAttachTitle: "Attach in New Window",
@@ -640,6 +642,7 @@ final class FleetWallUIKitTests: XCTestCase {
                 usesTmuxAttentionFallback: false,
                 hasOpenTab: hasOpenTab,
                 sessionBackend: .herdr,
+                showsBackendIdentity: false,
                 compact: false,
                 selected: false,
                 duplicateAttachTitle: "Attach in New Window",
@@ -697,6 +700,7 @@ final class FleetWallUIKitTests: XCTestCase {
                 usesTmuxAttentionFallback: true,
                 hasOpenTab: false,
                 sessionBackend: .tmux,
+                showsBackendIdentity: false,
                 compact: false,
                 selected: false,
                 duplicateAttachTitle: "Attach in New Window",
@@ -747,7 +751,10 @@ final class FleetWallUIKitTests: XCTestCase {
             .move
         )
         target.dropInteraction(drop, performDrop: dropSession)
-        XCTAssertEqual(dropped, [sourceSession.name])
+        // The reorder payload is the dragged tile's `SessionKey.storageKey`,
+        // not its bare name: a mixed host's saved order is a list of these,
+        // and two backends can hold the same name.
+        XCTAssertEqual(dropped, [sourceSession.id.storageKey])
 
         let sourceDrop = try XCTUnwrap(
             source.interactions.compactMap { $0 as? UIDropInteraction }.first
@@ -779,6 +786,7 @@ final class FleetWallUIKitTests: XCTestCase {
             usesTmuxAttentionFallback: true,
             hasOpenTab: false,
             sessionBackend: .tmux,
+            showsBackendIdentity: false,
             compact: false,
             selected: false,
             duplicateAttachTitle: "Attach in New Window",

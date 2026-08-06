@@ -164,7 +164,9 @@ final class TerminalSessionController {
     private var terminalAgentHint: AgentKind?
     private var lastTerminalTitleProcessedForAgentHint: String?
     private var directShellAttentionAgent: AgentKind?
-    private var directShellAttentionTracker = AttentionTracker()
+    /// Keyed by this tab's own UUID: a direct shell has no session record,
+    /// so there is nothing else to key an edge baseline by.
+    private var directShellAttentionTracker = AttentionTracker<String>()
     private(set) var dropState: DropState?
     private var dropTask: Task<Void, Never>?
     private var dropClearTask: Task<Void, Never>?

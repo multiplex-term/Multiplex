@@ -182,7 +182,7 @@ final class TmuxProbeTests: XCTestCase {
     }
 
     func testProbeCommandCarriesDetectionStages() {
-        let command = TmuxProbe.probeCommand
+        let command = TmuxProbe.probeCommand()
         XCTAssertTrue(command.contains("tmux -u list-panes -a"))
         XCTAssertTrue(command.contains(
             "#{pane_id} #{pane_pid} #{pane_tty} #{pane_current_command} #{pane_title}"))
@@ -211,7 +211,7 @@ final class TmuxProbeTests: XCTestCase {
         // `#{pane_current_path}` any non-ASCII directory. Verified live
         // against the harness: bare tmux returned "_ Claude Code".
         let commands = [
-            TmuxProbe.probeCommand,
+            TmuxProbe.probeCommand(),
             TmuxProbe.activePaneCommand(sessionName: "main"),
             TmuxProbe.dropDestinationCommand(sessionName: "main"),
             TmuxProbe.killCommand(for: TmuxSession(
@@ -312,7 +312,7 @@ final class TmuxProbeTests: XCTestCase {
         // The miniatures ride the same exec: a server-side loop captures
         // every session behind MULTIPLEX_TAILS, with markers carrying tmux's
         // own session ids — never names, which could forge the framing.
-        let command = TmuxProbe.probeCommand
+        let command = TmuxProbe.probeCommand()
         XCTAssertTrue(command.contains("echo MULTIPLEX_TAILS"))
         XCTAssertTrue(command.contains(
             "tmux -u list-sessions -F '#{session_id}' 2>/dev/null | while IFS= read -r s; do"))

@@ -23,8 +23,11 @@ final class HostStore {
     /// this host". Device-local bookkeeping, so UserDefaults is fine.
     private var mirroredIDs: Set<UUID>
     private static let mirroredIDsKey = "MultiplexMirroredHostIDs"
-    /// Device-local deck preference: host ID → session names in display
-    /// order. tmux remains the source of truth for which sessions exist.
+    /// Host → the user's tile order as `SessionKey.storageKey` strings.
+    /// The backends remain the source of truth for which sessions exist.
+    /// Device-local presentation preference. Entries written before mixed
+    /// hosts are bare names, which `SessionKey(storageKey:)` reads as tmux
+    /// keys — exactly what they were — so the file needs no migration.
     private var sessionOrders: [UUID: [String]] = [:]
     private static let sessionOrdersKey = "MultiplexSessionOrders"
     private var isRefreshingFromCloud = false
@@ -52,6 +55,7 @@ final class HostStore {
             #if DEBUG
             installDebugHostEnableHook()
             installDebugHostKeepAliveHook()
+            installDebugBackendOfferHook()
             #endif
         }
     }
@@ -82,6 +86,7 @@ final class HostStore {
         persistMirroredIDs()
         sessionOrders.removeValue(forKey: host.id)
         persistSessionOrders()
+        BackendOfferPreferences().forget(hostID: host.id)
         save()
     }
 
@@ -130,6 +135,30 @@ final class HostStore {
         guard let host = host(id: hostID), host.sessionBackend != backend else { return }
         var updated = host
         updated.sessionBackend = backend
+        // The new primary can never also be a secondary — `monitoredBackends`
+        // would list it twice and the wall would probe it twice.
+        updated.secondaryBackends.remove(backend)
+        update(updated)
+    }
+
+    /// Start or stop showing another backend's sessions on this host's deck.
+    /// The one writer of `Host.secondaryBackends` — discovery never writes
+    /// it, only offers. Turning a backend ON also clears any device-local
+    /// dismissal of its offer, so the rail chip and Host Settings can't
+    /// contradict each other.
+    func setSecondaryBackend(
+        _ monitored: Bool, backend: Host.SessionBackend, for hostID: UUID
+    ) {
+        guard let host = host(id: hostID), backend != host.sessionBackend else { return }
+        var updated = host
+        if monitored {
+            updated.secondaryBackends.insert(backend)
+            BackendOfferPreferences().setDismissed(
+                false, backend: backend, for: hostID)
+        } else {
+            updated.secondaryBackends.remove(backend)
+        }
+        guard updated.secondaryBackends != host.secondaryBackends else { return }
         update(updated)
     }
 
@@ -164,11 +193,14 @@ final class HostStore {
         SessionOrdering.ordered(sessions, saved: sessionOrders[hostID])
     }
 
+    /// Sources and destination are `SessionKey.storageKey` strings, not
+    /// bare names: on a mixed host the wall interleaves two backends whose
+    /// session names can collide.
     func moveSessions(
         _ sources: [String], before destination: String?, for hostID: UUID,
         available sessions: [TmuxSession]
     ) {
-        let current = orderedSessions(sessions, for: hostID).map(\.name)
+        let current = orderedSessions(sessions, for: hostID).map(\.id.storageKey)
         setSessionOrder(
             SessionOrdering.moving(sources, before: destination, in: current),
             for: hostID,
@@ -180,7 +212,7 @@ final class HostStore {
         _ source: String, to target: String, for hostID: UUID,
         available sessions: [TmuxSession]
     ) {
-        let current = orderedSessions(sessions, for: hostID).map(\.name)
+        let current = orderedSessions(sessions, for: hostID).map(\.id.storageKey)
         setSessionOrder(
             SessionOrdering.moving(source, to: target, in: current),
             for: hostID,
@@ -323,6 +355,15 @@ final class HostStore {
             .flatMap(Host.SessionBackend.init(rawValue:)) {
             host.sessionBackend = backend
         }
+        // A seeded `secondaryBackends: ["herdr"]` imports a MIXED host, so a
+        // headless run can prove two probes on one connection and both
+        // backends' tiles. Absent leaves the host single-backend, which is
+        // what every existing seed means.
+        if let secondaries = seed.secondaryBackends {
+            host.secondaryBackends = Set(
+                secondaries.compactMap(Host.SessionBackend.init(rawValue:))
+            ).subtracting([host.sessionBackend])
+        }
         if let path = seed.moshServerPath { host.moshServerPath = path }
         if let ports = seed.moshPorts { host.moshPorts = ports }
         // Optional so existing seeds leave the host's dirs alone; used by
@@ -407,6 +448,31 @@ final class HostStore {
         }
     }
 
+    /// Headless-verification hook for the rail's backend offer: the chip
+    /// can't be tapped from the CLI (simctl has no tap route, and idb died
+    /// under Xcode 27), so
+    /// `xcrun simctl spawn <udid> notifyutil -p app.multiplexterm.multiplex.debug.backendoffer`
+    /// accepts it for the FIRST host through the exact store mutation the
+    /// chip's confirmation and Host Settings both perform. Toggles, so one
+    /// run can prove the escalation and the way back.
+    private func installDebugBackendOfferHook() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.backendoffer", &token, .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let host = self.hosts.first else { return }
+                let other: Host.SessionBackend =
+                    host.sessionBackend == .herdr ? .tmux : .herdr
+                self.setSecondaryBackend(
+                    !host.secondaryBackends.contains(other),
+                    backend: other,
+                    for: host.id
+                )
+            }
+        }
+    }
+
     private struct SeedHost: Decodable {
         var name: String
         var hostname: String
@@ -419,6 +485,7 @@ final class HostStore {
         var backgroundKeepAlive: Bool?
         var useMosh: Bool?
         var sessionBackend: String?
+        var secondaryBackends: [String]?
         var moshServerPath: String?
         var moshPorts: String?
         var workingDirs: [String]?

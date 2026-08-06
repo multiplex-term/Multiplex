@@ -431,7 +431,9 @@ final class HerdrProbeTests: XCTestCase {
             ]
         )
 
-        XCTAssertTrue(command.hasPrefix(HerdrProbe.pathPrefix))
+        // The tmux discovery rider leads (a primary probe's default), so the
+        // path prefix follows it rather than opening the command.
+        XCTAssertTrue(command.contains(HerdrProbe.pathPrefix))
         XCTAssertTrue(command.contains(
             "command -v herdr >/dev/null 2>&1 || { echo MULTIPLEX_NO_HERDR; exit 0; }"))
         XCTAssertTrue(command.contains("herdr status --json 2>/dev/null || true"))
@@ -950,13 +952,16 @@ final class HerdrProbeTests: XCTestCase {
     }
 }
 
-/// The tmux probe's herdr-presence line — the dead-tile switch hint's
-/// input. Presence rides every tick; only dead tiles read it.
+/// The tmux probe's herdr presence answer — the dead-tile switch hint's
+/// input. It now rides the discovery rider (`BackendDiscovery`), which
+/// answers presence AND session count for the same ~1 ms the old standalone
+/// `command -v herdr` cost. Presence rides every tick; only dead tiles read
+/// it.
 final class TmuxProbeHerdrPresenceTests: XCTestCase {
     func testProbeCommandChecksHerdrBeforeTheTmuxGuard() {
-        let command = TmuxProbe.probeCommand
+        let command = TmuxProbe.probeCommand()
         let herdrCheck = command.range(of: "command -v herdr")
-        let tmuxGuard = command.range(of: "command -v tmux")
+        let tmuxGuard = command.range(of: "command -v tmux >/dev/null 2>&1 || {")
         XCTAssertNotNil(herdrCheck)
         XCTAssertNotNil(tmuxGuard)
         if let herdrCheck, let tmuxGuard {
@@ -967,14 +972,29 @@ final class TmuxProbeHerdrPresenceTests: XCTestCase {
                       "the hint must see the same Cargo install the herdr probe can run")
     }
 
-    func testParseProbeReadsThePresenceMarker() {
-        let missingWithHerdr = TmuxProbe.parseProbe(
-            "MULTIPLEX_HERDR_PRESENT\nMULTIPLEX_NO_TMUX\n")
+    func testParseProbeReadsPresenceFromTheDiscoveryRider() {
+        let missingWithHerdr = TmuxProbe.parseProbe("""
+            \(BackendDiscovery.beginMarker) herdr
+            MPXD_PRESENT
+            {"sessions":[]}
+            \(BackendDiscovery.endMarker)
+            MULTIPLEX_NO_TMUX
+            """)
         XCTAssertEqual(missingWithHerdr.state, .tmuxMissing)
         XCTAssertTrue(missingWithHerdr.herdrPresent)
 
+        let installedElsewhere = TmuxProbe.parseProbe("""
+            \(BackendDiscovery.beginMarker) herdr
+            \(BackendDiscovery.endMarker)
+            MULTIPLEX_NO_TMUX
+            """)
+        XCTAssertFalse(installedElsewhere.herdrPresent)
+
+        // No rider at all (a secondary probe, or a truncated response) must
+        // not read as "herdr is absent" — that would retract a live hint.
         let missingAlone = TmuxProbe.parseProbe("MULTIPLEX_NO_TMUX\n")
         XCTAssertFalse(missingAlone.herdrPresent)
+        XCTAssertNil(missingAlone.discovery[.herdr])
     }
 }
 
@@ -1008,23 +1028,39 @@ final class HerdrRouteTests: XCTestCase {
 
     func testAttachFactoryPicksTheBackend() {
         var host = Host(name: "box", hostname: "10.0.0.1", username: "dev")
-        let session = TmuxSession(
+        var session = TmuxSession(
             name: "work", windows: [], created: .distantPast, tmuxID: "work")
 
         XCTAssertEqual(
             TerminalRoute.Mode.attach(host: host, session: session),
             .attach(sessionName: "work")
         )
+        // A session RECORD carries its own backend, and that is what
+        // decides. On a mixed host the tmux `work` and the herdr `work` are
+        // two tiles that attach two different ways, so flipping the HOST's
+        // primary must not change how an existing tmux record opens.
         host.sessionBackend = .herdr
+        host.secondaryBackends = [.tmux]
+        XCTAssertEqual(
+            TerminalRoute.Mode.attach(host: host, session: session),
+            .attach(sessionName: "work")
+        )
+        session.backend = .herdr
         XCTAssertEqual(
             TerminalRoute.Mode.attach(host: host, session: session),
             .herdrAttach(sessionName: "work")
         )
         // The name-based overload serves callers holding only a name
-        // (auto-attach entries, widget targets) — no fabricated session.
+        // (auto-attach entries, widget and URL targets that named no
+        // backend) — no fabricated session. It falls back to the host's
+        // PRIMARY, the documented tie-break.
         XCTAssertEqual(
             TerminalRoute.Mode.attach(host: host, sessionName: "work"),
             .herdrAttach(sessionName: "work")
+        )
+        XCTAssertEqual(
+            TerminalRoute.Mode.attach(backend: .tmux, sessionName: "work"),
+            .attach(sessionName: "work")
         )
     }
 

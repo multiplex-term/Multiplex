@@ -617,8 +617,13 @@ final class TerminalWindowViewController: UIViewController,
         guard let sessionName = activeTab.sessionName else {
             return activeController?.directShellAgent
         }
+        // Any backend this host MONITORS can answer — on a mixed host the
+        // probe carries both, and a tab on the secondary deserves its agent
+        // chips too. A tab whose backend the host no longer monitors gets
+        // nothing rather than a same-named record from the other one.
         guard let host = store.host(id: activeTab.hostID),
-              activeTab.sessionBackend == host.sessionBackend
+              let backend = activeTab.sessionBackend,
+              host.monitoredBackends.contains(backend)
         else { return nil }
         let model = hub.model(for: host)
         // One expression serves both backends on purpose: a herdr tile IS
@@ -626,7 +631,7 @@ final class TerminalWindowViewController: UIViewController,
         // record (active window = focused workspace, active pane = the
         // session's one focus every client mirrors) — so following
         // `activeAgent` follows a workspace switch inside the TUI too.
-        return model.tmux.sessions
+        return model.sessions(on: backend)
             .first { $0.name == sessionName }?
             .activeAgent
     }
@@ -1182,7 +1187,8 @@ final class TerminalWindowViewController: UIViewController,
         let initialAgent = detectedAgent
         let agentChanged = shownAgent != initialAgent
         shownAgent = initialAgent
-        activePaneFingerprint = model.tmux.sessions
+        activePaneFingerprint = model
+            .sessions(on: watchedTab.sessionBackend ?? host.sessionBackend)
             .first(where: { $0.name == sessionName })?
             .activeWindow?
             .activePane?

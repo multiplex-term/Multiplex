@@ -14,6 +14,7 @@ NEW IN 1.3.0
 • TMUX / HRDR button — no longer drawn twice. The key rail below the terminal owns it wherever it fits; the title rail above takes it over only on windows too narrow for the key rail to keep it (iPhone landscape used to show both).
 • Every surface was rewritten on UIKit, so anything that looks or behaves differently from 1.2 is worth reporting.
 • FILE VIEWER TEXT SIZE — A− / A+ on a ▤ tab's title rail, beside CLOSE, and pinch the code, diff, or markdown screen itself (everywhere except the Mac). The size is remembered, applies to every ▤ tab, and a chip showing the percentage appears beside the buttons once you leave 100% — tap it to go back.
+• MIXED tmux + herdr ON ONE HOST — a host running both can now show all of it. Every deck refresh quietly asks the other multiplexer whether it has sessions; when it does, the host rail offers "+ HERDR · 3" (long-press to stop being asked). Accept and its sessions join the wall as tiles marked TMUX / HRDR, with herdr tiles carrying a light purple chassis. Host Settings ▸ Backend has the same switch. New sessions still start on the host's chosen backend.
 
 PLEASE TRY
 1. Add your own host (key or password) — did the wall probe everything?
@@ -23,8 +24,10 @@ PLEASE TRY
 5. Open a file viewer tab, resize a long code file and a README with A− / A+ and by pinching, then open another file — it should arrive at the size you chose.
 6. Turn Keep alive in background on for one host, attach a Claude Code / Codex / Pi session, start a turn, and leave the app. Did the alert arrive, and roughly how long after?
 7. Vision Pro: switch to GLASS and type fast in a busy session, then compare with DARK.
+8. On a host running BOTH tmux and herdr, wait for the rail's "+ HERDR" (or "+ TMUX") chip, accept it, and check both backends' tiles appear and attach to the right thing — especially if the same session name exists on both. Long-press the chip to dismiss it, and turn it back on from Host Settings ▸ Backend.
 
 KNOWN
 • Background wake timing is entirely iOS's call — minutes or tens of minutes — and nothing arrives at all if Background App Refresh is off for Multiplex.
+• A mixed host's widgets and Shortcuts still see its primary backend's sessions only.
 • If iOS terminated the app rather than suspending it, the first background check after relaunch can only establish a baseline; the one after that can alert.
 Feedback: screenshot in TestFlight, or iainst0409@gmail.com

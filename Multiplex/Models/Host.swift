@@ -86,6 +86,31 @@ struct Host: Identifiable, Codable, Hashable {
     /// rebuild the probe connection, because the probe command itself is
     /// backend-shaped.
     var sessionBackend: SessionBackend = .tmux
+    /// Backends beyond `sessionBackend` whose sessions ALSO appear on this
+    /// host's deck. Empty is the shipping default and the only state that
+    /// costs what a host has always cost.
+    ///
+    /// Never written by discovery — only by the rail's offer or Host
+    /// Settings. Escalation is asked for because the second full probe is
+    /// the expensive half (measured: a herdr host is 25 KB/tick against
+    /// tmux's 3.5 KB), and a host silently costing 8× more to monitor
+    /// because someone started a herdr session on it would break the
+    /// promise that a host costs what its record says it costs. The
+    /// discovery rider that *finds* those sessions is free enough to run
+    /// always — see `BackendDiscovery`.
+    ///
+    /// Rides the synced record, and participates in
+    /// `connectionModelConfiguration`: adding a backend must rebuild the
+    /// probe, because the probe command itself is backend-shaped — the same
+    /// reasoning that already puts `sessionBackend` there.
+    ///
+    /// ⚠ A `Set` encodes in iteration order, which Swift seeds per process.
+    /// That is stable today only because two backends exist, so this holds
+    /// at most one element and has exactly one encoding — and `hosts.json`
+    /// is written with `.sortedKeys` precisely to stay byte-stable. Adding a
+    /// third backend must therefore also sort this on the way out, or every
+    /// launch will rewrite the file and the mirrored Keychain record.
+    var secondaryBackends: Set<SessionBackend> = []
     /// Absolute path to `mosh-server` when it isn't on the exec PATH.
     var moshServerPath: String?
     /// UDP port or range ("60000:61000") handed to `mosh-server -p`.
@@ -149,6 +174,22 @@ struct Host: Identifiable, Codable, Hashable {
         port == 22 ? "\(username)@\(hostname)" : "\(username)@\(hostname):\(port)"
     }
 
+    /// Primary first, then the opted-in secondaries in a stable order — the
+    /// one accessor every probe loop, tile grid, and settings surface
+    /// iterates. Order is load-bearing: the primary's block leads the wall,
+    /// and the primary alone answers reachability, minting, and the Signal
+    /// check.
+    var monitoredBackends: [SessionBackend] {
+        [sessionBackend] + SessionBackend.allCases.filter {
+            $0 != sessionBackend && secondaryBackends.contains($0)
+        }
+    }
+
+    /// Whether tiles must say which multiplexer they came from. The single
+    /// gate for the wall's `TMUX`/`HRDR` chip and its herdr tint: on a host
+    /// where the backend is not in question, both would be decoration.
+    var showsBackendIdentity: Bool { monitoredBackends.count > 1 }
+
     /// The configured launch models for one agent, picker-ready.
     func launchModels(for agent: AgentKind) -> [String] {
         agentLaunchModels[agent.rawValue] ?? []
@@ -204,6 +245,14 @@ extension Host {
         // instead of throwing this host (and with it the whole list) away.
         sessionBackend = (try container.decodeIfPresent(String.self, forKey: .sessionBackend))
             .flatMap(SessionBackend.init(rawValue:)) ?? .tmux
+        // Same rule, applied per element: a record from a schema with a
+        // third backend degrades by dropping that entry instead of throwing
+        // the host away. An older build simply ignores the key and behaves
+        // as it always did — the safe direction.
+        secondaryBackends = Set(
+            (try container.decodeIfPresent([String].self, forKey: .secondaryBackends) ?? [])
+                .compactMap(SessionBackend.init(rawValue:))
+        ).subtracting([sessionBackend])
         moshServerPath = try container.decodeIfPresent(String.self, forKey: .moshServerPath)
         moshPorts = try container.decodeIfPresent(String.self, forKey: .moshPorts)
         workingDirs = try container.decodeIfPresent([String].self, forKey: .workingDirs) ?? []

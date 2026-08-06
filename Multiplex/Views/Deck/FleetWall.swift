@@ -250,6 +250,9 @@ final class FleetWallViewController: UIViewController {
     private var fixedHeaderLeadingConstraint: NSLayoutConstraint?
     private var fixedHeaderTrailingConstraint: NSLayoutConstraint?
     private var sections: [UUID: FleetHostSectionView] = [:]
+    /// Which backend offers this device was told to stop showing. Held once
+    /// rather than per section: it is read on every render pass.
+    private let offerPreferences = BackendOfferPreferences()
     private var awaitingSignalView: FleetAwaitingSignalView?
     private var inlineHeader: FleetHeaderView?
     private var latestSnapshot: WallSnapshot?
@@ -589,6 +592,7 @@ final class FleetWallViewController: UIViewController {
         FleetHostSectionConfiguration(
             store: configuration.store,
             workspace: configuration.workspace,
+            offerPreferences: offerPreferences,
             presentation: configuration.presentation,
             selectedTerminal: configuration.selectedTerminal,
             networkOffline: latestSnapshot?.offline ?? false,
@@ -646,10 +650,43 @@ final class FleetWallViewController: UIViewController {
                     available: sessions
                 )
             },
+            acceptBackendOffer: { [weak self] backend, host in
+                self?.confirmBackendOffer(backend, for: host)
+            },
+            dismissBackendOffer: { [weak self] backend, host in
+                guard let self else { return }
+                self.offerPreferences.setDismissed(
+                    true, backend: backend, for: host.id)
+                // A dismissal is device-local UserDefaults, so nothing in the
+                // Observation graph changed — re-render this host explicitly
+                // or the chip stays on screen until the next probe tick.
+                self.sections[host.id]?.refreshPresentation()
+            },
             modelDidChange: { [weak self] in
                 self?.synchronizePassphrasePrompt()
             }
         )
+    }
+
+    /// The rail's offer chip was pressed. It confirms first: this is the one
+    /// press that changes what a host COSTS to monitor, and the copy states
+    /// that plainly rather than letting the deck quietly get more expensive.
+    private func confirmBackendOffer(_ backend: Host.SessionBackend, for host: Host) {
+        let name = backend.rawValue
+        let primary = host.sessionBackend.rawValue
+        let alert = UIAlertController(
+            title: "Also Show \(name) Sessions",
+            message: "\(host.name) is running \(name) as well as \(primary). "
+                + "Showing both roughly doubles what this host fetches on every "
+                + "deck refresh.\n\nNew sessions still start on \(primary).",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Show Them", style: .default) { [weak self] _ in
+            self?.configuration.store.setSecondaryBackend(
+                true, backend: backend, for: host.id)
+        })
+        present(alert, animated: true)
     }
 
     // MARK: Responsive grid
@@ -759,7 +796,12 @@ final class FleetWallViewController: UIViewController {
     }
 
     private func presentNewSession(on host: Host) {
-        let sessions = configuration.hub.model(for: host).tmux.sessions
+        // The names the mint must be unique against — the PRIMARY backend's
+        // only, since that is what `+ New Session` creates in. A herdr
+        // namesake on a mixed host is a different server and never collides
+        // (`SessionKey`), so counting it would respell a perfectly good name.
+        let sessions = configuration.hub.model(for: host)
+            .sessions(on: host.sessionBackend)
         let controller = NewSessionViewController(
             host: host,
             existingNames: sessions.map(\.name)
@@ -1192,6 +1234,10 @@ private final class FleetHeaderView: UIView {
 private struct FleetHostSectionConfiguration {
     let store: HostStore
     let workspace: TerminalWorkspace
+    /// Device-local record of which backend offers this device was told to
+    /// stop showing. Read on the render path, so it is held rather than
+    /// re-instantiated per tile pass.
+    let offerPreferences: BackendOfferPreferences
     var presentation: FleetWall.Presentation
     var selectedTerminal: TerminalRoute?
     var networkOffline: Bool
@@ -1216,6 +1262,8 @@ private struct FleetHostSectionConfiguration {
     var editHost: () -> Void
     var removeHost: () -> Void
     var reorderSession: (String, String, [TmuxSession]) -> Void
+    var acceptBackendOffer: (Host.SessionBackend, Host) -> Void
+    var dismissBackendOffer: (Host.SessionBackend, Host) -> Void
     var modelDidChange: () -> Void
 }
 
@@ -1226,18 +1274,23 @@ private final class FleetHostSectionView: UIView {
         let tmux: TmuxState
         let keyPassphraseChallenge: SSHKeyPassphraseChallenge?
         let hasLiveProbe: Bool
-        let miniatures: [String: [String]]
-        let attention: [String: PaneAgentState]
+        let miniatures: [SessionKey: [String]]
+        let attention: [SessionKey: PaneAgentState]
         let keychainNotice: KeychainLockNotice?
-        let openSessionNames: Set<String>
+        /// Sessions with a terminal tab open right now — keyed, because a
+        /// mixed host's tmux `main` and herdr `main` are two tabs.
+        let openSessions: Set<SessionKey>
         let orderedSessions: [TmuxSession]
         let herdrPresent: Bool
+        /// Backends this host isn't monitoring that are holding sessions
+        /// right now, minus any this device was told to stop mentioning.
+        let offers: [FleetBackendOffer]
     }
 
     private enum GridIdentity: Equatable {
         case unknown
         case probing
-        case sessions([String])
+        case sessions([SessionKey])
         case noServer
         // The hint chip is tile content, so its arrival must re-render.
         case tmuxMissing(herdrHint: Bool)
@@ -1259,6 +1312,10 @@ private final class FleetHostSectionView: UIView {
         let reduceMotion: Bool
         let canMoveUp: Bool
         let canMoveDown: Bool
+        /// Part of the identity so the rail re-renders when the OFFER
+        /// changes, not on every probe tick that re-counts the same
+        /// sessions.
+        let offers: [FleetBackendOffer]
     }
 
     private let stack = UIStackView()
@@ -1320,6 +1377,13 @@ private final class FleetHostSectionView: UIView {
         }
     }
 
+    /// Re-read the model and repaint. For the device-local decisions that
+    /// live outside the Observation graph — today, dismissing a backend
+    /// offer — where nothing would otherwise invalidate this section.
+    func refreshPresentation() {
+        observeModel()
+    }
+
     func stopObserving() {
         observationGeneration += 1
     }
@@ -1333,7 +1397,10 @@ private final class FleetHostSectionView: UIView {
             return
         }
         let snapshot = withObservationTracking {
-            let sessions = model.tmux.sessions
+            // Every monitored backend's sessions, primary's block first.
+            // Identical to `model.tmux.sessions` on the single-backend host
+            // that is the overwhelmingly common case.
+            let sessions = model.allSessions
             return Snapshot(
                 phase: model.phase,
                 tmux: model.tmux,
@@ -1342,18 +1409,29 @@ private final class FleetHostSectionView: UIView {
                 miniatures: model.miniatures,
                 attention: model.attention,
                 keychainNotice: model.keychainNotice,
-                openSessionNames: Set(sessions.compactMap { session in
+                openSessions: Set(sessions.compactMap { session in
                     configuration.workspace.hasTab(
                         hostID: host.id,
                         sessionName: session.name,
-                        backend: host.sessionBackend
-                    ) ? session.name : nil
+                        // The SESSION's backend: a mixed host's tab set can
+                        // hold both, and asking under the host's primary
+                        // would light the wrong tile's LIVE lamp.
+                        backend: session.backend
+                    ) ? session.id : nil
                 }),
                 orderedSessions: configuration.store.orderedSessions(
                     sessions,
                     for: host.id
                 ),
-                herdrPresent: model.herdrPresent
+                herdrPresent: model.herdrPresent,
+                offers: model.offeredBackends.compactMap { result in
+                    guard !configuration.offerPreferences.isDismissed(
+                        result.backend, for: host.id) else { return nil }
+                    return FleetBackendOffer(
+                        backend: result.backend,
+                        sessionCount: result.sessionCount
+                    )
+                }
             )
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -1386,7 +1464,7 @@ private final class FleetHostSectionView: UIView {
         switch snapshot.tmux {
         case .unknown: .unknown
         case .probing: .probing
-        case .sessions(let sessions): .sessions(sessions.map(\.name))
+        case .sessions(let sessions): .sessions(sessions.map(\.id))
         case .noServer: .noServer
         case .tmuxMissing: .tmuxMissing(herdrHint: snapshot.herdrPresent)
         case .failed: .failed
@@ -1411,7 +1489,8 @@ private final class FleetHostSectionView: UIView {
             presentation: configuration.presentation,
             reduceMotion: configuration.reduceMotion,
             canMoveUp: canMoveUp,
-            canMoveDown: canMoveDown
+            canMoveDown: canMoveDown,
+            offers: snapshot?.offers ?? []
         )
         rail.updateActions(
             openShell: { [weak self] in self?.configuration.openShell() },
@@ -1424,6 +1503,14 @@ private final class FleetHostSectionView: UIView {
             },
             showKeychainGuide: { [weak self] names in
                 self?.configuration.showKeychainGuide(names)
+            },
+            acceptOffer: { [weak self] backend in
+                guard let self else { return }
+                self.configuration.acceptBackendOffer(backend, self.host)
+            },
+            dismissOffer: { [weak self] backend in
+                guard let self else { return }
+                self.configuration.dismissBackendOffer(backend, self.host)
             }
         )
         if renderedRailIdentity != railIdentity {
@@ -1439,6 +1526,7 @@ private final class FleetHostSectionView: UIView {
                 reduceMotion: configuration.reduceMotion,
                 canMoveUp: canMoveUp,
                 canMoveDown: canMoveDown,
+                offers: snapshot?.offers ?? [],
                 menu: hostMenu,
                 openShell: { [weak self] in self?.configuration.openShell() },
                 requestPassphrase: { [weak self] in
@@ -1450,6 +1538,14 @@ private final class FleetHostSectionView: UIView {
                 },
                 showKeychainGuide: { [weak self] names in
                     self?.configuration.showKeychainGuide(names)
+                },
+                acceptOffer: { [weak self] backend in
+                    guard let self else { return }
+                    self.configuration.acceptBackendOffer(backend, self.host)
+                },
+                dismissOffer: { [weak self] backend in
+                    guard let self else { return }
+                    self.configuration.dismissBackendOffer(backend, self.host)
                 }
             )
         }
@@ -1471,9 +1567,15 @@ private final class FleetHostSectionView: UIView {
             return
         }
 
-        switch snapshot.tmux {
+        // Any monitored backend having sessions outranks the primary's
+        // special states. On a single-backend host this is exactly
+        // `case .sessions` as before; on a mixed one it stops a primary
+        // reporting NO SERVER from hiding the secondary's live tiles behind
+        // a placeholder — the user opted in to SEE those sessions.
+        // `.tmuxMissing` and `.failed` still speak when nothing is running.
+        let ordered = snapshot.orderedSessions
+        switch ordered.isEmpty ? snapshot.tmux : .sessions(ordered) {
         case .sessions(let sessions):
-            let ordered = snapshot.orderedSessions
             var items: [FleetGridItem] = []
             let newTile = reusableSpecialTile(key: "new") { FleetNewSessionTileView() }
             newTile.configure(
@@ -1483,7 +1585,7 @@ private final class FleetHostSectionView: UIView {
             )
             items.append(FleetGridItem(id: "new", view: newTile))
             for session in ordered {
-                let key = "session:\(session.name)"
+                let key = "session:\(session.id.storageKey)"
                 let tile: FleetSessionTileView
                 if let existing = tileViews[key] as? FleetSessionTileView {
                     tile = existing
@@ -1494,17 +1596,18 @@ private final class FleetHostSectionView: UIView {
                 tile.configure(FleetSessionTileConfiguration(
                     hostID: host.id,
                     session: session,
-                    lines: snapshot.miniatures[session.name] ?? [],
-                    attention: snapshot.attention[session.name],
+                    lines: snapshot.miniatures[session.id] ?? [],
+                    attention: snapshot.attention[session.id],
                     usesTmuxAttentionFallback: snapshot.hasLiveProbe
-                        && host.sessionBackend == .tmux,
-                    hasOpenTab: snapshot.openSessionNames.contains(session.name),
-                    sessionBackend: host.sessionBackend,
+                        && session.backend == .tmux,
+                    hasOpenTab: snapshot.openSessions.contains(session.id),
+                    sessionBackend: session.backend,
+                    showsBackendIdentity: host.showsBackendIdentity,
                     compact: configuration.presentation == .shellRail,
                     selected: configuration.selectedTerminal?.hostID == host.id
                         && configuration.selectedTerminal?.sessionName == session.name
                         && configuration.selectedTerminal?.sessionBackend
-                            == host.sessionBackend,
+                            == session.backend,
                     duplicateAttachTitle: configuration.duplicateAttachTitle,
                     openTabAccessibilityText: configuration.openTabAccessibilityText,
                     attach: { [weak self] in self?.configuration.openSession(session) },
@@ -1520,7 +1623,8 @@ private final class FleetHostSectionView: UIView {
                     droppedSession: { [weak self] source in
                         guard let self else { return }
                         let move = {
-                            self.configuration.reorderSession(source, session.name, sessions)
+                            self.configuration.reorderSession(
+                                source, session.id.storageKey, sessions)
                             // Session order is device-local HostStore state,
                             // not a probe change. Re-arm its Observation read
                             // now so the native grid settles immediately after
@@ -1647,6 +1751,24 @@ private final class FleetHostSectionView: UIView {
 // MARK: - Host rail
 
 @MainActor
+/// One backend the rail can offer to start showing — what discovery found
+/// running on a host that is not monitoring it. The count is the whole
+/// argument for pressing, so it rides the offer and the chip states it.
+struct FleetBackendOffer: Equatable {
+    let backend: Host.SessionBackend
+    let sessionCount: Int
+
+    /// `+ HERDR · 3`. A neutral action, never tally red — this is something
+    /// available, not something live.
+    var chipCaption: String {
+        "+ \(backend.rawValue.uppercased()) · \(sessionCount)"
+    }
+
+    var sessionNoun: String {
+        sessionCount == 1 ? "1 session" : "\(sessionCount) sessions"
+    }
+}
+
 private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate {
     private struct PresentationIdentity: Equatable {
         let hostID: UUID
@@ -1664,6 +1786,9 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         let reduceMotion: Bool
         let canMoveUp: Bool
         let canMoveDown: Bool
+        /// Rides the identity so the rail re-renders when the OFFER changes,
+        /// not on every probe tick that merely re-counts the same sessions.
+        let offers: [FleetBackendOffer]
     }
 
     private let stack = UIStackView()
@@ -1673,6 +1798,13 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
     private var requestPassphrase: () -> Void = {}
     private var showUnreachable: (String) -> Void = { _ in }
     private var showKeychainGuide: ([String]) -> Void = { _ in }
+    private var acceptOffer: (Host.SessionBackend) -> Void = { _ in }
+    private var dismissOffer: (Host.SessionBackend) -> Void = { _ in }
+    /// Offer chip → its own "Don't offer here" menu. The rail is the context
+    /// menu delegate for both itself (host options) and its chips, so the
+    /// delegate method resolves by the interaction's view. Rebuilt with the
+    /// chips on every re-render, so a stale chip's entry cannot survive.
+    private var offerMenus: [ObjectIdentifier: UIMenu] = [:]
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1701,17 +1833,22 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         reduceMotion: Bool,
         canMoveUp: Bool,
         canMoveDown: Bool,
+        offers: [FleetBackendOffer],
         menu: UIMenu,
         openShell: @escaping () -> Void,
         requestPassphrase: @escaping () -> Void,
         showUnreachable: @escaping (String) -> Void,
-        showKeychainGuide: @escaping ([String]) -> Void
+        showKeychainGuide: @escaping ([String]) -> Void,
+        acceptOffer: @escaping (Host.SessionBackend) -> Void,
+        dismissOffer: @escaping (Host.SessionBackend) -> Void
     ) {
         updateActions(
             openShell: openShell,
             requestPassphrase: requestPassphrase,
             showUnreachable: showUnreachable,
-            showKeychainGuide: showKeychainGuide
+            showKeychainGuide: showKeychainGuide,
+            acceptOffer: acceptOffer,
+            dismissOffer: dismissOffer
         )
         let identity = PresentationIdentity(
             hostID: host.id,
@@ -1728,11 +1865,13 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
             presentation: presentation,
             reduceMotion: reduceMotion,
             canMoveUp: canMoveUp,
-            canMoveDown: canMoveDown
+            canMoveDown: canMoveDown,
+            offers: offers
         )
         guard renderedIdentity != identity else { return }
         renderedIdentity = identity
         self.menu = menu
+        offerMenus = [:]
         stack.arrangedSubviews.forEach {
             stack.removeArrangedSubview($0)
             $0.removeFromSuperview()
@@ -1789,13 +1928,19 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         menuButton.menu = menu
         menuButton.showsMenuAsPrimaryAction = true
         menuButton.accessibilityLabel = "Host options for \(host.name)"
+        // Neutral chips: an offer is an available ACTION, not live state, so
+        // it never wears tally red (`DESIGN.md` — color is state).
+        let offerChips = offers.map { makeOfferChip($0, host: host) }
 
         if presentation == .shellRail {
             let first = UIStackView(arrangedSubviews: [name, UIView(), status, menuButton])
             first.axis = .horizontal
             first.alignment = .center
             first.spacing = 8
-            let second = UIStackView(arrangedSubviews: [address, mosh, backend, UIView(), shell])
+            let second = UIStackView(
+                arrangedSubviews: [address, mosh, backend, UIView()]
+                    + offerChips + [shell]
+            )
             second.axis = .horizontal
             second.alignment = .center
             second.spacing = 8
@@ -1808,8 +1953,8 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
                 menuButton: menuButton
             )
             let row = UIStackView(arrangedSubviews: [
-                name, address, mosh, backend, UIView(), controls,
-            ])
+                name, address, mosh, backend, UIView(),
+            ] + offerChips + [controls])
             row.axis = .horizontal
             row.alignment = .firstBaseline
             row.spacing = 14
@@ -1822,20 +1967,52 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         openShell: @escaping () -> Void,
         requestPassphrase: @escaping () -> Void,
         showUnreachable: @escaping (String) -> Void,
-        showKeychainGuide: @escaping ([String]) -> Void
+        showKeychainGuide: @escaping ([String]) -> Void,
+        acceptOffer: @escaping (Host.SessionBackend) -> Void,
+        dismissOffer: @escaping (Host.SessionBackend) -> Void
     ) {
         self.openShell = openShell
         self.requestPassphrase = requestPassphrase
         self.showUnreachable = showUnreachable
         self.showKeychainGuide = showKeychainGuide
+        self.acceptOffer = acceptOffer
+        self.dismissOffer = dismissOffer
+    }
+
+    /// `+ HERDR · 3` — press to start monitoring, long-press to stop being
+    /// told. The chip is the ONLY automatic consequence of discovery; the
+    /// escalation it offers is deliberately never taken on the app's own
+    /// initiative (`Host.secondaryBackends`).
+    private func makeOfferChip(
+        _ offer: FleetBackendOffer, host: Host
+    ) -> UIView {
+        let name = offer.backend.rawValue
+        let chip = UIKitChassisChip(
+            offer.chipCaption,
+            accessibilityLabel:
+                "\(host.name) is also running \(offer.sessionNoun) under \(name)",
+            action: { [weak self] in self?.acceptOffer(offer.backend) }
+        )
+        chip.accessibilityHint = "Shows them on this host's deck"
+        offerMenus[ObjectIdentifier(chip)] = UIMenu(children: [
+            UIAction(
+                title: "Don't Offer \(name) Here",
+                image: UIImage(systemName: "bell.slash")
+            ) { [weak self] _ in self?.dismissOffer(offer.backend) },
+        ])
+        chip.addInteraction(UIContextMenuInteraction(delegate: self))
+        return chip
     }
 
     func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
         configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
-        UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-            self?.menu
+        let chipMenu = interaction.view.flatMap { offerMenus[ObjectIdentifier($0)] }
+        return UIContextMenuConfiguration(
+            identifier: nil, previewProvider: nil
+        ) { [weak self] _ in
+            chipMenu ?? self?.menu
         }
     }
 
@@ -2377,9 +2554,16 @@ struct FleetSessionTileConfiguration {
     /// across every pane and must never fall back to title heuristics.
     let usesTmuxAttentionFallback: Bool
     let hasOpenTab: Bool
-    /// Which multiplexer this tile speaks for. Only the LIVE lamp reads it:
-    /// a herdr session has no client count to light it with.
+    /// Which multiplexer this tile speaks for. Read by the LIVE lamp (a
+    /// herdr session has no client count to light it with), by the
+    /// herdr-only menu row, and — when `showsBackendIdentity` — by the
+    /// tile's own chip and chassis tint.
     let sessionBackend: Host.SessionBackend
+    /// Whether the tile must SAY which backend it came from. True only on a
+    /// host monitoring more than one (`Host.showsBackendIdentity`): a
+    /// single-backend host's tiles stay byte-for-byte what they have always
+    /// been, which is the overwhelmingly common case.
+    let showsBackendIdentity: Bool
     let compact: Bool
     let selected: Bool
     let duplicateAttachTitle: String
@@ -2412,6 +2596,7 @@ struct FleetSessionTileConfiguration {
             && usesTmuxAttentionFallback == other.usesTmuxAttentionFallback
             && hasOpenTab == other.hasOpenTab
             && sessionBackend == other.sessionBackend
+            && showsBackendIdentity == other.showsBackendIdentity
             && compact == other.compact
             && selected == other.selected
             && duplicateAttachTitle == other.duplicateAttachTitle
@@ -2446,7 +2631,9 @@ final class FleetSessionTileView: FleetPressView,
 {
     private struct DragPayload {
         let hostID: UUID
-        let sessionName: String
+        /// The dragged tile's `SessionKey`. The saved order is a list of
+        /// these, and on a mixed host a bare name would move the wrong tile.
+        let session: SessionKey
     }
 
     private let contentStack = UIStackView()
@@ -2497,6 +2684,14 @@ final class FleetSessionTileView: FleetPressView,
         // pre-UIKit `.equatable()` tile gate existed to prevent.
         let unchanged = self.configuration?.hasSameContent(as: configuration) ?? false
         self.configuration = configuration
+        // The chassis tint is the wordless half of the backend chip (see
+        // `TallyPalette.herdrBezel`). Applied outside the `unchanged` gate,
+        // beside the border, because both are cheap color writes and neither
+        // needs the view tree rebuilt.
+        backgroundColor = UIKitChassis.tileBezel(
+            backend: configuration.sessionBackend,
+            tinted: configuration.showsBackendIdentity
+        )
         pressAction = configuration.attach
         menuProvider = { [weak self] in
             guard let configuration = self?.configuration else { return nil }
@@ -2542,7 +2737,7 @@ final class FleetSessionTileView: FleetPressView,
         let provider = NSItemProvider(object: configuration.session.name as NSString)
         let payload = DragPayload(
             hostID: configuration.hostID,
-            sessionName: configuration.session.name
+            session: configuration.session.id
         )
         session.localContext = payload
         let item = UIDragItem(itemProvider: provider)
@@ -2609,9 +2804,9 @@ final class FleetSessionTileView: FleetPressView,
         guard let configuration,
               let payload = dragPayload(from: session),
               payload.hostID == configuration.hostID,
-              payload.sessionName != configuration.session.name
+              payload.session != configuration.session.id
         else { return }
-        configuration.droppedSession(payload.sessionName)
+        configuration.droppedSession(payload.session.storageKey)
     }
 
     /// Only this host's own session tiles reorder each other. Session-level
@@ -2622,7 +2817,7 @@ final class FleetSessionTileView: FleetPressView,
               let payload = dragPayload(from: session)
         else { return false }
         return payload.hostID == configuration.hostID
-            && payload.sessionName != configuration.session.name
+            && payload.session != configuration.session.id
     }
 
     private func dragPayload(from session: UIDropSession) -> DragPayload? {
@@ -2720,6 +2915,21 @@ final class FleetSessionTileView: FleetPressView,
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 9
+        if configuration.showsBackendIdentity {
+            // Leads the row: on a mixed wall, which multiplexer a tile came
+            // from is what disambiguates two identically named sessions, so
+            // it reads before the name it qualifies. `HRDR` is the same
+            // four-character spelling the terminal key rail uses, so the two
+            // surfaces name the backend identically.
+            let chip = UILabel()
+            chip.font = UIKitChassis.monoFont(configuration.compact ? 8.5 : 9.5)
+            chip.textColor = UIKitChassis.signal2
+            chip.text = configuration.sessionBackend == .herdr ? "HRDR" : "TMUX"
+            chip.accessibilityLabel =
+                "Runs under \(configuration.sessionBackend.rawValue)"
+            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+            row.addArrangedSubview(chip)
+        }
         let name = UIKitChassisLabel(
             configuration.session.name,
             size: configuration.compact ? 10 : 12

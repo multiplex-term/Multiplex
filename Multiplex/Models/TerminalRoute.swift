@@ -37,20 +37,32 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
             .create(sessionName: sessionName, directory: nil)
         }
 
-        /// The attach mode for one session on this host — the tmux attach
-        /// or the herdr client, decided by the host's backend in exactly
-        /// one place so no mint site can disagree. Name-based on purpose:
-        /// callers holding only a name (auto-attach entries, widget
-        /// targets) must not fabricate a session record to qualify.
-        static func attach(host: Host, sessionName: String) -> Mode {
-            switch host.sessionBackend {
+        /// The attach mode for one session — the tmux attach or the herdr
+        /// client. THE single place the app decides tmux-vs-herdr for a
+        /// tab, so no mint site can disagree.
+        static func attach(
+            backend: Host.SessionBackend, sessionName: String
+        ) -> Mode {
+            switch backend {
             case .tmux: .attach(sessionName: sessionName)
             case .herdr: .herdrAttach(sessionName: sessionName)
             }
         }
 
+        /// For callers holding only a name (auto-attach entries, widget and
+        /// URL targets that named no backend): the host's PRIMARY. Those
+        /// callers should resolve the name against the probe list first —
+        /// on a mixed host a bare name is ambiguous, and this is the
+        /// documented tie-break, not a guess about which the user meant.
+        static func attach(host: Host, sessionName: String) -> Mode {
+            attach(backend: host.sessionBackend, sessionName: sessionName)
+        }
+
+        /// A session RECORD knows its own backend. On a mixed host the tmux
+        /// `main` and the herdr `main` are two tiles that attach two
+        /// different ways, so this must never consult `host.sessionBackend`.
         static func attach(host: Host, session: TmuxSession) -> Mode {
-            attach(host: host, sessionName: session.name)
+            attach(backend: session.backend, sessionName: session.name)
         }
     }
 

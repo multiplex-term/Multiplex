@@ -376,7 +376,7 @@ final class AgentAttentionTests: XCTestCase {
     // MARK: Tracker edges
 
     func testFirstSightIsBaselineNotEdge() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         // Relaunching next to a long-standing dialog must not re-notify.
         XCTAssertEqual(
             tracker.update(session: "main", state: .needsYou(.permission), hasBell: false),
@@ -384,7 +384,7 @@ final class AgentAttentionTests: XCTestCase {
     }
 
     func testTurnEndEdgeFiresOnce() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .busy, hasBell: false)
         XCTAssertEqual(
             tracker.update(session: "main", state: .idle, hasBell: false),
@@ -395,7 +395,7 @@ final class AgentAttentionTests: XCTestCase {
     }
 
     func testNeedsInputEdgeFiresOnceAndPerKind() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .busy, hasBell: false)
         XCTAssertEqual(
             tracker.update(session: "main", state: .needsYou(.permission), hasBell: false),
@@ -414,7 +414,7 @@ final class AgentAttentionTests: XCTestCase {
     }
 
     func testDialogDismissedWithoutTurnEndStaysQuiet() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .needsYou(.permission), hasBell: false)
         _ = tracker.update(session: "main", state: .needsYou(.permission), hasBell: false)
         // needsYou → idle is the user answering; they were there.
@@ -424,7 +424,7 @@ final class AgentAttentionTests: XCTestCase {
     func testSameTickEventsCoalesceToMostActionable() {
         // A remote hook can ring the bell on the same tick the turn ends;
         // the hub posts one banner, priority-ordered.
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .busy, hasBell: false)
         let events = tracker.update(session: "main", state: .idle, hasBell: true)
         XCTAssertTrue(events.contains(.bell))
@@ -436,7 +436,7 @@ final class AgentAttentionTests: XCTestCase {
     }
 
     func testBellRisingEdgeOnly() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: nil, hasBell: false)
         XCTAssertEqual(
             tracker.update(session: "main", state: nil, hasBell: true),
@@ -448,7 +448,7 @@ final class AgentAttentionTests: XCTestCase {
     }
 
     func testPruneResetsBaselineForRecreatedSession() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .busy, hasBell: false)
         tracker.prune(keeping: [])
         // Same name, new session: first sight again, no phantom turn-end.
@@ -456,7 +456,7 @@ final class AgentAttentionTests: XCTestCase {
     }
 
     func testAgentLossDropsStateWithoutEvents() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .busy, hasBell: false)
         // Probe flap: agent detection misses a tick (state nil) — no edge.
         XCTAssertEqual(tracker.update(session: "main", state: nil, hasBell: false), [])

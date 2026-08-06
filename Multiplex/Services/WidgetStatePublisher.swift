@@ -58,6 +58,8 @@ enum WidgetStateBuilder {
     /// Lines the medium widget's held frame can actually show.
     static let miniatureLineLimit = 6
 
+    /// `miniatures` is keyed by `SessionKey.storageKey`, matching the deck
+    /// snapshot it is read from — a bare name collides across backends.
     static func hostState(
         host: Host,
         sessions: [TmuxSession],
@@ -69,7 +71,7 @@ enum WidgetStateBuilder {
             name: host.name,
             address: host.address,
             sessions: sessions.map {
-                sessionState($0, miniatureLines: miniatures[$0.name] ?? [])
+                sessionState($0, miniatureLines: miniatures[$0.id.storageKey] ?? [])
             },
             probedAt: probedAt,
             agentModels: host.agentLaunchModels.isEmpty ? nil : host.agentLaunchModels,

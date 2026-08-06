@@ -52,6 +52,8 @@ struct AddHostFormState {
     var isEnabled = true
     var backgroundKeepAlive = false
     var sessionBackend = Host.SessionBackend.tmux
+    /// Backends beyond `sessionBackend` this host also shows tiles for.
+    var secondaryBackends: Set<Host.SessionBackend> = []
     var useMosh = false
     var moshServerPath = ""
     var moshPorts = ""
@@ -83,6 +85,7 @@ struct AddHostFormState {
         isEnabled = host.isEnabled
         backgroundKeepAlive = host.backgroundKeepAlive
         sessionBackend = host.sessionBackend
+        secondaryBackends = host.secondaryBackends
         useMosh = host.useMosh
         moshServerPath = host.moshServerPath ?? ""
         moshPorts = host.moshPorts ?? ""
@@ -163,6 +166,9 @@ struct AddHostFormState {
         host.isEnabled = isEnabled
         host.backgroundKeepAlive = backgroundKeepAlive
         host.sessionBackend = sessionBackend
+        // The primary can never also be a secondary: `monitoredBackends`
+        // would list it twice and the wall would probe it twice.
+        host.secondaryBackends = secondaryBackends.subtracting([sessionBackend])
         host.useMosh = useMosh
         let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
@@ -1408,6 +1414,20 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     // MARK: Backend
 
+    /// The other backend, whose sessions this host may ALSO show.
+    private var otherBackend: Host.SessionBackend {
+        form.sessionBackend == .herdr ? .tmux : .herdr
+    }
+
+    private var secondaryBackendDetail: String {
+        let other = otherBackend.rawValue
+        let primary = form.sessionBackend.rawValue
+        return "Shows \(other) sessions on this host's deck beside its "
+            + "\(primary) ones, each tile marked with the backend it came "
+            + "from. Roughly doubles what the deck fetches on every refresh "
+            + "of this host. New sessions still start on \(primary)."
+    }
+
     private var backendDetail: String {
         if form.sessionBackend == .herdr {
             return "The deck monitors herdr (herdr.dev) sessions and their "
@@ -1443,8 +1463,26 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         stack.axis = .vertical
         stack.alignment = .fill
         stack.spacing = 8
-        backendSection.setDetail(backendDetail)
-        backendSection.setRows([AddHostInsetRow(contentView: stack)])
+        // The mixed-host opt-in. A monochrome chassis switch, never the
+        // system green pill. The deck's rail offers the same escalation when
+        // discovery finds sessions running; this is where it lives when the
+        // user goes looking for it.
+        let other = otherBackend
+        let alsoShow = SettingsBooleanRow(
+            title: "Also show \(other.rawValue) sessions",
+            isOn: form.secondaryBackends.contains(other),
+            accessibilityHint: "Adds this host's \(other.rawValue) sessions "
+                + "to its deck; roughly doubles what it fetches per refresh"
+        ) { [weak self] enabled in
+            guard let self else { return }
+            if enabled {
+                self.form.secondaryBackends.insert(other)
+            } else {
+                self.form.secondaryBackends.remove(other)
+            }
+        }
+        backendSection.setDetail(backendDetail + "\n\n" + secondaryBackendDetail)
+        backendSection.setRows([AddHostInsetRow(contentView: stack), alsoShow])
         // Only the tmux options editor is tmux-scoped (herdr has no analog
         // of tmux's targeted set-option calls; keep the stored value for a
         // later switch back rather than claiming it affects herdr).

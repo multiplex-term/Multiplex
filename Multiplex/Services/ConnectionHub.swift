@@ -123,11 +123,20 @@ final class ConnectionHub {
             let model = models[host.id]
             // Live probe state when the model has one; otherwise the same
             // last-known snapshot the deck's tiles restore from.
+            //
+            // ⚠ The PRIMARY backend's sessions only, deliberately. A widget
+            // row deep-links by NAME, and `WidgetSessionState` carries no
+            // backend yet, so a secondary session's tap would resolve
+            // against the primary and attach the wrong thing. Showing a
+            // subset is the conservative half of that trade — widgets
+            // already withhold tally red and NEEDS YOU. Lifting it means
+            // adding `backendRaw` to the shared session type and `backend=`
+            // to `ExternalActionURL`, in `SharedStateTests` lockstep.
             let snapshot: DeckSnapshot?
             if let model, model.hasLiveProbe {
                 snapshot = DeckSnapshot(
-                    sessions: model.tmux.sessions,
-                    miniatures: model.miniatures,
+                    sessions: model.sessions(on: host.sessionBackend),
+                    miniatures: model.miniatures.storageKeyed,
                     sessionBackend: host.sessionBackend
                 )
                 widgetProbeDates[host.id] = Date()
@@ -161,7 +170,37 @@ final class HostConnectionModel {
 
     let host: Host
     private(set) var phase: Phase = .idle
+    /// The PRIMARY backend's probe state. Read from many call sites, and
+    /// deliberately still the answer to "what does this host look like": the
+    /// rail's STANDBY/LINKING/CONNECTED phase, the NO TMUX / NO SERVER
+    /// tiles, and every external-action failure message speak for the one
+    /// connection and the one backend that mints sessions.
     private(set) var tmux: TmuxState = .unknown
+    /// Opted-in secondary backends' probe states, keyed by backend
+    /// (`Host.secondaryBackends`). Empty on the overwhelmingly common
+    /// single-backend host.
+    private(set) var secondaryStates: [Host.SessionBackend: TmuxState] = [:]
+
+    /// One monitored backend's sessions, from whichever slot it occupies.
+    func sessions(on backend: Host.SessionBackend) -> [TmuxSession] {
+        backend == host.sessionBackend
+            ? tmux.sessions
+            : secondaryStates[backend]?.sessions ?? []
+    }
+
+    /// Every monitored backend's sessions, primary's block first — what the
+    /// wall renders and what `sessionCount` counts. A secondary answering
+    /// "missing" or "no sessions" contributes nothing rather than a tile:
+    /// the user asked to see its sessions if they exist, not to be told
+    /// they don't.
+    var allSessions: [TmuxSession] {
+        guard !secondaryStates.isEmpty else { return tmux.sessions }
+        return host.monitoredBackends.flatMap { backend in
+            backend == host.sessionBackend
+                ? tmux.sessions
+                : secondaryStates[backend]?.sessions ?? []
+        }
+    }
     /// Set when the private key is encrypted and its absent/stale passphrase
     /// could not unlock it. Background wall polling never presents UI by
     /// itself; FleetWall asks only after the user presses the failed host.
@@ -171,16 +210,37 @@ final class HostConnectionModel {
     /// badge count should not subscribe to the full pane/process tree.
     private(set) var hasLiveProbe = false
     private(set) var sessionCount = 0
-    /// herdr is installed on this host (the tmux probe checks presence
-    /// every tick). Read only by the dead-tmux tile's switch hint.
+    /// herdr is installed on this host (the discovery rider answers every
+    /// tick). Read only by the dead-tmux tile's switch hint.
     private(set) var herdrPresent = false
-    /// Session name → last visible lines of its active pane; the deck
-    /// wall's live miniatures, refreshed by every probe (the probe's single
-    /// exec carries the capture tails).
-    private(set) var miniatures: [String: [String]] = [:]
-    /// Session name → agent state (busy / idle / needs you), re-derived on
+    /// What the discovery riders found on the last settled probe, keyed by
+    /// the backend asked (`BackendDiscovery`). Live-only: never snapshotted
+    /// and never in `widget-state.json`, because an offer is about what is
+    /// running right now. Cleared by `disconnect()` alongside the herdr bake
+    /// state — a dead probe has no discovery to report.
+    private(set) var discovery: [Host.SessionBackend: BackendDiscovery.Result] = [:]
+
+    /// Backends this host is NOT monitoring that are nonetheless holding
+    /// sessions right now — what the rail offers to start showing. Never
+    /// acted on automatically; the press is the whole design.
+    var offeredBackends: [BackendDiscovery.Result] {
+        let monitored = Set(host.monitoredBackends)
+        return Host.SessionBackend.allCases.compactMap { backend in
+            guard !monitored.contains(backend),
+                  let result = discovery[backend],
+                  result.offersSessions
+            else { return nil }
+            return result
+        }
+    }
+    /// Session → last visible lines of its active pane; the deck wall's
+    /// live miniatures, refreshed by every probe (the probe's single exec
+    /// carries the capture tails). Keyed by `SessionKey`, not name: a
+    /// mixed host's tmux `main` and herdr `main` are two tiles.
+    private(set) var miniatures: [SessionKey: [String]] = [:]
+    /// Session → agent state (busy / idle / needs you), re-derived on
     /// every probe and capture pass. Drives the wall's NEEDS YOU badge.
-    private(set) var attention: [String: PaneAgentState] = [:]
+    private(set) var attention: [SessionKey: PaneAgentState] = [:]
     /// The macOS locked-keychain tip (see `KeychainLockCheck`): set while a
     /// Claude pane sits on its sign-in screen AND the host-side check
     /// confirms the login keychain is locked over SSH. Free host plumbing
@@ -222,10 +282,10 @@ final class HostConnectionModel {
     /// wrappers and negative results expire so a long-lived foreground
     /// process can still change descendants without changing pane identity.
     @ObservationIgnored private var activeAgentCache: [String: ActiveAgentCacheEntry] = [:]
-    @ObservationIgnored private var attentionTracker = AttentionTracker()
+    @ObservationIgnored private var attentionTracker = AttentionTracker<SessionKey>()
     /// Deeper, unclipped capture tails (the miniatures' source parse) —
     /// what the question detector reads.
-    @ObservationIgnored private var attentionTails: [String: [String]] = [:]
+    @ObservationIgnored private var attentionTails: [SessionKey: [String]] = [:]
     /// herdr mode: the two sets the NEXT probe bakes into its command —
     /// the running sessions to snapshot and the pane each one fronts for
     /// its miniature read. A shell can't join JSON, so the app bakes last
@@ -236,15 +296,15 @@ final class HostConnectionModel {
     /// default session forever.
     @ObservationIgnored private var herdrSessionNames: [String]?
     @ObservationIgnored private var herdrTailTargets: [HerdrProbe.TailTarget] = []
-    /// herdr mode: session name → pane id → lifecycle status from the
-    /// last snapshots, EVERY pane included (pane ids collide across
-    /// sessions, so a pane is never keyed without its session) — the
-    /// attention authority. Never persisted; NEEDS YOU is re-earned live.
-    @ObservationIgnored private var herdrPaneStatuses: [String: [String: HerdrProbe.AgentStatus]] = [:]
+    /// herdr mode: session → pane id → lifecycle status from the last
+    /// snapshots, EVERY pane included (pane ids collide across sessions, so
+    /// a pane is never keyed without its session) — the attention
+    /// authority. Never persisted; NEEDS YOU is re-earned live.
+    @ObservationIgnored private var herdrPaneStatuses: [SessionKey: [String: HerdrProbe.AgentStatus]] = [:]
     /// The immediately preceding status table, retained only long enough to
     /// attribute an aggregate busy → idle edge to the front pane without
     /// borrowing its agent name when a background pane actually finished.
-    @ObservationIgnored private var previousHerdrPaneStatuses: [String: [String: HerdrProbe.AgentStatus]] = [:]
+    @ObservationIgnored private var previousHerdrPaneStatuses: [SessionKey: [String: HerdrProbe.AgentStatus]] = [:]
     /// Last keychain check answer + when it landed. `.notMacOS` is
     /// structural and never re-asked on this connection; other verdicts
     /// refresh after `keychainVerdictTTL` while the symptom persists.
@@ -268,9 +328,29 @@ final class HostConnectionModel {
         guard snapshot.sessionBackend == host.sessionBackend,
               case .unknown = tmux
         else { return }
-        tmux = .sessions(snapshot.sessions)
-        miniatures = snapshot.miniatures
-        sessionCount = snapshot.sessions.count
+        // Split by each record's own backend rather than pouring the lot
+        // into the primary's state: a cached mixed host would otherwise make
+        // `sessions(on: .tmux)` answer with herdr sessions until the first
+        // live probe, and the mint uniques new names against that answer.
+        tmux = .sessions(snapshot.sessions.filter { $0.backend == host.sessionBackend })
+        for backend in host.monitoredBackends.dropFirst() {
+            secondaryStates[backend] = .sessions(
+                snapshot.sessions.filter { $0.backend == backend })
+        }
+        miniatures = snapshot.miniatures.sessionKeyed
+        sessionCount = allSessions.count
+    }
+
+    /// Probe parsers answer for ONE backend, so their maps are name-keyed;
+    /// the model merges backends, so its maps are `SessionKey`-keyed. This
+    /// is the one seam between the two spaces.
+    private static func keyed<Value>(
+        _ byName: [String: Value], backend: Host.SessionBackend
+    ) -> [SessionKey: Value] {
+        Dictionary(
+            byName.map { (SessionKey(backend: backend, name: $0.key), $0.value) },
+            uniquingKeysWith: { _, later in later }
+        )
     }
 
     /// Connect if needed, then re-probe tmux sessions.
@@ -446,68 +526,116 @@ final class HostConnectionModel {
             // makes the wall shake; the next parse/failure overwrites it.
             if case .unknown = tmux { tmux = .probing }
             let execStart = ContinuousClock.now
-            let parsed: TmuxProbe.ParsedProbe
-            let execEnd: ContinuousClock.Instant
-            let outputBytes: Int
-            switch host.sessionBackend {
-            case .tmux:
-                let output = try await deadlined {
-                    try await connection.exec(TmuxProbe.probeCommand)
+            // Discovery rides the primary probe for every backend this host
+            // does NOT already monitor. A monitored one gets a full probe of
+            // its own below, which would make the rider redundant work.
+            let discovering = Set(Host.SessionBackend.allCases)
+                .subtracting(host.monitoredBackends)
+            let secondaries = host.monitoredBackends.dropFirst()
+
+            // Two exec channels on the SAME connection, concurrently —
+            // measured 105 ms against 176 ms concatenated (Citadel opens a
+            // fresh channel per `executeCommand`, and the app already
+            // multiplexes SFTP beside a live PTY). The reason that actually
+            // decides it is containment: a secondary's failure must not be
+            // able to reach `markFailed`, `phase`, or the dead-link rebuild,
+            // and separate channels make that structural rather than
+            // careful. Started BEFORE the primary is awaited so they
+            // genuinely overlap.
+            let secondaryProbes = secondaries.map { backend in
+                (backend, Task { [weak self] in
+                    guard let self else { return BackendProbe?.none }
+                    do {
+                        return try await self.runProbe(
+                            backend: backend,
+                            discovering: [],
+                            over: connection,
+                            generation: generation
+                        )
+                    } catch {
+                        // Contained by design: log and leave every
+                        // host-wide fact alone. `markFailed`, `phase`, and
+                        // the dead-link rebuild belong to the primary
+                        // probe, because a host's reachability is one fact
+                        // about one connection.
+                        Self.timing.debug("""
+                            \(self.host.name, privacy: .public) secondary \
+                            \(backend.rawValue, privacy: .public) probe failed: \
+                            \(String(describing: error), privacy: .public)
+                            """)
+                        return nil
+                    }
+                })
+            }
+
+            let primary = try await runProbe(
+                backend: host.sessionBackend,
+                discovering: discovering,
+                over: connection,
+                generation: generation
+            )
+            let execEnd = ContinuousClock.now
+            guard refreshGeneration == generation, !Task.isCancelled else {
+                secondaryProbes.forEach { $0.1.cancel() }
+                return
+            }
+            var nextSecondaryStates: [Host.SessionBackend: TmuxState] = [:]
+            var results = [primary]
+            for (backend, task) in secondaryProbes {
+                guard let result = await task.value else {
+                    // A secondary that failed keeps its LAST state rather
+                    // than dropping to a stand-in: its sessions are still
+                    // there, and one bad round-trip is not evidence they
+                    // went away. It also stays out of `answered` below, so
+                    // its attention baseline survives untouched.
+                    nextSecondaryStates[backend] = secondaryStates[backend]
+                    continue
                 }
-                execEnd = ContinuousClock.now
-                outputBytes = output.utf8.count
-                guard refreshGeneration == generation, !Task.isCancelled else { return }
-                parsed = await Task.detached(priority: .userInitiated) {
-                    TmuxProbe.parseProbe(output)
-                }.value
-            case .herdr:
-                let command = HerdrProbe.probeCommand(
-                    sessionNames: herdrSessionNames,
-                    tailTargets: herdrTailTargets
-                )
-                let output = try await deadlined { try await connection.exec(command) }
-                execEnd = ContinuousClock.now
-                outputBytes = output.utf8.count
-                guard refreshGeneration == generation, !Task.isCancelled else { return }
-                let herdrParsed = await Task.detached(priority: .userInitiated) {
-                    HerdrProbe.parseProbe(output)
-                }.value
-                // Parsing runs off-actor; a backend switch or suspension can
-                // invalidate this generation while it is in flight. Do not
-                // let that stale pass prime the next herdr command or its
-                // attention-edge baseline.
-                guard refreshGeneration == generation, !Task.isCancelled else { return }
-                herdrSessionNames = herdrParsed.sessionNames
-                herdrTailTargets = herdrParsed.tailTargets
-                previousHerdrPaneStatuses = herdrPaneStatuses
-                herdrPaneStatuses = herdrParsed.paneStatuses
-                parsed = TmuxProbe.ParsedProbe(
-                    state: herdrParsed.state.tmuxState,
-                    tails: herdrParsed.tails,
-                    miniatures: herdrParsed.miniatures
-                )
+                nextSecondaryStates[backend] = result.parsed.state
+                results.append(result)
             }
             let parseEnd = ContinuousClock.now
             guard refreshGeneration == generation, !Task.isCancelled else { return }
 
-            if tmux != parsed.state { tmux = parsed.state }
-            if attentionTails != parsed.tails { attentionTails = parsed.tails }
-            if miniatures != parsed.miniatures { miniatures = parsed.miniatures }
-            if herdrPresent != parsed.herdrPresent { herdrPresent = parsed.herdrPresent }
+            let backend = host.sessionBackend
+            var nextTails: [SessionKey: [String]] = [:]
+            var nextMiniatures: [SessionKey: [String]] = [:]
+            for result in results {
+                nextTails.merge(
+                    Self.keyed(result.parsed.tails, backend: result.backend)
+                ) { _, later in later }
+                nextMiniatures.merge(
+                    Self.keyed(result.parsed.miniatures, backend: result.backend)
+                ) { _, later in later }
+            }
+            if tmux != primary.parsed.state { tmux = primary.parsed.state }
+            if secondaryStates != nextSecondaryStates {
+                secondaryStates = nextSecondaryStates
+            }
+            if attentionTails != nextTails { attentionTails = nextTails }
+            if miniatures != nextMiniatures { miniatures = nextMiniatures }
+            if herdrPresent != primary.parsed.herdrPresent {
+                herdrPresent = primary.parsed.herdrPresent
+            }
+            if discovery != primary.parsed.discovery {
+                discovery = primary.parsed.discovery
+            }
             if !hasLiveProbe { hasLiveProbe = true }
-            let nextSessionCount = parsed.state.sessions.count
-            if sessionCount != nextSessionCount { sessionCount = nextSessionCount }
-            switch parsed.state {
-            case .sessions(let sessions):
+            let sessions = allSessions
+            if sessionCount != sessions.count { sessionCount = sessions.count }
+            switch primary.parsed.state {
+            case .sessions:
                 seedActiveAgentCache(from: sessions)
                 onSnapshot?(DeckSnapshot(
                     sessions: sessions,
-                    miniatures: miniatures,
+                    miniatures: miniatures.storageKeyed,
                     sessionBackend: host.sessionBackend
                 ))
             case .noServer, .tmuxMissing:
                 // A settled "nothing there" clears the cache — ghost tiles
                 // at the next launch would outlive the sessions they show.
+                // Keyed off the PRIMARY: it is what `restore(from:)` guards
+                // on, so a cache it would refuse is a cache worth dropping.
                 onSnapshot?(nil)
             case .unknown, .probing, .failed:
                 break
@@ -516,10 +644,14 @@ final class HostConnectionModel {
                 \(self.host.name, privacy: .public) probe: exec \
                 \(Self.ms(execStart, execEnd), privacy: .public)ms, parse \
                 \(Self.ms(execEnd, parseEnd), privacy: .public)ms, \
-                \(outputBytes, privacy: .public)B
+                \(Self.byteBreakdown(results), privacy: .public)
                 """)
             lastRefreshed = Date()
-            evaluateAttention()
+            // Only the backends that actually ANSWERED. A failed
+            // secondary's sessions must keep both their displayed attention
+            // and their edge baseline — pruning them is the 2026-08-05 bug's
+            // exact shape (see `evaluateAttention`).
+            evaluateAttention(answered: Set(results.map(\.backend)))
             await evaluateKeychainTip(connection: connection, generation: generation)
         } catch {
             guard refreshGeneration == generation, !Task.isCancelled else { return }
@@ -544,6 +676,83 @@ final class HostConnectionModel {
                 markFailed(error, registerConnectFailure: !reusedLink)
             }
         }
+    }
+
+    /// One backend's full probe: exec, parse, and — for herdr — the bake
+    /// state its NEXT command needs. Only one backend on a host can be
+    /// herdr (primary or secondary, never both), so that state stays a
+    /// single set.
+    private struct BackendProbe {
+        var backend: Host.SessionBackend
+        var parsed: TmuxProbe.ParsedProbe
+        var outputBytes: Int
+    }
+
+    /// Runs one backend's probe over the shared control connection.
+    ///
+    /// Throws on exec or deadline failure. The CALLER decides what that
+    /// means: the primary's throw reaches `markFailed` and the dead-link
+    /// rebuild, a secondary's is caught and logged.
+    private func runProbe(
+        backend: Host.SessionBackend,
+        discovering: Set<Host.SessionBackend>,
+        over connection: SSHConnection,
+        generation: Int
+    ) async throws -> BackendProbe {
+        switch backend {
+        case .tmux:
+            let output = try await deadlined {
+                try await connection.exec(
+                    TmuxProbe.probeCommand(discovering: discovering))
+            }
+            try Task.checkCancellation()
+            let parsed = await Task.detached(priority: .userInitiated) {
+                TmuxProbe.parseProbe(output)
+            }.value
+            guard refreshGeneration == generation else { throw CancellationError() }
+            return BackendProbe(
+                backend: .tmux, parsed: parsed, outputBytes: output.utf8.count)
+        case .herdr:
+            let output = try await deadlined {
+                try await connection.exec(HerdrProbe.probeCommand(
+                    sessionNames: self.herdrSessionNames,
+                    tailTargets: self.herdrTailTargets,
+                    discovering: discovering
+                ))
+            }
+            try Task.checkCancellation()
+            let herdrParsed = await Task.detached(priority: .userInitiated) {
+                HerdrProbe.parseProbe(output)
+            }.value
+            // Parsing runs off-actor; a backend switch or suspension can
+            // invalidate this generation while it is in flight. Do not let
+            // that stale pass prime the next herdr command or its
+            // attention-edge baseline.
+            guard refreshGeneration == generation else { throw CancellationError() }
+            herdrSessionNames = herdrParsed.sessionNames
+            herdrTailTargets = herdrParsed.tailTargets
+            previousHerdrPaneStatuses = herdrPaneStatuses
+            herdrPaneStatuses = Self.keyed(
+                herdrParsed.paneStatuses, backend: .herdr)
+            return BackendProbe(
+                backend: .herdr,
+                parsed: TmuxProbe.ParsedProbe(
+                    state: herdrParsed.state.tmuxState,
+                    tails: herdrParsed.tails,
+                    miniatures: herdrParsed.miniatures,
+                    discovery: herdrParsed.discovery
+                ),
+                outputBytes: output.utf8.count
+            )
+        }
+    }
+
+    /// `3478B tmux` — or `3478B tmux + 25324B herdr` on a mixed host, so the
+    /// 2026-07 probe baseline stays comparable per backend.
+    private static func byteBreakdown(_ results: [BackendProbe]) -> String {
+        results
+            .map { "\($0.outputBytes)B \($0.backend.rawValue)" }
+            .joined(separator: " + ")
     }
 
     private func seedActiveAgentCache(from sessions: [TmuxSession]) {
@@ -588,7 +797,7 @@ final class HostConnectionModel {
             Task { await connection.close() }
         }
         connection = nil
-        evaluateAttention()
+        clearDisplayedAttention()
     }
 
     private func ensureConnection(refreshGeneration expectedGeneration: Int? = nil) async throws -> SSHConnection {
@@ -699,30 +908,32 @@ final class HostConnectionModel {
     /// Re-derive every session's agent state from the latest probe (title)
     /// + capture (dialog content), and emit any edges. Runs after every
     /// probe pass — title and tail inputs arrive together.
-    private func evaluateAttention() {
-        guard case .sessions(let sessions) = tmux else {
-            // Stop *claiming* attention we can no longer see — NEEDS YOU is
-            // re-earned live, never asserted from a dead probe.
-            if !attention.isEmpty { attention = [:] }
-            // But keep the edge baseline. A lost connection is not evidence
-            // that an agent's state changed, and the baseline is the only
-            // record of what it was: reset here, the reconnect's first pass
-            // has nothing to compare against and emits nothing. That is
-            // precisely the suspend → socket dies → wake → reconnect path,
-            // so clearing it made "the agent finished while you were away"
-            // unannounceable — the case background keep-alive and the
-            // background refresh both exist to serve. A session that really
-            // is gone is dropped by `prune` on the next successful pass.
-            return
-        }
-        var next: [String: PaneAgentState] = [:]
+    ///
+    /// `answered` names the backends whose probe actually came back this
+    /// pass. ⚠ It is the whole safety property of the mixed-host version: a
+    /// backend that failed (or was never probed) has NOT proved its sessions
+    /// are gone, so its displayed attention and — much more importantly —
+    /// its `AttentionTracker` baseline must survive untouched. Handing this
+    /// the union of everything *expected* reproduces the bug fixed
+    /// 2026-08-05 exactly: a reachable session's NEEDS YOU silently cleared
+    /// by an unrelated probe's failure, invisible outside the `attention`
+    /// log, and "the agent finished while you were away" made
+    /// unannounceable.
+    private func evaluateAttention(answered: Set<Host.SessionBackend>) {
+        guard !answered.isEmpty else { return }
+        let sessions = allSessions.filter { answered.contains($0.backend) }
+        // Start from what the backends that did NOT answer are still
+        // showing. Their verdicts are not this pass's to retract; a backend
+        // that DID answer has its keys rebuilt below, so answering with no
+        // sessions correctly clears its own.
+        var next = attention.filter { !answered.contains($0.key.backend) }
         for session in sessions {
             let verdict = sessionAttentionVerdict(for: session)
             if let state = verdict.state {
-                next[session.name] = state
+                next[session.id] = state
             }
             let events = attentionTracker.update(
-                session: session.name,
+                session: session.id,
                 state: verdict.state,
                 hasBell: verdict.hasBell
             )
@@ -733,7 +944,7 @@ final class HostConnectionModel {
                 var dialogSummary: String?
                 if verdict.offersDialogSummary, case .needsInput(let kind) = event {
                     dialogSummary = AgentAttention.dialogSummary(
-                        in: attentionTails[session.name] ?? [], kind: kind)
+                        in: attentionTails[session.id] ?? [], kind: kind)
                 }
                 onAttentionAlert?(AttentionAlert(
                     host: host,
@@ -745,8 +956,29 @@ final class HostConnectionModel {
                 ))
             }
         }
-        attentionTracker.prune(keeping: Set(sessions.map(\.name)))
+        // Prune only within the backends that answered: an unanswered one's
+        // baselines must survive, or the next successful pass has nothing to
+        // compare against and emits no edge at all.
+        attentionTracker.prune { key in
+            !answered.contains(key.backend) || sessions.contains { $0.id == key }
+        }
         if attention != next { attention = next }
+    }
+
+    /// The control link died. Stop *claiming* attention we can no longer see
+    /// — NEEDS YOU is re-earned live, never asserted from a dead probe — but
+    /// keep every edge baseline.
+    ///
+    /// A lost connection is not evidence that an agent's state changed, and
+    /// the baseline is the only record of what it was: reset here, the
+    /// reconnect's first pass has nothing to compare against and emits
+    /// nothing. That is precisely the suspend → socket dies → wake →
+    /// reconnect path, so clearing it made "the agent finished while you
+    /// were away" unannounceable — the case background keep-alive and the
+    /// background refresh both exist to serve. A session that really is gone
+    /// is dropped by `prune` on the next successful pass.
+    private func clearDisplayedAttention() {
+        if !attention.isEmpty { attention = [:] }
     }
 
     private struct AttentionVerdict {
@@ -769,7 +1001,9 @@ final class HostConnectionModel {
     /// verified 2026-08-01) and no bells; its derived `done` arrives as
     /// the busy → idle edge, exactly the turn-ended shape.
     private func sessionAttentionVerdict(for session: TmuxSession) -> AttentionVerdict {
-        switch host.sessionBackend {
+        // The SESSION's backend, not the host's: a mixed host runs both, and
+        // the classifier that applies is the one that produced the record.
+        switch session.backend {
         case .tmux:
             let window = session.activeWindow
             let agent = window?.activeAgent
@@ -779,7 +1013,7 @@ final class HostConnectionModel {
                 // signals, means no state (bells are still tracked).
                 state: AgentAttention.classifyVerified(
                     title: title,
-                    tail: attentionTails[session.name] ?? [],
+                    tail: attentionTails[session.id] ?? [],
                     agent: agent
                 ),
                 agent: agent,
@@ -788,7 +1022,7 @@ final class HostConnectionModel {
                 offersDialogSummary: true
             )
         case .herdr:
-            let statuses = herdrPaneStatuses[session.name] ?? [:]
+            let statuses = herdrPaneStatuses[session.id] ?? [:]
             let state = HerdrProbe.sessionAgentState(statuses.values)
             // Alert metadata speaks for the fronted pane only when its own
             // status produced the session's verdict — a blocked background
@@ -796,7 +1030,7 @@ final class HostConnectionModel {
             let pane = session.activeWindow?.activePane
             let frontStatus = pane.flatMap { statuses[$0.tmuxID] }
             let previousFrontStatus = pane.flatMap {
-                previousHerdrPaneStatuses[session.name]?[$0.tmuxID]
+                previousHerdrPaneStatuses[session.id]?[$0.tmuxID]
             }
             // Busy/blocked are winning states, so a matching front pane
             // participated in the verdict. Idle is different: a background
@@ -834,7 +1068,7 @@ final class HostConnectionModel {
         let affected = sessions.filter { session in
             session.activeAgent == .claudeCode
                 && KeychainLockCheck.showsClaudeLoginScreen(
-                    in: attentionTails[session.name] ?? [])
+                    in: attentionTails[session.id] ?? [])
         }.map(\.name)
         guard !affected.isEmpty else {
             applyKeychainVerdict(nil, sessions: [])
@@ -919,16 +1153,22 @@ final class HostConnectionModel {
     /// Returns the attach mode for the created session — the one value every
     /// caller actually wants, and what preserves the selected backend in the
     /// terminal route before the next probe has seen the new session.
+    /// `backend` names which multiplexer mints. Defaults to the host's
+    /// primary — the only answer on a single-backend host, and still the
+    /// default everywhere else; a mixed host's New Session sheet passes the
+    /// user's explicit choice.
     func createSession(
-        base: String, inDirectoryOf sourceSession: String?,
+        base: String, backend: Host.SessionBackend? = nil,
+        inDirectoryOf sourceSession: String?,
         startingIn directory: String? = nil, applying tmuxConf: String? = nil,
         running script: String? = nil, typing launch: String?
     ) async -> TerminalRoute.Mode? {
         resetConnectRetryBackoff()
         let reusedLink = connection != nil && phase == .connected
+        let backend = backend ?? host.sessionBackend
         do {
             let connection = try await ensureConnection()
-            if host.sessionBackend == .herdr {
+            if backend == .herdr {
                 // The tmux conf rider applies to the tmux path only; the
                 // two directory riders resolve inside the herdr mint (the
                 // session server inherits the spawn's cwd).
@@ -939,8 +1179,11 @@ final class HostConnectionModel {
                 )
             }
             let command = TmuxProbe.newSessionCommand(
+                // Unique within TMUX's namespace only: a herdr session of
+                // the same name is a different server, and the two never
+                // collide (`SessionKey`). The server settles real races.
                 name: TmuxProbe.uniqueSessionName(
-                    base: base, existing: tmux.sessions.map(\.name)),
+                    base: base, existing: sessions(on: .tmux).map(\.name)),
                 sourceSessionName: sourceSession,
                 startDirectory: directory,
                 tmuxConf: tmuxConf,
@@ -1121,8 +1364,12 @@ final class HostConnectionModel {
     /// Returns the session's attach mode (the fresh pane is now what the
     /// session fronts); nil on failure — never a fallback mint, which
     /// would hide the failure behind a surprise second session.
+    /// `backend` is the TARGET session's, resolved by the caller against
+    /// the probe list — never `host.sessionBackend`, which on a mixed host
+    /// answers only for the primary.
     func launchInSession(
         named sessionName: String,
+        backend: Host.SessionBackend? = nil,
         placement: ExternalSessionPlacement,
         directory: String?,
         label: String?,
@@ -1133,7 +1380,7 @@ final class HostConnectionModel {
         let reusedLink = connection != nil && phase == .connected
         do {
             let connection = try await ensureConnection()
-            if host.sessionBackend == .herdr {
+            if (backend ?? host.sessionBackend) == .herdr {
                 return await launchInHerdrSession(
                     named: sessionName, placement: placement,
                     directory: directory, label: label,
@@ -1217,14 +1464,17 @@ final class HostConnectionModel {
         let reusedLink = connection != nil && phase == .connected
         do {
             let connection = try await ensureConnection()
-            var session = TmuxSession(name: name, windows: [], created: .distantPast)
-            // The model's probe records only belong to its configured
-            // backend. An older open tab may intentionally belong to the
-            // other backend after Host Settings changes, so never borrow a
-            // same-named record across that boundary.
-            if backend == host.sessionBackend,
-               case .sessions(let list) = tmux,
-               let match = list.first(where: { $0.name == name }) {
+            // The stand-in must carry the CALLER's backend: `session.id` is
+            // what the optimistic tile removal below filters by, so a
+            // tmux-stamped default would fail to drop a herdr tile.
+            var session = TmuxSession(
+                name: name, windows: [], created: .distantPast, backend: backend)
+            // Match on the full identity, never the name alone: an older
+            // open tab may intentionally belong to a backend this host no
+            // longer monitors, and a mixed host can hold the same name
+            // twice. `allSessions` records carry their own backend, so the
+            // lookup cannot cross that boundary.
+            if let match = allSessions.first(where: { $0.id == session.id }) {
                 session = match
             }
             await kill(session, backend: backend, over: connection)
@@ -1315,14 +1565,19 @@ final class HostConnectionModel {
         if let command {
             _ = try? await deadlined { try await connection.exec(command) }
         }
-        if case .sessions(let list) = tmux {
-            let remaining = list.filter { $0.id != session.id }
-            tmux = .sessions(remaining)
-            sessionCount = remaining.count
+        // Drop the tile optimistically from whichever backend's state holds
+        // it; the follow-up probe is the truth and resurrects it if the
+        // close failed.
+        if backend == host.sessionBackend, case .sessions(let list) = tmux {
+            tmux = .sessions(list.filter { $0.id != session.id })
+        } else if case .sessions(let list) = secondaryStates[backend] {
+            secondaryStates[backend] = .sessions(
+                list.filter { $0.id != session.id })
         }
-        miniatures[session.name] = nil
-        attentionTails[session.name] = nil
-        attention[session.name] = nil
+        sessionCount = allSessions.count
+        miniatures[session.id] = nil
+        attentionTails[session.id] = nil
+        attention[session.id] = nil
         // A probe already in flight may predate the kill — let it land,
         // then re-probe so the wall settles on reality.
         await refreshTask?.value
@@ -1339,6 +1594,7 @@ final class HostConnectionModel {
         connection = nil
         phase = .idle
         tmux = .unknown
+        secondaryStates = [:]
         keyPassphraseChallenge = nil
         hasLiveProbe = false
         sessionCount = 0
@@ -1351,6 +1607,7 @@ final class HostConnectionModel {
         herdrPaneStatuses = [:]
         previousHerdrPaneStatuses = [:]
         herdrPresent = false
+        discovery = [:]
         keychainNotice = nil
         keychainVerdict = nil
     }
