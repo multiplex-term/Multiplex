@@ -46,6 +46,20 @@ struct Host: Identifiable, Codable, Hashable {
         func isSessionLive(clientCount: Int, hasOpenTab: Bool) -> Bool {
             reportsClientCount ? clientCount > 0 : hasOpenTab
         }
+
+        /// The one reader of a backend written by a human or an automation —
+        /// a `multiplex://` query item, a Shortcut's String parameter, a
+        /// seed file. Trimmed and case-folded so the grammar is the same
+        /// word wherever it is typed, and nil for anything else, which every
+        /// caller reads as "the host's default" (`ExternalSessionPlacement
+        /// .init(token:)`'s rule, applied to the sibling parameter).
+        init?(token: String?) {
+            guard let token else { return nil }
+            let normalized = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard !normalized.isEmpty else { return nil }
+            self.init(rawValue: normalized)
+        }
     }
 
     var id: UUID = UUID()
@@ -85,7 +99,13 @@ struct Host: Identifiable, Codable, Hashable {
     /// `connectionModelConfiguration`: flipping it must tear down and
     /// rebuild the probe connection, because the probe command itself is
     /// backend-shaped.
-    var sessionBackend: SessionBackend = .tmux
+    ///
+    /// Promoting a backend to primary retires it as a secondary in the same
+    /// write, so the record can never point at a backend it also lists as an
+    /// extra — see `secondaryBackends`.
+    var sessionBackend: SessionBackend = .tmux {
+        didSet { secondaryBackends.remove(sessionBackend) }
+    }
     /// Backends beyond `sessionBackend` whose sessions ALSO appear on this
     /// host's deck. Empty is the shipping default and the only state that
     /// costs what a host has always cost.
@@ -110,7 +130,16 @@ struct Host: Identifiable, Codable, Hashable {
     /// is written with `.sortedKeys` precisely to stay byte-stable. Adding a
     /// third backend must therefore also sort this on the way out, or every
     /// launch will rewrite the file and the mirrored Keychain record.
-    var secondaryBackends: Set<SessionBackend> = []
+    ///
+    /// The primary is never also a secondary — `monitoredBackends` would
+    /// list it twice, and a stray copy makes `connectionModelConfiguration`
+    /// unequal and rebuilds the probe for nothing. That is enforced here, on
+    /// the way in, so no writer has to remember it. (`init(from:)` assigns
+    /// before `didSet` observers exist and therefore repeats the rule; that
+    /// is the one place it lives twice.)
+    var secondaryBackends: Set<SessionBackend> = [] {
+        didSet { secondaryBackends.remove(sessionBackend) }
+    }
     /// Absolute path to `mosh-server` when it isn't on the exec PATH.
     var moshServerPath: String?
     /// UDP port or range ("60000:61000") handed to `mosh-server -p`.
@@ -185,10 +214,25 @@ struct Host: Identifiable, Codable, Hashable {
         }
     }
 
+    /// Whether this host's sessions may come from `backend` at all — the one
+    /// predicate every surface that resolves a named backend asks before
+    /// trusting it. A backend the host does not monitor has no sessions
+    /// here, and answering with the other one's namesake would attach the
+    /// wrong multiplexer.
+    func monitors(_ backend: SessionBackend) -> Bool {
+        backend == sessionBackend || secondaryBackends.contains(backend)
+    }
+
     /// Whether tiles must say which multiplexer they came from. The single
-    /// gate for the wall's `TMUX`/`HRDR` chip and its herdr tint: on a host
-    /// where the backend is not in question, both would be decoration.
-    var showsBackendIdentity: Bool { monitoredBackends.count > 1 }
+    /// gate for the herdr tile tint: on a host where the backend is not in
+    /// question it would be decoration, not state.
+    ///
+    /// Equivalent to `monitoredBackends.count > 1` without that accessor's
+    /// two array allocations — this is read once per tile per render and
+    /// once per session per widget publish. The set never holds the primary
+    /// (`secondaryBackends`' `didSet`), so non-empty is exactly "more than
+    /// one monitored backend".
+    var showsBackendIdentity: Bool { !secondaryBackends.isEmpty }
 
     /// The configured launch models for one agent, picker-ready.
     func launchModels(for agent: AgentKind) -> [String] {

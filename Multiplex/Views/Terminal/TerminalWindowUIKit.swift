@@ -623,7 +623,7 @@ final class TerminalWindowViewController: UIViewController,
         // nothing rather than a same-named record from the other one.
         guard let host = store.host(id: activeTab.hostID),
               let backend = activeTab.sessionBackend,
-              host.monitoredBackends.contains(backend)
+              host.monitors(backend)
         else { return nil }
         let model = hub.model(for: host)
         // One expression serves both backends on purpose: a herdr tile IS
@@ -923,7 +923,7 @@ final class TerminalWindowViewController: UIViewController,
         // tmux-default mixed host keeps producing herdr siblings. A backend
         // the host no longer monitors falls back to the default.
         let backend = activeTab.sessionBackend
-            .flatMap { host.monitoredBackends.contains($0) ? $0 : nil }
+            .flatMap { host.monitors($0) ? $0 : nil }
             ?? host.sessionBackend
         // Only inherit a source session from the namespace the new tab will
         // actually use.
@@ -1186,7 +1186,12 @@ final class TerminalWindowViewController: UIViewController,
         }
 
         let model = hub.model(for: host)
-        guard watchedTab.sessionBackend == host.sessionBackend else {
+        // Any backend this host MONITORS can answer, matching `detectedAgent`
+        // above — on a mixed host the secondary's tabs get the focused-pane
+        // check too. A tab whose backend the host no longer monitors (or a
+        // `.shell` tab, which has none) gets nothing rather than a same-named
+        // record from the other one.
+        guard let backend = watchedTab.sessionBackend, host.monitors(backend) else {
             activePaneFingerprint = nil
             shownAgent = nil
             renderNow()
@@ -1196,7 +1201,7 @@ final class TerminalWindowViewController: UIViewController,
         let agentChanged = shownAgent != initialAgent
         shownAgent = initialAgent
         activePaneFingerprint = model
-            .sessions(on: watchedTab.sessionBackend ?? host.sessionBackend)
+            .sessions(on: backend)
             .first(where: { $0.name == sessionName })?
             .activeWindow?
             .activePane?
@@ -1204,7 +1209,7 @@ final class TerminalWindowViewController: UIViewController,
         if agentChanged { renderNow() }
         await model.refreshAndWait(ifStaleFor: 4)
 
-        if watchedTab.sessionBackend == .herdr {
+        if backend == .herdr {
             // The five-second wall probe remains the broad session/attention
             // authority. Between ticks, the one terminal that owns keyboard
             // focus asks `pane current`: herdr's global focused pane identifies
@@ -1220,7 +1225,8 @@ final class TerminalWindowViewController: UIViewController,
                     // falling to the wall-verdict branch below, so a chip
                     // never swaps under the user's fingers.
                     if !view.hasRecentUserInput(within: Self.typingQuietWindow) {
-                        let detection = await model.detectActiveAgent(in: sessionName)
+                        let detection = await model.detectActiveAgent(
+                            in: sessionName, backend: backend)
                         guard !Task.isCancelled, activeTab?.id == watchedTab.id else { return }
                         if let detection { apply(detection) }
                     }
@@ -1242,7 +1248,8 @@ final class TerminalWindowViewController: UIViewController,
                let view = activeController?.terminalView,
                TerminalFocusArbiter.current === view,
                !view.hasRecentUserInput(within: Self.typingQuietWindow) {
-                let detection = await model.detectActiveAgent(in: sessionName)
+                let detection = await model.detectActiveAgent(
+                    in: sessionName, backend: backend)
                 guard !Task.isCancelled, activeTab?.id == watchedTab.id else { return }
                 if let detection { apply(detection) }
             }

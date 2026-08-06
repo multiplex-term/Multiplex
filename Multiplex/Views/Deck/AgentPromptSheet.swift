@@ -49,7 +49,8 @@ struct AgentPromptFormState {
             directory: directory,
             setupScript: request.setupScript,
             model: launchModel.isEmpty ? nil : launchModel,
-            target: request.target
+            target: request.target,
+            backend: request.backend
         )
     }
 

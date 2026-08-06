@@ -214,11 +214,11 @@ final class MixedBackendTests: XCTestCase {
         )
     }
 
-    func testTheSetKeyedPruneStillWorksForSingleBackendCallers() {
+    func testPruneStillWorksForSingleBackendCallers() {
         var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "a", state: .busy, hasBell: false)
         _ = tracker.update(session: "b", state: .busy, hasBell: false)
-        tracker.prune(keeping: ["a"])
+        tracker.prune { $0 == "a" }
         XCTAssertTrue(tracker.update(session: "b", state: .idle, hasBell: false).isEmpty)
         XCTAssertEqual(
             tracker.update(session: "a", state: .idle, hasBell: false),

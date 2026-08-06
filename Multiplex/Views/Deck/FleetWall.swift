@@ -677,8 +677,8 @@ final class FleetWallViewController: UIViewController {
         let alert = UIAlertController(
             title: "Also Show \(name) Sessions",
             message: "\(host.name) is running \(name) as well as \(primary). "
-                + "Showing both roughly doubles what this host fetches on every "
-                + "deck refresh.\n\nNew sessions still start on \(primary).",
+                + "Showing both \(HostGuide.secondBackendCost)."
+                + "\n\nNew sessions still start on \(primary).",
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -785,10 +785,13 @@ final class FleetWallViewController: UIViewController {
     }
 
     private func focusOrAttach(_ host: Host, session: TmuxSession) {
+        // The RECORD's backend, never the host's primary: a mixed host's
+        // herdr tile is already open under its own namespace, and asking
+        // about the primary's would miss it and open a duplicate window.
         if configuration.workspace.focusTab(
             hostID: host.id,
             sessionName: session.name,
-            backend: host.sessionBackend
+            backend: session.backend
         ) {
             return
         }
@@ -854,8 +857,11 @@ final class FleetWallViewController: UIViewController {
         in target: String, on host: Host,
         submission: NewSessionSubmission, model: HostConnectionModel
     ) async {
+        // `tabTargetChoices` only ever lists the form's own backend's
+        // sessions, so the submission's backend IS the target's.
         guard let mode = await model.launchInSession(
             named: target,
+            backend: submission.backend,
             placement: .tab,
             directory: submission.directory,
             label: submission.agent?.launchCommand,
@@ -868,7 +874,7 @@ final class FleetWallViewController: UIViewController {
             presentTabCreateFailure(session: target, on: host, model: model)
             return
         }
-        reveal(mode: mode, session: target, on: host)
+        reveal(mode: mode, session: target, backend: submission.backend, on: host)
     }
 
     /// The tile menu's herdr-only New Tab in Workspace: the terminal
@@ -885,6 +891,7 @@ final class FleetWallViewController: UIViewController {
         Task { [weak self] in
             guard let mode = await model.launchInSession(
                 named: session.name,
+                backend: session.backend,
                 placement: .tab,
                 directory: nil,
                 label: nil,
@@ -895,18 +902,23 @@ final class FleetWallViewController: UIViewController {
                     session: session.name, on: host, model: model)
                 return
             }
-            self?.reveal(mode: mode, session: session.name, on: host)
+            self?.reveal(
+                mode: mode, session: session.name,
+                backend: session.backend, on: host)
         }
     }
 
     /// Created first, revealed second — the external performer's rule: the
     /// fresh pane is already the session's focus, so an existing tab needs
     /// only the reveal and a missing one attaches straight onto it.
-    private func reveal(mode: TerminalRoute.Mode, session: String, on host: Host) {
+    private func reveal(
+        mode: TerminalRoute.Mode, session: String,
+        backend: Host.SessionBackend, on host: Host
+    ) {
         if configuration.workspace.focusTab(
             hostID: host.id,
             sessionName: session,
-            backend: host.sessionBackend
+            backend: backend
         ) { return }
         open(TerminalRoute(hostID: host.id, mode: mode))
     }
@@ -1580,7 +1592,7 @@ private final class FleetHostSectionView: UIView {
         // `.tmuxMissing` and `.failed` still speak when nothing is running.
         let ordered = snapshot.orderedSessions
         switch ordered.isEmpty ? snapshot.tmux : .sessions(ordered) {
-        case .sessions(let sessions):
+        case .sessions:
             var items: [FleetGridItem] = []
             let newTile = reusableSpecialTile(key: "new") { FleetNewSessionTileView() }
             newTile.configure(
@@ -1629,7 +1641,7 @@ private final class FleetHostSectionView: UIView {
                         guard let self else { return }
                         let move = {
                             self.configuration.reorderSession(
-                                source, session.id.storageKey, sessions)
+                                source, session.id.storageKey, ordered)
                             // Session order is device-local HostStore state,
                             // not a probe change. Re-arm its Observation read
                             // now so the native grid settles immediately after
@@ -3597,20 +3609,6 @@ struct NewSessionFormState {
         )
     }
 
-    /// Single-backend convenience — the shape every caller had before a host
-    /// could show two.
-    init(
-        host: Host,
-        existingNames: [String],
-        preferences: NewSessionPreferences = NewSessionPreferences()
-    ) {
-        self.init(
-            host: host,
-            existingNames: [host.sessionBackend: existingNames],
-            preferences: preferences
-        )
-    }
-
     /// The backends this sheet may mint on, in the host's own order. More
     /// than one is what makes the sheet offer a choice at all.
     var backendChoices: [Host.SessionBackend] { host.monitoredBackends }
@@ -3655,6 +3653,21 @@ struct NewSessionFormState {
     /// prefix keys and the shortcut panel.
     var tabTargetChoices: [String] {
         backend == .herdr ? (existingNames[.herdr] ?? []) : []
+    }
+
+    /// Whether the Creates section is worth BUILDING — whether any backend
+    /// this host monitors could offer a tab target, not whether the live
+    /// choice does. Flipping the backend then costs a visibility change
+    /// instead of rebuilding the sheet under the user's fingers.
+    ///
+    /// Same rule as `tabTargetChoices`, asked across the host's backends, so
+    /// the two can't disagree about which one has the shape.
+    var mayOfferTabTarget: Bool {
+        host.monitoredBackends.contains { backend in
+            var probe = self
+            probe.backend = backend
+            return !probe.tabTargetChoices.isEmpty
+        }
     }
 
     mutating func selectTabTarget(_ session: String?) {
@@ -3832,7 +3845,6 @@ final class NewSessionViewController: UIViewController,
     private var createsButton: FleetMenuFieldButton?
     private var createsSection: FleetFormSectionView?
     private var identitySection: FleetFormSectionView?
-    private var backendSection: FleetFormSectionView?
     private var backendChoiceBar: FleetBackendChoiceBar?
     private var createItem: UIBarButtonItem?
 
@@ -3849,22 +3861,6 @@ final class NewSessionViewController: UIViewController,
         )
         self.create = create
         super.init(nibName: nil, bundle: nil)
-    }
-
-    /// Single-backend convenience — the shape every caller had before a host
-    /// could show two.
-    convenience init(
-        host: Host,
-        existingNames: [String],
-        preferences: NewSessionPreferences = NewSessionPreferences(),
-        create: @escaping (NewSessionSubmission) -> Void
-    ) {
-        self.init(
-            host: host,
-            existingNames: [host.sessionBackend: existingNames],
-            preferences: preferences,
-            create: create
-        )
     }
 
     @available(*, unavailable)
@@ -3960,18 +3956,11 @@ final class NewSessionViewController: UIViewController,
         // Only a question when the host shows more than one backend. On the
         // single-backend host the sheet is exactly what it always was.
         if form.backendChoices.count > 1 {
-            let backend = makeBackendSection()
-            backendSection = backend
-            contentStack.addArrangedSubview(backend)
+            contentStack.addArrangedSubview(makeBackendSection())
         }
         // Built whenever ANY monitored backend could offer it, and hidden by
-        // `renderForm` when the live choice can't — flipping the backend then
-        // costs a visibility change instead of rebuilding the whole sheet
-        // under the user's fingers.
-        if Host.SessionBackend.allCases.contains(where: {
-            form.host.monitoredBackends.contains($0)
-                && !(form.existingNames[$0] ?? []).isEmpty && $0 == .herdr
-        }) {
+        // `renderForm` when the live choice can't.
+        if form.mayOfferTabTarget {
             let creates = makeCreatesSection()
             createsSection = creates
             contentStack.addArrangedSubview(creates)

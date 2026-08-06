@@ -120,7 +120,7 @@ final class SharedStateTests: XCTestCase {
         )
         XCTAssertEqual(
             widget.mostRecentSession?.name,
-            ExternalActionPlan.mostRecentSessionName(in: tmux)
+            ExternalActionPlan.mostRecentSession(in: tmux)?.name
         )
     }
 

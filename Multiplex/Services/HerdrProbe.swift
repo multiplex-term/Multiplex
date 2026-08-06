@@ -114,10 +114,8 @@ enum HerdrProbe {
         sessionNames: [String]?, tailTargets: [TailTarget],
         discovering: Set<Host.SessionBackend> = [.tmux]
     ) -> String {
-        var command = discovering.subtracting([.herdr])
-            .sorted { $0.rawValue < $1.rawValue }
-            .map(BackendDiscovery.riderCommand(for:))
-            .joined()
+        var command = BackendDiscovery.riderPrefix(
+            discovering: discovering, excluding: .herdr)
         command += pathPrefix
             + "command -v herdr >/dev/null 2>&1 || { echo \(noHerdrMarker); exit 0; }; "
             + "echo \(statusMarker); herdr status --json 2>/dev/null || true; "
@@ -682,8 +680,12 @@ enum HerdrProbe {
     /// The mint's live existence check — attach auto-creates, so setup
     /// typing must only ever aim at a session THIS mint brought into
     /// being, and the probe's tile list can be a tick stale.
-    static let sessionListCommand =
-        pathPrefix + "herdr session list --json 2>/dev/null || true"
+    static let sessionListCommand = pathPrefix + sessionListVerb
+
+    /// The list invocation without the PATH export, for callers that have
+    /// already exported it (the discovery rider). One spelling of the shape
+    /// `parseSessionNames` reads, wherever it is asked for.
+    static let sessionListVerb = "herdr session list --json 2>/dev/null || true"
 
     /// nil distinguishes an unreadable list from a valid empty one. The mint
     /// must prove absence before it may type setup lines into a name: treating

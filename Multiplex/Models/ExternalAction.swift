@@ -243,9 +243,7 @@ enum ExternalActionURL {
         // performer validates the resolved backend against the host's live
         // record anyway.
         func backend() -> Host.SessionBackend? {
-            value("backend").flatMap {
-                Host.SessionBackend(rawValue: $0.lowercased())
-            }
+            Host.SessionBackend(token: value("backend"))
         }
         guard let hostToken = value("host"), !hostToken.isEmpty else { return nil }
         let hostRef = UUID(uuidString: hostToken).map(ExternalHostRef.id)
@@ -311,10 +309,19 @@ enum ExternalActionURL {
 enum ExternalActionPlan {
     /// The session an "open shell" targets: the newest by creation date,
     /// name-ordered on a tie so the choice is deterministic.
-    static func mostRecentSessionName(in sessions: [TmuxSession]) -> String? {
+    ///
+    /// Returns the RECORD, not the name: on a mixed host the candidate list
+    /// spans two namespaces, and re-finding the winner by name would resolve
+    /// to whichever backend's namesake sorts first — the exact ambiguity
+    /// `SessionKey` exists to abolish. The attach needs `backend` anyway.
+    ///
+    /// Mirrored by `WidgetHostState.mostRecentSession`, which the widget
+    /// process computes over its own projection; `SharedStateTests` pins the
+    /// two to the same answer.
+    static func mostRecentSession(in sessions: [TmuxSession]) -> TmuxSession? {
         sessions.max { lhs, rhs in
             (lhs.created, lhs.name) < (rhs.created, rhs.name)
-        }?.name
+        }
     }
 
     /// Resolve only against the chosen host's current scripts. A stale
@@ -350,6 +357,12 @@ struct AgentPromptRequest: Identifiable {
     var setupScript: ExternalSetupScriptSelection
     var model: String?
     var target: ExternalSessionTarget = .newSession
+    /// The multiplexer the approved launch runs on — carried through
+    /// untouched like `target`, because the sheet rebuilds the action and
+    /// anything it does not hold is silently re-defaulted to the host's
+    /// primary. On a mixed host that would land the launch on the other
+    /// backend than the one the widget was configured for.
+    var backend: Host.SessionBackend?
 }
 
 /// Whether a parsed `multiplex://` URL may run without asking. Pure so the

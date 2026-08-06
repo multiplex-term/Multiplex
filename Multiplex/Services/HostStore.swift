@@ -134,10 +134,9 @@ final class HostStore {
     func setSessionBackend(_ backend: Host.SessionBackend, for hostID: UUID) {
         guard let host = host(id: hostID), host.sessionBackend != backend else { return }
         var updated = host
+        // `Host` retires the new primary as a secondary on the way in, so
+        // this cannot leave a backend listed twice.
         updated.sessionBackend = backend
-        // The new primary can never also be a secondary — `monitoredBackends`
-        // would list it twice and the wall would probe it twice.
-        updated.secondaryBackends.remove(backend)
         update(updated)
     }
 
@@ -362,7 +361,7 @@ final class HostStore {
         if let secondaries = seed.secondaryBackends {
             host.secondaryBackends = Set(
                 secondaries.compactMap(Host.SessionBackend.init(rawValue:))
-            ).subtracting([host.sessionBackend])
+            )
         }
         if let path = seed.moshServerPath { host.moshServerPath = path }
         if let ports = seed.moshPorts { host.moshPorts = ports }

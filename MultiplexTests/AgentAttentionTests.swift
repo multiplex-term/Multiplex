@@ -450,7 +450,7 @@ final class AgentAttentionTests: XCTestCase {
     func testPruneResetsBaselineForRecreatedSession() {
         var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .busy, hasBell: false)
-        tracker.prune(keeping: [])
+        tracker.prune { _ in false }
         // Same name, new session: first sight again, no phantom turn-end.
         XCTAssertEqual(tracker.update(session: "main", state: .idle, hasBell: false), [])
     }
@@ -502,12 +502,17 @@ final class AgentAttentionTests: XCTestCase {
         XCTAssertNil(AttentionTapTarget(userInfo: corrupted))
     }
 
-    func testAlertBuildsTapTargetFromHostIdentity() {
+    /// The banner gets back to the ALERTING session, so the target carries
+    /// that session's backend. On a mixed host stamping the host's primary
+    /// instead would send the press looking in the wrong namespace — for a
+    /// namesake, or for nothing at all.
+    func testAlertBuildsTapTargetFromTheAlertingSessionsBackend() {
         var host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
         host.sessionBackend = .herdr
         let target = AttentionAlert(
             host: host,
             sessionName: "deploy",
+            backend: .herdr,
             agent: .pi,
             event: .turnEnded,
             paneTitle: ""
@@ -516,6 +521,21 @@ final class AgentAttentionTests: XCTestCase {
         XCTAssertEqual(target.sessionName, "deploy")
         XCTAssertEqual(target.backend, .herdr)
         XCTAssertNil(target.tabID)
+
+        // The mixed host: a tmux session alerting on a herdr-primary host
+        // keeps its OWN backend.
+        host.secondaryBackends = [.tmux]
+        XCTAssertEqual(
+            AttentionAlert(
+                host: host,
+                sessionName: "deploy",
+                backend: .tmux,
+                agent: .claudeCode,
+                event: .turnEnded,
+                paneTitle: ""
+            ).tapTarget.backend,
+            .tmux
+        )
     }
 
     @MainActor
@@ -577,9 +597,15 @@ final class AgentAttentionTests: XCTestCase {
 
         // A session-scoped alert re-attaches through the widget seam (the
         // router queues behind the app lock and raises the deck itself).
+        // The banner's backend rides along: dropping it would resolve the
+        // name in the host's PRIMARY namespace, which on a mixed host is a
+        // different session — or none.
         center.handleTap(AttentionTapTarget(
             hostID: hostID, sessionName: "deploy", backend: .herdr))
-        XCTAssertEqual(submitted, [.openShell(host: .id(hostID), sessionName: "deploy")])
+        XCTAssertEqual(
+            submitted,
+            [.openShell(host: .id(hostID), sessionName: "deploy", backend: .herdr)]
+        )
 
         // A tab-scoped alert whose tab died stops at the reveal attempt:
         // its "shell" display name is not an attachable session.

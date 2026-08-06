@@ -56,22 +56,47 @@ enum BackendDiscovery {
         case .herdr:
             // cargo installs a Rust binary where tmux would never live, so
             // the herdr PATH is its own; `-x` covers a `~/.cargo/bin` that
-            // an exec channel's minimal PATH never picked up.
+            // an exec channel's minimal PATH never picked up. The list verb
+            // is `HerdrProbe`'s own — the shape `parseSessionNames` reads is
+            // produced in exactly one place.
             command += RemoteCommandEnvironment.herdrPathPrefix
                 + "{ command -v herdr >/dev/null 2>&1"
                 + " || [ -x \"$HOME/.cargo/bin/herdr\" ]; } && "
                 + "{ echo \(presentMarker); "
-                + "herdr session list --json 2>/dev/null || true; }; "
+                + HerdrProbe.sessionListVerb + "; }; "
         case .tmux:
-            // `-u` on every tmux invocation, always: an exec channel
-            // inherits no locale, and tmux's `-F` writer then sanitizes
-            // every multibyte character in a session name to `_`.
+            // `TmuxProbe.tmuxCommand` carries the mandatory `-u`: an exec
+            // channel inherits no locale, and tmux's `-F` writer then
+            // sanitizes every multibyte character in a session name to `_`.
             command += RemoteCommandEnvironment.pathPrefix
                 + "command -v tmux >/dev/null 2>&1 && "
                 + "{ echo \(presentMarker); "
-                + "tmux -u list-sessions -F 'D #{session_name}' 2>/dev/null || true; }; "
+                + "\(TmuxProbe.tmuxCommand) list-sessions -F 'D #{session_name}'"
+                + " 2>/dev/null || true; }; "
         }
         return command + "echo \(endMarker); "
+    }
+
+    /// The riders one probe prepends to its own command, composed once so
+    /// both probe builders — and the next backend's — agree on the rule.
+    ///
+    /// ⚠ The riders LEAD. `read` consumes only the leading region block, and
+    /// that placement is the security property: a probe response carries
+    /// panes' visible screens in its capture tails, so a rider emitted after
+    /// them would let terminal content forge an offer (or get the tails
+    /// swallowed as region body and blank every miniature). It is also why
+    /// they precede a probe's own presence guard, which `exit`s: a host with
+    /// no herdr but live tmux sessions is exactly a case worth discovering.
+    ///
+    /// Sorted by raw value so the command is byte-stable across launches —
+    /// a `Set`'s iteration order is seeded per process.
+    static func riderPrefix(
+        discovering: Set<Host.SessionBackend>, excluding own: Host.SessionBackend
+    ) -> String {
+        discovering.subtracting([own])
+            .sorted { $0.rawValue < $1.rawValue }
+            .map(riderCommand(for:))
+            .joined()
     }
 
     // MARK: - Parse
@@ -106,30 +131,53 @@ enum BackendDiscovery {
     /// Arbitrary noise BEFORE the block is tolerated (a remote `.bashrc`
     /// that echoes is a real thing, and the primary parsers already tolerate
     /// it); the block simply starts at the first header.
+    /// Deliberately walks the response one line at a time and slices the
+    /// remainder, rather than `split`ting it into lines and re-`joined`ing
+    /// what is left. The block is a leading fragment, so the remainder is
+    /// literally a prefix plus a suffix of the input — and both probe parsers
+    /// slice their capture-tail region off before walking it, precisely so
+    /// the bulk of every response (25 KB of pane screens on a herdr host) is
+    /// tokenized once, not once as probe records and again as terminal lines.
+    /// Materializing every line here would undo that for both of them.
     static func read(_ output: String) -> Reading {
-        guard output.contains(beginMarker) else {
+        // Match on UTF-8: this scans the whole response, and the grapheme-
+        // aware `String.contains` pays for correctness the marker's ASCII
+        // does not need.
+        guard output.utf8.firstRange(of: beginMarker.utf8) != nil else {
             return Reading(results: [:], remainder: output)
         }
         var results: [Host.SessionBackend: Result] = [:]
-        var lines = output.split(separator: "\n", omittingEmptySubsequences: false)[...]
-        var leading: [Substring] = []
-        var blockStarted = false
+        var cursor = output[...]
+        var blockStart: String.Index?
 
-        while let line = lines.first {
+        /// Consumes and returns the next line, newline dropped.
+        func nextLine() -> Substring? {
+            guard !cursor.isEmpty else { return nil }
+            guard let newline = cursor.firstIndex(of: "\n") else {
+                defer { cursor = cursor[cursor.endIndex...] }
+                return cursor
+            }
+            defer { cursor = cursor[cursor.index(after: newline)...] }
+            return cursor[..<newline]
+        }
+
+        while true {
+            let lineStart = cursor.startIndex
+            guard let line = nextLine() else { break }
             guard let backend = header(line) else {
-                // Noise before the block is kept; anything after it ends the
-                // scan for good.
-                if blockStarted { break }
-                leading.append(line)
-                lines = lines.dropFirst()
+                // Noise before the block is kept; the first line after it ends
+                // the scan for good — and is put back, since it belongs to the
+                // remainder.
+                if blockStart != nil {
+                    cursor = output[lineStart...]
+                    break
+                }
                 continue
             }
-            blockStarted = true
-            lines = lines.dropFirst()
+            if blockStart == nil { blockStart = lineStart }
             var region: [Substring] = []
             var terminated = false
-            while let line = lines.first {
-                lines = lines.dropFirst()
+            while let line = nextLine() {
                 if line == endMarker {
                     terminated = true
                     break
@@ -144,9 +192,13 @@ enum BackendDiscovery {
                 results[backend] = result(from: region, backend: backend)
             }
         }
+        guard let blockStart else { return Reading(results: [:], remainder: output) }
+        // Concatenating the untouched slices reproduces the response byte for
+        // byte minus the block — no separator to re-guess, so a response with
+        // or without a trailing newline round-trips either way.
         return Reading(
             results: results,
-            remainder: (leading + lines).joined(separator: "\n")
+            remainder: String(output[..<blockStart]) + String(cursor)
         )
     }
 

@@ -1023,7 +1023,16 @@ logic belongs — keep parsing/command-building out of views.
     or, worse, get the tails swallowed as region body and blank every
     miniature. Noise *before* the block is tolerated (remote `.bashrc`
     echoes are real); once a non-region line follows it, nothing later is
-    read or removed.
+    read or removed. That placement is `BackendDiscovery.riderPrefix`'s job,
+    not each probe builder's — the rule (subtract self, sort by raw value so
+    the command is byte-stable, lead) is written once, and the rider spells
+    its list verbs through `TmuxProbe.tmuxCommand` / `HerdrProbe
+    .sessionListVerb` so the mandatory `-u` and the shape
+    `parseSessionNames` reads each have one owner. `read` itself walks the
+    response line by line and returns the remainder as prefix + suffix
+    SLICES: both probe parsers cut their capture-tail region off before
+    walking it precisely so 25 KB of pane screens is tokenized once, and
+    splitting the whole response into lines here would undo that for both.
   - **A secondary's failure is structurally contained.** Two concurrent exec
     channels on the SAME connection (105 ms vs 176 ms concatenated); the
     primary alone owns `phase`, `markFailed`, and the `reusedLink && mayRetry`
@@ -1042,6 +1051,24 @@ logic belongs — keep parsing/command-building out of views.
     is what `TerminalRoute.Mode.attach(host:session:)`, the attention
     classifier, `killSession`, and the external-action router all read; the
     name-only overload falls back to the primary as a documented tie-break.
+    Anything that TARGETS a session states the backend rather than defaulting
+    it, because pairing a name with the host's primary is a silent miss on a
+    mixed host — a duplicate window from `focusOrAttach`, a banner press that
+    finds nothing, an `in=tab` launch running tmux verbs at a herdr session.
+    So `kill` reads `session.backend` (the parameter that let the two
+    disagree is gone), `launchInSession` and `detectActiveAgent` take it
+    required, `AttentionAlert` carries it into `tapTarget` and out through
+    `AttentionCenter`'s attach, `AgentPromptRequest` holds it across the ASK
+    sheet's rebuild, and `ExternalActionPlan.mostRecentSession` returns the
+    RECORD — the name-then-re-lookup it replaced resolved in exactly the
+    namespace `SessionKey` exists to disambiguate.
+  - **The primary is never also a secondary, enforced by the record**
+    (`didSet` on both `Host.sessionBackend` and `Host.secondaryBackends`), so
+    no writer has to remember it and a stray copy can't make
+    `connectionModelConfiguration` unequal and rebuild the probe for nothing.
+    `init(from:)` repeats the rule because observers don't run during
+    initialization; that is the one place it lives twice. ⚠ The rule does NOT
+    reach `AddHostFormState`, which carries its own fields.
   - **Host Settings ▸ Backend is a CHECK selection, not a switch**
     (`AddHostCheckBar`): tmux and herdr as peers, at least one always
     checked, plus a "New sessions run on" single-choice bar that appears

@@ -165,7 +165,8 @@ enum ExternalActionPerformer {
                     directory: directory,
                     setupScript: setupScript,
                     model: model,
-                    target: target
+                    target: target,
+                    backend: backend
                 ))
                 return
             }
@@ -211,8 +212,7 @@ enum ExternalActionPerformer {
         let requested = requestedSession.flatMap { name in
             sessions.first { $0.name == name }
         }
-        let fallback = ExternalActionPlan.mostRecentSessionName(in: sessions)
-            .flatMap { name in sessions.first { $0.name == name } }
+        let fallback = ExternalActionPlan.mostRecentSession(in: sessions)
         if let target = requested ?? fallback {
             if context.workspace.focusTab(
                 hostID: host.id,
@@ -250,8 +250,7 @@ enum ExternalActionPerformer {
     private static func scopedSessions(
         _ model: HostConnectionModel, to backend: Host.SessionBackend
     ) -> [TmuxSession] {
-        model.host.monitoredBackends.contains(backend)
-            ? model.sessions(on: backend) : []
+        model.host.monitors(backend) ? model.sessions(on: backend) : []
     }
 
     private static func openAgent(
@@ -324,9 +323,7 @@ enum ExternalActionPerformer {
             // A named backend mints there; nil is the host's default. One
             // the host no longer monitors falls back rather than failing —
             // minting is not the ambiguous case, attaching is.
-            backend: backend.flatMap {
-                host.monitoredBackends.contains($0) ? $0 : nil
-            },
+            backend: backend.flatMap { host.monitors($0) ? $0 : nil },
             inDirectoryOf: nil,
             startingIn: directory ?? host.workingDirs.first,
             applying: host.newSessionTmuxConf,

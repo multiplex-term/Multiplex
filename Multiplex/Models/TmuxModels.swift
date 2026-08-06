@@ -309,16 +309,25 @@ struct DeckSnapshot: Codable, Equatable {
     /// Which backend an individual session belongs to is `TmuxSession
     /// .backend`, not this.
     var sessionBackend: Host.SessionBackend = .tmux
+}
+
+extension DeckSnapshot {
     /// Written `true` by every build that stamps `TmuxSession.backend` and
     /// keys `miniatures` by `SessionKey.storageKey`. Absent means a file
     /// from before mixed hosts, whose whole content belongs to
     /// `sessionBackend` and whose miniature keys are bare names — the
     /// decoder migrates it forward rather than reading a herdr cache as
     /// tmux. Not a version number: it names the one property that changed.
-    var keysCarryBackend: Bool = true
-}
+    ///
+    /// Deliberately NOT a stored property: it is only ever true of a value
+    /// this build can hold, so storing it would put an always-true field in
+    /// `Equatable`, in every construction site, and — the reason it matters
+    /// — let a caller write `false` and make the next decode re-migrate
+    /// miniatures that are already keyed.
+    private enum CodingKeys: String, CodingKey {
+        case sessions, miniatures, sessionBackend, keysCarryBackend
+    }
 
-extension DeckSnapshot {
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         // Every snapshot written before herdr support is a tmux snapshot.
@@ -327,14 +336,13 @@ extension DeckSnapshot {
         let sessions = try container.decode([TmuxSession].self, forKey: .sessions)
         let miniatures = try container.decode(
             [String: [String]].self, forKey: .miniatures)
-        let carriesBackend = try container.decodeIfPresent(
-            Bool.self, forKey: .keysCarryBackend) ?? false
-        guard !carriesBackend else {
+        guard try !(container.decodeIfPresent(
+            Bool.self, forKey: .keysCarryBackend) ?? false)
+        else {
             self.init(
                 sessions: sessions,
                 miniatures: miniatures,
-                sessionBackend: backend,
-                keysCarryBackend: true
+                sessionBackend: backend
             )
             return
         }
@@ -348,15 +356,17 @@ extension DeckSnapshot {
                 session.backend = backend
                 return session
             },
-            miniatures: Dictionary(
-                miniatures.map {
-                    (SessionKey(backend: backend, name: $0.key).storageKey, $0.value)
-                },
-                uniquingKeysWith: { _, later in later }
-            ),
-            sessionBackend: backend,
-            keysCarryBackend: true
+            miniatures: miniatures.keyed(backend: backend).storageKeyed,
+            sessionBackend: backend
         )
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessions, forKey: .sessions)
+        try container.encode(miniatures, forKey: .miniatures)
+        try container.encode(sessionBackend, forKey: .sessionBackend)
+        try container.encode(true, forKey: .keysCarryBackend)
     }
 }
 

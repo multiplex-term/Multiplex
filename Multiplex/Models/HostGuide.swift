@@ -55,6 +55,16 @@ enum HostGuide {
         }
     }
 
+    /// What opting a host into a SECOND backend costs — the measured fact
+    /// behind asking at all rather than escalating silently (a full second
+    /// probe is ~25 KB/tick for herdr against tmux's ~3.5 KB; see
+    /// `BackendDiscovery`). Shared because it is said in two places that
+    /// must agree: the deck rail's offer confirmation, which is the press
+    /// that spends it, and Host Settings' Backend detail, which is where it
+    /// can be undone. A stale copy in either one misstates the trade.
+    static let secondBackendCost =
+        "roughly doubles what this host fetches on every deck refresh"
+
     /// The macOS locked-keychain fix (see `KeychainLockCheck`): unlock once
     /// in any shell on the host, then restart the signed-out agent.
     static let keychainUnlock = Command(

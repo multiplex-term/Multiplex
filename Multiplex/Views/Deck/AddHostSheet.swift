@@ -166,9 +166,7 @@ struct AddHostFormState {
         host.isEnabled = isEnabled
         host.backgroundKeepAlive = backgroundKeepAlive
         host.sessionBackend = sessionBackend
-        // The primary can never also be a secondary: `monitoredBackends`
-        // would list it twice and the wall would probe it twice.
-        host.secondaryBackends = secondaryBackends.subtracting([sessionBackend])
+        host.secondaryBackends = secondaryBackends
         host.useMosh = useMosh
         let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
@@ -1435,8 +1433,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         }
         if enabled.count > 1 {
             detail += "\n\nBoth are shown, each tile marked with the backend "
-                + "it came from. That roughly doubles what this host fetches "
-                + "on every deck refresh."
+                + "it came from. That \(HostGuide.secondBackendCost)."
         }
         return detail
     }
@@ -1515,6 +1512,9 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 ?? form.sessionBackend
         updateTestSensitive {
             $0.sessionBackend = nextDefault
+            // The form carries its own fields, so `Host`'s normalization
+            // does not reach here — the primary is subtracted explicitly, or
+            // an unchanged set would look edited to `testFingerprint`.
             $0.secondaryBackends = backends.subtracting([nextDefault])
         }
         renderBackend()
@@ -2122,21 +2122,17 @@ enum AddHostChoiceMetrics {
     static let selectionAnimationDuration: TimeInterval = 0.14
 }
 
+/// The chrome both selection bars wear: one row of equal faces over a seam
+/// of `bezelHi`, lit faces animated in unless Reduce Motion is on. Subclasses
+/// supply only what "selected" means and what a press does, so the two bars
+/// cannot drift on the ground, the seam, or the animation.
 @MainActor
-final class AddHostChoiceBar<Value: Hashable>: UIStackView {
-    private(set) var selection: Value
-    private let choices: [(String, Value)]
-    private let changed: (Value) -> Void
+class AddHostSelectionBarBase<Value: Hashable>: UIStackView {
+    fileprivate let choices: [(String, Value)]
     private var buttons: [AddHostChoiceButton] = []
 
-    init(
-        choices: [(String, Value)],
-        selection: Value,
-        changed: @escaping (Value) -> Void
-    ) {
+    fileprivate init(choices: [(String, Value)], checkable: Bool) {
         self.choices = choices
-        self.selection = selection
-        self.changed = changed
         super.init(frame: .zero)
         axis = .horizontal
         alignment = .fill
@@ -2144,7 +2140,8 @@ final class AddHostChoiceBar<Value: Hashable>: UIStackView {
         spacing = AddHostChoiceMetrics.seam
         backgroundColor = UIKitChassis.bezelHi
         for (index, choice) in choices.enumerated() {
-            let button = AddHostChoiceButton(title: choice.0, index: index)
+            let button = AddHostChoiceButton(
+                title: choice.0, index: index, checkable: checkable)
             button.addTarget(self, action: #selector(pressed(_:)), for: .touchUpInside)
             buttons.append(button)
             addArrangedSubview(button)
@@ -2155,25 +2152,29 @@ final class AddHostChoiceBar<Value: Hashable>: UIStackView {
     @available(*, unavailable)
     required init(coder: NSCoder) { fatalError("unused") }
 
-    func setSelection(_ selection: Value) {
-        guard self.selection != selection else { return }
-        self.selection = selection
-        refresh(animated: true)
-    }
+    /// Whether this value's face is lit. Overridden; never called directly.
+    fileprivate func isSelected(_ value: Value) -> Bool { false }
+
+    /// Apply a press. Returns false when it changes nothing — an already-set
+    /// single choice, or a check the minimum refuses to clear — in which case
+    /// neither the animation nor the callback runs.
+    fileprivate func applyPress(_ value: Value) -> Bool { false }
+
+    /// Hand the new selection to the owner. Split from `applyPress` so the
+    /// callback fires exactly once, after the faces have been told.
+    fileprivate func notifyChanged() {}
 
     @objc private func pressed(_ sender: AddHostChoiceButton) {
-        guard choices.indices.contains(sender.choiceIndex) else { return }
-        let nextSelection = choices[sender.choiceIndex].1
-        guard nextSelection != selection else { return }
-        selection = nextSelection
+        guard choices.indices.contains(sender.choiceIndex),
+              applyPress(choices[sender.choiceIndex].1) else { return }
         refresh(animated: true)
-        changed(selection)
+        notifyChanged()
     }
 
-    private func refresh(animated: Bool = false) {
+    fileprivate func refresh(animated: Bool = false) {
         let changes = { [self] in
             for (index, button) in buttons.enumerated() {
-                button.setSelected(choices[index].1 == selection)
+                button.setSelected(isSelected(choices[index].1))
             }
         }
         guard animated, !UIAccessibility.isReduceMotionEnabled else {
@@ -2189,6 +2190,38 @@ final class AddHostChoiceBar<Value: Hashable>: UIStackView {
     }
 }
 
+@MainActor
+final class AddHostChoiceBar<Value: Hashable>: AddHostSelectionBarBase<Value> {
+    private(set) var selection: Value
+    private let changed: (Value) -> Void
+
+    init(
+        choices: [(String, Value)],
+        selection: Value,
+        changed: @escaping (Value) -> Void
+    ) {
+        self.selection = selection
+        self.changed = changed
+        super.init(choices: choices, checkable: false)
+    }
+
+    func setSelection(_ selection: Value) {
+        guard self.selection != selection else { return }
+        self.selection = selection
+        refresh(animated: true)
+    }
+
+    fileprivate override func isSelected(_ value: Value) -> Bool { value == selection }
+
+    fileprivate override func applyPress(_ value: Value) -> Bool {
+        guard value != selection else { return false }
+        selection = value
+        return true
+    }
+
+    fileprivate override func notifyChanged() { changed(selection) }
+}
+
 /// The multi-select sibling of `AddHostChoiceBar` — same faces, same seam,
 /// but any number can be lit and a lit face wears a checkmark so the two
 /// bars can never be mistaken for each other at a glance.
@@ -2200,87 +2233,40 @@ final class AddHostChoiceBar<Value: Hashable>: UIStackView {
 /// the set; a separate single-choice bar states the default, and only when
 /// there is more than one to choose from.
 ///
-/// `minimumSelection` refuses to leave the set empty — a host with no
-/// backend has nothing to show at all, so the last check simply doesn't
-/// respond rather than opening a state the model cannot express.
+/// The last check never clears — a host with no backend has nothing to show
+/// at all. Enforced by not responding rather than by disabling the face: a
+/// disabled last check reads as broken, while an unresponsive one reads as
+/// "this is already the minimum".
 @MainActor
-final class AddHostCheckBar<Value: Hashable>: UIStackView {
+final class AddHostCheckBar<Value: Hashable>: AddHostSelectionBarBase<Value> {
     private(set) var selection: Set<Value>
-    private let choices: [(String, Value)]
-    private let minimumSelection: Int
     private let changed: (Set<Value>) -> Void
-    private var buttons: [AddHostChoiceButton] = []
 
     init(
         choices: [(String, Value)],
         selection: Set<Value>,
-        minimumSelection: Int = 1,
         changed: @escaping (Set<Value>) -> Void
     ) {
-        self.choices = choices
         self.selection = selection
-        self.minimumSelection = minimumSelection
         self.changed = changed
-        super.init(frame: .zero)
-        axis = .horizontal
-        alignment = .fill
-        distribution = .fillEqually
-        spacing = AddHostChoiceMetrics.seam
-        backgroundColor = UIKitChassis.bezelHi
-        for (index, choice) in choices.enumerated() {
-            let button = AddHostChoiceButton(
-                title: choice.0, index: index, checkable: true)
-            button.addTarget(self, action: #selector(pressed(_:)), for: .touchUpInside)
-            buttons.append(button)
-            addArrangedSubview(button)
-        }
-        refresh()
+        super.init(choices: choices, checkable: true)
     }
 
-    @available(*, unavailable)
-    required init(coder: NSCoder) { fatalError("unused") }
-
-    func setSelection(_ selection: Set<Value>) {
-        guard self.selection != selection else { return }
-        self.selection = selection
-        refresh(animated: true)
+    fileprivate override func isSelected(_ value: Value) -> Bool {
+        selection.contains(value)
     }
 
-    @objc private func pressed(_ sender: AddHostChoiceButton) {
-        guard choices.indices.contains(sender.choiceIndex) else { return }
-        let value = choices[sender.choiceIndex].1
-        var next = selection
-        if next.contains(value) {
-            // The floor is enforced here rather than by disabling the face:
-            // a disabled last check reads as broken, while an unresponsive
-            // one reads as "this is already the minimum".
-            guard next.count > minimumSelection else { return }
-            next.remove(value)
+    fileprivate override func applyPress(_ value: Value) -> Bool {
+        if selection.contains(value) {
+            guard selection.count > 1 else { return false }
+            selection.remove(value)
         } else {
-            next.insert(value)
+            selection.insert(value)
         }
-        selection = next
-        refresh(animated: true)
-        changed(selection)
+        return true
     }
 
-    private func refresh(animated: Bool = false) {
-        let changes = { [self] in
-            for (index, button) in buttons.enumerated() {
-                button.setSelected(selection.contains(choices[index].1))
-            }
-        }
-        guard animated, !UIAccessibility.isReduceMotionEnabled else {
-            changes()
-            return
-        }
-        UIView.animate(
-            withDuration: AddHostChoiceMetrics.selectionAnimationDuration,
-            delay: 0,
-            options: [.curveEaseOut, .beginFromCurrentState, .allowUserInteraction],
-            animations: changes
-        )
-    }
+    fileprivate override func notifyChanged() { changed(selection) }
 }
 
 @MainActor

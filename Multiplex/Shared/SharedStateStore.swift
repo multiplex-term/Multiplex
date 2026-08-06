@@ -96,7 +96,7 @@ struct WidgetHostState: Codable, Hashable, Identifiable {
 
     /// The session the per-host widget features and a bare shell deep link
     /// attaches — newest by creation, name-ordered on a tie. Must mirror
-    /// `ExternalActionPlan.mostRecentSessionName` (unit-tested app-side).
+    /// `ExternalActionPlan.mostRecentSession` (unit-tested app-side).
     var mostRecentSession: WidgetSessionState? {
         sessions.max { lhs, rhs in
             (lhs.createdAt, lhs.name) < (rhs.createdAt, rhs.name)

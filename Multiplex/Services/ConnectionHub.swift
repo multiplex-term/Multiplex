@@ -128,19 +128,20 @@ final class ConnectionHub {
             // mixed host now carry `backendRaw` and their deep links emit
             // `backend=`, so a tap resolves in the right namespace instead
             // of matching a same-named session on the other one.
-            let snapshot: DeckSnapshot?
             if let model, model.hasLiveProbe {
-                snapshot = DeckSnapshot(
-                    sessions: model.allSessions,
-                    miniatures: model.miniatures.storageKeyed,
-                    sessionBackend: host.sessionBackend
-                )
                 widgetProbeDates[host.id] = Date()
-            } else {
-                let cached = snapshots.snapshot(for: host.id)
-                snapshot = cached?.sessionBackend == host.sessionBackend
-                    ? cached : nil
+                // Straight off the live maps: they are already `SessionKey`-
+                // keyed, and this runs for every host on every host's tick.
+                return WidgetStateBuilder.hostState(
+                    host: host,
+                    sessions: model.allSessions,
+                    liveMiniatures: model.miniatures,
+                    probedAt: widgetProbeDates[host.id]
+                )
             }
+            let cached = snapshots.snapshot(for: host.id)
+            let snapshot = cached?.sessionBackend == host.sessionBackend
+                ? cached : nil
             return WidgetStateBuilder.hostState(
                 host: host,
                 sessions: snapshot?.sessions ?? [],
@@ -177,11 +178,16 @@ final class HostConnectionModel {
     /// single-backend host.
     private(set) var secondaryStates: [Host.SessionBackend: TmuxState] = [:]
 
-    /// One monitored backend's sessions, from whichever slot it occupies.
+    /// One monitored backend's probe state, from whichever slot it occupies —
+    /// the ONE place that resolves "primary slot or dictionary slot", so a
+    /// reader never re-derives it.
+    func state(on backend: Host.SessionBackend) -> TmuxState {
+        backend == host.sessionBackend ? tmux : (secondaryStates[backend] ?? .unknown)
+    }
+
+    /// One monitored backend's sessions.
     func sessions(on backend: Host.SessionBackend) -> [TmuxSession] {
-        backend == host.sessionBackend
-            ? tmux.sessions
-            : secondaryStates[backend]?.sessions ?? []
+        state(on: backend).sessions
     }
 
     /// Every monitored backend's sessions, primary's block first — what the
@@ -191,11 +197,7 @@ final class HostConnectionModel {
     /// they don't.
     var allSessions: [TmuxSession] {
         guard !secondaryStates.isEmpty else { return tmux.sessions }
-        return host.monitoredBackends.flatMap { backend in
-            backend == host.sessionBackend
-                ? tmux.sessions
-                : secondaryStates[backend]?.sessions ?? []
-        }
+        return host.monitoredBackends.flatMap(sessions(on:))
     }
     /// Set when the private key is encrypted and its absent/stale passphrase
     /// could not unlock it. Background wall polling never presents UI by
@@ -337,18 +339,6 @@ final class HostConnectionModel {
         sessionCount = allSessions.count
     }
 
-    /// Probe parsers answer for ONE backend, so their maps are name-keyed;
-    /// the model merges backends, so its maps are `SessionKey`-keyed. This
-    /// is the one seam between the two spaces.
-    private static func keyed<Value>(
-        _ byName: [String: Value], backend: Host.SessionBackend
-    ) -> [SessionKey: Value] {
-        Dictionary(
-            byName.map { (SessionKey(backend: backend, name: $0.key), $0.value) },
-            uniquingKeysWith: { _, later in later }
-        )
-    }
-
     /// Connect if needed, then re-probe tmux sessions.
     func refresh() {
         guard refreshTask == nil else { return }
@@ -389,7 +379,14 @@ final class HostConnectionModel {
     /// nil means the lightweight check itself was unavailable. A nonnil,
     /// non-definitive result still carries the new fingerprint so the UI can
     /// immediately retire helpers that belonged to a different pane.
-    func detectActiveAgent(in sessionName: String) async -> ActivePaneAgentDetection? {
+    ///
+    /// `backend` is the TAB's, parameterized like `sessions(on:)` and
+    /// `killSession(named:backend:)` — a mixed host's secondary-backend tab
+    /// gets helper chips too, and asking the primary about its session name
+    /// would answer for a namesake or for nothing.
+    func detectActiveAgent(
+        in sessionName: String, backend: Host.SessionBackend
+    ) async -> ActivePaneAgentDetection? {
         guard !activePaneProbeInFlight,
               refreshTask == nil,
               phase == .connected,
@@ -399,12 +396,12 @@ final class HostConnectionModel {
         activePaneProbeInFlight = true
         defer { activePaneProbeInFlight = false }
 
-        if host.sessionBackend == .herdr {
+        if backend == .herdr {
             // `pane current` carries no protocol field. Require a supported
             // full probe first; that pass owns the version gate and proves
             // the backend is serving sessions before the one-second path.
             guard HerdrProbe.bakeableSessionName(sessionName),
-                  case .sessions = tmux,
+                  case .sessions = state(on: backend),
                   let output = try? await deadlined(seconds: 3, {
                       try await connection.exec(
                           HerdrProbe.activePaneCommand(sessionName: sessionName))
@@ -593,15 +590,14 @@ final class HostConnectionModel {
             let parseEnd = ContinuousClock.now
             guard refreshGeneration == generation, !Task.isCancelled else { return }
 
-            let backend = host.sessionBackend
             var nextTails: [SessionKey: [String]] = [:]
             var nextMiniatures: [SessionKey: [String]] = [:]
             for result in results {
                 nextTails.merge(
-                    Self.keyed(result.parsed.tails, backend: result.backend)
+                    result.parsed.tails.keyed(backend: result.backend)
                 ) { _, later in later }
                 nextMiniatures.merge(
-                    Self.keyed(result.parsed.miniatures, backend: result.backend)
+                    result.parsed.miniatures.keyed(backend: result.backend)
                 ) { _, later in later }
             }
             if tmux != primary.parsed.state { tmux = primary.parsed.state }
@@ -728,8 +724,7 @@ final class HostConnectionModel {
             herdrSessionNames = herdrParsed.sessionNames
             herdrTailTargets = herdrParsed.tailTargets
             previousHerdrPaneStatuses = herdrPaneStatuses
-            herdrPaneStatuses = Self.keyed(
-                herdrParsed.paneStatuses, backend: .herdr)
+            herdrPaneStatuses = herdrParsed.paneStatuses.keyed(backend: .herdr)
             return BackendProbe(
                 backend: .herdr,
                 parsed: TmuxProbe.ParsedProbe(
@@ -916,8 +911,8 @@ final class HostConnectionModel {
     /// log, and "the agent finished while you were away" made
     /// unannounceable.
     private func evaluateAttention(answered: Set<Host.SessionBackend>) {
-        guard !answered.isEmpty else { return }
         let sessions = allSessions.filter { answered.contains($0.backend) }
+        let live = Set(sessions.map(\.id))
         // Start from what the backends that did NOT answer are still
         // showing. Their verdicts are not this pass's to retract; a backend
         // that DID answer has its keys rebuilt below, so answering with no
@@ -945,6 +940,7 @@ final class HostConnectionModel {
                 onAttentionAlert?(AttentionAlert(
                     host: host,
                     sessionName: session.name,
+                    backend: session.backend,
                     agent: verdict.agent,
                     event: event,
                     paneTitle: verdict.paneTitle,
@@ -956,7 +952,7 @@ final class HostConnectionModel {
         // baselines must survive, or the next successful pass has nothing to
         // compare against and emits no edge at all.
         attentionTracker.prune { key in
-            !answered.contains(key.backend) || sessions.contains { $0.id == key }
+            !answered.contains(key.backend) || live.contains(key)
         }
         if attention != next { attention = next }
     }
@@ -1365,7 +1361,7 @@ final class HostConnectionModel {
     /// answers only for the primary.
     func launchInSession(
         named sessionName: String,
-        backend: Host.SessionBackend? = nil,
+        backend: Host.SessionBackend,
         placement: ExternalSessionPlacement,
         directory: String?,
         label: String?,
@@ -1376,7 +1372,7 @@ final class HostConnectionModel {
         let reusedLink = connection != nil && phase == .connected
         do {
             let connection = try await ensureConnection()
-            if (backend ?? host.sessionBackend) == .herdr {
+            if backend == .herdr {
                 return await launchInHerdrSession(
                     named: sessionName, placement: placement,
                     directory: directory, label: label,
@@ -1438,15 +1434,15 @@ final class HostConnectionModel {
         return .herdrAttach(sessionName: sessionName)
     }
 
-    /// Kill a tmux session on the host over the control connection, then
-    /// re-probe. The tile drops as soon as the kill lands; the follow-up
-    /// probe is the truth and resurrects it if the kill failed. Fail-soft
-    /// like the probe helpers — if the control link dropped, do nothing and
-    /// let the next probe cycle surface the failure.
+    /// Kill a session on the host over the control connection, then re-probe.
+    /// The tile drops as soon as the kill lands; the follow-up probe is the
+    /// truth and resurrects it if the kill failed. Fail-soft like the probe
+    /// helpers — if the control link dropped, do nothing and let the next
+    /// probe cycle surface the failure.
     func killSession(_ session: TmuxSession) async {
         resetConnectRetryBackoff()
         guard phase == .connected, let connection else { return }
-        await kill(session, backend: host.sessionBackend, over: connection)
+        await kill(session, over: connection)
     }
 
     /// Kill a session by name — the terminal window's CLOSE SESSION action.
@@ -1473,7 +1469,7 @@ final class HostConnectionModel {
             if let match = allSessions.first(where: { $0.id == session.id }) {
                 session = match
             }
-            await kill(session, backend: backend, over: connection)
+            await kill(session, over: connection)
         } catch {
             markFailed(error, registerConnectFailure: !reusedLink)
         }
@@ -1542,10 +1538,11 @@ final class HostConnectionModel {
         refresh()
     }
 
-    private func kill(
-        _ session: TmuxSession, backend: Host.SessionBackend,
-        over connection: SSHConnection
-    ) async {
+    /// The session record names its own backend — the parameter this used to
+    /// take let the two disagree, and every caller had to remember not to
+    /// hand it `host.sessionBackend`.
+    private func kill(_ session: TmuxSession, over connection: SSHConnection) async {
+        let backend = session.backend
         let command: String?
         switch backend {
         case .tmux:

@@ -85,4 +85,18 @@ extension Dictionary where Key == String {
             uniquingKeysWith: { _, later in later }
         )
     }
+
+    /// Stamps a backend onto a name-keyed map. Probe parsers answer for ONE
+    /// backend, so their maps are name-keyed; anything that merges backends
+    /// is `SessionKey`-keyed — this is the seam between the two spaces, and
+    /// the pre-mixed snapshot migration's too.
+    ///
+    /// Names are unique within one backend's answer, so the collision
+    /// policy is only a formality; last-writer matches `sessionKeyed`.
+    func keyed(backend: Host.SessionBackend) -> [SessionKey: Value] {
+        [SessionKey: Value](
+            map { (SessionKey(backend: backend, name: $0.key), $0.value) },
+            uniquingKeysWith: { _, later in later }
+        )
+    }
 }

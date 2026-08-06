@@ -141,11 +141,7 @@ enum TmuxProbe {
     static func probeCommand(
         discovering: Set<Host.SessionBackend> = [.herdr]
     ) -> String {
-        let others = discovering.subtracting([.tmux])
-        guard !others.isEmpty else { return baseProbeCommand }
-        return others.sorted { $0.rawValue < $1.rawValue }
-            .map(BackendDiscovery.riderCommand(for:))
-            .joined()
+        BackendDiscovery.riderPrefix(discovering: discovering, excluding: .tmux)
             + baseProbeCommand
     }
 

@@ -54,7 +54,14 @@ final class DeckSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.miniatures["tmux:main"], ["$ make test", "ok"])
         XCTAssertEqual(decoded.sessionBackend, .tmux)
         XCTAssertEqual(decoded.sessions[0].backend, .tmux)
-        XCTAssertTrue(decoded.keysCarryBackend)
+        // Every file this build writes claims backend-keyed miniatures, so
+        // reading one back never re-runs the legacy migration. The claim is
+        // written by the encoder, never held as a property a caller could
+        // set false.
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(snapshot)) as? [String: Any])
+        XCTAssertEqual(json["keysCarryBackend"] as? Bool, true)
         // A cold launch must still be able to tell a real pane title from
         // tmux's seeded hostname, so the server host rides the snapshot.
         XCTAssertEqual(decoded.sessions[0].serverHost, "Jhen-MBPr14.local")
@@ -164,7 +171,12 @@ final class DeckSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.sessions[0].id, SessionKey(backend: .herdr, name: "mpx-demo"))
         XCTAssertEqual(decoded.miniatures["herdr:mpx-demo"], ["$ herdr", "ok"])
         XCTAssertNil(decoded.miniatures["mpx-demo"])
-        XCTAssertTrue(decoded.keysCarryBackend)
+        // Migration runs exactly once: rewriting the file marks it, so the
+        // next read must not stamp `herdr:` onto an already-stamped key.
+        let rewritten = try JSONDecoder().decode(
+            DeckSnapshot.self, from: JSONEncoder().encode(decoded))
+        XCTAssertEqual(rewritten, decoded)
+        XCTAssertEqual(rewritten.miniatures["herdr:mpx-demo"], ["$ herdr", "ok"])
     }
 
     /// The overwhelmingly common legacy file: a tmux host. It must land on

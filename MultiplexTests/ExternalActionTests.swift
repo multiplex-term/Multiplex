@@ -213,7 +213,7 @@ final class ExternalActionTests: XCTestCase {
             TmuxSession(name: "new", windows: [], created: Date(timeIntervalSince1970: 300)),
             TmuxSession(name: "mid", windows: [], created: Date(timeIntervalSince1970: 200)),
         ]
-        XCTAssertEqual(ExternalActionPlan.mostRecentSessionName(in: sessions), "new")
+        XCTAssertEqual(ExternalActionPlan.mostRecentSession(in: sessions)?.name, "new")
     }
 
     func testMostRecentSessionBreaksCreationTiesByName() {
@@ -222,11 +222,11 @@ final class ExternalActionTests: XCTestCase {
             TmuxSession(name: "alpha", windows: [], created: created),
             TmuxSession(name: "beta", windows: [], created: created),
         ]
-        XCTAssertEqual(ExternalActionPlan.mostRecentSessionName(in: sessions), "beta")
+        XCTAssertEqual(ExternalActionPlan.mostRecentSession(in: sessions)?.name, "beta")
     }
 
     func testMostRecentSessionEmptyIsNil() {
-        XCTAssertNil(ExternalActionPlan.mostRecentSessionName(in: []))
+        XCTAssertNil(ExternalActionPlan.mostRecentSession(in: [])?.name)
     }
 
     // MARK: Setup script selection

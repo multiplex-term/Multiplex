@@ -261,14 +261,7 @@ struct AgentBackendOptionsProvider: DynamicOptionsProvider {
     private var intent
 
     func results() async throws -> IntentItemCollection<String> {
-        let hosts = await HostEntityProvider.all()
-        let backends = hosts.first { $0.id == intent?.host.id }?.backendsRaw
-        let items = SessionTargetChoices.backendChoices(backendsRaw: backends)
-            .map { IntentItem($0.value, title: "\($0.title)") }
-        return IntentItemCollection(
-            promptLabel: "Choose a backend",
-            sections: [IntentItemSection(items: items)]
-        )
+        await ShortcutBackendOptions.rows(forHostID: intent?.host.id)
     }
 }
 
@@ -278,26 +271,36 @@ struct HostBackendOptionsProvider: DynamicOptionsProvider {
     private var intent
 
     func results() async throws -> IntentItemCollection<String> {
-        let hosts = await HostEntityProvider.all()
-        let backends = hosts.first { $0.id == intent?.host.id }?.backendsRaw
-        let items = SessionTargetChoices.backendChoices(backendsRaw: backends)
-            .map { IntentItem($0.value, title: "\($0.title)") }
-        return IntentItemCollection(
-            promptLabel: "Choose a backend",
-            sections: [IntentItemSection(items: items)]
-        )
+        await ShortcutBackendOptions.rows(forHostID: intent?.host.id)
     }
 }
 
-/// Token validation behind those providers. A Shortcuts VARIABLE can supply
-/// anything, so an unrecognized value resolves to the host's default rather
-/// than to a backend the host may not even monitor.
+/// The rows and the token grammar behind those providers, in one place so
+/// the two Shortcuts pickers cannot drift on either. (The widget's provider
+/// builds its own — it lives in the extension target, which compiles only
+/// `Multiplex/Shared`; `SessionTargetChoices` is the piece they do share.)
 enum ShortcutBackendOptions {
+    /// Empty for a single-backend host — what keeps the parameter invisible
+    /// there, and the contract `SharedStateTests` pins.
+    static func rows(forHostID hostID: UUID?) async -> IntentItemCollection<String> {
+        let hosts = await HostEntityProvider.all()
+        let backends = hosts.first { $0.id == hostID }?.backendsRaw
+        return IntentItemCollection(
+            promptLabel: "Choose a backend",
+            sections: [IntentItemSection(
+                items: SessionTargetChoices.backendChoices(backendsRaw: backends)
+                    .map { IntentItem($0.value, title: "\($0.title)") }
+            )]
+        )
+    }
+
+    /// A Shortcuts VARIABLE can supply anything, so an unrecognized value
+    /// resolves to the host's default rather than to a backend the host may
+    /// not even monitor. The "Host Default" row's own value is the empty
+    /// string, which `init(token:)` already reads as no choice — the same
+    /// answer, through the one token grammar.
     static func selection(for value: String?) -> Host.SessionBackend? {
-        guard let value else { return nil }
-        let token = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard token != SessionTargetChoices.hostDefaultBackendValue else { return nil }
-        return Host.SessionBackend(rawValue: token)
+        Host.SessionBackend(token: value)
     }
 }
 
