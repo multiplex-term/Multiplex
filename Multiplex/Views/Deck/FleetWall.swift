@@ -843,9 +843,49 @@ final class FleetWallViewController: UIViewController {
                     model: submission.model,
                     initialPrompt: submission.initialPrompt
                 )
-            ) else { return }
+            ) else {
+                self?.presentCreateSessionFailure(on: host, model: model)
+                return
+            }
             self?.open(TerminalRoute(hostID: host.id, mode: created))
         }
+    }
+
+    /// A failed mint used to close the sheet and show nothing at all — the
+    /// commonest cause being a herdr host with no herdr installed, which
+    /// reads as "the button does nothing". The mint's own cause leads, the
+    /// connection's reason is the fallback (`presentTabCreateFailure`'s
+    /// rule, and the external performer's).
+    private func presentCreateSessionFailure(
+        on host: Host, model: HostConnectionModel
+    ) {
+        let message: String
+        switch model.sessionCreateFailure {
+        case .backendMissing(let backend):
+            message = HostGuide.backendMissingMessage(backend, hostName: host.name)
+        case nil:
+            if case .failed(let reason) = model.phase {
+                message = reason
+            } else {
+                message = "Couldn't create the session on \(host.name)."
+            }
+        }
+        let alert = UIAlertController(
+            title: "Couldn't Create Session",
+            message: message,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        // The sheet dismisses on the press and the mint answers a
+        // round-trip later, so the sheet is normally gone — but a slow
+        // dismissal must not swallow the alert. Present from whatever is
+        // actually on top.
+        var presenter: UIViewController = self
+        while let presented = presenter.presentedViewController,
+              !presented.isBeingDismissed {
+            presenter = presented
+        }
+        presenter.present(alert, animated: true)
     }
 
     /// The sheet's Creates → "Tab in …" branch: `launchInSession`'s herdr

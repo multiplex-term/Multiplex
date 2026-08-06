@@ -934,7 +934,8 @@ final class TerminalWindowViewController: UIViewController,
         Task { [weak self] in
             guard let self else { return }
             defer { creatingTab = false }
-            guard let created = await hub.model(for: host).createSession(
+            let model = hub.model(for: host)
+            guard let created = await model.createSession(
                 base: agent?.launchCommand ?? source ?? "main",
                 backend: backend,
                 inDirectoryOf: source,
@@ -947,7 +948,15 @@ final class TerminalWindowViewController: UIViewController,
                     )
                 }
             ) else {
-                presentNewTabFailure(hostName: host.name, target: .session)
+                presentNewTabFailure(
+                    hostName: host.name, target: .session,
+                    reason: model.sessionCreateFailure.map {
+                        switch $0 {
+                        case .backendMissing(let backend):
+                            HostGuide.backendMissingMessage(
+                                backend, hostName: host.name)
+                        }
+                    })
                 return
             }
             let tab = TerminalRoute(hostID: host.id, mode: created)
@@ -985,13 +994,17 @@ final class TerminalWindowViewController: UIViewController,
         }
     }
 
+    /// `reason` carries a mint failure the connection is not to blame for
+    /// (a host with no herdr installed, say) — pointing at the link there
+    /// sends the user to check something that is working.
     private func presentNewTabFailure(
-        hostName: String, target: TerminalRoute.NewTabTarget
+        hostName: String, target: TerminalRoute.NewTabTarget,
+        reason: String? = nil
     ) {
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(
             title: target.failureTitle,
-            message: "Check the connection to \(hostName) and try again.",
+            message: reason ?? "Check the connection to \(hostName) and try again.",
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "OK", style: .cancel))

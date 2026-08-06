@@ -70,6 +70,18 @@ final class HostGuideTests: XCTestCase {
         XCTAssertEqual(HostGuide.mpxBindCopy.command, "mpx bind --copy")
     }
 
+    /// The mint-failure copy names the backend, the host, the install
+    /// command, and the way out — a New Session press that fails because
+    /// the multiplexer isn't there must not read as a connection problem.
+    func testBackendMissingMessageNamesTheBackendAndItsInstall() {
+        let herdr = HostGuide.backendMissingMessage(.herdr, hostName: "devbox")
+        XCTAssertTrue(herdr.hasPrefix("herdr isn’t installed on devbox"), herdr)
+        XCTAssertTrue(herdr.contains("brew install herdr"), herdr)
+        XCTAssertTrue(herdr.contains("Host Settings"), herdr)
+        let tmux = HostGuide.backendMissingMessage(.tmux, hostName: "devbox")
+        XCTAssertTrue(tmux.contains("brew install tmux"), tmux)
+    }
+
     func testCommandIdentityIncludesBothLabelAndCommand() {
         let command = HostGuide.Command(label: "macOS", command: "brew install tmux")
         XCTAssertEqual(command.id, "macOSbrew install tmux")

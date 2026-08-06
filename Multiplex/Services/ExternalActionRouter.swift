@@ -391,13 +391,21 @@ enum ExternalActionPerformer {
         for model: HostConnectionModel, host: Host,
         context: ExternalActionRouter.Context
     ) {
-        // createSession marks the host failed when the control link is the
+        // The mint's own cause leads — a host with no herdr installed fails
+        // with a perfectly healthy link, and the connection's reason (or a
+        // generic one) would send the user after the wrong thing.
+        // createSession marks the host failed when the control link IS the
         // problem; reuse that reason when it exists.
         let message: String
-        if case .failed(let reason) = model.phase {
-            message = reason
-        } else {
-            message = "Couldn't create the session on \(host.name)."
+        switch model.sessionCreateFailure {
+        case .backendMissing(let backend):
+            message = HostGuide.backendMissingMessage(backend, hostName: host.name)
+        case nil:
+            if case .failed(let reason) = model.phase {
+                message = reason
+            } else {
+                message = "Couldn't create the session on \(host.name)."
+            }
         }
         context.presentFailure(ExternalActionFailure(hostName: host.name, message: message))
     }

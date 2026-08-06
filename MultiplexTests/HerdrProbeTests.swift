@@ -743,6 +743,27 @@ final class HerdrProbeTests: XCTestCase {
                      "unreadable is not the same as a valid empty list")
     }
 
+    /// The mint's list read is also its presence check: with herdr absent
+    /// the list verb prints nothing, which is indistinguishable from
+    /// garbage — and a New Session press that can't name that cause shows
+    /// the user nothing at all.
+    func testTheMintsListReadNamesAMissingHerdr() {
+        XCTAssertTrue(
+            HerdrProbe.sessionListCommand.contains("command -v herdr"),
+            "the mint's first exec must prove herdr exists")
+        XCTAssertEqual(
+            HerdrProbe.readSessionList("MULTIPLEX_NO_HERDR\n"), .herdrMissing)
+        XCTAssertEqual(
+            HerdrProbe.readSessionList("motd noise\nMULTIPLEX_NO_HERDR\n"),
+            .herdrMissing,
+            "a remote rc file may echo before the guard runs")
+        XCTAssertEqual(
+            HerdrProbe.readSessionList("noise\n" + sessionList + "\n"),
+            .names(["default", "work", "parked"]))
+        XCTAssertEqual(HerdrProbe.readSessionList("garbage"), .unreadable,
+                       "an unreadable answer is not a missing binary")
+    }
+
     func testTypeCommandScopesToTheSessionAndTypesLinesThenEnter() {
         let command = HerdrProbe.typeCommand(
             sessionName: "api", paneID: "w1:p1",

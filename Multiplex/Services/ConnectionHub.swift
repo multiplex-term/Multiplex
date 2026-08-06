@@ -203,6 +203,23 @@ final class HostConnectionModel {
     /// could not unlock it. Background wall polling never presents UI by
     /// itself; FleetWall asks only after the user presses the failed host.
     private(set) var keyPassphraseChallenge: SSHKeyPassphraseChallenge?
+
+    /// Why the LAST session mint failed, when the cause is not the
+    /// connection's (`phase` already carries that). A mint can fail with a
+    /// perfectly healthy link — the commonest way being a host asked to
+    /// create a herdr session with no herdr installed — and every surface
+    /// that presents a mint failure reads this first so it can name the
+    /// real cause instead of pointing at the connection. Cleared at the top
+    /// of every mint, so it never describes an older press.
+    private(set) var sessionCreateFailure: SessionCreateFailure?
+
+    /// Mint failures a healthy connection can produce. Copy lives in
+    /// `HostGuide` (one source for every surface), never here.
+    enum SessionCreateFailure: Equatable {
+        /// The backend's binary isn't on the host's PATH — proved by the
+        /// mint's own first exec, not guessed from an empty answer.
+        case backendMissing(Host.SessionBackend)
+    }
     @ObservationIgnored private var lastRefreshed: Date?
     /// Observation-friendly summaries: views that only need liveness or a
     /// badge count should not subscribe to the full pane/process tree.
@@ -1158,6 +1175,7 @@ final class HostConnectionModel {
         resetConnectRetryBackoff()
         let reusedLink = connection != nil && phase == .connected
         let backend = backend ?? host.sessionBackend
+        sessionCreateFailure = nil
         do {
             let connection = try await ensureConnection()
             if backend == .herdr {
@@ -1229,9 +1247,19 @@ final class HostConnectionModel {
         let listOutput = try? await deadlined {
             try await connection.exec(HerdrProbe.sessionListCommand)
         }
-        guard let listOutput,
-              let existing = HerdrProbe.parseSessionNames(listOutput)
-        else { return nil }
+        // The list read doubles as the presence check: a host with no herdr
+        // says so through the command's own guard, and that is the one mint
+        // failure the app can explain rather than merely report.
+        let existing: [String]
+        switch listOutput.map(HerdrProbe.readSessionList) {
+        case .names(let names):
+            existing = names
+        case .herdrMissing:
+            sessionCreateFailure = .backendMissing(.herdr)
+            return nil
+        case .unreadable, nil:
+            return nil
+        }
         let name = HerdrProbe.uniqueSessionName(base: base, existing: existing)
         var startDirectory: String?
         if let sourceSession {

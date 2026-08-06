@@ -41,6 +41,26 @@ enum HostGuide {
         }
     }
 
+    /// A mint that failed because the backend's binary isn't on the host —
+    /// said the same way wherever New Session can be pressed (deck sheet,
+    /// a window's + TAB, an external action), because all three fail for
+    /// the one reason and the fix is the same command. It names the
+    /// install road and the settings escape hatch; the probe-PATH detail
+    /// stays with the tile's INSTALL GUIDE, which has room for it.
+    static func backendMissingMessage(
+        _ backend: Host.SessionBackend, hostName: String
+    ) -> String {
+        let install = multiplexerInstall(for: backend).first?.command
+        var message = "\(backend.rawValue) isn’t installed on \(hostName), so there’s "
+            + "nothing to create the session with."
+        if let install {
+            message += " Install it there (\(install)), "
+        } else {
+            message += " Install it there, "
+        }
+        return message + "or change this host’s backend in Host Settings."
+    }
+
     /// Why a default install needs no further host setup: both probes
     /// prepend these directories (`TmuxProbe.pathPrefix`,
     /// `HerdrProbe.pathPrefix`). Shared so the tile's INSTALL GUIDE and the

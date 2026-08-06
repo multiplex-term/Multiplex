@@ -680,7 +680,16 @@ enum HerdrProbe {
     /// The mint's live existence check — attach auto-creates, so setup
     /// typing must only ever aim at a session THIS mint brought into
     /// being, and the probe's tile list can be a tick stale.
-    static let sessionListCommand = pathPrefix + sessionListVerb
+    ///
+    /// It carries the probe's own presence guard because it is the FIRST
+    /// exec of a New Session press: with herdr absent the list verb prints
+    /// nothing (`2>/dev/null || true`), which is indistinguishable from
+    /// garbage, and the mint used to fail silently. The marker lets
+    /// `readSessionList` name the real cause so the press can say
+    /// "herdr isn't installed" instead of nothing at all.
+    static let sessionListCommand = pathPrefix
+        + "command -v herdr >/dev/null 2>&1 || { echo \(noHerdrMarker); exit 0; }; "
+        + sessionListVerb
 
     /// The list invocation without the PATH export, for callers that have
     /// already exported it (the discovery rider). One spelling of the shape
@@ -692,6 +701,27 @@ enum HerdrProbe {
     /// garbage as [] could attach to an existing session and type into it.
     static func parseSessionNames(_ output: String) -> [String]? {
         firstDecodedLine(in: output, decodeSessionList)?.sessions.map(\.name)
+    }
+
+    /// What `sessionListCommand` answered. `parseSessionNames`' nil says
+    /// only "not a list"; the mint needs the one cause it can explain, so a
+    /// host with no herdr on its PATH reads as `.herdrMissing` rather than
+    /// as unreadable garbage.
+    enum SessionListReading: Equatable {
+        case names([String])
+        case herdrMissing
+        case unreadable
+    }
+
+    static func readSessionList(_ output: String) -> SessionListReading {
+        // Same leading-noise tolerance as the probe's own read: a remote
+        // `.bashrc` may echo before the guard runs.
+        if output.split(separator: "\n", omittingEmptySubsequences: false)
+            .contains(where: { $0.trimmingCharacters(in: .whitespaces) == noHerdrMarker }) {
+            return .herdrMissing
+        }
+        guard let names = parseSessionNames(output) else { return .unreadable }
+        return .names(names)
     }
 
     /// One snapshot invocation, spelled once: the spawn's verify loop and
