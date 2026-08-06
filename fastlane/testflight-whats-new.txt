@@ -1,36 +1,29 @@
 NEW IN 1.3.0
-• HERDR BACKEND — Host Settings ▸ Backend switches a host between TMUX and HERDR (herdr 0.7.5+). One deck tile per herdr session, its workspaces on the spine, HRDR shortcut panel, FILE attach and drop, MENU for herdr's own pane menu, long-press a divider to resize a split, and Claude Code HISTORY + JUMP. Add Host ▸ BIND carries the same choice.
+• HERDR BACKEND — Host Settings ▸ Backend switches a host between TMUX and HERDR (herdr 0.7.5+): one deck tile per herdr session, HRDR shortcut panel, FILE attach/drop, MENU for herdr's pane menu, long-press a divider to resize a split, Claude Code HISTORY + JUMP.
+• MIXED tmux + herdr ON ONE HOST — each refresh quietly asks the other multiplexer whether it has sessions; when it does the host rail offers "+ HERDR · 3" (long-press to stop being asked). Accept and its sessions join the wall, herdr tiles in a light purple chassis. Backend is now a check selection — tick tmux, herdr, or both, with a "New sessions run on" choice. New Session, the Open Shell / Open Agent Shortcuts, the Host widget, and Add Host ▸ BIND all gain a Backend picker on those hosts.
 • SELECT TEXT — long-press, double-tap, or secondary-click terminal text on either backend: SELECT / SELECT ALL / PASTE at the gesture, selection clamped to the pane you pressed, floating COPY / SELECT ALL / DONE beside it.
-• KEEP ALIVE IN BACKGROUND (iPhone/iPad) — Host Settings ▸ Monitoring, off by default. Leaving no longer drops that host straight away, and iOS can wake the app later to re-check it, so a turn that ends after you left can still notify you.
-• AGENT ALERTS — now fire for the session you walked away from, which used to be the one case that stayed silent. Notification permission is asked while the app is on screen instead of riding your first alert.
-• VISION PRO GLASS — Settings ▸ Appearance adds GLASS beside SYSTEM / LIGHT / DARK, applied live to deck, terminals, forms, and popovers. Typing under GLASS now repaints only the rows that changed.
-• TERMINAL TITLE BAR (iPad, Designed for iPad) — the system bar is replaced by the app's own slim rail, matching the key rail at the pane's other end; the window pill rides the top edge.
-• FILE VIEWER — its own tabs (long-press a file ▸ Open in New Tab), ◂ ▸ browse history, and DIFF stays selected as you move between changed files.
-• WINDOW TABS — drag to reorder, on every platform.
-• GUIDE — a chip on the terminal's title rail (⋯ ▸ Guide on a narrow window), an illustrated field manual of that tab's gestures.
-• OPEN SOURCE LICENSES — Settings ▸ About, all 13 shipped components with full text.
-• FASTER TAPS — under mouse reporting each tap reaches the remote immediately, one click per tap, so a TUI's own double-click works.
-• The agent strip's STOP chip is gone; ESC on the key rail (or the Vision Pro key cluster) interrupts a turn.
-• TMUX / HRDR button — no longer drawn twice. The key rail below the terminal owns it wherever it fits; the title rail above takes it over only on windows too narrow for the key rail to keep it (iPhone landscape used to show both).
-• Every surface was rewritten on UIKit, so anything that looks or behaves differently from 1.2 is worth reporting.
-• FILE VIEWER TEXT SIZE — A− / A+ on a ▤ tab's title rail, beside CLOSE, and pinch the code, diff, or markdown screen itself (everywhere except the Mac). The size is remembered, applies to every ▤ tab, and a chip showing the percentage appears beside the buttons once you leave 100% — tap it to go back.
-• MIXED tmux + herdr ON ONE HOST — a host running both can now show all of it. Every deck refresh quietly asks the other multiplexer whether it has sessions; when it does, the host rail offers "+ HERDR · 3" (long-press to stop being asked). Accept and its sessions join the wall, herdr tiles wearing a light purple chassis so the two are tellable apart at a glance. Host Settings ▸ Backend is now a check selection — tick tmux, herdr, or both — with a "New sessions run on" choice when you tick two. New Session, the Open Shell / Open Agent Shortcuts, and the Host widget all gain a Backend picker on those hosts (and show nothing extra on hosts running one).
-
-• BIND A HOST ON BOTH BACKENDS — Add Host ▸ BIND now carries the same backend check selection Host Settings does, so a machine that runs tmux and herdr can be enrolled showing both instead of picking one and correcting it on the deck afterwards.
+• KEEP ALIVE IN BACKGROUND (iPhone/iPad) — Host Settings ▸ Monitoring, off by default. Leaving no longer drops that host at once, and iOS can wake the app later, so a turn ending after you left can still notify you.
+• AGENT ALERTS — now fire for the session you walked away from (the one case that used to stay silent). Notification permission is asked while the app is on screen.
+• VISION PRO GLASS — Settings ▸ Appearance adds GLASS beside SYSTEM / LIGHT / DARK, live across deck, terminals, forms, popovers. Typing under GLASS repaints only changed rows.
+• TERMINAL TITLE BAR (iPad) — the system bar is replaced by the app's own slim rail.
+• FILE VIEWER — its own tabs, ◂ ▸ browse history, DIFF stays selected across files, and text size via A− / A+ on the ▤ tab's rail or by pinching (remembered, applies to every ▤ tab).
+• GUIDE — an illustrated field manual of the tab's gestures, on the title rail.
+• Window tabs drag to reorder. Open Source Licenses in Settings ▸ About. Under mouse reporting each tap reaches the remote immediately. The STOP chip is gone — use ESC. TMUX / HRDR is no longer drawn twice.
+• Every surface was rewritten on UIKit, so anything that differs from 1.2 is worth reporting.
 
 PLEASE TRY
 1. Add your own host (key or password) — did the wall probe everything?
-2. Attach two sessions, place the windows apart, type in both. Merge one in as a tab, then move it back out; it must not reconnect.
-3. On a herdr host, switch the backend both ways, then attach, split, close a pane, and work through the HRDR panel.
-4. Long-press / double-tap / right-click terminal text on both backends, and copy something out of one pane of a split.
+2. Attach two sessions in separate windows, type in both. Merge one in as a tab, move it back out; it must not reconnect.
+3. On a herdr host, switch backend both ways, then attach, split, close a pane, and work through the HRDR panel.
+4. Long-press / double-tap / right-click terminal text on both backends, and copy from one pane of a split.
 5. Open a file viewer tab, resize a long code file and a README with A− / A+ and by pinching, then open another file — it should arrive at the size you chose.
-6. Turn Keep alive in background on for one host, attach a Claude Code / Codex / Pi session, start a turn, and leave the app. Did the alert arrive, and roughly how long after?
+6. Turn Keep alive in background on for one host, attach a Claude Code / Codex / Pi session, start a turn, and leave the app. Did the alert arrive, and how long after?
 7. Vision Pro: switch to GLASS and type fast in a busy session, then compare with DARK.
-8. On a host running BOTH tmux and herdr, wait for the rail's "+ HERDR" (or "+ TMUX") chip, accept it, and check both backends' tiles appear and attach to the right thing — especially if the same session name exists on both. Long-press the chip to dismiss it, and turn it back on from Host Settings ▸ Backend.
-9. On that host, create sessions on each backend from New Session ▸ Runs on, then point a widget and an Open Agent Shortcut at each backend — check the tap lands on the one you picked, especially with the same session name on both.
-10. In Host Settings ▸ Backend, tick BOTH tmux and herdr, then use “New sessions run on” to switch the default back and forth — both must stay ticked (they used to collapse back to one). Then bind a machine from Add Host ▸ BIND with both ticked and check the new host shows both on the deck.
+8. On a host running BOTH, accept the rail's "+ HERDR" (or "+ TMUX") chip and check both backends' tiles appear and attach to the right thing — especially with the same session name on both. Long-press to dismiss, then re-enable from Host Settings ▸ Backend.
+9. On that host, create sessions on each backend from New Session ▸ Runs on, then point a widget and an Open Agent Shortcut at each backend.
+10. Tick BOTH backends in Host Settings, switch "New sessions run on" back and forth — both must stay ticked. Then bind a machine from Add Host ▸ BIND with both ticked.
 
 KNOWN
-• Background wake timing is entirely iOS's call — minutes or tens of minutes — and nothing arrives at all if Background App Refresh is off for Multiplex.
-• If iOS terminated the app rather than suspending it, the first background check after relaunch can only establish a baseline; the one after that can alert.
+• Background wake timing is iOS's call — minutes or tens of minutes — and nothing arrives if Background App Refresh is off for Multiplex.
+• If iOS terminated the app rather than suspending it, the first background check after relaunch only establishes a baseline; the next one can alert.
 Feedback: screenshot in TestFlight, or iainst0409@gmail.com
