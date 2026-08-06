@@ -2562,12 +2562,17 @@ struct FleetSessionTileConfiguration {
     /// Which multiplexer this tile speaks for. Read by the LIVE lamp (a
     /// herdr session has no client count to light it with), by the
     /// herdr-only menu row, and — when `showsBackendIdentity` — by the
-    /// tile's own chip and chassis tint.
+    /// tile's chassis tint and its accessibility label.
     let sessionBackend: Host.SessionBackend
     /// Whether the tile must SAY which backend it came from. True only on a
     /// host monitoring more than one (`Host.showsBackendIdentity`): a
     /// single-backend host's tiles stay byte-for-byte what they have always
     /// been, which is the overwhelmingly common case.
+    ///
+    /// Visually this is the chassis tint alone — no chip. The name is what
+    /// the row's width is for, and the tint carries further anyway. VoiceOver
+    /// gets it from `accessibilitySummary` instead, so nothing is encoded in
+    /// color only.
     let showsBackendIdentity: Bool
     let compact: Bool
     let selected: Bool
@@ -2920,21 +2925,13 @@ final class FleetSessionTileView: FleetPressView,
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 9
-        if configuration.showsBackendIdentity {
-            // Leads the row: on a mixed wall, which multiplexer a tile came
-            // from is what disambiguates two identically named sessions, so
-            // it reads before the name it qualifies. `HRDR` is the same
-            // four-character spelling the terminal key rail uses, so the two
-            // surfaces name the backend identically.
-            let chip = UILabel()
-            chip.font = UIKitChassis.monoFont(configuration.compact ? 8.5 : 9.5)
-            chip.textColor = UIKitChassis.signal2
-            chip.text = configuration.sessionBackend == .herdr ? "HRDR" : "TMUX"
-            chip.accessibilityLabel =
-                "Runs under \(configuration.sessionBackend.rawValue)"
-            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
-            row.addArrangedSubview(chip)
-        }
+        // No visible backend chip: on a mixed wall the chassis tint reads
+        // faster and from further away than a 9.5 pt label would, and a
+        // `TMUX`/`HRDR` prefix beside every name spent a crowded row's width
+        // repeating what the tile's own color already says (user direction
+        // 2026-08-06 — the tint is clear enough on its own). The fact still
+        // reaches VoiceOver through `accessibilitySummary`, which is what
+        // keeps this from being color-only encoding.
         let name = UIKitChassisLabel(
             configuration.session.name,
             size: configuration.compact ? 10 : 12
@@ -3092,7 +3089,15 @@ final class FleetSessionTileView: FleetPressView,
         agentNeedsYou: Bool
     ) -> String {
         let session = configuration.session
-        var parts = [session.name, configuration.isLive ? "live" : "not attached"]
+        var parts = [session.name]
+        // The tile draws its backend as a chassis tint, which VoiceOver
+        // cannot see — so on a mixed host the label is where that fact
+        // lives. Said right after the name it qualifies, and only where it
+        // qualifies anything.
+        if configuration.showsBackendIdentity {
+            parts.append("on \(configuration.sessionBackend.rawValue)")
+        }
+        parts.append(configuration.isLive ? "live" : "not attached")
         if agentNeedsYou { parts.append("agent needs your input") }
         if agentRunning { parts.append("agent running") }
         parts.append("\(session.windowCount) windows and \(session.paneCount) panes")

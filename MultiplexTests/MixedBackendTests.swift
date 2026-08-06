@@ -109,6 +109,42 @@ final class MixedBackendTests: XCTestCase {
         return 0.2126 * red + 0.7152 * green + 0.0722 * blue
     }
 
+    /// The tile carries its backend as a chassis tint and nothing else — no
+    /// `TMUX`/`HRDR` chip. VoiceOver cannot see a tint, so the label is the
+    /// only place that fact survives, and this is what stops the backend
+    /// from being encoded in color alone.
+    func testAMixedHostsTileNamesItsBackendToVoiceOver() {
+        func summary(backend: Host.SessionBackend, mixed: Bool) -> String {
+            var session = TmuxSession(
+                name: "main", windows: [], created: .distantPast)
+            session.backend = backend
+            let tile = FleetSessionTileView()
+            tile.configure(FleetSessionTileConfiguration(
+                hostID: UUID(),
+                session: session,
+                lines: [],
+                attention: nil,
+                usesTmuxAttentionFallback: false,
+                hasOpenTab: false,
+                sessionBackend: backend,
+                showsBackendIdentity: mixed,
+                compact: false,
+                selected: false,
+                duplicateAttachTitle: "Attach in New Window",
+                openTabAccessibilityText: "Open",
+                attach: {}, attachNewWindow: {}, newHerdrTab: {},
+                delete: {}, droppedSession: { _ in }
+            ))
+            return tile.accessibilityLabel ?? ""
+        }
+
+        XCTAssertTrue(summary(backend: .herdr, mixed: true).contains("on herdr"))
+        XCTAssertTrue(summary(backend: .tmux, mixed: true).contains("on tmux"))
+        // And says nothing extra where the backend isn't in question.
+        XCTAssertFalse(summary(backend: .herdr, mixed: false).contains("on herdr"))
+        XCTAssertFalse(summary(backend: .tmux, mixed: false).contains("on tmux"))
+    }
+
     // MARK: The offer
 
     func testTheOfferChipNamesTheBackendAndItsCount() {

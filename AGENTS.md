@@ -1051,11 +1051,17 @@ logic belongs — keep parsing/command-building out of views.
     Unchecking the current default promotes what remains, so the record can
     never point at a backend it no longer shows. The New Session sheet
     mirrors it with a "Runs on" bar under the same gate.
-  - **Tiles say which backend only on a mixed host** (`showsBackendIdentity`):
-    a `TMUX`/`HRDR` chip leading the UMD row plus, for herdr, a very light
-    purple chassis (`TallyPalette.herdrBezel` — Catppuccin Mauve, herdr's own
-    default theme; luminance-matched to `bezel` so it changes hue, not
-    hierarchy). A single-backend host's tiles are byte-for-byte as shipped.
+  - **Tiles say which backend only on a mixed host** (`showsBackendIdentity`),
+    and say it in the CHASSIS: a herdr tile takes a very light purple
+    (`TallyPalette.herdrBezel` — Catppuccin Mauve, herdr's own default theme;
+    luminance-matched to `bezel` so it changes hue, not hierarchy). A
+    single-backend host's tiles are byte-for-byte as shipped. A `TMUX`/`HRDR`
+    chip led the UMD row first and was removed 2026-08-06 (user direction):
+    the tint reads faster and from further away than a 9.5 pt label, and the
+    prefix spent a crowded row's width repeating it. ⚠ That leaves the tint
+    as the only *visual* channel, so the backend MUST stay in the tile's
+    `accessibilityLabel` ("main, on herdr, live, …") — VoiceOver cannot see a
+    chassis color, and color-only encoding is what that label prevents.
   - Any monitored backend having sessions outranks the primary's `.noServer`
     tile, so an opted-in secondary's live tiles are never hidden behind a
     placeholder. A secondary answering "missing" or "no sessions" renders
