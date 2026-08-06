@@ -17,7 +17,9 @@
 #                        mpx-blocked NEEDS YOU, mpx-done carries an
 #                        off-focus derived `done`; the
 #                        herdr-mode analog of `demo`; point the app at
-#                        state/seed-herdr.json
+#                        state/seed-herdr.json — or, with `demo` also run,
+#                        at state/seed-mixed.json for one host showing BOTH
+#                        backends' tiles
 #   ./harness.sh bind    run the real `mpx bind` against this sshd with a
 #                        pinned token/PIN, so the app's bind flow can be
 #                        driven headlessly (MULTIPLEX_AUTO_BIND /
@@ -88,7 +90,14 @@ seed = {
 (state / "seed-mosh-v6.json").write_text(json.dumps(dict(seed, hostname="::1", useMosh=True), indent=2))
 # Same host again, herdr backend — pair with `./harness.sh herdr`.
 (state / "seed-herdr.json").write_text(json.dumps(dict(seed, sessionBackend="herdr"), indent=2))
-print(f"wrote {state / 'seed.json'} (+ seed-mosh.json, seed-mosh-v6.json, seed-herdr.json)")
+# And the MIXED host: tmux primary, herdr opted in as a secondary. Run BOTH
+# `demo` and `herdr` first; the deck then shows both backends' tiles from one
+# connection (two exec channels per tick in state/sshd.log).
+(state / "seed-mixed.json").write_text(
+    json.dumps(dict(seed, secondaryBackends=["herdr"]), indent=2))
+print(
+    f"wrote {state / 'seed.json'} (+ seed-mosh.json, seed-mosh-v6.json, "
+    "seed-herdr.json, seed-mixed.json)")
 PY
 }
 

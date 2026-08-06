@@ -46,6 +46,20 @@ struct Host: Identifiable, Codable, Hashable {
         func isSessionLive(clientCount: Int, hasOpenTab: Bool) -> Bool {
             reportsClientCount ? clientCount > 0 : hasOpenTab
         }
+
+        /// The one reader of a backend written by a human or an automation —
+        /// a `multiplex://` query item, a Shortcut's String parameter, a
+        /// seed file. Trimmed and case-folded so the grammar is the same
+        /// word wherever it is typed, and nil for anything else, which every
+        /// caller reads as "the host's default" (`ExternalSessionPlacement
+        /// .init(token:)`'s rule, applied to the sibling parameter).
+        init?(token: String?) {
+            guard let token else { return nil }
+            let normalized = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard !normalized.isEmpty else { return nil }
+            self.init(rawValue: normalized)
+        }
     }
 
     var id: UUID = UUID()
@@ -85,7 +99,47 @@ struct Host: Identifiable, Codable, Hashable {
     /// `connectionModelConfiguration`: flipping it must tear down and
     /// rebuild the probe connection, because the probe command itself is
     /// backend-shaped.
-    var sessionBackend: SessionBackend = .tmux
+    ///
+    /// Promoting a backend to primary retires it as a secondary in the same
+    /// write, so the record can never point at a backend it also lists as an
+    /// extra — see `secondaryBackends`.
+    var sessionBackend: SessionBackend = .tmux {
+        didSet { secondaryBackends.remove(sessionBackend) }
+    }
+    /// Backends beyond `sessionBackend` whose sessions ALSO appear on this
+    /// host's deck. Empty is the shipping default and the only state that
+    /// costs what a host has always cost.
+    ///
+    /// Never written by discovery — only by the rail's offer or Host
+    /// Settings. Escalation is asked for because the second full probe is
+    /// the expensive half (measured: a herdr host is 25 KB/tick against
+    /// tmux's 3.5 KB), and a host silently costing 8× more to monitor
+    /// because someone started a herdr session on it would break the
+    /// promise that a host costs what its record says it costs. The
+    /// discovery rider that *finds* those sessions is free enough to run
+    /// always — see `BackendDiscovery`.
+    ///
+    /// Rides the synced record, and participates in
+    /// `connectionModelConfiguration`: adding a backend must rebuild the
+    /// probe, because the probe command itself is backend-shaped — the same
+    /// reasoning that already puts `sessionBackend` there.
+    ///
+    /// ⚠ A `Set` encodes in iteration order, which Swift seeds per process.
+    /// That is stable today only because two backends exist, so this holds
+    /// at most one element and has exactly one encoding — and `hosts.json`
+    /// is written with `.sortedKeys` precisely to stay byte-stable. Adding a
+    /// third backend must therefore also sort this on the way out, or every
+    /// launch will rewrite the file and the mirrored Keychain record.
+    ///
+    /// The primary is never also a secondary — `monitoredBackends` would
+    /// list it twice, and a stray copy makes `connectionModelConfiguration`
+    /// unequal and rebuilds the probe for nothing. That is enforced here, on
+    /// the way in, so no writer has to remember it. (`init(from:)` assigns
+    /// before `didSet` observers exist and therefore repeats the rule; that
+    /// is the one place it lives twice.)
+    var secondaryBackends: Set<SessionBackend> = [] {
+        didSet { secondaryBackends.remove(sessionBackend) }
+    }
     /// Absolute path to `mosh-server` when it isn't on the exec PATH.
     var moshServerPath: String?
     /// UDP port or range ("60000:61000") handed to `mosh-server -p`.
@@ -149,6 +203,90 @@ struct Host: Identifiable, Codable, Hashable {
         port == 22 ? "\(username)@\(hostname)" : "\(username)@\(hostname):\(port)"
     }
 
+    /// Which backends a host shows, and which of them new sessions run on.
+    ///
+    /// The record stores these as a default plus extras, so writing either
+    /// half alone silently changes the other — checking a second backend and
+    /// then picking it as the default used to un-check the first, because
+    /// "the extras" still held the backend that had just been promoted
+    /// (reported 2026-08-06). Every surface that edits the pair — Host
+    /// Settings' Backend section, the Bind pane — edits this instead of the
+    /// two fields, and the bind mint carries it as one value rather than two
+    /// parameters that must agree.
+    struct BackendSelection: Equatable, Sendable {
+        /// Always a member of `enabled`.
+        private(set) var preferred: SessionBackend
+        /// Never empty: a host with no backend has nothing to show.
+        private(set) var enabled: Set<SessionBackend>
+
+        init(preferred: SessionBackend = .tmux, also secondaries: Set<SessionBackend> = []) {
+            self.preferred = preferred
+            enabled = secondaries.union([preferred])
+        }
+
+        var secondaries: Set<SessionBackend> { enabled.subtracting([preferred]) }
+        var isMixed: Bool { enabled.count > 1 }
+
+        /// Check or uncheck backends. Unchecking the current default promotes
+        /// whatever remains, so the record can never point at a backend it no
+        /// longer shows; an empty set is refused rather than stored.
+        mutating func setEnabled(_ backends: Set<SessionBackend>) {
+            guard !backends.isEmpty else { return }
+            enabled = backends
+            guard !backends.contains(preferred) else { return }
+            preferred = SessionBackend.allCases.first(where: backends.contains) ?? preferred
+        }
+
+        /// Move the default without changing what is checked — the old
+        /// default stays on as a secondary. A backend that is not checked is
+        /// checked by being chosen.
+        mutating func setPreferred(_ backend: SessionBackend) {
+            preferred = backend
+            enabled.insert(backend)
+        }
+    }
+
+    /// The pair as one value. The setter is what keeps the two stored fields
+    /// consistent for callers that edit them together.
+    var backendSelection: BackendSelection {
+        get { BackendSelection(preferred: sessionBackend, also: secondaryBackends) }
+        set {
+            sessionBackend = newValue.preferred
+            secondaryBackends = newValue.secondaries
+        }
+    }
+
+    /// Primary first, then the opted-in secondaries in a stable order — the
+    /// one accessor every probe loop, tile grid, and settings surface
+    /// iterates. Order is load-bearing: the primary's block leads the wall,
+    /// and the primary alone answers reachability, minting, and the Signal
+    /// check.
+    var monitoredBackends: [SessionBackend] {
+        [sessionBackend] + SessionBackend.allCases.filter {
+            $0 != sessionBackend && secondaryBackends.contains($0)
+        }
+    }
+
+    /// Whether this host's sessions may come from `backend` at all — the one
+    /// predicate every surface that resolves a named backend asks before
+    /// trusting it. A backend the host does not monitor has no sessions
+    /// here, and answering with the other one's namesake would attach the
+    /// wrong multiplexer.
+    func monitors(_ backend: SessionBackend) -> Bool {
+        backend == sessionBackend || secondaryBackends.contains(backend)
+    }
+
+    /// Whether tiles must say which multiplexer they came from. The single
+    /// gate for the herdr tile tint: on a host where the backend is not in
+    /// question it would be decoration, not state.
+    ///
+    /// Equivalent to `monitoredBackends.count > 1` without that accessor's
+    /// two array allocations — this is read once per tile per render and
+    /// once per session per widget publish. The set never holds the primary
+    /// (`secondaryBackends`' `didSet`), so non-empty is exactly "more than
+    /// one monitored backend".
+    var showsBackendIdentity: Bool { !secondaryBackends.isEmpty }
+
     /// The configured launch models for one agent, picker-ready.
     func launchModels(for agent: AgentKind) -> [String] {
         agentLaunchModels[agent.rawValue] ?? []
@@ -204,6 +342,14 @@ extension Host {
         // instead of throwing this host (and with it the whole list) away.
         sessionBackend = (try container.decodeIfPresent(String.self, forKey: .sessionBackend))
             .flatMap(SessionBackend.init(rawValue:)) ?? .tmux
+        // Same rule, applied per element: a record from a schema with a
+        // third backend degrades by dropping that entry instead of throwing
+        // the host away. An older build simply ignores the key and behaves
+        // as it always did — the safe direction.
+        secondaryBackends = Set(
+            (try container.decodeIfPresent([String].self, forKey: .secondaryBackends) ?? [])
+                .compactMap(SessionBackend.init(rawValue:))
+        ).subtracting([sessionBackend])
         moshServerPath = try container.decodeIfPresent(String.self, forKey: .moshServerPath)
         moshPorts = try container.decodeIfPresent(String.self, forKey: .moshPorts)
         workingDirs = try container.decodeIfPresent([String].self, forKey: .workingDirs) ?? []

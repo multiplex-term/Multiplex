@@ -150,11 +150,13 @@ enum ExternalActionPerformer {
             return
         }
         switch action {
-        case .openShell(_, let sessionName):
-            await openShell(on: host, requestedSession: sessionName, context: context)
+        case .openShell(_, let sessionName, let backend):
+            await openShell(
+                on: host, requestedSession: sessionName,
+                backend: backend, context: context)
         case .openAgent(
             _, let agent, let prompt, let askForPrompt, let directory,
-            let setupScript, let model, let target
+            let setupScript, let model, let target, let backend
         ):
             if askForPrompt {
                 context.presentAgentPrompt(AgentPromptRequest(
@@ -163,7 +165,8 @@ enum ExternalActionPerformer {
                     directory: directory,
                     setupScript: setupScript,
                     model: model,
-                    target: target
+                    target: target,
+                    backend: backend
                 ))
                 return
             }
@@ -174,6 +177,7 @@ enum ExternalActionPerformer {
                 setupScript: setupScript,
                 model: model,
                 target: target,
+                backend: backend,
                 on: host,
                 context: context
             )
@@ -192,23 +196,34 @@ enum ExternalActionPerformer {
 
     private static func openShell(
         on host: Host, requestedSession: String?,
+        backend: Host.SessionBackend?,
         context: ExternalActionRouter.Context
     ) async {
         guard let model = await connectedModel(for: host, context: context) else { return }
-        let sessions = model.tmux.sessions
+        // A named backend narrows the search to its namespace; without one,
+        // every monitored backend's sessions are candidates and the record
+        // that matches carries the backend the attach must use.
+        // `host.sessionBackend` is the tie-break, never the assumption.
+        let sessions = backend.map { scopedSessions(model, to: $0) }
+            ?? model.allSessions
         // A widget tile names the exact session it showed; a session that
         // died since that snapshot falls back to the most recent (fail-soft,
         // same spirit as the deck's tiles resurrecting from a live probe).
         let requested = requestedSession.flatMap { name in
-            sessions.first { $0.name == name }?.name
+            sessions.first { $0.name == name }
         }
-        if let target = requested ?? ExternalActionPlan.mostRecentSessionName(in: sessions) {
+        let fallback = ExternalActionPlan.mostRecentSession(in: sessions)
+        if let target = requested ?? fallback {
             if context.workspace.focusTab(
                 hostID: host.id,
-                sessionName: target,
-                backend: host.sessionBackend
+                sessionName: target.name,
+                backend: target.backend
             ) { return }
-            open(mode: .attach(host: host, sessionName: target), on: host, context: context)
+            open(
+                mode: .attach(host: host, session: target),
+                on: host,
+                context: context
+            )
         } else {
             // Headless creation inherits the New Session sheet's remembered
             // setup script (nil unless its REMEMBER opt-in is on) — a widget
@@ -228,6 +243,16 @@ enum ExternalActionPerformer {
         }
     }
 
+    /// A named backend the host no longer monitors resolves to nothing
+    /// rather than silently landing on another one — fail-soft everywhere
+    /// else in this file means "fall back to a safe default", but attaching
+    /// the wrong multiplexer's same-named session is not safe.
+    private static func scopedSessions(
+        _ model: HostConnectionModel, to backend: Host.SessionBackend
+    ) -> [TmuxSession] {
+        model.host.monitors(backend) ? model.sessions(on: backend) : []
+    }
+
     private static func openAgent(
         _ agent: AgentKind,
         prompt: String?,
@@ -235,6 +260,7 @@ enum ExternalActionPerformer {
         setupScript: ExternalSetupScriptSelection,
         model launchModel: String?,
         target: ExternalSessionTarget,
+        backend: Host.SessionBackend?,
         on host: Host,
         context: ExternalActionRouter.Context
     ) async {
@@ -256,10 +282,16 @@ enum ExternalActionPerformer {
         // (fail-soft, openShell's rule). An in-session create that FAILS
         // stays a visible failure instead — a fallback mint there would
         // hide it behind a surprise second session.
+        let candidates = backend.map { scopedSessions(model, to: $0) }
+            ?? model.allSessions
         if case .existingSession(let name, let placement) = target,
-           let session = model.tmux.sessions.first(where: { $0.name == name }) {
+           let session = candidates.first(where: { $0.name == name }) {
             guard let mode = await model.launchInSession(
                 named: session.name,
+                // The TARGET session's backend, not the host's: an `in=tab`
+                // launch aimed at a herdr session on a tmux-primary host
+                // must run herdr's verbs.
+                backend: session.backend,
                 placement: placement,
                 // Same rule as the fresh-session mint below: the Working
                 // Directory field, else the host's first configured dir —
@@ -270,7 +302,8 @@ enum ExternalActionPerformer {
                 typing: launch
             ) else {
                 presentLaunchInSessionFailure(
-                    session: session.name, placement: placement,
+                    session: session.name, backend: session.backend,
+                    placement: placement,
                     for: model, host: host, context: context)
                 return
             }
@@ -280,13 +313,17 @@ enum ExternalActionPerformer {
             if context.workspace.focusTab(
                 hostID: host.id,
                 sessionName: session.name,
-                backend: host.sessionBackend
+                backend: session.backend
             ) { return }
             open(mode: mode, on: host, context: context)
             return
         }
         guard let created = await model.createSession(
             base: agent.launchCommand,
+            // A named backend mints there; nil is the host's default. One
+            // the host no longer monitors falls back rather than failing —
+            // minting is not the ambiguous case, attaching is.
+            backend: backend.flatMap { host.monitors($0) ? $0 : nil },
             inDirectoryOf: nil,
             startingIn: directory ?? host.workingDirs.first,
             applying: host.newSessionTmuxConf,
@@ -328,12 +365,15 @@ enum ExternalActionPerformer {
     /// the person configured "New Tab"/"New Workspace"/"New Window" and the
     /// alert should say which one didn't happen.
     private static func presentLaunchInSessionFailure(
-        session: String, placement: ExternalSessionPlacement,
+        session: String, backend: Host.SessionBackend,
+        placement: ExternalSessionPlacement,
         for model: HostConnectionModel, host: Host,
         context: ExternalActionRouter.Context
     ) {
         let noun: String
-        switch (host.sessionBackend, placement) {
+        // The RESOLVED session's backend names the thing that didn't
+        // happen, not the host's primary.
+        switch (backend, placement) {
         case (.tmux, _): noun = "window"
         case (.herdr, .tab): noun = "tab"
         case (.herdr, .workspace): noun = "workspace"

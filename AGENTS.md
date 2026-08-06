@@ -73,7 +73,9 @@ app.multiplexterm.multiplex`):
   new devbox AND re-adopts the old record (two identically named hosts).
   Prefer terminate + relaunch over reinstall. Optional seed keys:
   `workingDirs` / `sessionScripts` / `newSessionTmuxConf` /
-  `agentLaunchModels` feed the picker/script/conf/model paths; `passphrase`
+  `agentLaunchModels` feed the picker/script/conf/model paths;
+  `secondaryBackends: ["herdr"]` imports a MIXED host (two probes on one
+  connection, both backends' tiles); `passphrase`
   stores the key passphrase in the Keychain so an encrypted `privateKey`
   proves the sealed-key connect path (probe logs `Accepted publickey`, no
   prompt); `"enabled": false` proves the never-dials promise against a
@@ -105,9 +107,12 @@ app.multiplexterm.multiplex`):
   `state/bind.log`). Proof is host-side: a `multiplex:bind:<id>:<device>`
   line in `state/authorized_keys`, then `Accepted publickey` in `sshd.log`.
   `MULTIPLEX_BIND_PASSPHRASE=<text>` presets KEY PASSPHRASE so a headless
-  bind stores its key sealed; `MULTIPLEX_BIND_BACKEND=tmux|herdr` presets the
-  pane's Backend choice, so the minted host record carries that backend
-  (proof: the deck tile probes herdr, not tmux). ⚠ These are `DeckWindow` tasks — a restored
+  bind stores its key sealed; `MULTIPLEX_BIND_BACKEND=<comma list>` presets
+  the pane's Backend selection, so the minted host record carries it (proof:
+  the deck tile probes herdr, not tmux). The FIRST entry is the default that
+  mints, and every entry is shown — `herdr` is the old single-backend
+  meaning unchanged, `tmux,herdr` binds a MIXED host straight from the pane.
+  ⚠ These are `DeckWindow` tasks — a restored
   terminal-only scene never runs them; `simctl uninstall` + `simctl
   keychain <udid> reset` first (or the mirror re-adopts the old host and
   the free host limit blocks the bind).
@@ -189,6 +194,9 @@ app.multiplexterm.multiplex.<name>`:
   opted-in host under a refresh grant window) without the scheduler, which
   the simulator does not provide. The app must be RUNNING to receive it —
   a suspended process never gets the notify.
+- `debug.backendoffer` — accept (or withdraw) the rail's backend offer for
+  the FIRST host, through the same store write the chip's confirmation and
+  Host Settings both perform. No headless tap route exists for the chip.
 - `debug.hostkeepalive` — toggle the FIRST host's background keep-alive
   through the same record write the Host Settings row performs. Then
   background the app (`xcrun simctl launch <udid> com.apple.mobilesafari`)
@@ -277,9 +285,14 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
   AgentCommandConfiguration  pure per-host Bar/More overrides + ordered
                      custom helpers; shared UUIDs mirror between profiles
   ConnectionHub      one HostConnectionModel per host — the probe connection;
-                     ONE exec round-trip carries sessions + a clipped ps
-                     table + capture tails, polled ~5s by FleetWall while
-                     frontmost (background re-probes never surface .probing)
+                     ONE exec round-trip per monitored backend carries
+                     sessions + a clipped ps table + capture tails, polled
+                     ~5s by FleetWall while frontmost (background re-probes
+                     never surface .probing)
+    SessionKey       (backend, name) — the identity every per-session map
+                     keys by; persisted maps use its `storageKey` (pure)
+    BackendDiscovery the other backend's rider on the primary probe's own
+                     channel: installed? how many sessions? (pure)
     DeckSnapshotStore  last-known wall state per host (device-local) — cold
                      launches paint instantly; attention is never cached
     TmuxProbe        tmux list/capture/ps command builders + parsers (pure)
@@ -980,6 +993,139 @@ logic belongs — keep parsing/command-building out of views.
   sealed key is never rotated, and `save()` skips the probe for a sealed
   key with no passphrase on file. The CLI knows nothing about passphrases
   (a CLI-side variant shipped and was reverted 2026-07-29).
+- **A host may show a SECOND backend's sessions, offered and never assumed**
+  (`Host.secondaryBackends` / `monitoredBackends`; `BackendDiscovery`;
+  plan + measurements in `local-plan/mixed-backend-deck-plan.md` and
+  `mixed-backend-deck.md`). `sessionBackend` stays the PRIMARY: it mints
+  sessions, answers the Signal check, owns the rail phase and the NO TMUX /
+  NO SERVER / UNREACHABLE tiles, and defaults every external action.
+  - **Identity is `SessionKey(backend, name)`, never a bare name.** A tmux
+    `main` beside a herdr `main` used to make `SessionOrdering.ordered`'s
+    `Dictionary(uniqueKeysWithValues:)` **trap at runtime** — a fatal error
+    on the deck's render path for any mixed host with a saved tile order.
+    In-memory maps are `[SessionKey: …]`; persisted ones
+    (`deck-snapshots.json`, `widget-state.json`, `MultiplexSessionOrders`)
+    stay `[String: …]` through `storageKey`, so a legacy file's bare `"main"`
+    reads back as `.tmux/"main"` — no migration, no version bump.
+    `DeckSnapshot.keysCarryBackend` is the one exception: a pre-mixed HERDR
+    snapshot's whole content belongs to its file-level `sessionBackend`, and
+    the decoder stamps it forward rather than reading it as tmux.
+  - **Discovery is free; the second full probe is not.** Every tick rides
+    `BackendDiscovery.riderCommand` for each UNmonitored backend on the
+    primary's own channel — measured +1 ms absent, +4–9 ms and <1 KB present,
+    which is what the old standalone `command -v herdr` already cost (the
+    rider replaced it, and `herdrPresent` is now derived from it). A full
+    second probe is 25 KB/tick for herdr against tmux's 3.5 KB, so it is
+    **offered**, never taken: the rail draws `+ HERDR · 3`, a confirmation
+    names the cost, and only that press writes `secondaryBackends`. Long-press
+    dismisses per host per backend, device-local (`BackendOfferPreferences`)
+    — a dismissal is a this-device annoyance judgement, not a fleet fact.
+  - ⚠ **`BackendDiscovery.read` consumes only the LEADING region block.** A
+    probe response carries panes' visible screens in its capture tails, so
+    scanning the whole response would let terminal content forge an offer —
+    or, worse, get the tails swallowed as region body and blank every
+    miniature. Noise *before* the block is tolerated (remote `.bashrc`
+    echoes are real); once a non-region line follows it, nothing later is
+    read or removed. That placement is `BackendDiscovery.riderPrefix`'s job,
+    not each probe builder's — the rule (subtract self, sort by raw value so
+    the command is byte-stable, lead) is written once, and the rider spells
+    its list verbs through `TmuxProbe.tmuxCommand` / `HerdrProbe
+    .sessionListVerb` so the mandatory `-u` and the shape
+    `parseSessionNames` reads each have one owner. `read` itself walks the
+    response line by line and returns the remainder as prefix + suffix
+    SLICES: both probe parsers cut their capture-tail region off before
+    walking it precisely so 25 KB of pane screens is tokenized once, and
+    splitting the whole response into lines here would undo that for both.
+  - **A secondary's failure is structurally contained.** Two concurrent exec
+    channels on the SAME connection (105 ms vs 176 ms concatenated); the
+    primary alone owns `phase`, `markFailed`, and the `reusedLink && mayRetry`
+    rebuild. A secondary that throws is logged under `wall` and keeps its
+    LAST state — one bad round-trip is not evidence its sessions went away.
+  - ⚠ **`evaluateAttention(answered:)` takes the backends that actually
+    ANSWERED, never the union of everything expected.** A backend that failed
+    has not proved its sessions are gone, so its displayed attention AND its
+    `AttentionTracker` baseline must survive. Getting this wrong reproduces
+    the 2026-08-05 bug exactly: NEEDS YOU silently cleared by an unrelated
+    probe's failure, invisible outside the `attention` log, and "the agent
+    finished while you were away" made unannounceable. `prune` has a
+    predicate overload for precisely this.
+  - **A tile's backend comes from its own record** (`TmuxSession.backend`,
+    stamped by the parser that built it), never `host.sessionBackend`. That
+    is what `TerminalRoute.Mode.attach(host:session:)`, the attention
+    classifier, `killSession`, and the external-action router all read; the
+    name-only overload falls back to the primary as a documented tie-break.
+    Anything that TARGETS a session states the backend rather than defaulting
+    it, because pairing a name with the host's primary is a silent miss on a
+    mixed host — a duplicate window from `focusOrAttach`, a banner press that
+    finds nothing, an `in=tab` launch running tmux verbs at a herdr session.
+    So `kill` reads `session.backend` (the parameter that let the two
+    disagree is gone), `launchInSession` and `detectActiveAgent` take it
+    required, `AttentionAlert` carries it into `tapTarget` and out through
+    `AttentionCenter`'s attach, `AgentPromptRequest` holds it across the ASK
+    sheet's rebuild, and `ExternalActionPlan.mostRecentSession` returns the
+    RECORD — the name-then-re-lookup it replaced resolved in exactly the
+    namespace `SessionKey` exists to disambiguate.
+  - **The primary is never also a secondary, enforced by the record**
+    (`didSet` on both `Host.sessionBackend` and `Host.secondaryBackends`), so
+    no writer has to remember it and a stray copy can't make
+    `connectionModelConfiguration` unequal and rebuild the probe for nothing.
+    `init(from:)` repeats the rule because observers don't run during
+    initialization; that is the one place it lives twice. ⚠ The rule does NOT
+    reach `AddHostFormState`, which carries its own fields.
+  - **Host Settings ▸ Backend is a CHECK selection, not a switch**
+    (`AddHostCheckBar`): tmux and herdr as peers, at least one always
+    checked, plus a "New sessions run on" single-choice bar that appears
+    only once more than one is. A boolean "Also show herdr sessions" row
+    shipped first and read badly — it framed two peers as a primary and an
+    afterthought and said nothing about where a new session lands.
+    Unchecking the current default promotes what remains, so the record can
+    never point at a backend it no longer shows. The New Session sheet
+    mirrors it with a "Runs on" bar under the same gate, and **Add Host ▸
+    BIND wears the same two controls** — a machine may genuinely run both,
+    and one choice made at mint time meant correcting it on the deck
+    afterwards.
+  - ⚠ **The two controls edit `Host.BackendSelection`, never the two fields.**
+    The record stores a default plus extras, so writing either half alone
+    silently changes the other: promoting a checked backend to default used
+    to un-check the one that had been default, because the extras still held
+    the backend just promoted — checking both and then choosing a default
+    collapsed the checks back to one (reported 2026-08-06).
+    `setPreferred` moves the default and keeps the set; `setEnabled` changes
+    the set and promotes a survivor. `AddHostFormState` and `BindController`
+    both hold the value, and the bind mint carries it as ONE parameter down
+    the handshake/offline chain rather than two that must agree.
+  - **Tiles say which backend only on a mixed host** (`showsBackendIdentity`),
+    and say it in the CHASSIS: a herdr tile takes a very light purple
+    (`TallyPalette.herdrBezel` — Catppuccin Mauve, herdr's own default theme;
+    luminance-matched to `bezel` so it changes hue, not hierarchy). A
+    single-backend host's tiles are byte-for-byte as shipped. A `TMUX`/`HRDR`
+    chip led the UMD row first and was removed 2026-08-06 (user direction):
+    the tint reads faster and from further away than a 9.5 pt label, and the
+    prefix spent a crowded row's width repeating it. ⚠ That leaves the tint
+    as the only *visual* channel, so the backend MUST stay in the tile's
+    `accessibilityLabel` ("main, on herdr, live, …") — VoiceOver cannot see a
+    chassis color, and color-only encoding is what that label prevents.
+  - Any monitored backend having sessions outranks the primary's `.noServer`
+    tile, so an opted-in secondary's live tiles are never hidden behind a
+    placeholder. A secondary answering "missing" or "no sessions" renders
+    nothing — the user asked to see its sessions if they exist.
+  - **Every surface that creates or targets a session can name a backend**,
+    and each omits the choice where there is only one answer.
+    `ExternalActionURL`/`WidgetLink` carry `backend=` — omitted for the
+    host's default, so every URL, widget, and Shortcut built before mixed
+    hosts keeps its exact bytes and meaning; an unknown token fails soft to
+    the default (`model`/`in`'s rule) but a named backend the host does NOT
+    monitor resolves to NO session rather than the other one's namesake.
+    `WidgetSessionState.backendRaw` is set only on a mixed host, so widget
+    rows deep-link unambiguously. The Open Shell / Open Agent Shortcuts and
+    the Host widget grow a Backend parameter whose rows come from
+    `SessionTargetChoices.backendChoices` — **empty for a single-backend
+    host**, which is what keeps the setting invisible there. Pinned by
+    `SharedStateTests`.
+  - Headless: seed key `secondaryBackends: ["herdr"]`, notify hook
+    `debug.backendoffer` (accepts/withdraws the offer for the FIRST host).
+    Proof is host-side — two exec channels per tick in `state/sshd.log` —
+    and the `wall` timing line's per-backend byte breakdown.
 - **herdr is an explicit per-host backend** (`Host.sessionBackend`,
   `HerdrProbe`; 0.7.5 / protocol 17), adapted as session→tile,
   workspace→window, pane→pane. Identity is `(backend, session, pane)` because

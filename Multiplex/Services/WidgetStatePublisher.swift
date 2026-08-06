@@ -58,28 +58,71 @@ enum WidgetStateBuilder {
     /// Lines the medium widget's held frame can actually show.
     static let miniatureLineLimit = 6
 
+    /// `miniatures` is keyed by `SessionKey.storageKey`, matching the deck
+    /// snapshot it is read from — a bare name collides across backends.
     static func hostState(
         host: Host,
         sessions: [TmuxSession],
         miniatures: [String: [String]],
         probedAt: Date?
     ) -> WidgetHostState {
+        hostState(host: host, sessions: sessions, probedAt: probedAt) {
+            miniatures[$0.id.storageKey] ?? []
+        }
+    }
+
+    /// The live-probe form. The model keeps its maps `SessionKey`-keyed, and
+    /// this publish runs once per host per tick for every host — going
+    /// through the storage spelling would interpolate two strings per session
+    /// only to parse them straight back.
+    ///
+    /// A distinct label rather than an overload: overloading on the key type
+    /// alone makes an empty `[:]` literal ambiguous at every call site.
+    static func hostState(
+        host: Host,
+        sessions: [TmuxSession],
+        liveMiniatures: [SessionKey: [String]],
+        probedAt: Date?
+    ) -> WidgetHostState {
+        hostState(host: host, sessions: sessions, probedAt: probedAt) {
+            liveMiniatures[$0.id] ?? []
+        }
+    }
+
+    private static func hostState(
+        host: Host,
+        sessions: [TmuxSession],
+        probedAt: Date?,
+        miniatureLines: (TmuxSession) -> [String]
+    ) -> WidgetHostState {
         WidgetHostState(
             id: host.id,
             name: host.name,
             address: host.address,
             sessions: sessions.map {
-                sessionState($0, miniatureLines: miniatures[$0.name] ?? [])
+                sessionState(
+                    $0,
+                    miniatureLines: miniatureLines($0),
+                    // Rows carry a backend only where it disambiguates. On
+                    // a single-backend host nil keeps every row — and every
+                    // link built from one — byte-identical to before.
+                    qualifiesBackend: host.showsBackendIdentity
+                )
             },
             probedAt: probedAt,
             agentModels: host.agentLaunchModels.isEmpty ? nil : host.agentLaunchModels,
             backendRaw: host.sessionBackend.rawValue,
+            // Default first, so the pickers' leading "Host Default" row and
+            // the explicit rows agree without the widget process knowing the
+            // rule. A single entry means there is nothing to pick.
+            backendsRaw: host.monitoredBackends.map(\.rawValue),
             workingDirs: host.workingDirs.isEmpty ? nil : host.workingDirs
         )
     }
 
     static func sessionState(
-        _ session: TmuxSession, miniatureLines: [String]
+        _ session: TmuxSession, miniatureLines: [String],
+        qualifiesBackend: Bool = false
     ) -> WidgetSessionState {
         WidgetSessionState(
             name: session.name,
@@ -90,7 +133,8 @@ enum WidgetStateBuilder {
             },
             activeWindowIndex: session.windows.firstIndex(where: \.isActive) ?? 0,
             miniatureLines: Array(miniatureLines.suffix(miniatureLineLimit)),
-            createdAt: session.created
+            createdAt: session.created,
+            backendRaw: qualifiesBackend ? session.backend.rawValue : nil
         )
     }
 

@@ -80,7 +80,7 @@ final class AgentPromptSheetUIKitTests: XCTestCase {
 
         // Where the launch types is part of what the person approves here.
         XCTAssertEqual(state.title, "Codex on devbox · main")
-        guard case .openAgent(_, _, _, _, _, _, _, let target) = state.launchAction
+        guard case .openAgent(_, _, _, _, _, _, _, let target, _) = state.launchAction
         else { return XCTFail("expected openAgent") }
         XCTAssertEqual(target, .existingSession(name: "main", placement: .workspace))
 

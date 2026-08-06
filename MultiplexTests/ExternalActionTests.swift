@@ -126,7 +126,7 @@ final class ExternalActionTests: XCTestCase {
         // (the adapter maps herdr workspace → window)...
         let window = URL(string:
             "multiplex://open?host=devbox&action=agent&agent=claude&session=main&in=window")!
-        guard case .openAgent(_, _, _, _, _, _, _, let aliased)? =
+        guard case .openAgent(_, _, _, _, _, _, _, let aliased, _)? =
             ExternalActionURL.action(from: window)
         else { return XCTFail("expected openAgent") }
         XCTAssertEqual(aliased, .existingSession(name: "main", placement: .workspace))
@@ -135,7 +135,7 @@ final class ExternalActionTests: XCTestCase {
         // performer validates the name against the live list anyway.
         let junk = URL(string:
             "multiplex://open?host=devbox&action=agent&agent=claude&session=main&in=explode")!
-        guard case .openAgent(_, _, _, _, _, _, _, let defaulted)? =
+        guard case .openAgent(_, _, _, _, _, _, _, let defaulted, _)? =
             ExternalActionURL.action(from: junk)
         else { return XCTFail("expected openAgent") }
         XCTAssertEqual(defaulted, .existingSession(name: "main", placement: .tab))
@@ -148,7 +148,7 @@ final class ExternalActionTests: XCTestCase {
             // A placement without a session names nowhere to place into.
             "multiplex://open?host=devbox&action=agent&agent=claude&in=workspace",
         ] {
-            guard case .openAgent(_, _, _, _, _, _, _, let target)? =
+            guard case .openAgent(_, _, _, _, _, _, _, let target, _)? =
                 ExternalActionURL.action(from: URL(string: query)!)
             else { return XCTFail("expected openAgent for \(query)") }
             XCTAssertEqual(target, .newSession, query)
@@ -186,7 +186,7 @@ final class ExternalActionTests: XCTestCase {
 
     func testAgentDefaultsToClaudeCode() {
         let url = URL(string: "multiplex://open?host=devbox&action=agent")!
-        guard case .openAgent(_, let agent, _, _, _, _, _, _)? = ExternalActionURL.action(from: url) else {
+        guard case .openAgent(_, let agent, _, _, _, _, _, _, _)? = ExternalActionURL.action(from: url) else {
             return XCTFail("expected openAgent")
         }
         XCTAssertEqual(agent, .claudeCode)
@@ -213,7 +213,7 @@ final class ExternalActionTests: XCTestCase {
             TmuxSession(name: "new", windows: [], created: Date(timeIntervalSince1970: 300)),
             TmuxSession(name: "mid", windows: [], created: Date(timeIntervalSince1970: 200)),
         ]
-        XCTAssertEqual(ExternalActionPlan.mostRecentSessionName(in: sessions), "new")
+        XCTAssertEqual(ExternalActionPlan.mostRecentSession(in: sessions)?.name, "new")
     }
 
     func testMostRecentSessionBreaksCreationTiesByName() {
@@ -222,11 +222,11 @@ final class ExternalActionTests: XCTestCase {
             TmuxSession(name: "alpha", windows: [], created: created),
             TmuxSession(name: "beta", windows: [], created: created),
         ]
-        XCTAssertEqual(ExternalActionPlan.mostRecentSessionName(in: sessions), "beta")
+        XCTAssertEqual(ExternalActionPlan.mostRecentSession(in: sessions)?.name, "beta")
     }
 
     func testMostRecentSessionEmptyIsNil() {
-        XCTAssertNil(ExternalActionPlan.mostRecentSessionName(in: []))
+        XCTAssertNil(ExternalActionPlan.mostRecentSession(in: [])?.name)
     }
 
     // MARK: Setup script selection

@@ -15,16 +15,31 @@ struct OpenHostShellIntent: AppIntent {
     static let openAppWhenRun = true
 
     @Parameter(title: "Host") var host: HostEntity
+    /// Which multiplexer's most recent session to open. Offered only when
+    /// the host shows more than one (the provider returns no rows
+    /// otherwise); unset is the host's own default, which is what every
+    /// Shortcut built before this parameter existed means.
+    @Parameter(
+        title: "Backend",
+        description: "Which multiplexer's session to open. Leave empty for the host default.",
+        optionsProvider: HostBackendOptionsProvider()
+    ) var backend: String?
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Open a shell on \(\.$host)")
+        Summary("Open a shell on \(\.$host)") {
+            \.$backend
+        }
     }
 
     @Dependency private var router: ExternalActionRouter
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        router.submit(.openShell(host: .id(host.id), sessionName: nil))
+        router.submit(.openShell(
+            host: .id(host.id),
+            sessionName: nil,
+            backend: ShortcutBackendOptions.selection(for: backend)
+        ))
         return .result()
     }
 }
@@ -42,6 +57,15 @@ struct OpenHostAgentIntent: AppIntent {
 
     @Parameter(title: "Host") var host: HostEntity
     @Parameter(title: "Agent", default: .claudeCode) var agent: AgentChoice
+    /// Which multiplexer the launch lands on — and which namespace Session
+    /// below is resolved in. Offered only when the host shows more than
+    /// one; unset is the host's default. Declared before Session because
+    /// it scopes what Session can mean.
+    @Parameter(
+        title: "Backend",
+        description: "Which multiplexer the agent runs on. Leave empty for the host default.",
+        optionsProvider: AgentBackendOptionsProvider()
+    ) var backend: String?
     /// A free String so Shortcuts variables keep working; suggestions are
     /// the published snapshot's last-known session names. The app resolves
     /// the name against the live probe — a session that no longer exists
@@ -101,6 +125,7 @@ struct OpenHostAgentIntent: AppIntent {
 
     static var parameterSummary: some ParameterSummary {
         Summary("Start \(\.$agent) on \(\.$host)") {
+            \.$backend
             \.$session
             \.$placement
             \.$directory
@@ -134,7 +159,8 @@ struct OpenHostAgentIntent: AppIntent {
             directory: path.isEmpty ? nil : path,
             setupScript: script,
             model: launchModel,
-            target: target
+            target: target,
+            backend: ShortcutBackendOptions.selection(for: backend)
         ))
         return .result()
     }
@@ -224,6 +250,57 @@ struct AgentPlacementOptionsProvider: DynamicOptionsProvider {
             promptLabel: "Choose where the agent opens",
             sections: [IntentItemSection(items: items)]
         )
+    }
+}
+
+/// Backend rows for a host showing more than one — no rows at all
+/// otherwise, which is what keeps the parameter invisible on the
+/// single-backend host. Same shared builder as the widget's provider.
+struct AgentBackendOptionsProvider: DynamicOptionsProvider {
+    @IntentParameterDependency<OpenHostAgentIntent>(\.$host)
+    private var intent
+
+    func results() async throws -> IntentItemCollection<String> {
+        await ShortcutBackendOptions.rows(forHostID: intent?.host.id)
+    }
+}
+
+/// The same rows for Open Shell.
+struct HostBackendOptionsProvider: DynamicOptionsProvider {
+    @IntentParameterDependency<OpenHostShellIntent>(\.$host)
+    private var intent
+
+    func results() async throws -> IntentItemCollection<String> {
+        await ShortcutBackendOptions.rows(forHostID: intent?.host.id)
+    }
+}
+
+/// The rows and the token grammar behind those providers, in one place so
+/// the two Shortcuts pickers cannot drift on either. (The widget's provider
+/// builds its own — it lives in the extension target, which compiles only
+/// `Multiplex/Shared`; `SessionTargetChoices` is the piece they do share.)
+enum ShortcutBackendOptions {
+    /// Empty for a single-backend host — what keeps the parameter invisible
+    /// there, and the contract `SharedStateTests` pins.
+    static func rows(forHostID hostID: UUID?) async -> IntentItemCollection<String> {
+        let hosts = await HostEntityProvider.all()
+        let backends = hosts.first { $0.id == hostID }?.backendsRaw
+        return IntentItemCollection(
+            promptLabel: "Choose a backend",
+            sections: [IntentItemSection(
+                items: SessionTargetChoices.backendChoices(backendsRaw: backends)
+                    .map { IntentItem($0.value, title: "\($0.title)") }
+            )]
+        )
+    }
+
+    /// A Shortcuts VARIABLE can supply anything, so an unrecognized value
+    /// resolves to the host's default rather than to a backend the host may
+    /// not even monitor. The "Host Default" row's own value is the empty
+    /// string, which `init(token:)` already reads as no choice — the same
+    /// answer, through the one token grammar.
+    static func selection(for value: String?) -> Host.SessionBackend? {
+        Host.SessionBackend(token: value)
     }
 }
 

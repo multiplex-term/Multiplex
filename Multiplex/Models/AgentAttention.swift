@@ -49,6 +49,11 @@ enum AttentionEvent: Equatable {
 struct AttentionAlert {
     var host: Host
     var sessionName: String
+    /// The multiplexer the alerting session runs on — the session record's
+    /// own, never `host.sessionBackend`, which on a mixed host answers only
+    /// for the primary. Defaults to the primary for the single-backend
+    /// sources (plain-shell tabs, in-band bells) where it is the one answer.
+    var backend: Host.SessionBackend = .tmux
     /// Present for an event emitted by a plain-shell tab. tmux probe events
     /// remain session-scoped because the same remote session may have more
     /// than one attached client, while every plain shell is its own process.
@@ -60,12 +65,14 @@ struct AttentionAlert {
     /// when the event is needs-input and the tail yielded readable copy.
     var dialogSummary: String?
 
-    /// What this alert's banner should get back to when pressed.
+    /// What this alert's banner should get back to when pressed. A banner
+    /// for a secondary-backend session must carry that backend, or the press
+    /// looks for the tab in the wrong namespace and finds nothing.
     var tapTarget: AttentionTapTarget {
         AttentionTapTarget(
             hostID: host.id,
             sessionName: sessionName,
-            backend: host.sessionBackend,
+            backend: backend,
             tabID: tabID
         )
     }
@@ -338,18 +345,22 @@ enum AgentAttention {
 /// The first sighting of a session is a baseline, not an edge: relaunching
 /// the app next to a long-waiting dialog must not re-notify (the wall
 /// badge shows standing state; events are for changes).
-struct AttentionTracker {
+/// Generic over the key because two owners track different things: the wall
+/// keys by `SessionKey` (a name alone collides across backends on a mixed
+/// host), while a direct `.shell` tab keys by its own tab UUID — it has no
+/// session at all.
+struct AttentionTracker<Session: Hashable> {
     private struct Observation: Equatable {
         var state: PaneAgentState?
         var hasBell: Bool
     }
 
-    private var previous: [String: Observation] = [:]
+    private var previous: [Session: Observation] = [:]
 
     /// Feed one observation; get the events this edge produces. `state` is
     /// nil when the session has no detected agent (bells still track).
     mutating func update(
-        session: String,
+        session: Session,
         state: PaneAgentState?,
         hasBell: Bool
     ) -> [AttentionEvent] {
@@ -373,8 +384,19 @@ struct AttentionTracker {
 
     /// Drop sessions that no longer exist so a recreated namesake starts
     /// from a fresh baseline.
-    mutating func prune(keeping sessions: Set<String>) {
-        previous = previous.filter { sessions.contains($0.key) }
+    ///
+    /// ⚠ On a mixed host, hand this the surviving keys of the backends that
+    /// actually ANSWERED this tick — never the union of everything expected.
+    /// A backend whose probe failed has not proved its sessions are gone,
+    /// and pruning them resets the very baseline the edge detector needs
+    /// (`ConnectionHub.evaluateAttention` keeps that baseline across a dead
+    /// probe for exactly this reason).
+    /// Predicate form so a mixed-host caller can keep an unanswered
+    /// backend's baselines while pruning an answered one's — the set form it
+    /// replaced could only express "these survive", which is the shape that
+    /// made the bug above possible.
+    mutating func prune(keeping isLive: (Session) -> Bool) {
+        previous = previous.filter { isLive($0.key) }
     }
 
     mutating func reset() {

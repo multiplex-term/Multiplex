@@ -19,6 +19,14 @@ struct HostWidgetConfigurationIntent: WidgetConfigurationIntent {
     @Parameter(title: "Agent", default: .claudeCode)
     var agent: AgentChoice
 
+    /// Which multiplexer the AGENT key mints on — and which namespace the
+    /// Session choice above is resolved in. Offered only when the host
+    /// shows more than one (the provider returns no rows otherwise, and an
+    /// unset value is the host's own default), so a widget configured
+    /// before this setting existed behaves identically.
+    @Parameter(title: "Backend", optionsProvider: WidgetBackendOptionsProvider())
+    var backend: String?
+
     /// The AGENT key launches inside this existing session; unset/empty
     /// mints a fresh one (the original behavior). Choices are the
     /// snapshot's last-known session names; the app revalidates against
@@ -153,4 +161,22 @@ enum WidgetTapAction: String, AppEnum {
         .shell: "Shell",
         .agent: "Agent",
     ]
+}
+
+/// Backend rows for a host showing more than one — no rows at all
+/// otherwise, which is what keeps the setting invisible on the
+/// single-backend host. Same shared builder as the Shortcut's provider.
+struct WidgetBackendOptionsProvider: DynamicOptionsProvider {
+    @IntentParameterDependency<HostWidgetConfigurationIntent>(\.$host)
+    private var intent
+
+    func results() async throws -> IntentItemCollection<String> {
+        let items = SessionTargetChoices
+            .backendChoices(backendsRaw: widgetConfiguredHost(intent?.host)?.backendsRaw)
+            .map { IntentItem($0.value, title: "\($0.title)") }
+        return IntentItemCollection(
+            promptLabel: "Choose a backend",
+            sections: [IntentItemSection(items: items)]
+        )
+    }
 }

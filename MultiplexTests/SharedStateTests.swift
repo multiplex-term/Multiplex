@@ -22,6 +22,89 @@ final class SharedStateTests: XCTestCase {
         )
     }
 
+    /// The mixed-host half of the lockstep: a link that names a backend must
+    /// parse back to that backend, and one that names none must still parse
+    /// to nil — which is what keeps every widget, Shortcut, and hand-written
+    /// URL built before this parameter existed meaning exactly what it did.
+    func testBackendRidesBothLinkBuildersOrIsAbsentEntirely() {
+        let id = UUID()
+        for backend in Host.SessionBackend.allCases {
+            XCTAssertEqual(
+                ExternalActionURL.action(from: WidgetLink.shellURL(
+                    hostID: id, sessionName: "main",
+                    backendRaw: backend.rawValue)),
+                .openShell(host: .id(id), sessionName: "main", backend: backend)
+            )
+            XCTAssertEqual(
+                ExternalActionURL.action(from: WidgetLink.agentURL(
+                    hostID: id, agentRaw: "claudeCode", askForPrompt: false,
+                    backendRaw: backend.rawValue)),
+                .openAgent(
+                    host: .id(id), agent: .claudeCode, prompt: nil,
+                    askForPrompt: false, directory: nil,
+                    setupScript: .remembered, model: nil, target: .newSession,
+                    backend: backend)
+            )
+        }
+
+        // Omitted, empty, and unrecognized all read as the host's default.
+        // Fail-soft like `model` and `in`: the performer validates against
+        // the host's live record anyway.
+        for raw in [nil, "", "zellij", "TMUX?"] {
+            guard case .openShell(_, _, let parsed)? = ExternalActionURL.action(
+                from: WidgetLink.shellURL(
+                    hostID: id, sessionName: "main", backendRaw: raw))
+            else { return XCTFail("expected openShell for \(raw ?? "nil")") }
+            XCTAssertNil(parsed, "\(raw ?? "nil")")
+        }
+
+        // And a link that names none carries no `backend` item at all, so
+        // its bytes are unchanged from before the parameter existed.
+        XCTAssertFalse(
+            WidgetLink.shellURL(hostID: id).absoluteString.contains("backend"))
+        XCTAssertEqual(
+            ExternalActionURL.url(for: .openShell(host: .id(id), sessionName: nil)),
+            ExternalActionURL.url(
+                for: .openShell(host: .id(id), sessionName: nil, backend: nil))
+        )
+    }
+
+    /// Case-insensitive, because a hand-written URL is a supported road.
+    func testABackendTokenIsReadCaseInsensitively() {
+        let id = UUID()
+        let url = URL(string: "multiplex://open?host=\(id.uuidString)&backend=HERDR")!
+        XCTAssertEqual(
+            ExternalActionURL.action(from: url),
+            .openShell(host: .id(id), sessionName: nil, backend: .herdr)
+        )
+    }
+
+    /// The picker rows behind both the Shortcut parameter and the widget
+    /// setting. A host with one backend offers NOTHING — the surfaces hide
+    /// the setting rather than showing a picker with a single answer.
+    func testBackendChoicesAppearOnlyForAMixedHost() {
+        XCTAssertTrue(SessionTargetChoices.backendChoices(backendsRaw: nil).isEmpty)
+        XCTAssertTrue(SessionTargetChoices.backendChoices(backendsRaw: []).isEmpty)
+        XCTAssertTrue(SessionTargetChoices.backendChoices(backendsRaw: ["tmux"]).isEmpty)
+
+        let choices = SessionTargetChoices.backendChoices(
+            backendsRaw: ["herdr", "tmux"])
+        XCTAssertEqual(choices.map(\.value), ["", "herdr", "tmux"])
+        XCTAssertEqual(choices.first?.title, "Host Default")
+        // Default first, so the leading row and the explicit rows agree
+        // about which one "default" means.
+        XCTAssertEqual(choices.dropFirst().first?.value, "herdr")
+    }
+
+    func testAShortcutBackendVariableCannotNameAnArbitraryBackend() {
+        XCTAssertNil(ShortcutBackendOptions.selection(for: nil))
+        XCTAssertNil(ShortcutBackendOptions.selection(for: ""))
+        XCTAssertNil(ShortcutBackendOptions.selection(for: "  "))
+        XCTAssertNil(ShortcutBackendOptions.selection(for: "zellij"))
+        XCTAssertEqual(ShortcutBackendOptions.selection(for: "herdr"), .herdr)
+        XCTAssertEqual(ShortcutBackendOptions.selection(for: " TMUX "), .tmux)
+    }
+
     func testMostRecentSessionMirrorsExternalActionPlan() {
         let sessions = [
             ("old", 100.0), ("newest", 400.0), ("tie-b", 400.0), ("mid", 250.0),
@@ -37,7 +120,7 @@ final class SharedStateTests: XCTestCase {
         )
         XCTAssertEqual(
             widget.mostRecentSession?.name,
-            ExternalActionPlan.mostRecentSessionName(in: tmux)
+            ExternalActionPlan.mostRecentSession(in: tmux)?.name
         )
     }
 
@@ -313,7 +396,7 @@ final class SharedStateTests: XCTestCase {
                 hostID: UUID(), agentRaw: "codex", askForPrompt: false,
                 model: AgentModelChoices.agentDefaultValue))
                 .flatMap { action -> String?? in
-                    guard case .openAgent(_, _, _, _, _, _, let model, _) = action
+                    guard case .openAgent(_, _, _, _, _, _, let model, _, _) = action
                     else { return nil }
                     return .some(model)
                 },

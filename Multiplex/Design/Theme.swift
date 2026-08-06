@@ -10,6 +10,30 @@ enum TallyPalette {
     static let screen = UIColor(light: 0xF9FBFD, dark: 0x0A0B0C)
     static let screenHatch = UIColor(light: 0xEDF0F4, dark: 0x101114)
 
+    /// `bezel` for a herdr tile on a host that shows BOTH backends — the
+    /// wordless half of the same fact its `HRDR` chip states in words. Drawn
+    /// only when `Host.showsBackendIdentity`: on a host where the backend is
+    /// not in question, a tinted wall would be decoration, and color here is
+    /// state.
+    ///
+    /// The hue is herdr's own. herdr ships Catppuccin as its default theme
+    /// (`herdr --default-config`: `name = "catppuccin"`, dark/light pair
+    /// `catppuccin`/`catppuccin-latte`), `mauve` is a first-class token in
+    /// its `[theme.custom]` set, and Catppuccin's flagship accent is Mauve —
+    /// Mocha `#CBA6F7`, Latte `#8839EF`. These are washes of those into
+    /// `bezel`, solved to `bezel`'s own relative luminance (within 2/255 in
+    /// both polarities): a herdr tile reads as a differently *tinted*
+    /// sibling, never a raised or highlighted one.
+    ///
+    /// ⚠ Keep that property if you retune — lightness is hierarchy, and
+    /// hierarchy is not what this says. Green carries 71% of luminance, so a
+    /// violet's low green has to be paid back in red and blue; the light
+    /// rendition's first draft was 5.7/255 dim and read as a recessed tile
+    /// (caught by `testTheHerdrWashMatchesBezelsLightnessInBothPolarities`,
+    /// which is also what pins the blue > red > green ordering that makes it
+    /// violet rather than merely cool).
+    static let herdrBezel = UIColor(light: 0xF6F0FF, dark: 0x2C2833)
+
     static let tally = UIColor(light: 0xC13439, dark: 0xE5484D)
     static let caution = UIColor(light: 0x966618, dark: 0xE0A33E)
     static let ok = UIColor(light: 0x3E7C58, dark: 0x7FBF9A)

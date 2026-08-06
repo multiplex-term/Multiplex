@@ -23,6 +23,33 @@ enum SessionTargetChoices {
     /// model.
     static let herdrBackendRaw = "herdr"
 
+    /// The "whatever the host's default is" sentinel for the backend
+    /// pickers — the same empty-string convention `newSessionValue` and
+    /// `AgentModelChoices.agentDefaultValue` use. Link builders skip it, so
+    /// a Shortcut or widget that never touched the setting produces exactly
+    /// the bytes it always did.
+    static let hostDefaultBackendValue = ""
+
+    /// Backend rows for a host that shows more than one. A host showing one
+    /// gets NO rows: there is nothing to choose, and the surfaces hide the
+    /// setting rather than offering a picker with a single answer.
+    ///
+    /// `backendsRaw` arrives default-first from the published snapshot, so
+    /// the leading Host Default row and the explicit rows agree on which one
+    /// "default" means without the widget process knowing the rule.
+    static func backendChoices(backendsRaw: [String]?) -> [Choice] {
+        let backends = (backendsRaw ?? []).filter { !$0.isEmpty }
+        guard backends.count > 1 else { return [] }
+        var choices = [
+            Choice(value: hostDefaultBackendValue, title: "Host Default"),
+        ]
+        var seen = Set<String>()
+        for backend in backends where seen.insert(backend).inserted {
+            choices.append(Choice(value: backend, title: backend))
+        }
+        return choices
+    }
+
     /// Session rows: New Session leads (never empty — a zero-item options
     /// query flash-dismisses the picker) and the published snapshot's
     /// session names follow, deduped in the snapshot's own order.

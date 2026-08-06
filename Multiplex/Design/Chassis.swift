@@ -15,6 +15,14 @@ enum UIKitChassis {
     static var bezel: UIColor {
         GlassPrototype.enabled ? GlassPrototype.strata : TallyPalette.bezel
     }
+    /// `bezel` for a session tile, tinted when the tile has to say which
+    /// multiplexer it came from. Only a MIXED host reaches the tinted branch
+    /// — see `TallyPalette.herdrBezel`.
+    static func tileBezel(backend: Host.SessionBackend, tinted: Bool) -> UIColor {
+        guard tinted, backend == .herdr else { return bezel }
+        return GlassPrototype.enabled
+            ? GlassPrototype.herdrStrata : TallyPalette.herdrBezel
+    }
     static var bezelHi: UIColor {
         GlassPrototype.enabled ? GlassPrototype.line : TallyPalette.bezelHi
     }

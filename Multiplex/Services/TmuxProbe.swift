@@ -94,19 +94,14 @@ enum TmuxProbe {
     /// active-pane capture for the live miniatures. A second capture exec
     /// used to follow the probe; folding it in halves the per-tick channel
     /// opens, login-shell spawns, and round-trips.
-    static let probeCommand: String = {
+    /// The probe proper. Callers go through `probeCommand(discovering:)`,
+    /// which prepends the other backend's discovery rider.
+    private static let baseProbeCommand: String = {
         let sessionFormat = "S #{session_id} #{session_attached} #{session_created} #{session_name}"
         let windowFormat = "W #{session_id} #{window_index} #{window_active} "
             + "#{window_bell_flag} #{window_activity_flag} #{window_name}"
         let paneLineFormat = paneFormat(tag: "P")
         return pathPrefix
-            // One extra `command -v` per tick so a dead-tmux tile can offer
-            // the herdr switch only when herdr is actually installed
-            // (`Host.SessionBackend` — the hint is one tap, never an
-            // auto-flip). Before the tmux guard on purpose: the guard exits.
-            + "{ command -v herdr >/dev/null 2>&1"
-            + " || [ -x \"$HOME/.cargo/bin/herdr\" ]; }"
-            + " && echo \(herdrPresentMarker); "
             + "command -v tmux >/dev/null 2>&1 || { echo MULTIPLEX_NO_TMUX; exit 0; }; "
             // The server's own hostname — the exact string tmux seeded every
             // untouched pane title with (see `PaneTitleDisplay`). Its own
@@ -132,6 +127,24 @@ enum TmuxProbe {
             + "done; echo MPXE"
     }()
 
+    /// One exec round-trip, optionally carrying a discovery rider for each
+    /// backend in `discovering` — the mixed-host offer's whole cost
+    /// (`BackendDiscovery`). The rider replaced this probe's old
+    /// `command -v herdr` presence check: it answers presence *and* session
+    /// count for the same ~1 ms, so a primary probe always asks for
+    /// `[.herdr]` and only a SECONDARY full probe passes `[]` (it must not
+    /// rediscover the primary that scheduled it).
+    ///
+    /// Deliberately not memoized: two string appends of ~200 bytes once per
+    /// 5 s tick is beneath measurement, and a mutable static cache would
+    /// need concurrency annotation to buy it.
+    static func probeCommand(
+        discovering: Set<Host.SessionBackend> = [.herdr]
+    ) -> String {
+        BackendDiscovery.riderPrefix(discovering: discovering, excluding: .tmux)
+            + baseProbeCommand
+    }
+
     /// Everything derived from one probe response. Keeping this pure bundle
     /// together lets callers move the process-tree walk, capture trimming,
     /// and miniature clipping off the UI actor in one hop.
@@ -139,28 +152,27 @@ enum TmuxProbe {
         var state: TmuxState
         var tails: [String: [String]]
         var miniatures: [String: [String]]
+        /// What the discovery riders found, keyed by the backend asked.
+        /// Empty when the response carried no rider.
+        var discovery: [Host.SessionBackend: BackendDiscovery.Result] = [:]
+
         /// herdr is installed on this host — the dead-tmux tile's switch
         /// hint. Presence only; nothing reads it while tmux is healthy.
-        var herdrPresent: Bool = false
+        var herdrPresent: Bool { discovery[.herdr]?.isInstalled ?? false }
     }
 
-    private static let herdrPresentMarker = "MULTIPLEX_HERDR_PRESENT"
-
     static func parseProbe(_ output: String) -> ParsedProbe {
-        // The presence marker prints before the tmux guard, so it can only
-        // live in the record region — scan up to the tails marker, never
-        // the capture section (the bulk of every response, re-walked each
-        // 5 s tick otherwise).
-        let head = tailsMarker(in: output).map { output[..<$0.lowerBound] }
-            ?? Substring(output)
-        let herdrPresent = head.hasPrefix(herdrPresentMarker + "\n")
-            || head.contains("\n" + herdrPresentMarker + "\n")
-            || head.hasSuffix("\n" + herdrPresentMarker)
+        // One pass reads the riders' answers and hands back the response
+        // without their regions, so the record walker and the tails slicer
+        // below can never see another backend's list format.
+        let reading = BackendDiscovery.read(output)
+        let discovery = reading.results
+        let output = reading.remainder
         let state = parse(output)
         guard case .sessions(let sessions) = state else {
             return ParsedProbe(
                 state: state, tails: [:], miniatures: [:],
-                herdrPresent: herdrPresent
+                discovery: discovery
             )
         }
         let tails = parseTails(output, sessions: sessions)
@@ -168,7 +180,7 @@ enum TmuxProbe {
             state: state,
             tails: tails,
             miniatures: tails.mapValues(miniatureTail),
-            herdrPresent: herdrPresent
+            discovery: discovery
         )
     }
 

@@ -107,7 +107,11 @@ struct FleetWidgetView: View {
     private func hostRow(_ host: WidgetHostState) -> some View {
         HStack(spacing: 8) {
             Link(destination: WidgetLink.shellURL(
-                hostID: host.id, sessionName: host.mostRecentSession?.name
+                hostID: host.id, sessionName: host.mostRecentSession?.name,
+                // The row's own backend, present only where the host shows
+                // more than one — without it a same-named session on the
+                // other multiplexer could answer the tap.
+                backendRaw: host.mostRecentSession?.backendRaw
             )) {
                 HStack(spacing: 6) {
                     WidgetLabel(
@@ -195,7 +199,8 @@ struct FleetWidgetView: View {
             ) {
                 ForEach(tiles) { tile in
                     Link(destination: WidgetLink.shellURL(
-                        hostID: tile.host.id, sessionName: tile.session?.name
+                        hostID: tile.host.id, sessionName: tile.session?.name,
+                        backendRaw: tile.session?.backendRaw
                     )) {
                         tileView(tile)
                     }

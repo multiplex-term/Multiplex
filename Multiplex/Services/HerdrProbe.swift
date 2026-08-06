@@ -104,10 +104,19 @@ enum HerdrProbe {
     /// that vanished mid-tick just yields an empty frame the parser drops.
     /// This is also the ONE place the bake guards apply: what the parser
     /// reports is truth, what gets spliced into a shell line is vetted.
+    /// `discovering` carries the mixed-host discovery riders
+    /// (`BackendDiscovery`): a PRIMARY herdr probe asks `[.tmux]`, while a
+    /// secondary full probe passes `[]` — it must not rediscover the
+    /// primary that scheduled it. The riders lead, before this probe's own
+    /// presence guard, because that guard `exit`s and a host with no herdr
+    /// but live tmux sessions is exactly a case worth discovering.
     static func probeCommand(
-        sessionNames: [String]?, tailTargets: [TailTarget]
+        sessionNames: [String]?, tailTargets: [TailTarget],
+        discovering: Set<Host.SessionBackend> = [.tmux]
     ) -> String {
-        var command = pathPrefix
+        var command = BackendDiscovery.riderPrefix(
+            discovering: discovering, excluding: .herdr)
+        command += pathPrefix
             + "command -v herdr >/dev/null 2>&1 || { echo \(noHerdrMarker); exit 0; }; "
             + "echo \(statusMarker); herdr status --json 2>/dev/null || true; "
             + "echo \(sessionsMarker); herdr session list --json 2>/dev/null || true; "
@@ -207,6 +216,9 @@ enum HerdrProbe {
         var tailTargets: [TailTarget]
         /// Running sessions to snapshot next tick.
         var sessionNames: [String]
+        /// What the discovery riders found, keyed by the backend asked.
+        /// Empty when the response carried no rider.
+        var discovery: [Host.SessionBackend: BackendDiscovery.Result] = [:]
     }
 
     static func parseProbe(_ output: String) -> ParsedProbe {
@@ -215,6 +227,13 @@ enum HerdrProbe {
             tails: [:], miniatures: [:], paneStatuses: [:],
             tailTargets: [], sessionNames: []
         )
+        // One pass reads the riders' answers and removes their regions: a
+        // tmux session list is `D `-tagged lines, and this parser's own
+        // session region hunts for the first decodable JSON line. Removing
+        // the regions is what guarantees the two can never meet.
+        let reading = BackendDiscovery.read(output)
+        result.discovery = reading.results
+        let output = reading.remainder
         // Slice at the tails marker first: everything structural lives in
         // the head, and the tail region — one visible screen per session,
         // the bulk of every response — is walked exactly once, by
@@ -528,7 +547,12 @@ enum HerdrProbe {
             // by it — herdr's own list order is the only order it states.
             created: Date(timeIntervalSince1970: TimeInterval(index)),
             tmuxID: entry.name,
-            serverHost: ""
+            serverHost: "",
+            // The one place a herdr record learns it is one. Everything
+            // downstream keys off `TmuxSession.id`, which reads it — never
+            // off `Host.sessionBackend`, which a mixed host answers for its
+            // primary alone.
+            backend: .herdr
         )
     }
 
@@ -656,8 +680,12 @@ enum HerdrProbe {
     /// The mint's live existence check — attach auto-creates, so setup
     /// typing must only ever aim at a session THIS mint brought into
     /// being, and the probe's tile list can be a tick stale.
-    static let sessionListCommand =
-        pathPrefix + "herdr session list --json 2>/dev/null || true"
+    static let sessionListCommand = pathPrefix + sessionListVerb
+
+    /// The list invocation without the PATH export, for callers that have
+    /// already exported it (the discovery rider). One spelling of the shape
+    /// `parseSessionNames` reads, wherever it is asked for.
+    static let sessionListVerb = "herdr session list --json 2>/dev/null || true"
 
     /// nil distinguishes an unreadable list from a valid empty one. The mint
     /// must prove absence before it may type setup lines into a name: treating

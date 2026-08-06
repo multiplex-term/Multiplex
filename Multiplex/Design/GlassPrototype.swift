@@ -75,6 +75,14 @@ enum GlassPrototype {
     )
     /// Raised chrome — tiles, rails, slabs, chips, keys (replaces `bezel`).
     static let strataMaterial = UIColor(white: 1, alpha: 0.05)
+    /// The same strata step, tinted with Catppuccin Mocha Mauve — a herdr
+    /// tile on a host showing both backends (`TallyPalette.herdrBezel`
+    /// carries the rationale and the opaque renditions). Mauve is darker
+    /// than white, so 0.10 of it lifts about as much as white at 0.07: one
+    /// step, in a different hue, rather than a brighter tile.
+    static let herdrStrataMaterial = UIColor(
+        red: 203 / 255, green: 166 / 255, blue: 247 / 255, alpha: 0.10
+    )
     /// Hairlines and resting borders (replaces `bezelHi`).
     static let lineMaterial = UIColor(white: 1, alpha: 0.11)
     /// Active borders (lit spine segment, active tab). Part of the frozen
@@ -105,6 +113,9 @@ enum GlassPrototype {
     // Trait-resolved tokens for the common replacements.
     static let windowGround = material(smokeMaterial, fallback: TallyPalette.chassis)
     static let strata = material(strataMaterial, fallback: TallyPalette.bezel)
+    static let herdrStrata = material(
+        herdrStrataMaterial, fallback: TallyPalette.herdrBezel
+    )
     static let line = material(lineMaterial, fallback: TallyPalette.bezelHi)
     static let lineHi = material(lineHiMaterial, fallback: TallyPalette.bezelHi)
     static let screenGlass = material(screenGlassMaterial, fallback: TallyPalette.screen)

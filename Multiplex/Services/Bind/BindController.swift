@@ -133,7 +133,7 @@ final class BindController {
             // carry a silent choice from a session nobody remembers.
             if !bindSurfaceOpen {
                 keyPassphrase = ""
-                sessionBackend = .tmux
+                backends = Host.BackendSelection()
             }
         }
     }
@@ -154,8 +154,10 @@ final class BindController {
     /// it, and `mpx bind` doesn't report a backend — so this is the person's
     /// choice, made where the host record is minted rather than found wrong on
     /// the deck afterwards. Never auto-switched (`Host.sessionBackend`'s rule),
-    /// and changeable later in Host Settings → Backend.
-    var sessionBackend: Host.SessionBackend = .tmux
+    /// and changeable later in Host Settings → Backend. A machine may be
+    /// enrolled showing both (the same check selection Host Settings uses),
+    /// in which case the default is what new sessions run on.
+    var backends = Host.BackendSelection()
 
     private let discovery = BindDiscovery()
 
@@ -336,20 +338,20 @@ final class BindController {
         // Snapshot the pane's passphrase and backend now: the pane may close
         // (and reset both) while this bind is still talking to the machine.
         let passphrase = keyPassphrase
-        let backend = sessionBackend
+        let backends = self.backends
         if case .payload(let payload) = candidate.source, payload.isOffline {
             await importOffline(
-                payload, id: candidate.id, keyPassphrase: passphrase, backend: backend
+                payload, id: candidate.id, keyPassphrase: passphrase, backends: backends
             )
         } else {
-            await handshake(for: candidate, keyPassphrase: passphrase, backend: backend)
+            await handshake(for: candidate, keyPassphrase: passphrase, backends: backends)
         }
     }
 
     private func handshake(
         for candidate: Pending,
         keyPassphrase: String,
-        backend: Host.SessionBackend
+        backends: Host.BackendSelection
     ) async {
         let id = candidate.id
         let raw = Curve25519.Signing.PrivateKey()
@@ -409,7 +411,7 @@ final class BindController {
                 pins: completion.offer.hostkeys,
                 rotation: nil,
                 savedPassphrase: keyPassphrase.isEmpty ? nil : keyPassphrase,
-                backend: backend
+                backends: backends
             )
         } catch {
             fail(id: id, (error as? LocalizedError)?.errorDescription
@@ -438,7 +440,7 @@ final class BindController {
         _ payload: BindPayload,
         id: String,
         keyPassphrase: String,
-        backend: Host.SessionBackend
+        backends: Host.BackendSelection
     ) async {
         guard let offline = payload.offline,
               let raw = try? Curve25519.Signing.PrivateKey(rawRepresentation: offline.seed)
@@ -477,7 +479,7 @@ final class BindController {
             pins: offline.pinnedHostKey.map { [$0] } ?? [],
             rotation: rotation,
             savedPassphrase: savedPassphrase,
-            backend: backend
+            backends: backends
         )
     }
 
@@ -491,7 +493,7 @@ final class BindController {
         pins: [String],
         rotation: BindRotationStore.Request?,
         savedPassphrase: String?,
-        backend: Host.SessionBackend
+        backends: Host.BackendSelection
     ) async {
         guard let store else { return }
         var host = Host(
@@ -503,8 +505,9 @@ final class BindController {
         host.authMethod = .privateKey
         host.pinnedHostKeys = pins
         // Set before the test connect below: `HostTest` looks for the host's
-        // own multiplexer on the exec PATH.
-        host.sessionBackend = backend
+        // own multiplexer on the exec PATH — the default one, which is the
+        // one that mints.
+        host.backendSelection = backends
         KeychainStore.set(privateKey, for: host.id, kind: .privateKey)
         store.add(host)
         if let savedPassphrase {
@@ -680,10 +683,16 @@ final class BindController {
             keyPassphrase = passphrase
             log.debug("bind automation: pane passphrase preset")
         }
-        if let raw = environment["MULTIPLEX_BIND_BACKEND"],
-           let backend = Host.SessionBackend(rawValue: raw) {
-            sessionBackend = backend
-            log.debug("bind automation: backend preset to \(raw, privacy: .public)")
+        // Comma-separated so a headless run can mint a MIXED host; the
+        // first entry is the default (`tmux,herdr` = both shown, tmux mints).
+        if let raw = environment["MULTIPLEX_BIND_BACKEND"] {
+            let parsed = raw.split(separator: ",")
+                .compactMap { Host.SessionBackend(token: String($0)) }
+            if let preferred = parsed.first {
+                backends = Host.BackendSelection(
+                    preferred: preferred, also: Set(parsed.dropFirst()))
+                log.debug("bind automation: backend preset to \(raw, privacy: .public)")
+            }
         }
         // Let the store finish its first load (and any seeded host land).
         try? await Task.sleep(for: .seconds(2))

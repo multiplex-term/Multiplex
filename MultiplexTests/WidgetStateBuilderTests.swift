@@ -42,7 +42,9 @@ final class WidgetStateBuilderTests: XCTestCase {
         let state = WidgetStateBuilder.hostState(
             host: host,
             sessions: sessions,
-            miniatures: ["main": ["$ pnpm build", "✓ done"]],
+            // Keyed by `SessionKey.storageKey`, matching the deck snapshot
+            // this is projected from — a bare name collides across backends.
+            miniatures: ["tmux:main": ["$ pnpm build", "✓ done"]],
             probedAt: probed
         )
 

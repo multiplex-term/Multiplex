@@ -111,6 +111,7 @@ final class AttentionCenter {
         post(AttentionAlert(
             host: controller.host,
             sessionName: controller.route.displayName,
+            backend: controller.route.sessionBackend ?? controller.host.sessionBackend,
             tabID: controller.route.id,
             agent: agent,
             event: event,
@@ -136,6 +137,7 @@ final class AttentionCenter {
         post(AttentionAlert(
             host: controller.host,
             sessionName: controller.route.displayName,
+            backend: controller.route.sessionBackend ?? controller.host.sessionBackend,
             tabID: controller.route.id,
             agent: nil,
             event: .bell,
@@ -213,8 +215,14 @@ final class AttentionCenter {
             backend: target.backend
         ) == true { return }
         guard target.sessionIsAttachable else { return }
-        performExternalAction(
-            .openShell(host: .id(target.hostID), sessionName: target.sessionName))
+        // The backend rides through: without it the attach resolves the name
+        // in the host's PRIMARY namespace, which on a mixed host can be the
+        // other multiplexer's namesake — or nothing at all.
+        performExternalAction(.openShell(
+            host: .id(target.hostID),
+            sessionName: target.sessionName,
+            backend: target.backend
+        ))
     }
 
     // MARK: Delivery

@@ -12,7 +12,7 @@ final class FleetWallUIKitTests: XCTestCase {
 
         var state = NewSessionFormState(
             host: host,
-            existingNames: ["main", "codex"],
+            existingNames: [host.sessionBackend: ["main", "codex"]],
             preferences: preferences
         )
         XCTAssertEqual(state.launchMode, .shell)
@@ -50,7 +50,7 @@ final class FleetWallUIKitTests: XCTestCase {
 
         var state = NewSessionFormState(
             host: host,
-            existingNames: [],
+            existingNames: [host.sessionBackend: []],
             preferences: preferences
         )
         state.selectAgent(.codex)
@@ -67,7 +67,7 @@ final class FleetWallUIKitTests: XCTestCase {
 
         let restored = NewSessionFormState(
             host: host,
-            existingNames: [],
+            existingNames: [host.sessionBackend: []],
             preferences: preferences
         )
         XCTAssertEqual(restored.agentToLaunch, .codex)
@@ -97,7 +97,7 @@ final class FleetWallUIKitTests: XCTestCase {
         var dismissCount = 0
         let controller = NewSessionViewController(
             host: host,
-            existingNames: ["codex"],
+            existingNames: [host.sessionBackend: ["codex"]],
             preferences: preferences,
             create: { submissions.append($0) }
         )
@@ -188,6 +188,7 @@ final class FleetWallUIKitTests: XCTestCase {
         send(controller.navigationItem.rightBarButtonItem)
 
         XCTAssertEqual(submissions, [NewSessionSubmission(
+            backend: .tmux,
             name: "release-watch",
             agent: .codex,
             model: "gpt-5.1-codex",
@@ -204,7 +205,7 @@ final class FleetWallUIKitTests: XCTestCase {
         let shellPreferences = NewSessionPreferences(defaults: isolatedDefaults())
         let shell = NewSessionViewController(
             host: host,
-            existingNames: [],
+            existingNames: [host.sessionBackend: []],
             preferences: shellPreferences,
             create: { _ in }
         )
@@ -231,7 +232,7 @@ final class FleetWallUIKitTests: XCTestCase {
         )
         let agent = NewSessionViewController(
             host: host,
-            existingNames: [],
+            existingNames: [host.sessionBackend: []],
             preferences: agentPreferences,
             create: { _ in }
         )
@@ -431,6 +432,7 @@ final class FleetWallUIKitTests: XCTestCase {
             usesTmuxAttentionFallback: true,
             hasOpenTab: true,
             sessionBackend: .tmux,
+            showsBackendIdentity: false,
             compact: false,
             selected: true,
             duplicateAttachTitle: "Attach in New Window",
@@ -468,6 +470,7 @@ final class FleetWallUIKitTests: XCTestCase {
             usesTmuxAttentionFallback: true,
             hasOpenTab: true,
             sessionBackend: .tmux,
+            showsBackendIdentity: false,
             compact: false,
             selected: false,
             duplicateAttachTitle: "Attach in New Window",
@@ -522,7 +525,7 @@ final class FleetWallUIKitTests: XCTestCase {
         host.workingDirs = ["/srv/app"]
         let controller = NewSessionViewController(
             host: host,
-            existingNames: []
+            existingNames: [host.sessionBackend: []]
         ) { _ in }
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 680, height: 760)
@@ -543,7 +546,7 @@ final class FleetWallUIKitTests: XCTestCase {
         host.sessionBackend = .herdr
         var state = NewSessionFormState(
             host: host,
-            existingNames: ["main", "deploy"],
+            existingNames: [host.sessionBackend: ["main", "deploy"]],
             preferences: preferences
         )
         XCTAssertEqual(state.tabTargetChoices, ["main", "deploy"])
@@ -566,7 +569,7 @@ final class FleetWallUIKitTests: XCTestCase {
 
         let tmuxState = NewSessionFormState(
             host: makeHost(),
-            existingNames: ["main"],
+            existingNames: [host.sessionBackend: ["main"]],
             preferences: preferences
         )
         XCTAssertTrue(
@@ -581,7 +584,7 @@ final class FleetWallUIKitTests: XCTestCase {
         var submissions: [NewSessionSubmission] = []
         let controller = NewSessionViewController(
             host: host,
-            existingNames: ["main"],
+            existingNames: [host.sessionBackend: ["main"]],
             preferences: NewSessionPreferences(defaults: isolatedDefaults()),
             create: { submissions.append($0) }
         )
@@ -615,7 +618,7 @@ final class FleetWallUIKitTests: XCTestCase {
         // A tmux host never grows the row.
         let tmux = NewSessionViewController(
             host: makeHost(),
-            existingNames: ["main"],
+            existingNames: [host.sessionBackend: ["main"]],
             preferences: NewSessionPreferences(defaults: isolatedDefaults()),
             create: { _ in }
         )
@@ -640,6 +643,7 @@ final class FleetWallUIKitTests: XCTestCase {
                 usesTmuxAttentionFallback: false,
                 hasOpenTab: hasOpenTab,
                 sessionBackend: .herdr,
+                showsBackendIdentity: false,
                 compact: false,
                 selected: false,
                 duplicateAttachTitle: "Attach in New Window",
@@ -697,6 +701,7 @@ final class FleetWallUIKitTests: XCTestCase {
                 usesTmuxAttentionFallback: true,
                 hasOpenTab: false,
                 sessionBackend: .tmux,
+                showsBackendIdentity: false,
                 compact: false,
                 selected: false,
                 duplicateAttachTitle: "Attach in New Window",
@@ -747,7 +752,10 @@ final class FleetWallUIKitTests: XCTestCase {
             .move
         )
         target.dropInteraction(drop, performDrop: dropSession)
-        XCTAssertEqual(dropped, [sourceSession.name])
+        // The reorder payload is the dragged tile's `SessionKey.storageKey`,
+        // not its bare name: a mixed host's saved order is a list of these,
+        // and two backends can hold the same name.
+        XCTAssertEqual(dropped, [sourceSession.id.storageKey])
 
         let sourceDrop = try XCTUnwrap(
             source.interactions.compactMap { $0 as? UIDropInteraction }.first
@@ -779,6 +787,7 @@ final class FleetWallUIKitTests: XCTestCase {
             usesTmuxAttentionFallback: true,
             hasOpenTab: false,
             sessionBackend: .tmux,
+            showsBackendIdentity: false,
             compact: false,
             selected: false,
             duplicateAttachTitle: "Attach in New Window",

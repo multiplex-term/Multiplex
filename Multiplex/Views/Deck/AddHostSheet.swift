@@ -52,6 +52,11 @@ struct AddHostFormState {
     var isEnabled = true
     var backgroundKeepAlive = false
     var sessionBackend = Host.SessionBackend.tmux
+    /// Backends beyond `sessionBackend` this host also shows tiles for.
+    /// ⚠ Write this and `sessionBackend` through `setBackends(enabled:default:)`
+    /// — the record stores a default plus extras, so touching either alone
+    /// silently changes the other.
+    var secondaryBackends: Set<Host.SessionBackend> = []
     var useMosh = false
     var moshServerPath = ""
     var moshPorts = ""
@@ -83,6 +88,7 @@ struct AddHostFormState {
         isEnabled = host.isEnabled
         backgroundKeepAlive = host.backgroundKeepAlive
         sessionBackend = host.sessionBackend
+        secondaryBackends = host.secondaryBackends
         useMosh = host.useMosh
         moshServerPath = host.moshServerPath ?? ""
         moshPorts = host.moshPorts ?? ""
@@ -117,6 +123,19 @@ struct AddHostFormState {
             return (1...65535).contains(value)
         }
     }
+
+    /// The two backend fields as one value — the Backend section's two
+    /// controls each move one half, and `Host.BackendSelection` is where the
+    /// rule that keeps them consistent lives.
+    var backendSelection: Host.BackendSelection {
+        get { Host.BackendSelection(preferred: sessionBackend, also: secondaryBackends) }
+        set {
+            sessionBackend = newValue.preferred
+            secondaryBackends = newValue.secondaries
+        }
+    }
+
+    var enabledBackends: Set<Host.SessionBackend> { backendSelection.enabled }
 
     var testFingerprint: [String] {
         [
@@ -162,7 +181,7 @@ struct AddHostFormState {
         host.authMethod = authMethod
         host.isEnabled = isEnabled
         host.backgroundKeepAlive = backgroundKeepAlive
-        host.sessionBackend = sessionBackend
+        host.backendSelection = backendSelection
         host.useMosh = useMosh
         let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
@@ -1408,41 +1427,80 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     // MARK: Backend
 
+    /// Every backend this host shows tiles for — the checked set.
+    private var enabledBackends: Set<Host.SessionBackend> { form.enabledBackends }
+
     private var backendDetail: String {
-        if form.sessionBackend == .herdr {
-            return "The deck monitors herdr (herdr.dev) sessions and their "
+        let enabled = enabledBackends
+        var detail: String
+        if enabled.contains(.herdr) {
+            detail = "The deck monitors herdr (herdr.dev) sessions and their "
                 + "agents through the herdr CLI — one tile per session, its "
                 + "workspaces as the tile's window lines; a tile attaches "
                 + "the full herdr client. The tmux options editor doesn't "
-                + "apply here."
+                + "apply to herdr sessions."
+        } else {
+            detail = "The deck monitors a remote tmux server — sessions, "
+                + "windows, and agent panes. herdr (herdr.dev) is the "
+                + "alternative for hosts that run it."
         }
-        return "The deck monitors a remote tmux server — sessions, windows, "
-            + "and agent panes. herdr (herdr.dev) is the alternative for "
-            + "hosts that run it."
+        if enabled.count > 1 {
+            detail += "\n\nBoth are shown, each tile marked with the backend "
+                + "it came from. That \(HostGuide.secondBackendCost)."
+        }
+        return detail
     }
 
     private func renderBackend() {
-        let bar = AddHostChoiceBar<Host.SessionBackend>(
+        let checks = AddHostCheckBar<Host.SessionBackend>(
             // The button face uppercases; pass the natural spelling so
             // VoiceOver reads "tmux", not the letters T-M-U-X.
             choices: Host.SessionBackend.allCases.map { ($0.rawValue, $0) },
-            selection: form.sessionBackend
-        ) { [weak self] backend in
-            guard let self else { return }
-            self.updateTestSensitive { $0.sessionBackend = backend }
-            self.renderBackend()
-            self.renderTestSection()
+            selection: enabledBackends
+        ) { [weak self] backends in
+            self?.setEnabledBackends(backends)
         }
-        bar.accessibilityIdentifier = "addhost.backendBar"
-        let label = addHostLabel(
-            "Sessions run on",
+        checks.accessibilityIdentifier = "addhost.backendChecks"
+        let checksLabel = addHostLabel(
+            "Backends",
             font: UIKitChassis.uiFont(10, weight: .semibold),
             color: UIKitChassis.signal2
         )
-        let stack = UIStackView(arrangedSubviews: [label, bar])
+        let stack = UIStackView(arrangedSubviews: [checksLabel, checks])
         stack.axis = .vertical
         stack.alignment = .fill
         stack.spacing = 8
+
+        // The default is only a question when there is more than one answer.
+        // On the single-backend host — the overwhelmingly common case — the
+        // section is exactly one labelled control, as it always was.
+        if enabledBackends.count > 1 {
+            let bar = AddHostChoiceBar<Host.SessionBackend>(
+                choices: Host.SessionBackend.allCases
+                    .filter(enabledBackends.contains)
+                    .map { ($0.rawValue, $0) },
+                selection: form.sessionBackend
+            ) { [weak self] backend in
+                guard let self else { return }
+                // Only the DEFAULT moves — the checked set is unchanged,
+                // so the old default stays checked as a secondary.
+                self.updateTestSensitive { $0.backendSelection.setPreferred(backend) }
+                self.renderBackend()
+                self.renderTestSection()
+            }
+            bar.accessibilityIdentifier = "addhost.backendBar"
+            let label = addHostLabel(
+                "New sessions run on",
+                font: UIKitChassis.uiFont(10, weight: .semibold),
+                color: UIKitChassis.signal2
+            )
+            label.accessibilityHint =
+                "The backend New Session, widgets, and Shortcuts start on "
+                + "unless they name another"
+            stack.addArrangedSubview(label)
+            stack.addArrangedSubview(bar)
+            stack.setCustomSpacing(16, after: checks)
+        }
         backendSection.setDetail(backendDetail)
         backendSection.setRows([AddHostInsetRow(contentView: stack)])
         // Only the tmux options editor is tmux-scoped (herdr has no analog
@@ -1451,7 +1509,18 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         // Working directories apply to BOTH backends: the herdr mint roots
         // a fresh session's world by cd'ing the headless spawn, so the
         // paths here feed New Session, widgets, and Shortcuts either way.
-        tmuxConfSection.isHidden = form.sessionBackend == .herdr
+        // Only the tmux options editor is tmux-scoped, so it survives as long
+        // as tmux is one of the checked backends — a mixed host still mints
+        // tmux sessions when its default says so.
+        tmuxConfSection.isHidden = !enabledBackends.contains(.tmux)
+    }
+
+    /// Apply a new checked set, keeping the current default where it is still
+    /// checked — `setBackends` promotes a survivor when it isn't.
+    private func setEnabledBackends(_ backends: Set<Host.SessionBackend>) {
+        updateTestSensitive { $0.backendSelection.setEnabled(backends) }
+        renderBackend()
+        renderTestSection()
     }
 
     // MARK: Transport
@@ -2055,21 +2124,17 @@ enum AddHostChoiceMetrics {
     static let selectionAnimationDuration: TimeInterval = 0.14
 }
 
+/// The chrome both selection bars wear: one row of equal faces over a seam
+/// of `bezelHi`, lit faces animated in unless Reduce Motion is on. Subclasses
+/// supply only what "selected" means and what a press does, so the two bars
+/// cannot drift on the ground, the seam, or the animation.
 @MainActor
-final class AddHostChoiceBar<Value: Hashable>: UIStackView {
-    private(set) var selection: Value
-    private let choices: [(String, Value)]
-    private let changed: (Value) -> Void
+class AddHostSelectionBarBase<Value: Hashable>: UIStackView {
+    fileprivate let choices: [(String, Value)]
     private var buttons: [AddHostChoiceButton] = []
 
-    init(
-        choices: [(String, Value)],
-        selection: Value,
-        changed: @escaping (Value) -> Void
-    ) {
+    fileprivate init(choices: [(String, Value)], checkable: Bool) {
         self.choices = choices
-        self.selection = selection
-        self.changed = changed
         super.init(frame: .zero)
         axis = .horizontal
         alignment = .fill
@@ -2077,7 +2142,8 @@ final class AddHostChoiceBar<Value: Hashable>: UIStackView {
         spacing = AddHostChoiceMetrics.seam
         backgroundColor = UIKitChassis.bezelHi
         for (index, choice) in choices.enumerated() {
-            let button = AddHostChoiceButton(title: choice.0, index: index)
+            let button = AddHostChoiceButton(
+                title: choice.0, index: index, checkable: checkable)
             button.addTarget(self, action: #selector(pressed(_:)), for: .touchUpInside)
             buttons.append(button)
             addArrangedSubview(button)
@@ -2088,25 +2154,29 @@ final class AddHostChoiceBar<Value: Hashable>: UIStackView {
     @available(*, unavailable)
     required init(coder: NSCoder) { fatalError("unused") }
 
-    func setSelection(_ selection: Value) {
-        guard self.selection != selection else { return }
-        self.selection = selection
-        refresh(animated: true)
-    }
+    /// Whether this value's face is lit. Overridden; never called directly.
+    fileprivate func isSelected(_ value: Value) -> Bool { false }
+
+    /// Apply a press. Returns false when it changes nothing — an already-set
+    /// single choice, or a check the minimum refuses to clear — in which case
+    /// neither the animation nor the callback runs.
+    fileprivate func applyPress(_ value: Value) -> Bool { false }
+
+    /// Hand the new selection to the owner. Split from `applyPress` so the
+    /// callback fires exactly once, after the faces have been told.
+    fileprivate func notifyChanged() {}
 
     @objc private func pressed(_ sender: AddHostChoiceButton) {
-        guard choices.indices.contains(sender.choiceIndex) else { return }
-        let nextSelection = choices[sender.choiceIndex].1
-        guard nextSelection != selection else { return }
-        selection = nextSelection
+        guard choices.indices.contains(sender.choiceIndex),
+              applyPress(choices[sender.choiceIndex].1) else { return }
         refresh(animated: true)
-        changed(selection)
+        notifyChanged()
     }
 
-    private func refresh(animated: Bool = false) {
+    fileprivate func refresh(animated: Bool = false) {
         let changes = { [self] in
             for (index, button) in buttons.enumerated() {
-                button.setSelected(choices[index].1 == selection)
+                button.setSelected(isSelected(choices[index].1))
             }
         }
         guard animated, !UIAccessibility.isReduceMotionEnabled else {
@@ -2123,14 +2193,95 @@ final class AddHostChoiceBar<Value: Hashable>: UIStackView {
 }
 
 @MainActor
+final class AddHostChoiceBar<Value: Hashable>: AddHostSelectionBarBase<Value> {
+    private(set) var selection: Value
+    private let changed: (Value) -> Void
+
+    init(
+        choices: [(String, Value)],
+        selection: Value,
+        changed: @escaping (Value) -> Void
+    ) {
+        self.selection = selection
+        self.changed = changed
+        super.init(choices: choices, checkable: false)
+    }
+
+    func setSelection(_ selection: Value) {
+        guard self.selection != selection else { return }
+        self.selection = selection
+        refresh(animated: true)
+    }
+
+    fileprivate override func isSelected(_ value: Value) -> Bool { value == selection }
+
+    fileprivate override func applyPress(_ value: Value) -> Bool {
+        guard value != selection else { return false }
+        selection = value
+        return true
+    }
+
+    fileprivate override func notifyChanged() { changed(selection) }
+}
+
+/// The multi-select sibling of `AddHostChoiceBar` — same faces, same seam,
+/// but any number can be lit and a lit face wears a checkmark so the two
+/// bars can never be mistaken for each other at a glance.
+///
+/// Built for the Backend section, where a host picks which multiplexers it
+/// shows. A boolean "Also show herdr sessions" switch shipped there first
+/// and read badly: it presented two peers as a primary and an afterthought,
+/// and it said nothing about which one a new session lands on. Checks state
+/// the set; a separate single-choice bar states the default, and only when
+/// there is more than one to choose from.
+///
+/// The last check never clears — a host with no backend has nothing to show
+/// at all. Enforced by not responding rather than by disabling the face: a
+/// disabled last check reads as broken, while an unresponsive one reads as
+/// "this is already the minimum".
+@MainActor
+final class AddHostCheckBar<Value: Hashable>: AddHostSelectionBarBase<Value> {
+    private(set) var selection: Set<Value>
+    private let changed: (Set<Value>) -> Void
+
+    init(
+        choices: [(String, Value)],
+        selection: Set<Value>,
+        changed: @escaping (Set<Value>) -> Void
+    ) {
+        self.selection = selection
+        self.changed = changed
+        super.init(choices: choices, checkable: true)
+    }
+
+    fileprivate override func isSelected(_ value: Value) -> Bool {
+        selection.contains(value)
+    }
+
+    fileprivate override func applyPress(_ value: Value) -> Bool {
+        if selection.contains(value) {
+            guard selection.count > 1 else { return false }
+            selection.remove(value)
+        } else {
+            selection.insert(value)
+        }
+        return true
+    }
+
+    fileprivate override func notifyChanged() { changed(selection) }
+}
+
+@MainActor
 private final class AddHostChoiceButton: UIButton {
     let choiceIndex: Int
     private let sourceTitle: String
+    private let checkable: Bool
     private let visualLabel = UILabel()
 
-    init(title: String, index: Int) {
+    init(title: String, index: Int, checkable: Bool = false) {
         sourceTitle = title
         choiceIndex = index
+        self.checkable = checkable
         super.init(frame: .zero)
         // The SwiftUI source used `.buttonStyle(.plain)`. Keep this a custom
         // button with no configuration so UIKit cannot supply a capsule or
@@ -2159,8 +2310,15 @@ private final class AddHostChoiceButton: UIButton {
         // sheet's smoke, never opaque chassis.
         backgroundColor = selected
             ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
+        // A checkable face says so in the face itself: the two bars sit one
+        // above the other in the Backend section, and without the mark a
+        // multi-select bar with one item lit is indistinguishable from a
+        // single-select one.
+        let face = checkable && selected
+            ? "✓ " + sourceTitle.uppercased()
+            : sourceTitle.uppercased()
         visualLabel.attributedText = NSAttributedString(
-            string: sourceTitle.uppercased(),
+            string: face,
             attributes: [
                 .font: UIKitChassis.compressedLabelFont(9),
                 .kern: CGFloat(9 * Theme.typeScale * 0.09),
@@ -2170,7 +2328,12 @@ private final class AddHostChoiceButton: UIButton {
         layer.borderColor = (selected ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
             .resolvedColor(with: traitCollection)
             .cgColor
-        accessibilityValue = selected ? "Selected" : "Not selected"
+        if checkable {
+            accessibilityTraits.insert(.toggleButton)
+        }
+        accessibilityValue = checkable
+            ? (selected ? "Checked" : "Unchecked")
+            : (selected ? "Selected" : "Not selected")
         if selected {
             accessibilityTraits.insert(.selected)
         } else {

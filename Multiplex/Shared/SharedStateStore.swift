@@ -21,6 +21,13 @@ struct WidgetSessionState: Codable, Hashable {
     /// Last visible lines of the active pane — the tile's held frame.
     var miniatureLines: [String] = []
     var createdAt: Date = .distantPast
+    /// `Host.SessionBackend` raw value, when the host shows more than one.
+    /// nil means "the host's default", which is what every row a
+    /// single-backend host publishes means — and what every row in a file
+    /// written before mixed hosts means. A row that carries one deep-links
+    /// with `backend=`, so a tap can never resolve the name against the
+    /// wrong multiplexer.
+    var backendRaw: String?
 
     /// Pane title of the window an attached client is looking at. Index-guarded:
     /// legacy files carry no titles at all, and the widget must render them
@@ -53,7 +60,9 @@ extension WidgetSessionState {
             miniatureLines: try container.decodeIfPresent(
                 [String].self, forKey: .miniatureLines) ?? [],
             createdAt: try container.decodeIfPresent(
-                Date.self, forKey: .createdAt) ?? .distantPast
+                Date.self, forKey: .createdAt) ?? .distantPast,
+            backendRaw: try container.decodeIfPresent(
+                String.self, forKey: .backendRaw)
         )
     }
 }
@@ -70,10 +79,15 @@ struct WidgetHostState: Codable, Hashable, Identifiable {
     /// Names only, no secrets. Optional-typed so files written before the
     /// field existed keep decoding (synthesized decoder; nil = none).
     var agentModels: [String: [String]]?
-    /// `Host.SessionBackend` raw value ("tmux"/"herdr") — what the widget
-    /// configuration's placement picker labels its rows with. Optional for
-    /// the same legacy-file reason; nil reads as tmux, the app's default.
+    /// `Host.SessionBackend` raw value ("tmux"/"herdr") — the host's
+    /// DEFAULT backend, which the widget configuration's placement picker
+    /// labels its rows with. Optional for the same legacy-file reason; nil
+    /// reads as tmux, the app's default.
     var backendRaw: String?
+    /// Every backend this host shows tiles for, default first — what the
+    /// widget configuration's Backend picker offers. nil or a single entry
+    /// means there is nothing to pick, and the picker stays hidden.
+    var backendsRaw: [String]?
     /// The host's configured working directories, in the user's order —
     /// what the widget configuration's directory picker offers. Paths only
     /// (setup-script names and bodies still never ride widget state);
@@ -82,7 +96,7 @@ struct WidgetHostState: Codable, Hashable, Identifiable {
 
     /// The session the per-host widget features and a bare shell deep link
     /// attaches — newest by creation, name-ordered on a tie. Must mirror
-    /// `ExternalActionPlan.mostRecentSessionName` (unit-tested app-side).
+    /// `ExternalActionPlan.mostRecentSession` (unit-tested app-side).
     var mostRecentSession: WidgetSessionState? {
         sessions.max { lhs, rhs in
             (lhs.createdAt, lhs.name) < (rhs.createdAt, rhs.name)

@@ -95,7 +95,13 @@ enum ExternalAction: Hashable {
     /// tap) is attached exactly when it still exists; nil — or a session
     /// that died since the widget snapshot — falls back to the most recent,
     /// creating one if none exist.
-    case openShell(host: ExternalHostRef, sessionName: String?)
+    /// `backend` names which multiplexer the session belongs to; nil means
+    /// the host's default, which is what every URL, widget, and Shortcut
+    /// written before a host could show two means — and still the only
+    /// answer a single-backend host has.
+    case openShell(
+        host: ExternalHostRef, sessionName: String?,
+        backend: Host.SessionBackend? = nil)
     /// Mint a detached tmux session launching the agent — optionally with a
     /// first prompt as its shell-quoted launch argument — then attach it.
     /// `askForPrompt` presents the in-app prompt sheet first (the widget's
@@ -109,11 +115,14 @@ enum ExternalAction: Hashable {
     /// automation without a model must behave the same on every device).
     /// `target` picks where the launch lands (`ExternalSessionTarget`):
     /// a fresh session, or inside an existing one.
+    /// `backend` picks the multiplexer: which one a fresh session is minted
+    /// on, and which namespace an `existingSession` target is resolved in.
+    /// nil is the host's default (see `openShell`).
     case openAgent(
         host: ExternalHostRef, agent: AgentKind, prompt: String?,
         askForPrompt: Bool, directory: String?,
         setupScript: ExternalSetupScriptSelection, model: String?,
-        target: ExternalSessionTarget)
+        target: ExternalSessionTarget, backend: Host.SessionBackend? = nil)
 
     /// Whether an untrusted (non-widget) URL has to be confirmed before this
     /// runs. The widget's ASK mode is exempt: it presents the prompt sheet,
@@ -122,14 +131,14 @@ enum ExternalAction: Hashable {
     var needsOriginConfirmation: Bool {
         switch self {
         case .openShell: true
-        case .openAgent(_, _, _, let askForPrompt, _, _, _, _): !askForPrompt
+        case .openAgent(_, _, _, let askForPrompt, _, _, _, _, _): !askForPrompt
         }
     }
 
     var hostRef: ExternalHostRef {
         switch self {
-        case .openShell(let host, _): host
-        case .openAgent(let host, _, _, _, _, _, _, _): host
+        case .openShell(let host, _, _): host
+        case .openAgent(let host, _, _, _, _, _, _, _, _): host
         }
     }
 }
@@ -156,14 +165,17 @@ enum ExternalActionURL {
         components.host = authority
         var items = [hostItem(for: action.hostRef)]
         switch action {
-        case .openShell(_, let sessionName):
+        case .openShell(_, let sessionName, let backend):
             items.append(URLQueryItem(name: "action", value: "shell"))
             if let sessionName, !sessionName.isEmpty {
                 items.append(URLQueryItem(name: "session", value: sessionName))
             }
+            if let backend {
+                items.append(URLQueryItem(name: "backend", value: backend.rawValue))
+            }
         case .openAgent(
             _, let agent, let prompt, let askForPrompt, let directory,
-            let setupScript, let model, let target
+            let setupScript, let model, let target, let backend
         ):
             items.append(URLQueryItem(name: "action", value: "agent"))
             items.append(URLQueryItem(name: "agent", value: agent.rawValue))
@@ -185,6 +197,11 @@ enum ExternalActionURL {
             if case .existingSession(let name, let placement) = target {
                 items.append(URLQueryItem(name: "session", value: name))
                 items.append(URLQueryItem(name: "in", value: placement.rawValue))
+            }
+            // Omitted for the default, so every link written before mixed
+            // hosts keeps its exact bytes and its exact meaning.
+            if let backend {
+                items.append(URLQueryItem(name: "backend", value: backend.rawValue))
             }
         }
         components.queryItems = items
@@ -221,6 +238,13 @@ enum ExternalActionURL {
         func value(_ name: String) -> String? {
             items.first { $0.name == name }?.value
         }
+        // Fail-soft like `model` and `in`: an unknown token reads as the
+        // host's default rather than failing the whole action, and the
+        // performer validates the resolved backend against the host's live
+        // record anyway.
+        func backend() -> Host.SessionBackend? {
+            Host.SessionBackend(token: value("backend"))
+        }
         guard let hostToken = value("host"), !hostToken.isEmpty else { return nil }
         let hostRef = UUID(uuidString: hostToken).map(ExternalHostRef.id)
             ?? .named(hostToken)
@@ -228,7 +252,8 @@ enum ExternalActionURL {
         switch value("action")?.lowercased() ?? "shell" {
         case "shell":
             let sessionName = value("session").flatMap { $0.isEmpty ? nil : $0 }
-            return .openShell(host: hostRef, sessionName: sessionName)
+            return .openShell(
+                host: hostRef, sessionName: sessionName, backend: backend())
         case "agent":
             let agent = value("agent").flatMap(agentKind) ?? .claudeCode
             let prompt = value("prompt").flatMap { $0.isEmpty ? nil : $0 }
@@ -256,7 +281,8 @@ enum ExternalActionURL {
             return .openAgent(
                 host: hostRef, agent: agent, prompt: prompt,
                 askForPrompt: ask, directory: directory,
-                setupScript: setupScript, model: model, target: target)
+                setupScript: setupScript, model: model, target: target,
+                backend: backend())
         default:
             return nil
         }
@@ -283,10 +309,19 @@ enum ExternalActionURL {
 enum ExternalActionPlan {
     /// The session an "open shell" targets: the newest by creation date,
     /// name-ordered on a tie so the choice is deterministic.
-    static func mostRecentSessionName(in sessions: [TmuxSession]) -> String? {
+    ///
+    /// Returns the RECORD, not the name: on a mixed host the candidate list
+    /// spans two namespaces, and re-finding the winner by name would resolve
+    /// to whichever backend's namesake sorts first — the exact ambiguity
+    /// `SessionKey` exists to abolish. The attach needs `backend` anyway.
+    ///
+    /// Mirrored by `WidgetHostState.mostRecentSession`, which the widget
+    /// process computes over its own projection; `SharedStateTests` pins the
+    /// two to the same answer.
+    static func mostRecentSession(in sessions: [TmuxSession]) -> TmuxSession? {
         sessions.max { lhs, rhs in
             (lhs.created, lhs.name) < (rhs.created, rhs.name)
-        }?.name
+        }
     }
 
     /// Resolve only against the chosen host's current scripts. A stale
@@ -322,6 +357,12 @@ struct AgentPromptRequest: Identifiable {
     var setupScript: ExternalSetupScriptSelection
     var model: String?
     var target: ExternalSessionTarget = .newSession
+    /// The multiplexer the approved launch runs on — carried through
+    /// untouched like `target`, because the sheet rebuilds the action and
+    /// anything it does not hold is silently re-defaulted to the host's
+    /// primary. On a mixed host that would land the launch on the other
+    /// backend than the one the widget was configured for.
+    var backend: Host.SessionBackend?
 }
 
 /// Whether a parsed `multiplex://` URL may run without asking. Pure so the
@@ -348,7 +389,7 @@ struct ExternalActionConfirmation: Equatable {
     /// this will actually run on, never the token the URL used for it.
     static func make(for action: ExternalAction, hostName: String) -> ExternalActionConfirmation {
         switch action {
-        case .openShell(_, let sessionName):
+        case .openShell(_, let sessionName, _):
             let target = sessionName.map { "session \($0)" } ?? "a session"
             return ExternalActionConfirmation(
                 title: "Open \(hostName)?",
@@ -358,7 +399,7 @@ struct ExternalActionConfirmation: Equatable {
                     """,
                 action: action
             )
-        case .openAgent(_, let agent, let prompt, _, _, _, _, let target):
+        case .openAgent(_, let agent, let prompt, _, _, _, _, let target, _):
             // An existing-session target is part of what the person approves:
             // the launch types into that session, not a fresh one.
             var location = hostName
