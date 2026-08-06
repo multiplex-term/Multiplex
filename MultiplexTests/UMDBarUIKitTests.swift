@@ -126,7 +126,8 @@ final class UMDBarUIKitTests: XCTestCase {
         let compactController = UMDBarViewController(configuration: configuration(
             style: .shell,
             deckControlLabel: "WALL",
-            availableWidth: 375
+            availableWidth: 375,
+            keyRailContentWidth: 375
         ))
         compactController.loadViewIfNeeded()
         XCTAssertNotNil(view("umd.shell.compact", in: compactController.view))
@@ -135,6 +136,43 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertNotNil(control("umd.overflow", in: compactController.view))
         XCTAssertNotNil(control("umd.tmux", in: compactController.view))
         XCTAssertEqual(compactController.fittingContentSize(for: 375).width, 375)
+    }
+
+    /// One road, one rail: the pane's key rail carries TMUX/HRDR wherever it
+    /// fits, so a rail wide enough for the wide row must not draw a second
+    /// chip above it (iPhone landscape, reported 2026-08-06).
+    func testOnlyOneRailDrawsTheShortcutChipAtAnyWidth() throws {
+        let wide = UMDBarViewController(configuration: configuration(
+            style: .shell,
+            availableWidth: 734,
+            keyRailContentWidth: 734
+        ))
+        wide.loadViewIfNeeded()
+        XCTAssertNotNil(view("umd.shell.wide", in: wide.view))
+        XCTAssertNil(
+            control("umd.tmux", in: wide.view),
+            "the key rail below still carries TMUX at this width"
+        )
+
+        let narrow = UMDBarViewController(configuration: configuration(
+            style: .shell,
+            availableWidth: 375,
+            keyRailContentWidth: 375
+        ))
+        narrow.loadViewIfNeeded()
+        XCTAssertNotNil(
+            control("umd.tmux", in: narrow.view),
+            "the key rail drops TMUX here, so the top bar takes it over"
+        )
+
+        // No key rail at all (visionOS) — the rail is the only road.
+        let ornament = UMDBarViewController(configuration: configuration(
+            style: .shell,
+            availableWidth: 734,
+            keyRailContentWidth: nil
+        ))
+        ornament.loadViewIfNeeded()
+        XCTAssertNotNil(control("umd.tmux", in: ornament.view))
     }
 
     func testWideRailsCarryGuideAsItsOwnChipNeverInTheOverflow() throws {
@@ -409,7 +447,8 @@ final class UMDBarUIKitTests: XCTestCase {
         style: UMDBarStyle = .regular,
         deckControlLabel: String = "DECK",
         availableWidth: CGFloat? = nil,
-        contentSafeArea: UIEdgeInsets = .zero
+        contentSafeArea: UIEdgeInsets = .zero,
+        keyRailContentWidth: CGFloat? = nil
     ) -> UMDBarConfiguration {
         UMDBarConfiguration(
             controller: controller,
@@ -430,7 +469,8 @@ final class UMDBarUIKitTests: XCTestCase {
             style: style,
             deckControlLabel: deckControlLabel,
             availableWidth: availableWidth,
-            contentSafeArea: contentSafeArea
+            contentSafeArea: contentSafeArea,
+            keyRailContentWidth: keyRailContentWidth
         )
     }
 

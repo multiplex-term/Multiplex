@@ -43,10 +43,14 @@ struct UMDBarConfiguration {
     /// authored 8; the classic window buys terminal rows with a tighter one
     /// (it is a title bar, and it already spends the scene's top strip).
     var contentVerticalPadding: CGFloat = 8
-    /// True where the pane's own key rail carries the TMUX/HRDR key, so the
-    /// wide row must not draw a second one. The compact row still may — that
-    /// is the width at which the key rail drops it.
-    var shortcutRidesKeyRail = false
+    /// Content width of the pane's own key rail, which carries the TMUX/HRDR
+    /// key until it runs out of room. The rail takes that key over exactly
+    /// when the key rail drops it — measuring the KEY RAIL, never this rail's
+    /// own width, is what keeps the two from drawing it at once (a rail
+    /// clearing the window-control pill is ~90 pt narrower than the pane
+    /// below it). nil means no key rail exists — visionOS, where the rail is
+    /// the only road.
+    var keyRailContentWidth: CGFloat?
     /// Floor for the rail's own height, excluding any top strip it spends.
     /// The classic window's title bar matches the key rail at the other end
     /// of the pane; its faces keep their size and centre in the extra room.
@@ -79,7 +83,7 @@ private struct UMDBarPresentationKey: Equatable {
     var availableWidth: CGFloat?
     var contentSafeArea: UIEdgeInsets
     var contentVerticalPadding: CGFloat
-    var shortcutRidesKeyRail: Bool
+    var keyRailContentWidth: CGFloat?
     var minimumContentHeight: CGFloat
 
     @MainActor
@@ -98,7 +102,7 @@ private struct UMDBarPresentationKey: Equatable {
         availableWidth = configuration.availableWidth
         contentSafeArea = configuration.contentSafeArea
         contentVerticalPadding = configuration.contentVerticalPadding
-        shortcutRidesKeyRail = configuration.shortcutRidesKeyRail
+        keyRailContentWidth = configuration.keyRailContentWidth
         minimumContentHeight = configuration.minimumContentHeight
     }
 }
@@ -433,7 +437,7 @@ final class UMDBarViewController: UIViewController,
             views.append(newTabButton())
             views.append(fileAttachController.takeAttachButton())
             if let backend = configuration.shortcutBackend,
-               !configuration.shortcutRidesKeyRail {
+               showsTopBarShortcut(state: state) {
                 views.append(shortcutButton(backend))
             }
             // MERGE is a window-level road and belongs beside DETACH; the
@@ -456,7 +460,7 @@ final class UMDBarViewController: UIViewController,
                 views.append(overflow)
             }
             if let backend = configuration.shortcutBackend,
-               showsCompactTopBarShortcut(state: state) {
+               showsTopBarShortcut(state: state) {
                 views.append(shortcutButton(backend))
             }
         }
@@ -468,15 +472,30 @@ final class UMDBarViewController: UIViewController,
         return row
     }
 
-    private func showsCompactTopBarShortcut(
-        state: UMDBarObservedState
-    ) -> Bool {
-        guard let availableWidth = configuration.availableWidth else { return false }
+    /// TMUX/HRDR names one road, and exactly one rail may draw it. The pane's
+    /// key rail owns it wherever it fits — so the top bar asks about the KEY
+    /// RAIL's width, not its own (measuring its own is how a wide iPhone
+    /// landscape rail drew a second chip above the one already on the key
+    /// rail). Only where no key rail exists (visionOS) does the bar own it
+    /// outright.
+    private func showsTopBarShortcut(state: UMDBarObservedState) -> Bool {
+        guard configuration.shortcutBackend != nil else { return false }
+        guard let keyRailWidth = configuration.keyRailContentWidth else { return true }
         return SingleWindowShellLayout.showsTopBarTmuxShortcut(
-            availableWidth: availableWidth,
-            supportsTmuxShortcuts: configuration.shortcutBackend != nil,
-            keyBarIncludesReturnKey: state.keyboardLocked
+            availableWidth: keyRailWidth,
+            supportsTmuxShortcuts: true,
+            keyBarIncludesReturnKey: state.keyboardLocked || keyRailAlwaysShowsReturn
         )
+    }
+
+    /// `TerminalKeyBar` gives every iPad a RET key, which is what moves its
+    /// shortcut cutoff to the wider tier.
+    private var keyRailAlwaysShowsReturn: Bool {
+        #if os(visionOS)
+        return false
+        #else
+        return UIDevice.current.userInterfaceIdiom == .pad
+        #endif
     }
 
     private func titleLabel(size: CGFloat) -> UIKitChassisLabel {

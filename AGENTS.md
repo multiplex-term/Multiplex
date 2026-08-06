@@ -590,9 +590,15 @@ logic belongs — keep parsing/command-building out of views.
   .bounds` does not follow the scene's orientation, so a maximised
   landscape window is 1376x1032 against a 1032x1376 screen. Same trap for anything else asking "am I full
   screen" — the shell-mode decision's own `isFullScreen` read is worth
-  re-checking. The rail also never draws the TMUX/HRDR chip on a classic
-  window (`shortcutRidesKeyRail`): the pane's key rail below carries that
-  same road, and only the shell's rail can lose it at narrow widths.
+  re-checking. TMUX/HRDR names one road and exactly one rail may draw it: the
+  pane's key rail owns the chip wherever it fits, and the rail above takes
+  it over only at the widths where the key rail drops it. The rail
+  therefore measures the KEY RAIL's content width (`keyRailContentWidth`),
+  never its own — a classic window's rail clears the window-control pill
+  and is ~90 pt narrower than the pane below it, while the shell's wide
+  row stays above the cutoff on any landscape phone (drawing a second chip
+  there was a shipped bug, 2026-08-06). No key rail at all (visionOS)
+  means the rail owns the chip outright.
   MERGE rides the wide row beside DETACH (the overflow carries it only
   when it displaces the direct actions).
   ⚠ The clearances are the RAIL's (`umdSafeArea`), never a pane's

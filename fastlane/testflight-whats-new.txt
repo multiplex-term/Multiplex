@@ -11,6 +11,7 @@ NEW IN 1.3.0
 • OPEN SOURCE LICENSES — Settings ▸ About, all 13 shipped components with full text.
 • FASTER TAPS — under mouse reporting each tap reaches the remote immediately, one click per tap, so a TUI's own double-click works.
 • The agent strip's STOP chip is gone; ESC on the key rail (or the Vision Pro key cluster) interrupts a turn.
+• TMUX / HRDR button — no longer drawn twice. The key rail below the terminal owns it wherever it fits; the title rail above takes it over only on windows too narrow for the key rail to keep it (iPhone landscape used to show both).
 • Every surface was rewritten on UIKit, so anything that looks or behaves differently from 1.2 is worth reporting.
 
 PLEASE TRY

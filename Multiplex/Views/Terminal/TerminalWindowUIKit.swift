@@ -1572,11 +1572,10 @@ extension TerminalWindowViewController {
         var verticalPadding: CGFloat
         /// The title bar matches the key rail at the pane's other end.
         var minimumHeight: CGFloat
-        /// The classic window always shows its pane's key rail, whose
-        /// TMUX/HRDR key is the same road — the title bar must not draw a
-        /// second one. The shell's rail is the one that can lose it at
-        /// narrow widths.
-        var shortcutRidesKeyRail: Bool
+        /// Whether the pane below this rail wears a `TerminalKeyBar`. Where
+        /// one exists it owns the TMUX/HRDR key until its own width drops it,
+        /// and the rail measures THAT width before drawing the key itself.
+        var hasKeyRail: Bool
 
         /// visionOS classic windows wear the `.regular` row inside an
         /// ornament; every other terminal surface — the adaptive shell and,
@@ -1587,7 +1586,7 @@ extension TerminalWindowViewController {
             auxiliaryStyle: .regular,
             verticalPadding: 8,
             minimumHeight: 0,
-            shortcutRidesKeyRail: false
+            hasKeyRail: false
         )
 
         static let shell = RailProfile(
@@ -1595,7 +1594,7 @@ extension TerminalWindowViewController {
             auxiliaryStyle: .shell,
             verticalPadding: 8,
             minimumHeight: 0,
-            shortcutRidesKeyRail: false
+            hasKeyRail: true
         )
 
         #if !os(visionOS)
@@ -1605,7 +1604,7 @@ extension TerminalWindowViewController {
             auxiliaryStyle: .shell,
             verticalPadding: TerminalClassicRailInsets.verticalPadding,
             minimumHeight: TerminalKeyBar.barHeight,
-            shortcutRidesKeyRail: true
+            hasKeyRail: true
         )
         #endif
     }
@@ -1646,6 +1645,28 @@ extension TerminalWindowViewController {
         max(0, rootView.bounds.width - insets.left - insets.right)
     }
     #endif
+
+    /// The content width of the pane's key rail — the width its TMUX/HRDR key
+    /// must fit in, and the only honest input to "may the rail above draw one
+    /// too". Never the rail's own available width: the classic window's rail
+    /// clears the window-control pill and is ~90 pt narrower than the pane
+    /// below it. nil where no key rail exists, so the rail owns the key.
+    private func keyRailContentWidth(profile: RailProfile) -> CGFloat? {
+        #if os(visionOS)
+        return nil
+        #else
+        guard profile.hasKeyRail else { return nil }
+        if let shell { return shell.availableWidth }
+        // Unmeasurable yet reads as roomy: the key rail keeps its own key
+        // until a real width says otherwise.
+        guard isViewLoaded else { return .greatestFiniteMagnitude }
+        let insets = contentSafeArea
+        return max(
+            0,
+            rootView.paneContainer.bounds.width - insets.left - insets.right
+        )
+        #endif
+    }
 
     private func renderUMD() {
         let profile = railProfile
@@ -1697,7 +1718,7 @@ extension TerminalWindowViewController {
             availableWidth: umdAvailableWidth,
             contentSafeArea: umdSafeArea,
             contentVerticalPadding: profile.verticalPadding,
-            shortcutRidesKeyRail: profile.shortcutRidesKeyRail,
+            keyRailContentWidth: keyRailContentWidth(profile: profile),
             minimumContentHeight: profile.minimumHeight
         )
         if let controller = umdController as? UMDBarViewController {
