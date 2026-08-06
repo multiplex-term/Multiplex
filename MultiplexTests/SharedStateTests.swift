@@ -96,6 +96,31 @@ final class SharedStateTests: XCTestCase {
         XCTAssertEqual(choices.dropFirst().first?.value, "herdr")
     }
 
+    /// The rows above are only reachable if the LIVE projection carries the
+    /// list: the Shortcuts option providers run in the app process, so
+    /// `HostEntityProvider.live` — not the published snapshot — is what they
+    /// read. Leaving `backendsRaw` unset there made the Backend picker empty
+    /// on every host, mixed ones included.
+    func testTheLiveHostEntityCarriesThePickerLists() {
+        var host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        host.secondaryBackends = [.herdr]
+        host.workingDirs = ["~/src"]
+
+        let entity = HostEntity(host: host)
+        XCTAssertEqual(entity.backendRaw, "tmux")
+        XCTAssertEqual(entity.backendsRaw, ["tmux", "herdr"])
+        XCTAssertEqual(entity.workingDirs, ["~/src"])
+        XCTAssertFalse(
+            SessionTargetChoices.backendChoices(backendsRaw: entity.backendsRaw).isEmpty
+        )
+
+        let plain = HostEntity(host: Host(name: "a", hostname: "b", username: "c"))
+        XCTAssertEqual(plain.backendsRaw, ["tmux"])
+        XCTAssertTrue(
+            SessionTargetChoices.backendChoices(backendsRaw: plain.backendsRaw).isEmpty
+        )
+    }
+
     func testAShortcutBackendVariableCannotNameAnArbitraryBackend() {
         XCTAssertNil(ShortcutBackendOptions.selection(for: nil))
         XCTAssertNil(ShortcutBackendOptions.selection(for: ""))

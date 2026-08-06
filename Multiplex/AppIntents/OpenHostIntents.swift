@@ -279,6 +279,28 @@ struct HostBackendOptionsProvider: DynamicOptionsProvider {
 /// the two Shortcuts pickers cannot drift on either. (The widget's provider
 /// builds its own — it lives in the extension target, which compiles only
 /// `Multiplex/Shared`; `SessionTargetChoices` is the piece they do share.)
+extension HostEntity {
+    /// The live-store projection the Shortcuts pickers actually read: the
+    /// providers run in the app process, so this — not the published
+    /// snapshot — is what feeds `SessionTargetChoices`. Every host-dependent
+    /// list must be filled here or its picker comes up empty.
+    init(host: Host) {
+        self.init(
+            id: host.id,
+            name: host.name,
+            address: host.address,
+            workingDirs: host.workingDirs,
+            sessionScripts: host.sessionScripts.map {
+                ShortcutSessionScript(id: $0.id, displayName: $0.displayName)
+            },
+            agentModels: host.agentLaunchModels,
+            backendRaw: host.sessionBackend.rawValue,
+            // Default first, the contract `backendChoices` reads.
+            backendsRaw: host.monitoredBackends.map(\.rawValue)
+        )
+    }
+}
+
 enum ShortcutBackendOptions {
     /// Empty for a single-backend host — what keeps the parameter invisible
     /// there, and the contract `SharedStateTests` pins.

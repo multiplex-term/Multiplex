@@ -96,23 +96,9 @@ final class AppRuntime {
         // app initialization), and the Shortcuts host picker reads the live
         // store rather than a separate scene-owned copy.
         AppDependencyManager.shared.add(dependency: self.externalActions)
-        HostEntityProvider.live = {
-            store.hosts.map {
-                HostEntity(
-                    id: $0.id,
-                    name: $0.name,
-                    address: $0.address,
-                    workingDirs: $0.workingDirs,
-                    sessionScripts: $0.sessionScripts.map {
-                        ShortcutSessionScript(
-                            id: $0.id,
-                            displayName: $0.displayName
-                        )
-                    },
-                    agentModels: $0.agentLaunchModels,
-                    backendRaw: $0.sessionBackend.rawValue
-                )
-            }
-        }
+        // ⚠ The pickers read THIS, never the published snapshot — a field
+        // missing from the projection is a picker that comes up empty
+        // (`backendsRaw` was, so Backend offered no rows on any host).
+        HostEntityProvider.live = { store.hosts.map(HostEntity.init(host:)) }
     }
 }
