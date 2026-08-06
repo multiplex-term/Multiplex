@@ -124,18 +124,14 @@ final class ConnectionHub {
             // Live probe state when the model has one; otherwise the same
             // last-known snapshot the deck's tiles restore from.
             //
-            // ⚠ The PRIMARY backend's sessions only, deliberately. A widget
-            // row deep-links by NAME, and `WidgetSessionState` carries no
-            // backend yet, so a secondary session's tap would resolve
-            // against the primary and attach the wrong thing. Showing a
-            // subset is the conservative half of that trade — widgets
-            // already withhold tally red and NEEDS YOU. Lifting it means
-            // adding `backendRaw` to the shared session type and `backend=`
-            // to `ExternalActionURL`, in `SharedStateTests` lockstep.
+            // Every monitored backend's sessions. Safe because rows on a
+            // mixed host now carry `backendRaw` and their deep links emit
+            // `backend=`, so a tap resolves in the right namespace instead
+            // of matching a same-named session on the other one.
             let snapshot: DeckSnapshot?
             if let model, model.hasLiveProbe {
                 snapshot = DeckSnapshot(
-                    sessions: model.sessions(on: host.sessionBackend),
+                    sessions: model.allSessions,
                     miniatures: model.miniatures.storageKeyed,
                     sessionBackend: host.sessionBackend
                 )

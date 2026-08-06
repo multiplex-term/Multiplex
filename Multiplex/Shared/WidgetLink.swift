@@ -8,13 +8,22 @@ enum WidgetLink {
     static let scheme = "multiplex"
     static let authority = "open"
 
-    static func shellURL(hostID: UUID, sessionName: String? = nil) -> URL {
+    /// `backendRaw` travels raw for the same reason `model` does — the
+    /// app-side parser owns validation, and an unknown token reads as the
+    /// host's default. Omitting it is what every link a single-backend host
+    /// builds means, so those bytes are unchanged.
+    static func shellURL(
+        hostID: UUID, sessionName: String? = nil, backendRaw: String? = nil
+    ) -> URL {
         var items = [
             URLQueryItem(name: "host", value: hostID.uuidString),
             URLQueryItem(name: "action", value: "shell"),
         ]
         if let sessionName, !sessionName.isEmpty {
             items.append(URLQueryItem(name: "session", value: sessionName))
+        }
+        if let backendRaw, !backendRaw.isEmpty {
+            items.append(URLQueryItem(name: "backend", value: backendRaw))
         }
         return url(queryItems: items)
     }
@@ -31,7 +40,7 @@ enum WidgetLink {
     static func agentURL(
         hostID: UUID, agentRaw: String, askForPrompt: Bool, model: String? = nil,
         sessionName: String? = nil, placementRaw: String? = nil,
-        directory: String? = nil
+        directory: String? = nil, backendRaw: String? = nil
     ) -> URL {
         var items = [
             URLQueryItem(name: "host", value: hostID.uuidString),
@@ -52,6 +61,9 @@ enum WidgetLink {
             if let placementRaw, !placementRaw.isEmpty {
                 items.append(URLQueryItem(name: "in", value: placementRaw))
             }
+        }
+        if let backendRaw, !backendRaw.isEmpty {
+            items.append(URLQueryItem(name: "backend", value: backendRaw))
         }
         return url(queryItems: items)
     }

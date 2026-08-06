@@ -71,17 +71,29 @@ enum WidgetStateBuilder {
             name: host.name,
             address: host.address,
             sessions: sessions.map {
-                sessionState($0, miniatureLines: miniatures[$0.id.storageKey] ?? [])
+                sessionState(
+                    $0,
+                    miniatureLines: miniatures[$0.id.storageKey] ?? [],
+                    // Rows carry a backend only where it disambiguates. On
+                    // a single-backend host nil keeps every row — and every
+                    // link built from one — byte-identical to before.
+                    qualifiesBackend: host.showsBackendIdentity
+                )
             },
             probedAt: probedAt,
             agentModels: host.agentLaunchModels.isEmpty ? nil : host.agentLaunchModels,
             backendRaw: host.sessionBackend.rawValue,
+            // Default first, so the pickers' leading "Host Default" row and
+            // the explicit rows agree without the widget process knowing the
+            // rule. A single entry means there is nothing to pick.
+            backendsRaw: host.monitoredBackends.map(\.rawValue),
             workingDirs: host.workingDirs.isEmpty ? nil : host.workingDirs
         )
     }
 
     static func sessionState(
-        _ session: TmuxSession, miniatureLines: [String]
+        _ session: TmuxSession, miniatureLines: [String],
+        qualifiesBackend: Bool = false
     ) -> WidgetSessionState {
         WidgetSessionState(
             name: session.name,
@@ -92,7 +104,8 @@ enum WidgetStateBuilder {
             },
             activeWindowIndex: session.windows.firstIndex(where: \.isActive) ?? 0,
             miniatureLines: Array(miniatureLines.suffix(miniatureLineLimit)),
-            createdAt: session.created
+            createdAt: session.created,
+            backendRaw: qualifiesBackend ? session.backend.rawValue : nil
         )
     }
 

@@ -212,15 +212,25 @@ final class AddHostUIKitTests: XCTestCase {
         fixture.controller.loadViewIfNeeded()
         fixture.controller.setMode(.manual)
 
-        let herdr = try XCTUnwrap(
-            descendants(of: UIButton.self, in: fixture.controller.view)
-                // The face uppercases; the spoken label stays the natural
-                // spelling so VoiceOver says "herdr", not H-E-R-D-R.
-                .first { $0.accessibilityLabel == "herdr" }
-        )
-        herdr.sendActions(for: .touchUpInside)
+        // Backends are CHECKS now, so "make this a herdr host" is check
+        // herdr, uncheck tmux — and unchecking the current default promotes
+        // what remains rather than leaving the record pointing at a backend
+        // it no longer shows.
+        func check(_ name: String) throws {
+            try XCTUnwrap(
+                descendants(of: UIButton.self, in: fixture.controller.view)
+                    // The face uppercases; the spoken label stays the natural
+                    // spelling so VoiceOver says "herdr", not H-E-R-D-R.
+                    .first { $0.accessibilityLabel == name }
+            ).sendActions(for: .touchUpInside)
+        }
+        try check("herdr")
+        XCTAssertEqual(fixture.controller.form.sessionBackend, .tmux)
+        XCTAssertEqual(fixture.controller.form.secondaryBackends, [.herdr])
+        try check("tmux")
 
         XCTAssertEqual(fixture.controller.form.sessionBackend, .herdr)
+        XCTAssertTrue(fixture.controller.form.secondaryBackends.isEmpty)
         XCTAssertTrue(renderedText(in: fixture.controller.view).contains(
             "Signs in over SSH with the settings above, then looks for herdr on the host."
         ))
@@ -236,25 +246,51 @@ final class AddHostUIKitTests: XCTestCase {
         XCTAssertTrue(tmuxConf?.isHidden == true)
     }
 
-    /// The backend bar shipped as a bare section row: it spanned the card
-    /// edge to edge while every other row — the auth bar it sits above
+    /// The backend control shipped as a bare section row: it spanned the
+    /// card edge to edge while every other row — the auth bar it sits above
     /// included — carries the inset row's 12 pt gutter.
-    func testBackendChoiceBarSitsInTheSameInsetRowAsTheAuthChoiceBar() throws {
+    ///
+    /// Also pins the rule that replaced the "Also show herdr sessions"
+    /// boolean: the DEFAULT bar exists only once there is more than one
+    /// backend to be default OF, so a single-backend host still sees exactly
+    /// one labelled control.
+    func testBackendChecksSitInAnInsetRowAndTheDefaultBarAppearsOnlyWhenMixed() throws {
         let fixture = makeFixture()
         defer { clean(fixture) }
         fixture.controller.loadViewIfNeeded()
         fixture.controller.setMode(.manual)
 
-        let bar = try XCTUnwrap(
-            descendants(of: UIView.self, in: fixture.controller.view)
-                .first { $0.accessibilityIdentifier == "addhost.backendBar" }
-        )
-        var ancestor = bar.superview
-        while ancestor != nil, !(ancestor is AddHostInsetRow) {
-            ancestor = ancestor?.superview
+        func insetRowAncestor(of identifier: String) -> UIView? {
+            let view = descendants(of: UIView.self, in: fixture.controller.view)
+                .first { $0.accessibilityIdentifier == identifier }
+            var ancestor = view?.superview
+            while ancestor != nil, !(ancestor is AddHostInsetRow) {
+                ancestor = ancestor?.superview
+            }
+            return ancestor
         }
-        XCTAssertNotNil(ancestor, "backend bar must sit inside an inset row")
-        XCTAssertTrue(renderedText(in: fixture.controller.view).contains("Sessions run on"))
+
+        XCTAssertNotNil(
+            insetRowAncestor(of: "addhost.backendChecks"),
+            "backend checks must sit inside an inset row"
+        )
+        XCTAssertTrue(renderedText(in: fixture.controller.view).contains("Backends"))
+        // One backend: nothing to choose a default from.
+        XCTAssertNil(insetRowAncestor(of: "addhost.backendBar"))
+        XCTAssertFalse(
+            renderedText(in: fixture.controller.view).contains("New sessions run on"))
+
+        try XCTUnwrap(
+            descendants(of: UIButton.self, in: fixture.controller.view)
+                .first { $0.accessibilityLabel == "herdr" }
+        ).sendActions(for: .touchUpInside)
+
+        XCTAssertNotNil(
+            insetRowAncestor(of: "addhost.backendBar"),
+            "the default bar must sit inside the same inset row"
+        )
+        XCTAssertTrue(
+            renderedText(in: fixture.controller.view).contains("New sessions run on"))
     }
 
     func testEditingIsManualOnlyAndStoredPrivateKeyStaysConcealedUntilEdit() throws {

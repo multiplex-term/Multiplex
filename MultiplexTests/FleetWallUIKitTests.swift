@@ -188,6 +188,7 @@ final class FleetWallUIKitTests: XCTestCase {
         send(controller.navigationItem.rightBarButtonItem)
 
         XCTAssertEqual(submissions, [NewSessionSubmission(
+            backend: .tmux,
             name: "release-watch",
             agent: .codex,
             model: "gpt-5.1-codex",

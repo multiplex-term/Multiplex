@@ -1042,6 +1042,15 @@ logic belongs — keep parsing/command-building out of views.
     is what `TerminalRoute.Mode.attach(host:session:)`, the attention
     classifier, `killSession`, and the external-action router all read; the
     name-only overload falls back to the primary as a documented tie-break.
+  - **Host Settings ▸ Backend is a CHECK selection, not a switch**
+    (`AddHostCheckBar`): tmux and herdr as peers, at least one always
+    checked, plus a "New sessions run on" single-choice bar that appears
+    only once more than one is. A boolean "Also show herdr sessions" row
+    shipped first and read badly — it framed two peers as a primary and an
+    afterthought and said nothing about where a new session lands.
+    Unchecking the current default promotes what remains, so the record can
+    never point at a backend it no longer shows. The New Session sheet
+    mirrors it with a "Runs on" bar under the same gate.
   - **Tiles say which backend only on a mixed host** (`showsBackendIdentity`):
     a `TMUX`/`HRDR` chip leading the UMD row plus, for herdr, a very light
     purple chassis (`TallyPalette.herdrBezel` — Catppuccin Mauve, herdr's own
@@ -1051,11 +1060,19 @@ logic belongs — keep parsing/command-building out of views.
     tile, so an opted-in secondary's live tiles are never hidden behind a
     placeholder. A secondary answering "missing" or "no sessions" renders
     nothing — the user asked to see its sessions if they exist.
-  - **Widgets and Shortcuts still see the PRIMARY's sessions only.** A widget
-    row deep-links by name and carries no backend, so a secondary session's
-    tap would attach the wrong thing; showing a subset is the safe half of
-    that trade. Lifting it means `WidgetSessionState.backendRaw` +
-    `ExternalActionURL`'s `backend=`, in `SharedStateTests` lockstep.
+  - **Every surface that creates or targets a session can name a backend**,
+    and each omits the choice where there is only one answer.
+    `ExternalActionURL`/`WidgetLink` carry `backend=` — omitted for the
+    host's default, so every URL, widget, and Shortcut built before mixed
+    hosts keeps its exact bytes and meaning; an unknown token fails soft to
+    the default (`model`/`in`'s rule) but a named backend the host does NOT
+    monitor resolves to NO session rather than the other one's namesake.
+    `WidgetSessionState.backendRaw` is set only on a mixed host, so widget
+    rows deep-link unambiguously. The Open Shell / Open Agent Shortcuts and
+    the Host widget grow a Backend parameter whose rows come from
+    `SessionTargetChoices.backendChoices` — **empty for a single-backend
+    host**, which is what keeps the setting invisible there. Pinned by
+    `SharedStateTests`.
   - Headless: seed key `secondaryBackends: ["herdr"]`, notify hook
     `debug.backendoffer` (accepts/withdraws the offer for the FIRST host).
     Proof is host-side — two exec channels per tick in `state/sshd.log` —

@@ -796,15 +796,19 @@ final class FleetWallViewController: UIViewController {
     }
 
     private func presentNewSession(on host: Host) {
-        // The names the mint must be unique against — the PRIMARY backend's
-        // only, since that is what `+ New Session` creates in. A herdr
-        // namesake on a mixed host is a different server and never collides
-        // (`SessionKey`), so counting it would respell a perfectly good name.
-        let sessions = configuration.hub.model(for: host)
-            .sessions(on: host.sessionBackend)
+        // Per backend: the mint uniques within one namespace, and the sheet
+        // can switch which one it is. A namesake on the other backend is a
+        // different server and never collides (`SessionKey`), so counting it
+        // would respell a perfectly good name.
+        let model = configuration.hub.model(for: host)
+        let existingNames = Dictionary(
+            uniqueKeysWithValues: host.monitoredBackends.map { backend in
+                (backend, model.sessions(on: backend).map(\.name))
+            }
+        )
         let controller = NewSessionViewController(
             host: host,
-            existingNames: sessions.map(\.name)
+            existingNames: existingNames
         ) { [weak self] submission in
             self?.createSession(on: host, submission: submission)
         }
@@ -827,6 +831,7 @@ final class FleetWallViewController: UIViewController {
             // view never second-guesses the naming rules.
             guard let created = await model.createSession(
                 base: submission.name,
+                backend: submission.backend,
                 inDirectoryOf: nil,
                 startingIn: submission.directory,
                 applying: host.newSessionTmuxConf,
@@ -3516,6 +3521,9 @@ private final class FleetAwaitingSignalView: UIView {
 // MARK: - New Session state
 
 struct NewSessionSubmission: Equatable {
+    /// Which multiplexer mints. The host's default unless its Backends
+    /// selection has more than one and the sheet offered a choice.
+    let backend: Host.SessionBackend
     let name: String
     let agent: AgentKind?
     let model: String?
@@ -3536,8 +3544,16 @@ struct NewSessionFormState {
     }
 
     let host: Host
-    let existingNames: [String]
+    /// Session names per backend — what the mint uniques against. Kept
+    /// per backend because a namesake on the other one is a different
+    /// server and never collides (`SessionKey`), so counting it would
+    /// respell a perfectly good name.
+    let existingNames: [Host.SessionBackend: [String]]
     let preferences: NewSessionPreferences
+    /// Which multiplexer this session will be minted on. Every naming and
+    /// targeting rule below reads THIS, not `host.sessionBackend` — the
+    /// host answers only for the default.
+    private(set) var backend: Host.SessionBackend
     var name: String
     var launchMode: LaunchMode
     var selectedAgent: AgentKind
@@ -3554,12 +3570,13 @@ struct NewSessionFormState {
 
     init(
         host: Host,
-        existingNames: [String],
+        existingNames: [Host.SessionBackend: [String]],
         preferences: NewSessionPreferences = NewSessionPreferences()
     ) {
         self.host = host
         self.existingNames = existingNames
         self.preferences = preferences
+        backend = host.sessionBackend
         remembersLastLaunch = preferences.remembersLastLaunch
         let agent = preferences.rememberedAgent
         launchMode = agent == nil ? .shell : .agents
@@ -3568,25 +3585,59 @@ struct NewSessionFormState {
         initialPrompt = ""
         directory = host.workingDirs.first
         script = preferences.rememberedScript(for: host)
-        name = Self.suggestedName(for: host, agent: agent, existing: existingNames)
+        name = Self.suggestedName(
+            for: host.sessionBackend,
+            agent: agent,
+            existing: existingNames[host.sessionBackend] ?? []
+        )
+    }
+
+    /// Single-backend convenience — the shape every caller had before a host
+    /// could show two.
+    init(
+        host: Host,
+        existingNames: [String],
+        preferences: NewSessionPreferences = NewSessionPreferences()
+    ) {
+        self.init(
+            host: host,
+            existingNames: [host.sessionBackend: existingNames],
+            preferences: preferences
+        )
+    }
+
+    /// The backends this sheet may mint on, in the host's own order. More
+    /// than one is what makes the sheet offer a choice at all.
+    var backendChoices: [Host.SessionBackend] { host.monitoredBackends }
+
+    /// Switching backends re-prefills the name the way switching agents
+    /// does — an untouched suggestion follows the choice, a typed one is
+    /// left alone — and drops any tab target, because session names belong
+    /// to one backend and `tabTargetChoices` is about to change under it.
+    mutating func selectBackend(_ backend: Host.SessionBackend) {
+        guard backend != self.backend, backendChoices.contains(backend) else { return }
+        let nameUntouched = name == prefill(for: agentToLaunch)
+        self.backend = backend
+        tabTargetSession = nil
+        if nameUntouched { name = prefill(for: agentToLaunch) }
     }
 
     /// What an empty name means for this backend — the field placeholder
     /// and the prefill base when no agent is chosen.
-    var defaultNameBase: String { Self.defaultNameBase(for: host) }
+    var defaultNameBase: String { Self.defaultNameBase(for: backend) }
 
-    private static func defaultNameBase(for host: Host) -> String {
-        host.sessionBackend == .herdr ? "session" : "main"
+    private static func defaultNameBase(for backend: Host.SessionBackend) -> String {
+        backend == .herdr ? "session" : "main"
     }
 
     /// The backend's own namer: the prefill must match what the mint will
     /// do downstream, or the sheet suggests a spelling the create then
     /// respells.
     private static func suggestedName(
-        for host: Host, agent: AgentKind?, existing: [String]
+        for backend: Host.SessionBackend, agent: AgentKind?, existing: [String]
     ) -> String {
-        let base = agent?.launchCommand ?? defaultNameBase(for: host)
-        return switch host.sessionBackend {
+        let base = agent?.launchCommand ?? defaultNameBase(for: backend)
+        return switch backend {
         case .tmux: TmuxProbe.uniqueSessionName(base: base, existing: existing)
         case .herdr: HerdrProbe.uniqueSessionName(base: base, existing: existing)
         }
@@ -3598,7 +3649,7 @@ struct NewSessionFormState {
     /// deck's mint stays session-first, and tmux windows belong to the
     /// prefix keys and the shortcut panel.
     var tabTargetChoices: [String] {
-        host.sessionBackend == .herdr ? existingNames : []
+        backend == .herdr ? (existingNames[.herdr] ?? []) : []
     }
 
     mutating func selectTabTarget(_ session: String?) {
@@ -3664,6 +3715,7 @@ struct NewSessionFormState {
 
     var submission: NewSessionSubmission {
         NewSessionSubmission(
+            backend: backend,
             name: name,
             agent: agentToLaunch,
             model: modelToLaunch,
@@ -3676,7 +3728,7 @@ struct NewSessionFormState {
 
     var targetDetail: String {
         guard let tabTargetSession else {
-            return "A fresh \(host.sessionBackend.rawValue) session, its own tile "
+            return "A fresh \(backend.rawValue) session, its own tile "
                 + "on the deck. Choose a session to add a tab to its focused "
                 + "workspace instead."
         }
@@ -3695,7 +3747,7 @@ struct NewSessionFormState {
             return "Starts \(agentToLaunch.displayName) in the new tab. The optional prompt becomes its first message; \(remembers)"
         }
         guard let agentToLaunch else {
-            return "Creates the \(host.sessionBackend.rawValue) session, then attaches "
+            return "Creates the \(backend.rawValue) session, then attaches "
                 + "to its login shell. \(remembers)"
         }
         return "Starts \(agentToLaunch.displayName) in the fresh shell. The optional prompt becomes its first message; \(remembers)"
@@ -3731,7 +3783,8 @@ struct NewSessionFormState {
     }
 
     private func prefill(for agent: AgentKind?) -> String {
-        Self.suggestedName(for: host, agent: agent, existing: existingNames)
+        Self.suggestedName(
+            for: backend, agent: agent, existing: existingNames[backend] ?? [])
     }
 
     private func modelPrefill(for agent: AgentKind?) -> String {
@@ -3774,11 +3827,13 @@ final class NewSessionViewController: UIViewController,
     private var createsButton: FleetMenuFieldButton?
     private var createsSection: FleetFormSectionView?
     private var identitySection: FleetFormSectionView?
+    private var backendSection: FleetFormSectionView?
+    private var backendChoiceBar: FleetBackendChoiceBar?
     private var createItem: UIBarButtonItem?
 
     init(
         host: Host,
-        existingNames: [String],
+        existingNames: [Host.SessionBackend: [String]],
         preferences: NewSessionPreferences = NewSessionPreferences(),
         create: @escaping (NewSessionSubmission) -> Void
     ) {
@@ -3789,6 +3844,22 @@ final class NewSessionViewController: UIViewController,
         )
         self.create = create
         super.init(nibName: nil, bundle: nil)
+    }
+
+    /// Single-backend convenience — the shape every caller had before a host
+    /// could show two.
+    convenience init(
+        host: Host,
+        existingNames: [String],
+        preferences: NewSessionPreferences = NewSessionPreferences(),
+        create: @escaping (NewSessionSubmission) -> Void
+    ) {
+        self.init(
+            host: host,
+            existingNames: [host.sessionBackend: existingNames],
+            preferences: preferences,
+            create: create
+        )
     }
 
     @available(*, unavailable)
@@ -3881,7 +3952,21 @@ final class NewSessionViewController: UIViewController,
         ])
 
         contentStack.addArrangedSubview(makeTargetSection())
-        if !form.tabTargetChoices.isEmpty {
+        // Only a question when the host shows more than one backend. On the
+        // single-backend host the sheet is exactly what it always was.
+        if form.backendChoices.count > 1 {
+            let backend = makeBackendSection()
+            backendSection = backend
+            contentStack.addArrangedSubview(backend)
+        }
+        // Built whenever ANY monitored backend could offer it, and hidden by
+        // `renderForm` when the live choice can't — flipping the backend then
+        // costs a visibility change instead of rebuilding the whole sheet
+        // under the user's fingers.
+        if Host.SessionBackend.allCases.contains(where: {
+            form.host.monitoredBackends.contains($0)
+                && !(form.existingNames[$0] ?? []).isEmpty && $0 == .herdr
+        }) {
             let creates = makeCreatesSection()
             createsSection = creates
             contentStack.addArrangedSubview(creates)
@@ -3908,6 +3993,30 @@ final class NewSessionViewController: UIViewController,
         dismissTap.cancelsTouchesInView = false
         dismissTap.delegate = self
         scrollView.addGestureRecognizer(dismissTap)
+    }
+
+    /// "Runs on" — which multiplexer mints this session. Built only on a
+    /// host whose Backends selection has more than one; the choice then
+    /// re-drives the name prefill, the Creates row's session list, and the
+    /// tmux-only riders downstream.
+    private func makeBackendSection() -> FleetFormSectionView {
+        let bar = FleetBackendChoiceBar(
+            choices: form.backendChoices,
+            selection: form.backend
+        ) { [weak self] backend in
+            guard let self else { return }
+            self.syncFormFromInputs()
+            self.form.selectBackend(backend)
+            self.renderForm()
+        }
+        bar.accessibilityIdentifier = "newSession.backend"
+        backendChoiceBar = bar
+        return FleetFormSectionView(
+            title: "Runs on",
+            detail: "This host shows both. New sessions start on the one "
+                + "chosen here; its default is set in Host Settings.",
+            rows: [bar]
+        )
     }
 
     private func makeTargetSection() -> UIView {
@@ -4108,7 +4217,11 @@ final class NewSessionViewController: UIViewController,
         // leaves with the choice rather than asking for a name the create
         // would ignore.
         identitySection?.isHidden = form.tabTargetSession != nil
+        // herdr-only, so it leaves with a switch to tmux.
+        createsSection?.isHidden = form.tabTargetChoices.isEmpty
         createsSection?.setDetail(form.targetDetail)
+        backendChoiceBar?.setSelection(form.backend)
+        nameField.placeholder = form.defaultNameBase
         scriptSection?.setDetail(form.scriptDetail)
         directorySection?.setDetail(form.directoryDetail)
         directoryHomeLabel?.text = form.directoryFallbackTitle.uppercased()
@@ -4442,6 +4555,84 @@ private final class FleetFormSectionView: UIView {
 }
 
 @MainActor
+/// "Runs on" — the New Session sheet's backend bar, built from the same
+/// faces as the launch choice so the two read as one family. Present only
+/// on a host whose Backends selection has more than one.
+private final class FleetBackendChoiceBar: UIView {
+    private static let selectionAnimationDuration: TimeInterval = 0.14
+
+    private let choices: [Host.SessionBackend]
+    private var buttons: [FleetChoiceButton] = []
+    private var selection: Host.SessionBackend
+    private let changed: (Host.SessionBackend) -> Void
+
+    init(
+        choices: [Host.SessionBackend],
+        selection: Host.SessionBackend,
+        changed: @escaping (Host.SessionBackend) -> Void
+    ) {
+        self.choices = choices
+        self.selection = selection
+        self.changed = changed
+        super.init(frame: .zero)
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.alignment = .fill
+        stack.distribution = .fillEqually
+        stack.spacing = 1
+        backgroundColor = UIKitChassis.bezelHi
+        for backend in choices {
+            let button = FleetChoiceButton()
+            button.addAction(UIAction { [weak self] _ in
+                self?.select(backend)
+            }, for: .touchUpInside)
+            buttons.append(button)
+            stack.addArrangedSubview(button)
+        }
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            heightAnchor.constraint(equalToConstant: 34),
+        ])
+        isAccessibilityElement = false
+        accessibilityLabel = "Which backend the session runs on"
+        refresh(animated: false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func setSelection(_ selection: Host.SessionBackend) {
+        guard self.selection != selection else { return }
+        self.selection = selection
+        refresh(animated: true)
+    }
+
+    private func select(_ backend: Host.SessionBackend) {
+        guard backend != selection else { return }
+        selection = backend
+        refresh(animated: true)
+        changed(backend)
+    }
+
+    private func refresh(animated: Bool) {
+        for (index, backend) in choices.enumerated() {
+            buttons[index].configure(
+                // The face uppercases; pass the natural spelling so VoiceOver
+                // reads "herdr", not the letters.
+                title: backend.rawValue,
+                selected: backend == selection,
+                showsChevron: false,
+                animationDuration: animated ? Self.selectionAnimationDuration : nil
+            )
+        }
+    }
+}
+
 private final class FleetLaunchChoiceView: UIView {
     private static let selectionAnimationDuration: TimeInterval = 0.14
 

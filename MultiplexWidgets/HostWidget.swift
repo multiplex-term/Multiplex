@@ -120,7 +120,11 @@ struct HostWidgetView: View {
         case .shell:
             WidgetLink.shellURL(
                 hostID: host.id,
-                sessionName: host.mostRecentSession?.name
+                sessionName: host.mostRecentSession?.name,
+                // The row's own backend, present only where the host shows
+                // more than one — without it a same-named session on the
+                // other multiplexer could answer the tap.
+                backendRaw: host.mostRecentSession?.backendRaw
             )
         case .agent:
             agentURL(for: host)
@@ -137,7 +141,10 @@ struct HostWidgetView: View {
             model: entry.configuration.model,
             sessionName: entry.configuration.session,
             placementRaw: entry.configuration.placement,
-            directory: entry.configuration.directory
+            directory: entry.configuration.directory,
+            // Empty (the Host Default row, and every widget configured
+            // before this setting existed) omits the parameter entirely.
+            backendRaw: entry.configuration.backend
         )
     }
 
@@ -148,7 +155,8 @@ struct HostWidgetView: View {
         return HStack(spacing: 12) {
             VStack(spacing: 5) {
                 Link(destination: WidgetLink.shellURL(
-                    hostID: host.id, sessionName: session?.name
+                    hostID: host.id, sessionName: session?.name,
+                    backendRaw: session?.backendRaw
                 )) {
                     heldFrame(for: session)
                 }
@@ -197,7 +205,8 @@ struct HostWidgetView: View {
 
                 HStack(spacing: 7) {
                     Link(destination: WidgetLink.shellURL(
-                        hostID: host.id, sessionName: session?.name
+                        hostID: host.id, sessionName: session?.name,
+                        backendRaw: session?.backendRaw
                     )) {
                         ActionKey(glyph: "❯_", caption: "shell")
                     }

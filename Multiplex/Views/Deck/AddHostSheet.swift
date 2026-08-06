@@ -1414,82 +1414,111 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     // MARK: Backend
 
-    /// The other backend, whose sessions this host may ALSO show.
-    private var otherBackend: Host.SessionBackend {
-        form.sessionBackend == .herdr ? .tmux : .herdr
-    }
-
-    private var secondaryBackendDetail: String {
-        let other = otherBackend.rawValue
-        let primary = form.sessionBackend.rawValue
-        return "Shows \(other) sessions on this host's deck beside its "
-            + "\(primary) ones, each tile marked with the backend it came "
-            + "from. Roughly doubles what the deck fetches on every refresh "
-            + "of this host. New sessions still start on \(primary)."
+    /// Every backend this host shows tiles for — the checked set.
+    private var enabledBackends: Set<Host.SessionBackend> {
+        form.secondaryBackends.union([form.sessionBackend])
     }
 
     private var backendDetail: String {
-        if form.sessionBackend == .herdr {
-            return "The deck monitors herdr (herdr.dev) sessions and their "
+        let enabled = enabledBackends
+        var detail: String
+        if enabled.contains(.herdr) {
+            detail = "The deck monitors herdr (herdr.dev) sessions and their "
                 + "agents through the herdr CLI — one tile per session, its "
                 + "workspaces as the tile's window lines; a tile attaches "
                 + "the full herdr client. The tmux options editor doesn't "
-                + "apply here."
+                + "apply to herdr sessions."
+        } else {
+            detail = "The deck monitors a remote tmux server — sessions, "
+                + "windows, and agent panes. herdr (herdr.dev) is the "
+                + "alternative for hosts that run it."
         }
-        return "The deck monitors a remote tmux server — sessions, windows, "
-            + "and agent panes. herdr (herdr.dev) is the alternative for "
-            + "hosts that run it."
+        if enabled.count > 1 {
+            detail += "\n\nBoth are shown, each tile marked with the backend "
+                + "it came from. That roughly doubles what this host fetches "
+                + "on every deck refresh."
+        }
+        return detail
     }
 
     private func renderBackend() {
-        let bar = AddHostChoiceBar<Host.SessionBackend>(
+        let checks = AddHostCheckBar<Host.SessionBackend>(
             // The button face uppercases; pass the natural spelling so
             // VoiceOver reads "tmux", not the letters T-M-U-X.
             choices: Host.SessionBackend.allCases.map { ($0.rawValue, $0) },
-            selection: form.sessionBackend
-        ) { [weak self] backend in
-            guard let self else { return }
-            self.updateTestSensitive { $0.sessionBackend = backend }
-            self.renderBackend()
-            self.renderTestSection()
+            selection: enabledBackends
+        ) { [weak self] backends in
+            self?.setEnabledBackends(backends)
         }
-        bar.accessibilityIdentifier = "addhost.backendBar"
-        let label = addHostLabel(
-            "Sessions run on",
+        checks.accessibilityIdentifier = "addhost.backendChecks"
+        let checksLabel = addHostLabel(
+            "Backends",
             font: UIKitChassis.uiFont(10, weight: .semibold),
             color: UIKitChassis.signal2
         )
-        let stack = UIStackView(arrangedSubviews: [label, bar])
+        let stack = UIStackView(arrangedSubviews: [checksLabel, checks])
         stack.axis = .vertical
         stack.alignment = .fill
         stack.spacing = 8
-        // The mixed-host opt-in. A monochrome chassis switch, never the
-        // system green pill. The deck's rail offers the same escalation when
-        // discovery finds sessions running; this is where it lives when the
-        // user goes looking for it.
-        let other = otherBackend
-        let alsoShow = SettingsBooleanRow(
-            title: "Also show \(other.rawValue) sessions",
-            isOn: form.secondaryBackends.contains(other),
-            accessibilityHint: "Adds this host's \(other.rawValue) sessions "
-                + "to its deck; roughly doubles what it fetches per refresh"
-        ) { [weak self] enabled in
-            guard let self else { return }
-            if enabled {
-                self.form.secondaryBackends.insert(other)
-            } else {
-                self.form.secondaryBackends.remove(other)
+
+        // The default is only a question when there is more than one answer.
+        // On the single-backend host — the overwhelmingly common case — the
+        // section is exactly one labelled control, as it always was.
+        if enabledBackends.count > 1 {
+            let bar = AddHostChoiceBar<Host.SessionBackend>(
+                choices: Host.SessionBackend.allCases
+                    .filter(enabledBackends.contains)
+                    .map { ($0.rawValue, $0) },
+                selection: form.sessionBackend
+            ) { [weak self] backend in
+                guard let self else { return }
+                self.updateTestSensitive { $0.sessionBackend = backend }
+                self.renderBackend()
+                self.renderTestSection()
             }
+            bar.accessibilityIdentifier = "addhost.backendBar"
+            let label = addHostLabel(
+                "New sessions run on",
+                font: UIKitChassis.uiFont(10, weight: .semibold),
+                color: UIKitChassis.signal2
+            )
+            label.accessibilityHint =
+                "The backend New Session, widgets, and Shortcuts start on "
+                + "unless they name another"
+            stack.addArrangedSubview(label)
+            stack.addArrangedSubview(bar)
+            stack.setCustomSpacing(16, after: checks)
         }
-        backendSection.setDetail(backendDetail + "\n\n" + secondaryBackendDetail)
-        backendSection.setRows([AddHostInsetRow(contentView: stack), alsoShow])
+        backendSection.setDetail(backendDetail)
+        backendSection.setRows([AddHostInsetRow(contentView: stack)])
         // Only the tmux options editor is tmux-scoped (herdr has no analog
         // of tmux's targeted set-option calls; keep the stored value for a
         // later switch back rather than claiming it affects herdr).
         // Working directories apply to BOTH backends: the herdr mint roots
         // a fresh session's world by cd'ing the headless spawn, so the
         // paths here feed New Session, widgets, and Shortcuts either way.
-        tmuxConfSection.isHidden = form.sessionBackend == .herdr
+        // Only the tmux options editor is tmux-scoped, so it survives as long
+        // as tmux is one of the checked backends — a mixed host still mints
+        // tmux sessions when its default says so.
+        tmuxConfSection.isHidden = !enabledBackends.contains(.tmux)
+    }
+
+    /// Apply a new checked set, keeping the record's shape valid: the
+    /// default must always be one of the checked backends, so unchecking the
+    /// current default promotes whatever remains rather than leaving the
+    /// host pointing at a backend it no longer shows.
+    private func setEnabledBackends(_ backends: Set<Host.SessionBackend>) {
+        guard !backends.isEmpty else { return }
+        let nextDefault = backends.contains(form.sessionBackend)
+            ? form.sessionBackend
+            : Host.SessionBackend.allCases.first(where: backends.contains)
+                ?? form.sessionBackend
+        updateTestSensitive {
+            $0.sessionBackend = nextDefault
+            $0.secondaryBackends = backends.subtracting([nextDefault])
+        }
+        renderBackend()
+        renderTestSection()
     }
 
     // MARK: Transport
@@ -2160,15 +2189,111 @@ final class AddHostChoiceBar<Value: Hashable>: UIStackView {
     }
 }
 
+/// The multi-select sibling of `AddHostChoiceBar` — same faces, same seam,
+/// but any number can be lit and a lit face wears a checkmark so the two
+/// bars can never be mistaken for each other at a glance.
+///
+/// Built for the Backend section, where a host picks which multiplexers it
+/// shows. A boolean "Also show herdr sessions" switch shipped there first
+/// and read badly: it presented two peers as a primary and an afterthought,
+/// and it said nothing about which one a new session lands on. Checks state
+/// the set; a separate single-choice bar states the default, and only when
+/// there is more than one to choose from.
+///
+/// `minimumSelection` refuses to leave the set empty — a host with no
+/// backend has nothing to show at all, so the last check simply doesn't
+/// respond rather than opening a state the model cannot express.
+@MainActor
+final class AddHostCheckBar<Value: Hashable>: UIStackView {
+    private(set) var selection: Set<Value>
+    private let choices: [(String, Value)]
+    private let minimumSelection: Int
+    private let changed: (Set<Value>) -> Void
+    private var buttons: [AddHostChoiceButton] = []
+
+    init(
+        choices: [(String, Value)],
+        selection: Set<Value>,
+        minimumSelection: Int = 1,
+        changed: @escaping (Set<Value>) -> Void
+    ) {
+        self.choices = choices
+        self.selection = selection
+        self.minimumSelection = minimumSelection
+        self.changed = changed
+        super.init(frame: .zero)
+        axis = .horizontal
+        alignment = .fill
+        distribution = .fillEqually
+        spacing = AddHostChoiceMetrics.seam
+        backgroundColor = UIKitChassis.bezelHi
+        for (index, choice) in choices.enumerated() {
+            let button = AddHostChoiceButton(
+                title: choice.0, index: index, checkable: true)
+            button.addTarget(self, action: #selector(pressed(_:)), for: .touchUpInside)
+            buttons.append(button)
+            addArrangedSubview(button)
+        }
+        refresh()
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("unused") }
+
+    func setSelection(_ selection: Set<Value>) {
+        guard self.selection != selection else { return }
+        self.selection = selection
+        refresh(animated: true)
+    }
+
+    @objc private func pressed(_ sender: AddHostChoiceButton) {
+        guard choices.indices.contains(sender.choiceIndex) else { return }
+        let value = choices[sender.choiceIndex].1
+        var next = selection
+        if next.contains(value) {
+            // The floor is enforced here rather than by disabling the face:
+            // a disabled last check reads as broken, while an unresponsive
+            // one reads as "this is already the minimum".
+            guard next.count > minimumSelection else { return }
+            next.remove(value)
+        } else {
+            next.insert(value)
+        }
+        selection = next
+        refresh(animated: true)
+        changed(selection)
+    }
+
+    private func refresh(animated: Bool = false) {
+        let changes = { [self] in
+            for (index, button) in buttons.enumerated() {
+                button.setSelected(selection.contains(choices[index].1))
+            }
+        }
+        guard animated, !UIAccessibility.isReduceMotionEnabled else {
+            changes()
+            return
+        }
+        UIView.animate(
+            withDuration: AddHostChoiceMetrics.selectionAnimationDuration,
+            delay: 0,
+            options: [.curveEaseOut, .beginFromCurrentState, .allowUserInteraction],
+            animations: changes
+        )
+    }
+}
+
 @MainActor
 private final class AddHostChoiceButton: UIButton {
     let choiceIndex: Int
     private let sourceTitle: String
+    private let checkable: Bool
     private let visualLabel = UILabel()
 
-    init(title: String, index: Int) {
+    init(title: String, index: Int, checkable: Bool = false) {
         sourceTitle = title
         choiceIndex = index
+        self.checkable = checkable
         super.init(frame: .zero)
         // The SwiftUI source used `.buttonStyle(.plain)`. Keep this a custom
         // button with no configuration so UIKit cannot supply a capsule or
@@ -2197,8 +2322,15 @@ private final class AddHostChoiceButton: UIButton {
         // sheet's smoke, never opaque chassis.
         backgroundColor = selected
             ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
+        // A checkable face says so in the face itself: the two bars sit one
+        // above the other in the Backend section, and without the mark a
+        // multi-select bar with one item lit is indistinguishable from a
+        // single-select one.
+        let face = checkable && selected
+            ? "✓ " + sourceTitle.uppercased()
+            : sourceTitle.uppercased()
         visualLabel.attributedText = NSAttributedString(
-            string: sourceTitle.uppercased(),
+            string: face,
             attributes: [
                 .font: UIKitChassis.compressedLabelFont(9),
                 .kern: CGFloat(9 * Theme.typeScale * 0.09),
@@ -2208,7 +2340,12 @@ private final class AddHostChoiceButton: UIButton {
         layer.borderColor = (selected ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
             .resolvedColor(with: traitCollection)
             .cgColor
-        accessibilityValue = selected ? "Selected" : "Not selected"
+        if checkable {
+            accessibilityTraits.insert(.toggleButton)
+        }
+        accessibilityValue = checkable
+            ? (selected ? "Checked" : "Unchecked")
+            : (selected ? "Selected" : "Not selected")
         if selected {
             accessibilityTraits.insert(.selected)
         } else {

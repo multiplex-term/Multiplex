@@ -918,9 +918,16 @@ final class TerminalWindowViewController: UIViewController,
               let host = store.host(id: activeTab.hostID)
         else { return }
         creatingTab = true
-        // A host backend can change while this tab stays live. Only inherit a
-        // source session from the namespace the new tab will actually use.
-        let source = activeTab.sessionBackend == host.sessionBackend
+        // + TAB means "another one like this": the sibling session is minted
+        // on THIS tab's backend, not the host's default, so a herdr tab on a
+        // tmux-default mixed host keeps producing herdr siblings. A backend
+        // the host no longer monitors falls back to the default.
+        let backend = activeTab.sessionBackend
+            .flatMap { host.monitoredBackends.contains($0) ? $0 : nil }
+            ?? host.sessionBackend
+        // Only inherit a source session from the namespace the new tab will
+        // actually use.
+        let source = activeTab.sessionBackend == backend
             ? activeTab.sessionName : nil
         let preferences = NewSessionPreferences()
         let script = preferences.rememberedScript(for: host)
@@ -929,6 +936,7 @@ final class TerminalWindowViewController: UIViewController,
             defer { creatingTab = false }
             guard let created = await hub.model(for: host).createSession(
                 base: agent?.launchCommand ?? source ?? "main",
+                backend: backend,
                 inDirectoryOf: source,
                 applying: host.newSessionTmuxConf,
                 running: script?.normalizedBody,

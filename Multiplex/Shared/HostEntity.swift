@@ -32,6 +32,10 @@ struct HostEntity: AppEntity, Identifiable, Hashable {
     /// The host's session backend raw value — what the placement picker
     /// labels its rows with; nil (a pre-backend snapshot) reads as tmux.
     var backendRaw: String?
+    /// Every backend this host shows tiles for, default first — what the
+    /// Open Agent / Open Shell Backend pickers offer. One entry (or none)
+    /// means there is nothing to pick.
+    var backendsRaw: [String]?
 
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(title: "\(name)", subtitle: "\(address)")
@@ -51,7 +55,8 @@ enum HostEntityProvider {
             HostEntity(
                 id: $0.id, name: $0.name, address: $0.address,
                 agentModels: $0.agentModels ?? [:],
-                backendRaw: $0.backendRaw
+                backendRaw: $0.backendRaw,
+                backendsRaw: $0.backendsRaw
             )
         }
     }
