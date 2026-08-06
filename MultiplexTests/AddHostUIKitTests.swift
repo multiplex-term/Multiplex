@@ -293,6 +293,55 @@ final class AddHostUIKitTests: XCTestCase {
             renderedText(in: fixture.controller.view).contains("New sessions run on"))
     }
 
+    /// Picking a default must not un-check anything. The record stores a
+    /// default plus extras, so writing `sessionBackend` alone drops whatever
+    /// that backend used to be — checking both and then choosing HERDR as the
+    /// default collapsed the checks back to one (reported 2026-08-06).
+    func testChoosingTheDefaultKeepsBothBackendsChecked() throws {
+        let fixture = makeFixture()
+        defer { clean(fixture) }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.setMode(.manual)
+
+        func bar<Bar: UIView>(_ identifier: String, of type: Bar.Type) throws -> Bar {
+            try XCTUnwrap(
+                descendants(of: type, in: fixture.controller.view)
+                    .first { $0.accessibilityIdentifier == identifier }
+            )
+        }
+        func press(_ label: String, in identifier: String) throws {
+            let container = try XCTUnwrap(
+                descendants(of: UIView.self, in: fixture.controller.view)
+                    .first { $0.accessibilityIdentifier == identifier }
+            )
+            try XCTUnwrap(
+                descendants(of: UIButton.self, in: container)
+                    .first { $0.accessibilityLabel == label }
+            ).sendActions(for: .touchUpInside)
+        }
+
+        // Check herdr alongside the tmux default, then make herdr the default.
+        try press("herdr", in: "addhost.backendChecks")
+        try press("herdr", in: "addhost.backendBar")
+
+        // Both stay checked — the promotion moved the default, it did not
+        // un-check the backend that used to hold it.
+        XCTAssertEqual(
+            try bar("addhost.backendChecks", of: AddHostCheckBar<Host.SessionBackend>.self)
+                .selection,
+            [.tmux, .herdr]
+        )
+        XCTAssertEqual(
+            try bar("addhost.backendBar", of: AddHostChoiceBar<Host.SessionBackend>.self)
+                .selection,
+            .herdr
+        )
+        // And the default bar, which exists only while more than one is
+        // checked, is still on screen.
+        XCTAssertTrue(
+            renderedText(in: fixture.controller.view).contains("New sessions run on"))
+    }
+
     func testEditingIsManualOnlyAndStoredPrivateKeyStaysConcealedUntilEdit() throws {
         var host = Host(name: "Studio", hostname: "studio.local", username: "jhen")
         host.authMethod = .privateKey

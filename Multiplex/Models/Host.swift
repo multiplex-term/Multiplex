@@ -203,6 +203,59 @@ struct Host: Identifiable, Codable, Hashable {
         port == 22 ? "\(username)@\(hostname)" : "\(username)@\(hostname):\(port)"
     }
 
+    /// Which backends a host shows, and which of them new sessions run on.
+    ///
+    /// The record stores these as a default plus extras, so writing either
+    /// half alone silently changes the other — checking a second backend and
+    /// then picking it as the default used to un-check the first, because
+    /// "the extras" still held the backend that had just been promoted
+    /// (reported 2026-08-06). Every surface that edits the pair — Host
+    /// Settings' Backend section, the Bind pane — edits this instead of the
+    /// two fields, and the bind mint carries it as one value rather than two
+    /// parameters that must agree.
+    struct BackendSelection: Equatable, Sendable {
+        /// Always a member of `enabled`.
+        private(set) var preferred: SessionBackend
+        /// Never empty: a host with no backend has nothing to show.
+        private(set) var enabled: Set<SessionBackend>
+
+        init(preferred: SessionBackend = .tmux, also secondaries: Set<SessionBackend> = []) {
+            self.preferred = preferred
+            enabled = secondaries.union([preferred])
+        }
+
+        var secondaries: Set<SessionBackend> { enabled.subtracting([preferred]) }
+        var isMixed: Bool { enabled.count > 1 }
+
+        /// Check or uncheck backends. Unchecking the current default promotes
+        /// whatever remains, so the record can never point at a backend it no
+        /// longer shows; an empty set is refused rather than stored.
+        mutating func setEnabled(_ backends: Set<SessionBackend>) {
+            guard !backends.isEmpty else { return }
+            enabled = backends
+            guard !backends.contains(preferred) else { return }
+            preferred = SessionBackend.allCases.first(where: backends.contains) ?? preferred
+        }
+
+        /// Move the default without changing what is checked — the old
+        /// default stays on as a secondary. A backend that is not checked is
+        /// checked by being chosen.
+        mutating func setPreferred(_ backend: SessionBackend) {
+            preferred = backend
+            enabled.insert(backend)
+        }
+    }
+
+    /// The pair as one value. The setter is what keeps the two stored fields
+    /// consistent for callers that edit them together.
+    var backendSelection: BackendSelection {
+        get { BackendSelection(preferred: sessionBackend, also: secondaryBackends) }
+        set {
+            sessionBackend = newValue.preferred
+            secondaryBackends = newValue.secondaries
+        }
+    }
+
     /// Primary first, then the opted-in secondaries in a stable order — the
     /// one accessor every probe loop, tile grid, and settings surface
     /// iterates. Order is load-bearing: the primary's block leads the wall,

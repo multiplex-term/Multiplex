@@ -53,6 +53,9 @@ struct AddHostFormState {
     var backgroundKeepAlive = false
     var sessionBackend = Host.SessionBackend.tmux
     /// Backends beyond `sessionBackend` this host also shows tiles for.
+    /// ⚠ Write this and `sessionBackend` through `setBackends(enabled:default:)`
+    /// — the record stores a default plus extras, so touching either alone
+    /// silently changes the other.
     var secondaryBackends: Set<Host.SessionBackend> = []
     var useMosh = false
     var moshServerPath = ""
@@ -121,6 +124,19 @@ struct AddHostFormState {
         }
     }
 
+    /// The two backend fields as one value — the Backend section's two
+    /// controls each move one half, and `Host.BackendSelection` is where the
+    /// rule that keeps them consistent lives.
+    var backendSelection: Host.BackendSelection {
+        get { Host.BackendSelection(preferred: sessionBackend, also: secondaryBackends) }
+        set {
+            sessionBackend = newValue.preferred
+            secondaryBackends = newValue.secondaries
+        }
+    }
+
+    var enabledBackends: Set<Host.SessionBackend> { backendSelection.enabled }
+
     var testFingerprint: [String] {
         [
             hostname, port, username, authMethod.rawValue,
@@ -165,8 +181,7 @@ struct AddHostFormState {
         host.authMethod = authMethod
         host.isEnabled = isEnabled
         host.backgroundKeepAlive = backgroundKeepAlive
-        host.sessionBackend = sessionBackend
-        host.secondaryBackends = secondaryBackends
+        host.backendSelection = backendSelection
         host.useMosh = useMosh
         let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
@@ -1413,9 +1428,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     // MARK: Backend
 
     /// Every backend this host shows tiles for — the checked set.
-    private var enabledBackends: Set<Host.SessionBackend> {
-        form.secondaryBackends.union([form.sessionBackend])
-    }
+    private var enabledBackends: Set<Host.SessionBackend> { form.enabledBackends }
 
     private var backendDetail: String {
         let enabled = enabledBackends
@@ -1469,7 +1482,9 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 selection: form.sessionBackend
             ) { [weak self] backend in
                 guard let self else { return }
-                self.updateTestSensitive { $0.sessionBackend = backend }
+                // Only the DEFAULT moves — the checked set is unchanged,
+                // so the old default stays checked as a secondary.
+                self.updateTestSensitive { $0.backendSelection.setPreferred(backend) }
                 self.renderBackend()
                 self.renderTestSection()
             }
@@ -1500,23 +1515,10 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         tmuxConfSection.isHidden = !enabledBackends.contains(.tmux)
     }
 
-    /// Apply a new checked set, keeping the record's shape valid: the
-    /// default must always be one of the checked backends, so unchecking the
-    /// current default promotes whatever remains rather than leaving the
-    /// host pointing at a backend it no longer shows.
+    /// Apply a new checked set, keeping the current default where it is still
+    /// checked — `setBackends` promotes a survivor when it isn't.
     private func setEnabledBackends(_ backends: Set<Host.SessionBackend>) {
-        guard !backends.isEmpty else { return }
-        let nextDefault = backends.contains(form.sessionBackend)
-            ? form.sessionBackend
-            : Host.SessionBackend.allCases.first(where: backends.contains)
-                ?? form.sessionBackend
-        updateTestSensitive {
-            $0.sessionBackend = nextDefault
-            // The form carries its own fields, so `Host`'s normalization
-            // does not reach here — the primary is subtracted explicitly, or
-            // an unchanged set would look edited to `testFingerprint`.
-            $0.secondaryBackends = backends.subtracting([nextDefault])
-        }
+        updateTestSensitive { $0.backendSelection.setEnabled(backends) }
         renderBackend()
         renderTestSection()
     }

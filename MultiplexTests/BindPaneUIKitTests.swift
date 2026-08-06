@@ -127,10 +127,13 @@ final class BindPaneUIKitTests: XCTestCase {
         XCTAssertEqual(bind.keyPassphrase, "")
     }
 
-    /// The pane's backend choice is what the host record is minted with, so
-    /// it has to write straight through to the controller, say which backend
-    /// it means, and — like the passphrase — never survive the pane closing.
-    func testBackendBarWritesControllerSaysWhatItMeansAndResetsOnRemoval() async throws {
+    /// The pane's backend selection is what the host record is minted with,
+    /// so it has to write straight through to the controller, say which
+    /// backends it means, and — like the passphrase — never survive the pane
+    /// closing. It wears Host Settings' two controls, because a machine may
+    /// genuinely run both and a single choice made the person pick one and
+    /// correct it on the deck afterwards.
+    func testBackendSelectionWritesControllerSaysWhatItMeansAndResetsOnRemoval() async throws {
         let bind = BindController()
         bind.bindSurfaceOpen = true
         let controller = BindPaneViewController(bind: bind)
@@ -138,32 +141,59 @@ final class BindPaneUIKitTests: XCTestCase {
         controller.view.frame = CGRect(x: 0, y: 0, width: 640, height: 1_600)
         controller.view.layoutIfNeeded()
 
-        let bar = try XCTUnwrap(
+        // Each control is rebuilt per render, so every look re-queries.
+        func checks() throws -> AddHostCheckBar<Host.SessionBackend> {
+            try XCTUnwrap(
+                descendants(of: AddHostCheckBar<Host.SessionBackend>.self, in: controller.view)
+                    .first { $0.accessibilityIdentifier == "bind.backendChecks" }
+            )
+        }
+        func defaultBar() -> AddHostChoiceBar<Host.SessionBackend>? {
             descendants(of: AddHostChoiceBar<Host.SessionBackend>.self, in: controller.view)
                 .first { $0.accessibilityIdentifier == "bind.backendBar" }
+        }
+
+        XCTAssertEqual(try checks().selection, [.tmux])
+        XCTAssertEqual(
+            descendants(of: UIButton.self, in: try checks()).compactMap(\.accessibilityLabel),
+            ["tmux", "herdr"]
         )
-        XCTAssertEqual(bar.selection, .tmux)
-        let buttons = descendants(of: UIButton.self, in: bar)
-        XCTAssertEqual(buttons.compactMap(\.accessibilityLabel), ["tmux", "herdr"])
+        // One backend: nothing to be the default OF.
+        XCTAssertNil(defaultBar())
         XCTAssertTrue(renderedText(in: controller.view).contains(
-            BindPaneViewController.backendDetail(for: .tmux)
+            BindPaneViewController.backendDetail(for: Host.BackendSelection(preferred: .tmux))
         ))
 
-        buttons[1].sendActions(for: .touchUpInside)
-        XCTAssertEqual(bind.sessionBackend, .herdr)
-        await waitUntil("herdr detail renders") {
+        // Check herdr as well: both are shown, tmux still mints.
+        descendants(of: UIButton.self, in: try checks())[1].sendActions(for: .touchUpInside)
+        XCTAssertEqual(bind.backends.enabled, [.tmux, .herdr])
+        XCTAssertEqual(bind.backends.preferred, .tmux)
+        await waitUntil("the default bar appears") { defaultBar() != nil }
+        await waitUntil("mixed detail renders") {
             self.renderedText(in: controller.view).contains(
-                BindPaneViewController.backendDetail(for: .herdr)
+                BindPaneViewController.backendDetail(
+                    for: Host.BackendSelection(preferred: .tmux, also: [.herdr]))
             )
         }
 
-        // A controller-side change (the DEBUG preset, a reset) reaches the bar.
-        bind.sessionBackend = .tmux
-        await waitUntil("bar follows the controller") { bar.selection == .tmux }
+        // Picking a default moves it WITHOUT un-checking the other.
+        let bar = try XCTUnwrap(defaultBar())
+        descendants(of: UIButton.self, in: bar)[1].sendActions(for: .touchUpInside)
+        XCTAssertEqual(bind.backends.preferred, .herdr)
+        XCTAssertEqual(bind.backends.enabled, [.tmux, .herdr])
+        await waitUntil("the checks stay on both") {
+            (try? checks().selection) == [.tmux, .herdr]
+        }
 
-        bind.sessionBackend = .herdr
+        // A controller-side change (the DEBUG preset, a reset) reaches them.
+        bind.backends = Host.BackendSelection(preferred: .tmux)
+        await waitUntil("the checks follow the controller") {
+            (try? checks().selection) == [.tmux] && defaultBar() == nil
+        }
+
+        bind.backends = Host.BackendSelection(preferred: .herdr, also: [.tmux])
         controller.prepareForRemoval()
-        XCTAssertEqual(bind.sessionBackend, .tmux)
+        XCTAssertEqual(bind.backends, Host.BackendSelection(preferred: .tmux))
     }
 
     func testCandidateRowKeepsPINFieldAndRendersEveryStage() throws {

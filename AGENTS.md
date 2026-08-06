@@ -107,9 +107,12 @@ app.multiplexterm.multiplex`):
   `state/bind.log`). Proof is host-side: a `multiplex:bind:<id>:<device>`
   line in `state/authorized_keys`, then `Accepted publickey` in `sshd.log`.
   `MULTIPLEX_BIND_PASSPHRASE=<text>` presets KEY PASSPHRASE so a headless
-  bind stores its key sealed; `MULTIPLEX_BIND_BACKEND=tmux|herdr` presets the
-  pane's Backend choice, so the minted host record carries that backend
-  (proof: the deck tile probes herdr, not tmux). ⚠ These are `DeckWindow` tasks — a restored
+  bind stores its key sealed; `MULTIPLEX_BIND_BACKEND=<comma list>` presets
+  the pane's Backend selection, so the minted host record carries it (proof:
+  the deck tile probes herdr, not tmux). The FIRST entry is the default that
+  mints, and every entry is shown — `herdr` is the old single-backend
+  meaning unchanged, `tmux,herdr` binds a MIXED host straight from the pane.
+  ⚠ These are `DeckWindow` tasks — a restored
   terminal-only scene never runs them; `simctl uninstall` + `simctl
   keychain <udid> reset` first (or the mirror re-adopts the old host and
   the free host limit blocks the bind).
@@ -1077,7 +1080,20 @@ logic belongs — keep parsing/command-building out of views.
     afterthought and said nothing about where a new session lands.
     Unchecking the current default promotes what remains, so the record can
     never point at a backend it no longer shows. The New Session sheet
-    mirrors it with a "Runs on" bar under the same gate.
+    mirrors it with a "Runs on" bar under the same gate, and **Add Host ▸
+    BIND wears the same two controls** — a machine may genuinely run both,
+    and one choice made at mint time meant correcting it on the deck
+    afterwards.
+  - ⚠ **The two controls edit `Host.BackendSelection`, never the two fields.**
+    The record stores a default plus extras, so writing either half alone
+    silently changes the other: promoting a checked backend to default used
+    to un-check the one that had been default, because the extras still held
+    the backend just promoted — checking both and then choosing a default
+    collapsed the checks back to one (reported 2026-08-06).
+    `setPreferred` moves the default and keeps the set; `setEnabled` changes
+    the set and promotes a survivor. `AddHostFormState` and `BindController`
+    both hold the value, and the bind mint carries it as ONE parameter down
+    the handshake/offline chain rather than two that must agree.
   - **Tiles say which backend only on a mixed host** (`showsBackendIdentity`),
     and say it in the CHASSIS: a herdr tile takes a very light purple
     (`TallyPalette.herdrBezel` — Catppuccin Mauve, herdr's own default theme;
