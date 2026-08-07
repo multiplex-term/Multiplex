@@ -165,7 +165,7 @@ const LAMP = { live: ["live", "LIVE"], needs: ["needs", "NEEDS YOU"], plain: ["p
 // store order — lives in ORDER below.
 const SHOTS = {
   wall: {
-    headline: "Every tmux session, live on the wall", telemetry: "2 HOSTS · 4 SESSIONS", lamp: "live",
+    headline: "Every essions, live on the wall", telemetry: "2 HOSTS · 4 SESSIONS", lamp: "live",
     stage: "Deck frontmost, 2 host rails, live tiles with real miniature content; header count must match the telemetry. One tile LIVE, the agent tile showing its glyph. Nothing behind the app.",
     per: { iphone: { stage: "The single-window shell's deck in portrait: both host rails in frame, staged miniatures, one attached tile's tally dot lit. Status bar overridden to 9:41." } },
   },
@@ -175,18 +175,8 @@ const SHOTS = {
     per: { ipad: { headline: "Real scenes, Stage Manager ready", stage: "Two Multiplex scenes side-by-side in Stage Manager (drag a second window out via a tab's context menu → New Window)." } },
   },
   herdr: {
-    headline: "Herdr on the wall — a window per session", telemetry: "DECK + 1 WINDOW", lamp: "live",
-    stage: "iPad: Stage Manager — the deck scene (mixed host: graphite tmux tiles beside mauve herdr tiles) beside one attached herdr workspace window (2 tabs / 3 panes, real claude in the agent pane). harness.sh herdr + seed secondaryBackends. Staging bake-off: redesign-herdr-shot.html (V3 combo won 2026-08-07).",
-    per: {
-      visionos: {
-        telemetry: "DECK + 2 WINDOWS",
-        stage: "Deck at left (mixed tiles, mauve visible) + two attached herdr workspace windows placed at depths. MULTIPLEX_DECK_SIZE/TERM_SIZE for repeatable geometry.",
-      },
-      iphone: {
-        headline: "tmux and herdr, one wall", telemetry: "TMUX + HERDR",
-        stage: "The shell deck with one host carrying both backends: graphite tmux tiles beside mauve herdr tiles; a second rail's + HERDR offer chip in frame if it fits. A complete workspace doesn't read at phone size — the mixed deck is the phone's herdr story.",
-      },
-    },
+    headline: "Run herdr — the whole workspace, live", telemetry: "1 WINDOW", lamp: "live",
+    stage: "iPad: Stage Manager — the deck scene (mixed host: graphite tmux tiles beside mauve herdr tiles) beside one attached herdr workspace window (2 tabs / 3 panes, real claude in the agent pane). harness.sh herdr + seed secondaryBackends. Staging bake-off: redesign-herdr-shot.html (V1 won 2026-08-07).",
   },
   agents: {
     headline: "Know when your agent needs you", telemetry: "✳ CLAUDE CODE · EVEN AFTER YOU LEAVE", lamp: "needs",
