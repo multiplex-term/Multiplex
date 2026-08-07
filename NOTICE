@@ -1,0 +1,27 @@
+Multiplex
+Copyright 2026 Jhen-Jie Hong
+
+This product includes software developed by third parties, listed below.
+The complete, audited inventory of everything linked into the shipping app —
+with full license texts — is `Multiplex/Models/LicenseCatalog.swift`, which is
+also what Settings ▸ About ▸ Open Source Licenses renders in the app.
+
+Third-party source vendored into this repository:
+
+- SwiftTerm (`Vendor/SwiftTerm`) — MIT License.
+  Copyright (c) Miguel de Icaza, the xterm.js authors, SourceLair, and
+  Christopher Jeffrey. Vendored fork of 1.15.0 (rev dd2fb8a) carrying Multiplex
+  patches; see `Vendor/SwiftTerm/LICENSE`.
+
+- SwiftNIO SSH (`Vendor/swift-nio-ssh`) — Apache License 2.0.
+  Copyright (c) 2017-2022 Apple Inc. and the SwiftNIO project authors.
+  Vendored fork of Citadel's `Joannis/swift-nio-ssh` 0.3.5 with a one-line
+  manifest fix; see `Vendor/swift-nio-ssh/LICENSE.txt`.
+
+- bcrypt_pbkdf (`Multiplex/Models/Bind/CBcryptSeal`) — BSD-style license.
+  Copyright (c) 2013 Ted Unangst; Copyright 1997 Niels Provos. OpenBSD source
+  vendored under an `mpxbind_` prefix for Bind key sealing.
+
+The mosh transport in `Multiplex/Services/Mosh` is a clean-room implementation
+written from published protocol facts. It carries no third-party license and no
+code from the mosh project (which is GPLv3).
