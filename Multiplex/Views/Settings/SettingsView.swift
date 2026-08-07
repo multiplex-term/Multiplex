@@ -566,6 +566,13 @@ final class SettingsViewController: UIViewController {
     }
 
     private func makeAboutSection() -> UIView {
+        let whatsNew = SettingsNavigationRow(
+            title: "What’s New",
+            accessibilityLabel: "What’s new"
+        ) { [weak self] in
+            self?.showReleaseLog()
+        }
+        whatsNew.accessibilityIdentifier = "settings.whatsNew"
         let licenses = SettingsNavigationRow(
             title: "Open Source Licenses",
             accessibilityLabel: "Open source licenses"
@@ -574,8 +581,9 @@ final class SettingsViewController: UIViewController {
         }
         return SettingsSectionView(
             title: "About",
-            detail: "License notices for the third-party code shipped with Multiplex.",
-            rows: [licenses]
+            detail: "Everything Multiplex \(ReleaseNotes.version) changed, and the "
+                + "license notices for the third-party code shipped with it.",
+            rows: [whatsNew, licenses]
         )
     }
 
@@ -627,6 +635,27 @@ final class SettingsViewController: UIViewController {
         }
         controller.followAppAppearance(themes)
         navigationController?.pushViewController(controller, animated: true)
+    }
+
+    /// The record the launch card's FULL NOTES chip leads to, reachable
+    /// afterwards from here — which is what keeps a one-time modal from being
+    /// the only road to it. Its own modal for the same reason the licenses
+    /// page is one.
+    private func showReleaseLog() {
+        let controller = ReleaseLogViewController()
+        controller.followAppAppearance(themes)
+        let navigation = UINavigationController(rootViewController: controller)
+        controller.onDone = { [weak navigation] in
+            navigation?.dismiss(animated: true)
+        }
+        navigation.navigationBar.prefersLargeTitles = false
+        navigation.view.backgroundColor = GlassPrototype.clearedChassis
+        UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
+        navigation.preferredContentSize = ReleaseLogViewController.preferredSheetSize
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            navigation.modalPresentationStyle = .formSheet
+        }
+        present(navigation, animated: true)
     }
 
     /// The licenses page is its own modal, not a push: its component wall

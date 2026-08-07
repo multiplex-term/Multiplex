@@ -129,6 +129,14 @@ app.multiplexterm.multiplex`):
 - `MULTIPLEX_AUTO_SETTINGS=1|theme|licenses` / `MULTIPLEX_AUTO_FAQ=1` — open
   those sheets for headless capture (`theme` pushes the theme editor,
   `licenses` the Open Source Licenses page).
+- `MULTIPLEX_AUTO_WHATS_NEW=1|log` — open the release-notes launch card /
+  the full record behind its FULL NOTES chip. The launch gate itself is
+  unreachable headlessly (it fires only for an install carrying a PREVIOUS
+  version's defaults), so this is the layout road; the gate is pinned by
+  `DeckWindowUIKitTests` instead. ⚠ Both screens are `DeckWindow`
+  presentations — a restored terminal-only scene shows nothing — and the
+  notification-permission alert iOS raises on a fresh install sits over the
+  middle of the sheet with no headless way to dismiss it.
 - `MULTIPLEX_AUTO_HOST_SETTINGS=1|models|backend|directories` — opens the
   first host's edit sheet (regression-checks the Observation environment
   across the sheet boundary — a missing HostStore is a fatal error);
@@ -1774,6 +1782,42 @@ logic belongs — keep parsing/command-building out of views.
   renders with Icon Composer's own `ictool` and unblends the layers,
   verifying the restack recomposites the reference (≤0.5/255). Never
   edit the three layer PNGs by hand — edit `AppIcon.icon` and re-bake.
+- **The release notes are one content model with two renderings, and the
+  launch card is priced like the interruption it is** (`ReleaseNotes` pure +
+  tested; `WhatsNewViewController` / `ReleaseLogViewController`;
+  `ReleaseNotesStore`). The card shows FOUR changes, no navigation bar, and
+  ends inside one phone screen; FULL NOTES and Settings ▸ About ▸ What's New
+  both open the full banked record. Bake-off record: the log alone was
+  dismissed at the fold, the card alone left eight changes unread, so each
+  absorbs the other's failure. Load-bearing details:
+  - **A missing stamp is not a first run.** Every device updating from a
+    version that never wrote one has `lastSeenVersion == nil`, so
+    `ReleaseNotesGate` takes `installHasPriorUse` (the deck answers it with
+    its locally cached host list) to tell "updated" from "installed today".
+    Reading nil as new silences the notes for exactly the people they are
+    for; reading it as updated shows a changelog to someone meeting the app.
+    Pinned by `ReleaseNotesTests` + `DeckWindowUIKitTests`.
+  - **Once per MINOR version** (1.3.0 → 1.3.1 must not re-open it), stamped
+    on presentation rather than dismissal (a force-quit mid-animation must
+    not make it recurring), and **device-local `UserDefaults`** — updating
+    on iPad must not consume the notice on Vision Pro, so it never rides the
+    synced Host record.
+  - **`ReleaseNotes.version` is the notes' own release, not the bundle's**
+    short version: a patch build must not present itself as a release with
+    its own notes.
+  - Entries and highlights are platform-filtered the way
+    `TerminalGuide.entries(for:)` is — GLASS never reaches an iPad, keep-alive
+    never a Vision Pro — and each platform's FOURTH card row is whichever
+    change is about it. The card's "also in 1.3" line is DERIVED from the
+    entries no shown highlight `covers`, so it can never re-offer something
+    the card just said or miscount the rest.
+  - It rides the deck's presentation queue as its own `PresentationKind`, so
+    it waits behind the app-lock veil; it defers while
+    `ExternalActionRouter.hasPendingActions` (a widget deep link asked for
+    something specific), and it needs real deck width — the compact shell
+    clips its deck pane to zero, and a later layout pass retries. FULL NOTES
+    *supersedes* the card rather than stacking a second sheet, the same
+    reason the licenses page is its own modal.
 
 ## Store metadata maintenance
 

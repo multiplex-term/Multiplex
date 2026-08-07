@@ -235,6 +235,8 @@ final class DeckWindowViewController: UIViewController {
         case editHost(UUID)
         case settings
         case faq
+        case whatsNew
+        case releaseLog
         case paywall
         case localNetworkAlert
     }
@@ -244,6 +246,8 @@ final class DeckWindowViewController: UIViewController {
         case editHost(Host)
         case settings
         case faq
+        case whatsNew
+        case releaseLog
         case paywall
         case localNetworkAlert
 
@@ -253,6 +257,8 @@ final class DeckWindowViewController: UIViewController {
             case .editHost(let host): .editHost(host.id)
             case .settings: .settings
             case .faq: .faq
+            case .whatsNew: .whatsNew
+            case .releaseLog: .releaseLog
             case .paywall: .paywall
             case .localNetworkAlert: .localNetworkAlert
             }
@@ -307,6 +313,10 @@ final class DeckWindowViewController: UIViewController {
     private var lifecycleTasks: [Task<Void, Never>] = []
     private var cloudRefreshTask: Task<Void, Never>?
     private var externalActionCoordinator: ExternalActionUIKitCoordinator?
+    private var releaseNotesChecked = false
+    /// Device-local, so each device is owed the notes on its own update. Tests
+    /// substitute a scratch `UserDefaults` suite.
+    var releaseNotesStore = ReleaseNotesStore()
     #if DEBUG
     private var debugAutomationStarted = false
     #endif
@@ -358,8 +368,16 @@ final class DeckWindowViewController: UIViewController {
             DeckScene.register(session)
         }
         startLifecycleIfNeeded()
+        presentReleaseNotesIfDue()
         presentNextIfPossible()
         externalActionCoordinator?.presenterDidBecomeAvailable()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // The shell's deck pane can be on screen at zero width; this is where
+        // it becomes presentable again after the terminal collapses.
+        presentReleaseNotesIfDue()
     }
 
     deinit {
@@ -703,6 +721,45 @@ final class DeckWindowViewController: UIViewController {
         requestPresentation(.faq)
     }
 
+    func requestReleaseLog() {
+        requestPresentation(.releaseLog)
+    }
+
+    /// Whether this launch owes the reader the release notes, asked once the
+    /// deck is genuinely presentable.
+    ///
+    /// Two guards beyond the gate itself. **Width**: the compact shell clips
+    /// its deck pane to zero while a terminal is expanded, and that pane is
+    /// the wrong presenter (the same trap the external-action alert routes
+    /// around) — a later layout pass retries. **Pending external actions**: a
+    /// launch carrying a widget deep link asked for something specific, so
+    /// the card waits for a launch that did not. Whether a window exists yet
+    /// is deliberately NOT asked here: that is `presentNextIfPossible`'s
+    /// guard, and a queued request is exactly what it is for.
+    private func presentReleaseNotesIfDue() {
+        guard !releaseNotesChecked,
+              lifecycleStarted,
+              !lifecycleStopped,
+              view.bounds.width > 0,
+              !configuration.externalActions.hasPendingActions
+        else { return }
+        releaseNotesChecked = true
+        switch ReleaseNotesGate.decide(
+            lastSeen: releaseNotesStore.lastSeenVersion,
+            current: ReleaseNotes.version,
+            // The locally cached host list is what separates "updated from a
+            // version that stamped nothing" from "installed today".
+            installHasPriorUse: !configuration.store.hosts.isEmpty
+        ) {
+        case .show:
+            requestPresentation(.whatsNew)
+        case .stampSilently:
+            releaseNotesStore.markSeen(ReleaseNotes.version)
+        case .nothing:
+            break
+        }
+    }
+
     private func requestPresentation(
         _ request: PresentationRequest,
         supersedingCurrent: Bool = false
@@ -746,6 +803,10 @@ final class DeckWindowViewController: UIViewController {
             presentSettings()
         case .faq:
             presentFAQ()
+        case .whatsNew:
+            presentWhatsNew()
+        case .releaseLog:
+            presentReleaseLog()
         case .paywall:
             presentPaywall()
         case .localNetworkAlert:
@@ -793,6 +854,37 @@ final class DeckWindowViewController: UIViewController {
         controller.onDone = { [weak self] in self?.dismissActivePresentation() }
         let navigation = makeNavigation(root: controller)
         beginPresentation(navigation, kind: .faq, usesOwnerDelegate: true)
+    }
+
+    /// The launch card carries its own DONE, so it is presented bare — a
+    /// navigation bar above four rows would be chrome for nothing.
+    private func presentWhatsNew() {
+        let controller = WhatsNewViewController()
+        controller.followAppAppearance(configuration.themes)
+        controller.onDone = { [weak self] in self?.dismissActivePresentation() }
+        // FULL NOTES *replaces* the card rather than stacking a second sheet
+        // on it: one sheet at a time is the deck's discipline, and a reader
+        // who asked for the record should land back on the wall when done.
+        controller.onFullNotes = { [weak self] in
+            self?.requestPresentation(.releaseLog, supersedingCurrent: true)
+        }
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            controller.modalPresentationStyle = .formSheet
+        }
+        beginPresentation(controller, kind: .whatsNew, usesOwnerDelegate: true)
+        releaseNotesStore.markSeen(ReleaseNotes.version)
+    }
+
+    private func presentReleaseLog() {
+        let controller = ReleaseLogViewController()
+        controller.followAppAppearance(configuration.themes)
+        controller.onDone = { [weak self] in self?.dismissActivePresentation() }
+        let navigation = makeNavigation(root: controller)
+        navigation.preferredContentSize = ReleaseLogViewController.preferredSheetSize
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            navigation.modalPresentationStyle = .formSheet
+        }
+        beginPresentation(navigation, kind: .releaseLog, usesOwnerDelegate: true)
     }
 
     private func presentPaywall() {
@@ -920,6 +1012,7 @@ final class DeckWindowViewController: UIViewController {
         presentPaywallForReviewCaptureIfRequested()
         presentSettingsForVerificationIfRequested()
         presentFAQForVerificationIfRequested()
+        presentReleaseNotesForVerificationIfRequested()
         presentAddHostForVerificationIfRequested()
         lifecycleTasks.append(Task { [weak self] in
             await self?.presentHostSettingsForVerificationIfRequested()
@@ -951,6 +1044,19 @@ final class DeckWindowViewController: UIViewController {
         guard ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_FAQ"] == "1"
         else { return }
         requestPresentation(.faq)
+    }
+
+    /// Opens either release-notes screen for layout capture. The launch gate
+    /// itself is unreachable headlessly — it fires only for an install that
+    /// carries a PREVIOUS version's defaults — so this is the layout road and
+    /// `DeckWindowUIKitTests` pins the gate. The card still stamps itself seen
+    /// when it presents; Settings ▸ About is the way back to it.
+    private func presentReleaseNotesForVerificationIfRequested() {
+        switch ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_WHATS_NEW"] {
+        case "1": requestPresentation(.whatsNew)
+        case "log": requestPresentation(.releaseLog)
+        default: return
+        }
     }
 
     private func presentHostSettingsForVerificationIfRequested() async {

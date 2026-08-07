@@ -36,6 +36,62 @@ final class DeckWindowUIKitTests: XCTestCase {
         XCTAssertEqual(unlocked.controller.pendingPresentationKinds, [.addHost])
     }
 
+    /// An install that already has hosts is one that was in use before this
+    /// stamp existed — every device updating from a version that wrote
+    /// nothing. Reading that as "first run" is what would silence the notes
+    /// for exactly the people they are written for.
+    func testAnInstallAlreadyInUseIsQueuedTheReleaseNotes() throws {
+        let harness = try makeHarness(hosts: [makeHost(name: "devbox")])
+        let (defaults, suite) = try scratchDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        harness.controller.releaseNotesStore = ReleaseNotesStore(defaults: defaults)
+
+        appear(harness.controller)
+        defer { harness.controller.prepareForRemoval() }
+
+        XCTAssertEqual(harness.controller.pendingPresentationKinds, [.whatsNew])
+        XCTAssertEqual(
+            ReleaseNotesStore(defaults: defaults).lastSeenVersion,
+            nil,
+            "the stamp belongs to the presentation, not the decision"
+        )
+    }
+
+    /// A first run owes nobody a changelog for a release they never missed —
+    /// it is stamped instead, so the next update is the first one that shows.
+    func testAFirstRunIsStampedInsteadOfShownTheReleaseNotes() throws {
+        let harness = try makeHarness()
+        let (defaults, suite) = try scratchDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        harness.controller.releaseNotesStore = ReleaseNotesStore(defaults: defaults)
+
+        appear(harness.controller)
+        defer { harness.controller.prepareForRemoval() }
+
+        XCTAssertTrue(harness.controller.pendingPresentationKinds.isEmpty)
+        XCTAssertEqual(
+            ReleaseNotesStore(defaults: defaults).lastSeenVersion,
+            ReleaseNotes.version
+        )
+    }
+
+    /// A launch carrying a widget deep link asked for something specific.
+    func testAPendingExternalActionHoldsTheReleaseNotesBack() throws {
+        let harness = try makeHarness(hosts: [makeHost(name: "devbox")])
+        let (defaults, suite) = try scratchDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        harness.controller.releaseNotesStore = ReleaseNotesStore(defaults: defaults)
+        harness.externalActions.submit(
+            .openShell(host: .named("devbox"), sessionName: nil)
+        )
+
+        appear(harness.controller)
+        defer { harness.controller.prepareForRemoval() }
+
+        XCTAssertTrue(harness.controller.pendingPresentationKinds.isEmpty)
+        XCTAssertNil(ReleaseNotesStore(defaults: defaults).lastSeenVersion)
+    }
+
     func testHostSettingsDoesNotStackNavigationSmokeInGlass() async throws {
         guard GlassPrototype.enabled else { return }
         let host = makeHost(name: "devbox")
@@ -211,6 +267,22 @@ final class DeckWindowUIKitTests: XCTestCase {
         let controller: DeckWindowViewController
         let bind: BindController
         let themes: ThemeStore
+        let externalActions: ExternalActionRouter
+    }
+
+    /// Enough of the appear cycle to start the deck's lifecycle without a
+    /// window — which is what keeps these assertions on the presentation
+    /// QUEUE, never on a real sheet a later test would inherit.
+    private func appear(_ controller: DeckWindowViewController) {
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        controller.view.layoutIfNeeded()
+        controller.viewDidAppear(false)
+    }
+
+    private func scratchDefaults() throws -> (UserDefaults, String) {
+        let suite = "app.multiplexterm.tests.deckNotes.\(UUID().uuidString)"
+        return (try XCTUnwrap(UserDefaults(suiteName: suite)), suite)
     }
 
     private func makeHarness(
@@ -252,6 +324,7 @@ final class DeckWindowUIKitTests: XCTestCase {
             defaults: defaults,
             directory: root.appendingPathComponent("themes")
         )
+        let externalActions = ExternalActionRouter()
         let configuration = DeckWindowConfiguration(
             store: store,
             entitlements: entitlements,
@@ -263,7 +336,7 @@ final class DeckWindowUIKitTests: XCTestCase {
             themes: themes,
             attention: attention,
             appLock: AppLockStore(defaults: defaults, authenticate: { _ in false }),
-            externalActions: ExternalActionRouter(),
+            externalActions: externalActions,
             sceneWindows: SceneWindowRouting(
                 supportsMultipleWindows: false,
                 perform: { _ in }
@@ -277,7 +350,8 @@ final class DeckWindowUIKitTests: XCTestCase {
         return Harness(
             controller: DeckWindowViewController(configuration: configuration),
             bind: bind,
-            themes: themes
+            themes: themes,
+            externalActions: externalActions
         )
     }
 
