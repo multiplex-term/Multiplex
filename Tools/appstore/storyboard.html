@@ -41,14 +41,21 @@
     box-shadow: 0 calc(var(--u) * .5) calc(var(--u) * 2.4) rgba(0,0,0,.55);
   }
 
-  /* iPad + iPhone: chassis mat, inset screen, UMD docked beneath.
+  /* iPad: chassis mat, inset screen, UMD docked beneath.
      The inset keeps the raw capture's exact aspect (--rawAR) so a real
      capture is uniformly downscaled, never cropped — cover-fitting a
      2752×2064 raw into the mat would shave ~90 px off the deck header
-     and the key rail. The mat absorbs the difference as chassis. */
-  .frame.ipad, .frame.iphone { display: flex; flex-direction: column; gap: 0; }
-  .frame.ipad   { padding: calc(var(--u) * 1.8); }
-  .frame.iphone { padding: calc(var(--u) * 1.2); }
+     and the key rail. The mat absorbs the difference as chassis.
+
+     iPhone deliberately does NOT wear the mat (chosen 2026-08-07, bake-off
+     in redesign-iphone-frame.html): the App Store clips iPhone shots into
+     a device-shaped card (radius ≈ 14% of width, ~185 px at 1320) that ate
+     the square mat's corners and ran the caption into the bottom curve.
+     Full-bleed instead — the raw at native 1:1 IS the poster, the store
+     mask is the device frame, and the UMD floats as a rounded slab inset
+     clear of the curve (the visionOS slab idiom, portrait-sized). Captures
+     must keep their money pixels out of the slab's bottom band. */
+  .frame.ipad { display: flex; flex-direction: column; gap: 0; padding: calc(var(--u) * 1.8); }
   .frame .inset {
     position: relative; flex: 1; min-height: 0; overflow: hidden;
     aspect-ratio: var(--rawAR); align-self: center; max-width: 100%;
@@ -84,15 +91,24 @@
   .lamp.needs { color: var(--caution); } .lamp.needs .dot { background: var(--caution); box-shadow: 0 0 calc(var(--u)*.9) var(--caution); }
   .lamp.plain { color: var(--signal2); } .lamp.plain .dot { background: var(--signal3); }
 
-  /* iPhone portrait: the row UMD can't fit a headline + telemetry side by
-     side at 1320 px, so the UMD stacks — headline row, then telemetry +
-     lamp on a second row. --u is w/50 there (not w/100) so the bar keeps
-     the same visual weight against a portrait frame. */
+  /* iPhone portrait: floating slab. Stacked rows (headline, then telemetry
+     + lamp — a 1320 px row can't fit them side by side), absolutely inset
+     from the store mask's bottom curve: 1.6u sides + 3u bottom keeps the
+     slab's corners inside the ~185 px mask radius. --u is w/50 there (not
+     w/100), and the type runs larger than the old docked bar (headline
+     1.9u, telemetry 1.25u) so the slab carries at card size. */
   .frame.iphone .umd {
-    flex-direction: column; align-items: stretch; gap: calc(var(--u) * .5);
-    padding: calc(var(--u) * .9) calc(var(--u) * 1.1);
+    position: absolute; left: calc(var(--u) * 1.6); right: calc(var(--u) * 1.6);
+    bottom: calc(var(--u) * 3);
+    width: auto; /* the shared .umd width: 100% would override `right` */
+    flex-direction: column; align-items: stretch; gap: calc(var(--u) * .55);
+    padding: calc(var(--u) * 1) calc(var(--u) * 1.2);
+    border-radius: calc(var(--u) * .7);
+    box-shadow: 0 calc(var(--u) * .5) calc(var(--u) * 2.2) rgba(0,0,0,.6);
   }
-  .frame.iphone .umd .headline { font-size: calc(var(--u) * 1.45); }
+  .frame.iphone .umd .headline { font-size: calc(var(--u) * 1.9); }
+  .frame.iphone .umd .telemetry, .frame.iphone .umd .lamp { font-size: calc(var(--u) * 1.25); }
+  .frame.iphone .umd .lamp .dot { width: calc(var(--u) * .95); height: calc(var(--u) * .95); }
   .frame.iphone .umd .subrow {
     display: flex; align-items: baseline; justify-content: space-between;
     gap: calc(var(--u) * 1);
@@ -158,14 +174,32 @@ const SHOTS = {
     stage: "visionOS: three terminals placed around the room at different depths, deck small at left.",
     per: { ipad: { headline: "Real scenes, Stage Manager ready", stage: "Two Multiplex scenes side-by-side in Stage Manager (drag a second window out via a tab's context menu → New Window)." } },
   },
+  herdr: {
+    headline: "Herdr on the wall — a window per session", telemetry: "DECK + 1 WINDOW", lamp: "live",
+    stage: "iPad: Stage Manager — the deck scene (mixed host: graphite tmux tiles beside mauve herdr tiles) beside one attached herdr workspace window (2 tabs / 3 panes, real claude in the agent pane). harness.sh herdr + seed secondaryBackends. Staging bake-off: redesign-herdr-shot.html (V3 combo won 2026-08-07).",
+    per: {
+      visionos: {
+        telemetry: "DECK + 2 WINDOWS",
+        stage: "Deck at left (mixed tiles, mauve visible) + two attached herdr workspace windows placed at depths. MULTIPLEX_DECK_SIZE/TERM_SIZE for repeatable geometry.",
+      },
+      iphone: {
+        headline: "tmux and herdr, one wall", telemetry: "TMUX + HERDR",
+        stage: "The shell deck with one host carrying both backends: graphite tmux tiles beside mauve herdr tiles; a second rail's + HERDR offer chip in frame if it fits. A complete workspace doesn't read at phone size — the mixed deck is the phone's herdr story.",
+      },
+    },
+  },
   agents: {
-    headline: "Know when your agent needs you", telemetry: "✳ CLAUDE CODE", lamp: "needs",
-    stage: "Wall with the agent tile in NEEDS YOU (run real claude, let it ask a question). Notification banner visible if you can catch it — that's the money pixel.",
+    headline: "Know when your agent needs you", telemetry: "✳ CLAUDE CODE · EVEN AFTER YOU LEAVE", lamp: "needs",
+    stage: "Wall with the agent tile in NEEDS YOU (run real claude, let it ask a question). Notification banner visible if you can catch it — that's the money pixel. Telemetry carries the v1.3 keep-alive angle.",
     per: { iphone: { stage: "Shell deck with the agent tile in NEEDS YOU and the notification banner landing over it — the away-from-the-desk pitch. Needs the one-time notification grant." } },
   },
   strip: {
-    headline: "One-tap agent commands — plus your own", telemetry: "/CLEAR · /COMPACT · STOP", lamp: "plain",
-    stage: "Attached session running real Claude Code, chip strip visible, keyboard hidden. Include one custom chip from Command Setup (e.g. a SHIP IT… command) so “plus your own” is true in the pixels.",
+    headline: "One-tap agent commands — plus your own", telemetry: "/CLEAR · /COMPACT · /MODEL", lamp: "plain",
+    stage: "Attached session running real Claude Code, chip strip visible, keyboard hidden. Include one custom chip from Command Setup (e.g. a SHIP IT… command) so “plus your own” is true in the pixels. Recapture: the STOP chip was withdrawn 2026-08-05 — the shipped frames still show it.",
+  },
+  fileviewer: {
+    headline: "Code, diffs, docs — beside the session", telemetry: "▤ CODE · DIFF · MARKDOWN", lamp: "plain",
+    stage: "A ▤ file-viewer tab beside a live session: a git diff or code screen with line numbers, the tree drawer visible, and a second ▤ tab in the tab row (the v1.3 file-viewer tabs). Auxiliary pane — no tally dot, honest.",
   },
   launch: {
     headline: "Start an agent session in one step", telemetry: "CLAUDE CODE · CODEX · PI", lamp: "plain",
@@ -211,14 +245,16 @@ const SHOTS = {
 };
 
 // Store order per device class (= file order after compose.sh).
-// visionOS/iPad run the shared 10-shot narrative; iPhone drops `windows`
-// (no multi-window story in the one-window shell). Every platform carries
-// `keys` — its own key surface: rail (iPad/iPhone) or ornament cluster
-// (visionOS).
+// The 2026-08-07 (v1.3) re-plan: herdr in at slot 3, fileviewer at 7;
+// mosh + drop out on iPad/visionOS (mosh's roaming pitch and drop's Camera
+// story stay iPhone shots). iPhone still drops `windows` (no multi-window
+// story in the one-window shell) and tells herdr as the mixed deck. Every
+// platform carries `keys` — its own key surface: rail (iPad/iPhone) or
+// ornament cluster (visionOS).
 const ORDER = {
-  visionos: ["wall", "windows", "agents", "strip", "launch", "drop", "widgets", "mosh", "keys", "themes"],
-  ipad:     ["wall", "windows", "agents", "strip", "launch", "drop", "widgets", "mosh", "keys", "themes"],
-  iphone:   ["wall", "keys", "agents", "strip", "launch", "drop", "widgets", "mosh", "themes"],
+  visionos: ["wall", "windows", "herdr", "agents", "strip", "launch", "fileviewer", "widgets", "keys", "themes"],
+  ipad:     ["wall", "windows", "herdr", "agents", "strip", "launch", "fileviewer", "widgets", "keys", "themes"],
+  iphone:   ["wall", "keys", "agents", "herdr", "strip", "launch", "drop", "widgets", "mosh", "themes"],
 };
 
 const PLATFORMS = [
@@ -266,10 +302,11 @@ function frameEl(shotKey, platform) {
       <div class="stage">${shot.stage}</div>
     </div>`;
 
-  if (platform.id === "visionos") {
-    f.innerHTML = `<img class="raw" src="${raw}" alt="">${awaiting}${umd}`;
-  } else {
+  if (platform.id === "ipad") {
     f.innerHTML = `<div class="inset"><img class="raw" src="${raw}" alt="">${awaiting}</div>${umd}`;
+  } else {
+    // visionOS + iPhone are full-bleed: the raw is the poster, the UMD floats
+    f.innerHTML = `<img class="raw" src="${raw}" alt="">${awaiting}${umd}`;
   }
   f.querySelector("img.raw").addEventListener("error", () => f.classList.add("missing"));
   return f;
