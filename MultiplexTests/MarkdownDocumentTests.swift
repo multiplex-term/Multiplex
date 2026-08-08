@@ -114,8 +114,34 @@ final class MarkdownDocumentTests: XCTestCase {
             "see [docs](https://example.com/x) and ![shot](img.png) and <https://a.dev>"
         )
         XCTAssertTrue(inlines.contains(.link(text: "docs", destination: "https://example.com/x")))
-        XCTAssertTrue(inlines.contains(.image(alt: "shot")))
+        XCTAssertTrue(inlines.contains(.image(alt: "shot", destination: "img.png")))
         XCTAssertTrue(inlines.contains(.link(text: "https://a.dev", destination: "https://a.dev")))
+    }
+
+    /// An image's destination is what a press resolves, so the two
+    /// decorations CommonMark allows around a target have to come off — a
+    /// title left in place aims the press at a path that does not exist.
+    func testImageAndLinkTargetsShedTitlesAndAngleBrackets() {
+        let titled = MarkdownDocument.parseInlines(
+            #"![shot](docs/shot.png "Figure 1")"#
+        )
+        XCTAssertEqual(
+            titled, [.image(alt: "shot", destination: "docs/shot.png")]
+        )
+        let bracketed = MarkdownDocument.parseInlines("[docs](<my docs.md>)")
+        XCTAssertEqual(
+            bracketed, [.link(text: "docs", destination: "my docs.md")]
+        )
+        // A quote that is part of the target, not a title, stays put.
+        let quoted = MarkdownDocument.parseInlines(#"![q](a"b.png)"#)
+        XCTAssertEqual(quoted, [.image(alt: "q", destination: #"a"b.png"#)])
+    }
+
+    func testImageWithoutADestinationCarriesNone() {
+        XCTAssertEqual(
+            MarkdownDocument.parseInlines("![alt]()"),
+            [.image(alt: "alt", destination: "")]
+        )
     }
 
     func testUnmatchedDelimitersStayPlain() {

@@ -23,6 +23,9 @@ extension Notification.Name {
     static let multiplexDebugFileViewerSelect = Notification.Name(
         "MultiplexDebugFileViewerSelect"
     )
+    static let multiplexDebugFileViewerImage = Notification.Name(
+        "MultiplexDebugFileViewerImage"
+    )
 }
 
 /// `….debug.fileviewer` runs the focused window's + TAB ▸ File Viewer
@@ -31,7 +34,9 @@ extension Notification.Name {
 /// prior `….debug.link` raised over path-shaped text — together the
 /// headless walk of both summon doors. `….debug.fvselect` toggles the
 /// active viewer's rendered-markdown SELECT mode (the rail chip the
-/// simulator can't tap).
+/// simulator can't tap). `….debug.fvimage` presses the first image
+/// placeholder on the rendered markdown screen — the same destination →
+/// resolve → open path a finger takes, which no sim tap can drive.
 @MainActor
 enum FileViewerDebugHook {
     private static var installed = false
@@ -65,6 +70,14 @@ enum FileViewerDebugHook {
         ) { _ in
             NotificationCenter.default.post(
                 name: .multiplexDebugFileViewerSelect, object: nil
+            )
+        }
+        var imageToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.fvimage", &imageToken, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugFileViewerImage, object: nil
             )
         }
     }

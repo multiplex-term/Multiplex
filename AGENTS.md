@@ -251,6 +251,8 @@ app.multiplexterm.multiplex.<name>`:
 - `debug.keybar` — iPad key-bar proof: a shell prompt capture shows `~|/-^C`.
 - `debug.kbdlock` — toggle the software-keyboard lock headlessly.
 - `debug.fvselect` — the file viewer's markdown SELECT mode.
+- `debug.fvimage` — press the first image placeholder on the rendered
+  markdown screen (destination → resolve → open, the finger's own path).
 - `debug.dictation` — press the dictation action. Grant mic with `simctl
   privacy <UDID> grant microphone …`; speech recognition has no simctl
   service — with the device SHUT DOWN insert `kTCCServiceSpeechRecognition`
@@ -894,7 +896,42 @@ logic belongs — keep parsing/command-building out of views.
   (hand-build the stack), and a `path:12` centered scroll must defer one
   main-queue hop past first layout. Rendered markdown keeps SwiftUI
   blocks; a rail SELECT chip re-hosts the raw source on the selectable
-  screen. Honesty rules: NUL-sniff says BINARY; >1.5 MB renders its head
+  screen. **A markdown image is a captioned placeholder that a press turns
+  into the picture, in place** (`MarkdownInline.image(alt:destination:)`;
+  `FileViewerController.InlineImage`): rendering a document still fetches
+  nothing — the press is the only thing that does, and it SHOWS rather
+  than navigates (the tab stays on the README). The caption is the switch:
+  `⟨image: alt⟩` in link ink while hidden, `⌄ image: alt` above the
+  picture once shown, pressed again to put it away. A web URL is not a
+  file this viewer fetches — it goes to the link sheet exactly as it does
+  in prose — and a destination-less `![alt]()` stays the inert caption it
+  always was. Load-bearing details:
+  - **Pictures ride INSIDE the block that names them**
+    (`FileViewerMarkdownProseBlockView`), never as extra rows of the
+    document stack: that stack is index-paired with `blocks`, and
+    mounting, restyling, and the reader's scroll anchor all count on it.
+  - **The height is a constraint re-derived from the width Auto Layout
+    actually gave the view**, never a cached `intrinsicContentSize`. The
+    column's width arrives after the picture does, and one stale
+    measurement leaves the picture floating in a band of empty chassis —
+    shipped and caught on the sim, 2026-08-08. Fit is the column, capped
+    by the picture's own pixels (never upscaled) and by
+    `maximumHeight` (one figure can't take the whole screen); tapping it
+    opens the full ▤ screen, where zoom lives.
+  - Decoded at `inlineImageMaxPixelEdge` (1600, against the full screen's
+    4096) because a README shows many at once; keyed by the destination as
+    written, so one fetch serves every repeat of it, and cleared when the
+    screen moves to another document.
+  - `FileTree.resolve(reference:from:)` is the one resolver the picture
+    and link roads share — percent escapes decode to the REMOTE path,
+    `#anchor` is dropped (there is nothing to scroll to), an anchor-only
+    reference resolves to nothing; `MarkdownDocument` sheds the two
+    decorations CommonMark allows around a target (a `"title"` and `<…>`
+    brackets) so a press can't aim at a path the document never named.
+  - A picture this screen can't draw (an SVG, a PDF, a stat failure) says
+    so where it would have been, with an OPEN FILE chip onto the ▤ screen
+    — a press is never a dead end. Table cells keep the old road outright
+    (a picture would wreck the measured column widths). Honesty rules: NUL-sniff says BINARY; >1.5 MB renders its head
   under TRUNCATED; a deleted file's row opens its diff; failures name the
   cause. A browse summon starts the drawer OPEN (the tree is the subject
   until a file is chosen). `FileTree.hiddenNames` hides only the

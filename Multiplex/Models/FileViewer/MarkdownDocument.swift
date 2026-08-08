@@ -37,9 +37,13 @@ enum MarkdownInline: Equatable {
     /// The destination is untrusted remote text: the renderer offers it
     /// through the link sheet's confirm discipline, never follows it.
     case link(text: String, destination: String)
-    /// v1 renders a captioned placeholder — fetching a document's images
-    /// over SFTP (or the network!) is its own decision, not a side effect.
-    case image(alt: String)
+    /// Rendering an image is still a captioned placeholder — fetching a
+    /// document's images over SFTP (or the network!) is not a side effect of
+    /// reading the prose around them. The destination rides along so a
+    /// *press* can make that decision explicitly: a document-relative path
+    /// opens as its own file-viewer screen, a web URL goes through the link
+    /// sheet like any other untrusted destination.
+    case image(alt: String, destination: String)
 }
 
 enum MarkdownDocument {
@@ -334,7 +338,8 @@ enum MarkdownDocument {
                 if let parsed = parseBracketed(text, from: cursor) {
                     flushPlain()
                     if isImage {
-                        inlines.append(.image(alt: parsed.label))
+                        inlines.append(.image(
+                            alt: parsed.label, destination: parsed.destination))
                     } else {
                         inlines.append(.link(text: parsed.label, destination: parsed.destination))
                     }
@@ -466,15 +471,38 @@ enum MarkdownDocument {
                 parenDepth -= 1
                 if parenDepth == 0 {
                     let label = flattenedLabel(text[text.index(after: open)..<closeBracket])
-                    let destination = String(
+                    let destination = linkDestination(
                         text[text.index(after: afterBracket)..<scan]
-                    ).trimmingCharacters(in: .whitespaces)
+                    )
                     return (label, destination, text.index(after: scan))
                 }
             }
             scan = text.index(after: scan)
         }
         return nil
+    }
+
+    /// The destination inside `(…)`, stripped of the two decorations
+    /// CommonMark allows around it: an optional title after the target
+    /// (`![shot](shot.png "Figure 1")`) and the angle brackets that let a
+    /// target carry spaces (`[docs](<my docs.md>)`). Both are common enough
+    /// in real READMEs that leaving them in would make an otherwise valid
+    /// press miss the file it names.
+    private static func linkDestination(_ raw: Substring) -> String {
+        var value = raw.trimmingCharacters(in: .whitespaces)
+        for quote in ["\"", "'"] where value.hasSuffix(quote) {
+            let body = value.dropLast()
+            if let open = body.lastIndex(of: Character(quote)),
+               open > body.startIndex,
+               body[body.index(before: open)] == " " {
+                value = String(body[..<open]).trimmingCharacters(in: .whitespaces)
+                break
+            }
+        }
+        if value.hasPrefix("<"), value.hasSuffix(">"), value.count >= 2 {
+            value = String(value.dropFirst().dropLast())
+        }
+        return value
     }
 
     /// Link labels render as plain text — emphasis markers inside are
@@ -485,7 +513,7 @@ enum MarkdownDocument {
             case .text(let value, _): value
             case .code(let value): value
             case .link(let value, _): value
-            case .image(let alt): alt
+            case .image(let alt, _): alt
             }
         }.joined()
     }

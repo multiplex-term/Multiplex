@@ -130,4 +130,33 @@ final class FileTreeTests: XCTestCase {
         XCTAssertEqual(FileTree.name(of: "/a/b/c.txt"), "c.txt")
         XCTAssertEqual(FileTree.name(of: "plain"), "plain")
     }
+
+    func testMarkdownReferencesResolveAgainstTheDocumentDirectory() {
+        let base = "/srv/app/docs"
+        XCTAssertEqual(
+            FileTree.resolve(reference: "img/shot.png", from: base),
+            "/srv/app/docs/img/shot.png"
+        )
+        XCTAssertEqual(
+            FileTree.resolve(reference: "../assets/logo.svg", from: base),
+            "/srv/app/docs/../assets/logo.svg"
+        )
+        XCTAssertEqual(
+            FileTree.resolve(reference: "/srv/app/logo.png", from: base),
+            "/srv/app/logo.png"
+        )
+        // A spaced filename is spelled percent-encoded; the remote path is
+        // the decoded one.
+        XCTAssertEqual(
+            FileTree.resolve(reference: "my%20shot.png", from: base),
+            "/srv/app/docs/my shot.png"
+        )
+        // The path in front of an anchor is still the file being named.
+        XCTAssertEqual(
+            FileTree.resolve(reference: "setup.md#install", from: base),
+            "/srv/app/docs/setup.md"
+        )
+        XCTAssertNil(FileTree.resolve(reference: "#install", from: base))
+        XCTAssertNil(FileTree.resolve(reference: "   ", from: base))
+    }
 }

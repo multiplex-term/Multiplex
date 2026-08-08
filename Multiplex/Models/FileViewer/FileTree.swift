@@ -172,6 +172,24 @@ enum FileTree {
         return directory + "/" + relative
     }
 
+    /// Resolve a markdown document's own reference — a link or an image
+    /// target — against the directory holding it. Percent escapes decode to
+    /// the REMOTE path (the rule `TerminalPathTarget` already follows for
+    /// `file:` URIs, and `![shot](my%20shot.png)` is how a spaced filename is
+    /// spelled), an absolute reference stands as written, and a trailing
+    /// `#anchor` is dropped: this viewer has no anchors, and the path in
+    /// front of one is still the file being named. A reference that is only
+    /// an anchor resolves to nothing rather than to the directory.
+    static func resolve(reference: String, from directory: String) -> String? {
+        var value = reference.trimmingCharacters(in: .whitespaces)
+        if let hash = value.firstIndex(of: "#") { value = String(value[..<hash]) }
+        guard !value.isEmpty else { return nil }
+        let decoded = value.removingPercentEncoding ?? value
+        guard !decoded.isEmpty, !decoded.contains("\0") else { return nil }
+        if decoded.hasPrefix("/") { return decoded }
+        return join(directory, decoded)
+    }
+
     /// The parent directory of an absolute path; nil at the filesystem root.
     static func parent(of path: String) -> String? {
         guard path != "/", let slash = path.lastIndex(of: "/") else { return nil }

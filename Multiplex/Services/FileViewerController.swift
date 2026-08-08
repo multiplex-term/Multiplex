@@ -29,10 +29,15 @@ final class FileViewerController: AuxiliaryPaneController {
     /// this in every dimension.
     static let imageMaxPixelEdge = 4096
 
+    /// The ceiling for an image shown INSIDE a document. A rendered column is
+    /// at most 760 pt wide, so this is retina-generous — and a README can
+    /// hold many of these at once, where the full screen shows exactly one.
+    static let inlineImageMaxPixelEdge = 1600
+
     /// Decode through ImageIO with a pixel ceiling, so a decompression bomb
     /// from the host costs a downsample instead of the app's memory.
     /// Falls back to nothing (i.e. "binary") when the bytes aren't an image.
-    static func decodeImage(_ data: Data) -> UIImage? {
+    static func decodeImage(_ data: Data, maxPixelEdge: Int = imageMaxPixelEdge) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               CGImageSourceGetCount(source) > 0
         else { return nil }
@@ -40,7 +45,7 @@ final class FileViewerController: AuxiliaryPaneController {
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: imageMaxPixelEdge,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelEdge,
         ]
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(
             source, 0, options as CFDictionary
@@ -172,6 +177,85 @@ final class FileViewerController: AuxiliaryPaneController {
                 lastDocument = updated
                 content = .document(updated)
             }
+        }
+    }
+
+    // MARK: Markdown images
+
+    /// A picture the reader asked to SEE, shown where the document places it.
+    /// Rendering a document still fetches nothing — the placeholder is a
+    /// press, and this is what that press produced.
+    enum InlineImage: Equatable {
+        case loading
+        case ready(UIImage)
+        /// Why it can't be shown here, in the pane's caps voice.
+        case failed(String)
+
+        /// Two decodes of the same bytes are different pictures to the screen
+        /// (it must re-measure and redraw), and `UIImage`'s own `==` compares
+        /// pixel data — identity is both the cheaper and the truer answer.
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            switch (lhs, rhs) {
+            case (.loading, .loading): true
+            case (.ready(let left), .ready(let right)): left === right
+            case (.failed(let left), .failed(let right)): left == right
+            default: false
+            }
+        }
+    }
+
+    /// Keyed by the destination exactly as the document spells it — so the
+    /// same picture referenced twice shows in both places from one fetch, and
+    /// the map is meaningless outside the document that named those
+    /// references (`open` clears it when the screen moves to another file).
+    /// Bounded by what a person can press, and by the inline pixel ceiling.
+    private(set) var inlineImages: [String: InlineImage] = [:]
+
+    /// Show or hide one markdown image. `destination` is the document's own
+    /// spelling (the key the screen knows), `path` the absolute remote path
+    /// it resolved to (`FileTree.resolve`).
+    func toggleInlineImage(destination: String, path: String) {
+        guard inlineImages[destination] == nil else {
+            inlineImages[destination] = nil
+            return
+        }
+        inlineImages[destination] = .loading
+        let generation = contentGeneration
+        Task { [weak self] in
+            guard let self else { return }
+            let verdict = await loadInlineImage(path: path)
+            // The reader may have collapsed it, or left the document, while
+            // the bytes were in flight.
+            guard generation == contentGeneration,
+                  case .loading = inlineImages[destination]
+            else { return }
+            inlineImages[destination] = verdict
+        }
+    }
+
+    private func loadInlineImage(path: String) async -> InlineImage {
+        let name = FileTree.name(of: path)
+        do {
+            let stat = try await withConnection { try await $0.statFile(atPath: path) }
+            if stat.isDirectory { return .failed("\(name.uppercased()) IS A FOLDER") }
+            let size = stat.size ?? 0
+            guard size <= UInt64(Self.imageByteLimit) else {
+                return .failed("TOO LARGE — \(Self.formatBytes(size))")
+            }
+            let (data, _) = try await withConnection {
+                try await $0.readFile(atPath: path, limit: Self.imageByteLimit)
+            }
+            // Decoded on the main actor, as the full screen's read already is:
+            // the downsample below is bounded and the alternative is making
+            // this type's statics nonisolated for one hop.
+            guard let image = Self.decodeImage(
+                data, maxPixelEdge: Self.inlineImageMaxPixelEdge
+            ) else {
+                return .failed("NOT AN IMAGE THIS VIEWER CAN DRAW")
+            }
+            return .ready(image)
+        } catch {
+            return .failed(failureMessage(error).uppercased())
         }
     }
 
@@ -525,6 +609,8 @@ final class FileViewerController: AuxiliaryPaneController {
 
     func open(path: String, line: Int?) async {
         filePresentation = .source
+        // Shown images belong to the document that named them.
+        if lastDocument?.path != path { inlineImages.removeAll() }
         let name = FileTree.name(of: path)
         contentGeneration += 1
         let generation = contentGeneration

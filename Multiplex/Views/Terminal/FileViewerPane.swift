@@ -38,11 +38,14 @@ private struct FileViewerPaneObservedState {
     /// The reader's text size. Read inside the pane's observation, so a pinch
     /// in one ▤ tab resizes every open one.
     var textScale: CGFloat
+    /// The pictures the reader pressed open inside the rendered document.
+    var inlineImages: [String: FileViewerController.InlineImage]
 
     @MainActor
     init(controller: FileViewerController, textScales: FileViewerTextScaleStore) {
         textScale = textScales.scale
         body = FileViewerPaneBodyState(controller.content)
+        inlineImages = controller.inlineImages
         hostName = controller.hostName
         rootPath = controller.rootPath
         railPath = controller.railPath
@@ -122,6 +125,7 @@ final class FileViewerPaneViewController: UIViewController {
     private var renderedBodyState: FileViewerPaneBodyState?
     private var renderedBodyKey: BodyKey?
     private var renderedTextScale = FileViewerTextScale.default
+    private var renderedInlineImages: [String: FileViewerController.InlineImage] = [:]
     private var markdownSelectKey: String?
     private var observationGeneration = 0
     private var startTask: Task<Void, Never>?
@@ -129,6 +133,7 @@ final class FileViewerPaneViewController: UIViewController {
 
     #if DEBUG
     private var debugSelectObserver: NSObjectProtocol?
+    private var debugImageObserver: NSObjectProtocol?
     #endif
 
     init(
@@ -160,6 +165,9 @@ final class FileViewerPaneViewController: UIViewController {
         #if DEBUG
         if let debugSelectObserver {
             NotificationCenter.default.removeObserver(debugSelectObserver)
+        }
+        if let debugImageObserver {
+            NotificationCenter.default.removeObserver(debugImageObserver)
         }
         #endif
     }
@@ -195,6 +203,13 @@ final class FileViewerPaneViewController: UIViewController {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.toggleMarkdownSelection() }
+        }
+        debugImageObserver = NotificationCenter.default.addObserver(
+            forName: .multiplexDebugFileViewerImage,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.pressFirstMarkdownImage() }
         }
         #endif
     }
@@ -457,6 +472,14 @@ final class FileViewerPaneViewController: UIViewController {
         if renderedTextScale != state.textScale {
             renderedTextScale = state.textScale
             applyTextScale(state.textScale, to: currentBodyView)
+        }
+        // A picture arriving (or being put away) changes one block's height —
+        // never the body's identity, so the screen keeps its scroll position
+        // and any live selection.
+        if renderedInlineImages != state.inlineImages {
+            renderedInlineImages = state.inlineImages
+            (currentBodyView as? FileViewerMarkdownContentView)?
+                .setImageStates(state.inlineImages)
         }
         rebuildRail(state)
         workingLine.isHidden = !isWorking(state)
@@ -827,6 +850,20 @@ final class FileViewerPaneViewController: UIViewController {
         rebuildRail(state)
     }
 
+    #if DEBUG
+    /// The headless spelling of pressing the first image placeholder on the
+    /// rendered screen: it takes the destination the renderer recorded and
+    /// runs the real press path, so what it proves is what a finger proves.
+    /// Firing it twice shows the picture and puts it away again.
+    private func pressFirstMarkdownImage() {
+        guard isActive,
+              let markdown = currentBodyView as? FileViewerMarkdownContentView,
+              let destination = markdown.firstMountedImageDestination()
+        else { return }
+        showMarkdownImage(destination)
+    }
+    #endif
+
     private func markdownSelectionAvailable(_ state: FileViewerPaneObservedState) -> Bool {
         if case .document(let document) = state.body,
            document.kind == .markdown,
@@ -989,6 +1026,8 @@ final class FileViewerPaneViewController: UIViewController {
             let view = FileViewerMarkdownContentView()
             view.setTextScale(scale)
             view.openLink = { [weak self] in self?.openMarkdownLink($0) }
+            view.showImage = { [weak self] in self?.showMarkdownImage($0) }
+            view.setImageStates(controller.inlineImages)
             view.apply(blocks: document.markdown)
             return view
         case .markdown, .code:
@@ -1044,6 +1083,8 @@ final class FileViewerPaneViewController: UIViewController {
             )
         case (.document(let document), let markdown as FileViewerMarkdownContentView):
             markdown.openLink = { [weak self] in self?.openMarkdownLink($0) }
+            markdown.showImage = { [weak self] in self?.showMarkdownImage($0) }
+            markdown.setImageStates(controller.inlineImages)
             markdown.apply(blocks: document.markdown)
         case (.document(let document), let source as FileViewerMarkdownSourceContentView):
             source.apply(text: document.sourceText ?? "")
@@ -1058,6 +1099,30 @@ final class FileViewerPaneViewController: UIViewController {
         }
     }
 
+    /// A pressed image placeholder: show the picture where the document puts
+    /// it, or put it away again. A web address is not a file this viewer can
+    /// fetch, so it stays the link sheet's business exactly as it is in prose
+    /// — and the sheet is also what a `file:`-shaped or malformed target
+    /// meets. Rendering a document still fetches nothing; this press is the
+    /// only thing that does.
+    private func showMarkdownImage(_ destination: String) {
+        if let link = TerminalLink.resolve(destination, schemelessHosts: false) {
+            presentLinkConfirmation(link)
+            return
+        }
+        guard !destination.contains(":"),
+              let current = controller.lastDocument,
+              let path = FileTree.resolve(
+                  reference: destination,
+                  from: FileTree.parent(of: current.path) ?? "/"
+              )
+        else { return }
+        controller.toggleInlineImage(destination: destination, path: path)
+    }
+
+    /// A pressed markdown link — and the way out of a picture this screen
+    /// can't draw (the inline OPEN FILE chip, and a tap on a shown picture,
+    /// which is where zoom lives).
     private func openMarkdownLink(_ destination: String) {
         // External targets are untrusted document text — the link sheet
         // decides, exactly like a pane press. A scheme-less target is
@@ -1068,11 +1133,10 @@ final class FileViewerPaneViewController: UIViewController {
             presentLinkConfirmation(link)
         } else if !destination.contains(":"), let current = controller.lastDocument {
             let base = FileTree.parent(of: current.path) ?? "/"
+            guard let path = FileTree.resolve(reference: destination, from: base)
+            else { return }
             Task { [weak controller] in
-                await controller?.open(
-                    path: FileTree.join(base, destination),
-                    line: nil
-                )
+                await controller?.open(path: path, line: nil)
             }
         }
     }
@@ -1705,6 +1769,13 @@ private extension Comparable {
 struct FileViewerMarkdownAttributedText {
     var text: NSAttributedString
     var destinations: [URL: String]
+    /// The image targets this run carries, in document order — what the block
+    /// mounts pictures for, and what the headless press hook aims at (no sim
+    /// tap route reaches a link).
+    var imageDestinations: [String] = []
+    /// Which of `destinations` are images, so a press can be routed to the
+    /// picture rather than to a file screen.
+    var imageURLs: Set<URL> = []
 }
 
 @MainActor
@@ -1713,10 +1784,13 @@ private enum FileViewerMarkdownInlineRenderer {
         _ inlines: [MarkdownInline],
         baseFont: UIFont,
         lineSpacing: CGFloat = 0,
-        scale: CGFloat = FileViewerTextScale.default
+        scale: CGFloat = FileViewerTextScale.default,
+        shownImages: Set<String> = []
     ) -> FileViewerMarkdownAttributedText {
         let result = NSMutableAttributedString(string: "")
         var destinations: [URL: String] = [:]
+        var imageDestinations: [String] = []
+        var imageURLs: Set<URL> = []
         var linkOrdinal = 0
         for inline in inlines {
             switch inline {
@@ -1751,13 +1825,33 @@ private enum FileViewerMarkdownInlineRenderer {
                         .link: url,
                     ]
                 ))
-            case .image(let alt):
+            case .image(let alt, let destination):
+                // The caption is the picture's switch: pressable in the
+                // screen's own link language while the picture is hidden,
+                // and — with the picture right below it — a plain label
+                // wearing the mark that says pressing hides it again. A
+                // nameless image stays the inert caption it always was.
+                let shown = shownImages.contains(destination)
+                var attributes: [NSAttributedString.Key: Any] = [
+                    .font: UIKitChassis.monoFont(10 * scale),
+                    .foregroundColor: UIKitChassis.signal3,
+                ]
+                if !destination.isEmpty {
+                    let url = URL(string: "multiplex-markdown://image/\(linkOrdinal)")!
+                    linkOrdinal += 1
+                    destinations[url] = destination
+                    imageDestinations.append(destination)
+                    imageURLs.insert(url)
+                    attributes[.link] = url
+                    if !shown {
+                        attributes[.foregroundColor] = CodePalette.link
+                        attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                    }
+                }
+                let described = "image\(alt.isEmpty ? "" : ": \(alt)")"
                 result.append(NSAttributedString(
-                    string: "⟨image\(alt.isEmpty ? "" : ": \(alt)")⟩",
-                    attributes: [
-                        .font: UIKitChassis.monoFont(10 * scale),
-                        .foregroundColor: UIKitChassis.signal3,
-                    ]
+                    string: shown ? "⌄ \(described)" : "⟨\(described)⟩",
+                    attributes: attributes
                 ))
             }
         }
@@ -1776,7 +1870,12 @@ private enum FileViewerMarkdownInlineRenderer {
                 range: NSRange(location: 0, length: result.length)
             )
         }
-        return FileViewerMarkdownAttributedText(text: result, destinations: destinations)
+        return FileViewerMarkdownAttributedText(
+            text: result,
+            destinations: destinations,
+            imageDestinations: imageDestinations,
+            imageURLs: imageURLs
+        )
     }
 
     private static func emphasizedFont(
@@ -1794,15 +1893,24 @@ private enum FileViewerMarkdownInlineRenderer {
 @MainActor
 final class FileViewerMarkdownTextView: UITextView, UITextViewDelegate {
     private var destinations: [URL: String] = [:]
+    private var imageURLs: Set<URL> = []
     var openLink: (String) -> Void = { _ in }
+    /// Set where a picture can be shown in place. Unset — a table cell, whose
+    /// column widths a picture would wreck — an image press falls back to
+    /// `openLink`, which opens the file on its own screen.
+    var showImage: ((String) -> Void)?
     private var lastMeasuredWidth: CGFloat = -1
     private var attributed: FileViewerMarkdownAttributedText
+
+    /// This block's image targets, in document order.
+    var imageDestinations: [String] { attributed.imageDestinations }
 
     init(
         attributed: FileViewerMarkdownAttributedText,
         openLink: @escaping (String) -> Void
     ) {
         self.attributed = attributed
+        imageURLs = attributed.imageURLs
         super.init(frame: .zero, textContainer: nil)
         backgroundColor = .clear
         isEditable = false
@@ -1843,6 +1951,7 @@ final class FileViewerMarkdownTextView: UITextView, UITextViewDelegate {
     func update(attributed: FileViewerMarkdownAttributedText) {
         self.attributed = attributed
         destinations = attributed.destinations
+        imageURLs = attributed.imageURLs
         if attributedText.length > 0 {
             attributedText = NSAttributedString()
         }
@@ -1894,8 +2003,229 @@ final class FileViewerMarkdownTextView: UITextView, UITextViewDelegate {
         // gesture that used to offer text selection instead. `false` keeps the
         // system's own link menu (which would bypass the sheet) out of the way.
         guard interaction == .invokeDefaultAction else { return false }
-        openLink(destinations[URL] ?? URL.absoluteString)
+        let destination = destinations[URL] ?? URL.absoluteString
+        if imageURLs.contains(URL), let showImage {
+            showImage(destination)
+        } else {
+            openLink(destination)
+        }
         return false
+    }
+}
+
+/// A prose block that can carry pictures: the text, and under it whatever
+/// images the reader pressed open, in the order the block names them. The
+/// pictures ride INSIDE the block's own view rather than as extra rows of the
+/// document stack, because that stack is index-paired with `blocks` —
+/// mounting, restyling, and the reader's scroll anchor all count on it.
+@MainActor
+final class FileViewerMarkdownProseBlockView: UIView {
+    let text: FileViewerMarkdownTextView
+    private let stack = UIStackView()
+    /// Re-renders the text at (size, shown targets) — the caption's own
+    /// pressed/unpressed state lives in the attributed run.
+    private let updateText: (CGFloat, Set<String>) -> Void
+    private let openFull: (String) -> Void
+    private var scale: CGFloat
+    private var shown: Set<String> = []
+    private var mountedImages: [(destination: String, view: FileViewerMarkdownImageView)] = []
+
+    init(
+        content: UIView,
+        text: FileViewerMarkdownTextView,
+        scale: CGFloat,
+        updateText: @escaping (CGFloat, Set<String>) -> Void,
+        openFull: @escaping (String) -> Void
+    ) {
+        self.text = text
+        self.scale = scale
+        self.updateText = updateText
+        self.openFull = openFull
+        super.init(frame: .zero)
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 10
+        stack.addArrangedSubview(content)
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func setScale(_ scale: CGFloat) {
+        self.scale = scale
+        updateText(scale, shown)
+    }
+
+    func setImages(_ states: [String: FileViewerController.InlineImage]) {
+        let wanted = text.imageDestinations.filter { states[$0] != nil }
+        if Set(wanted) != shown {
+            shown = Set(wanted)
+            updateText(scale, shown)
+        }
+        guard wanted != mountedImages.map(\.destination) else {
+            for mounted in mountedImages {
+                guard let state = states[mounted.destination],
+                      state != mounted.view.state
+                else { continue }
+                mounted.view.apply(state)
+            }
+            return
+        }
+        for mounted in mountedImages {
+            stack.removeArrangedSubview(mounted.view)
+            mounted.view.removeFromSuperview()
+        }
+        mountedImages = wanted.compactMap { destination in
+            guard let state = states[destination] else { return nil }
+            let view = FileViewerMarkdownImageView(state: state) { [weak self] in
+                self?.openFull(destination)
+            }
+            stack.addArrangedSubview(view)
+            return (destination, view)
+        }
+    }
+
+    /// The pictures this block currently shows — the UIKit tests' seam.
+    var shownImageViews: [FileViewerMarkdownImageView] { mountedImages.map(\.view) }
+}
+
+/// One picture, shown where the document places it. Its size is the reading
+/// column's, never larger than the picture itself — an upscaled screenshot is
+/// worse than a small one — and never taller than `maximumHeight`, so one
+/// figure can't take a whole screen from the prose it belongs to.
+@MainActor
+final class FileViewerMarkdownImageView: UIKitTallyBorderedView {
+    static let maximumHeight: CGFloat = 460
+    private static let panelHeight: CGFloat = 84
+
+    private let imageView = UIImageView()
+    private let captionLabel = UIKitChassisLabel("", size: 8, color: UIKitChassis.signal3)
+    private let openChip: UIKitChassisChip
+    private var heightConstraint: NSLayoutConstraint!
+    private(set) var state: FileViewerController.InlineImage
+    /// Opening the file on its own screen — where zoom lives, and the way out
+    /// of a picture this screen can't draw.
+    private let openFull: () -> Void
+
+    init(state: FileViewerController.InlineImage, openFull: @escaping () -> Void) {
+        self.state = state
+        self.openFull = openFull
+        openChip = UIKitChassisChip(
+            "OPEN FILE",
+            accessibilityLabel: "Open this file on its own screen",
+            action: openFull
+        )
+        super.init(frame: .zero)
+        backgroundColor = UIKitChassis.bezel
+        clipsToBounds = true
+        heightConstraint = heightAnchor.constraint(equalToConstant: Self.panelHeight)
+        heightConstraint.isActive = true
+
+        imageView.contentMode = .scaleAspectFit
+        imageView.isUserInteractionEnabled = true
+        imageView.addGestureRecognizer(
+            UITapGestureRecognizer(target: self, action: #selector(openFullScreen))
+        )
+        #if os(visionOS)
+        imageView.hoverStyle = .init(effect: .highlight, shape: .rect(cornerRadius: 2))
+        #endif
+        addSubview(imageView)
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        let panel = UIStackView(arrangedSubviews: [captionLabel, openChip])
+        panel.axis = .vertical
+        panel.alignment = .center
+        panel.spacing = 8
+        addSubview(panel)
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            panel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            panel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            panel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 12),
+            panel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+        ])
+        apply(state)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    @objc private func openFullScreen() { openFull() }
+
+    func apply(_ state: FileViewerController.InlineImage) {
+        self.state = state
+        switch state {
+        case .loading:
+            imageView.image = nil
+            imageView.isHidden = true
+            captionLabel.setText("LOADING")
+            captionLabel.isHidden = false
+            openChip.isHidden = true
+            isAccessibilityElement = true
+            accessibilityLabel = "Loading image"
+        case .ready(let image):
+            imageView.image = image
+            imageView.isHidden = false
+            captionLabel.isHidden = true
+            openChip.isHidden = true
+            isAccessibilityElement = false
+            imageView.isAccessibilityElement = true
+            imageView.accessibilityLabel = "Image, opens on its own screen"
+            imageView.accessibilityTraits = .button
+        case .failed(let reason):
+            imageView.image = nil
+            imageView.isHidden = true
+            captionLabel.setText("CAN'T SHOW — \(reason)")
+            captionLabel.isHidden = false
+            openChip.isHidden = false
+            isAccessibilityElement = true
+            accessibilityLabel = "Can't show this image. \(reason)"
+        }
+        applyHeight()
+    }
+
+    /// The height is a CONSTRAINT re-derived from the width Auto Layout
+    /// actually gave this view, never a cached intrinsic size: the column's
+    /// width arrives after the picture does (and changes again when the tree
+    /// drawer moves), and a stale measurement is a picture floating in a
+    /// band of empty chassis — which is exactly what caching it produced.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        applyHeight()
+    }
+
+    private func applyHeight() {
+        let width = bounds.width > 0 ? bounds.width : 320
+        let target = Self.height(for: state, inWidth: width)
+        guard abs(heightConstraint.constant - target) > 0.5 else { return }
+        heightConstraint.constant = target
+    }
+
+    /// Pure: the column width, the picture's own size, and the ceiling.
+    static func height(
+        for state: FileViewerController.InlineImage,
+        inWidth width: CGFloat
+    ) -> CGFloat {
+        guard case .ready(let image) = state,
+              image.size.width > 0, image.size.height > 0
+        else { return panelHeight }
+        let drawnWidth = min(width, image.size.width)
+        let height = drawnWidth * image.size.height / image.size.width
+        return max(1, min(height, maximumHeight))
     }
 }
 
@@ -1931,9 +2261,14 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
     }
 
     var openLink: (String) -> Void = { _ in }
+    /// A pressed image placeholder: the pane decides whether that means
+    /// fetching the picture or confirming a web address.
+    var showImage: (String) -> Void = { _ in }
     private(set) var scrollView = UIScrollView()
     private(set) var blockStack = UIStackView()
     private var blocks: [MarkdownBlock] = []
+    /// What the reader has open, by the document's own spelling of the target.
+    private var imageStates: [String: FileViewerController.InlineImage] = [:]
     private var mounted: [MountedBlock] = []
     private var mountedCount = 0
     private var mounting = false
@@ -1987,6 +2322,46 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
+
+    /// The pictures the reader has open, fanned out to every mounted prose
+    /// block (quotes nest, so this walks rather than indexes). Newly mounted
+    /// blocks pick the same map up as they are built.
+    func setImageStates(_ states: [String: FileViewerController.InlineImage]) {
+        guard states != imageStates else { return }
+        imageStates = states
+        applyImageStates()
+    }
+
+    private func applyImageStates() {
+        func walk(_ view: UIView) {
+            if let block = view as? FileViewerMarkdownProseBlockView {
+                block.setImages(imageStates)
+                return
+            }
+            view.subviews.forEach(walk)
+        }
+        blockStack.arrangedSubviews.forEach(walk)
+    }
+
+    /// The first image target on the *mounted* stack, in document order —
+    /// what a press would reach. Blocks past the mount frontier are not
+    /// built yet and are not on screen either, so they are not candidates.
+    func firstMountedImageDestination() -> String? {
+        func scan(_ view: UIView) -> String? {
+            if let text = view as? FileViewerMarkdownTextView,
+               let destination = text.imageDestinations.first {
+                return destination
+            }
+            for subview in view.subviews {
+                if let found = scan(subview) { return found }
+            }
+            return nil
+        }
+        for block in blockStack.arrangedSubviews {
+            if let found = scan(block) { return found }
+        }
+        return nil
+    }
 
     /// Resizes what the reader can see, and lets the rest follow.
     ///
@@ -2159,35 +2534,34 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
     private func makeBlock(_ block: MarkdownBlock) -> MountedBlock {
         switch block {
         case .heading(let level, let inlines):
-            let text = FileViewerMarkdownTextView(
-                attributed: FileViewerMarkdownInlineRenderer.render(
+            let render = { (scale: CGFloat, shown: Set<String>) in
+                FileViewerMarkdownInlineRenderer.render(
                     inlines,
-                    baseFont: Self.headingFont(level, scale: textScale),
-                    scale: textScale
-                ),
-                openLink: openLink
+                    baseFont: Self.headingFont(level, scale: scale),
+                    scale: scale,
+                    shownImages: shown
+                )
+            }
+            let text = makeText(render(textScale, []))
+            let block = proseBlock(
+                content: inset(text, top: level <= 2 ? 8 : 4),
+                text: text,
+                render: render
             )
             return MountedBlock(
-                view: inset(text, top: level <= 2 ? 8 : 4),
-                restyle: { [weak text] scale in
-                    text?.update(attributed: FileViewerMarkdownInlineRenderer.render(
-                        inlines,
-                        baseFont: Self.headingFont(level, scale: scale),
-                        scale: scale
-                    ))
-                },
+                view: block,
+                restyle: { [weak block] scale in block?.setScale(scale) },
                 scale: textScale
             )
         case .paragraph(let inlines):
-            let text = FileViewerMarkdownTextView(
-                attributed: Self.proseText(inlines, scale: textScale),
-                openLink: openLink
-            )
+            let render = { (scale: CGFloat, shown: Set<String>) in
+                Self.proseText(inlines, scale: scale, shownImages: shown)
+            }
+            let text = makeText(render(textScale, []))
+            let block = proseBlock(content: text, text: text, render: render)
             return MountedBlock(
-                view: text,
-                restyle: { [weak text] scale in
-                    text?.update(attributed: Self.proseText(inlines, scale: scale))
-                },
+                view: block,
+                restyle: { [weak block] scale in block?.setScale(scale) },
                 scale: textScale
             )
         case .code(let language, _, let lines):
@@ -2230,10 +2604,10 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
             markerLabel.font = UIKitChassis.monoFont(11 * textScale)
             markerLabel.textColor = UIKitChassis.signal3
             markerLabel.setContentHuggingPriority(.required, for: .horizontal)
-            let text = FileViewerMarkdownTextView(
-                attributed: Self.proseText(inlines, scale: textScale),
-                openLink: openLink
-            )
+            let render = { (scale: CGFloat, shown: Set<String>) in
+                Self.proseText(inlines, scale: scale, shownImages: shown)
+            }
+            let text = makeText(render(textScale, []))
             let row = UIStackView(arrangedSubviews: [markerLabel, text])
             row.axis = .horizontal
             row.alignment = .firstBaseline
@@ -2251,11 +2625,12 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
                 row.topAnchor.constraint(equalTo: container.topAnchor),
                 row.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             ])
+            let block = proseBlock(content: container, text: text, render: render)
             return MountedBlock(
-                view: container,
-                restyle: { [weak markerLabel, weak text, weak row] scale in
+                view: block,
+                restyle: { [weak markerLabel, weak block, weak row] scale in
                     markerLabel?.font = UIKitChassis.monoFont(11 * scale)
-                    text?.update(attributed: Self.proseText(inlines, scale: scale))
+                    block?.setScale(scale)
                     row?.spacing = 9 * scale
                     leading.constant = CGFloat(level) * 18 * scale
                 },
@@ -2290,15 +2665,45 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
         }
     }
 
+    /// A text view wired to both roads a run's links can take: a picture is
+    /// shown in place, anything else is confirmed and opened.
+    private func makeText(
+        _ attributed: FileViewerMarkdownAttributedText
+    ) -> FileViewerMarkdownTextView {
+        let text = FileViewerMarkdownTextView(attributed: attributed, openLink: openLink)
+        text.showImage = { [weak self] in self?.showImage($0) }
+        return text
+    }
+
+    private func proseBlock(
+        content: UIView,
+        text: FileViewerMarkdownTextView,
+        render: @escaping (CGFloat, Set<String>) -> FileViewerMarkdownAttributedText
+    ) -> FileViewerMarkdownProseBlockView {
+        let block = FileViewerMarkdownProseBlockView(
+            content: content,
+            text: text,
+            scale: textScale,
+            updateText: { [weak text] scale, shown in
+                text?.update(attributed: render(scale, shown))
+            },
+            openFull: { [weak self] in self?.openLink($0) }
+        )
+        block.setImages(imageStates)
+        return block
+    }
+
     private static func proseText(
         _ inlines: [MarkdownInline],
-        scale: CGFloat
+        scale: CGFloat,
+        shownImages: Set<String> = []
     ) -> FileViewerMarkdownAttributedText {
         FileViewerMarkdownInlineRenderer.render(
             inlines,
             baseFont: UIKitChassis.uiFont(13 * scale),
             lineSpacing: 3 * scale,
-            scale: scale
+            scale: scale,
+            shownImages: shownImages
         )
     }
 
