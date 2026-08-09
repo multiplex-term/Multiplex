@@ -838,6 +838,39 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertEqual(store.commerceState, .failed("restore failed"))
     }
 
+    func testRestoreSyncFailureFallsBackToOwnedEntitlements() async {
+        // TestFlight's commerce backend routinely fails AppStore.sync() with
+        // internal errors while the entitlement query still answers; owned
+        // entitlements must complete the restore anyway.
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let storeDouble = ProStoreDouble()
+        storeDouble.current = [.verified(storeDouble.transaction())]
+        storeDouble.syncError = .sync
+        let store = lockedStore(defaults: defaults, storeClient: storeDouble.client())
+
+        let restored = await store.restorePurchases()
+        XCTAssertTrue(restored)
+        XCTAssertEqual(store.commerceState, .restored)
+        XCTAssertTrue(store.isPro)
+        XCTAssertTrue(store.hasVerifiedStoreEntitlementForTesting)
+        XCTAssertEqual(storeDouble.syncCount, 1)
+    }
+
+    func testOpaqueStoreErrorMessageNamesTheDomainAndCode() {
+        let message = EntitlementStore.storeErrorMessage(
+            NSError(domain: "SKInternalErrorDomain", code: 14)
+        )
+        XCTAssertTrue(message.contains("(SKInternalErrorDomain 14)"))
+        XCTAssertTrue(message.contains("signed in to the App Store"))
+
+        // An authored LocalizedError message must survive untouched.
+        XCTAssertEqual(
+            EntitlementStore.storeErrorMessage(ProStoreDoubleError.sync),
+            "restore failed"
+        )
+    }
+
     func testVerifiedUpdateClearsEarlierNonPendingRestoreError() async {
         let (defaults, name) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: name) }

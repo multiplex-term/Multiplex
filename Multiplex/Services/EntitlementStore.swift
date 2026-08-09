@@ -576,11 +576,54 @@ final class EntitlementStore {
                 return true
             }
             Self.logger.error(
-                "restore failed: \(String(describing: error), privacy: .public)"
+                "restore sync failed: \(String(describing: error), privacy: .public)"
             )
+            // TestFlight's commerce backend routinely fails AppStore.sync()
+            // with internal errors (SKInternalErrorDomain) even while the
+            // entitlement query works. A snapshot begun NOW is current
+            // StoreKit truth — newer than the failed sync — so a verified
+            // ownership it reports completes the restore. Promotion only:
+            // an EMPTY answer beside a failed sync is the same backend
+            // flakiness and must not revoke ownership already established.
+            let fallbackAuthority = entitlementAuthority
+            let entitled = await currentOwnershipSnapshot()
+            if entitlementAuthority == fallbackAuthority {
+                if entitled {
+                    advanceEntitlementAuthority()
+                    invalidateEntitlementRefresh()
+                    storeEntitled = true
+                    #if DEBUG
+                    debugOverride = nil
+                    #endif
+                    recomputeProStatus()
+                    purchaseAwaitingApproval = false
+                    commerceState = .restored
+                    return true
+                }
+            } else if storeEntitled {
+                // A newer StoreKit event established ownership while the
+                // fallback snapshot ran; it owns the outcome.
+                purchaseAwaitingApproval = false
+                commerceState = .restored
+                return true
+            }
             commerceState = .failed(Self.storeErrorMessage(error))
             return false
         }
+    }
+
+    /// One fresh pass over `currentEntitlements`, published nowhere — the
+    /// failed-sync fallback's evidence gathering.
+    private func currentOwnershipSnapshot() async -> Bool {
+        let entitlementDate = now()
+        var entitled = false
+        for await result in storeClient.currentEntitlements() {
+            guard case .verified(let transaction) = result,
+                  Self.transactionGrantsPro(transaction, at: entitlementDate)
+            else { continue }
+            entitled = true
+        }
+        return entitled
     }
 
     /// Rebuilds ownership from verified current App Store entitlements. A
@@ -812,6 +855,18 @@ final class EntitlementStore {
         case Product.PurchaseError.productUnavailable:
             return "Multiplex Pro is not available for purchase right now."
         default:
+            // An error with no authored description renders as the opaque
+            // "operation couldn't be completed (SKInternalErrorDomain error
+            // 14)" shape — say something actionable and keep the code as a
+            // diagnostic suffix. Bridged Swift errors carry no userInfo, so
+            // LocalizedError's authored message must be consulted directly.
+            let nsError = error as NSError
+            if nsError.userInfo[NSLocalizedDescriptionKey] == nil,
+               (error as? LocalizedError)?.errorDescription == nil {
+                return "The App Store could not complete the request. Check "
+                    + "that this device is signed in to the App Store, then "
+                    + "try again. (\(nsError.domain) \(nsError.code))"
+            }
             return error.localizedDescription
         }
     }
