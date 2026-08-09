@@ -34,7 +34,7 @@ final class TmuxShortcutTests: XCTestCase {
         XCTAssertEqual(TmuxShortcut.closeWindow.bindingLabel, "2×")
     }
 
-    func testSplitActionsUseDirectIDTargetedControlCommandsForMosh() throws {
+    func testSplitActionsUseDirectIDTargetedControlCommandsOnEveryTransport() throws {
         let leftRight = try XCTUnwrap(TmuxProbe.directShortcutCommand(
             .splitLeftRight, sessionName: "my project"
         ))
@@ -50,6 +50,41 @@ final class TmuxShortcutTests: XCTestCase {
         XCTAssertTrue(topBottom.contains("tmux -u split-window -t \"$target\""))
         XCTAssertFalse(topBottom.contains("split-window -h"))
         XCTAssertTrue(topBottom.contains("-c '#{pane_current_path}'"))
+
+        // These stock bindings remain useful as documentation and for physical
+        // keyboard input, but panel dispatch must prefer the commands above.
+        XCTAssertNotNil(TmuxShortcut.splitLeftRight.bindingInput)
+        XCTAssertNotNil(TmuxShortcut.splitTopBottom.bindingInput)
+
+        let leftDelivery = try XCTUnwrap(TmuxProbe.shortcutDelivery(
+            .splitLeftRight, sessionName: "my project"
+        ))
+        guard case .controlCommand(let deliveredLeftRight) = leftDelivery else {
+            return XCTFail("Panel split must prefer its control command")
+        }
+        XCTAssertEqual(deliveredLeftRight, leftRight)
+
+        let topDelivery = try XCTUnwrap(TmuxProbe.shortcutDelivery(
+            .splitTopBottom, sessionName: "my project"
+        ))
+        guard case .controlCommand(let deliveredTopBottom) = topDelivery else {
+            return XCTFail("Panel split must prefer its control command")
+        }
+        XCTAssertEqual(deliveredTopBottom, topBottom)
+    }
+
+    func testOnlySplitsAndConfirmedClosesHaveDirectControlCommands() {
+        let expected: Set<TmuxShortcut> = [
+            .splitLeftRight, .splitTopBottom, .closePane, .closeWindow,
+        ]
+        let actual = Set(TmuxShortcut.allCases.filter {
+            TmuxProbe.directShortcutCommand($0, sessionName: "main") != nil
+        })
+        XCTAssertEqual(actual, expected)
+        XCTAssertEqual(
+            TmuxProbe.shortcutDelivery(.copyMode, sessionName: "main"),
+            .terminalInput([0x02, Character("[").asciiValue!])
+        )
     }
 
     func testCloseActionsUseDirectIDTargetedControlCommands() throws {

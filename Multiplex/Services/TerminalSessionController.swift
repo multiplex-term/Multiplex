@@ -930,11 +930,12 @@ final class TerminalSessionController {
         }
     }
 
-    /// Run one command from the shared tmux panel. Ordinary SSH shortcuts
-    /// enter through SwiftTerm exactly like keyboard input. Mosh split rows
-    /// use the SSH control plane: on iPad the stock Ctrl-B + shifted `%` burst
-    /// can reach tmux without its prefix and type `%` into the pane. Confirmed
-    /// destructive rows already use that control path to avoid tmux's prompt.
+    /// Run one command from the shared tmux panel. Split rows use the SSH
+    /// control plane on every transport: on iPad a stock Ctrl-B + shifted `%`
+    /// burst can intermittently reach tmux without its prefix and type `%`
+    /// into the pane, including on an SSH tab. Other ordinary rows enter
+    /// through SwiftTerm exactly like keyboard input. Confirmed destructive
+    /// rows already use the control path to avoid tmux's prompt.
     func performTmuxShortcut(_ shortcut: TmuxShortcut) {
         guard status == .live, route.usesTmux,
               let sessionName = route.sessionName
@@ -943,15 +944,10 @@ final class TerminalSessionController {
         // either be dropped by the input lock (leaving copy-mode UI stuck
         // half-armed) or race the remote script.
         if case .finding = historyJump { return }
-        let isSplit = shortcut == .splitLeftRight || shortcut == .splitTopBottom
-        if host.useMosh, isSplit,
-           let command = TmuxProbe.directShortcutCommand(
-               shortcut, sessionName: sessionName
-           ) {
+        switch TmuxProbe.shortcutDelivery(shortcut, sessionName: sessionName) {
+        case .controlCommand(let command):
             Task { await executeControlCommand(command) }
-            return
-        }
-        if let input = shortcut.bindingInput {
+        case .terminalInput(let input):
             guard let terminalView else { return }
             if shortcut == .copyMode {
                 // Copy mode freezes the remote pane for navigation, but its
@@ -961,12 +957,9 @@ final class TerminalSessionController {
                 setTmuxCopyModeUIActive(true)
             }
             terminalView.send(input)
+        case nil:
             return
         }
-        guard let command = TmuxProbe.directShortcutCommand(
-            shortcut, sessionName: sessionName
-        ) else { return }
-        Task { await executeControlCommand(command) }
     }
 
     /// Run one command from the herdr panel (HRDR) — `performTmuxShortcut`'s

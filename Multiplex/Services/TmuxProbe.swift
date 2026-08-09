@@ -451,9 +451,31 @@ enum TmuxProbe {
         return pathPrefix + "\(tmuxCommand) kill-session -t \(target.shellQuoted)"
     }
 
-    /// Execute one shortcut through the SSH control plane. Mosh split rows use
-    /// this because a stock-prefix burst can lose its Ctrl-B before a shifted
-    /// `%` reaches tmux on iPad, leaving the character in the pane. Confirmed
+    enum ShortcutDelivery: Equatable {
+        case controlCommand(String)
+        case terminalInput([UInt8])
+    }
+
+    /// The panel's one dispatch decision. A direct command deliberately wins
+    /// when a shortcut also documents stock binding bytes (both split rows).
+    static func shortcutDelivery(
+        _ shortcut: TmuxShortcut, sessionName: String
+    ) -> ShortcutDelivery? {
+        if let command = directShortcutCommand(
+            shortcut, sessionName: sessionName
+        ) {
+            return .controlCommand(command)
+        }
+        if let input = shortcut.bindingInput {
+            return .terminalInput(input)
+        }
+        return nil
+    }
+
+    /// Execute one shortcut through the SSH control plane. Split rows on every
+    /// transport use this because a stock-prefix burst can intermittently lose
+    /// its Ctrl-B before a shifted `%` reaches tmux on iPad, leaving the
+    /// character in the pane. Confirmed
     /// closes use it so they never enter tmux's own confirmation prompt.
     /// Resolve the session's current pane/window to tmux's id first: pane
     /// commands reject `=name` targets on tmux 3.6a, and ids avoid prefix

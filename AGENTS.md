@@ -1518,12 +1518,14 @@ logic belongs — keep parsing/command-building out of views.
   drops (server re-bases within an RTO); a desync valve turns pathology
   into a reconnect. `MoshSession` re-creates the socket on
   failure/better-path/silence (mosh's port hop + roaming); `.active`
-  nudges a heartbeat. **The two tmux split rows use a short-lived SSH
-  control connection on a mosh tab**, resolving tmux's active pane id before
-  `split-window`: iPad can otherwise lose Ctrl-B from the stock-prefix burst
-  and type the shifted `%` into the pane. `-c '#{pane_current_path}'` keeps
-  the binding's working-directory semantics. Other non-destructive shortcut
-  rows still ride the ordered terminal pump. mosh tabs have no exec surface:
+  nudges a heartbeat. **The two tmux split rows use the SSH control plane on
+  every transport** — the tab's live control connection on SSH, a short-lived
+  one on mosh — resolving tmux's active pane id before `split-window`: iPad can
+  intermittently lose Ctrl-B from the stock-prefix burst and type the shifted
+  `%` into the pane on either transport. A direct command MUST outrank the
+  split's documented `bindingInput`; `-c '#{pane_current_path}'` keeps the
+  binding's working-directory semantics. Other non-destructive shortcut rows
+  still ride the ordered terminal pump. mosh tabs have no exec surface:
   FILE is hidden and pane drops are refused with a message, never silently
   dropped.
 - **Tabs move between windows without dropping the shell**: a terminal
