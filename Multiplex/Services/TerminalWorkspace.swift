@@ -121,7 +121,7 @@ final class TerminalWorkspace {
         tab: TerminalRoute,
         host: Host,
         startDirectory: String?,
-        anchorSessionName: String?,
+        anchorSession: SessionKey?,
         target: TerminalPathTarget?,
         targetPresentation: FileViewerController.FilePresentation = .source
     ) {
@@ -130,7 +130,7 @@ final class TerminalWorkspace {
             tabID: tab.id,
             host: host,
             startDirectory: startDirectory,
-            anchorSessionName: anchorSessionName,
+            anchorSession: anchorSession,
             target: target,
             targetPresentation: targetPresentation
         )

@@ -1015,12 +1015,10 @@ final class TerminalWindowViewController: UIViewController,
         guard let activeTab, let host = store.host(id: activeTab.hostID) else { return }
         let anchorID = activeTab.id
         let hostID = activeTab.hostID
-        // A live tmux or herdr tab answers its own pane cwd below; this
-        // anchor only feeds the viewer's LATER re-query over its own
-        // connection, and that re-query is a tmux command — so mosh-tmux
-        // summons re-anchor while mosh-herdr and plain-shell summons
-        // honestly fall back to $HOME.
-        let anchorSessionName = activeTab.usesTmux ? activeTab.sessionName : nil
+        // A live SSH tab answers its own pane cwd below. A mosh tab cannot,
+        // so carry the complete session identity into the viewer: its own SSH
+        // connection re-asks tmux or herdr before $HOME is considered.
+        let anchorSession = activeTab.sessionKey
         Task { [weak self] in
             guard let self else { return }
             let cwd = await workspace.controller(for: anchorID)?.paneWorkingDirectory()
@@ -1032,7 +1030,7 @@ final class TerminalWindowViewController: UIViewController,
                 tab: tab,
                 host: host,
                 startDirectory: cwd,
-                anchorSessionName: anchorSessionName,
+                anchorSession: anchorSession,
                 target: target
             )
             dock(tab, after: anchorID)
@@ -1067,7 +1065,7 @@ final class TerminalWindowViewController: UIViewController,
             tab: tab,
             host: host,
             startDirectory: FileTree.parent(of: path),
-            anchorSessionName: nil,
+            anchorSession: nil,
             target: target,
             targetPresentation: sourceController.selectionPresentation(for: row)
         )

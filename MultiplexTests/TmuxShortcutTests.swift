@@ -34,6 +34,24 @@ final class TmuxShortcutTests: XCTestCase {
         XCTAssertEqual(TmuxShortcut.closeWindow.bindingLabel, "2×")
     }
 
+    func testSplitActionsUseDirectIDTargetedControlCommandsForMosh() throws {
+        let leftRight = try XCTUnwrap(TmuxProbe.directShortcutCommand(
+            .splitLeftRight, sessionName: "my project"
+        ))
+        XCTAssertTrue(leftRight.contains("tmux -u list-panes -t '=my project'"))
+        XCTAssertTrue(leftRight.contains("#{?pane_active,#{pane_id},}"))
+        XCTAssertTrue(leftRight.contains("tmux -u split-window -h -t \"$target\""))
+        XCTAssertTrue(leftRight.contains("-c '#{pane_current_path}'"))
+        XCTAssertFalse(leftRight.contains("send-keys"))
+
+        let topBottom = try XCTUnwrap(TmuxProbe.directShortcutCommand(
+            .splitTopBottom, sessionName: "my project"
+        ))
+        XCTAssertTrue(topBottom.contains("tmux -u split-window -t \"$target\""))
+        XCTAssertFalse(topBottom.contains("split-window -h"))
+        XCTAssertTrue(topBottom.contains("-c '#{pane_current_path}'"))
+    }
+
     func testCloseActionsUseDirectIDTargetedControlCommands() throws {
         let pane = try XCTUnwrap(TmuxProbe.directShortcutCommand(
             .closePane, sessionName: "my project"

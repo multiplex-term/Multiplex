@@ -108,7 +108,7 @@ final class TerminalWorkspaceTests: XCTestCase {
             tab: tab,
             host: host,
             startDirectory: "/srv/app",
-            anchorSessionName: nil,
+            anchorSession: SessionKey(backend: .herdr, name: "work"),
             target: TerminalPathTarget(
                 raw: path,
                 path: path,
@@ -118,11 +118,43 @@ final class TerminalWorkspaceTests: XCTestCase {
             targetPresentation: .diff
         )
 
+        let controller = workspace.fileViewerController(for: tab.id)
+        XCTAssertEqual(controller?.filePresentation, .diff)
         XCTAssertEqual(
-            workspace.fileViewerController(for: tab.id)?.filePresentation,
-            .diff
+            controller?.anchorSession,
+            SessionKey(backend: .herdr, name: "work")
         )
         workspace.closeTab(tab.id)
+    }
+
+    func testFileViewerMoshAnchorDispatchesBySessionBackend() throws {
+        let tmux = SessionKey(backend: .tmux, name: "main")
+        XCTAssertEqual(
+            FileViewerController.anchorDirectoryCommand(for: tmux),
+            TmuxProbe.dropDestinationCommand(sessionName: "main")
+        )
+        XCTAssertEqual(
+            FileViewerController.parseAnchorDirectory(
+                "/srv/project\nMULTIPLEX_GIT\n", backend: .tmux
+            ),
+            "/srv/project"
+        )
+
+        let herdr = SessionKey(backend: .herdr, name: "work")
+        XCTAssertEqual(
+            FileViewerController.anchorDirectoryCommand(for: herdr),
+            HerdrProbe.snapshotCommand(sessionName: "work")
+        )
+        let fixtureURL = try XCTUnwrap(
+            Bundle(for: TerminalWorkspaceTests.self).url(
+                forResource: "herdr-snapshot-v0-7-5", withExtension: "json"
+            )
+        )
+        let snapshot = try String(contentsOf: fixtureURL, encoding: .utf8)
+        XCTAssertEqual(
+            FileViewerController.parseAnchorDirectory(snapshot, backend: .herdr),
+            "/Users/jhen"
+        )
     }
 
     func testUnregisteredWindowStopsMatching() {

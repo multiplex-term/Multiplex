@@ -66,6 +66,22 @@ final class SessionKeyTests: XCTestCase {
         )
     }
 
+    func testTerminalRoutesCarryTheirCompleteSessionIdentity() {
+        let hostID = UUID()
+        XCTAssertEqual(
+            TerminalRoute(hostID: hostID, mode: .attach(sessionName: "main")).sessionKey,
+            SessionKey(backend: .tmux, name: "main")
+        )
+        XCTAssertEqual(
+            TerminalRoute(hostID: hostID, mode: .herdrAttach(sessionName: "work")).sessionKey,
+            SessionKey(backend: .herdr, name: "work")
+        )
+        XCTAssertNil(TerminalRoute(hostID: hostID, mode: .shell).sessionKey)
+        XCTAssertNil(
+            TerminalRoute(hostID: hostID, mode: .fileViewer(path: "/tmp")).sessionKey
+        )
+    }
+
     func testDictionaryReKeyingRoundTrips() {
         let byKey: [SessionKey: [String]] = [
             SessionKey(backend: .tmux, name: "main"): ["a"],

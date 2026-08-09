@@ -451,32 +451,45 @@ enum TmuxProbe {
         return pathPrefix + "\(tmuxCommand) kill-session -t \(target.shellQuoted)"
     }
 
-    /// Execute a shortcut's destructive action from an SSH exec channel.
-    /// Resolve the session's current pane/window to tmux's own id first:
-    /// pane commands reject `=name` targets on tmux 3.6a, and ids also avoid
-    /// prefix collisions. The UI has already required the second press, so
-    /// these use `kill-*` directly and never open tmux's `:` prompt.
+    /// Execute one shortcut through the SSH control plane. Mosh split rows use
+    /// this because a stock-prefix burst can lose its Ctrl-B before a shifted
+    /// `%` reaches tmux on iPad, leaving the character in the pane. Confirmed
+    /// closes use it so they never enter tmux's own confirmation prompt.
+    /// Resolve the session's current pane/window to tmux's id first: pane
+    /// commands reject `=name` targets on tmux 3.6a, and ids avoid prefix
+    /// collisions. `#{pane_current_path}` is expanded by tmux against that
+    /// target, preserving the stock split binding's working directory.
     static func directShortcutCommand(
         _ shortcut: TmuxShortcut, sessionName: String
     ) -> String? {
         let exactSession = "=\(sessionName)".shellQuoted
         let lookup: String
-        let kill: String
+        let action: String
         switch shortcut {
+        case .splitLeftRight:
+            lookup = "\(tmuxCommand) list-panes -t \(exactSession)"
+                + " -F '#{?pane_active,#{pane_id},}' 2>/dev/null | grep -m1 ."
+            action = "\(tmuxCommand) split-window -h -t \"$target\""
+                + " -c '#{pane_current_path}'"
+        case .splitTopBottom:
+            lookup = "\(tmuxCommand) list-panes -t \(exactSession)"
+                + " -F '#{?pane_active,#{pane_id},}' 2>/dev/null | grep -m1 ."
+            action = "\(tmuxCommand) split-window -t \"$target\""
+                + " -c '#{pane_current_path}'"
         case .closePane:
             lookup = "\(tmuxCommand) list-panes -t \(exactSession)"
                 + " -F '#{?pane_active,#{pane_id},}' 2>/dev/null | grep -m1 ."
-            kill = "\(tmuxCommand) kill-pane -t \"$target\""
+            action = "\(tmuxCommand) kill-pane -t \"$target\""
         case .closeWindow:
             lookup = "\(tmuxCommand) list-windows -t \(exactSession)"
                 + " -F '#{?window_active,#{window_id},}' 2>/dev/null | grep -m1 ."
-            kill = "\(tmuxCommand) kill-window -t \"$target\""
+            action = "\(tmuxCommand) kill-window -t \"$target\""
         default:
             return nil
         }
         return pathPrefix
             + "target=$(\(lookup)); "
-            + "if [ -n \"$target\" ]; then \(kill); fi"
+            + "if [ -n \"$target\" ]; then \(action); fi"
     }
 
     /// The shortcut panel's window list for one session. Same `-F`

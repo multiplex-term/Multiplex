@@ -1,10 +1,12 @@
 NEW SINCE 1.3.0
 • MARKDOWN IMAGES SHOW ON A PRESS — in a rendered README the ⟨image: …⟩ placeholder is now a link. Press it and the picture appears right there in the document, sized to the text column; press the caption again to put it away, or tap the picture to open it full-screen with zoom. An image hosted on the web goes through the usual link confirmation instead. Nothing is fetched until you press.
+• MOSH FIXES — TMUX split shortcuts work on iPad, and File Viewer starts in the current tmux or herdr pane directory.
 
 PLEASE TRY
 1. Open a README with screenshots in a ▤ file viewer tab and press its ⟨image: …⟩ placeholders — including one written `../assets/x.png`, one with a %20-escaped space in the filename, and one carrying a "title". Does the right picture appear, in the right place, at a sensible size?
 2. Press the caption again to hide it, resize the tab and the text size (A− / A+) with pictures open, and scroll a long README with several of them open.
 3. Press an image whose target is an https:// address — it must raise the link confirmation, not fetch the picture. Point one at an SVG or a PDF: it should say it can't draw it and offer OPEN FILE.
 4. Press ordinary links in the same document: relative ones still navigate, and `docs/setup.md#install` now opens setup.md instead of failing.
+5. On an iPad mosh tab, try both TMUX split shortcuts, then open File Viewer from non-home tmux and herdr panes. Splits must not type `%`; the viewer must start in each pane's directory.
 
 Feedback: screenshot in TestFlight, or iainst0409@gmail.com

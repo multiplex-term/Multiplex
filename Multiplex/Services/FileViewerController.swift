@@ -60,12 +60,12 @@ final class FileViewerController: AuxiliaryPaneController {
     /// The pane cwd at summon time (absolute), when the summoning tab could
     /// answer over its own transport.
     private let startDirectory: String?
-    /// The tmux session the summoning tab was attached to, when it was one.
-    /// A mosh tab has no exec surface, so it cannot resolve its own pane
-    /// cwd — but SSH is still every host's control plane and this viewer
-    /// dials its own SSH connection, so the query simply moves here rather
-    /// than silently rooting a worktree at $HOME.
-    private let anchorSessionName: String?
+    /// The backend + session the summoning tab was attached to. A mosh tab
+    /// has no exec surface, so it cannot resolve its own pane cwd — but SSH
+    /// remains every host's control plane and this viewer dials its own
+    /// connection, so the backend-specific query simply moves here rather
+    /// than silently rooting tmux or herdr at $HOME.
+    let anchorSession: SessionKey?
     /// The pressed path this tab was summoned to show, when it was.
     private let target: TerminalPathTarget?
     /// A file viewer keeps SOURCE | DIFF as a browsing mode: once DIFF is
@@ -88,14 +88,14 @@ final class FileViewerController: AuxiliaryPaneController {
         tabID: UUID,
         host: Host,
         startDirectory: String?,
-        anchorSessionName: String? = nil,
+        anchorSession: SessionKey? = nil,
         target: TerminalPathTarget?,
         targetPresentation: FilePresentation = .source
     ) {
         self.tabID = tabID
         self.host = host
         self.startDirectory = startDirectory
-        self.anchorSessionName = anchorSessionName
+        self.anchorSession = anchorSession
         self.target = target
         self.targetPresentation = targetPresentation
         self.filePresentation = targetPresentation
@@ -422,19 +422,37 @@ final class FileViewerController: AuxiliaryPaneController {
         }
     }
 
-    /// The summoning tab's active-pane cwd, asked over this viewer's own
-    /// SSH connection. Only reached when the tab itself could not answer —
-    /// a mosh tab has no exec channel, and without this its worktree
-    /// sessions rooted the tree (and every relative path press) at $HOME.
-    /// Same one-exec query and one parser as file drops.
+    /// The summoning tab's active-pane cwd, asked over this viewer's own SSH
+    /// connection. Only reached when the tab itself could not answer — a mosh
+    /// tab has no exec channel. Dispatch by the tab's backend rather than
+    /// assuming tmux: herdr's focused pane comes from its snapshot envelope.
     private func anchorPaneDirectory() async -> String? {
-        guard let anchorSessionName else { return nil }
-        guard let output = try? await withConnection({
-            try await $0.exec(
-                TmuxProbe.dropDestinationCommand(sessionName: anchorSessionName)
-            )
-        }) else { return nil }
-        return TmuxProbe.parseDropDestination(output).cwd
+        guard let anchorSession,
+              let output = try? await withConnection({
+                  try await $0.exec(Self.anchorDirectoryCommand(for: anchorSession))
+              })
+        else { return nil }
+        return Self.parseAnchorDirectory(output, backend: anchorSession.backend)
+    }
+
+    static func anchorDirectoryCommand(for session: SessionKey) -> String {
+        switch session.backend {
+        case .tmux:
+            TmuxProbe.dropDestinationCommand(sessionName: session.name)
+        case .herdr:
+            HerdrProbe.snapshotCommand(sessionName: session.name)
+        }
+    }
+
+    static func parseAnchorDirectory(
+        _ output: String, backend: Host.SessionBackend
+    ) -> String? {
+        switch backend {
+        case .tmux:
+            TmuxProbe.parseDropDestination(output).cwd
+        case .herdr:
+            HerdrProbe.parseFocusedPaneWorkingDirectory(output)
+        }
     }
 
     // MARK: Git

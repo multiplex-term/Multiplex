@@ -876,6 +876,9 @@ logic belongs — keep parsing/command-building out of views.
   never the probe's (a disabled host must not be revived) and never the
   tab's transport (merge/split moves the viewer) — redialed once per op
   after suspension; works for mosh hosts (SSH stays the control plane).
+  A mosh summon carries its full `SessionKey`, so that connection re-asks
+  tmux's active pane or herdr's focused pane for the cwd before `$HOME` — a
+  bare session name regressed herdr to home when backend support landed.
   **SFTP for listings/bytes** (structural, never parse `ls`; reads fill
   fixed chunks concurrently — sequential chunk walks cost seconds per MB
   at real RTT). **Exec for git**: Citadel's `executeCommand` THROWS on
@@ -1515,8 +1518,14 @@ logic belongs — keep parsing/command-building out of views.
   drops (server re-bases within an RTO); a desync valve turns pathology
   into a reconnect. `MoshSession` re-creates the socket on
   failure/better-path/silence (mosh's port hop + roaming); `.active`
-  nudges a heartbeat. mosh tabs have no exec surface: FILE is hidden and
-  pane drops are refused with a message, never silently dropped.
+  nudges a heartbeat. **The two tmux split rows use a short-lived SSH
+  control connection on a mosh tab**, resolving tmux's active pane id before
+  `split-window`: iPad can otherwise lose Ctrl-B from the stock-prefix burst
+  and type the shifted `%` into the pane. `-c '#{pane_current_path}'` keeps
+  the binding's working-directory semantics. Other non-destructive shortcut
+  rows still ride the ordered terminal pump. mosh tabs have no exec surface:
+  FILE is hidden and pane drops are refused with a message, never silently
+  dropped.
 - **Tabs move between windows without dropping the shell**: a terminal
   window's scene value (`TerminalWindowRoute`) *is* its tab list —
   merge/split mutate the window-value binding, never close-and-reopen.

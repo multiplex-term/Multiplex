@@ -149,6 +149,14 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         }
     }
 
+    /// Complete multiplexer identity for control-plane work that outlives or
+    /// sits beside this tab's interactive transport (for example a mosh tab
+    /// summoning its independently connected file viewer).
+    var sessionKey: SessionKey? {
+        guard let backend = sessionBackend, let name = sessionName else { return nil }
+        return SessionKey(backend: backend, name: name)
+    }
+
     /// The extra `+ TAB` entry this tab offers beyond the leading New
     /// Session.
     ///

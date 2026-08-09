@@ -930,10 +930,11 @@ final class TerminalSessionController {
         }
     }
 
-    /// Run one command from the shared tmux panel. Ordinary shortcuts enter
-    /// through SwiftTerm exactly like keyboard input. Destructive shortcuts
-    /// were already confirmed by the panel's second press and use an SSH exec
-    /// channel, which avoids the timing-sensitive tmux `:` prompt entirely.
+    /// Run one command from the shared tmux panel. Ordinary SSH shortcuts
+    /// enter through SwiftTerm exactly like keyboard input. Mosh split rows
+    /// use the SSH control plane: on iPad the stock Ctrl-B + shifted `%` burst
+    /// can reach tmux without its prefix and type `%` into the pane. Confirmed
+    /// destructive rows already use that control path to avoid tmux's prompt.
     func performTmuxShortcut(_ shortcut: TmuxShortcut) {
         guard status == .live, route.usesTmux,
               let sessionName = route.sessionName
@@ -942,6 +943,14 @@ final class TerminalSessionController {
         // either be dropped by the input lock (leaving copy-mode UI stuck
         // half-armed) or race the remote script.
         if case .finding = historyJump { return }
+        let isSplit = shortcut == .splitLeftRight || shortcut == .splitTopBottom
+        if host.useMosh, isSplit,
+           let command = TmuxProbe.directShortcutCommand(
+               shortcut, sessionName: sessionName
+           ) {
+            Task { await executeControlCommand(command) }
+            return
+        }
         if let input = shortcut.bindingInput {
             guard let terminalView else { return }
             if shortcut == .copyMode {
