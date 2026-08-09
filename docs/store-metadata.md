@@ -304,7 +304,8 @@ corresponding binary ships.
 
 When the price changes, also update the DEBUG review-preview default in
 `EntitlementStore.prepareDebugPaywallPreview`, its StoreKit tests, the
-`MULTIPLEX_AUTO_PAYWALL` price wording in `AGENTS.md`, and the review screenshot.
+`MULTIPLEX_AUTO_PAYWALL` price wording in `docs/agents/e2e-headless.md`, and
+the review screenshot.
 Production purchase UI must continue to use StoreKit's localized price.
 
 ## IAP review screenshot

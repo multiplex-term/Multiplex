@@ -97,7 +97,7 @@ own keys under `Tools/dev-sshd/state/` — it never touches `~/.ssh`:
 The simulator shares the Mac's network, so launching a DEBUG build with
 `MULTIPLEX_SEED_HOST` pointing at `state/seed.json` imports a ready `devbox`
 host. Dozens of further DEBUG hooks drive attach, drops, bind, dictation, and
-the rest headlessly — they are catalogued in `AGENTS.md`.
+the rest headlessly — they are catalogued in `docs/agents/e2e-headless.md`.
 
 ## Third-party code
 

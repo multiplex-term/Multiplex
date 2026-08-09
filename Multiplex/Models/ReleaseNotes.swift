@@ -62,7 +62,7 @@ struct ReleaseNoteHighlight: Equatable {
 /// promised to an iPad and background keep-alive never to a Vision Pro.
 ///
 /// Reconciled with `fastlane/metadata/*/release_notes_*.txt` whenever it
-/// changes — same release, same words (AGENTS.md → Store metadata).
+/// changes — same release, same words (docs/agents/release-and-metadata.md).
 enum ReleaseNotes {
     /// The release these notes are for — deliberately not the running build's
     /// `CFBundleShortVersionString`, so a 1.3.1 patch build cannot present

@@ -14,7 +14,8 @@ included:
   - Tools
 
 # Vendored SwiftTerm / swift-nio-ssh carry deliberate upstream patches and are
-# re-applied on every bump (see AGENTS.md) — restyling them would bury the
+# re-applied on every bump (see docs/agents/swiftterm-fork.md) — restyling
+# them would bury the
 # diff that matters. The rest is build output.
 excluded:
   - Vendor
