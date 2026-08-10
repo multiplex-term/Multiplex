@@ -1446,12 +1446,38 @@ extension TerminalWindowViewController {
         }
     }
 
+    private var showsInWindowAuxiliaryRail: Bool {
+        #if os(visionOS)
+        shell != nil
+        #else
+        true
+        #endif
+    }
+
+    private func auxiliaryOrnamentDidChange() {
+        #if os(visionOS)
+        guard shell == nil, !appLocked, isViewLoaded else { return }
+        // Pane observation may fire while UIKit is loading that pane inside
+        // reconciliation. Move ornament reconciliation to the next main turn
+        // rather than re-entering the child graph mid-mount.
+        Task { @MainActor [weak self] in
+            guard let self, self.shell == nil, !self.appLocked else { return }
+            self.renderUMD()
+            self.updateVisionOrnaments(forceRevision: true)
+        }
+        #endif
+    }
+
     private func makePaneController(for tab: TerminalRoute) -> UIViewController? {
         if tab.isViewport {
             guard let viewport = workspace.viewportController(for: tab.id) else { return nil }
             return ViewportPaneViewController(
                 controller: viewport,
                 contentSafeArea: contentSafeArea,
+                showsInWindowRail: showsInWindowAuxiliaryRail,
+                ornamentRailDidChange: { [weak self] in
+                    self?.auxiliaryOrnamentDidChange()
+                },
                 close: { [weak self] in self?.closeTab(tab.id) }
             )
         }
@@ -1461,6 +1487,10 @@ extension TerminalWindowViewController {
                 controller: fileViewer,
                 contentSafeArea: contentSafeArea,
                 isActive: tab.id == activeTab?.id,
+                showsInWindowRail: showsInWindowAuxiliaryRail,
+                ornamentRailDidChange: { [weak self] in
+                    self?.auxiliaryOrnamentDidChange()
+                },
                 openInNewTab: { [weak self] row in
                     self?.openFileInNewViewerTab(row, after: tab.id)
                 },
@@ -1483,7 +1513,10 @@ extension TerminalWindowViewController {
         } else if let viewport = pane as? ViewportPaneViewController {
             viewport.update(
                 contentSafeArea: contentSafeArea,
-                close: { [weak self] in self?.closeTab(tab.id) }
+                close: { [weak self] in self?.closeTab(tab.id) },
+                ornamentRailDidChange: { [weak self] in
+                    self?.auxiliaryOrnamentDidChange()
+                }
             )
         } else if let fileViewer = pane as? FileViewerPaneViewController {
             fileViewer.update(
@@ -1492,7 +1525,10 @@ extension TerminalWindowViewController {
                 openInNewTab: { [weak self] row in
                     self?.openFileInNewViewerTab(row, after: tab.id)
                 },
-                close: { [weak self] in self?.closeTab(tab.id) }
+                close: { [weak self] in self?.closeTab(tab.id) },
+                ornamentRailDidChange: { [weak self] in
+                    self?.auxiliaryOrnamentDidChange()
+                }
             )
         }
     }
@@ -1728,6 +1764,11 @@ extension TerminalWindowViewController {
     private func renderUMD() {
         let profile = railProfile
         if activeTab?.isAuxiliaryPane == true {
+            let activePane = activeTab.flatMap { paneControllers[$0.id] }
+            let fileViewer = (activePane as? FileViewerPaneViewController)?
+                .ornamentConfiguration
+            let viewport = (activePane as? ViewportPaneViewController)?
+                .ornamentConfiguration
             let configuration = ViewportUMDConfiguration(
                 title: umdTitle,
                 mergeSources: mergeSources,
@@ -1743,8 +1784,22 @@ extension TerminalWindowViewController {
                 contentVerticalPadding: profile.verticalPadding,
                 minimumContentHeight: profile.minimumHeight,
                 closeAccessibilityLabel: auxiliaryCloseLabel,
-                textScale: auxiliaryTextScale
+                textScale: auxiliaryTextScale,
+                fileViewer: fileViewer,
+                viewport: viewport
             )
+            #if os(visionOS)
+            if profile.auxiliaryStyle == .regular, viewport != nil {
+                if let controller = umdController as? ViewportSwitchboardViewController {
+                    controller.update(configuration: configuration)
+                } else {
+                    replaceUMD(with: ViewportSwitchboardViewController(
+                        configuration: configuration
+                    ))
+                }
+                return
+            }
+            #endif
             if let controller = umdController as? ViewportUMDViewController {
                 controller.update(configuration: configuration)
             } else {

@@ -174,6 +174,94 @@ final class ViewportPaneUIKitTests: XCTestCase {
         )
     }
 
+    func testVisionSwitchboardMovesPageAndWindowActionsIntoThreeSlabs() throws {
+        let sourceID = UUID()
+        var deckCount = 0
+        var backCount = 0
+        var reloadCount = 0
+        var systemCount = 0
+        var merged: [UUID] = []
+        var closeCount = 0
+        let viewport = ViewportOrnamentConfiguration(
+            key: .init(
+                displayURL: URL(string: "https://docs.example:8443/guide?q=tmux")!,
+                railTag: "VIA DEVBOX",
+                isLoading: true,
+                progress: 0.4,
+                canGoBack: false
+            ),
+            goBack: { backCount += 1 },
+            reloadOrStop: { reloadCount += 1 },
+            editAddress: {},
+            copyAddress: {},
+            clearBrowsingData: {},
+            openInSystemBrowser: { systemCount += 1 }
+        )
+        let configuration = ViewportUMDConfiguration(
+            title: "⌗ 8443 · devbox",
+            mergeSources: [window("agent · devbox", id: sourceID)],
+            showDeck: { deckCount += 1 },
+            merge: { merged.append($0) },
+            close: { closeCount += 1 },
+            style: .regular,
+            deckControlLabel: "DECK",
+            contentSafeArea: .zero,
+            closeAccessibilityLabel: "Close viewport",
+            textScale: nil,
+            viewport: viewport
+        )
+        let switchboard = ViewportSwitchboardViewController(configuration: configuration)
+
+        XCTAssertEqual(switchboard.slabControllers.count, 3)
+        XCTAssertEqual(switchboard.addressButton.accessibilityIdentifier, "viewport.address")
+        XCTAssertEqual(
+            switchboard.addressButton.attributedTitle(for: .normal)?.string,
+            "docs.example:8443/guide?q=tmux"
+        )
+        XCTAssertEqual(switchboard.reachBadge.accessibilityLabel, "Reach: VIA DEVBOX")
+        XCTAssertFalse(switchboard.backChip.isUserInteractionEnabled)
+        XCTAssertEqual(switchboard.reloadChip.accessibilityLabel, "Stop loading")
+        XCTAssertEqual(switchboard.mergeButton?.menu?.title, "Merge")
+        XCTAssertEqual(switchboard.mergeButton?.menu?.children.count, 1)
+        XCTAssertEqual(switchboard.closeChip.accessibilityLabel, "Close viewport")
+        XCTAssertNil(
+            switchboard.navigateSlab.view.descendant(of: UIKitChassisLabel.self),
+            "the retired viewport UMD title must not appear in Switchboard"
+        )
+
+        XCTAssertTrue(switchboard.deckChip.accessibilityActivate())
+        XCTAssertTrue(switchboard.reloadChip.accessibilityActivate())
+        XCTAssertTrue(switchboard.systemChip.accessibilityActivate())
+        let merge = try XCTUnwrap(switchboard.mergeButton?.menu?.children.first as? UIAction)
+        merge.performWithSender(nil, target: nil)
+        XCTAssertTrue(switchboard.closeChip.accessibilityActivate())
+        XCTAssertEqual(deckCount, 1)
+        XCTAssertEqual(backCount, 0)
+        XCTAssertEqual(reloadCount, 1)
+        XCTAssertEqual(systemCount, 1)
+        XCTAssertEqual(merged, [sourceID])
+        XCTAssertEqual(closeCount, 1)
+    }
+
+    func testOrnamentProfileReclaimsTheViewportRailHeight() {
+        let controller = makeViewportController()
+        controller.stopLoading()
+        let pane = ViewportPaneViewController(
+            controller: controller,
+            showsInWindowRail: false,
+            close: {}
+        )
+        pane.loadViewIfNeeded()
+        defer {
+            pane.prepareForRemoval()
+            controller.shutdown()
+        }
+
+        XCTAssertNotNil(pane.ornamentConfiguration)
+        XCTAssertNil(pane.view.viewWithAccessibilityIdentifier("viewport.back"))
+        XCTAssertNil(pane.view.viewWithAccessibilityIdentifier("viewport.close"))
+    }
+
     func testNativeUMDPreservesRegularMenuAndShellSafeAreaGeometry() {
         let sourceID = UUID()
         let source = TerminalWorkspace.WindowEntry(
@@ -353,5 +441,19 @@ final class ViewportPaneUIKitTests: XCTestCase {
             surrender: { [] },
             adopt: { _ in }
         )
+    }
+}
+
+private extension UIView {
+    func descendant<T: UIView>(of type: T.Type) -> T? {
+        if let match = self as? T { return match }
+        return subviews.lazy.compactMap { $0.descendant(of: type) }.first
+    }
+
+    func viewWithAccessibilityIdentifier(_ identifier: String) -> UIView? {
+        if accessibilityIdentifier == identifier { return self }
+        return subviews.lazy.compactMap {
+            $0.viewWithAccessibilityIdentifier(identifier)
+        }.first
     }
 }

@@ -730,6 +730,23 @@ final class TerminalWindowUIKitTests: XCTestCase {
         XCTAssertEqual(collapsedHelper.consoleOrigin, CGPoint(x: 0, y: 44))
     }
 
+    func testVisionStackedDeckGeometryHangsTheExtraRowBelowTheAnchor() {
+        let geometry = TerminalVisionStackedDeckGeometry.resolve(
+            contentSize: CGSize(width: 820, height: 95),
+            anchorOffset: 48
+        )
+
+        XCTAssertEqual(geometry.size, CGSize(width: 820, height: 143))
+        XCTAssertEqual(geometry.contentOrigin, CGPoint(x: 0, y: 48))
+        XCTAssertEqual(
+            geometry.size.height / 2 - geometry.contentOrigin.y,
+            (95 - 48) / 2,
+            "the slab's top edge sits half a window row above the anchor —"
+                + " matching a single-row slab — so the file row never rides up"
+                + " over the pane's content"
+        )
+    }
+
     func testVisionConsoleMountsNativeCenterOnceAcrossFittingCandidates() async {
         let counter = VisionConsoleCenterMountCounter()
         let nativeCenter = UIViewController()

@@ -396,6 +396,105 @@ final class FileViewerPaneUIKitTests: XCTestCase {
         XCTAssertEqual(view.content?.bodyFont.pointSize, resized.bodyFont.pointSize)
     }
 
+    func testVisionStackedDeckKeepsFileInventoryAboveTheVerbatimWindowRow() {
+        var refreshed = 0
+        var closed = 0
+        let fileViewer = FileViewerOrnamentConfiguration(
+            key: .init(
+                canGoBack: true,
+                canGoForward: false,
+                showsSourceDiff: true,
+                sourceSelected: true,
+                markdownSelectionCaption: "SELECT",
+                path: "/srv/app/README.md",
+                hostName: "devbox",
+                treeCaption: "TREE",
+                isBusy: false,
+                isWorking: true
+            ),
+            goBack: {},
+            goForward: {},
+            showSource: {},
+            showDiff: {},
+            toggleMarkdownSelection: {},
+            toggleTree: {},
+            refresh: { refreshed += 1 }
+        )
+        let configuration = ViewportUMDConfiguration(
+            title: "▤ README.md · devbox",
+            mergeSources: [],
+            showDeck: {},
+            merge: { _ in },
+            close: { closed += 1 },
+            style: .regular,
+            deckControlLabel: "DECK",
+            contentSafeArea: .zero,
+            closeAccessibilityLabel: "Close file viewer",
+            textScale: nil,
+            fileViewer: fileViewer
+        )
+        let controller = ViewportUMDViewController(configuration: configuration)
+        controller.loadViewIfNeeded()
+
+        XCTAssertGreaterThan(controller.stackedDeckAnchorOffset(for: 800), 0)
+        XCTAssertEqual(controller.titleLabel?.accessibilityLabel, "▤ README.md · devbox")
+        let pathLabel = controller.filePathLabel
+        XCTAssertEqual(pathLabel?.accessibilityLabel, "/srv/app/README.md")
+        XCTAssertTrue(pathLabel?.constraints.contains {
+            $0.firstAttribute == .width
+                && $0.relation == .greaterThanOrEqual
+                && $0.constant == 120
+        } == true)
+        XCTAssertTrue(pathLabel?.constraints.contains {
+            $0.firstAttribute == .width
+                && $0.relation == .lessThanOrEqual
+                && $0.constant == 360
+        } == true)
+        XCTAssertLessThan(
+            controller.fittingContentSize().width,
+            800,
+            "the slab fits its controls instead of adopting the window width"
+        )
+        XCTAssertEqual(controller.fileHostBadge?.accessibilityLabel, "Files on devbox")
+        XCTAssertEqual(controller.fileBackChip?.alpha, 1)
+        XCTAssertEqual(controller.fileForwardChip?.alpha, 0.5)
+        XCTAssertEqual(controller.fileSelectChip?.accessibilityLabel, "Select source text to copy")
+        XCTAssertEqual(controller.fileTreeChip?.accessibilityLabel, "Show the file tree")
+        XCTAssertTrue(controller.fileRefreshChip?.accessibilityActivate() == true)
+        XCTAssertTrue(controller.closeChip?.accessibilityActivate() == true)
+        XCTAssertEqual(refreshed, 1)
+        XCTAssertEqual(closed, 1)
+        XCTAssertNil(
+            controller.view.descendants.first {
+                $0.accessibilityIdentifier == "fileViewer.close"
+            },
+            "Stacked Deck has only its window-row CLOSE"
+        )
+    }
+
+    func testOrnamentProfileReclaimsTheFileViewerRailHeight() {
+        let controller = FileViewerController(
+            tabID: UUID(),
+            host: makeHost(),
+            startDirectory: "/srv/app",
+            target: nil
+        )
+        let pane = FileViewerPaneViewController(
+            controller: controller,
+            startsController: false,
+            showsInWindowRail: false,
+            close: {}
+        )
+        pane.loadViewIfNeeded()
+
+        XCTAssertNotNil(pane.ornamentConfiguration)
+        XCTAssertNil(
+            pane.view.descendants.first {
+                $0.accessibilityIdentifier == "fileViewer.close"
+            }
+        )
+    }
+
     private func makePane(close: @escaping () -> Void) -> FileViewerPaneViewController {
         let controller = FileViewerController(
             tabID: UUID(),

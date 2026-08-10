@@ -287,7 +287,40 @@ private struct TerminalVisionBottomOrnament: View {
             EmptyView()
 
         case .auxiliary:
-            if let umd = state.umdController {
+            if let switchboard = state.umdController as? ViewportSwitchboardViewController {
+                HStack(spacing: 10) {
+                    ForEach(
+                        Array(switchboard.slabControllers.enumerated()),
+                        id: \.offset
+                    ) { _, slab in
+                        TerminalVisionControllerMount(
+                            controller: slab,
+                            sizing: .switchboardSlab,
+                            revision: state.revision,
+                            interfaceStyle: state.interfaceStyle
+                        )
+                        .fixedSize()
+                        .modifier(GlassPrototypeSlabGround())
+                    }
+                }
+            } else if let umd = state.umdController as? ViewportUMDViewController,
+                      umd.stackedDeckAnchorOffset(for: nil) > 0 {
+                // Content-sized on purpose: a slab that tracked the window
+                // width would permanently cover the system window bar and
+                // resize corners below the silhouette.
+                TerminalVisionStackedDeckLayout(
+                    anchorOffset: umd.stackedDeckAnchorOffset(for: nil)
+                ) {
+                    TerminalVisionControllerMount(
+                        controller: umd,
+                        sizing: .auxiliaryUMD,
+                        revision: state.revision,
+                        interfaceStyle: state.interfaceStyle
+                    )
+                    .fixedSize()
+                    .modifier(GlassPrototypeSlabGround())
+                }
+            } else if let umd = state.umdController {
                 TerminalVisionControllerMount(
                     controller: umd,
                     sizing: .auxiliaryUMD,
@@ -381,6 +414,73 @@ private struct TerminalVisionBottomOrnament: View {
                 value: helperCollapsed
             )
         }
+    }
+}
+
+struct TerminalVisionStackedDeckGeometry: Equatable {
+    var size: CGSize
+    var contentOrigin: CGPoint
+
+    static func resolve(contentSize: CGSize, anchorOffset: CGFloat) -> Self {
+        let size = CGSize(
+            width: contentSize.width.isFinite ? max(0, contentSize.width) : 0,
+            height: contentSize.height.isFinite ? max(0, contentSize.height) : 0
+        )
+        let offset = anchorOffset.isFinite
+            ? min(max(0, anchorOffset), size.height) : 0
+        // Pad the host by the upper band's height and shift the content down
+        // by the same amount: the slab's top edge then lands half a window
+        // row above the anchor — exactly where a single-row slab's top sits —
+        // and the extra file row extends BELOW the anchor instead of riding
+        // up over the pane's last lines of content.
+        return Self(
+            size: CGSize(width: size.width, height: size.height + offset),
+            contentOrigin: CGPoint(x: 0, y: offset)
+        )
+    }
+}
+
+/// Biases Stacked Deck's host bounds so the slab's top edge sits where a
+/// single-row slab's top would — half a window row above the anchor — and the
+/// extra file row hangs below the anchor. A plain VStack would center the
+/// doubled slab on the anchor and push the file row up over the pane's last
+/// lines of content.
+private struct TerminalVisionStackedDeckLayout: Layout {
+    var anchorOffset: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let content = subviews.first else { return .zero }
+        let size = content.sizeThatFits(proposal)
+        return TerminalVisionStackedDeckGeometry.resolve(
+            contentSize: size,
+            anchorOffset: anchorOffset
+        ).size
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let content = subviews.first else { return }
+        let size = content.sizeThatFits(proposal)
+        let geometry = TerminalVisionStackedDeckGeometry.resolve(
+            contentSize: size,
+            anchorOffset: anchorOffset
+        )
+        content.place(
+            at: CGPoint(
+                x: bounds.midX,
+                y: bounds.minY + geometry.contentOrigin.y
+            ),
+            anchor: .top,
+            proposal: ProposedViewSize(width: size.width, height: size.height)
+        )
     }
 }
 
@@ -816,6 +916,7 @@ private enum TerminalVisionControllerSizing: Equatable {
     case helper
     case terminalUMD
     case auxiliaryUMD
+    case switchboardSlab
 }
 
 private struct TerminalVisionControllerMount: UIViewControllerRepresentable {
@@ -952,6 +1053,10 @@ private final class TerminalVisionControllerHost: UIViewController {
         case .auxiliaryUMD:
             if let umd = content as? ViewportUMDViewController {
                 return umd.fittingContentSize(for: proposedWidth)
+            }
+        case .switchboardSlab:
+            if let slab = content as? ViewportSwitchboardSlabViewController {
+                return slab.fittingContentSize(for: proposedWidth)
             }
         }
         content.loadViewIfNeeded()

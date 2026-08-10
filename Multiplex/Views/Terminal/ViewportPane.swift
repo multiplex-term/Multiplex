@@ -27,6 +27,26 @@ struct ViewportPaneObservedState {
     }
 }
 
+/// Value snapshot consumed by visionOS's three-slab Switchboard. The floating
+/// editor and destructive confirmation remain pane-owned presentations.
+struct ViewportOrnamentConfiguration {
+    struct RenderKey: Equatable {
+        var displayURL: URL
+        var railTag: String
+        var isLoading: Bool
+        var progress: Double
+        var canGoBack: Bool
+    }
+
+    var key: RenderKey
+    var goBack: () -> Void
+    var reloadOrStop: () -> Void
+    var editAddress: () -> Void
+    var copyAddress: () -> Void
+    var clearBrowsingData: () -> Void
+    var openInSystemBrowser: () -> Void
+}
+
 /// Native viewport surface. It adopts the controller-owned WKWebView instead
 /// of recreating it, so merge/split keeps page state, sockets, and scroll;
 /// every piece of app chrome around that page is UIKit-owned here.
@@ -44,6 +64,8 @@ final class ViewportPaneViewController: UIViewController,
     private var state: ViewportPaneObservedState?
     private var failureIdentity: String?
     private var isPresentingExternalLink = false
+    private let showsInWindowRail: Bool
+    private var ornamentRailDidChange: () -> Void
 
     private let rootStack = UIStackView()
     private let pageArea = UIView()
@@ -69,10 +91,14 @@ final class ViewportPaneViewController: UIViewController,
     init(
         controller: ViewportController,
         contentSafeArea: UIEdgeInsets = .zero,
+        showsInWindowRail: Bool = true,
+        ornamentRailDidChange: @escaping () -> Void = {},
         close: @escaping () -> Void
     ) {
         self.controller = controller
         self.contentSafeArea = contentSafeArea
+        self.showsInWindowRail = showsInWindowRail
+        self.ornamentRailDidChange = ornamentRailDidChange
         closeAction = close
         super.init(nibName: nil, bundle: nil)
     }
@@ -99,8 +125,13 @@ final class ViewportPaneViewController: UIViewController,
         presentPendingExternalLinkIfPossible()
     }
 
-    func update(contentSafeArea: UIEdgeInsets, close: @escaping () -> Void) {
+    func update(
+        contentSafeArea: UIEdgeInsets,
+        close: @escaping () -> Void,
+        ornamentRailDidChange: @escaping () -> Void = {}
+    ) {
         closeAction = close
+        self.ornamentRailDidChange = ornamentRailDidChange
         if self.contentSafeArea != contentSafeArea {
             self.contentSafeArea = contentSafeArea
             if isViewLoaded { updateRailInsets() }
@@ -151,7 +182,9 @@ final class ViewportPaneViewController: UIViewController,
         ])
         rootStack.addArrangedSubview(pageArea)
         buildRail()
-        rootStack.addArrangedSubview(railView)
+        if showsInWindowRail {
+            rootStack.addArrangedSubview(railView)
+        }
     }
 
     func adoptWebView() {
@@ -296,6 +329,37 @@ final class ViewportPaneViewController: UIViewController,
         reachBadge.accessibilityLabel = "Reach: \(state.railTag)"
         progressLine.isHidden = !state.isLoading
         updateProgressWidth()
+        if !showsInWindowRail { ornamentRailDidChange() }
+    }
+
+    var ornamentConfiguration: ViewportOrnamentConfiguration? {
+        guard !showsInWindowRail, let state else { return nil }
+        return ViewportOrnamentConfiguration(
+            key: .init(
+                displayURL: state.displayURL,
+                railTag: state.railTag,
+                isLoading: state.isLoading,
+                progress: state.progress,
+                canGoBack: state.canGoBack
+            ),
+            goBack: { [weak controller] in controller?.goBack() },
+            reloadOrStop: { [weak self] in
+                guard let self else { return }
+                if self.state?.isLoading == true {
+                    self.controller.stopLoading()
+                } else {
+                    self.controller.reload()
+                }
+            },
+            editAddress: { [weak self] in self?.beginEditingAddress() },
+            copyAddress: { [weak controller] in controller?.copyURL() },
+            clearBrowsingData: { [weak self] in
+                self?.presentClearBrowsingDataConfirmation()
+            },
+            openInSystemBrowser: { [weak controller] in
+                controller?.openInSystemBrowser()
+            }
+        )
     }
 
     private func updateProgressWidth() {
@@ -762,6 +826,12 @@ struct ViewportUMDConfiguration {
     /// nil (the default) is a rail with no reading size — every ⌗ viewport
     /// tab, and any caller that has no file viewer under it.
     var textScale: TextScale?
+    /// The visionOS classic FileViewer stacks its file-local row above this
+    /// unchanged window row inside one slab. Shell/iPad leave this nil.
+    var fileViewer: FileViewerOrnamentConfiguration?
+    /// The visionOS classic Viewport replaces this flat row with Switchboard.
+    /// Shell/iPad leave this nil and retain the existing UMD.
+    var viewport: ViewportOrnamentConfiguration?
 }
 
 enum ViewportUMDAction: Equatable {
@@ -794,6 +864,8 @@ final class ViewportUMDViewController: UIViewController {
         private let closeAccessibilityLabel: String
         private let textScale: CGFloat?
         private let textScaleEnds: [Bool]
+        private let fileViewer: FileViewerOrnamentConfiguration.RenderKey?
+        private let viewport: ViewportOrnamentConfiguration.RenderKey?
 
         init(_ configuration: ViewportUMDConfiguration) {
             title = configuration.title
@@ -803,6 +875,8 @@ final class ViewportUMDViewController: UIViewController {
             textScaleEnds = configuration.textScale.map {
                 [$0.canDecrease, $0.canIncrease]
             } ?? []
+            fileViewer = configuration.fileViewer?.key
+            viewport = configuration.viewport?.key
             switch configuration.style {
             case .regular:
                 mergeSources = configuration.mergeSources.map {
@@ -836,6 +910,15 @@ final class ViewportUMDViewController: UIViewController {
     private(set) var textScaleDownChip: UIKitChassisChip?
     private(set) var textScaleUpChip: UIKitChassisChip?
     private(set) var textScaleResetChip: UIKitChassisChip?
+    private(set) var fileBackChip: UIKitChassisChip?
+    private(set) var fileForwardChip: UIKitChassisChip?
+    private(set) var fileSourceChip: UIKitChassisChip?
+    private(set) var fileDiffChip: UIKitChassisChip?
+    private(set) var fileSelectChip: UIKitChassisChip?
+    private(set) var fileTreeChip: UIKitChassisChip?
+    private(set) var fileRefreshChip: UIKitChassisChip?
+    private(set) var filePathLabel: UILabel?
+    private(set) var fileHostBadge: FileViewerBadgeView?
 
     init(configuration: ViewportUMDConfiguration) {
         self.configuration = configuration
@@ -933,14 +1016,185 @@ final class ViewportUMDViewController: UIViewController {
         }
         row.axis = .horizontal
         row.alignment = .center
+        let fileRow = configuration.style == .regular
+            ? makeFileViewerRow() : nil
         rootView.apply(
             content: row,
+            upperContent: fileRow,
+            showsWorkingLine: configuration.fileViewer?.key.isWorking == true,
             style: configuration.style,
             safeArea: configuration.contentSafeArea,
             verticalPadding: configuration.contentVerticalPadding,
             minimumHeight: configuration.minimumContentHeight
         )
         preferredContentSize = fittingContentSize()
+    }
+
+    private func makeFileViewerRow() -> UIView? {
+        fileBackChip = nil
+        fileForwardChip = nil
+        fileSourceChip = nil
+        fileDiffChip = nil
+        fileSelectChip = nil
+        fileTreeChip = nil
+        fileRefreshChip = nil
+        filePathLabel = nil
+        fileHostBadge = nil
+        guard let fileViewer = configuration.fileViewer else { return nil }
+        let state = fileViewer.key
+        var views: [UIView] = []
+
+        if state.canGoBack || state.canGoForward {
+            let back = fileChip("◂", accessibility: "Back", action: fileViewer.goBack)
+            back.accessibilityIdentifier = "fileViewer.back"
+            setChipEnabled(back, state.canGoBack)
+            fileBackChip = back
+            let forward = fileChip("▸", accessibility: "Forward", action: fileViewer.goForward)
+            forward.accessibilityIdentifier = "fileViewer.forward"
+            setChipEnabled(forward, state.canGoForward)
+            fileForwardChip = forward
+            let pair = UIStackView(arrangedSubviews: [back, forward])
+            pair.axis = .horizontal
+            pair.alignment = .center
+            pair.spacing = 4
+            views.append(pair)
+        }
+
+        if state.showsSourceDiff {
+            let source = fileChip(
+                "SOURCE",
+                prominent: state.sourceSelected,
+                accessibility: "Show source",
+                action: fileViewer.showSource
+            )
+            source.accessibilityIdentifier = "fileViewer.source"
+            fileSourceChip = source
+            let diff = fileChip(
+                "DIFF",
+                prominent: !state.sourceSelected,
+                accessibility: "Show diff",
+                action: fileViewer.showDiff
+            )
+            diff.accessibilityIdentifier = "fileViewer.diff"
+            fileDiffChip = diff
+            let segment = UIStackView(arrangedSubviews: [source, diff])
+            segment.axis = .horizontal
+            segment.alignment = .center
+            segment.spacing = 4
+            segment.accessibilityLabel = "Source or diff"
+            views.append(segment)
+        }
+
+        if let caption = state.markdownSelectionCaption {
+            let selected = caption == "DONE"
+            let select = fileChip(
+                caption,
+                prominent: selected,
+                accessibility: selected
+                    ? "Back to rendered markdown" : "Select source text to copy",
+                action: fileViewer.toggleMarkdownSelection
+            )
+            select.accessibilityIdentifier = "fileViewer.markdownSelect"
+            fileSelectChip = select
+            views.append(select)
+        }
+
+        let path = UILabel()
+        path.numberOfLines = 1
+        path.lineBreakMode = .byTruncatingHead
+        path.attributedText = Self.filePathText(state.path)
+        path.accessibilityLabel = state.path
+        path.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        path.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The slab is content-sized (it must not track the window width), so
+        // the breadcrumb bounds the measurement: long paths truncate at 360
+        // instead of widening the slab, while the cap yields when the window
+        // row underneath is wider and the path absorbs that slack.
+        let pathCap = path.widthAnchor.constraint(lessThanOrEqualToConstant: 360)
+        pathCap.priority = UILayoutPriority(999)
+        NSLayoutConstraint.activate([
+            path.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+            pathCap,
+        ])
+        filePathLabel = path
+        views.append(path)
+
+        let host = FileViewerBadgeView(state.hostName.uppercased())
+        host.accessibilityLabel = "Files on \(state.hostName)"
+        host.setContentHuggingPriority(.required, for: .horizontal)
+        fileHostBadge = host
+        views.append(host)
+
+        let tree = fileChip(
+            state.treeCaption,
+            accessibility: state.treeCaption == "HIDE"
+                ? "Hide the file tree" : "Show the file tree",
+            action: fileViewer.toggleTree
+        )
+        tree.accessibilityIdentifier = "fileViewer.tree"
+        fileTreeChip = tree
+        views.append(tree)
+
+        let refresh = fileChip(
+            "REFRESH",
+            accessibility: "Refresh file viewer",
+            action: fileViewer.refresh
+        )
+        refresh.accessibilityIdentifier = "fileViewer.refresh"
+        setChipEnabled(refresh, !state.isBusy)
+        fileRefreshChip = refresh
+        views.append(refresh)
+
+        let row = UIStackView(arrangedSubviews: views)
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 8
+        return row
+    }
+
+    private func fileChip(
+        _ caption: String,
+        prominent: Bool = false,
+        accessibility: String,
+        action: @escaping () -> Void
+    ) -> UIKitChassisChip {
+        let chip = UIKitChassisChip(
+            caption,
+            prominent: prominent,
+            accessibilityLabel: accessibility,
+            action: action
+        )
+        chip.setContentHuggingPriority(.required, for: .horizontal)
+        chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return chip
+    }
+
+    private static func filePathText(_ path: String) -> NSAttributedString {
+        let name = FileTree.name(of: path)
+        let directory = String(path.dropLast(name.count))
+        let text = NSMutableAttributedString(
+            string: directory,
+            attributes: [
+                .font: UIKitChassis.monoFont(10),
+                .foregroundColor: UIKitChassis.signal3,
+            ]
+        )
+        text.append(NSAttributedString(
+            string: name,
+            attributes: [
+                .font: UIKitChassis.monoFont(10, weight: .semibold),
+                .foregroundColor: UIKitChassis.signal,
+            ]
+        ))
+        return text
+    }
+
+    /// Distance from the combined slab's top to the unchanged window row.
+    /// The ornament layout puts this seam on the scene's bottom anchor so the
+    /// new file row grows upward instead of entering the clipped lower half.
+    func stackedDeckAnchorOffset(for proposedWidth: CGFloat?) -> CGFloat {
+        loadViewIfNeeded()
+        return rootView.stackedAnchorOffset(proposedWidth: proposedWidth)
     }
 
     /// A− / A+ in the trailing cluster, exactly where a terminal tab's rail
@@ -1040,26 +1294,301 @@ final class ViewportUMDViewController: UIViewController {
     }
 }
 
+/// visionOS classic Viewport chrome. The controller is a configuration owner;
+/// its three standalone slab controllers mount side-by-side in the ornament.
+@MainActor
+final class ViewportSwitchboardViewController: UIViewController {
+    private struct RenderKey: Equatable {
+        struct MergeSource: Equatable {
+            var id: UUID
+            var label: String
+        }
+
+        var viewport: ViewportOrnamentConfiguration.RenderKey
+        var mergeSources: [MergeSource]
+    }
+
+    private var configuration: ViewportUMDConfiguration
+    private var renderKey: RenderKey
+
+    let navigateSlab = ViewportSwitchboardSlabViewController()
+    let locateSlab = ViewportSwitchboardSlabViewController()
+    let actSlab = ViewportSwitchboardSlabViewController()
+
+    private(set) var deckChip: UIKitChassisChip!
+    private(set) var backChip: UIKitChassisChip!
+    private(set) var reloadChip: UIKitChassisChip!
+    private(set) var addressButton = UIButton(type: .custom)
+    private(set) var reachBadge = ViewportBadgeView("")
+    private(set) var systemChip: UIKitChassisChip!
+    private(set) var mergeButton: ViewportMenuButton?
+    private(set) var closeChip: UIKitChassisChip!
+
+    init(configuration: ViewportUMDConfiguration) {
+        guard configuration.viewport != nil else {
+            preconditionFailure("Switchboard requires viewport configuration")
+        }
+        self.configuration = configuration
+        renderKey = Self.key(configuration)
+        super.init(nibName: nil, bundle: nil)
+        render()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func update(configuration: ViewportUMDConfiguration) {
+        guard configuration.viewport != nil else { return }
+        let nextKey = Self.key(configuration)
+        let needsRender = nextKey != renderKey
+        self.configuration = configuration
+        renderKey = nextKey
+        if needsRender { render() }
+    }
+
+    var slabControllers: [ViewportSwitchboardSlabViewController] {
+        [navigateSlab, locateSlab, actSlab]
+    }
+
+    private func render() {
+        guard let viewport = configuration.viewport else { return }
+        deckChip = chip("DECK", accessibility: "Deck") { [weak self] in
+            self?.configuration.showDeck()
+        }
+        backChip = chip(
+            "",
+            systemImage: "chevron.left",
+            accessibility: "Back"
+        ) { [weak self] in self?.configuration.viewport?.goBack() }
+        backChip.accessibilityIdentifier = "viewport.back"
+        setChipEnabled(backChip, viewport.key.canGoBack)
+        reloadChip = chip(
+            "",
+            systemImage: viewport.key.isLoading ? "xmark" : "arrow.clockwise",
+            accessibility: viewport.key.isLoading ? "Stop loading" : "Reload"
+        ) { [weak self] in self?.configuration.viewport?.reloadOrStop() }
+        reloadChip.accessibilityIdentifier = "viewport.reload"
+        let navigateRow = UIStackView(arrangedSubviews: [
+            deckChip!, divider(), backChip!, reloadChip!,
+        ])
+        configure(row: navigateRow, spacing: 14)
+        navigateSlab.apply(row: navigateRow)
+
+        addressButton = UIButton(type: .custom)
+        addressButton.contentHorizontalAlignment = .leading
+        addressButton.titleLabel?.numberOfLines = 1
+        addressButton.titleLabel?.lineBreakMode = .byTruncatingMiddle
+        addressButton.setAttributedTitle(
+            ViewportPaneViewController.readoutText(viewport.key.displayURL),
+            for: .normal
+        )
+        addressButton.accessibilityLabel = viewport.key.displayURL.absoluteString
+        addressButton.accessibilityHint = "Edits the address"
+        addressButton.accessibilityIdentifier = "viewport.address"
+        addressButton.hoverStyle = UIHoverStyle(
+            effect: .highlight,
+            shape: .rect(cornerRadius: 2)
+        )
+        addressButton.addAction(UIAction { [weak self] _ in
+            self?.configuration.viewport?.editAddress()
+        }, for: .touchUpInside)
+        addressButton.menu = addressMenu()
+        addressButton.showsMenuAsPrimaryAction = false
+        addressButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        addressButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        NSLayoutConstraint.activate([
+            addressButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+            addressButton.widthAnchor.constraint(lessThanOrEqualToConstant: 300),
+        ])
+        reachBadge = ViewportBadgeView(viewport.key.railTag)
+        reachBadge.accessibilityLabel = "Reach: \(viewport.key.railTag)"
+        reachBadge.setContentHuggingPriority(.required, for: .horizontal)
+        let locateRow = UIStackView(arrangedSubviews: [addressButton, reachBadge])
+        configure(row: locateRow, spacing: 10)
+        locateSlab.apply(
+            row: locateRow,
+            progress: viewport.key.isLoading ? viewport.key.progress : nil
+        )
+
+        systemChip = chip("SYSTEM", accessibility: "Open in the system browser") { [weak self] in
+            self?.configuration.viewport?.openInSystemBrowser()
+        }
+        systemChip.accessibilityIdentifier = "viewport.system"
+        var actViews: [UIView] = [systemChip!]
+        if !configuration.mergeSources.isEmpty {
+            let menu = ViewportMenuButton(
+                caption: "⋯",
+                accessibilityLabel: "Merge another window into this one",
+                menu: mergeMenu()
+            )
+            mergeButton = menu
+            actViews.append(menu)
+        } else {
+            mergeButton = nil
+        }
+        actViews.append(divider())
+        closeChip = chip(
+            "CLOSE",
+            prominent: true,
+            accessibility: configuration.closeAccessibilityLabel
+        ) { [weak self] in self?.configuration.close() }
+        closeChip.accessibilityIdentifier = "viewport.close"
+        actViews.append(closeChip)
+        let actRow = UIStackView(arrangedSubviews: actViews)
+        configure(row: actRow, spacing: 14)
+        actSlab.apply(row: actRow)
+    }
+
+    private func configure(row: UIStackView, spacing: CGFloat) {
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = spacing
+    }
+
+    private func chip(
+        _ caption: String,
+        systemImage: String? = nil,
+        prominent: Bool = false,
+        accessibility: String,
+        action: @escaping () -> Void
+    ) -> UIKitChassisChip {
+        let chip = UIKitChassisChip(
+            caption,
+            systemImage: systemImage,
+            prominent: prominent,
+            accessibilityLabel: accessibility,
+            action: action
+        )
+        chip.setContentHuggingPriority(.required, for: .horizontal)
+        chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return chip
+    }
+
+    private func setChipEnabled(_ chip: UIKitChassisChip, _ enabled: Bool) {
+        chip.isUserInteractionEnabled = enabled
+        chip.alpha = enabled ? 1 : 0.45
+        chip.accessibilityTraits = enabled ? .button : [.button, .notEnabled]
+    }
+
+    private func divider() -> UIView {
+        let line = UIView()
+        line.backgroundColor = UIKitChassis.bezelHi
+        line.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            line.widthAnchor.constraint(equalToConstant: 1),
+            line.heightAnchor.constraint(equalToConstant: 18),
+        ])
+        return line
+    }
+
+    private func addressMenu() -> UIMenu {
+        UIMenu(children: [
+            UIAction(title: "Copy Address", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+                self?.configuration.viewport?.copyAddress()
+            },
+            UIAction(
+                title: "Clear Browsing Data…",
+                image: UIImage(systemName: "trash"),
+                attributes: .destructive
+            ) { [weak self] _ in
+                self?.configuration.viewport?.clearBrowsingData()
+            },
+        ])
+    }
+
+    private func mergeMenu() -> UIMenu {
+        UIMenu(title: "Merge", children: configuration.mergeSources.map { source in
+            UIAction(
+                title: source.label,
+                image: UIImage(systemName: "macwindow"),
+                identifier: UIAction.Identifier("viewportUMD.merge.\(source.id.uuidString)")
+            ) { [weak self] _ in self?.configuration.merge(source.id) }
+        })
+    }
+
+    private static func key(_ configuration: ViewportUMDConfiguration) -> RenderKey {
+        guard let viewport = configuration.viewport else {
+            preconditionFailure("Switchboard requires viewport configuration")
+        }
+        return RenderKey(
+            viewport: viewport.key,
+            mergeSources: configuration.mergeSources.map {
+                .init(id: $0.id, label: $0.label)
+            }
+        )
+    }
+}
+
+@MainActor
+final class ViewportSwitchboardSlabViewController: UIViewController {
+    private(set) var rootView = ViewportUMDRootView()
+    private var progress: CGFloat?
+    private weak var progressLine: UIView?
+    private var progressWidth: NSLayoutConstraint?
+
+    override func loadView() { view = rootView }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateProgressWidth()
+    }
+
+    func apply(row: UIView, progress: Double? = nil) {
+        loadViewIfNeeded()
+        self.progress = progress.map { CGFloat(min(max($0, 0), 1)) }
+        rootView.apply(content: row, style: .regular, safeArea: .zero)
+        progressLine = nil
+        progressWidth = nil
+        if self.progress != nil {
+            let line = UIView()
+            line.backgroundColor = TallyPalette.caution
+            line.isAccessibilityElement = false
+            rootView.addSubview(line)
+            line.translatesAutoresizingMaskIntoConstraints = false
+            let width = line.widthAnchor.constraint(equalToConstant: 0)
+            NSLayoutConstraint.activate([
+                line.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
+                line.topAnchor.constraint(equalTo: rootView.topAnchor),
+                line.heightAnchor.constraint(equalToConstant: 2),
+                width,
+            ])
+            progressLine = line
+            progressWidth = width
+        }
+        updateProgressWidth()
+        preferredContentSize = fittingContentSize()
+    }
+
+    func fittingContentSize(for proposedWidth: CGFloat? = nil) -> CGSize {
+        loadViewIfNeeded()
+        return rootView.fittingSize(proposedWidth: proposedWidth)
+    }
+
+    private func updateProgressWidth() {
+        progressWidth?.constant = rootView.bounds.width * (progress ?? 0)
+    }
+}
+
 @MainActor
 final class ViewportUMDRootView: UIKitTallyBorderedView {
     private(set) var contentInsets = UIEdgeInsets.zero
     private var minimumHeight: CGFloat = 0
     private var spentTopStrip: CGFloat = 0
-    private weak var content: UIView?
-    private weak var bottomDivider: UIView?
+    private weak var upperBand: UIView?
 
     func apply(
         content: UIView,
+        upperContent: UIView? = nil,
+        showsWorkingLine: Bool = false,
         style: ViewportUMDStyle,
         safeArea: UIEdgeInsets,
         verticalPadding: CGFloat = 8,
         minimumHeight: CGFloat = 0
     ) {
-        self.content?.removeFromSuperview()
-        bottomDivider?.removeFromSuperview()
-        self.content = content
+        subviews.forEach { $0.removeFromSuperview() }
+        upperBand = nil
         self.minimumHeight = minimumHeight
-        self.spentTopStrip = style == .shell ? safeArea.top : 0
+        spentTopStrip = style == .shell ? safeArea.top : 0
         backgroundColor = UIKitChassis.bezel
         switch style {
         case .regular:
@@ -1068,18 +1597,35 @@ final class ViewportUMDRootView: UIKitTallyBorderedView {
             layer.cornerCurve = .continuous
             clipsToBounds = true
             contentInsets = UIEdgeInsets(top: 11, left: 18, bottom: 11, right: 18)
+            if let upperContent {
+                installStackedDeck(
+                    upperContent: upperContent,
+                    windowContent: content,
+                    showsWorkingLine: showsWorkingLine
+                )
+            } else {
+                install(
+                    content,
+                    in: self,
+                    insets: contentInsets,
+                    centerYOffset: 0
+                )
+            }
         case .shell:
             layer.borderWidth = 0
             layer.cornerRadius = 0
             clipsToBounds = false
-            // The classic window's rail spans the scene's top safe strip and
-            // hands the clearance back here, exactly like `UMDBarRootView`
-            // (the shell always passes top: 0).
             contentInsets = UIEdgeInsets(
                 top: verticalPadding + safeArea.top,
                 left: UMDBarRootView.horizontalPadding + safeArea.left,
                 bottom: verticalPadding,
                 right: UMDBarRootView.horizontalPadding + safeArea.right
+            )
+            install(
+                content,
+                in: self,
+                insets: contentInsets,
+                centerYOffset: safeArea.top / 2
             )
             let divider = UIView()
             divider.backgroundColor = UIKitChassis.bezelHi
@@ -1091,29 +1637,7 @@ final class ViewportUMDRootView: UIKitTallyBorderedView {
                 divider.bottomAnchor.constraint(equalTo: bottomAnchor),
                 divider.heightAnchor.constraint(equalToConstant: 1),
             ])
-            bottomDivider = divider
         }
-        addSubview(content)
-        content.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentInsets.left),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -contentInsets.right),
-            // The insets are a floor: a rail asked to match the key bar's
-            // height keeps its faces the same size and centres them below
-            // whatever strip it spends (`UMDBarRootView` does the same).
-            content.topAnchor.constraint(
-                greaterThanOrEqualTo: topAnchor,
-                constant: contentInsets.top
-            ),
-            content.bottomAnchor.constraint(
-                lessThanOrEqualTo: bottomAnchor,
-                constant: -contentInsets.bottom
-            ),
-            content.centerYAnchor.constraint(
-                equalTo: centerYAnchor,
-                constant: safeArea.top / 2
-            ),
-        ])
     }
 
     func fittingSize(proposedWidth: CGFloat?) -> CGSize {
@@ -1127,10 +1651,86 @@ final class ViewportUMDRootView: UIKitTallyBorderedView {
             withHorizontalFittingPriority: horizontal,
             verticalFittingPriority: .fittingSizeLevel
         )
-        // The floor applies to the band below whatever top strip the rail
-        // spends, matching `UMDBarRootView.fittingSize`.
         let body = max(minimumHeight, measured.height - spentTopStrip)
         return CGSize(width: measured.width, height: body + spentTopStrip)
+    }
+
+    func stackedAnchorOffset(proposedWidth: CGFloat?) -> CGFloat {
+        guard let upperBand else { return 0 }
+        let width = proposedWidth ?? UIView.layoutFittingCompressedSize.width
+        let priority: UILayoutPriority = proposedWidth == nil ? .fittingSizeLevel : .required
+        let size = upperBand.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: priority,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        return size.height + 1
+    }
+
+    private func installStackedDeck(
+        upperContent: UIView,
+        windowContent: UIView,
+        showsWorkingLine: Bool
+    ) {
+        let upper = UIView()
+        let window = UIView()
+        upperBand = upper
+        install(upperContent, in: upper, insets: contentInsets, centerYOffset: 0)
+        install(windowContent, in: window, insets: contentInsets, centerYOffset: 0)
+        let hairline = UIView()
+        hairline.backgroundColor = UIKitChassis.bezelHi
+        hairline.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        let stack = UIStackView(arrangedSubviews: [upper, hairline, window])
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 0
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        let workingLine = UIView()
+        workingLine.backgroundColor = TallyPalette.caution
+        workingLine.isAccessibilityElement = false
+        workingLine.isHidden = !showsWorkingLine
+        addSubview(workingLine)
+        workingLine.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            workingLine.leadingAnchor.constraint(equalTo: leadingAnchor),
+            workingLine.topAnchor.constraint(equalTo: topAnchor),
+            workingLine.widthAnchor.constraint(equalToConstant: 90),
+            workingLine.heightAnchor.constraint(equalToConstant: 2),
+        ])
+    }
+
+    private func install(
+        _ content: UIView,
+        in host: UIView,
+        insets: UIEdgeInsets,
+        centerYOffset: CGFloat
+    ) {
+        host.addSubview(content)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: insets.left),
+            content.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -insets.right),
+            content.topAnchor.constraint(
+                greaterThanOrEqualTo: host.topAnchor,
+                constant: insets.top
+            ),
+            content.bottomAnchor.constraint(
+                lessThanOrEqualTo: host.bottomAnchor,
+                constant: -insets.bottom
+            ),
+            content.centerYAnchor.constraint(
+                equalTo: host.centerYAnchor,
+                constant: centerYOffset
+            ),
+        ])
     }
 }
 
