@@ -241,6 +241,7 @@ final class SettingsViewController: UIViewController {
                 selectedTheme: selectedTheme,
                 selectedID: selectedTheme.id
             ),
+            makeRendererSection(),
             makeAlertsSection(state),
             makeAppLockSection(state),
             makeProSection(state),
@@ -427,6 +428,23 @@ final class SettingsViewController: UIViewController {
             : "Creating, duplicating, and editing custom themes requires Multiplex Pro. "
                 + "Existing themes remain selectable and deletable."
         return SettingsSectionView(title: "Your themes", detail: detail, rows: rows)
+    }
+
+    private func makeRendererSection() -> UIView {
+        // Reads and writes the defaults-backed switch directly: no store
+        // observes it, and the row's optimistic flip is the honest state.
+        let control = SettingsBooleanRow(
+            title: "Metal renderer",
+            isOn: MetalRendererSetting.isEnabled
+        ) { enabled in
+            MetalRendererSetting.setEnabled(enabled)
+        }
+        return SettingsSectionView(
+            title: "Terminal renderer",
+            detail: "Draws terminal text on the GPU instead of CoreGraphics. "
+                + "Takes effect for newly opened terminal windows.",
+            rows: [control]
+        )
     }
 
     private func makeAlertsSection(_ state: ViewState) -> UIView {

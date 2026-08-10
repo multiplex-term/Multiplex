@@ -212,12 +212,16 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
     private let frameSemaphore = DispatchSemaphore(value: 1)
     private var pendingRedraw = false
     private let redrawLock = NSLock()
-#if DEBUG
+    // Multiplex patch: the FPS heartbeat was #if DEBUG, but Release builds
+    // are where renderer performance gets judged — gate the log line by env
+    // (MULTIPLEX_METAL_FPS=1) instead and keep the counters compiled; the
+    // few integer stores per frame are noise next to the draw itself.
+    private static let fpsLogEnabled =
+        ProcessInfo.processInfo.environment["MULTIPLEX_METAL_FPS"] == "1"
     private var debugFrameCount = 0
     private var debugLastLogTime = CFAbsoluteTimeGetCurrent()
     private var debugRowsRebuilt = 0
     private var debugRowsCached = 0
-#endif
 #if DEBUG
     private var imageTextureFailures: Set<ObjectIdentifier> = []
     private var kittyTextureFailures: Set<UInt32> = []
@@ -333,7 +337,16 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
             layer.contentsScale = scale
         }
 #else
-        let scale = terminalView.backingScaleFactor()
+        // Multiplex patch: backingScaleFactor() is hardcoded to 1.0 on
+        // visionOS (no UIScreen there), which would size the drawable and
+        // rasterize the glyph atlas at 1x — visibly soft on Vision Pro. The
+        // layer's contentsScale carries the real window scale on both iOS
+        // and visionOS once the view is attached; keep backingScaleFactor
+        // as the floor for the pre-attach frames where contentsScale is
+        // still the CALayer default of 1.
+        let scale = max(view.layer.contentsScale,
+                        view.traitCollection.displayScale,
+                        terminalView.backingScaleFactor())
 #endif
         view.drawableSize = CGSize(width: view.bounds.width * scale, height: view.bounds.height * scale)
         let cursorStyle = terminalView.terminal.options.cursorStyle
@@ -382,19 +395,19 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
             os_signpost(.end, log: MetalTerminalRenderer.profileLog, name: "Metal.BuildDrawData", signpostID: buildID)
         }
 #endif
-#if DEBUG
-        debugFrameCount += 1
-        let now = CFAbsoluteTimeGetCurrent()
-        let elapsed = now - debugLastLogTime
-        if elapsed >= 1.0 {
-            let totalRows = debugRowsRebuilt + debugRowsCached
-            let fps = Double(debugFrameCount) / elapsed
-            print(String(format: "Metal FPS: %.1f (rows rebuilt: %d/%d)", fps, debugRowsRebuilt, totalRows))
-            debugFrameCount = 0
-            debugLastLogTime = now
+        if MetalTerminalRenderer.fpsLogEnabled {
+            debugFrameCount += 1
+            let now = CFAbsoluteTimeGetCurrent()
+            let elapsed = now - debugLastLogTime
+            if elapsed >= 1.0 {
+                let totalRows = debugRowsRebuilt + debugRowsCached
+                let fps = Double(debugFrameCount) / elapsed
+                print(String(format: "Metal FPS: %.1f (rows rebuilt: %d/%d)", fps, debugRowsRebuilt, totalRows))
+                debugFrameCount = 0
+                debugLastLogTime = now
+            }
         }
-#endif
-        let bgColor = colorToSIMD(terminalView.nativeBackgroundColor)
+        let bgColor = colorToSIMD(resolvedNativeBackground(terminalView))
         passDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(Double(bgColor.x),
                                                                          Double(bgColor.y),
                                                                          Double(bgColor.z),
@@ -593,10 +606,8 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
 
     private func buildDrawDataPass(scale: CGFloat) -> DrawData {
         guard let terminalView = terminalView else {
-#if DEBUG
             debugRowsRebuilt = 0
             debugRowsCached = 0
-#endif
             return DrawData(rows: [],
                             frame: nil,
                             cursorColorVertices: [],
@@ -614,10 +625,8 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
 
         let rowInfo = visibleRowRange(buffer: buffer, cellHeight: cellHeight, terminalView: terminalView)
         guard let (firstRow, lastRow, visibleDisp) = rowInfo else {
-#if DEBUG
             debugRowsRebuilt = 0
             debugRowsCached = 0
-#endif
             return DrawData(rows: [],
                             frame: nil,
                             cursorColorVertices: [],
@@ -779,10 +788,8 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                 }
             }
         }
-#if DEBUG
         debugRowsRebuilt = rebuiltRows
         debugRowsCached = cachedRows
-#endif
 
         let cursorData = buildCursorDrawData(scale: scale,
                                              cellWidth: cellWidth,
@@ -1067,7 +1074,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                                     if marginX1 > marginX0 {
                                         let (mx0, my0, mx1, my1) = transformRect(x0: marginX0, y0: y0, x1: marginX1, y1: lineOriginPx.y + cellHeightPx)
                                         if let mClipped = self.clipRect(mx0, my0, mx1, my1, clipRect) {
-                                            let defaultBg = colorToSIMD(terminalView.nativeBackgroundColor)
+                                            let defaultBg = colorToSIMD(resolvedNativeBackground(terminalView))
                                             backgroundCells.append(makeColorCell(x0: mClipped.0, y0: mClipped.1, x1: mClipped.2, y1: mClipped.3, color: defaultBg))
                                         }
                                     }
@@ -1897,6 +1904,22 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                 cache.removeValue(forKey: evicted)
             }
         }
+    }
+
+    /// Multiplex patch: `nativeBackgroundColor` can be a dynamic UIColor —
+    /// the app's GLASS appearance resolves it to clear only under a custom
+    /// trait carried by the view hierarchy. `getRed()` resolves dynamic
+    /// colors against `UITraitCollection.current`, which is NOT the terminal
+    /// view's traits inside an MTKView delegate callback, so the glass clear
+    /// silently resolved to the opaque fallback. Resolve explicitly against
+    /// the terminal view before converting.
+    private func resolvedNativeBackground(_ terminalView: TerminalView) -> TTColor {
+        #if os(macOS)
+        return terminalView.nativeBackgroundColor
+        #else
+        return terminalView.nativeBackgroundColor
+            .resolvedColor(with: terminalView.traitCollection)
+        #endif
     }
 
     private func colorToSIMD(_ color: TTColor) -> SIMD4<Float> {
