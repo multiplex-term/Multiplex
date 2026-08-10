@@ -247,8 +247,10 @@ Current product split:
   File Viewer (code, rendered Markdown, images, and git diffs) summoned from
   + TAB or a confirmed path in terminal output (a percent-decoded,
   local-authority `file:` URI naming that SSH host takes the same road); a
-  tree-file long press opens that file in another viewer tab, and per-file
-  DIFF mode carries across changed-file selections,
+  tree-file long press opens that file in another viewer tab, per-file
+  DIFF mode carries across changed-file selections, and web links in rendered
+  Markdown use the same confirmation with a choice of an inline viewport or
+  the system browser,
   opening web and mail links found in terminal output (long press, or tap
   where the remote is not tracking the mouse; the confirmation shows the
   resolved target and its host, and unsupported schemes are shown for copying

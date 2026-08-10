@@ -173,6 +173,33 @@ final class FileViewerPaneUIKitTests: XCTestCase {
         XCTAssertTrue(markdown.subviews.contains(markdown.scrollView))
     }
 
+    func testFileViewerWebLinkOffersViewportAlongsideExternalOpen() throws {
+        let controller = FileViewerController(
+            tabID: UUID(),
+            host: makeHost(),
+            startDirectory: "/srv/app",
+            target: nil
+        )
+        var openedViewport: ViewportOffer?
+        let pane = FileViewerPaneViewController(
+            controller: controller,
+            startsController: false,
+            openViewport: { openedViewport = $0 },
+            close: {}
+        )
+        let link = try XCTUnwrap(TerminalLink.resolve("https://example.com/docs"))
+        let sheet = pane.linkConfirmation(for: link)
+        sheet.loadViewIfNeeded()
+
+        let chips = sheet.view.descendants.compactMap { $0 as? UIKitChassisChip }
+        let viewport = try XCTUnwrap(chips.first { $0.accessibilityLabel == "⌗ Viewport" })
+        let external = try XCTUnwrap(chips.first { $0.accessibilityLabel == "Open" })
+        XCTAssertFalse(viewport.isHidden)
+        XCTAssertFalse(external.isHidden)
+        XCTAssertTrue(viewport.accessibilityActivate())
+        XCTAssertEqual(openedViewport?.url.absoluteString, "https://example.com/docs")
+    }
+
     /// A picture is a press away, and the press asks to SHOW it — never to
     /// navigate. A placeholder that named nothing stays the inert caption it
     /// always was.

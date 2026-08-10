@@ -106,6 +106,7 @@ final class FileViewerPaneViewController: UIViewController {
     private var contentSafeArea: UIEdgeInsets
     private var isActive: Bool
     private var openInNewTabAction: (FileTree.Row) -> Void
+    private var openViewportAction: (ViewportOffer) -> Void
     private var closeAction: () -> Void
     private let startsController: Bool
     private let showsInWindowRail: Bool
@@ -174,6 +175,7 @@ final class FileViewerPaneViewController: UIViewController {
         textScaleStore: FileViewerTextScaleStore = .shared,
         ornamentRailDidChange: @escaping () -> Void = {},
         openInNewTab: @escaping (FileTree.Row) -> Void = { _ in },
+        openViewport: @escaping (ViewportOffer) -> Void = { _ in },
         close: @escaping () -> Void
     ) {
         self.controller = controller
@@ -184,6 +186,7 @@ final class FileViewerPaneViewController: UIViewController {
         self.showsInWindowRail = showsInWindowRail
         self.ornamentRailDidChange = ornamentRailDidChange
         openInNewTabAction = openInNewTab
+        openViewportAction = openViewport
         closeAction = close
         drawerOpen = Self.startsWithDrawerOpen(controller)
         super.init(nibName: nil, bundle: nil)
@@ -275,10 +278,12 @@ final class FileViewerPaneViewController: UIViewController {
         contentSafeArea: UIEdgeInsets,
         isActive: Bool,
         openInNewTab: @escaping (FileTree.Row) -> Void,
+        openViewport: @escaping (ViewportOffer) -> Void,
         close: @escaping () -> Void,
         ornamentRailDidChange: @escaping () -> Void = {}
     ) {
         openInNewTabAction = openInNewTab
+        openViewportAction = openViewport
         closeAction = close
         self.ornamentRailDidChange = ornamentRailDidChange
         if self.contentSafeArea != contentSafeArea {
@@ -1221,16 +1226,24 @@ final class FileViewerPaneViewController: UIViewController {
 
     private func presentLinkConfirmation(_ link: TerminalLink) {
         guard presentedViewController == nil else { return }
-        let sheet = TerminalLinkSheetViewController(
-            link: link,
-            onOpen: { confirmed in
-                if let url = confirmed.openableURL { UIApplication.shared.open(url) }
-            },
-            onCopy: { UIPasteboard.general.string = $0 }
-        )
+        let sheet = linkConfirmation(for: link)
         let navigation = UINavigationController(rootViewController: sheet)
         sheet.onDismiss = { [weak navigation] in navigation?.dismiss(animated: true) }
         present(navigation, animated: true)
+    }
+
+    /// Kept as a small test seam so the File Viewer cannot silently regress
+    /// to an external-only link sheet while the shared sheet still tests green.
+    func linkConfirmation(for link: TerminalLink) -> TerminalLinkSheetViewController {
+        TerminalLinkSheetViewController(
+            link: link,
+            viewportOffer: { [weak controller] in controller?.viewportOffer(for: $0) },
+            onOpen: { confirmed in
+                if let url = confirmed.openableURL { UIApplication.shared.open(url) }
+            },
+            onCopy: { UIPasteboard.general.string = $0 },
+            onOpenViewport: { [weak self] in self?.openViewportAction($0) }
+        )
     }
 
     // MARK: Helpers

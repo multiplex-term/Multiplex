@@ -57,6 +57,14 @@ final class FileViewerController: AuxiliaryPaneController {
     private let host: Host
     var hostName: String { host.name }
 
+    /// Web links inside a remote document use the same admitted viewport road
+    /// as links printed in a terminal. The controller's host snapshot is the
+    /// authority for localhost rewriting, so a moved viewer tab never depends
+    /// on whichever terminal happens to be active in its new window.
+    func viewportOffer(for link: TerminalLink) -> ViewportOffer? {
+        ViewportOffer.make(for: link, host: host)
+    }
+
     /// The pane cwd at summon time (absolute), when the summoning tab could
     /// answer over its own transport.
     private let startDirectory: String?

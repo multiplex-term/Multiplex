@@ -157,7 +157,8 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   `⟨image: alt⟩` in link ink while hidden, `⌄ image: alt` above the
   picture once shown, pressed again to put it away. A web URL is not a
   file this viewer fetches — it goes to the link sheet exactly as it does
-  in prose — and a destination-less `![alt]()` stays the inert caption it
+  in prose, with both ⌗ VIEWPORT and the external OPEN handoff — and a
+  destination-less `![alt]()` stays the inert caption it
   always was. Load-bearing details:
   - **Pictures ride INSIDE the block that names them**
     (`FileViewerMarkdownProseBlockView`), never as extra rows of the

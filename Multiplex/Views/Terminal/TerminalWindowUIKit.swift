@@ -1079,13 +1079,20 @@ final class TerminalWindowViewController: UIViewController,
     }
 
     func openViewport(_ offer: ViewportOffer) {
-        guard let activeTab, let host = store.host(id: activeTab.hostID) else { return }
+        guard let activeTab else { return }
+        openViewport(offer, after: activeTab.id)
+    }
+
+    private func openViewport(_ offer: ViewportOffer, after anchorID: UUID) {
+        guard let anchor = route.tabs.first(where: { $0.id == anchorID }),
+              let host = store.host(id: anchor.hostID)
+        else { return }
         let tab = TerminalRoute(
-            hostID: activeTab.hostID,
+            hostID: anchor.hostID,
             mode: .viewport(urlString: offer.url.absoluteString)
         )
         workspace.openViewport(tab: tab, offer: offer, host: host)
-        dock(tab, after: activeTab.id)
+        dock(tab, after: anchorID)
     }
 
     private func dock(_ tab: TerminalRoute, after anchorID: UUID) {
@@ -1494,6 +1501,9 @@ extension TerminalWindowViewController {
                 openInNewTab: { [weak self] row in
                     self?.openFileInNewViewerTab(row, after: tab.id)
                 },
+                openViewport: { [weak self] offer in
+                    self?.openViewport(offer, after: tab.id)
+                },
                 close: { [weak self] in self?.closeTab(tab.id) }
             )
         }
@@ -1524,6 +1534,9 @@ extension TerminalWindowViewController {
                 isActive: isActive,
                 openInNewTab: { [weak self] row in
                     self?.openFileInNewViewerTab(row, after: tab.id)
+                },
+                openViewport: { [weak self] offer in
+                    self?.openViewport(offer, after: tab.id)
                 },
                 close: { [weak self] in self?.closeTab(tab.id) },
                 ornamentRailDidChange: { [weak self] in
