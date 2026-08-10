@@ -151,6 +151,10 @@ final class TerminalPathTargetTests: XCTestCase {
         let escapedColon = TerminalPathTarget.resolve("file:///tmp/report%3A42")
         XCTAssertEqual(escapedColon?.path, "/tmp/report:42")
         XCTAssertNil(escapedColon?.line)
+
+        let range = TerminalPathTarget.resolve("file:///tmp/report.swift:10-15")
+        XCTAssertEqual(range?.path, "/tmp/report.swift")
+        XCTAssertEqual(range?.lineRange, 10...15)
     }
 
     func testFileURLDeclinesAmbiguousOrUnsafeShapes() {
@@ -180,9 +184,24 @@ final class TerminalPathTargetTests: XCTestCase {
         let single = TerminalPathTarget.resolve("src/app.ts:42")
         XCTAssertEqual(single?.path, "src/app.ts")
         XCTAssertEqual(single?.line, 42)
+        XCTAssertEqual(single?.lineRange, 42...42)
         let pair = TerminalPathTarget.resolve("Multiplex/App.swift:120:15")
         XCTAssertEqual(pair?.path, "Multiplex/App.swift")
         XCTAssertEqual(pair?.line, 120)
+    }
+
+    func testLineRangeSuffixes() {
+        let range = TerminalPathTarget.resolve("Sources/App.swift:10-15")
+        XCTAssertEqual(range?.path, "Sources/App.swift")
+        XCTAssertEqual(range?.line, 10)
+        XCTAssertEqual(range?.endLine, 15)
+        XCTAssertEqual(range?.lineRange, 10...15)
+        XCTAssertEqual(range?.spelling, "Sources/App.swift:10-15")
+
+        let withColumn = TerminalPathTarget.resolve("Sources/App.swift:10-15:4")
+        XCTAssertEqual(withColumn?.path, "Sources/App.swift")
+        XCTAssertEqual(withColumn?.lineRange, 10...15)
+        XCTAssertNil(TerminalPathTarget.resolve("Sources/App.swift:15-10"))
     }
 
     func testExplicitPathsKeepFileNameSyntaxAndSeparateLine() {
@@ -198,6 +217,10 @@ final class TerminalPathTargetTests: XCTestCase {
             TerminalPathTarget.resolveExplicit("My File.swift", line: nil)?.path,
             "My File.swift"
         )
+
+        let range = TerminalPathTarget.resolveExplicit("README.md:10-15", line: nil)
+        XCTAssertEqual(range?.path, "README.md")
+        XCTAssertEqual(range?.lineRange, 10...15)
     }
 
     func testExplicitPathValidatesLineAndUnknownEnvironmentVariables() {

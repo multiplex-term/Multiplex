@@ -1036,7 +1036,8 @@ final class FileViewerPaneViewController: UIViewController {
             view.apply(
                 lines: document.codeLines,
                 truncated: document.truncated,
-                targetLine: document.targetLine
+                targetLine: document.targetLine,
+                targetEndLine: document.targetEndLine
             )
             return view
         }
@@ -1079,7 +1080,8 @@ final class FileViewerPaneViewController: UIViewController {
             code.apply(
                 lines: document.codeLines,
                 truncated: document.truncated,
-                targetLine: document.targetLine
+                targetLine: document.targetLine,
+                targetEndLine: document.targetEndLine
             )
         case (.document(let document), let markdown as FileViewerMarkdownContentView):
             markdown.openLink = { [weak self] in self?.openMarkdownLink($0) }
@@ -1415,7 +1417,12 @@ final class FileViewerCodeContentView: UIView {
     private var buildTask: Task<Void, Never>?
     private var generation = 0
     private var textScale = FileViewerTextScale.default
-    private var lastInput: (lines: [HighlightedLine], truncated: Bool, targetLine: Int?)?
+    private var lastInput: (
+        lines: [HighlightedLine],
+        truncated: Bool,
+        targetLine: Int?,
+        targetEndLine: Int?
+    )?
 
     override init(frame: CGRect) {
         let caption = UIKitChassisLabel("TRUNCATED", size: 8, color: TallyPalette.caution)
@@ -1468,16 +1475,18 @@ final class FileViewerCodeContentView: UIView {
         apply(
             lines: lastInput.lines,
             truncated: lastInput.truncated,
-            targetLine: lastInput.targetLine
+            targetLine: lastInput.targetLine,
+            targetEndLine: lastInput.targetEndLine
         )
     }
 
     func apply(
         lines: [HighlightedLine],
         truncated: Bool = false,
-        targetLine: Int? = nil
+        targetLine: Int? = nil,
+        targetEndLine: Int? = nil
     ) {
-        lastInput = (lines, truncated, targetLine)
+        lastInput = (lines, truncated, targetLine, targetEndLine)
         truncatedBanner.isHidden = !truncated
         generation &+= 1
         let expected = generation
@@ -1486,7 +1495,12 @@ final class FileViewerCodeContentView: UIView {
         buildTask?.cancel()
         buildTask = Task { [weak self] in
             let built = await Task.detached {
-                FileViewerTextContent.code(lines, targetLine: targetLine, scale: scale)
+                FileViewerTextContent.code(
+                    lines,
+                    targetLine: targetLine,
+                    targetEndLine: targetEndLine,
+                    scale: scale
+                )
             }.value
             guard !Task.isCancelled, let self, self.generation == expected else { return }
             self.textView.setContent(

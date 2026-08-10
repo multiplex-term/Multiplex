@@ -27,6 +27,9 @@ final class TerminalFilePathSheetViewController: UIViewController {
     private let opensStack = UIStackView()
     private let opensValueLabel = UILabel()
     private let lineStack = UIStackView()
+    private let lineTitleLabel = UIKitChassisLabel(
+        "LINE", size: 9, color: UIKitChassis.signal3
+    )
     private let lineValueLabel = UILabel()
     private(set) var actionStack = UIStackView()
     private(set) var editor: UIKitTerminalEditableValueBox
@@ -152,14 +155,13 @@ final class TerminalFilePathSheetViewController: UIViewController {
         opensStack.addArrangedSubview(opensTitle)
         opensStack.addArrangedSubview(opensValueLabel)
 
-        let lineTitle = UIKitChassisLabel("LINE", size: 9, color: UIKitChassis.signal3)
         lineValueLabel.font = UIKitChassis.monoFont(11)
         lineValueLabel.textColor = UIKitChassis.signal2
         lineValueLabel.accessibilityIdentifier = "terminal.path.lineValue"
         lineStack.axis = .horizontal
         lineStack.alignment = .center
         lineStack.spacing = 8
-        lineStack.addArrangedSubview(lineTitle)
+        lineStack.addArrangedSubview(lineTitleLabel)
         lineStack.addArrangedSubview(lineValueLabel)
         lineStack.addArrangedSubview(UIView())
 
@@ -256,9 +258,15 @@ final class TerminalFilePathSheetViewController: UIViewController {
         opensValueLabel.text = divergence
         opensValueLabel.accessibilityLabel = divergence
         opensStack.isHidden = divergence == nil
-        lineValueLabel.text = target?.line.map(String.init)
-        lineValueLabel.accessibilityLabel = target?.line.map(String.init)
-        lineStack.isHidden = target?.line == nil
+        let lines = target?.lineRange.map {
+            $0.lowerBound == $0.upperBound
+                ? String($0.lowerBound)
+                : "\($0.lowerBound)–\($0.upperBound)"
+        }
+        lineTitleLabel.text = target?.endLine == nil ? "LINE" : "LINES"
+        lineValueLabel.text = lines
+        lineValueLabel.accessibilityLabel = lines
+        lineStack.isHidden = lines == nil
         viewChip.isHidden = target == nil
         sectionView.setTitle(sectionTitle(for: target))
         sectionView.setDetail(detail(for: target))

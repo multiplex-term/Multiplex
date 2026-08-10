@@ -134,6 +134,23 @@ final class FileViewerPaneUIKitTests: XCTestCase {
         XCTAssertTrue(screen.textView.dataDetectorTypes.isEmpty)
     }
 
+    func testCodeScreenHighlightsEveryTargetedLineInARange() {
+        let lines = (1...6).map {
+            HighlightedLine(segments: [.init(text: "line \($0)", kind: .plain)])
+        }
+        let content = FileViewerTextContent.code(
+            lines,
+            targetLine: 2,
+            targetEndLine: 4
+        )
+
+        XCTAssertNil(content.rows[0].ground)
+        XCTAssertNotNil(content.rows[1].ground)
+        XCTAssertNotNil(content.rows[2].ground)
+        XCTAssertNotNil(content.rows[3].ground)
+        XCTAssertNil(content.rows[4].ground)
+    }
+
     func testRenderedMarkdownIsNativeAndParagraphsRemainSelectable() {
         let markdown = FileViewerMarkdownContentView()
         markdown.apply(blocks: [

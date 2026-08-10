@@ -106,6 +106,7 @@ struct FileViewerTextContent {
     static func code(
         _ lines: [HighlightedLine],
         targetLine: Int?,
+        targetEndLine: Int? = nil,
         scale: CGFloat = FileViewerTextScale.default
     ) -> FileViewerTextContent {
         let font = mono(11, scale)
@@ -113,17 +114,21 @@ struct FileViewerTextContent {
         let target = TallyPalette.caution
         let targetGround = TallyPalette.caution.withAlphaComponent(0.12)
         let inks: [CodeTokenKind: UIColor] = tokenInks()
+        let targetRange = targetLine.map { start in
+            start...max(start, targetEndLine ?? start)
+        }
 
         var builder = Builder(scale: scale)
         for (index, line) in lines.enumerated() {
             let number = index + 1
+            let isTarget = targetRange?.contains(number) == true
             builder.line(
                 line.segments.map {
                     ($0.text, $0.kind == .comment ? comment : font, inks[$0.kind] ?? plainInk)
                 },
                 gutter: "\(number)",
-                gutterColor: number == targetLine ? target : gutterInk,
-                ground: number == targetLine ? targetGround : nil
+                gutterColor: isTarget ? target : gutterInk,
+                ground: isTarget ? targetGround : nil
             )
         }
         return FileViewerTextContent(
@@ -439,7 +444,7 @@ final class FileViewerTextView: UITextView {
         }
     }
 
-    /// A `path:12` press scrolls its line to center, once.
+    /// A `path:12` / `path:12-18` press scrolls its first line to center, once.
     private func scrollToLineCentered(_ line: Int?) {
         guard let targetLine = line,
               let content,

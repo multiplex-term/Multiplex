@@ -122,8 +122,10 @@ final class FileViewerController: AuxiliaryPaneController {
         /// The text behind a markdown render, kept so the RAW toggle
         /// re-renders locally instead of re-downloading the file.
         var sourceText: String?
-        /// From a `path:12` press — the code view scrolls here once.
+        /// From a `path:12` / `path:12-18` press — the code view scrolls to
+        /// the first line once and highlights the requested line range.
         var targetLine: Int?
+        var targetEndLine: Int?
 
         var name: String { FileTree.name(of: path) }
     }
@@ -404,10 +406,18 @@ final class FileViewerController: AuxiliaryPaneController {
                     if badges[resolvedTarget] != nil {
                         await showFileDiff(path: resolvedTarget)
                     } else {
-                        await open(path: resolvedTarget, line: target?.line)
+                        await open(
+                            path: resolvedTarget,
+                            line: target?.line,
+                            endLine: target?.endLine
+                        )
                     }
                 } else {
-                    await open(path: resolvedTarget, line: target?.line)
+                    await open(
+                        path: resolvedTarget,
+                        line: target?.line,
+                        endLine: target?.endLine
+                    )
                 }
             }
             await list(rootPath)
@@ -625,7 +635,7 @@ final class FileViewerController: AuxiliaryPaneController {
 
     // MARK: Opening files
 
-    func open(path: String, line: Int?) async {
+    func open(path: String, line: Int?, endLine: Int? = nil) async {
         filePresentation = .source
         // Shown images belong to the document that named them.
         if lastDocument?.path != path { inlineImages.removeAll() }
@@ -647,7 +657,9 @@ final class FileViewerController: AuxiliaryPaneController {
                 if generation == contentGeneration { content = .idle }
                 return
             }
-            let document = try await makeDocument(path: path, line: line, stat: stat)
+            let document = try await makeDocument(
+                path: path, line: line, endLine: endLine, stat: stat
+            )
             guard generation == contentGeneration else { return }
             lastDocument = document
             watchedStamp = stat
@@ -678,12 +690,14 @@ final class FileViewerController: AuxiliaryPaneController {
     private func makeDocument(
         path: String,
         line: Int?,
+        endLine: Int?,
         stat: SSHConnection.FileStat
     ) async throws -> Document {
         let name = FileTree.name(of: path)
         let size = stat.size ?? 0
         var document = Document(path: path, size: size, kind: FileKind.classify(fileName: name))
         document.targetLine = line
+        document.targetEndLine = endLine
 
         switch document.kind {
         case .binary:
@@ -993,7 +1007,7 @@ final class FileViewerController: AuxiliaryPaneController {
         case .document(let current):
             guard !stat.isDirectory,
                   let document = try? await makeDocument(
-                      path: current.path, line: nil, stat: stat
+                      path: current.path, line: nil, endLine: nil, stat: stat
                   ),
                   generation == contentGeneration,
                   case .document(let still) = content, still.path == current.path

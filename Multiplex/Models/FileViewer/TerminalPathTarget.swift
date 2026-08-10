@@ -31,20 +31,45 @@ struct TerminalPathTarget: Equatable, Identifiable {
     /// the confirmation field starts at `spelling`, the path VIEW will use.
     var raw: String
     /// The path with the base marker kept (`~/x` stays `~/x`) and any
-    /// trailing `:line[:column]` suffix removed.
+    /// trailing `:line[:column]` / `:start-end[:column]` suffix removed.
     var path: String
     var base: Base
-    /// From a `path:12` / `path:12:5` suffix — compilers and agents cite
-    /// lines constantly, and the viewer scrolls there.
+    /// From a `path:12`, `path:12:5`, or `path:12-18` suffix — compilers,
+    /// tool calls, and agents cite lines constantly, and the viewer scrolls
+    /// to the first while highlighting the whole requested range.
     var line: Int?
+    var endLine: Int?
+
+    init(
+        raw: String,
+        path: String,
+        base: Base,
+        line: Int?,
+        endLine: Int? = nil
+    ) {
+        self.raw = raw
+        self.path = path
+        self.base = base
+        self.line = line
+        self.endLine = endLine
+    }
 
     var id: String { raw }
 
-    /// The canonical field spelling — the path plus its `:line` suffix —
+    var lineRange: ClosedRange<Int>? {
+        guard let line else { return nil }
+        let end = endLine ?? line
+        guard end >= line else { return nil }
+        return line...end
+    }
+
+    /// The canonical field spelling — the path plus its line/range suffix —
     /// i.e. the text that re-resolves to this same target. The sheet's
     /// editable field starts here, and its OPENS row compares against it.
     var spelling: String {
-        line.map { "\(path):\($0)" } ?? path
+        guard let line else { return path }
+        if let endLine, endLine > line { return "\(path):\(line)-\(endLine)" }
+        return "\(path):\(line)"
     }
 
     /// The path relative to its base, ready for remote resolution:
@@ -77,8 +102,8 @@ struct TerminalPathTarget: Equatable, Identifiable {
     /// A path supplied deliberately by app automation rather than inferred
     /// from terminal prose. Explicit input may be a bare file name or contain
     /// spaces and colons; relative paths resolve against the host's configured
-    /// working directory. `line` is separate so a colon in the file name is
-    /// never mistaken for an editor-style suffix.
+    /// working directory. `line` is separate so ordinary colon-bearing names
+    /// remain names; the deliberate exception is tool-call-style `:10-15`.
     static func resolveExplicit(_ raw: String, line: Int?) -> TerminalPathTarget? {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, text.count <= 1024,
@@ -88,22 +113,37 @@ struct TerminalPathTarget: Equatable, Identifiable {
 
         if hasFileScheme(text) {
             guard var target = resolveFileURL(text) else { return nil }
-            if let line { target.line = line }
+            if let line {
+                target.line = line
+                target.endLine = nil
+            }
             return target
         }
         guard !text.contains("://"), text != "/", !text.hasPrefix("//") else { return nil }
 
+        // A range suffix is explicit enough to recognize even here; unlike a
+        // lone `:42`, it does not steal common colon-bearing file names from
+        // an input that also offers a separate Line Number field.
+        let split = splittingLineSuffix(text)
+        let usesRangeSuffix = line == nil && split.endLine != nil
+        let path = usesRangeSuffix ? split.path : text
+        let resolvedLine = usesRangeSuffix ? split.line : line
+        let endLine = usesRangeSuffix ? split.endLine : nil
+
         let base: Base
-        if text.hasPrefix("/") {
+        if path.hasPrefix("/") {
             base = .absolute
-        } else if text == "~" || text.hasPrefix("~/")
-                    || text == "$HOME" || text.hasPrefix("$HOME/") {
+        } else if path == "~" || path.hasPrefix("~/")
+                    || path == "$HOME" || path.hasPrefix("$HOME/") {
             base = .home
         } else {
-            guard !text.hasPrefix("$") else { return nil }
+            guard !path.hasPrefix("$") else { return nil }
             base = .workingDirectory
         }
-        return TerminalPathTarget(raw: raw, path: text, base: base, line: line)
+        return TerminalPathTarget(
+            raw: raw, path: path, base: base,
+            line: resolvedLine, endLine: endLine
+        )
     }
 
     /// Resolves the `file:` shape before `TerminalLink` gets first refusal in
@@ -151,13 +191,13 @@ struct TerminalPathTarget: Equatable, Identifiable {
         return resolvePath(
             raw: raw,
             text: path,
-            syntax: .fileURL(line: encoded.line)
+            syntax: .fileURL(line: encoded.line, endLine: encoded.endLine)
         )
     }
 
     private enum PathSyntax {
         case implicitMatch
-        case fileURL(line: Int?)
+        case fileURL(line: Int?, endLine: Int?)
     }
 
     private static func resolvePath(
@@ -185,6 +225,7 @@ struct TerminalPathTarget: Equatable, Identifiable {
         // classify as one spaced path.
         if hasSpace, !hasBaseMarker(text) { return nil }
         let line: Int?
+        let endLine: Int?
         switch syntax {
         case .implicitMatch:
             // Shed trailing sentence punctuation, and — because the
@@ -197,8 +238,10 @@ struct TerminalPathTarget: Equatable, Identifiable {
             let split = splittingLineSuffix(text)
             text = split.path
             line = split.line
-        case .fileURL(let targetLine):
+            endLine = split.endLine
+        case .fileURL(let targetLine, let targetEndLine):
             line = targetLine
+            endLine = targetEndLine
         }
 
         guard !text.isEmpty, text != "/" else { return nil }
@@ -209,22 +252,52 @@ struct TerminalPathTarget: Equatable, Identifiable {
             // one because its syntax already proved the whole target.
             guard !text.contains(":") else { return nil }
         }
-        return classified(raw: raw, path: text, line: line)
+        return classified(
+            raw: raw, path: text, line: line, endLine: endLine
+        )
     }
 
-    /// `path:line[:column]`: the column does not affect a line-oriented
-    /// viewer, but stripping it makes compiler and runtime file URIs useful.
-    /// Run this on a file URI's *encoded* path so `%3A42` remains a literal
-    /// filename while an unescaped `:42` becomes a target line.
-    private static func splittingLineSuffix(_ text: String) -> (path: String, line: Int?) {
+    /// `path:line[:column]` or `path:start-end[:column]`: columns do not
+    /// affect a line-oriented viewer, but stripping one makes compiler and
+    /// tool-call references useful. Run this on a file URI's *encoded* path
+    /// so `%3A42` remains filename data while a literal suffix is navigation.
+    private static func splittingLineSuffix(
+        _ text: String
+    ) -> (path: String, line: Int?, endLine: Int?) {
         let pieces = text.split(separator: ":", omittingEmptySubsequences: false)
-        guard let last = pieces.last, let lastNumber = Int(last) else {
-            return (text, nil)
+        guard let last = pieces.last else { return (text, nil, nil) }
+
+        if let range = lineRange(String(last)) {
+            return (
+                pieces.dropLast().joined(separator: ":"),
+                range.lowerBound,
+                range.upperBound
+            )
         }
-        if pieces.count >= 3, let line = Int(pieces[pieces.count - 2]) {
-            return (pieces.dropLast(2).joined(separator: ":"), line)
+        guard let lastNumber = Int(last) else { return (text, nil, nil) }
+        if pieces.count >= 3 {
+            let previous = String(pieces[pieces.count - 2])
+            if let range = lineRange(previous) {
+                return (
+                    pieces.dropLast(2).joined(separator: ":"),
+                    range.lowerBound,
+                    range.upperBound
+                )
+            }
+            if let line = Int(previous) {
+                return (pieces.dropLast(2).joined(separator: ":"), line, nil)
+            }
         }
-        return (pieces.dropLast().joined(separator: ":"), lastNumber)
+        return (pieces.dropLast().joined(separator: ":"), lastNumber, nil)
+    }
+
+    private static func lineRange(_ suffix: String) -> ClosedRange<Int>? {
+        let bounds = suffix.split(separator: "-", omittingEmptySubsequences: false)
+        guard bounds.count == 2,
+              let start = Int(bounds[0]), let end = Int(bounds[1]),
+              start > 0, end >= start
+        else { return nil }
+        return start...end
     }
 
     private static func hasFileScheme(_ text: String) -> Bool {
@@ -290,27 +363,31 @@ struct TerminalPathTarget: Equatable, Identifiable {
     private static func classified(
         raw: String,
         path: String,
-        line: Int?
+        line: Int?,
+        endLine: Int?
     ) -> TerminalPathTarget? {
+        let base: Base
         if path.hasPrefix("/") {
             guard !path.hasPrefix("//") else { return nil }
-            return TerminalPathTarget(raw: raw, path: path, base: .absolute, line: line)
-        }
-        if path == "~" || path.hasPrefix("~/") {
-            return TerminalPathTarget(raw: raw, path: path, base: .home, line: line)
-        }
-        if path.hasPrefix("$") {
+            base = .absolute
+        } else if path == "~" || path.hasPrefix("~/") {
+            base = .home
+        } else if path.hasPrefix("$") {
             // Only $HOME is knowable from here; other variables live in the
             // remote's environment and stay unresolved (→ selection).
             guard path == "$HOME" || path.hasPrefix("$HOME/") else { return nil }
-            return TerminalPathTarget(raw: raw, path: path, base: .home, line: line)
+            base = .home
+        } else if path.hasPrefix("./") || path.hasPrefix("../") {
+            base = .workingDirectory
+        } else {
+            // Bare relative: needs an interior slash to look like a path at
+            // all ("README" alone is prose the matcher wouldn't send anyway).
+            guard path.contains("/") else { return nil }
+            base = .workingDirectory
         }
-        if path.hasPrefix("./") || path.hasPrefix("../") {
-            return TerminalPathTarget(raw: raw, path: path, base: .workingDirectory, line: line)
-        }
-        // Bare relative: needs an interior slash to look like a path at
-        // all ("README" alone is prose the matcher wouldn't send anyway).
-        guard path.contains("/") else { return nil }
-        return TerminalPathTarget(raw: raw, path: path, base: .workingDirectory, line: line)
+        return TerminalPathTarget(
+            raw: raw, path: path, base: base,
+            line: line, endLine: endLine
+        )
     }
 }

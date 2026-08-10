@@ -180,6 +180,32 @@ final class TerminalConfirmationUIKitTests: XCTestCase {
         XCTAssertEqual(dismissCount, 1)
     }
 
+    func testPathSheetPreservesAndDisplaysLineRange() throws {
+        let initial = try XCTUnwrap(
+            TerminalPathTarget.resolve("Sources/App.swift:10-15")
+        )
+        var viewed: TerminalPathTarget?
+        let controller = TerminalFilePathSheetViewController(
+            target: initial,
+            hostName: "devbox",
+            onView: { viewed = $0 },
+            onCopy: { _ in }
+        )
+        controller.onDismiss = {}
+        controller.loadViewIfNeeded()
+
+        XCTAssertEqual(controller.editedText, "Sources/App.swift:10-15")
+        let lineValue = try XCTUnwrap(
+            descendants(of: UILabel.self, in: controller.view).first {
+                $0.accessibilityIdentifier == "terminal.path.lineValue"
+            }
+        )
+        XCTAssertEqual(lineValue.text, "10–15")
+        let view = try XCTUnwrap(chip(label: "View", in: controller.view))
+        XCTAssertTrue(view.accessibilityActivate())
+        XCTAssertEqual(viewed?.lineRange, 10...15)
+    }
+
     func testPathSheetSemanticUpdatesRetainEditorSectionAndActions() throws {
         let initial = try XCTUnwrap(TerminalPathTarget.resolve("Sources/App.swift:42"))
         let controller = TerminalFilePathSheetViewController(

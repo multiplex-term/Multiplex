@@ -78,8 +78,9 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   .fileViewer`; pure models in `Models/FileViewer/`; records in
   `local-plan/file-viewer-bakeoff/` + `local-plan/file-viewer.md`). Two
   summons: + TAB ▸ File Viewer roots at the pane cwd ($HOME when no pane
-  answers), and a long-pressed path (`TerminalPathTarget`; `:12[:col]`
-  suffixes ride as a scroll target) raises `TerminalFilePathSheet` → ▤
+  answers), and a long-pressed path (`TerminalPathTarget`; `:12[:col]` and
+  tool-call-style `:12-18[:col]` suffixes ride as line targets) raises
+  `TerminalFilePathSheet` → ▤
   VIEW. `file:///absolute/path` and `file://localhost/absolute/path` take
   the same road: percent escapes decode to the REMOTE path, URI syntax
   proves spaces/trailing marks are filename bytes (no prose trimming),
@@ -127,8 +128,9 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   grounds, and washes are decor drawn by pinned companion views,
   unselectable by construction. Traps on record: the
   `usingTextLayoutManager:` convenience init crashes a Swift subclass
-  (hand-build the stack), and a `path:12` centered scroll must defer one
-  main-queue hop past first layout. Rendered markdown keeps SwiftUI
+  (hand-build the stack), and a `path:12` / `path:12-18` centered scroll
+  (the range starts centered and every requested row is washed) must defer
+  one main-queue hop past first layout. Rendered markdown keeps SwiftUI
   blocks; a rail SELECT chip re-hosts the raw source on the selectable
   screen. **A markdown image is a captioned placeholder that a press turns
   into the picture, in place** (`MarkdownInline.image(alt:destination:)`;

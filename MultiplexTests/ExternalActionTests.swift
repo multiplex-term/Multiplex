@@ -50,6 +50,15 @@ final class ExternalActionTests: XCTestCase {
         }
     }
 
+    func testFileURLRoundTripsEmbeddedLineRange() {
+        let action = ExternalAction.openFile(
+            host: .named("devbox"), path: "Sources/App.swift:10-15", line: nil)
+        XCTAssertEqual(
+            ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
+            action
+        )
+    }
+
     func testFileURLRequiresAUsablePathAndPositiveLine() {
         for query in [
             "multiplex://open?host=devbox&action=file",
@@ -264,7 +273,9 @@ final class ExternalActionTests: XCTestCase {
         )
 
         await ExternalActionPerformer.perform(
-            .openFile(host: .id(host.id), path: "Sources/App.swift", line: 42),
+            .openFile(
+                host: .id(host.id), path: "Sources/App.swift:10-15", line: nil
+            ),
             context: context
         )
 

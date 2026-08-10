@@ -109,7 +109,7 @@ Free surfaces added 2026-07-18 (unreleased; ships with the next binary):
 | Widget extension | `MultiplexWidgets` (`app.multiplexterm.multiplex.widgets`), embedded in the app; iPadOS 17.0+, visionOS 26.0+ (WidgetKit does not exist on earlier visionOS — the app itself stays 1.0) |
 | Widgets | "Host Monitor" (small/medium, configurable: host, small-tap action, agent, optional model picked from the host's configured launch models, optional target session with an Open In placement, optional working directory from the host's configured list, ask-for-prompt) and "Fleet Wall" (medium/large, host order follows the deck) |
 | Widget data | Last-known sessions/miniatures plus configured agent model names and working directories from an App Group snapshot (`group.app.multiplexterm.multiplex`, `widget-state.json`, secret-free). Widgets never open connections and show no liveness claims — a relative SEEN stamp only |
-| App Shortcuts | "Open Shell" (attach the selected backend's most recent session or create), "Open File" (remote file path plus optional positive line number; opens read-only in a File Viewer tab, with relative paths based at the host's first configured working directory or home), and "Open Agent" (Claude Code/Codex/Pi, host-configured working-directory, setup-script, and launch-model pickers — models passed as `--model` — optional first prompt; works on tmux and herdr hosts, with Session + Open In pickers to launch inside an existing session: a new tmux window, or a herdr tab in the focused workspace / a new workspace) — run in-app; failures surface as an in-app alert |
+| App Shortcuts | "Open Shell" (attach the selected backend's most recent session or create), "Open File" (remote file path plus optional positive line number, or a tool-call-style `path:10-15` line range; opens read-only in a File Viewer tab, with relative paths based at the host's first configured working directory or home), and "Open Agent" (Claude Code/Codex/Pi, host-configured working-directory, setup-script, and launch-model pickers — models passed as `--model` — optional first prompt; works on tmux and herdr hosts, with Session + Open In pickers to launch inside an existing session: a new tmux window, or a herdr tab in the focused workspace / a new workspace) — run in-app; failures surface as an in-app alert |
 | URL scheme | `multiplex://open?host=<uuid|name>&action=shell\|agent[&session=…][&agent=…][&prompt=…][&ask=1][&dir=…][&script=<uuid\|none>][&model=…][&in=tab\|workspace\|window]` or `multiplex://open?host=<uuid|name>&action=file&path=…[&line=…]` — widget taps and user automation; omitting `script` uses the remembered New Session choice, omitting `model` uses the agent's default; on `action=agent`, `session` targets an existing session and `in` places the launch inside it (tmux: a new window; herdr: tab in the focused workspace / new workspace) |
 | Privacy impact | None: the App Group snapshot stays on-device, contains no credentials, and adds no new data collection; setup-script bodies remain in the app's host record and never become Shortcut parameter values |
 
@@ -270,7 +270,8 @@ Current product split:
   tabs add a MENU chip that opens herdr's own pane menu in place), Home Screen
   widgets (per-host monitor +
   fleet wall; iPadOS 17+, visionOS 26+) and App Shortcuts ("Open Shell" /
-  "Open File" with remote path and optional line / "Open Agent" with
+  "Open File" with remote path and optional line or `path:10-15` range /
+  "Open Agent" with
   host-configured working-directory, setup-script, and
   launch-model pickers plus an optional first prompt; per-host agent model
   lists are configured once in Host Settings and offered on the New Session
