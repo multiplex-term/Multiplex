@@ -96,6 +96,11 @@ input encoding, or terminal rendering.
       across the joined rows, upper segment reaching the segment's right
       edge, seam forming a link. Border-free rows keep the whole-row path
       untouched. Locked by `TerminalSplitPaneLinkTests`.
+    - visionOS coalesces pending redraws to one 90 Hz frame (~11.1 ms) in
+      `queuePendingDisplay`; the upstream 16.67 ms delay assumed a 60 Hz
+      display and beat against Vision Pro's 90 Hz compositor during
+      streaming output (typing already bypassed it via
+      `displayImmediately`). iOS keeps 60 Hz.
     - The visible screen's links are enumerable (`Terminal
       .visibleLinkMatches` + `TerminalView.visibleLinkRegions`, the inverse
       of `calculateTapHit`) — what visionOS gaze hover stands on.
