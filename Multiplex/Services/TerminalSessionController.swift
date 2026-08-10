@@ -199,6 +199,15 @@ final class TerminalSessionController {
         return nil
     }
 
+    /// The screen cell of the last path press — which PANE the path was
+    /// printed in, so a relative path resolves against that pane's cwd
+    /// rather than the active one's. Overwritten by the next path press,
+    /// never cleared with the sheet: the ▤ VIEW confirmation reads it
+    /// after the sheet dismisses. nil for non-gesture summons (the debug
+    /// hooks, Shortcuts) and scrollback presses, which keep the
+    /// active-pane fallback.
+    private(set) var pathPressScreenCell: (col: Int, row: Int)?
+
     #if !os(visionOS)
     /// The terminal's app-owned dictation controls, from the pane's side:
     /// LISTENING while the microphone is open, or a short failure the user
@@ -243,8 +252,19 @@ final class TerminalSessionController {
         // never fire here; this pane decides instead. The view owns the
         // closure and this controller owns the view — capture weakly.
         view.linkActivationIgnoresHighlight = true
-        view.linkActivationHandler = { [weak self] target, _, rowTexts in
-            self?.activateLink(target, rowFragments: rowTexts) ?? false
+        view.linkActivationHandler = { [weak self, weak view] target, _, rowTexts, position in
+            guard let self else { return false }
+            // Buffer row → visible-screen cell: pane rectangles live in
+            // screen coordinates, and a press up in scrollback names no
+            // pane (the composite screen is the only pane-mapped surface).
+            var cell: (col: Int, row: Int)?
+            if let terminal = view?.getTerminal() {
+                let screenRow = position.row - terminal.buffer.yDisp
+                if screenRow >= 0 && screenRow < terminal.rows {
+                    cell = (col: position.col, row: screenRow)
+                }
+            }
+            return self.activateLink(target, rowFragments: rowTexts, pressedAt: cell)
         }
         // herdr resizes its pane splits by mouse drag, so a long press on a
         // border cell becomes a remote press-drag-release. herdr tabs only:
@@ -1833,18 +1853,22 @@ final class TerminalSessionController {
     /// gaze regions): a prose word butting a seam means the rows below start
     /// their own target (`and`⏎`local-plan/x` is not one path), so the cut
     /// suffix resolves first and the join stays the fallback.
-    func activateLink(_ target: String, rowFragments: [String] = []) -> Bool {
+    func activateLink(
+        _ target: String,
+        rowFragments: [String] = [],
+        pressedAt cell: (col: Int, row: Int)? = nil
+    ) -> Bool {
         // The jump search owns the pane's input while it pages and its veil
         // covers the text being pressed — same rule as a drop.
         if case .finding = historyJump { return false }
         if let cut = WrappedRowGlue.cutTarget(fragments: rowFragments),
-           claimResolved(cut) {
+           claimResolved(cut, pressedAt: cell) {
             return true
         }
-        return claimResolved(target)
+        return claimResolved(target, pressedAt: cell)
     }
 
-    private func claimResolved(_ target: String) -> Bool {
+    private func claimResolved(_ target: String, pressedAt cell: (col: Int, row: Int)?) -> Bool {
         // `file:` is URI-shaped, but in a remote pane it names a file on the
         // SSH host, never this device. Give the strict local-authority file
         // parser first refusal so it reaches the viewer; malformed/non-local
@@ -1853,6 +1877,7 @@ final class TerminalSessionController {
         // schemeless domain such as example.com/docs is legal path syntax too.
         if let file = TerminalPathTarget.resolveFileURL(target) {
             pendingActivation = .path(file)
+            pathPressScreenCell = cell
             return true
         }
         if let link = TerminalLink.resolve(target) {
@@ -1861,6 +1886,7 @@ final class TerminalSessionController {
         }
         if let path = TerminalPathTarget.resolve(target) {
             pendingActivation = .path(path)
+            pathPressScreenCell = cell
             return true
         }
         return false
@@ -1903,25 +1929,25 @@ final class TerminalSessionController {
         if case .path = pendingActivation { pendingActivation = nil }
     }
 
-    /// The pane's cwd for the file viewer's anchor — the same per-backend
-    /// truth drops resolve (tmux's `list-panes` line or the herdr
-    /// snapshot's focused pane; the git-worktree question is not asked
-    /// here). nil when no pane can answer: a plain shell, a mosh tab (no
-    /// exec surface), or a dead transport.
-    func paneWorkingDirectory() async -> String? {
+    /// The pane's cwd for the file viewer's anchor — the pressed pane's
+    /// when a cell rides along (a split's panes routinely sit in different
+    /// directories), the active/focused pane's otherwise (the git-worktree
+    /// question is not asked here). nil when no pane can answer: a plain
+    /// shell, a mosh tab (no exec surface), or a dead transport.
+    func paneWorkingDirectory(pressedAt cell: (col: Int, row: Int)? = nil) async -> String? {
         guard let sessionName = route.sessionName, let connection
         else { return nil }
         switch route.sessionBackend {
         case .tmux:
             let output = (try? await connection.exec(
-                TmuxProbe.dropDestinationCommand(sessionName: sessionName)
+                TmuxProbe.pathAnchorCommand(sessionName: sessionName)
             )) ?? ""
-            return TmuxProbe.parseDropDestination(output).cwd
+            return TmuxProbe.parsePathAnchorDirectory(output, atScreenCell: cell)
         case .herdr:
             let output = (try? await connection.exec(
                 HerdrProbe.snapshotCommand(sessionName: sessionName)
             )) ?? ""
-            return HerdrProbe.parseFocusedPaneWorkingDirectory(output)
+            return HerdrProbe.parsePaneWorkingDirectory(output, atScreenCell: cell)
         case nil:
             return nil
         }

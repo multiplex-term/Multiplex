@@ -82,9 +82,20 @@ input encoding, or terminal rendering.
       be driven headlessly).
     - Link activation is touch-reachable and app-answerable:
       `linkActivationIgnoresHighlight` (upstream needed pointer hover),
-      `linkActivationHandler` (the app can decline a match), one
-      `activateLink` for both gestures — `singleTap` skips links while the
-      remote wants the tap; `longPress` resolves one before its menu.
+      `linkActivationHandler` (the app can decline a match; carries the
+      pressed buffer `Position` so the app can name the pane under the
+      finger), one `activateLink` for both gestures — `singleTap` skips
+      links while the remote wants the tap; `longPress` resolves one
+      before its menu.
+    - Implicit link detection is split-pane-aware (`paneSegment` /
+      `buildPaneSegmentLineMap`): a row carrying vertical pane-border
+      glyphs (│ family; ASCII `|` deliberately excluded — it's shell
+      syntax) scopes matching to the border-delimited segment under the
+      press, and a path that wrapped at the PANE border (mid-row, never
+      `isWrapped`) rejoins via segment-edge heuristics — border continuous
+      across the joined rows, upper segment reaching the segment's right
+      edge, seam forming a link. Border-free rows keep the whole-row path
+      untouched. Locked by `TerminalSplitPaneLinkTests`.
     - The visible screen's links are enumerable (`Terminal
       .visibleLinkMatches` + `TerminalView.visibleLinkRegions`, the inverse
       of `calculateTapHit`) — what visionOS gaze hover stands on.

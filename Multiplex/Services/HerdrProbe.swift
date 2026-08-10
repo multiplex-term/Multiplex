@@ -845,6 +845,30 @@ enum HerdrProbe {
             .first(where: isSpliceablePath)
     }
 
+    /// The cwd a pressed path resolves against, out of the same snapshot
+    /// exec: the pane whose screen rectangle contains the pressed cell when
+    /// one does (and carries a spliceable directory — foreground process
+    /// first, `parseFocusedPaneWorkingDirectory`'s discipline), the focused
+    /// pane otherwise. In a split, the two panes' cwds routinely differ,
+    /// and "relative to the pane's directory" must mean the pane that
+    /// printed the path.
+    static func parsePaneWorkingDirectory(
+        _ output: String, atScreenCell cell: (col: Int, row: Int)?
+    ) -> String? {
+        if let cell,
+           let pressed = parsePaneScreenRects(output).first(where: {
+               $0.rect.contains(col: cell.col, row: cell.row)
+           }),
+           let snapshot = firstDecodedLine(in: output, decodeSnapshot),
+           let pane = snapshot.panes.first(where: { $0.paneID == pressed.id }),
+           let directory = [pane.foregroundCwd, pane.cwd]
+               .compactMap({ $0 })
+               .first(where: isSpliceablePath) {
+            return directory
+        }
+        return parseFocusedPaneWorkingDirectory(output)
+    }
+
     /// Every visible pane's screen rectangle out of one snapshot exec — the
     /// select-text mode's clamp candidates. The layout rects are already in
     /// the attached client's screen cells (sidebar and tab bar included in

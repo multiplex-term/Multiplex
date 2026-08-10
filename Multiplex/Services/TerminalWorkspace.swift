@@ -122,6 +122,7 @@ final class TerminalWorkspace {
         host: Host,
         startDirectory: String?,
         anchorSession: SessionKey?,
+        anchorCell: (col: Int, row: Int)? = nil,
         target: TerminalPathTarget?,
         targetPresentation: FileViewerController.FilePresentation = .source
     ) {
@@ -131,6 +132,7 @@ final class TerminalWorkspace {
             host: host,
             startDirectory: startDirectory,
             anchorSession: anchorSession,
+            anchorCell: anchorCell,
             target: target,
             targetPresentation: targetPresentation
         )

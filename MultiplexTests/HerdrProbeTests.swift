@@ -709,6 +709,50 @@ final class HerdrProbeTests: XCTestCase {
         XCTAssertNil(HerdrProbe.parseFocusedPaneWorkingDirectory("Error: no server\n"))
     }
 
+    func testParsePaneWorkingDirectoryPrefersThePressedPane() {
+        // Two side-by-side panes in different directories, focus on the
+        // left; the press landed in the right pane, so the right pane's
+        // cwd answers — foreground process first, same discipline as the
+        // focused-pane parser.
+        let snapshot = #"{"id":"cli:api:snapshot","result":{"snapshot":{"#
+            + #""version":"0.7.5","protocol":17,"focused_workspace_id":"w1","#
+            + #""focused_tab_id":"w1:t1","focused_pane_id":"w1:p1","#
+            + #""workspaces":[{"workspace_id":"w1","number":1,"label":"one","#
+            + #""active_tab_id":"w1:t1"}],"#
+            + #""panes":[{"pane_id":"w1:p1","tab_id":"w1:t1","cwd":"/home/dev/left","#
+            + #""agent_status":"unknown","scroll":{"viewport_rows":23}},"#
+            + #"{"pane_id":"w1:p2","tab_id":"w1:t1","cwd":"/home/dev/right","#
+            + #""foreground_cwd":"/home/dev/right/repo","#
+            + #""agent_status":"unknown","scroll":{"viewport_rows":23}}],"#
+            + #""layouts":[{"tab_id":"w1:t1","focused_pane_id":"w1:p1","#
+            + #""panes":[{"pane_id":"w1:p1","focused":true,"#
+            + #""rect":{"x":0,"y":1,"width":40,"height":23}},"#
+            + #"{"pane_id":"w1:p2","focused":false,"#
+            + #""rect":{"x":41,"y":1,"width":39,"height":23}}]}]}}}"#
+        XCTAssertEqual(
+            HerdrProbe.parsePaneWorkingDirectory(
+                snapshot, atScreenCell: (col: 50, row: 5)
+            ),
+            "/home/dev/right/repo"
+        )
+        // No cell, a cell outside every pane (the sidebar, a border), or a
+        // pressed pane without a spliceable cwd all keep the focused pane's
+        // answer.
+        XCTAssertEqual(
+            HerdrProbe.parsePaneWorkingDirectory(snapshot, atScreenCell: nil),
+            "/home/dev/left"
+        )
+        XCTAssertEqual(
+            HerdrProbe.parsePaneWorkingDirectory(
+                snapshot, atScreenCell: (col: 40, row: 5)
+            ),
+            "/home/dev/left"
+        )
+        XCTAssertNil(HerdrProbe.parsePaneWorkingDirectory(
+            "Error: no server\n", atScreenCell: (col: 1, row: 1)
+        ))
+    }
+
     func testParseFocusedPaneWorkingDirectoryNeverGuessesWithoutFocus() {
         // Typed paths land in the focused pane; a session that names no
         // focus (or names a pane the snapshot doesn't carry) gets $HOME —

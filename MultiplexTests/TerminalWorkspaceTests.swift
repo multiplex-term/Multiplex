@@ -131,13 +131,23 @@ final class TerminalWorkspaceTests: XCTestCase {
         let tmux = SessionKey(backend: .tmux, name: "main")
         XCTAssertEqual(
             FileViewerController.anchorDirectoryCommand(for: tmux),
-            TmuxProbe.dropDestinationCommand(sessionName: "main")
+            TmuxProbe.pathAnchorCommand(sessionName: "main")
         )
         XCTAssertEqual(
             FileViewerController.parseAnchorDirectory(
-                "/srv/project\nMULTIPLEX_GIT\n", backend: .tmux
+                "MPXPANE 1 0 0 80 24 /srv/project\n", backend: .tmux
             ),
             "/srv/project"
+        )
+        // A pressed cell aims at the pane under the finger, not the active.
+        XCTAssertEqual(
+            FileViewerController.parseAnchorDirectory(
+                "MPXPANE 1 0 0 40 24 /srv/active\n"
+                    + "MPXPANE 0 41 0 39 24 /srv/pressed\n",
+                backend: .tmux,
+                atScreenCell: (col: 50, row: 5)
+            ),
+            "/srv/pressed"
         )
 
         let herdr = SessionKey(backend: .herdr, name: "work")

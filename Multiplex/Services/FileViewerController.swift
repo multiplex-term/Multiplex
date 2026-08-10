@@ -66,6 +66,10 @@ final class FileViewerController: AuxiliaryPaneController {
     /// connection, so the backend-specific query simply moves here rather
     /// than silently rooting tmux or herdr at $HOME.
     let anchorSession: SessionKey?
+    /// The pressed screen cell that summoned this viewer, when a path press
+    /// did — the mosh re-ask (`anchorPaneDirectory`) aims at the pane under
+    /// the finger with it; nil keeps the active/focused-pane answer.
+    let anchorCell: (col: Int, row: Int)?
     /// The pressed path this tab was summoned to show, when it was.
     private let target: TerminalPathTarget?
     /// A file viewer keeps SOURCE | DIFF as a browsing mode: once DIFF is
@@ -89,6 +93,7 @@ final class FileViewerController: AuxiliaryPaneController {
         host: Host,
         startDirectory: String?,
         anchorSession: SessionKey? = nil,
+        anchorCell: (col: Int, row: Int)? = nil,
         target: TerminalPathTarget?,
         targetPresentation: FilePresentation = .source
     ) {
@@ -96,6 +101,7 @@ final class FileViewerController: AuxiliaryPaneController {
         self.host = host
         self.startDirectory = startDirectory
         self.anchorSession = anchorSession
+        self.anchorCell = anchorCell
         self.target = target
         self.targetPresentation = targetPresentation
         self.filePresentation = targetPresentation
@@ -432,36 +438,43 @@ final class FileViewerController: AuxiliaryPaneController {
         }
     }
 
-    /// The summoning tab's active-pane cwd, asked over this viewer's own SSH
+    /// The summoning tab's pane cwd, asked over this viewer's own SSH
     /// connection. Only reached when the tab itself could not answer — a mosh
     /// tab has no exec channel. Dispatch by the tab's backend rather than
     /// assuming tmux: herdr's focused pane comes from its snapshot envelope.
+    /// A path press carries its screen cell (`anchorCell`) so a split
+    /// resolves against the pane that printed the path; a browse summon
+    /// keeps the active/focused pane.
     private func anchorPaneDirectory() async -> String? {
         guard let anchorSession,
               let output = try? await withConnection({
                   try await $0.exec(Self.anchorDirectoryCommand(for: anchorSession))
               })
         else { return nil }
-        return Self.parseAnchorDirectory(output, backend: anchorSession.backend)
+        return Self.parseAnchorDirectory(
+            output, backend: anchorSession.backend, atScreenCell: anchorCell
+        )
     }
 
     static func anchorDirectoryCommand(for session: SessionKey) -> String {
         switch session.backend {
         case .tmux:
-            TmuxProbe.dropDestinationCommand(sessionName: session.name)
+            TmuxProbe.pathAnchorCommand(sessionName: session.name)
         case .herdr:
             HerdrProbe.snapshotCommand(sessionName: session.name)
         }
     }
 
     static func parseAnchorDirectory(
-        _ output: String, backend: Host.SessionBackend
+        _ output: String,
+        backend: Host.SessionBackend,
+        atScreenCell cell: (col: Int, row: Int)? = nil
     ) -> String? {
         switch backend {
         case .tmux:
-            TmuxProbe.parseDropDestination(output).cwd
+            TmuxProbe.parsePathAnchorDirectory(output, atScreenCell: cell)
         case .herdr:
-            HerdrProbe.parseFocusedPaneWorkingDirectory(output)
+            HerdrProbe.parsePaneWorkingDirectory(output, atScreenCell: cell)
         }
     }
 

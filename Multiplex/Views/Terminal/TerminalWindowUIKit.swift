@@ -1021,7 +1021,12 @@ final class TerminalWindowViewController: UIViewController,
         let anchorSession = activeTab.sessionKey
         Task { [weak self] in
             guard let self else { return }
-            let cwd = await workspace.controller(for: anchorID)?.paneWorkingDirectory()
+            // A pressed path anchors to the pane under the finger; the
+            // + TAB browse summon (no target) keeps the active pane.
+            let cell = target == nil
+                ? nil : workspace.controller(for: anchorID)?.pathPressScreenCell
+            let cwd = await workspace.controller(for: anchorID)?
+                .paneWorkingDirectory(pressedAt: cell)
             let tab = TerminalRoute(
                 hostID: hostID,
                 mode: .fileViewer(path: target?.path ?? cwd ?? "~")
@@ -1031,6 +1036,7 @@ final class TerminalWindowViewController: UIViewController,
                 host: host,
                 startDirectory: cwd,
                 anchorSession: anchorSession,
+                anchorCell: cell,
                 target: target
             )
             dock(tab, after: anchorID)

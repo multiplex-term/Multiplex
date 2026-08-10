@@ -6412,6 +6412,17 @@ open class Terminal {
             targetCol -= 1
         }
 
+        // Multiplex patch: a multiplexer composites side-by-side panes into
+        // one client row, so a row with vertical pane-border glyphs holds
+        // several panes' text. Scope the map to the border-delimited segment
+        // under the press — matching can't cross the border, and a path that
+        // wrapped at the PANE edge (mid-row, never `isWrapped`) rejoins via
+        // segment-edge heuristics instead of the whole-row ones, which look
+        // at the terminal's right edge where a neighbour pane's text sits.
+        if let segment = paneSegment(row: targetRow, around: targetCol, in: buffer) {
+            return buildPaneSegmentLineMap(targetRow: targetRow, targetCol: targetCol, segment: segment, in: buffer)
+        }
+
         var startRow = targetRow
         while startRow > 0 && buffer.lines[startRow].isWrapped {
             startRow -= 1
@@ -6444,6 +6455,249 @@ open class Terminal {
             }
             let isContinuationRow = isImplicitContinuationRow(row, startRow: startRow, in: buffer)
             let startCol = isContinuationRow ? firstNonWhitespaceColumn(in: line, lineLimit: lineLimit) : 0
+            guard startCol < lineLimit else {
+                continue
+            }
+            if row == targetRow && targetCol >= startCol && targetCol < lineLimit {
+                targetIsInsideTrimmedContent = true
+            }
+
+            for col in startCol..<lineLimit {
+                if col > 0 && line[col].code == 0 && line[col - 1].width == 2 {
+                    continue
+                }
+                let cell = line[col]
+                var character = getCharacter(for: cell)
+                if character == "\u{0}" {
+                    character = " "
+                }
+                text.append(character)
+                cells.append(
+                    GhosttyImplicitCellRef(
+                        row: row,
+                        col: col,
+                        width: max(1, Int(cell.width))
+                    )
+                )
+            }
+        }
+
+        guard !text.isEmpty, !cells.isEmpty, targetIsInsideTrimmedContent else {
+            return nil
+        }
+
+        return GhosttyImplicitLineMap(
+            text: text,
+            cells: cells,
+            targetRow: targetRow,
+            targetCol: targetCol
+        )
+    }
+
+    // Multiplex patch: split-pane implicit links. Vertical pane-border
+    // glyphs tmux and herdr draw between side-by-side panes (single, heavy,
+    // double, and dashed line-drawing). ASCII '|' is deliberately absent —
+    // in terminal output it is shell syntax far more often than a border.
+    private static let paneBorderCharacters: Set<Character> = [
+        "\u{2502}", "\u{2503}", "\u{2551}",
+        "\u{254E}", "\u{254F}", "\u{2506}", "\u{2507}", "\u{250A}", "\u{250B}"
+    ]
+
+    private func isPaneBorderCell(row: Int, col: Int, in buffer: Buffer) -> Bool
+    {
+        guard row >= 0 && row < buffer.lines.count else {
+            return false
+        }
+        let line = buffer.lines[row]
+        guard col >= 0 && col < min(cols, line.count) else {
+            return false
+        }
+        guard let character = linkCharacterAt(line: line, col: col) else {
+            return false
+        }
+        return Self.paneBorderCharacters.contains(character)
+    }
+
+    /// The border-delimited column segment around `col`, or nil when the row
+    /// carries no vertical pane border (the whole-row path handles it).
+    private func paneSegment(row: Int, around col: Int, in buffer: Buffer) -> Range<Int>?
+    {
+        guard row >= 0 && row < buffer.lines.count else {
+            return nil
+        }
+        let line = buffer.lines[row]
+        let limit = min(cols, line.count)
+        guard limit > 0, col < limit else {
+            return nil
+        }
+        if isPaneBorderCell(row: row, col: col, in: buffer) {
+            return nil
+        }
+        var start = 0
+        var sawBorder = false
+        var scan = col - 1
+        while scan >= 0 {
+            if isPaneBorderCell(row: row, col: scan, in: buffer) {
+                start = scan + 1
+                sawBorder = true
+                break
+            }
+            scan -= 1
+        }
+        var end = limit
+        scan = col + 1
+        while scan < limit {
+            if isPaneBorderCell(row: row, col: scan, in: buffer) {
+                end = scan
+                sawBorder = true
+                break
+            }
+            scan += 1
+        }
+        guard sawBorder, start < end else {
+            return nil
+        }
+        return start..<end
+    }
+
+    /// Whether `row` still carries the border glyphs that delimit `segment`
+    /// — a join must not cross into a differently-split region above/below.
+    private func rowCarriesSegmentBorders(row: Int, segment: Range<Int>, in buffer: Buffer) -> Bool
+    {
+        if segment.lowerBound > 0 && !isPaneBorderCell(row: row, col: segment.lowerBound - 1, in: buffer) {
+            return false
+        }
+        if segment.upperBound < cols && !isPaneBorderCell(row: row, col: segment.upperBound, in: buffer) {
+            return false
+        }
+        return true
+    }
+
+    private func linkSegmentEdgeInfo(row: Int, segment: Range<Int>, in buffer: Buffer) -> LinkRowEdgeInfo?
+    {
+        guard row >= 0 && row < buffer.lines.count else {
+            return nil
+        }
+        let line = buffer.lines[row]
+        let limit = min(min(cols, line.count), segment.upperBound)
+        guard limit > segment.lowerBound else {
+            return nil
+        }
+
+        var first: (col: Int, char: Character)?
+        var col = segment.lowerBound
+        while col < limit {
+            if let ch = linkCharacterAt(line: line, col: col), !ch.isWhitespace {
+                first = (col, ch)
+                break
+            }
+            col += 1
+        }
+        guard let first else {
+            return nil
+        }
+
+        var last: (col: Int, char: Character)?
+        var rcol = limit - 1
+        while rcol >= first.col {
+            if let ch = linkCharacterAt(line: line, col: rcol), !ch.isWhitespace {
+                last = (rcol, ch)
+                break
+            }
+            if rcol == 0 { break }
+            rcol -= 1
+        }
+        guard let last else {
+            return nil
+        }
+
+        return LinkRowEdgeInfo(
+            firstCol: first.col,
+            firstChar: first.char,
+            lastCol: last.col,
+            lastChar: last.char
+        )
+    }
+
+    /// The segment analogue of `canJoinImplicitRows`: the upper segment's
+    /// content reaches near the SEGMENT's right edge (the pane border, not
+    /// the terminal edge), both rows keep the delimiting borders, and the
+    /// seam forms a valid link.
+    private func canJoinPaneSegments(upper: Int, lower: Int, segment: Range<Int>, in buffer: Buffer) -> Bool
+    {
+        guard rowCarriesSegmentBorders(row: upper, segment: segment, in: buffer),
+              rowCarriesSegmentBorders(row: lower, segment: segment, in: buffer),
+              let upperInfo = linkSegmentEdgeInfo(row: upper, segment: segment, in: buffer),
+              let lowerInfo = linkSegmentEdgeInfo(row: lower, segment: segment, in: buffer)
+        else {
+            return false
+        }
+
+        let width = segment.count
+        let continuationThreshold = max(segment.lowerBound, segment.upperBound - max(2, width / 5))
+        guard upperInfo.lastCol >= continuationThreshold else {
+            return false
+        }
+
+        let upperScalars = upperInfo.lastChar.unicodeScalars
+        let lowerScalars = lowerInfo.firstChar.unicodeScalars
+        guard !upperScalars.isEmpty, !lowerScalars.isEmpty else {
+            return false
+        }
+        guard upperScalars.allSatisfy({ Self.ghosttyContinuationCharacters.contains($0) }),
+              lowerScalars.allSatisfy({ Self.ghosttyContinuationCharacters.contains($0) })
+        else {
+            return false
+        }
+
+        let upperLine = buffer.lines[upper]
+        let upperLimit = min(min(cols, upperLine.count), upperInfo.lastCol + 1)
+        let upperStart = max(segment.lowerBound, upperLimit - 96)
+        let upperText = implicitLineSegmentText(line: upperLine, startCol: upperStart, endCol: upperLimit)
+        guard !upperText.isEmpty else {
+            return false
+        }
+
+        let lowerLine = buffer.lines[lower]
+        let lowerLimit = min(min(cols, lowerLine.count), segment.upperBound)
+        guard lowerInfo.firstCol < lowerLimit else {
+            return false
+        }
+        let lowerEnd = min(lowerLimit, lowerInfo.firstCol + 96)
+        let lowerText = implicitLineSegmentText(line: lowerLine, startCol: lowerInfo.firstCol, endCol: lowerEnd)
+        guard !lowerText.isEmpty else {
+            return false
+        }
+
+        return candidateSeamContainsImplicitLink(candidate: upperText + lowerText, seamOffset: upperText.utf16.count)
+    }
+
+    /// The segment-scoped line map: only cells inside the pane's columns,
+    /// rows joined by `canJoinPaneSegments` (pane-internal wraps are never
+    /// `isWrapped` — the multiplexer repaints with cursor addressing).
+    private func buildPaneSegmentLineMap(targetRow: Int, targetCol: Int, segment: Range<Int>, in buffer: Buffer) -> GhosttyImplicitLineMap?
+    {
+        var startRow = targetRow
+        while startRow > 0 && canJoinPaneSegments(upper: startRow - 1, lower: startRow, segment: segment, in: buffer) {
+            startRow -= 1
+        }
+        var endRow = targetRow
+        while endRow + 1 < buffer.lines.count && canJoinPaneSegments(upper: endRow, lower: endRow + 1, segment: segment, in: buffer) {
+            endRow += 1
+        }
+
+        var text = ""
+        var cells: [GhosttyImplicitCellRef] = []
+        cells.reserveCapacity((endRow - startRow + 1) * segment.count)
+        var targetIsInsideTrimmedContent = false
+
+        for row in startRow...endRow {
+            let line = buffer.lines[row]
+            guard let edge = linkSegmentEdgeInfo(row: row, segment: segment, in: buffer) else {
+                continue
+            }
+            let lineLimit = edge.lastCol + 1
+            let startCol = row == startRow ? segment.lowerBound : edge.firstCol
             guard startCol < lineLimit else {
                 continue
             }
@@ -6602,9 +6856,6 @@ open class Terminal {
         in buffer: Buffer
     ) -> Bool
     {
-        guard let regex = Self.ghosttyImplicitLinkRegex else {
-            return false
-        }
         guard upper >= 0, upper < buffer.lines.count, lower >= 0, lower < buffer.lines.count else {
             return false
         }
@@ -6631,8 +6882,16 @@ open class Terminal {
             return false
         }
 
-        let candidate = upperText + lowerText
-        let seamOffset = upperText.utf16.count
+        return candidateSeamContainsImplicitLink(candidate: upperText + lowerText, seamOffset: upperText.utf16.count)
+    }
+
+    // Multiplex patch: the seam-straddling match test, shared by the
+    // whole-row and pane-segment join heuristics.
+    private func candidateSeamContainsImplicitLink(candidate: String, seamOffset: Int) -> Bool
+    {
+        guard let regex = Self.ghosttyImplicitLinkRegex else {
+            return false
+        }
         let searchRange = NSRange(candidate.startIndex..<candidate.endIndex, in: candidate)
         for match in regex.matches(in: candidate, options: [], range: searchRange) {
             let matchStart = match.range.location

@@ -408,6 +408,67 @@ enum TmuxProbe {
         }
     }
 
+    /// Every visible pane's screen rectangle plus its working directory —
+    /// the file-viewer anchor's one exec. A pressed path resolves against
+    /// the pane under the finger (`parsePathAnchorDirectory`), not the
+    /// active pane: in a split, the two panes' cwds routinely differ, and
+    /// "relative to the pane's directory" must mean the pane that printed
+    /// the path. Same `list-panes -F` discipline as `paneRectsCommand`
+    /// (3.6a renders `pane_*` empty for `display-message` from outside
+    /// clients); the path rides last because it may contain spaces.
+    static func pathAnchorCommand(sessionName: String) -> String {
+        pathPrefix
+            + "\(tmuxCommand) list-panes -t \("=\(sessionName)".shellQuoted) "
+            + "-F 'MPXPANE #{pane_active} #{pane_left} #{pane_top} "
+            + "#{pane_width} #{pane_height} #{pane_current_path}' 2>/dev/null"
+    }
+
+    struct PanePathAnchor: Equatable {
+        var rect: PaneScreenRect
+        var isActive: Bool
+        var cwd: String?
+    }
+
+    static func parsePathAnchors(_ output: String) -> [PanePathAnchor] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.split(
+                separator: " ", maxSplits: 6, omittingEmptySubsequences: false
+            ).map(String.init)
+            guard fields.count == 7, fields[0] == "MPXPANE",
+                  let left = Int(fields[2]), let top = Int(fields[3]),
+                  let width = Int(fields[4]), let height = Int(fields[5]),
+                  left >= 0, top >= 0, width > 0, height > 0
+            else { return nil }
+            let cwd = fields[6].trimmingCharacters(in: .whitespaces)
+            return PanePathAnchor(
+                rect: PaneScreenRect(
+                    columns: left...(left + width - 1),
+                    rows: top...(top + height - 1)
+                ),
+                isActive: fields[1] == "1",
+                cwd: cwd.hasPrefix("/") ? cwd : nil
+            )
+        }
+    }
+
+    /// The cwd a pressed path resolves against: the pane containing the
+    /// pressed screen cell when one does (and answered a cwd), the active
+    /// pane otherwise — which is also the no-cell answer for the + TAB
+    /// browse summon and the debug hooks.
+    static func parsePathAnchorDirectory(
+        _ output: String, atScreenCell cell: (col: Int, row: Int)?
+    ) -> String? {
+        let anchors = parsePathAnchors(output)
+        if let cell,
+           let pressed = anchors.first(where: {
+               $0.rect.contains(col: cell.col, row: cell.row)
+           }),
+           let cwd = pressed.cwd {
+            return cwd
+        }
+        return anchors.first(where: \.isActive)?.cwd
+    }
+
     /// Focus one pane by id — what a click would have done had the
     /// select-text mode not kept the tap local. `%id` pane targets are
     /// exact on 3.6a (only `=name` pane targets misbehave).

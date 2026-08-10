@@ -406,6 +406,71 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertTrue(command.contains("echo MULTIPLEX_GIT"))
     }
 
+    func testPathAnchorCommandTargetsExactSessionWithRectsAndPaths() {
+        let command = TmuxProbe.pathAnchorCommand(sessionName: "my project")
+        // list-panes, NOT display-message: 3.6a's display-message renders
+        // pane formats empty for outside clients.
+        XCTAssertTrue(command.contains("tmux -u list-panes -t '=my project'"))
+        // Rect first, path LAST — a cwd may contain spaces.
+        XCTAssertTrue(command.contains(
+            "MPXPANE #{pane_active} #{pane_left} #{pane_top} "
+                + "#{pane_width} #{pane_height} #{pane_current_path}"))
+    }
+
+    func testParsePathAnchorsReadsRectsActivityAndSpacedPaths() {
+        let output = """
+        MPXPANE 1 0 0 40 24 /srv/active
+        MPXPANE 0 41 0 39 24 /home/dev/my repo
+        MPXPANE 0 0 0 0 24 /zero/width
+        noise
+        """
+        XCTAssertEqual(TmuxProbe.parsePathAnchors(output), [
+            TmuxProbe.PanePathAnchor(
+                rect: PaneScreenRect(columns: 0...39, rows: 0...23),
+                isActive: true,
+                cwd: "/srv/active"
+            ),
+            TmuxProbe.PanePathAnchor(
+                rect: PaneScreenRect(columns: 41...79, rows: 0...23),
+                isActive: false,
+                cwd: "/home/dev/my repo"
+            ),
+        ], "zero-width rects and noise lines drop; spaced paths survive")
+    }
+
+    func testParsePathAnchorDirectoryPrefersThePressedPane() {
+        let output = """
+        MPXPANE 1 0 0 40 24 /srv/active
+        MPXPANE 0 41 0 39 24 /srv/pressed
+        """
+        // The press landed in the right pane — its cwd answers, not the
+        // active pane's: in a split the two routinely differ.
+        XCTAssertEqual(
+            TmuxProbe.parsePathAnchorDirectory(output, atScreenCell: (col: 50, row: 5)),
+            "/srv/pressed"
+        )
+        // No cell (+ TAB browse, debug hooks), a cell no pane contains
+        // (the border, the status line), or a pressed pane without a cwd
+        // all keep the active pane's answer.
+        XCTAssertEqual(
+            TmuxProbe.parsePathAnchorDirectory(output, atScreenCell: nil),
+            "/srv/active"
+        )
+        XCTAssertEqual(
+            TmuxProbe.parsePathAnchorDirectory(output, atScreenCell: (col: 40, row: 5)),
+            "/srv/active"
+        )
+        XCTAssertEqual(
+            TmuxProbe.parsePathAnchorDirectory(
+                "MPXPANE 1 0 0 40 24 /srv/active\nMPXPANE 0 41 0 39 24 ~\n",
+                atScreenCell: (col: 50, row: 5)
+            ),
+            "/srv/active",
+            "a non-absolute pane answer is no answer"
+        )
+        XCTAssertNil(TmuxProbe.parsePathAnchorDirectory("", atScreenCell: (col: 1, row: 1)))
+    }
+
     func testGitWorktreeCheckCommandRequotesTheResolvedDirectory() {
         // The herdr drop path resolves the cwd app-side (snapshot JSON), so
         // the corral question is its own exec — same marker, same parser,

@@ -93,6 +93,18 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   keep the prose guard. `trimmingProseTail` sheds trailing
   chunks carrying neither `/` nor `.` — hence the sheet's OPENS row
   (verbatim mono) whenever the resolved spelling differs from the field.
+  Split panes: detection is pane-aware in the fork (a border-glyph row
+  scopes matching + wrap-joining to the pressed pane's columns — see
+  `swiftterm-fork.md`), and a path press carries its screen cell so a
+  relative path resolves against the PRESSED pane's cwd
+  (`TmuxProbe.parsePathAnchorDirectory` / `HerdrProbe
+  .parsePaneWorkingDirectory`, rect-containment with active/focused-pane
+  fallback — a split's panes routinely sit in different repos). The cell
+  lives in `TerminalSessionController.pathPressScreenCell`, overwritten
+  per press rather than cleared with the sheet (the ▤ VIEW confirm reads
+  it after dismissal), and rides the summon (`anchorCell`) so the mosh
+  re-ask aims at the same pane; + TAB browse and the debug hooks pass no
+  cell and keep the active-pane anchor.
   Wrapped-row glue: hard wraps leave no seam space, so `LinkMatch
   .rowTexts` carries per-row fragments (built only for multi-row matches;
   deliberately NOT via the OSC-8-authored `params` dictionary) and

@@ -216,13 +216,18 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// `rowTexts` is the implicit match split at its hard-wrap seams
     /// (empty for explicit links and single-row matches) — the app-side
     /// glue detector's evidence.
-    public var linkActivationHandler: ((_ link: String, _ params: [String: String], _ rowTexts: [String]) -> Bool)?
+    ///
+    /// `position` is the pressed cell in buffer coordinates (row includes
+    /// the scrollback offset) — on a multiplexer's composited screen it
+    /// names the pane under the finger, which the app needs to resolve a
+    /// relative path against that pane's cwd rather than the active one's.
+    public var linkActivationHandler: ((_ link: String, _ params: [String: String], _ rowTexts: [String], _ position: Position) -> Bool)?
 
     /// Multiplex patch: shared activation path for tap and long press.
-    func activateLink(_ result: (link: String, params: [String: String], rowTexts: [String])) -> Bool
+    func activateLink(_ result: (link: String, params: [String: String], rowTexts: [String]), at position: Position) -> Bool
     {
         if let linkActivationHandler {
-            return linkActivationHandler(result.link, result.params, result.rowTexts)
+            return linkActivationHandler(result.link, result.params, result.rowTexts, position)
         }
         terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
         return true
@@ -789,7 +794,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
 
         if let result = linkForClick(at: hit, hasCommandModifier: commandActive),
-           activateLink(result) {
+           activateLink(result, at: hit) {
             _ = dismissAppMenu()
             return
         }
@@ -1162,7 +1167,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 && terminal.mouseMode.sendButtonPress()
             if !remoteWantsTap,
                let result = linkForClick(at: tapHit, hasCommandModifier: commandActive),
-               activateLink(result) {
+               activateLink(result, at: tapHit) {
                 return
             }
 
