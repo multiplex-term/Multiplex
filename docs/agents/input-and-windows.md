@@ -91,6 +91,25 @@ routing, tab moves, keyboard avoidance, or secret fields.
   still *builds* its stock accessory on
   visionOS and `commitTextInput` prefers its `controlModifier` —
   `SwiftTermView` nils `inputAccessoryView` there; don't remove that.
+- **Auxiliary tabs wear their whole bottom chrome in the ornament
+  (2026-08-10)** — on classic visionOS windows the in-window ▤/⌗ rails are
+  not mounted (`showsInWindowRail: false`); their end chips collided with
+  the system resize corners. The ▤ file viewer stacks its file row above
+  the verbatim UMD row in ONE slab (`ViewportUMDRootView
+  .installStackedDeck`; the rail's duplicate CLOSE is deleted — the window
+  row's CLOSE is the only one). The ⌗ viewport replaces rail + UMD with
+  three content-sized slabs (`ViewportSwitchboardViewController`:
+  navigate DECK ◂ ⟳ / locate address+reach / act SYSTEM ⋯ CLOSE; the caps
+  `⌗ port · host` title is retired — the address readout is the identity,
+  and MERGE folds into ⋯). Both mount `.fixedSize()` — NEVER window-width:
+  a slab that tracks the window permanently covers the system resize bar
+  (shipped and caught same day). `TerminalVisionStackedDeckGeometry`
+  biases the deck so its top edge sits half a window row above the anchor
+  and the extra file row hangs BELOW it, off the pane's last lines;
+  auxiliary slab content below the anchor does render — the CLIPS trap
+  above is about restacking keys under the UMD console line. Shell/iPad
+  keep the in-window rails unchanged; re-verify placement visually when
+  touching any of this.
 - **A terminal window's title bar is app-owned, and its scene asks for
   `.minimal` window controls** (`TerminalClassicRailInsets`;
   `MultiplexSceneDelegate.preferredWindowingControlStyle(for:)`). Two

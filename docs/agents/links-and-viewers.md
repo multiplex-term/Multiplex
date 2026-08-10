@@ -64,6 +64,11 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   avoidance). Controllers live only in `TerminalWorkspace`'s memory and
   register BEFORE the tab enters any route, so `syncTabs` strips exactly
   the tabs a dead process restored, never a live move.
+- **Classic visionOS moves both auxiliary rails into the bottom ornament**
+  (2026-08-10): the ▤ rail rides above the UMD row in one slab, the ⌗ rail
+  becomes three slabs with the address readout as the window identity.
+  Inventory, sizing rules, and the resize-bar/anchor traps live in
+  `input-and-windows.md`; Shell/iPad keep the in-window rails.
   `WKNavigationDelegate` re-applies the allowlist per navigation
   (`multiplex:` never navigable; mailto re-presents the sheet); no JS
   bridge, no send path into any terminal. One app-scoped persistent

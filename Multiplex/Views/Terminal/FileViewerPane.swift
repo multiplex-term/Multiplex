@@ -64,6 +64,33 @@ private struct FileViewerPaneObservedState {
     }
 }
 
+/// Value snapshot consumed by the visionOS Stacked Deck. Actions remain
+/// pane-owned because tree presentation and markdown selection are local UI
+/// state, while file loading/navigation stays in `FileViewerController`.
+struct FileViewerOrnamentConfiguration {
+    struct RenderKey: Equatable {
+        var canGoBack: Bool
+        var canGoForward: Bool
+        var showsSourceDiff: Bool
+        var sourceSelected: Bool
+        var markdownSelectionCaption: String?
+        var path: String
+        var hostName: String
+        var treeCaption: String
+        var isBusy: Bool
+        var isWorking: Bool
+    }
+
+    var key: RenderKey
+    var goBack: () -> Void
+    var goForward: () -> Void
+    var showSource: () -> Void
+    var showDiff: () -> Void
+    var toggleMarkdownSelection: () -> Void
+    var toggleTree: () -> Void
+    var refresh: () -> Void
+}
+
 /// Native WORKBENCH pane. The controller composes the already-native tree and
 /// selectable text surfaces, owns compact/regular geometry, and observes the
 /// service directly.
@@ -81,6 +108,8 @@ final class FileViewerPaneViewController: UIViewController {
     private var openInNewTabAction: (FileTree.Row) -> Void
     private var closeAction: () -> Void
     private let startsController: Bool
+    private let showsInWindowRail: Bool
+    private var ornamentRailDidChange: () -> Void
 
     private(set) var treeDocked = true
     private(set) var drawerOpen: Bool
@@ -141,7 +170,9 @@ final class FileViewerPaneViewController: UIViewController {
         contentSafeArea: UIEdgeInsets = .zero,
         isActive: Bool = true,
         startsController: Bool = true,
+        showsInWindowRail: Bool = true,
         textScaleStore: FileViewerTextScaleStore = .shared,
+        ornamentRailDidChange: @escaping () -> Void = {},
         openInNewTab: @escaping (FileTree.Row) -> Void = { _ in },
         close: @escaping () -> Void
     ) {
@@ -150,6 +181,8 @@ final class FileViewerPaneViewController: UIViewController {
         self.contentSafeArea = contentSafeArea
         self.isActive = isActive
         self.startsController = startsController
+        self.showsInWindowRail = showsInWindowRail
+        self.ornamentRailDidChange = ornamentRailDidChange
         openInNewTabAction = openInNewTab
         closeAction = close
         drawerOpen = Self.startsWithDrawerOpen(controller)
@@ -242,10 +275,12 @@ final class FileViewerPaneViewController: UIViewController {
         contentSafeArea: UIEdgeInsets,
         isActive: Bool,
         openInNewTab: @escaping (FileTree.Row) -> Void,
-        close: @escaping () -> Void
+        close: @escaping () -> Void,
+        ornamentRailDidChange: @escaping () -> Void = {}
     ) {
         openInNewTabAction = openInNewTab
         closeAction = close
+        self.ornamentRailDidChange = ornamentRailDidChange
         if self.contentSafeArea != contentSafeArea {
             self.contentSafeArea = contentSafeArea
             if isViewLoaded { updateRailInsets() }
@@ -311,7 +346,9 @@ final class FileViewerPaneViewController: UIViewController {
         buildContentColumn()
         buildTreeShell()
         buildRail()
-        rootStack.addArrangedSubview(railView)
+        if showsInWindowRail {
+            rootStack.addArrangedSubview(railView)
+        }
     }
 
     private func buildContentColumn() {
@@ -816,6 +853,45 @@ final class FileViewerPaneViewController: UIViewController {
         close.accessibilityIdentifier = "fileViewer.close"
         closeChip = close
         railStack.addArrangedSubview(close)
+
+        if !showsInWindowRail { ornamentRailDidChange() }
+    }
+
+    var ornamentConfiguration: FileViewerOrnamentConfiguration? {
+        guard !showsInWindowRail, let state = observedState else { return nil }
+        let sourceSelected: Bool
+        if case .document = state.body { sourceSelected = true } else { sourceSelected = false }
+        let markdownCaption = markdownSelectionAvailable(state)
+            ? (selectingMarkdownSource ? "DONE" : "SELECT") : nil
+        let treeVisible = isCompactLayout ? drawerOpen : treeDocked
+        return FileViewerOrnamentConfiguration(
+            key: .init(
+                canGoBack: state.canGoBack,
+                canGoForward: state.canGoForward,
+                showsSourceDiff: state.documentDiffBadge != nil,
+                sourceSelected: sourceSelected,
+                markdownSelectionCaption: markdownCaption,
+                path: state.railPath,
+                hostName: state.hostName,
+                treeCaption: treeVisible ? "HIDE" : "TREE",
+                isBusy: state.isBusy,
+                isWorking: isWorking(state)
+            ),
+            goBack: { [weak controller] in controller?.goBack() },
+            goForward: { [weak controller] in controller?.goForward() },
+            showSource: { [weak controller] in controller?.showSource() },
+            showDiff: { [weak self] in
+                guard let self,
+                      case .document(let document) = self.observedState?.body
+                else { return }
+                Task { @MainActor [weak controller = self.controller] in
+                    await controller?.showFileDiff(path: document.path)
+                }
+            },
+            toggleMarkdownSelection: { [weak self] in self?.toggleMarkdownSelection() },
+            toggleTree: { [weak self] in self?.toggleTree() },
+            refresh: { [weak controller] in controller?.refresh() }
+        )
     }
 
     private func makeChip(
