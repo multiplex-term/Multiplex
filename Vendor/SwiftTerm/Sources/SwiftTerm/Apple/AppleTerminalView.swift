@@ -2030,9 +2030,16 @@ extension TerminalView {
         }
         // throttle
         if !pendingDisplay {
+            // Multiplex patch: Vision Pro composites at 90 Hz; a 60 Hz delay
+            // beats against the display and floors streaming latency at
+            // ~16.7 ms, so coalesce to one 90 Hz frame there instead.
+            #if os(visionOS)
+            let fpsDelay = 11110000
+            #else
             let fps60 = 16670000
             // let fps30 = 16670000*2
             let fpsDelay = fps60
+            #endif
             pendingDisplay = true
             DispatchQueue.main.asyncAfter(
                 deadline: DispatchTime (uptimeNanoseconds: DispatchTime.now().uptimeNanoseconds + UInt64 (fpsDelay)),
