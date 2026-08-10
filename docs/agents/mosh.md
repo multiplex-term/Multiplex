@@ -32,3 +32,19 @@ Load-bearing decisions split from AGENTS.md.
   still ride the ordered terminal pump. mosh tabs have no exec surface:
   FILE is hidden and pane drops are refused with a message, never silently
   dropped.
+- **A mosh tab has NO local scrollback**
+  (`TerminalSessionController.localScrollbackLines` answers nil for mosh —
+  a transport capability, owned beside the transport choice — and
+  `SwiftTermView.installTerminal` applies it), faithful to mosh itself. mosh's
+  server-side emulator syncs ONE live screen and flattens the alternate
+  screen away, so full-screen TUIs (herdr) run in the client's primary
+  buffer — where scroll-op diffs, resync resets, and keyboard-cycle
+  resizes all archived stale frame rows as junk "scrollback": duplicated
+  herdr frames in a growing scroll area, and every overlay anchored in
+  content coordinates drifting by the accumulated offset (~one keyboard
+  height per cycle; both reported on iPhone 2026-08-10, pinned by
+  `TerminalMoshScreenTests`). Do not re-enable scrollback for mosh tabs
+  without solving all three junk sources; a speculative fork resize patch
+  (`screenAnchoredResize`) was built and REVERTED in favor of this —
+  upstream's resize archive/un-archive is symmetric and was not the
+  dominant leak.

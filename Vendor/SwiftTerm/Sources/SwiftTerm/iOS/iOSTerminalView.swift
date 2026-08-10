@@ -1391,8 +1391,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// deprecated UIMenuController never shows (`showContextMenu` no-ops),
     /// a plain tap or long press seeds a word selection directly — no
     /// PASTE/SELECT menu detour — and every selection change reports the
-    /// selection's screen rectangle (nil when the selection clears) so the
-    /// app can float its own actions beside it. Set only while the app's
+    /// selection's CONTENT-coordinate rectangle (`selectionUIRect`; nil
+    /// when the selection clears) so the app can float its own actions
+    /// beside it as sibling subviews. Set only while the app's
     /// select-text mode runs; nil restores the stock UIKit selection flow.
     public var selectionUIHandler: ((CGRect?) -> Void)?
 
@@ -1425,10 +1426,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         seedAppSelection(at: position)
     }
 
-    /// Multiplex patch: the active selection's bounding box in view
-    /// coordinates — what `selectionUIHandler` reports. Rows convert
-    /// through `yDisp`; multi-row widths honor `selectionClampRect` so the
-    /// box hugs the pane the selection lives in.
+    /// Multiplex patch: the active selection's bounding box in CONTENT
+    /// coordinates (the scroll view's own space — what subview frames use),
+    /// clipped to the visible rows; nil when fully off-screen. A displayed
+    /// buffer row's content y is simply its absolute row × cell height, so
+    /// the visibility test converts through `yDisp` but the rect must NOT —
+    /// subtracting it anchored the HUD a whole content-offset short (one
+    /// keyboard height per stranded frame on mosh tabs, reported
+    /// 2026-08-10). Multi-row widths honor `selectionClampRect` so the box
+    /// hugs the pane the selection lives in.
     public func selectionUIRect () -> CGRect? {
         guard let terminal, selection.active, selection.hasSelectionRange else { return nil }
         let (first, last) = Position.compare(selection.start, selection.end) == .before
@@ -1448,7 +1454,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
         return CGRect(
             x: CGFloat(cols.lo) * cellDimension.width,
-            y: CGFloat(max(0, startRow)) * cellDimension.height,
+            y: CGFloat(max(0, startRow) + yDisp) * cellDimension.height,
             width: CGFloat(cols.hi - cols.lo + 1) * cellDimension.width,
             height: CGFloat(min(terminal.rows - 1, endRow) - max(0, startRow) + 1) * cellDimension.height)
     }
@@ -4239,8 +4245,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             self.inputDelegate?.selectionWillChange (self)
             self.inputDelegate?.selectionDidChange(self)
 
-            // Multiplex patch: report the selection's screen box to the
-            // app-owned selection chrome (nil = selection cleared).
+            // Multiplex patch: report the selection's content-coordinate
+            // box to the app-owned selection chrome (nil = cleared).
             self.selectionUIHandler?(self.selectionUIRect())
  
 #if canImport(MetalKit)

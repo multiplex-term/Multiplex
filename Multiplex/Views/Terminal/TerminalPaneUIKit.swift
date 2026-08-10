@@ -783,11 +783,11 @@ final class TerminalContextBarView: UIKitTallyBorderedView {
 /// moved down here so cancel sits beside the work). Installing it hands the
 /// fork's selection chrome to the app (`TerminalView.selectionUIHandler`):
 /// the native menu never shows, a plain tap seeds a word selection, and the
-/// handler reports the selection's screen box so the block can float
-/// beside it — with no selection yet, the block parks top-center (COPY
-/// hidden until there is something to copy; DONE always reachable). Lives
-/// as a subview of the `TerminalView` itself (the link hover overlay's
-/// pattern) so the reported rect needs no conversion.
+/// handler reports the selection's content-coordinate box so the block can
+/// float beside it — with no selection yet, the block parks top-center of
+/// the visible region (COPY hidden until there is something to copy; DONE
+/// always reachable). Lives as a subview of the `TerminalView` itself (the
+/// link hover overlay's pattern) so the reported rect needs no conversion.
 @MainActor
 final class TerminalSelectionActionsOverlay {
     private weak var terminal: TerminalView?
@@ -841,30 +841,22 @@ final class TerminalSelectionActionsOverlay {
     }
 
     /// Float the block beside the selection; without one it parks
-    /// top-center — the mode stays visible and DONE stays reachable.
+    /// top-center — the mode stays visible and DONE stays reachable. A
+    /// zero-size anchor at the visible top-center flows through the shared
+    /// placement's below-the-anchor flip to exactly that park position.
     private func place(_ rect: CGRect?) {
         guard let terminal else { return }
         copyChip.isHidden = rect == nil
-        if let rect {
-            floatContextBar(bar, near: rect, in: terminal)
-        } else {
-            let size = bar.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-            bar.frame = CGRect(
-                origin: CGPoint(
-                    x: max(8, (terminal.bounds.width - size.width) / 2),
-                    y: 8
-                ),
-                size: size
-            )
-            bar.isHidden = false
-            terminal.bringSubviewToFront(bar)
-        }
+        let anchor = rect ?? CGRect(
+            x: terminal.bounds.midX, y: terminal.bounds.minY, width: 0, height: 0
+        )
+        floatContextBar(bar, near: anchor, in: terminal)
     }
 }
 
 /// Shared placement for floating context bars over the terminal: centered
 /// above the anchor, below when the top would clip, always inside the
-/// terminal's bounds.
+/// terminal's visible region.
 @MainActor
 private func floatContextBar(
     _ bar: TerminalContextBarView,
@@ -872,22 +864,33 @@ private func floatContextBar(
     in terminal: TerminalView
 ) {
     let size = bar.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-    let bounds = terminal.bounds
-    let margin: CGFloat = 8
-    let x = min(
-        max(rect.midX - size.width / 2, margin),
-        max(margin, bounds.width - size.width - margin)
-    )
-    var y = rect.minY - size.height - margin
-    if y < margin {
-        y = rect.maxY + margin
-    }
-    if y + size.height > bounds.height - margin {
-        y = max(margin, bounds.height - size.height - margin)
-    }
-    bar.frame = CGRect(origin: CGPoint(x: x, y: y), size: size)
+    bar.frame = contextBarFrame(size: size, anchor: rect, visible: terminal.bounds)
     bar.isHidden = false
     terminal.bringSubviewToFront(bar)
+}
+
+/// The pure placement: centered above the anchor, below when the top would
+/// clip, always inside `visible`. `TerminalView` is a scroll view, so bar
+/// frames live in content coordinates and `visible` is its `bounds` —
+/// whose ORIGIN is the content offset. Clamping against the offset-free
+/// viewport height instead used to strand the bar toward content-top: each
+/// keyboard show/hide cycle reflows rows into scrollback and grows the
+/// offset, so the block crept upward until it left the screen (reported
+/// 2026-08-10 on iPhone).
+func contextBarFrame(size: CGSize, anchor: CGRect, visible: CGRect) -> CGRect {
+    let margin: CGFloat = 8
+    let x = min(
+        max(anchor.midX - size.width / 2, visible.minX + margin),
+        max(visible.minX + margin, visible.maxX - size.width - margin)
+    )
+    var y = anchor.minY - size.height - margin
+    if y < visible.minY + margin {
+        y = anchor.maxY + margin
+    }
+    if y + size.height > visible.maxY - margin {
+        y = max(visible.minY + margin, visible.maxY - size.height - margin)
+    }
+    return CGRect(origin: CGPoint(x: x, y: y), size: size)
 }
 
 /// The idle selection block OUTSIDE select-text mode — the app-drawn

@@ -38,6 +38,31 @@ struct PaneScreenRectEntry: Equatable, Sendable {
     var isFocused: Bool
 }
 
+/// Requires two consecutive identical geometry answers before the
+/// select-text clamp may apply. Both backends size ONE shared viewport to
+/// the last client that typed or resized (herdr 0.8.0 measured 2026-08-10:
+/// an attach or keystroke moves it, snapshots lag the move by up to
+/// ~200 ms; tmux `window-size latest` behaves alike), so the snapshot
+/// fetched right after the entry gesture — itself the input that
+/// reclaims the viewport — can describe the OTHER client's geometry.
+/// An agreed pair proves the viewport settled; persistent disagreement
+/// (both clients typing) applies nothing, keeping the documented
+/// fail-soft whole-screen behavior instead of a wrong clamp.
+struct PaneClampSettle {
+    static let maxRounds = 3
+    static let retryDelayMilliseconds = 300
+
+    private var previous: [PaneScreenRectEntry]?
+
+    /// Feed one answer; returns the settled rects once two consecutive
+    /// answers agree, nil while the viewport is still moving.
+    mutating func offer(_ panes: [PaneScreenRectEntry]) -> [PaneScreenRectEntry]? {
+        let agreed = previous == panes
+        previous = panes
+        return agreed ? panes : nil
+    }
+}
+
 /// Builds and parses the `tmux` commands used to discover remote sessions.
 /// Pure functions — exercised directly by unit tests.
 ///

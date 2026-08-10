@@ -70,6 +70,14 @@ final class TerminalSessionController {
     /// Drops a stale focused-pane-rect answer when the mode ends or a
     /// resize refetches before the previous exec came home.
     private var selectTextClampGeneration = 0
+    private var selectTextClampTask: Task<Void, Never>?
+
+    /// Local scrollback for this tab's terminal view; nil disables it.
+    /// A transport capability, so it lives beside the transport choice:
+    /// mosh syncs ONE live screen and anything archived above it is junk
+    /// (stale frames from scroll-op diffs, resync resets, and resizes) —
+    /// full record in docs/agents/mosh.md.
+    var localScrollbackLines: Int? { host.useMosh ? nil : 5000 }
 
     /// The HISTORY surface: user prompts read from the agent's own session
     /// file on the host (see `AgentSessionHistory`). Present while the panel
@@ -883,6 +891,14 @@ final class TerminalSessionController {
     /// by pane id; herdr's only focus verb is directional, so one step
     /// fires and only in a two-pane layout, where a single step is exact.
     /// Fail-soft throughout: no answer leaves the whole-screen behavior.
+    ///
+    /// The geometry applies only once two consecutive answers agree
+    /// (`PaneClampSettle`): with a second client of another size attached,
+    /// the backend sizes its one shared viewport to the last client that
+    /// typed — and the entry gesture is itself such input — so the first
+    /// answer can still describe the other client's geometry (reported
+    /// 2026-08-09 as a mispositioned selection block on iPhone beside a
+    /// terminal `herdr attach`; the ~200 ms viewport-move lag is measured).
     private func refreshSelectTextClamp(targeting point: (col: Int, row: Int)? = nil) {
         guard selectTextModeUIActive,
               let backend = route.sessionBackend,
@@ -894,17 +910,42 @@ final class TerminalSessionController {
         case .tmux: TmuxProbe.paneRectsCommand(sessionName: sessionName)
         case .herdr: HerdrProbe.snapshotCommand(sessionName: sessionName)
         }
-        Task {
-            guard let output = try? await withControlConnection({
-                try await $0.exec(command)
-            }) else { return }
-            guard generation == selectTextClampGeneration,
-                  selectTextModeUIActive
-            else { return }
-            let panes = switch backend {
-            case .tmux: TmuxProbe.parsePaneRects(output)
-            case .herdr: HerdrProbe.parsePaneScreenRects(output)
-            }
+        // Cancellation ends a superseded fetch at its next sleep — resize
+        // re-enters here on every keyboard show/hide, and the generation
+        // check alone would let each stale task finish its execs first.
+        selectTextClampTask?.cancel()
+        selectTextClampTask = Task {
+            // All rounds share one control connection: on mosh the closure
+            // is a fresh SSH handshake, so per-round connections would pay
+            // it twice per Select Text entry.
+            let settled = (try? await withControlConnection { control -> [PaneScreenRectEntry]? in
+                var settle = PaneClampSettle()
+                for attempt in 0..<PaneClampSettle.maxRounds {
+                    if attempt > 0 {
+                        try await Task.sleep(
+                            for: .milliseconds(PaneClampSettle.retryDelayMilliseconds)
+                        )
+                    }
+                    guard generation == selectTextClampGeneration,
+                          selectTextModeUIActive
+                    else { return nil }
+                    let output = try await control.exec(command)
+                    guard generation == selectTextClampGeneration,
+                          selectTextModeUIActive
+                    else { return nil }
+                    let round = switch backend {
+                    case .tmux: TmuxProbe.parsePaneRects(output)
+                    case .herdr: HerdrProbe.parsePaneScreenRects(output)
+                    }
+                    // No answer keeps the current no-clamp behavior;
+                    // retrying could not distinguish a host without the
+                    // verb from noise.
+                    guard !round.isEmpty else { return nil }
+                    if let panes = settle.offer(round) { return panes }
+                }
+                return nil
+            }) ?? nil
+            guard let panes = settled else { return }
             let focused = panes.first(where: \.isFocused)
             guard let target = point.flatMap({ p in
                 panes.first(where: { $0.rect.contains(col: p.col, row: p.row) })

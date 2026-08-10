@@ -88,7 +88,7 @@ final class TerminalSurfaceView: UIView {
                     weight: .regular
                 )
             )
-            view.changeScrollback(5000)
+            view.changeScrollback(controller.localScrollbackLines)
             // Use the standard keyboard so the user's selected language and
             // multistage IMEs remain available instead of forcing ASCII input.
             view.keyboardType = .default

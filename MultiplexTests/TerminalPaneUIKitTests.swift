@@ -147,6 +147,69 @@ final class TerminalPaneUIKitTests: XCTestCase {
         XCTAssertFalse(menu.isHidden)
     }
 
+    func testContextBarFramePlacesInsideTheVisibleRegionOfAScrolledTerminal() {
+        let size = CGSize(width: 220, height: 44)
+
+        // Unscrolled: above the anchor, inside the viewport.
+        let unscrolled = contextBarFrame(
+            size: size,
+            anchor: CGRect(x: 300, y: 300, width: 10, height: 20),
+            visible: CGRect(x: 0, y: 0, width: 600, height: 800)
+        )
+        XCTAssertEqual(unscrolled.minY, 300 - 44 - 8)
+        XCTAssertEqual(unscrolled.midX, 305, accuracy: 0.5)
+
+        // Scrolled: TerminalView is a scroll view, so anchors and bar
+        // frames are content coordinates and the visible region starts at
+        // the content offset (bounds.origin). Repeated keyboard cycles
+        // grow scrollback, so the offset climbs — the bar must stay
+        // beside the anchor, never drift toward content-top (reported
+        // 2026-08-10: the select block pushed upwards until invisible).
+        let visible = CGRect(x: 0, y: 600, width: 600, height: 800)
+        let nearBottom = contextBarFrame(
+            size: size,
+            anchor: CGRect(x: 300, y: 1300, width: 10, height: 20),
+            visible: visible
+        )
+        XCTAssertEqual(
+            nearBottom.minY, 1300 - 44 - 8,
+            "the bar floats directly above an anchor that has room"
+        )
+        XCTAssertTrue(
+            visible.contains(nearBottom),
+            "the bar must land inside the visible region, not content-top"
+        )
+
+        // An anchor at the visible top flips the bar below itself.
+        let nearTop = contextBarFrame(
+            size: size,
+            anchor: CGRect(x: 300, y: 610, width: 10, height: 20),
+            visible: visible
+        )
+        XCTAssertEqual(nearTop.minY, 630 + 8)
+        XCTAssertTrue(visible.contains(nearTop))
+
+        // An anchor below the visible bottom clamps to the visible edge.
+        let offscreen = contextBarFrame(
+            size: size,
+            anchor: CGRect(x: 300, y: 1395, width: 10, height: 20),
+            visible: visible
+        )
+        XCTAssertTrue(visible.contains(offscreen))
+
+        // The SELECT TEXT HUD's no-selection park: a zero-size anchor at
+        // the visible top-center flips below itself into the top-center
+        // margin slot.
+        let parked = contextBarFrame(
+            size: size,
+            anchor: CGRect(x: visible.midX, y: visible.minY, width: 0, height: 0),
+            visible: visible
+        )
+        XCTAssertEqual(parked.minY, visible.minY + 8)
+        XCTAssertEqual(parked.midX, visible.midX, accuracy: 0.5)
+        XCTAssertTrue(visible.contains(parked))
+    }
+
     func testHistoryBarMovesToTrailingSlotWhenCopyModeEnds() {
         let terminal = terminalController(mode: .attach(sessionName: "agent"))
         let pane = TerminalPaneViewController(configuration: configuration(

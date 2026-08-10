@@ -941,6 +941,43 @@ final class TmuxProbeTests: XCTestCase {
         )
     }
 
+    func testPaneClampSettleRequiresAnAgreedPair() {
+        // Measured herdr 0.8.0 geometries (2026-08-10): a 120x40 client's
+        // pane beside the same session's 80x24 terminal client. The shared
+        // viewport follows the last typist with ~200 ms of snapshot lag,
+        // so a transition serves the stale geometry first.
+        let ours = [PaneScreenRectEntry(
+            id: "w1:p1",
+            rect: PaneScreenRect(columns: 26...119, rows: 1...39),
+            isFocused: true
+        )]
+        let theirs = [PaneScreenRectEntry(
+            id: "w1:p1",
+            rect: PaneScreenRect(columns: 26...79, rows: 1...23),
+            isFocused: true
+        )]
+
+        var steady = PaneClampSettle()
+        XCTAssertNil(steady.offer(ours), "one answer proves nothing")
+        XCTAssertEqual(steady.offer(ours), ours, "an agreed pair applies")
+
+        var transition = PaneClampSettle()
+        XCTAssertNil(transition.offer(theirs), "stale first answer")
+        XCTAssertNil(transition.offer(ours), "the move itself never applies")
+        XCTAssertEqual(
+            transition.offer(ours), ours,
+            "the settled geometry applies on the confirming round"
+        )
+
+        var flapping = PaneClampSettle()
+        XCTAssertNil(flapping.offer(ours))
+        XCTAssertNil(flapping.offer(theirs))
+        XCTAssertNil(
+            flapping.offer(ours),
+            "both clients typing settles nothing — fail-soft stays whole-screen"
+        )
+    }
+
     func testPaneScreenRectDirectionPicksTheDominantAxis() {
         let left = PaneScreenRect(columns: 0...49, rows: 0...23)
         let right = PaneScreenRect(columns: 51...99, rows: 0...23)

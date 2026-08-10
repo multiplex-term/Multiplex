@@ -142,7 +142,8 @@ final class HostileInputTests: XCTestCase {
 }
 
 /// The terminal only needs somewhere to send its responses; every other
-/// delegate method has a default implementation.
-private final class SilentTerminalDelegate: TerminalDelegate {
+/// delegate method has a default implementation. Shared by every headless
+/// `Terminal` feed-and-assert test.
+final class SilentTerminalDelegate: TerminalDelegate {
     func send(source: Terminal, data: ArraySlice<UInt8>) {}
 }
