@@ -185,6 +185,28 @@ final class TerminalPathTargetTests: XCTestCase {
         XCTAssertEqual(pair?.line, 120)
     }
 
+    func testExplicitPathsKeepFileNameSyntaxAndSeparateLine() {
+        let bare = TerminalPathTarget.resolveExplicit("README.md", line: 12)
+        XCTAssertEqual(bare?.path, "README.md")
+        XCTAssertEqual(bare?.base, .workingDirectory)
+        XCTAssertEqual(bare?.line, 12)
+
+        let colon = TerminalPathTarget.resolveExplicit("src/report:final.txt", line: 7)
+        XCTAssertEqual(colon?.path, "src/report:final.txt")
+        XCTAssertEqual(colon?.line, 7)
+        XCTAssertEqual(
+            TerminalPathTarget.resolveExplicit("My File.swift", line: nil)?.path,
+            "My File.swift"
+        )
+    }
+
+    func testExplicitPathValidatesLineAndUnknownEnvironmentVariables() {
+        XCTAssertNil(TerminalPathTarget.resolveExplicit("README.md", line: 0))
+        XCTAssertNil(TerminalPathTarget.resolveExplicit("README.md", line: -3))
+        XCTAssertNil(TerminalPathTarget.resolveExplicit("$WORK/src/main.rs", line: nil))
+        XCTAssertNil(TerminalPathTarget.resolveExplicit("https://example.com/a", line: nil))
+    }
+
     func testDeclines() {
         // Web URLs belong to TerminalLink; `file:` is the viewer exception.
         XCTAssertNil(TerminalPathTarget.resolve("https://example.com/a/b"))

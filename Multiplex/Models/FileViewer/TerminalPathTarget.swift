@@ -74,6 +74,38 @@ struct TerminalPathTarget: Equatable, Identifiable {
         return resolvePath(raw: raw, text: text, syntax: .implicitMatch)
     }
 
+    /// A path supplied deliberately by app automation rather than inferred
+    /// from terminal prose. Explicit input may be a bare file name or contain
+    /// spaces and colons; relative paths resolve against the host's configured
+    /// working directory. `line` is separate so a colon in the file name is
+    /// never mistaken for an editor-style suffix.
+    static func resolveExplicit(_ raw: String, line: Int?) -> TerminalPathTarget? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.count <= 1024,
+              line.map({ $0 > 0 }) ?? true,
+              !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else { return nil }
+
+        if hasFileScheme(text) {
+            guard var target = resolveFileURL(text) else { return nil }
+            if let line { target.line = line }
+            return target
+        }
+        guard !text.contains("://"), text != "/", !text.hasPrefix("//") else { return nil }
+
+        let base: Base
+        if text.hasPrefix("/") {
+            base = .absolute
+        } else if text == "~" || text.hasPrefix("~/")
+                    || text == "$HOME" || text.hasPrefix("$HOME/") {
+            base = .home
+        } else {
+            guard !text.hasPrefix("$") else { return nil }
+            base = .workingDirectory
+        }
+        return TerminalPathTarget(raw: raw, path: text, base: base, line: line)
+    }
+
     /// Resolves the `file:` shape before `TerminalLink` gets first refusal in
     /// a terminal pane. Only an empty/localhost authority is meaningful: the
     /// URI came from this SSH host, and the viewer cannot honestly follow a

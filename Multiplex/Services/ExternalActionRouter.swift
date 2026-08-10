@@ -181,6 +181,8 @@ enum ExternalActionPerformer {
                 on: host,
                 context: context
             )
+        case .openFile(_, let path, let line):
+            openFile(path: path, line: line, on: host, context: context)
         }
     }
 
@@ -334,6 +336,31 @@ enum ExternalActionPerformer {
             return
         }
         open(mode: created, on: host, context: context)
+    }
+
+    /// Register the in-memory viewer before its auxiliary route reaches a
+    /// window. Unlike shell actions this needs no deck probe: the viewer owns
+    /// its SSH control-plane connection and reports read failures in its pane.
+    private static func openFile(
+        path: String, line: Int?, on host: Host,
+        context: ExternalActionRouter.Context
+    ) {
+        guard let target = TerminalPathTarget.resolveExplicit(path, line: line) else {
+            context.presentFailure(ExternalActionFailure(
+                hostName: host.name,
+                message: "Enter a remote file path and an optional positive line number."
+            ))
+            return
+        }
+        let tab = TerminalRoute(hostID: host.id, mode: .fileViewer(path: target.path))
+        context.workspace.openFileViewer(
+            tab: tab,
+            host: host,
+            startDirectory: host.workingDirs.first,
+            anchorSession: nil,
+            target: target
+        )
+        context.open(TerminalWindowRoute(tab: tab))
     }
 
     /// The status guard: one fresh (or joined in-flight) probe, then the

@@ -123,6 +123,10 @@ enum ExternalAction: Hashable {
         askForPrompt: Bool, directory: String?,
         setupScript: ExternalSetupScriptSelection, model: String?,
         target: ExternalSessionTarget, backend: Host.SessionBackend? = nil)
+    /// Open a remote file read-only in a file-viewer tab. The path is explicit
+    /// user input, so bare names and filename colons are valid; relative paths
+    /// start at the host's first configured working directory (or home).
+    case openFile(host: ExternalHostRef, path: String, line: Int?)
 
     /// Whether an untrusted (non-widget) URL has to be confirmed before this
     /// runs. The widget's ASK mode is exempt: it presents the prompt sheet,
@@ -130,14 +134,14 @@ enum ExternalAction: Hashable {
     /// favour of what the person types — an in-app confirmation already.
     var needsOriginConfirmation: Bool {
         switch self {
-        case .openShell: true
+        case .openShell, .openFile: true
         case .openAgent(_, _, _, let askForPrompt, _, _, _, _, _): !askForPrompt
         }
     }
 
     var hostRef: ExternalHostRef {
         switch self {
-        case .openShell(let host, _, _): host
+        case .openShell(let host, _, _), .openFile(let host, _, _): host
         case .openAgent(let host, _, _, _, _, _, _, _, _): host
         }
     }
@@ -145,7 +149,8 @@ enum ExternalAction: Hashable {
 
 /// `multiplex://open?host=<uuid|name>&action=shell|agent[&agent=<kind>]
 /// [&prompt=<text>][&ask=1][&dir=<path>][&script=<uuid|none>][&model=<id>]
-/// [&session=<name>][&in=tab|workspace|window]`
+/// [&session=<name>][&in=tab|workspace|window]`, or
+/// `multiplex://open?host=<uuid|name>&action=file&path=<remote-path>[&line=<n>]`
 /// — built by widgets, parsed by `onOpenURL`. Omitting `script` uses the
 /// remembered New Session choice; omitting `model` uses the agent's own
 /// default (a malformed model token also parses as omitted — fail-soft, the
@@ -202,6 +207,12 @@ enum ExternalActionURL {
             // hosts keeps its exact bytes and its exact meaning.
             if let backend {
                 items.append(URLQueryItem(name: "backend", value: backend.rawValue))
+            }
+        case .openFile(_, let path, let line):
+            items.append(URLQueryItem(name: "action", value: "file"))
+            items.append(URLQueryItem(name: "path", value: path))
+            if let line {
+                items.append(URLQueryItem(name: "line", value: String(line)))
             }
         }
         components.queryItems = items
@@ -283,6 +294,17 @@ enum ExternalActionURL {
                 askForPrompt: ask, directory: directory,
                 setupScript: setupScript, model: model, target: target,
                 backend: backend())
+        case "file":
+            guard let path = value("path"), !path.isEmpty else { return nil }
+            let line: Int?
+            if let token = value("line"), !token.isEmpty {
+                guard let parsed = Int(token), parsed > 0 else { return nil }
+                line = parsed
+            } else {
+                line = nil
+            }
+            guard TerminalPathTarget.resolveExplicit(path, line: line) != nil else { return nil }
+            return .openFile(host: hostRef, path: path, line: line)
         default:
             return nil
         }
@@ -419,6 +441,17 @@ struct ExternalActionConfirmation: Equatable {
             return ExternalActionConfirmation(
                 title: "Launch \(agent.displayName) on \(hostName)?",
                 message: message,
+                action: action
+            )
+        case .openFile(_, let path, let line):
+            let location = line.map { "\(path), line \($0)" } ?? path
+            return ExternalActionConfirmation(
+                title: "Open file on \(hostName)?",
+                message: """
+                    Something outside Multiplex asked to view \(location) on \
+                    \(hostName). The file opens read-only. Open it only if you \
+                    started this.
+                    """,
                 action: action
             )
         }

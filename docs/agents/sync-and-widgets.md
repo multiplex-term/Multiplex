@@ -28,7 +28,9 @@ Load-bearing decisions split from AGENTS.md.
   Configured working-dir paths ride widget state for the widget's own
   directory picker; setup-script names and bodies never do.
   Directory stays a String for variables (unset = host default, `"~"` =
-  Home); the setup-script String is validated DEFAULT/NONE/UUID; the
+  Home); Open File likewise keeps its remote path as a String and carries an
+  optional positive line number, registering the in-memory viewer before its
+  route opens; the setup-script String is validated DEFAULT/NONE/UUID; the
   Model String is gated by `normalizedLaunchModel`. `SharedStateTests`
   locks intent/widget/`ExternalActionURL` formats in lockstep (the
   widget target compiles only `Multiplex/Shared` — never import

@@ -44,6 +44,43 @@ struct OpenHostShellIntent: AppIntent {
     }
 }
 
+struct OpenHostFileIntent: AppIntent {
+    static let title: LocalizedStringResource = "Open File"
+    static let description = IntentDescription(
+        "Opens a remote file read-only in Multiplex, optionally at a line number.",
+        categoryName: "Terminal"
+    )
+    static let openAppWhenRun = true
+
+    @Parameter(title: "Host") var host: HostEntity
+    @Parameter(
+        title: "File Path",
+        description: "An absolute, home-relative, or working-directory-relative path on the host."
+    ) var path: String
+    @Parameter(
+        title: "Line Number",
+        description: "The line to reveal after the file opens."
+    ) var line: Int?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Open \(\.$path) on \(\.$host)") {
+            \.$line
+        }
+    }
+
+    @Dependency private var router: ExternalActionRouter
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        router.submit(.openFile(
+            host: .id(host.id),
+            path: path.trimmingCharacters(in: .whitespacesAndNewlines),
+            line: line
+        ))
+        return .result()
+    }
+}
+
 struct OpenHostAgentIntent: AppIntent {
     static let title: LocalizedStringResource = "Open Agent"
     static let description = IntentDescription(
@@ -394,6 +431,15 @@ struct MultiplexShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Open Shell",
             systemImageName: "terminal"
+        )
+        AppShortcut(
+            intent: OpenHostFileIntent(),
+            phrases: [
+                "Open a file in \(.applicationName)",
+                "Open a \(.applicationName) file on \(\.$host)",
+            ],
+            shortTitle: "Open File",
+            systemImageName: "doc.text.magnifyingglass"
         )
         AppShortcut(
             intent: OpenHostAgentIntent(),

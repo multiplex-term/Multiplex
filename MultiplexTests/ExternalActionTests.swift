@@ -36,6 +36,31 @@ final class ExternalActionTests: XCTestCase {
         XCTAssertEqual(ExternalActionURL.action(from: url), action)
     }
 
+    func testFileURLRoundTripsPathAndLine() {
+        for line: Int? in [nil, 42] {
+            let action = ExternalAction.openFile(
+                host: .id(UUID()),
+                path: "/srv/build dir/Sources/App:Release.swift",
+                line: line
+            )
+            XCTAssertEqual(
+                ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
+                action
+            )
+        }
+    }
+
+    func testFileURLRequiresAUsablePathAndPositiveLine() {
+        for query in [
+            "multiplex://open?host=devbox&action=file",
+            "multiplex://open?host=devbox&action=file&path=",
+            "multiplex://open?host=devbox&action=file&path=README.md&line=0",
+            "multiplex://open?host=devbox&action=file&path=README.md&line=nope",
+        ] {
+            XCTAssertNil(ExternalActionURL.action(from: URL(string: query)!))
+        }
+    }
+
     func testAgentURLWithoutPromptRoundTrips() {
         let action = ExternalAction.openAgent(
             host: .id(UUID()), agent: .pi, prompt: nil,
@@ -203,6 +228,52 @@ final class ExternalActionTests: XCTestCase {
             from: URL(string: "multiplex://elsewhere?host=devbox")!))
         XCTAssertNil(ExternalActionURL.action(
             from: URL(string: "multiplex://open?host=devbox&action=agent&script=echo%20oops")!))
+    }
+
+    func testFileConfirmationNamesPathAndLine() {
+        let action = ExternalAction.openFile(
+            host: .named("devbox"), path: "Sources/App.swift", line: 88)
+        let confirmation = ExternalActionConfirmation.make(
+            for: action, hostName: "Development Mac")
+        XCTAssertEqual(confirmation.title, "Open file on Development Mac?")
+        XCTAssertTrue(confirmation.message.contains("Sources/App.swift, line 88"))
+        XCTAssertTrue(confirmation.message.contains("read-only"))
+        XCTAssertEqual(confirmation.action, action)
+    }
+
+    @MainActor
+    func testOpenFileRegistersViewerBeforeOpeningRoute() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var host = Host(name: "devbox", hostname: "127.0.0.1", username: "tester")
+        host.workingDirs = ["/srv/project"]
+        let store = HostStore(directory: directory, knownMirroredIDs: [])
+        store.add(host)
+        let workspace = TerminalWorkspace()
+        var opened: TerminalWindowRoute?
+        var failure: ExternalActionFailure?
+        let context = ExternalActionRouter.Context(
+            store: store,
+            hub: ConnectionHub(),
+            workspace: workspace,
+            open: { opened = $0 },
+            presentAgentPrompt: { _ in },
+            presentFailure: { failure = $0 },
+            presentConfirmation: { _ in }
+        )
+
+        await ExternalActionPerformer.perform(
+            .openFile(host: .id(host.id), path: "Sources/App.swift", line: 42),
+            context: context
+        )
+
+        let route = try XCTUnwrap(opened)
+        let tab = try XCTUnwrap(route.tabs.first)
+        XCTAssertEqual(tab.mode, .fileViewer(path: "Sources/App.swift"))
+        XCTAssertNotNil(workspace.fileViewerController(for: tab.id))
+        XCTAssertNil(failure)
+        workspace.closeTab(tab.id)
     }
 
     // MARK: Session pick
