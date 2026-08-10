@@ -1,8 +1,6 @@
+import os
 import SwiftTerm
 import UIKit
-#if DEBUG
-import os
-#endif
 
 /// The real terminal pane surface. UIKit callers can construct and update it
 /// directly. It owns the adopted `TerminalView`'s delegate, focus gesture,
@@ -257,19 +255,24 @@ final class TerminalSurfaceView: UIView {
         coordinator.railOwnsBottomSafeArea = configuration.railOwnsBottomSafeArea
         #endif
 
-        #if DEBUG
-        // Metal renderer bring-up (visionOS scale + glass fixes live in the
-        // fork): opt in per launch with MULTIPLEX_METAL=1. Idempotent for
-        // adopted views — setUseMetal returns early when already enabled.
-        if ProcessInfo.processInfo.environment["MULTIPLEX_METAL"] == "1" {
+        // Experimental Metal renderer (visionOS scale + glass fixes live in
+        // the fork): a Settings toggle, default off, with MULTIPLEX_METAL=1
+        // as the harness/scheme override. Applied at install so a changed
+        // setting reaches new terminal windows and re-hosted (merge/split)
+        // tabs; setUseMetal early-returns when the state already matches.
+        let wantsMetal = MetalRendererSetting.isEnabled
+        if wantsMetal != view.isUsingMetalRenderer {
+            let log = Logger(
+                subsystem: "app.multiplexterm.multiplex",
+                category: "render"
+            )
             do {
-                try view.setUseMetal(true)
+                try view.setUseMetal(wantsMetal)
+                log.info("Metal renderer \(wantsMetal ? "enabled" : "disabled")")
             } catch {
-                Logger(subsystem: "app.multiplexterm.multiplex", category: "render")
-                    .error("MULTIPLEX_METAL: setUseMetal failed: \(error)")
+                log.error("setUseMetal(\(wantsMetal)) failed: \(error)")
             }
         }
-        #endif
 
         controller.bind(view)
         if configuration.isActive {

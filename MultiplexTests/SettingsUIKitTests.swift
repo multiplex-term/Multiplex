@@ -49,6 +49,7 @@ final class SettingsUIKitTests: XCTestCase {
             "Current theme",
             "Built-in themes",
             "Your themes",
+            "Terminal renderer",
             "Agent alerts",
             "App lock",
             "Multiplex Pro",
@@ -62,6 +63,7 @@ final class SettingsUIKitTests: XCTestCase {
         XCTAssertTrue(rendered.contains("UNLIMITED HOSTS"))
         XCTAssertTrue(rendered.contains("MOSH TRANSPORT"))
         XCTAssertTrue(rendered.contains("AGENT HELPERS"))
+        XCTAssertTrue(rendered.contains("Metal renderer"))
         XCTAssertTrue(rendered.contains("AGENT ALERTS"))
         XCTAssertTrue(rendered.contains("CUSTOM THEMES"))
         XCTAssertTrue(rendered.contains("OPEN SOURCE LICENSES"))

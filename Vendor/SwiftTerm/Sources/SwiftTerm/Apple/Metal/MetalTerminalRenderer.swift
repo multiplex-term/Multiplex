@@ -212,12 +212,16 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
     private let frameSemaphore = DispatchSemaphore(value: 1)
     private var pendingRedraw = false
     private let redrawLock = NSLock()
-#if DEBUG
+    // Multiplex patch: the FPS heartbeat was #if DEBUG, but Release builds
+    // are where renderer performance gets judged — gate the log line by env
+    // (MULTIPLEX_METAL_FPS=1) instead and keep the counters compiled; the
+    // few integer stores per frame are noise next to the draw itself.
+    private static let fpsLogEnabled =
+        ProcessInfo.processInfo.environment["MULTIPLEX_METAL_FPS"] == "1"
     private var debugFrameCount = 0
     private var debugLastLogTime = CFAbsoluteTimeGetCurrent()
     private var debugRowsRebuilt = 0
     private var debugRowsCached = 0
-#endif
 #if DEBUG
     private var imageTextureFailures: Set<ObjectIdentifier> = []
     private var kittyTextureFailures: Set<UInt32> = []
@@ -391,18 +395,18 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
             os_signpost(.end, log: MetalTerminalRenderer.profileLog, name: "Metal.BuildDrawData", signpostID: buildID)
         }
 #endif
-#if DEBUG
-        debugFrameCount += 1
-        let now = CFAbsoluteTimeGetCurrent()
-        let elapsed = now - debugLastLogTime
-        if elapsed >= 1.0 {
-            let totalRows = debugRowsRebuilt + debugRowsCached
-            let fps = Double(debugFrameCount) / elapsed
-            print(String(format: "Metal FPS: %.1f (rows rebuilt: %d/%d)", fps, debugRowsRebuilt, totalRows))
-            debugFrameCount = 0
-            debugLastLogTime = now
+        if MetalTerminalRenderer.fpsLogEnabled {
+            debugFrameCount += 1
+            let now = CFAbsoluteTimeGetCurrent()
+            let elapsed = now - debugLastLogTime
+            if elapsed >= 1.0 {
+                let totalRows = debugRowsRebuilt + debugRowsCached
+                let fps = Double(debugFrameCount) / elapsed
+                print(String(format: "Metal FPS: %.1f (rows rebuilt: %d/%d)", fps, debugRowsRebuilt, totalRows))
+                debugFrameCount = 0
+                debugLastLogTime = now
+            }
         }
-#endif
         let bgColor = colorToSIMD(resolvedNativeBackground(terminalView))
         passDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(Double(bgColor.x),
                                                                          Double(bgColor.y),
@@ -602,10 +606,8 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
 
     private func buildDrawDataPass(scale: CGFloat) -> DrawData {
         guard let terminalView = terminalView else {
-#if DEBUG
             debugRowsRebuilt = 0
             debugRowsCached = 0
-#endif
             return DrawData(rows: [],
                             frame: nil,
                             cursorColorVertices: [],
@@ -623,10 +625,8 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
 
         let rowInfo = visibleRowRange(buffer: buffer, cellHeight: cellHeight, terminalView: terminalView)
         guard let (firstRow, lastRow, visibleDisp) = rowInfo else {
-#if DEBUG
             debugRowsRebuilt = 0
             debugRowsCached = 0
-#endif
             return DrawData(rows: [],
                             frame: nil,
                             cursorColorVertices: [],
@@ -788,10 +788,8 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                 }
             }
         }
-#if DEBUG
         debugRowsRebuilt = rebuiltRows
         debugRowsCached = cachedRows
-#endif
 
         let cursorData = buildCursorDrawData(scale: scale,
                                              cellWidth: cellWidth,

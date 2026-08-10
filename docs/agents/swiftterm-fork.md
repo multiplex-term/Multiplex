@@ -102,7 +102,10 @@ input encoding, or terminal rendering.
       streaming output (typing already bypassed it via
       `displayImmediately`). iOS keeps 60 Hz.
     - Metal renderer visionOS bring-up (still OFF by default; the app
-      enables it per launch via `MULTIPLEX_METAL=1`, DEBUG only): the
+      exposes it as Settings → Terminal renderer, with `MULTIPLEX_METAL=1`
+      as the harness/scheme override and `MULTIPLEX_METAL_FPS=1` printing a
+      per-second FPS/row-cache heartbeat in every configuration —
+      `SWIFTTERM_PROFILE=1` adds signposts for Instruments): the
       drawable/atlas scale no longer trusts `backingScaleFactor()` (1.0 on
       visionOS — 1x blur) but takes the layer contentsScale / trait
       displayScale max; the MTKView is non-opaque over the view's layer
@@ -112,7 +115,11 @@ input encoding, or terminal rendering.
       which inside an MTKView delegate callback misses the app's glass
       trait and silently painted the opaque fallback. Sim-verified matching
       CG pixel-for-pixel in DARK/LIGHT/GLASS; selection, marked text, and
-      kitty images under Metal are still unverified.
+      kitty images under Metal are still unverified. Do NOT judge Metal
+      performance in the simulator: `com.apple.metal.simulator` presents at
+      ~2–4 fps under streaming load with the row cache warm (rows rebuilt
+      0/58) — the stall is the sim's present path, not the renderer; only a
+      real-device A/B against the CG damage-strip path counts.
     - The visible screen's links are enumerable (`Terminal
       .visibleLinkMatches` + `TerminalView.visibleLinkRegions`, the inverse
       of `calculateTapHit`) — what visionOS gaze hover stands on.
