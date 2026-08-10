@@ -257,6 +257,20 @@ final class TerminalSurfaceView: UIView {
         coordinator.railOwnsBottomSafeArea = configuration.railOwnsBottomSafeArea
         #endif
 
+        #if DEBUG
+        // Metal renderer bring-up (visionOS scale + glass fixes live in the
+        // fork): opt in per launch with MULTIPLEX_METAL=1. Idempotent for
+        // adopted views — setUseMetal returns early when already enabled.
+        if ProcessInfo.processInfo.environment["MULTIPLEX_METAL"] == "1" {
+            do {
+                try view.setUseMetal(true)
+            } catch {
+                Logger(subsystem: "app.multiplexterm.multiplex", category: "render")
+                    .error("MULTIPLEX_METAL: setUseMetal failed: \(error)")
+            }
+        }
+        #endif
+
         controller.bind(view)
         if configuration.isActive {
             DispatchQueue.main.async {

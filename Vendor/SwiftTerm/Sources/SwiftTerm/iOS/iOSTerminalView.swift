@@ -487,6 +487,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             mtkView.framebufferOnly = true
             mtkView.colorPixelFormat = .bgra8Unorm
             mtkView.isUserInteractionEnabled = false
+            // Multiplex patch: the terminal's ground is painted by the view's
+            // layer (and, under the app's GLASS appearance, by live glass
+            // behind a clear nativeBackgroundColor). The renderer clears to
+            // nativeBackgroundColor including its alpha, so the Metal surface
+            // must composite with alpha instead of the MTKView default opaque
+            // black.
+            mtkView.isOpaque = false
+            mtkView.backgroundColor = .clear
             // Tag the metal layer with sRGB so the compositor color-manages our
             // pixels the same way as a regular UIView's layer. Without this,
             // CAMetalLayer is untagged and raw bytes are treated as

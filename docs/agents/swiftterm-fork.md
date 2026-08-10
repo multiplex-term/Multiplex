@@ -101,6 +101,18 @@ input encoding, or terminal rendering.
       display and beat against Vision Pro's 90 Hz compositor during
       streaming output (typing already bypassed it via
       `displayImmediately`). iOS keeps 60 Hz.
+    - Metal renderer visionOS bring-up (still OFF by default; the app
+      enables it per launch via `MULTIPLEX_METAL=1`, DEBUG only): the
+      drawable/atlas scale no longer trusts `backingScaleFactor()` (1.0 on
+      visionOS — 1x blur) but takes the layer contentsScale / trait
+      displayScale max; the MTKView is non-opaque over the view's layer
+      ground so the GLASS clear composites; and the clear/margin background
+      resolves `nativeBackgroundColor` against the terminal view's traits —
+      `getRed()` resolves dynamic colors via `UITraitCollection.current`,
+      which inside an MTKView delegate callback misses the app's glass
+      trait and silently painted the opaque fallback. Sim-verified matching
+      CG pixel-for-pixel in DARK/LIGHT/GLASS; selection, marked text, and
+      kitty images under Metal are still unverified.
     - The visible screen's links are enumerable (`Terminal
       .visibleLinkMatches` + `TerminalView.visibleLinkRegions`, the inverse
       of `calculateTapHit`) — what visionOS gaze hover stands on.

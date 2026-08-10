@@ -333,7 +333,16 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
             layer.contentsScale = scale
         }
 #else
-        let scale = terminalView.backingScaleFactor()
+        // Multiplex patch: backingScaleFactor() is hardcoded to 1.0 on
+        // visionOS (no UIScreen there), which would size the drawable and
+        // rasterize the glyph atlas at 1x — visibly soft on Vision Pro. The
+        // layer's contentsScale carries the real window scale on both iOS
+        // and visionOS once the view is attached; keep backingScaleFactor
+        // as the floor for the pre-attach frames where contentsScale is
+        // still the CALayer default of 1.
+        let scale = max(view.layer.contentsScale,
+                        view.traitCollection.displayScale,
+                        terminalView.backingScaleFactor())
 #endif
         view.drawableSize = CGSize(width: view.bounds.width * scale, height: view.bounds.height * scale)
         let cursorStyle = terminalView.terminal.options.cursorStyle
@@ -394,7 +403,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
             debugLastLogTime = now
         }
 #endif
-        let bgColor = colorToSIMD(terminalView.nativeBackgroundColor)
+        let bgColor = colorToSIMD(resolvedNativeBackground(terminalView))
         passDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(Double(bgColor.x),
                                                                          Double(bgColor.y),
                                                                          Double(bgColor.z),
@@ -1067,7 +1076,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                                     if marginX1 > marginX0 {
                                         let (mx0, my0, mx1, my1) = transformRect(x0: marginX0, y0: y0, x1: marginX1, y1: lineOriginPx.y + cellHeightPx)
                                         if let mClipped = self.clipRect(mx0, my0, mx1, my1, clipRect) {
-                                            let defaultBg = colorToSIMD(terminalView.nativeBackgroundColor)
+                                            let defaultBg = colorToSIMD(resolvedNativeBackground(terminalView))
                                             backgroundCells.append(makeColorCell(x0: mClipped.0, y0: mClipped.1, x1: mClipped.2, y1: mClipped.3, color: defaultBg))
                                         }
                                     }
@@ -1897,6 +1906,22 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                 cache.removeValue(forKey: evicted)
             }
         }
+    }
+
+    /// Multiplex patch: `nativeBackgroundColor` can be a dynamic UIColor —
+    /// the app's GLASS appearance resolves it to clear only under a custom
+    /// trait carried by the view hierarchy. `getRed()` resolves dynamic
+    /// colors against `UITraitCollection.current`, which is NOT the terminal
+    /// view's traits inside an MTKView delegate callback, so the glass clear
+    /// silently resolved to the opaque fallback. Resolve explicitly against
+    /// the terminal view before converting.
+    private func resolvedNativeBackground(_ terminalView: TerminalView) -> TTColor {
+        #if os(macOS)
+        return terminalView.nativeBackgroundColor
+        #else
+        return terminalView.nativeBackgroundColor
+            .resolvedColor(with: terminalView.traitCollection)
+        #endif
     }
 
     private func colorToSIMD(_ color: TTColor) -> SIMD4<Float> {
