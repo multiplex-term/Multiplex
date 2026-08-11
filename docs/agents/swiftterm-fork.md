@@ -13,7 +13,13 @@ input encoding, or terminal rendering.
       multistage IME survive.
     - Pans scroll the *remote* (`performRemoteScroll`): wheel events under
       mouse tracking, DECCKM-aware arrows in the alternate screen with mouse
-      off; plain-shell tabs keep native local scrollback.
+      off; plain-shell tabs keep native local scrollback. Wheel coordinates
+      are pinned to the pan's START location (`remoteScrollAnchor`): the live
+      location drifts with the drag (visionOS: gaze hit + unbounded hand
+      translation) and the row clamp pins overshoot to row 0 — herdr's tab
+      bar, which switches tabs on wheel events (herdr changelog: "Scrolling
+      over the tab bar now switches tabs directly"). tmux's status line has
+      the same wheel-switches-windows exposure.
     - The single→double→triple tap failure chain is decided PER TOUCH by a
       gesture-delegate method, never static `require(toFail:)`
       (`remoteOwnsImmediateTaps`): while the client reports mouse (tmux

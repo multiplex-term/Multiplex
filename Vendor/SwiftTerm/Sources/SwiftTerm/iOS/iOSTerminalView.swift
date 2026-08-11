@@ -1371,6 +1371,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // buffer otherwise keeps native local scrollback.
     var remoteScrollResidual: CGFloat = 0
 
+    // Multiplex patch: wheel reports are pinned to the pan's START location.
+    // A pan's live location moves with the drag (on visionOS it is the gaze
+    // hit at pinch time plus the hand's unbounded translation), so a long
+    // scroll walks the reported coordinate off the content and the row clamp
+    // pins it to row 0 — herdr's tab bar, where a wheel event switches tabs.
+    // Desktop wheel semantics scroll the point under the pointer at gesture
+    // start; anchoring restores that.
+    var remoteScrollAnchor: CGPoint?
+
     /// Multiplex patch: an app-owned tmux copy-mode HUD disables mouse
     /// reporting so UIKit can select text locally, but tmux may still render
     /// in the primary buffer. In that narrow state, keep pans remote by
@@ -1527,16 +1536,18 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         switch gestureRecognizer.state {
         case .began:
             remoteScrollResidual = 0
+            remoteScrollAnchor = gestureRecognizer.location(in: self)
         case .changed:
             let dy = gestureRecognizer.translation(in: self).y + remoteScrollResidual
             let ticks = Int (dy / cellDimension.height)
             remoteScrollResidual = dy - CGFloat (ticks) * cellDimension.height
             gestureRecognizer.setTranslation(.zero, in: self)
             if ticks != 0 {
-                performRemoteScroll(ticks: ticks, at: gestureRecognizer.location(in: self))
+                performRemoteScroll(ticks: ticks, at: remoteScrollAnchor
+                    ?? gestureRecognizer.location(in: self))
             }
         default:
-            break
+            remoteScrollAnchor = nil
         }
     }
 
