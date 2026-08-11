@@ -14,6 +14,18 @@ Split from AGENTS.md — read before committing any user-visible change.
   renders with Icon Composer's own `ictool` and unblends the layers,
   verifying the restack recomposites the reference (≤0.5/255). Never
   edit the three layer PNGs by hand — edit `AppIcon.icon` and re-bake.
+  **Keep the artwork SVGs to filled paths — no `stroke`.** Icon Composer's
+  importer closes an open stroked path, and the iOS **26** design generation
+  draws that phantom closing segment as a grey hairline. The V used to be a
+  stroked `<polyline>`, so a line ran across the M's counter — invisible in
+  Icon Composer's preview, on device, and in every default (generation 27)
+  render, and visible only where the 26 generation is rendered: App Store
+  Connect and the App Store product page. Fixed by outlining the stroke into
+  a fill; caps and the mitered apex are spelled out in `carrier.svg`. Check
+  both generations when the artwork changes — `ictool` inside
+  `Icon Composer.app/Contents/Executables` takes
+  `--design-generation 26|27`, and a background row through the counter
+  (y≈310, x 400–620 at 1024) must read the fill's ~24/255, not ~108.
 - **The release notes are one content model with two renderings, and the
   launch card is priced like the interruption it is** (`ReleaseNotes` pure +
   tested; `WhatsNewViewController` / `ReleaseLogViewController`;

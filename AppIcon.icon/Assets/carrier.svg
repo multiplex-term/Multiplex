@@ -1,10 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- Concept C · Carrier — one continuous trace: wire in, M, wire out.
-       Four same-fill shapes union seamlessly (posts carry the V's butt ends). -->
+       Four same-fill shapes union seamlessly (posts carry the V's butt ends).
+
+       The V is an explicitly outlined FILL, never a stroked polyline: Icon
+       Composer's importer closes an open stroked path, and the iOS 26 glass
+       pass draws that phantom closing segment as a grey hairline across the
+       M's counter. It is invisible in the 27 rendition (so on-device and in
+       Icon Composer's own preview) and shows only where the 26 generation is
+       rendered — App Store Connect and the App Store product page.
+
+       Outline of the width-68 V through (296,304) → (512,600) → (728,304),
+       butt caps, mitered apex (ratio 1.697, under the default limit of 4);
+       both caps stay buried inside the posts, as the stroke's did. -->
   <g fill="#F2F3F4">
     <rect x="72" y="654" width="880" height="68"/>
     <rect x="262" y="284" width="68" height="438"/>
     <rect x="694" y="284" width="68" height="438"/>
+    <path d="M323.467 284 L512 542.334 L700.533 284 L755.467 324.042 L512 657.712 L268.533 324.042 Z"/>
   </g>
-  <polyline points="296,304 512,600 728,304" fill="none" stroke="#F2F3F4" stroke-width="68" stroke-linecap="butt" stroke-linejoin="miter"/>
 </svg>
