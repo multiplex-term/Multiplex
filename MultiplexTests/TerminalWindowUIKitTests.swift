@@ -359,7 +359,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
     }
 
     #if !os(visionOS)
-    func testClassicLayoutReservesBottomSafeAreaWhileShellOwnsItsStageBounds() {
+    func testPaneBoundsStopAboveBottomStripOnlyWhenTheRailDoesNotSpendIt() {
         let bounds = CGRect(x: 0, y: 0, width: 950, height: 1_200)
         let safeArea = UIEdgeInsets(top: 0, left: 0, bottom: 21, right: 0)
 
@@ -370,7 +370,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
                 safeAreaInsets: safeArea
             ),
             CGRect(x: 0, y: 0, width: 950, height: 1_179),
-            "A classic iPad key rail must stop above the home/resize strip"
+            "A pane that keeps the strip must stop above the home/resize band"
         )
         XCTAssertEqual(
             TerminalWindowUIKitRootView.contentBounds(
@@ -379,7 +379,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
                 safeAreaInsets: safeArea
             ),
             bounds,
-            "The outer shell has already decided whether its rail spends the strip"
+            "A rail that spends the strip is the window's own bottom edge"
         )
     }
 

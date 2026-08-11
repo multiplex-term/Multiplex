@@ -190,6 +190,7 @@ final class TerminalSurfaceView: UIView {
             shortcutBackend: configuration.shortcutBackend
         )
         keyBar.contentSafeArea = configuration.contentSafeArea
+        keyBar.spendsBottomStrip = configuration.railOwnsBottomSafeArea
         coordinator.keyBar = keyBar
         addSubview(view)
         addSubview(keyBar)
@@ -225,6 +226,11 @@ final class TerminalSurfaceView: UIView {
         // always sits over appearance-correct hardware; its top rides the
         // rail's bottom anchor, so it is exactly the keyboard-covered band
         // and collapses to nothing when no keyboard docks.
+        let keyBarHeight = keyBar.heightAnchor.constraint(
+            equalToConstant: TerminalKeyBar.barHeight(
+                spendsBottomStrip: configuration.railOwnsBottomSafeArea
+            )
+        )
         let keyboardBackfill = UIView()
         keyboardBackfill.backgroundColor = TallyPalette.bezel
         keyboardBackfill.isUserInteractionEnabled = false
@@ -237,7 +243,7 @@ final class TerminalSurfaceView: UIView {
             terminalBottom,
             keyBar.leadingAnchor.constraint(equalTo: leadingAnchor),
             keyBar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            keyBar.heightAnchor.constraint(equalToConstant: TerminalKeyBar.barHeight),
+            keyBarHeight,
             keyBarBottom,
             keyboardBackfill.topAnchor.constraint(equalTo: keyBar.bottomAnchor),
             keyboardBackfill.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -252,7 +258,8 @@ final class TerminalSurfaceView: UIView {
             terminalLeadingConstraint: terminalLeading,
             terminalTrailingConstraint: terminalTrailing
         )
-        coordinator.railOwnsBottomSafeArea = configuration.railOwnsBottomSafeArea
+        coordinator.keyBarHeightConstraint = keyBarHeight
+        coordinator.setRailOwnsBottomSafeArea(configuration.railOwnsBottomSafeArea)
         #endif
 
         // Experimental Metal renderer (visionOS scale + glass fixes live in
@@ -326,7 +333,7 @@ final class TerminalSurfaceView: UIView {
             Self.terminalInsets.bottom + configuration.bottomChromeHeight
         )
         coordinator.updateContentSafeArea(configuration.contentSafeArea)
-        coordinator.railOwnsBottomSafeArea = configuration.railOwnsBottomSafeArea
+        coordinator.setRailOwnsBottomSafeArea(configuration.railOwnsBottomSafeArea)
         if fontChanged {
             coordinator.terminalMetricsDidChange()
         }
@@ -412,7 +419,8 @@ final class TerminalSurfaceView: UIView {
 
         #if !os(visionOS)
         weak var keyBar: TerminalKeyBar?
-        var railOwnsBottomSafeArea = false
+        private(set) var railOwnsBottomSafeArea = false
+        var keyBarHeightConstraint: NSLayoutConstraint?
         private weak var avoidingContainer: UIView?
         private var bottomConstraint: NSLayoutConstraint?
         private var terminalTopConstraint: NSLayoutConstraint?
@@ -477,6 +485,23 @@ final class TerminalSurfaceView: UIView {
                     }
                 })
             }
+        }
+
+        /// Whether this pane reaches the window's bottom edge instead of the
+        /// bottom safe area's. It moves with rotation on iPhone, and the rail
+        /// grows its own chassis when it does, so keep the fact, the bar, and
+        /// the height constraint in one place.
+        func setRailOwnsBottomSafeArea(_ owns: Bool) {
+            guard owns != railOwnsBottomSafeArea || keyBar?.spendsBottomStrip != owns
+            else { return }
+            railOwnsBottomSafeArea = owns
+            keyBar?.spendsBottomStrip = owns
+            let height = TerminalKeyBar.barHeight(spendsBottomStrip: owns)
+            guard let constraint = keyBarHeightConstraint,
+                  constraint.constant != height
+            else { return }
+            constraint.constant = height
+            avoidingContainer?.layoutIfNeeded()
         }
 
         func updateBottomChromeHeight(_ height: CGFloat) {

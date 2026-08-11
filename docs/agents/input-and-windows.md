@@ -27,10 +27,19 @@ routing, tab moves, keyboard avoidance, or secret fields.
   landscape edges unsafe without saying which holds it — no band is safe to
   read in; heights are `height + safeArea.bottom` (this reader is inset by
   whichever bottom region applies, so adding it back lands on the window
-  edge, keyboard or not). The key rail takes the bottom only at compact
-  vertical size class; where it does, `SwiftTermView.railOwnsBottomSafeArea`
-  moves `restingBottom` with it — a static fact per pane, never read from
-  the live frame (the strip's padding would feed back). Panes are placed
+  edge, keyboard or not). The key rail takes the bottom strip at compact
+  vertical size class and on every iPad stage (shell or classic window) —
+  the rail IS the window's bottom edge there, so a reserved strip would only
+  park a dead band under the row. Where it does,
+  `SwiftTermView.railOwnsBottomSafeArea` moves `restingBottom` with it — a
+  static fact per pane, never read from the live frame (the strip's padding
+  would feed back) — and the rail buys its own daylight back below the key
+  faces (`TerminalKeyBar.keyBottomInset(isIOSAppOnMac:spendsBottomStrip:)`:
+  3 → 8, which is also the iPhone-landscape padding fix, so the bar's height
+  moves with the fact). The auxiliary panes' rails instead paint through the
+  strip and lift their controls by the classic window's `contentSafeArea
+  .bottom`, which is why a classic window now hands that inset down.
+  Panes are placed
   with `.offset` (claims no width): align the frame `.topLeading` or
   SwiftUI centers the lot.
 - **iPhone's left-edge right-swipe arbitrates above SwiftTerm**

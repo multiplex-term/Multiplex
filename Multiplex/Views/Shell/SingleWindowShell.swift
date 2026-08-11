@@ -79,7 +79,8 @@ enum SingleWindowShellNativeLayout {
         deckRailVisible: Bool,
         compactShowsTerminal: Bool,
         compactBackSwipeOffset: CGFloat,
-        compactBackSwipeActive: Bool
+        compactBackSwipeActive: Bool,
+        railAlwaysTakesBottomStrip: Bool = false
     ) -> SingleWindowShellLayoutMetrics {
         let fullWidth = max(0, size.width)
         let usableWidth = max(0, fullWidth - safeArea.left - safeArea.right)
@@ -95,7 +96,14 @@ enum SingleWindowShellNativeLayout {
         let terminalWidth = max(0, fullWidth - (expanded ? deckWidth : 0))
         let contentOriginY = safeArea.top
         let deckHeight = max(0, size.height - safeArea.top)
+        // The terminal's own key rail is the bottom edge, so it spends the
+        // home-indicator strip rather than parking a backfill band under
+        // itself: on a compact-height phone the row is too precious to give
+        // away, and on iPad the rail reads as floating above the display edge
+        // otherwise. The rail buys back its own daylight below the key faces
+        // (`TerminalKeyBar.keyBottomInset`).
         let railTakesBottomStrip = verticalSizeClass == .compact
+            || railAlwaysTakesBottomStrip
         let terminalHeight = max(
             0,
             size.height - safeArea.top - safeArea.bottom
@@ -718,7 +726,8 @@ final class SingleWindowShellViewController: UIViewController {
             deckRailVisible: deckRailVisible,
             compactShowsTerminal: compactShowsTerminal,
             compactBackSwipeOffset: compactBackSwipeOffset,
-            compactBackSwipeActive: compactBackSwipeActive
+            compactBackSwipeActive: compactBackSwipeActive,
+            railAlwaysTakesBottomStrip: UIDevice.current.userInterfaceIdiom == .pad
         )
     }
 

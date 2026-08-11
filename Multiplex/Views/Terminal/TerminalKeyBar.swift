@@ -548,8 +548,17 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     /// Trimmed on iPad/iPhone, where the rail is the window's bottom edge
     /// and the window's own corner already sits under it. The Mac keeps the
     /// authored symmetry — its window bottom is the Mac's, not ours.
-    static func keyBottomInset(isIOSAppOnMac: Bool) -> CGFloat {
-        isIOSAppOnMac ? keyTopInset : 3
+    ///
+    /// Where the pane instead spends the home-indicator strip (iPhone
+    /// landscape, and every iPad window), the rail reaches the display edge:
+    /// the hairline would leave the keys sitting on the indicator itself, so
+    /// those rails buy back a little daylight below the faces.
+    static func keyBottomInset(
+        isIOSAppOnMac: Bool,
+        spendsBottomStrip: Bool = false
+    ) -> CGFloat {
+        if isIOSAppOnMac { return keyTopInset }
+        return spendsBottomStrip ? 8 : 3
     }
 
     static let keyBottomInset = keyBottomInset(
@@ -557,10 +566,29 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     )
     static let barHeight: CGFloat = keyTopInset + keyHeight + keyBottomInset
 
+    /// The rail's height for a pane that does (or does not) spend the bottom
+    /// strip. `barHeight` is the plain case, kept as a constant because the
+    /// top rail mirrors it for its own minimum height.
+    static func barHeight(spendsBottomStrip: Bool) -> CGFloat {
+        keyTopInset + keyHeight + keyBottomInset(
+            isIOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac,
+            spendsBottomStrip: spendsBottomStrip
+        )
+    }
+
     var contentSafeArea = UIEdgeInsets.zero {
         didSet {
             guard contentSafeArea != oldValue else { return }
             setNeedsLayout()
+        }
+    }
+
+    /// Whether this rail reaches the window's own bottom edge rather than the
+    /// bottom safe area's. Only the chassis below the faces changes with it.
+    var spendsBottomStrip = false {
+        didSet {
+            guard spendsBottomStrip != oldValue else { return }
+            invalidateIntrinsicContentSize()
         }
     }
 
@@ -630,7 +658,10 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
 
     var enableInputClicksWhenVisible: Bool { true }
     override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: Self.barHeight)
+        CGSize(
+            width: UIView.noIntrinsicMetric,
+            height: Self.barHeight(spendsBottomStrip: spendsBottomStrip)
+        )
     }
 
     override func layoutSubviews() {

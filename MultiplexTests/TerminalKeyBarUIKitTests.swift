@@ -118,6 +118,38 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
             TerminalKeyBar.keyTopInset,
             "The Mac's window bottom is the Mac's; the rail keeps its symmetry"
         )
+        // A rail that spends the home-indicator strip reaches the display
+        // edge, so it buys daylight back below the faces — and the bar it
+        // reports must grow by exactly that, or the terminal covers the row.
+        XCTAssertGreaterThan(
+            TerminalKeyBar.keyBottomInset(
+                isIOSAppOnMac: false,
+                spendsBottomStrip: true
+            ),
+            TerminalKeyBar.keyBottomInset(
+                isIOSAppOnMac: false,
+                spendsBottomStrip: false
+            ),
+            "Keys parked over the home indicator owe it visible daylight"
+        )
+        XCTAssertEqual(
+            TerminalKeyBar.keyBottomInset(
+                isIOSAppOnMac: true,
+                spendsBottomStrip: true
+            ),
+            TerminalKeyBar.keyTopInset,
+            "The Mac has no indicator strip to spend"
+        )
+        bar.spendsBottomStrip = true
+        XCTAssertEqual(
+            bar.intrinsicContentSize.height,
+            TerminalKeyBar.barHeight(spendsBottomStrip: true)
+        )
+        XCTAssertGreaterThan(
+            TerminalKeyBar.barHeight(spendsBottomStrip: true),
+            TerminalKeyBar.barHeight(spendsBottomStrip: false)
+        )
+        bar.spendsBottomStrip = false
         XCTAssertGreaterThan(
             TerminalKeyBarLayout.regularEdgeInset(isIOSAppOnMac: false),
             TerminalKeyBarLayout.regularEdgeInset(isIOSAppOnMac: true),

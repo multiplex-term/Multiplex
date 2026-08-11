@@ -537,7 +537,22 @@ final class TerminalWindowViewController: UIViewController,
     /// pill, which is chrome geometry and must never reach a pane (a leaked
     /// leading inset shoves the terminal off its own window).
     private var contentSafeArea: UIEdgeInsets {
-        shell?.contentSafeArea ?? .zero
+        if let shell { return shell.contentSafeArea }
+        #if os(visionOS)
+        return .zero
+        #else
+        // A classic pane now spans the window's own bottom edge, so the
+        // home/Stage Manager strip is the pane's to spend. The key rail keeps
+        // its faces clear through its own chassis; the auxiliary rails paint
+        // through the strip and lift their controls by this inset instead.
+        guard isViewLoaded else { return .zero }
+        return UIEdgeInsets(
+            top: 0,
+            left: 0,
+            bottom: rootView.safeAreaInsets.bottom,
+            right: 0
+        )
+        #endif
     }
 
     /// What the rail is asked to clear. The shell hands its panes' insets
@@ -571,7 +586,15 @@ final class TerminalWindowViewController: UIViewController,
         #endif
     }
     private var railOwnsBottomSafeArea: Bool {
-        shell?.railOwnsBottomSafeArea ?? false
+        if let shell { return shell.railOwnsBottomSafeArea }
+        #if os(visionOS)
+        return false
+        #else
+        // A classic iPad window's key rail is its bottom edge: it spends the
+        // home-indicator strip itself rather than floating a backfill band
+        // under the row, and buys back its own daylight below the key faces.
+        return true
+        #endif
     }
     private var showsAgentHelper: Bool {
         shownAgent != nil && activeController?.status == .live
@@ -2123,16 +2146,15 @@ extension TerminalWindowViewController {
             return
         }
         #endif
-        // SwiftUI's classic NavigationStack proposed only the safe-area
-        // height to its terminal VStack. A native child controller receives
-        // the navigation controller's full bounds instead, so pinning the
-        // pane to `bounds.maxY` puts the app-owned key rail under iPadOS's
-        // home/Stage Manager resize region. Shell stages already reserve or
-        // deliberately spend that strip themselves; only classic windows
-        // consume the local bottom safe area here.
+        // Every stage now spends the bottom strip itself: the key rail is the
+        // window's bottom edge and keeps its faces clear of the home/Stage
+        // Manager region through its own chassis, so reserving the strip here
+        // would only park a dead band under the row (the pane still learns
+        // the fact through `railOwnsBottomSafeArea`, which is what keeps the
+        // keyboard measurement honest).
         let contentBounds = TerminalWindowUIKitRootView.contentBounds(
             in: bounds,
-            reservesBottomSafeArea: shell == nil,
+            reservesBottomSafeArea: shell == nil && !railOwnsBottomSafeArea,
             safeAreaInsets: rootView.safeAreaInsets
         )
         #if !os(visionOS)
@@ -2242,6 +2264,10 @@ extension TerminalWindowViewController {
         if let helperController {
             #if !os(visionOS)
             let obstruction = activeController?.keyboardObstruction ?? 0
+            // The rail grows its chassis where it spends the bottom strip.
+            let railHeight = TerminalKeyBar.barHeight(
+                spendsBottomStrip: railOwnsBottomSafeArea
+            )
             if AgentHelperStripCollapse.shared.isCollapsed {
                 let dotSize = helperController.fittingContentSize()
                 rootView.helperContainer.frame = CGRect(
@@ -2250,7 +2276,7 @@ extension TerminalWindowViewController {
                         rootView.paneContainer.frame.minY,
                         rootView.paneContainer.frame.maxY
                             - obstruction
-                            - TerminalKeyBar.barHeight
+                            - railHeight
                             - dotSize.height
                             - 8
                     ),
@@ -2264,7 +2290,7 @@ extension TerminalWindowViewController {
                         rootView.paneContainer.frame.minY,
                         rootView.paneContainer.frame.maxY
                             - obstruction
-                            - TerminalKeyBar.barHeight
+                            - railHeight
                             - AgentHelperStripViewController.dockedHeight
                     ),
                     width: bounds.width,

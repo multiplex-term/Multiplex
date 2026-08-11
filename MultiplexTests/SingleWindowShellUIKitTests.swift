@@ -73,10 +73,18 @@ final class SingleWindowShellUIKitTests: XCTestCase {
             verticalSizeClass: .regular
         )
 
+        // iPad hands the bottom strip to the terminal's own key rail at any
+        // height; every other idiom keeps it (18 pt of safe area here).
+        let terminalHeight: CGFloat = UIDevice.current.userInterfaceIdiom == .pad
+            ? 744
+            : 726
         var metrics = try XCTUnwrap(controller.currentLayoutMetrics)
         XCTAssertTrue(metrics.expanded)
         XCTAssertEqual(metrics.deckFrame, CGRect(x: 0, y: 24, width: 336, height: 744))
-        XCTAssertEqual(metrics.terminalFrame, CGRect(x: 336, y: 24, width: 688, height: 726))
+        XCTAssertEqual(
+            metrics.terminalFrame,
+            CGRect(x: 336, y: 24, width: 688, height: terminalHeight)
+        )
         XCTAssertEqual(metrics.dividerFrame.origin.x, 335)
         XCTAssertEqual(metrics.deckSafeArea.left, 20)
         XCTAssertEqual(metrics.terminalSafeArea.left, 0)
@@ -90,7 +98,10 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         metrics = try XCTUnwrap(controller.currentLayoutMetrics)
         XCTAssertFalse(controller.deckRailVisible)
         XCTAssertEqual(metrics.deckFrame.width, 0)
-        XCTAssertEqual(metrics.terminalFrame, CGRect(x: 0, y: 24, width: 1_024, height: 726))
+        XCTAssertEqual(
+            metrics.terminalFrame,
+            CGRect(x: 0, y: 24, width: 1_024, height: terminalHeight)
+        )
         XCTAssertEqual(metrics.terminalSafeArea.left, 20)
         XCTAssertEqual(metrics.terminalAvailableWidth, 988)
         XCTAssertEqual(controller.shellState.presentation.deckControlLabel, "◧ DECK")
@@ -128,6 +139,26 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         )
         XCTAssertEqual(compactHeight.terminalFrame.height, 488)
         XCTAssertTrue(compactHeight.railOwnsBottomSafeArea)
+
+        // iPad hands the strip to the rail at any height: the key rail is the
+        // window's bottom edge there, not a row floating above a dead band.
+        let pad = SingleWindowShellNativeLayout.resolve(
+            size: CGSize(width: 600, height: 500),
+            safeArea: UIEdgeInsets(top: 12, left: 44, bottom: 21, right: 44),
+            verticalSizeClass: .regular,
+            deckRailVisible: true,
+            compactShowsTerminal: true,
+            compactBackSwipeOffset: 0,
+            compactBackSwipeActive: false,
+            railAlwaysTakesBottomStrip: true
+        )
+        XCTAssertEqual(pad.terminalFrame.height, 488)
+        XCTAssertTrue(pad.railOwnsBottomSafeArea)
+        XCTAssertEqual(
+            pad.deckSafeArea.bottom,
+            21,
+            "Only the terminal spends the strip; the deck still insets"
+        )
     }
 
     func testTerminalBottomBackfillDisappearsWhenRailOwnsSafeArea() throws {
