@@ -1,6 +1,6 @@
 NEW SINCE 1.3.0
 • FILE VIEWER AND VIEWPORT BARS FLOAT BELOW THE WINDOW (Vision Pro) — the bottom bars of ▤ File Viewer and ⌗ viewport tabs now float outside the window as glass bars, clear of the resize corners, holding their own size as the window resizes. File Viewer keeps its controls in a row above the window row (one CLOSE, not two); the viewport gets three clusters — back/reload, address, and SYSTEM/CLOSE. iPad unchanged.
-• MARKDOWN IMAGES SHOW ON A PRESS — in a rendered README the ⟨image: …⟩ placeholder is a link. Press it and the picture appears in the document, sized to the text column; press the caption to hide it, or tap for full-screen zoom. Web-hosted images go through the usual link confirmation, which now offers a docked ⌗ VIEWPORT as well as the browser. Nothing is fetched until you press.
+• MARKDOWN IMAGES SHOW ON A PRESS — in a rendered README the “image: …” placeholder is a link. Press it and the picture appears in the document, sized to the text column; press the caption to hide it, or tap for full-screen zoom. Web-hosted images go through the usual link confirmation, which now offers a docked ⌗ VIEWPORT as well as the browser. Nothing is fetched until you press.
 • TMUX + MOSH FIXES — TMUX split shortcuts no longer type `%` on iPad, and File Viewer starts in the current tmux or herdr pane directory.
 • SELECT BLOCK STAYS WHERE YOU PRESSED — the SELECT / SELECT ALL / PASTE block and the SELECT TEXT bar could drift up (about a keyboard height, or off screen) on mosh tabs and in scrolled-back terminals. Both now anchor to your press.
 • MOSH TABS NO LONGER GROW A JUNK SCROLL AREA — mosh syncs one live screen, but the app archived stale frames above it on every keyboard show/hide, stacking duplicate layouts. Mosh tabs now hold only the live screen.
@@ -13,7 +13,7 @@ NEW SINCE 1.3.0
 
 PLEASE TRY
 1. Vision Pro: open a ▤ File Viewer and a ⌗ viewport tab — both bars should float below the window, clear of the resize corners, holding their width as you resize. Check that the last lines of a long file stay readable, that every bar button still works, and that the viewport address edits and long-press-copies.
-2. Press ⟨image: …⟩ placeholders in a README — including `../assets/x.png`, a %20-escaped space, and one with a "title". Hide with the caption, then resize the tab and text size with pictures open.
+2. Press “image: …” placeholders in a README — including `../assets/x.png`, a %20-escaped space, and one with a "title". Hide with the caption, then resize the tab and text size with pictures open.
 3. Press an image at an https:// address — it must raise the confirmation, not fetch; an SVG or PDF should offer OPEN FILE. Web links should offer ⌗ VIEWPORT and OPEN; relative links navigate inside the viewer (`docs/setup.md#install` → setup.md).
 4. iPad: try both TMUX split shortcuts (no `%`), then open File Viewer from non-home tmux and herdr panes.
 5. In a split, long-press a path that wraps at the pane border — the confirmation should show all of it. Then `cd` the panes into different repos and press a relative path in the inactive pane.
