@@ -43,6 +43,17 @@ Where one line genuinely can't comply, use a scoped
 `// swiftlint:disable:next <rule>` with the reason above it; prefer fixing
 the code.
 
+**CI** (`.github/workflows/ci.yml`) runs on every push and pull request, and
+runs nothing CI-only: the macOS job (macos-26 — Xcode 26 and the visionOS 26
+simulator runtime) is `Tools/build.sh gen`, `lint`, then `build` + `test` for
+visionOS and iPad in sequence, sequential because of the DerivedData lock
+above. A second job on Linux runs `ruby Tools/check-metadata.rb`, which needs
+neither Xcode nor gems and so answers in seconds: it holds the TestFlight
+changelog and the App Store listing files to the App Store Connect caps and
+the vetted glyph set in `Tools/metadata_limits.rb` (shared with
+`fastlane/Fastfile`, so a lane and a pull request can never disagree about
+them). Run it locally before committing metadata.
+
 ## Architecture
 
 One UIKit scene runtime (`MultiplexSceneDelegate` +

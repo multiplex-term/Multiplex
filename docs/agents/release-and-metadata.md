@@ -2,6 +2,20 @@
 
 Split from AGENTS.md — read before committing any user-visible change.
 
+`ruby Tools/check-metadata.rb` is the mechanical half of this document, and
+CI's Linux job runs it on every push. It reads
+`fastlane/testflight-whats-new.txt` and `fastlane/metadata/`, and fails on: a
+field over its App Store Connect cap (measured in CHARACTERS — this copy's
+dashes and arrows run its byte length several hundred higher), an empty or
+missing field, a shared `description.txt` / `release_notes.txt` breaking the
+platform split, CRLF, control characters, and any non-ASCII glyph not vetted
+in `Tools/metadata_limits.rb`. That last rule is the ⟨…⟩ incident: the
+changelog looked right in every editor and App Store Connect refused the
+character. The caps live in that one file, required by `fastlane/Fastfile`
+too, so the lane that fails an archive and the job that fails a pull request
+can never disagree. Add a glyph to the allowlist only after an upload has
+actually accepted it.
+
 - **App icon is a hand-authored Icon Composer package** (`AppIcon.icon`;
   spec + bake-off in `DESIGN.md`); icon.json lists groups
   frontmost-first. Validate headlessly with `xcrun actool AppIcon.icon

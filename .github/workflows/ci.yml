@@ -1,0 +1,89 @@
+# Multiplex CI — two jobs, split by what they need.
+#
+#   metadata (Linux, seconds)  the TestFlight changelog and the App Store
+#                              listing files. No Xcode, no gems: it is the
+#                              fast answer on every push, and it catches the
+#                              class of mistake that otherwise surfaces after
+#                              two archives as an opaque upload failure.
+#   xcode (macOS 26)           lint, then build + unit tests on BOTH
+#                              platforms. macos-26 carries Xcode 26 and the
+#                              visionOS 26 simulator runtime; the app targets
+#                              visionOS 26 / iOS 17, so nothing older will do.
+#
+# Everything the macOS job runs is a Tools/build.sh subcommand — the same
+# entry point AGENTS.md points contributors at, so CI cannot drift into its
+# own private set of destinations and flags.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch supersedes this run; a ~40-minute macOS job
+# is not worth spending on a commit that has already been replaced. `main` is
+# exempt so its history keeps a result per commit.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    name: Metadata format
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check TestFlight changelog and App Store metadata
+        run: ruby Tools/check-metadata.rb
+
+  xcode:
+    name: Lint, build, test
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes | grep -E 'iOS|visionOS'
+
+      - name: Install XcodeGen and SwiftLint
+        run: brew install xcodegen swiftlint
+
+      # Citadel is the one dependency fetched over the network (SwiftTerm and
+      # swift-nio-ssh are vendored in-tree). Cache its checkout so a CI run is
+      # not at the mercy of a git host.
+      - name: Cache Swift package checkouts
+        uses: actions/cache@v4
+        with:
+          path: DerivedData/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('project.yml') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Generate the Xcode project
+        run: ./Tools/build.sh gen
+
+      - name: Lint
+        run: ./Tools/build.sh lint
+
+      # visionOS and iPad must not run concurrently against the shared
+      # DerivedData (the build DB locks), so these stay four sequential steps
+      # rather than a matrix. `test` builds the app target too, but building
+      # first keeps a compile error reported as a build failure.
+      - name: Build (visionOS)
+        run: ./Tools/build.sh build vos
+
+      - name: Test (visionOS)
+        run: ./Tools/build.sh test vos
+
+      - name: Build (iPad)
+        run: ./Tools/build.sh build ipad
+
+      - name: Test (iPad)
+        run: ./Tools/build.sh test ipad
