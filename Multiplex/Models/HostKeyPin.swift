@@ -61,6 +61,61 @@ struct HostKeyPin: Equatable, Sendable {
             .replacingOccurrences(of: "=", with: "")
     }
 
+    /// Stands in for the algorithm when a person supplied only a fingerprint
+    /// — a provider console prints `SHA256:…` and nothing else. Never
+    /// collides with a real SSH algorithm name, which is a lowercase
+    /// identifier and never contains `*`.
+    static let anyAlgorithm = "*"
+
+    /// Reads what a person can actually get hold of and paste, rather than
+    /// demanding one shape. Whitespace-tolerant; nil when nothing usable is
+    /// in the text.
+    ///
+    /// Four sources cover the realistic ways someone learns a host key
+    /// out of band:
+    ///
+    ///   - an OpenSSH public line, from `cat /etc/ssh/ssh_host_*_key.pub` or
+    ///     `ssh-keyscan host` (which prefixes the hostname) — the exact path,
+    ///     since the fingerprint is computed here from the key itself;
+    ///   - this app's own stored form, so a pin can be copied between hosts;
+    ///   - `ssh-keygen -lf …` output, `256 SHA256:… comment (ED25519)`;
+    ///   - a bare `SHA256:…`, which is what most provider consoles show.
+    ///
+    /// The last two carry no SSH algorithm name — `(ED25519)` is a label, not
+    /// the `ssh-ed25519` the wire uses — so they pin `anyAlgorithm`. Nothing
+    /// is lost: the digest covers the whole blob, whose first field is the
+    /// algorithm name, so matching the fingerprint settles the type too.
+    init?(userInput: String) {
+        let trimmed = userInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let fields = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+
+        // An OpenSSH public line: the algorithm followed by base64 key data.
+        // `ssh-keyscan` puts the host first, so try each adjacent pair.
+        for index in fields.indices.dropLast() {
+            let (algorithm, encoded) = (fields[index], fields[index + 1])
+            guard algorithm.contains("-"), !algorithm.hasPrefix("SHA256:"),
+                  let blob = Data(base64Encoded: encoded),
+                  let pin = HostKeyPin(keyBlob: blob),
+                  pin.algorithm == algorithm
+            else { continue }
+            self = pin
+            return
+        }
+
+        // Otherwise the text must carry a SHA256 digest somewhere.
+        guard let digest = fields.first(where: { $0.hasPrefix("SHA256:") }),
+              digest.count > "SHA256:".count
+        else { return nil }
+        // `<algorithm> SHA256:…` — this app's stored form.
+        if let index = fields.firstIndex(of: digest), index > 0,
+           fields[index - 1].contains("-") {
+            self.init(algorithm: fields[index - 1], fingerprint: digest)
+            return
+        }
+        self.init(algorithm: Self.anyAlgorithm, fingerprint: digest)
+    }
+
     /// Parses a `Host.pinnedHostKeys` array, dropping entries that don't
     /// parse. An unparsable entry is not a reason to connect unpinned — as
     /// long as one entry survives the host stays pinned, and a host whose
@@ -116,8 +171,15 @@ extension HostKeyPin {
     /// against a set the machine itself vouched for.
     static func decide(presented: HostKeyPin, against pins: [HostKeyPin]) -> HostKeyDecision {
         guard !pins.isEmpty else { return .learn(presented) }
-        if pins.contains(presented) { return .trusted }
-        if let expected = pins.first(where: { $0.algorithm == presented.algorithm }) {
+        // The fingerprint alone is the identity. SHA-256 is taken over the
+        // whole key blob, whose first field is the algorithm name, so a digest
+        // match settles the type as well — comparing the digest rather than
+        // the pair is identical for a pin that names its algorithm, and is
+        // what lets a person pin the bare `SHA256:…` a console showed them.
+        if pins.contains(where: { $0.fingerprint == presented.fingerprint }) { return .trusted }
+        if let expected = pins.first(where: {
+            $0.algorithm == presented.algorithm || $0.algorithm == anyAlgorithm
+        }) {
             return .refused(.changed(expected: expected, presented: presented))
         }
         return .refused(.unrecognizedAlgorithm(presented: presented, pinned: pins))

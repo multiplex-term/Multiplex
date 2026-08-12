@@ -81,6 +81,73 @@ struct HostKeyPinTests {
         #expect(pins.map(\.algorithm) == ["ssh-ed25519", "ecdsa-sha2-nistp256"])
     }
 
+    // MARK: What a person can paste
+
+    /// The exact path: a `.pub` line carries the key itself, so the digest is
+    /// computed here rather than taken on trust from the text.
+    @Test func acceptsAnOpenSSHPublicLine() throws {
+        let pin = try #require(HostKeyPin(userInput:
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGzvAzOMMkd4BHtz909gQaWthBZGQHtFP1QEVs9lsaih me@box"))
+        #expect(pin.algorithm == "ssh-ed25519")
+        #expect(pin.fingerprint == "SHA256:JsAUX9CQFrzfXXeSw9rfsDuGvSDg9kwa/D4OFBI72AA")
+    }
+
+    /// `ssh-keyscan` puts the host in front of the algorithm, and pasting its
+    /// output verbatim is the most likely way anyone gets a key here.
+    @Test func acceptsSSHKeyscanOutput() throws {
+        let pin = try #require(HostKeyPin(userInput:
+            "box.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGzvAzOMMkd4BHtz909gQaWthBZGQHtFP1QEVs9lsaih"))
+        #expect(pin.algorithm == "ssh-ed25519")
+        #expect(pin.fingerprint == "SHA256:JsAUX9CQFrzfXXeSw9rfsDuGvSDg9kwa/D4OFBI72AA")
+    }
+
+    /// `ssh-keygen -lf` names the type as `(ED25519)`, which is a label and
+    /// not the `ssh-ed25519` the wire uses — so this pins the digest alone
+    /// rather than inventing an algorithm name that would never match.
+    @Test func acceptsSSHKeygenListingAsADigestOnlyPin() throws {
+        let pin = try #require(HostKeyPin(userInput:
+            "256 SHA256:JsAUX9CQFrzfXXeSw9rfsDuGvSDg9kwa/D4OFBI72AA no comment (ED25519)"))
+        #expect(pin.algorithm == HostKeyPin.anyAlgorithm)
+        #expect(pin.fingerprint == "SHA256:JsAUX9CQFrzfXXeSw9rfsDuGvSDg9kwa/D4OFBI72AA")
+    }
+
+    /// What a VPS console usually shows.
+    @Test func acceptsABareFingerprint() throws {
+        let pin = try #require(
+            HostKeyPin(userInput: "  SHA256:JsAUX9CQFrzfXXeSw9rfsDuGvSDg9kwa/D4OFBI72AA  ")
+        )
+        #expect(pin.algorithm == HostKeyPin.anyAlgorithm)
+    }
+
+    @Test func acceptsTheAppsOwnStoredForm() throws {
+        let pin = try #require(HostKeyPin(userInput: Self.ed25519.storage))
+        #expect(pin == Self.ed25519)
+    }
+
+    @Test func rejectsTextThatIsNotAKey() {
+        #expect(HostKeyPin(userInput: "") == nil)
+        #expect(HostKeyPin(userInput: "    ") == nil)
+        #expect(HostKeyPin(userInput: "example.com") == nil)
+        #expect(HostKeyPin(userInput: "MD5:aa:bb:cc") == nil)
+        // An algorithm whose base64 body isn't that algorithm's key.
+        #expect(HostKeyPin(userInput: "ssh-ed25519 bm90LWEta2V5") == nil)
+    }
+
+    /// A digest-only pin still has to reject the wrong key — otherwise
+    /// pasting a fingerprint would be worse than pasting nothing.
+    @Test func aDigestOnlyPinTrustsItsKeyAndRefusesOthers() {
+        let digestOnly = HostKeyPin(
+            algorithm: HostKeyPin.anyAlgorithm,
+            fingerprint: Self.ed25519.fingerprint
+        )
+        #expect(HostKeyPin.decide(presented: Self.ed25519, against: [digestOnly]) == .trusted)
+        // Different algorithm, but the digest is the one pinned: still the
+        // same key, because the digest covers the algorithm name too.
+        #expect(HostKeyPin.decide(presented: Self.ecdsa, against: [digestOnly]) != .trusted)
+        #expect(HostKeyPin.decide(presented: Self.impostor, against: [digestOnly])
+            == .refused(.changed(expected: digestOnly, presented: Self.impostor)))
+    }
+
     // MARK: The trust rule
 
     private static let ed25519 = HostKeyPin(
