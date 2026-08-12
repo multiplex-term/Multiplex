@@ -382,9 +382,17 @@ final class ReleaseLogViewController: UIViewController, AppAppearanceFollowing {
         contentStack.axis = .vertical
         contentStack.alignment = .fill
         contentStack.spacing = Metrics.bankSpacing
-        contentStack.addArrangedSubview(makeHeader())
-        for bank in ReleaseNotes.banks(for: platform) {
-            contentStack.addArrangedSubview(makeBank(bank.bank, entries: bank.entries))
+        // Newest first, each release under its own header — a reader updating
+        // across two releases at once is owed both records, not a merge that
+        // no longer says which release brought what.
+        for (index, release) in ReleaseNotes.releases.enumerated() {
+            if index > 0 {
+                contentStack.addArrangedSubview(ReleaseNotesChrome.rule())
+            }
+            contentStack.addArrangedSubview(makeHeader(release))
+            for bank in release.banks(for: platform) {
+                contentStack.addArrangedSubview(makeBank(bank.bank, entries: bank.entries))
+            }
         }
 
         scrollView.addSubview(contentStack)
@@ -421,11 +429,11 @@ final class ReleaseLogViewController: UIViewController, AppAppearanceFollowing {
         ])
     }
 
-    private func makeHeader() -> UIView {
-        let mark = UIKitChassisLabel("Multiplex \(ReleaseNotes.version)", size: 18)
+    private func makeHeader(_ release: ReleaseNotesRelease) -> UIView {
+        let mark = UIKitChassisLabel("Multiplex \(release.version)", size: 18)
         mark.numberOfLines = 0
         let promise = ReleaseNotesChrome.label(
-            ReleaseNotes.promise,
+            release.promise,
             style: .subheadline,
             color: UIKitChassis.signal
         )

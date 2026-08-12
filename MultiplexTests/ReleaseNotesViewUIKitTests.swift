@@ -29,16 +29,15 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
         XCTAssertNotNil(chip(named: "whatsNew.done", in: controller.view))
     }
 
-    /// Vision Pro is told about GLASS and never about background keep-alive,
-    /// which it does not have.
-    func testTheVisionCardSwapsInGlassAndLeavesOutKeepAlive() {
+    /// Vision Pro is told about the floating bars and never about the key
+    /// rail's window edge, which it does not have.
+    func testTheVisionCardSwapsInTheFloatingBarsAndLeavesOutTheKeyRail() {
         let controller = WhatsNewViewController(platform: .vision)
         render(controller, width: 620, height: 700)
 
         let rendered = renderedText(in: controller.view).joined(separator: "\n")
-        XCTAssertTrue(rendered.contains("GLASS"))
-        XCTAssertFalse(rendered.contains("KEEP A HOST ALIVE AFTER YOU LEAVE"))
-        XCTAssertFalse(rendered.contains("A TITLE BAR OF ITS OWN"))
+        XCTAssertTrue(rendered.contains("BARS FLOAT BELOW THE WINDOW"))
+        XCTAssertFalse(rendered.contains("THE KEY RAIL MEETS THE WINDOW'S EDGE"))
     }
 
     func testBothChipsReportThroughTheirOwnCallback() throws {
@@ -84,20 +83,27 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
 
     // MARK: The full record
 
-    func testTheLogCarriesEveryChangeForItsPlatformUnderItsOwnBank() {
+    /// Both releases' records, each under its own header — a reader updating
+    /// from 1.2 straight to 1.3.1 is owed 1.3's story too.
+    func testTheLogCarriesEveryReleasesChangesForItsPlatform() {
         let controller = ReleaseLogViewController(platform: .pad)
-        render(controller, width: 720, height: 2_400)
+        render(controller, width: 720, height: 4_800)
 
         let rendered = renderedText(in: controller.view).joined(separator: "\n")
-        for entry in ReleaseNotes.entries(for: .pad) {
-            XCTAssertTrue(
-                rendered.contains(entry.title.uppercased()),
-                "the log dropped \(entry.id)"
-            )
-            XCTAssertTrue(rendered.contains(entry.body), "\(entry.id) lost its body")
-        }
-        for bank in ReleaseNotes.banks(for: .pad) {
-            XCTAssertTrue(rendered.contains(bank.bank.title))
+        for release in ReleaseNotes.releases {
+            // The header is a chassis label, which uppercases its text.
+            XCTAssertTrue(rendered.contains("MULTIPLEX \(release.version)"))
+            XCTAssertTrue(rendered.contains(release.promise))
+            for entry in release.entries(for: .pad) {
+                XCTAssertTrue(
+                    rendered.contains(entry.title.uppercased()),
+                    "the log dropped \(release.version)'s \(entry.id)"
+                )
+                XCTAssertTrue(rendered.contains(entry.body), "\(entry.id) lost its body")
+            }
+            for bank in release.banks(for: .pad) {
+                XCTAssertTrue(rendered.contains(bank.bank.title))
+            }
         }
         XCTAssertFalse(
             rendered.contains(ReleaseNoteBank.appearance.title),
@@ -108,7 +114,7 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
 
     func testTheLogIsTheCardsSuperset() {
         let log = ReleaseLogViewController(platform: .vision)
-        render(log, width: 720, height: 2_400)
+        render(log, width: 720, height: 4_800)
         let rendered = renderedText(in: log.view).joined(separator: "\n")
 
         for highlight in ReleaseNotes.highlights(for: .vision) {
