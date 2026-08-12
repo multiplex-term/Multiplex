@@ -1,0 +1,42 @@
+# Fast metadata validation that needs neither Xcode nor gems. Restricting the
+# trigger to the checker's complete input set keeps unrelated changes from
+# creating a Linux Actions run.
+name: CI / Linux
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "fastlane/metadata/**"
+      - "fastlane/testflight-whats-new.txt"
+      - "Tools/check-metadata.rb"
+      - "Tools/metadata_limits.rb"
+      - ".github/workflows/ci-linux.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "fastlane/metadata/**"
+      - "fastlane/testflight-whats-new.txt"
+      - "Tools/check-metadata.rb"
+      - "Tools/metadata_limits.rb"
+      - ".github/workflows/ci-linux.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-linux-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    name: Metadata format
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check TestFlight changelog and App Store metadata
+        run: ruby Tools/check-metadata.rb

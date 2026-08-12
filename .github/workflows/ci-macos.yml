@@ -1,49 +1,63 @@
-# Multiplex CI — two jobs, split by what they need.
+# Multiplex app CI. macos-26 carries Xcode 26 and the visionOS 26 simulator
+# runtime; the app targets visionOS 26 / iOS 17, so nothing older will do.
 #
-#   metadata (Linux, seconds)  the TestFlight changelog and the App Store
-#                              listing files. No Xcode, no gems: it is the
-#                              fast answer on every push, and it catches the
-#                              class of mistake that otherwise surfaces after
-#                              two archives as an opaque upload failure.
-#   xcode (macOS 26)           lint, then build + unit tests on BOTH
-#                              platforms. macos-26 carries Xcode 26 and the
-#                              visionOS 26 simulator runtime; the app targets
-#                              visionOS 26 / iOS 17, so nothing older will do.
-#
-# Everything the macOS job runs is a Tools/build.sh subcommand — the same
+# Everything this workflow runs is a Tools/build.sh subcommand — the same
 # entry point AGENTS.md points contributors at, so CI cannot drift into its
 # own private set of destinations and flags.
-name: CI
+name: CI / macOS
 
 on:
   push:
     branches:
       - main
+    # These files cannot affect linting, project generation, or an app build.
+    # If a commit also changes app/build inputs, the workflow still runs.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "fastlane/**"
+      - ".agents/**"
+      - ".claude/**"
+      - ".github/workflows/ci-linux.yml"
+      - "local-plan/**"
+      - ".gitignore"
+      - "Gemfile"
+      - "Gemfile.lock"
+      - "LICENSE"
+      - "NOTICE"
+      - "Tools/check-metadata.rb"
+      - "Tools/metadata_limits.rb"
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "fastlane/**"
+      - ".agents/**"
+      - ".claude/**"
+      - ".github/workflows/ci-linux.yml"
+      - "local-plan/**"
+      - ".gitignore"
+      - "Gemfile"
+      - "Gemfile.lock"
+      - "LICENSE"
+      - "NOTICE"
+      - "Tools/check-metadata.rb"
+      - "Tools/metadata_limits.rb"
   workflow_dispatch:
 
 # A newer push to the same branch supersedes this run; a ~40-minute macOS job
 # is not worth spending on a commit that has already been replaced. `main` is
 # exempt so its history keeps a result per commit.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-macos-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
 
 jobs:
-  metadata:
-    name: Metadata format
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v5
-      - name: Check TestFlight changelog and App Store metadata
-        run: ruby Tools/check-metadata.rb
-
   xcode:
     name: Lint, build, test
     runs-on: macos-26
