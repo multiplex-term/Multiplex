@@ -14,7 +14,7 @@ final class UIKitSceneRootViewControllerTests: XCTestCase {
         XCTAssertEqual(harness.window.overrideUserInterfaceStyle, .dark)
 
         harness.themes.appearance = .light
-        drainObservation()
+        drainObservation(until: { harness.root.overrideUserInterfaceStyle == .light })
         XCTAssertEqual(harness.root.overrideUserInterfaceStyle, .light)
         XCTAssertEqual(harness.window.overrideUserInterfaceStyle, .light)
     }
@@ -31,7 +31,9 @@ final class UIKitSceneRootViewControllerTests: XCTestCase {
         XCTAssertTrue(harness.window.traitCollection[GlassAppearanceTrait.self])
 
         harness.themes.appearance = .dark
-        drainObservation()
+        drainObservation(until: {
+            !harness.root.traitCollection[GlassAppearanceTrait.self]
+        })
         XCTAssertFalse(harness.root.traitCollection[GlassAppearanceTrait.self])
         XCTAssertFalse(harness.window.traitCollection[GlassAppearanceTrait.self])
     }
@@ -195,7 +197,7 @@ final class UIKitSceneRootViewControllerTests: XCTestCase {
         ))
 
         XCTAssertTrue(harness.root.receive(url))
-        drainObservation()
+        drainObservation(until: { !intents.isEmpty })
 
         XCTAssertEqual(harness.externalActions.pendingSignal, before + 1)
         XCTAssertEqual(intents, [.openDeck(.main)])
@@ -264,8 +266,20 @@ final class UIKitSceneRootViewControllerTests: XCTestCase {
         )
     }
 
-    private func drainObservation() {
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+    /// Observation reaches the controller through `onChange` → a `@MainActor`
+    /// Task, so a test is waiting for a scheduling hop, not for a duration. A
+    /// fixed 10ms spin passed on an idle laptop and failed on a loaded CI
+    /// runner (the iPad job, run 31545939526). Spin until the effect shows,
+    /// capped so a real regression still fails the assertion instead of
+    /// hanging the suite.
+    private func drainObservation(
+        until effectIsVisible: () -> Bool,
+        timeout: TimeInterval = 5
+    ) {
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        while !effectIsVisible(), Date() < deadline {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
     }
 
     private func drainObservationTasks() async {

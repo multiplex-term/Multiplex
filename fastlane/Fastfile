@@ -21,6 +21,11 @@
 
 default_platform(:ios)
 
+# App Store Connect's field caps and the vetted glyph set, shared with
+# `ruby Tools/check-metadata.rb` — the Linux CI job that fails a pull request
+# in seconds with the same numbers this file would fail an archive on.
+require_relative "../Tools/metadata_limits"
+
 PROJECT = "Multiplex.xcodeproj"
 SCHEME  = "Multiplex"
 
@@ -86,7 +91,7 @@ end
 # both platform archives, as Spaceship's opaque "An attribute value is too
 # long. - /data/attributes/whatsNew". Measured in CHARACTERS, which is what the
 # API counts; this file's bullets and arrows make its byte length run higher.
-WHATS_NEW_LIMIT = 4000
+WHATS_NEW_LIMIT = MetadataLimits::WHATS_NEW
 
 def whats_new(external)
   path = File.expand_path("testflight-whats-new.txt", __dir__)
@@ -108,10 +113,7 @@ end
 # Deliver has one shared metadata path, so inject the fields that differ
 # between App Store platform versions instead of duplicating every shared file.
 # App Store Connect caps both localized fields at 4,000 characters.
-PLATFORM_LOCALIZED_LIMITS = {
-  "description" => 4000,
-  "release_notes" => 4000,
-}.freeze
+PLATFORM_LOCALIZED_LIMITS = MetadataLimits::LOCALIZED.slice("description", "release_notes").freeze
 
 def platform_localized_metadata(field, platform)
   field = field.to_s
@@ -160,7 +162,7 @@ REVIEW_INFORMATION = {
 # API counts: notes.txt is full of em dashes and arrows, so its byte length
 # runs several hundred over its character length.
 REVIEW_INFORMATION_LIMITS = {
-  notes: 4000,
+  notes: MetadataLimits::REVIEW_NOTES,
 }.freeze
 
 # deliver's key => pilot's key for the same App Store Connect field.
