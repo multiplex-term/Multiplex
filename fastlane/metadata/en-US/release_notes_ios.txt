@@ -7,5 +7,6 @@ Multiplex 1.3.1 — pictures in your READMEs, file paths that work in split pane
 • Selection stays where you pressed. The SELECT block and the SELECT TEXT bar no longer drift upward on mosh tabs or in scrolled-back terminals, and with a second client attached the selection waits for the shared geometry to settle.
 • mosh tabs keep one screen — the junk scroll area that stacked stale layouts above the live screen is gone.
 • The tmux split shortcuts no longer type a stray % on iPad, and the File Viewer opens in the pressed pane's working directory on tmux and herdr alike.
+• Every connection now verifies the server's SSH host key against the fingerprints recorded for that host — from Bind Host, a key pasted into Add Host → Host key, or pinned on first connection. Host Settings → Host key lists what's recorded.
 • Settings → Terminal renderer can draw terminal text on the GPU with Metal — off by default, applied to newly opened terminal windows.
 • Restore Purchases recovers when the App Store's restore sync fails, and its errors now name something you can act on.

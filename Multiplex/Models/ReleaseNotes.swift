@@ -301,6 +301,19 @@ enum ReleaseNotes {
 
             // MARK: Elsewhere
             ReleaseNoteEntry(
+                id: "hostkeys",
+                bank: .elsewhere,
+                title: "Host keys are verified",
+                body: "Every connection checks the server against the host's "
+                    + "recorded fingerprints — from Bind Host, a key pasted "
+                    + "into Add Host ▸ Host key, or pinned on first "
+                    + "connection. Host Settings ▸ Host key lists them, with "
+                    + "FORGET.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "verified host keys"
+            ),
+            ReleaseNoteEntry(
                 id: "openfile",
                 bank: .elsewhere,
                 title: "Open File from Shortcuts",
