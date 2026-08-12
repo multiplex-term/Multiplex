@@ -231,12 +231,12 @@ final class AddHostUIKitTests: XCTestCase {
             "Backend",
             "Credentials",
             "Signal check",
-            "Host key",
             "New session defaults",
             "New session tmux conf",
             "Session setup scripts",
             "Agent launch models",
             "Transport",
+            "Host key",
         ])
         XCTAssertEqual(fixture.controller.nameField.accessibilityLabel, "Name")
         XCTAssertEqual(fixture.controller.hostnameField.accessibilityLabel, "Address")

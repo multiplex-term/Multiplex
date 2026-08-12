@@ -756,22 +756,23 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         backendSection = AddHostSectionView(title: "Backend", detail: nil, rows: [])
         backendSection.accessibilityIdentifier = "addhost.section.backend"
 
-        var sections: [AddHostSectionView] = [
+        // Host key sits last, after Transport. It stopped being a read-out
+        // beside Signal check the moment it grew a field to type into, and it
+        // is the section a person touches least — most hosts never need it,
+        // because the first connection or `mpx bind` fills it in.
+        [
             hostSection,
             monitoringSection,
             backendSection,
             credentialsSection,
             testSection,
-        ]
-        sections.append(hostKeySection)
-        sections += [
             workingDirectoriesSection,
             tmuxConfSection,
             scriptsSection,
             agentModelsSection,
             transportSection,
-        ]
-        sections.forEach { manualStack.addArrangedSubview($0) }
+            hostKeySection,
+        ].forEach { manualStack.addArrangedSubview($0) }
 
         renderCredentials()
         renderTestSection()
