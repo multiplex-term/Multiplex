@@ -36,7 +36,16 @@ Load-bearing decisions split from AGENTS.md.
   endorses it); the PIN proof is transcript-bound (HKDF over PIN + both
   public keys, 3 attempts then the session locks) while a wrong token
   closes silently (counting 128-bit guesses would gift a LAN spammer a
-  DoS). **The whole flow is one modal**: Add Host opens on BIND | MANUAL
+  DoS). **Two announcements claiming one name raise a caution on both
+  rows** (`BindAnnouncement.contestedNames`; discovery dedupes by session
+  key, so a shared name means two keys claiming one machine). It is a
+  **tell, not a control** — do not let it grow into one: the same
+  unauthenticated mDNS lets an attacker forge a goodbye for the real row
+  or answer for its instance name and leave a single row standing, and
+  two `mpx bind` runs on one machine contest their own name, which is why
+  the copy says "if you started only one". The fix that doesn't depend on
+  someone noticing is a SAS over `spub` (`spec/bind-v1.md` §3).
+  **The whole flow is one modal**: Add Host opens on BIND | MANUAL
   (`AddHostSheet.Mode`); the deck has no bind surface at all (chip, rail,
   and ghost tiles shipped and were withdrawn 2026-07-28). Discovery
   browses only while `bindSurfaceOpen` OR an enrollment is in flight —

@@ -747,6 +747,7 @@ final class BindCandidateRowView: UIView {
     private let userLabel = UILabel()
     private let addressLabel = UILabel()
     private let fingerprintLabel = UILabel()
+    private let contestedLabel = UILabel()
     private let errorLabel = UILabel()
     private let pinInput = BindPINInputView()
     private let boundLabel = UILabel()
@@ -782,6 +783,7 @@ final class BindCandidateRowView: UIView {
         addressLabel.text = pending.addressSummary
         fingerprintLabel.text = pending.fingerprint
         fingerprintLabel.isHidden = pending.fingerprint == nil
+        contestedLabel.isHidden = !pending.isNameContested
 
         if case .failed(let message) = pending.stage {
             errorLabel.text = message
@@ -870,6 +872,14 @@ final class BindCandidateRowView: UIView {
             identityStack.bottomAnchor.constraint(equalTo: identity.bottomAnchor, constant: -9),
         ])
 
+        contestedLabel.font = UIKitChassis.uiFont(10)
+        contestedLabel.textColor = TallyPalette.caution
+        contestedLabel.numberOfLines = 0
+        contestedLabel.isHidden = true
+        contestedLabel.text = "Another announcement is using this name. If you started "
+            + "only one mpx bind, one of these isn't your machine — scan its QR instead."
+        contestedLabel.accessibilityIdentifier = "bind.candidate.contested"
+
         errorLabel.font = UIKitChassis.uiFont(10)
         errorLabel.textColor = TallyPalette.caution
         errorLabel.numberOfLines = 0
@@ -935,7 +945,7 @@ final class BindCandidateRowView: UIView {
         actionState.spacing = 0
 
         let content = UIStackView(arrangedSubviews: [
-            header, identity, errorLabel, actionState,
+            header, identity, contestedLabel, errorLabel, actionState,
         ])
         content.axis = .vertical
         content.alignment = .fill

@@ -209,6 +209,36 @@ struct BindAnnouncement: Identifiable, Equatable, Sendable {
     }
 }
 
+extension BindAnnouncement {
+    /// Names claimed by more than one announcement, case-folded to match the
+    /// pane's own ordering so the contested rows sit together.
+    ///
+    /// Discovery already dedupes by session key, so two entries sharing a name
+    /// are two *different* keys both claiming to be that machine. That is what
+    /// the rogue-announcer attack looks like from here: mDNS authenticates
+    /// nothing, so anyone on the network can advertise the machine's name —
+    /// and its fingerprint, which is just as unauthenticated — and wait to be
+    /// picked.
+    ///
+    /// A tell, not a control. The same lack of authentication lets an attacker
+    /// forge a goodbye record for the real row, or answer for its instance
+    /// name outright, and leave exactly one row standing. It is worth showing
+    /// because the version that leaves both rows up is the one a person can
+    /// still catch. The fix that doesn't depend on noticing is a short
+    /// authenticated string over `spub` — see `spec/bind-v1.md` §3.
+    ///
+    /// One honest false positive: two `mpx bind` runs on the same machine mint
+    /// two session keys and so contest their own name. The copy says so rather
+    /// than accusing.
+    static func contestedNames(in announcements: [BindAnnouncement]) -> Set<String> {
+        var counts: [String: Int] = [:]
+        for announcement in announcements {
+            counts[announcement.name.lowercased(), default: 0] += 1
+        }
+        return Set(counts.lazy.filter { $0.value > 1 }.map(\.key))
+    }
+}
+
 /// The host record OFFER carries — what the app saves.
 struct BindOffer: Equatable, Sendable {
     var name: String

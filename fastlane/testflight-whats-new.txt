@@ -1,5 +1,6 @@
 NEW SINCE 1.3.0
 • FILE VIEWER AND VIEWPORT BARS FLOAT BELOW THE WINDOW (Vision Pro) — the ▤ and ⌗ bottom bars now sit outside the window, clear of the resize corners, holding their size as it resizes. File Viewer keeps one control row; the viewport gets back/reload, address, SYSTEM/CLOSE. iPad unchanged.
+• BIND FLAGS TWO MACHINES ANNOUNCING ONE NAME — in Add Host ▸ BIND, when more than one announcement claims the same name, both rows say so. Local-network discovery isn't authenticated, so another machine can advertise yours; if you started only one `mpx bind`, scan its QR instead.
 • MARKDOWN IMAGES SHOW ON A PRESS — in a rendered README the “image: …” placeholder is a link. Press it and the picture appears inline, sized to the text column; press the caption to hide it, tap for full-screen. Web-hosted images go through the link confirmation, which now offers a docked ⌗ VIEWPORT — nothing is fetched until you press.
 • SELECT BLOCK STAYS WHERE YOU PRESSED — the SELECT / SELECT ALL / PASTE block and the SELECT TEXT bar no longer drift up on mosh tabs or in scrollback, and Select Text waits for a second client's resize to settle before clamping.
 • MOSH TABS NO LONGER GROW A JUNK SCROLL AREA — stale frames were archived above the live screen on every keyboard show/hide. Mosh tabs now hold only the live screen.
