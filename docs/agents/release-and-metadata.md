@@ -45,7 +45,9 @@ actually accepted it.
   tested; `WhatsNewViewController` / `ReleaseLogViewController`;
   `ReleaseNotesStore`). The card shows FOUR changes, no navigation bar, and
   ends inside one phone screen; FULL NOTES and Settings ▸ About ▸ What's New
-  both open the full banked record. Bake-off record: the log alone was
+  both open the full banked record — `ReleaseNotes.releases`, every release
+  newest first, so a reader updating across two releases misses neither. The
+  card speaks only for the newest release. Bake-off record: the log alone was
   dismissed at the fold, the card alone left eight changes unread, so each
   absorbs the other's failure. Load-bearing details:
   - **A missing stamp is not a first run.** Every device updating from a
@@ -55,11 +57,13 @@ actually accepted it.
     Reading nil as new silences the notes for exactly the people they are
     for; reading it as updated shows a changelog to someone meeting the app.
     Pinned by `ReleaseNotesTests` + `DeckWindowUIKitTests`.
-  - **Once per MINOR version** (1.3.0 → 1.3.1 must not re-open it), stamped
-    on presentation rather than dismissal (a force-quit mid-animation must
-    not make it recurring), and **device-local `UserDefaults`** — updating
-    on iPad must not consume the notice on Vision Pro, so it never rides the
-    synced Host record.
+  - **Once per NOTES release**: `ReleaseNotes.version` advancing at any
+    component reopens the card (1.3 → 1.3.1 did, because 1.3.1 wrote notes
+    of its own); a patch build that leaves the constant alone compares equal
+    and stays silent. Stamped on presentation rather than dismissal (a
+    force-quit mid-animation must not make it recurring), and **device-local
+    `UserDefaults`** — updating on iPad must not consume the notice on
+    Vision Pro, so it never rides the synced Host record.
   - **`ReleaseNotes.version` is the notes' own release, not the bundle's**
     short version: a patch build must not present itself as a release with
     its own notes.

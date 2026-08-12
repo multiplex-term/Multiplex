@@ -4,9 +4,18 @@ import XCTest
 final class ReleaseNotesTests: XCTestCase {
     // MARK: Content
 
+    /// The card speaks for the newest release only — 1.3.1's fixes, not a
+    /// merge of every release the log still carries.
+    func testTheCardAnnouncesTheNewestRelease() {
+        XCTAssertEqual(ReleaseNotes.version, "1.3.1")
+        XCTAssertEqual(ReleaseNotes.releases.first?.version, ReleaseNotes.version)
+        XCTAssertEqual(ReleaseNotes.promise, ReleaseNotes.current.promise)
+    }
+
     /// The card's whole premise is four rows, and the fourth is where the
-    /// platform filter earns its keep: an iPad reader is told about the title
-    /// bar, a Vision Pro reader about GLASS, and neither hears the other's.
+    /// platform filter earns its keep: an iPad reader is told about the key
+    /// rail, a Vision Pro reader about the floating bars, and neither hears
+    /// the other's.
     func testTheCardsFourthRowIsTheOneAboutThisPlatform() {
         for platform in ReleaseNotePlatform.allCases {
             XCTAssertEqual(
@@ -15,108 +24,143 @@ final class ReleaseNotesTests: XCTestCase {
                 "\(platform) must fill the card"
             )
         }
-        XCTAssertEqual(ReleaseNotes.highlights(for: .pad).last?.id, "titlebar")
-        XCTAssertEqual(ReleaseNotes.highlights(for: .vision).map(\.id).contains("glass"), true)
-        XCTAssertEqual(ReleaseNotes.highlights(for: .phone).last?.id, "alerts")
+        XCTAssertEqual(ReleaseNotes.highlights(for: .pad).last?.id, "keyrail")
+        XCTAssertEqual(ReleaseNotes.highlights(for: .vision).last?.id, "ornaments")
+        XCTAssertEqual(ReleaseNotes.highlights(for: .phone).last?.id, "keyrail")
     }
 
-    func testGlassIsNeverPromisedToAnIPadAndKeepAliveNeverToAVisionPro() {
+    func testVisionOnlyFixesNeverReachAnIPadAndTheKeyRailNeverAVisionPro() {
         let padIDs = ReleaseNotes.entries(for: .pad).map(\.id)
+        XCTAssertFalse(padIDs.contains("ornaments"))
+        XCTAssertFalse(padIDs.contains("ninety"))
+        XCTAssertFalse(padIDs.contains("wheelpin"))
+        XCTAssertTrue(padIDs.contains("keyrail"))
+        XCTAssertTrue(padIDs.contains("metal"))
+
+        let visionIDs = ReleaseNotes.entries(for: .vision).map(\.id)
+        XCTAssertTrue(visionIDs.contains("ornaments"))
+        XCTAssertTrue(visionIDs.contains("ninety"))
+        XCTAssertFalse(visionIDs.contains("keyrail"))
+
+        let phoneIDs = ReleaseNotes.entries(for: .phone).map(\.id)
+        XCTAssertTrue(phoneIDs.contains("keyrail"))
+        XCTAssertFalse(phoneIDs.contains("ornaments"))
+    }
+
+    /// The 1.3 record rides along under the 1.3.1 log, and its platform
+    /// scoping still holds: GLASS never on an iPad, keep-alive never on a
+    /// Vision Pro.
+    func testTheBankedThirteenRecordKeepsItsPlatformScoping() throws {
+        let v13 = try XCTUnwrap(
+            ReleaseNotes.releases.first { $0.version == "1.3" },
+            "the log dropped the 1.3 record"
+        )
+        let padIDs = v13.entries(for: .pad).map(\.id)
         XCTAssertFalse(padIDs.contains("glass"))
         XCTAssertTrue(padIDs.contains("keepalive"))
         XCTAssertTrue(padIDs.contains("titlebar"))
 
-        let visionIDs = ReleaseNotes.entries(for: .vision).map(\.id)
+        let visionIDs = v13.entries(for: .vision).map(\.id)
         XCTAssertTrue(visionIDs.contains("glass"))
         XCTAssertFalse(visionIDs.contains("keepalive"))
         XCTAssertFalse(visionIDs.contains("titlebar"))
-
-        let phoneIDs = ReleaseNotes.entries(for: .phone).map(\.id)
-        XCTAssertTrue(phoneIDs.contains("keepalive"))
-        XCTAssertFalse(phoneIDs.contains("titlebar"))
     }
 
     /// A highlight shown where the change it summarises does not exist would
     /// promise a feature the reader cannot find.
     func testNoHighlightIsShownWhereItsOwnChangeIsNot() {
-        let byID = Dictionary(
-            uniqueKeysWithValues: ReleaseNotes.allEntries.map { ($0.id, $0) }
-        )
-        for highlight in ReleaseNotes.allHighlights {
-            XCTAssertFalse(highlight.covers.isEmpty, "\(highlight.id) covers nothing")
-            for id in highlight.covers {
-                let entry = try? XCTUnwrap(byID[id], "\(highlight.id) names a missing entry")
-                guard let entry else { continue }
-                XCTAssertTrue(
-                    highlight.platforms.isSubset(of: entry.platforms),
-                    "\(highlight.id) is shown where \(id) does not ship"
-                )
+        for release in ReleaseNotes.releases {
+            let byID = Dictionary(
+                uniqueKeysWithValues: release.entries.map { ($0.id, $0) }
+            )
+            for highlight in release.highlights {
+                XCTAssertFalse(highlight.covers.isEmpty, "\(highlight.id) covers nothing")
+                for id in highlight.covers {
+                    let entry = try? XCTUnwrap(byID[id], "\(highlight.id) names a missing entry")
+                    guard let entry else { continue }
+                    XCTAssertTrue(
+                        highlight.platforms.isSubset(of: entry.platforms),
+                        "\(highlight.id) is shown where \(id) does not ship"
+                    )
+                }
             }
         }
     }
 
     func testABankIsOnlyHeadedWhenThisPlatformHasSomethingInIt() {
-        let padBanks = ReleaseNotes.banks(for: .pad).map(\.bank)
-        XCTAssertFalse(
-            padBanks.contains(.appearance),
-            "APPEARANCE holds only GLASS, so it must not head an empty section on iPad"
-        )
-        XCTAssertTrue(ReleaseNotes.banks(for: .vision).map(\.bank).contains(.appearance))
-        for (_, entries) in ReleaseNotes.banks(for: .phone) {
-            XCTAssertFalse(entries.isEmpty)
+        for release in ReleaseNotes.releases {
+            for platform in ReleaseNotePlatform.allCases {
+                for (_, entries) in release.banks(for: platform) {
+                    XCTAssertFalse(entries.isEmpty)
+                }
+            }
         }
+        // APPEARANCE holds only GLASS, so it must not head an empty section
+        // on iPad — in either release's record.
+        for release in ReleaseNotes.releases {
+            XCTAssertFalse(release.banks(for: .pad).map(\.bank).contains(.appearance))
+        }
+        let v13 = ReleaseNotes.releases.first { $0.version == "1.3" }
+        XCTAssertEqual(v13?.banks(for: .vision).map(\.bank).contains(.appearance), true)
     }
 
     /// The card says what it is leaving out, and must never re-offer something
-    /// it already showed — "herdr, or both at once" covers two log entries, so
-    /// neither may reappear in the same breath as "also in 1.3".
+    /// it already showed.
     func testTheAlsoLineNeverRenamesSomethingTheCardAlreadyShowed() throws {
-        for platform in ReleaseNotePlatform.allCases {
-            let also = try XCTUnwrap(ReleaseNotes.alsoLine(for: platform))
-            let shown = ReleaseNotes.highlights(for: platform)
-                .reduce(into: Set<String>()) { $0.formUnion($1.covers) }
-            for id in shown {
-                guard let mention = ReleaseNotes.allEntries
-                    .first(where: { $0.id == id })?.mention else { continue }
-                XCTAssertFalse(
-                    also.contains(mention),
-                    "\(platform)'s also line re-offers \(id)"
-                )
+        for release in ReleaseNotes.releases {
+            for platform in ReleaseNotePlatform.allCases {
+                let also = try XCTUnwrap(release.alsoLine(for: platform))
+                let shown = release.highlights(for: platform)
+                    .reduce(into: Set<String>()) { $0.formUnion($1.covers) }
+                for id in shown {
+                    guard let mention = release.entries
+                        .first(where: { $0.id == id })?.mention else { continue }
+                    XCTAssertFalse(
+                        also.contains(mention),
+                        "\(release.version) \(platform)'s also line re-offers \(id)"
+                    )
+                }
             }
         }
     }
 
     /// The count is derived, so it can never drift from what is on screen.
     func testTheAlsoLineCountsExactlyTheChangesItDoesNotName() throws {
-        for platform in ReleaseNotePlatform.allCases {
-            let shown = ReleaseNotes.highlights(for: platform)
-                .reduce(into: Set<String>()) { $0.formUnion($1.covers) }
-            let remaining = ReleaseNotes.entries(for: platform)
-                .filter { !shown.contains($0.id) }
-            let named = remaining.compactMap(\.mention).prefix(3)
-            let also = try XCTUnwrap(ReleaseNotes.alsoLine(for: platform))
+        for release in ReleaseNotes.releases {
+            for platform in ReleaseNotePlatform.allCases {
+                let shown = release.highlights(for: platform)
+                    .reduce(into: Set<String>()) { $0.formUnion($1.covers) }
+                let remaining = release.entries(for: platform)
+                    .filter { !shown.contains($0.id) }
+                let named = remaining.compactMap(\.mention).prefix(3)
+                let also = try XCTUnwrap(release.alsoLine(for: platform))
 
-            XCTAssertTrue(also.hasPrefix("Also in \(ReleaseNotes.version): "))
-            for mention in named {
-                XCTAssertTrue(also.contains(mention), "\(platform) dropped \(mention)")
-            }
-            let unnamed = remaining.count - named.count
-            if unnamed > 0 {
-                XCTAssertTrue(
-                    also.hasSuffix("— and \(unnamed) more."),
-                    "\(platform) miscounts the rest: \(also)"
-                )
+                XCTAssertTrue(also.hasPrefix("Also in \(release.version): "))
+                for mention in named {
+                    XCTAssertTrue(also.contains(mention), "\(platform) dropped \(mention)")
+                }
+                let unnamed = remaining.count - named.count
+                if unnamed > 0 {
+                    XCTAssertTrue(
+                        also.hasSuffix("— and \(unnamed) more."),
+                        "\(platform) miscounts the rest: \(also)"
+                    )
+                }
             }
         }
     }
 
     func testEveryChangeIsWrittenOnce() {
-        let ids = ReleaseNotes.allEntries.map(\.id)
-        XCTAssertEqual(Set(ids).count, ids.count, "duplicate entry id")
-        let highlightIDs = ReleaseNotes.allHighlights.map(\.id)
-        XCTAssertEqual(Set(highlightIDs).count, highlightIDs.count)
-        for entry in ReleaseNotes.allEntries {
-            XCTAssertFalse(entry.platforms.isEmpty, "\(entry.id) ships nowhere")
+        let versions = ReleaseNotes.releases.map(\.version)
+        XCTAssertEqual(Set(versions).count, versions.count, "duplicate release")
+        for release in ReleaseNotes.releases {
+            let ids = release.entries.map(\.id)
+            XCTAssertEqual(Set(ids).count, ids.count, "duplicate entry id in \(release.version)")
+            let highlightIDs = release.highlights.map(\.id)
+            XCTAssertEqual(Set(highlightIDs).count, highlightIDs.count)
+            for entry in release.entries {
+                XCTAssertFalse(entry.platforms.isEmpty, "\(entry.id) ships nowhere")
+            }
         }
     }
 
@@ -130,7 +174,7 @@ final class ReleaseNotesTests: XCTestCase {
         XCTAssertEqual(
             ReleaseNotesGate.decide(
                 lastSeen: nil,
-                current: "1.3",
+                current: "1.3.1",
                 installHasPriorUse: true
             ),
             .show
@@ -141,29 +185,21 @@ final class ReleaseNotesTests: XCTestCase {
         XCTAssertEqual(
             ReleaseNotesGate.decide(
                 lastSeen: nil,
-                current: "1.3",
+                current: "1.3.1",
                 installHasPriorUse: false
             ),
             .stampSilently
         )
     }
 
-    func testAPatchReleaseDoesNotReopenTheCard() {
-        XCTAssertEqual(
-            ReleaseNotesGate.decide(lastSeen: "1.3", current: "1.3", installHasPriorUse: true),
-            .nothing
-        )
+    /// A release that writes notes of its own reopens the card at any version
+    /// component — `ReleaseNotes.version` moving to 1.3.1 is what carries
+    /// 1.3.1's notes to the people who already saw 1.3's.
+    func testANewNotesReleaseReopensTheCard() {
         XCTAssertEqual(
             ReleaseNotesGate.decide(lastSeen: "1.3", current: "1.3.1", installHasPriorUse: true),
-            .nothing
+            .show
         )
-        XCTAssertEqual(
-            ReleaseNotesGate.decide(lastSeen: "1.3.0", current: "1.3.9", installHasPriorUse: true),
-            .nothing
-        )
-    }
-
-    func testANewMinorOrMajorReopensTheCard() {
         XCTAssertEqual(
             ReleaseNotesGate.decide(lastSeen: "1.3", current: "1.4", installHasPriorUse: true),
             .show
@@ -178,15 +214,44 @@ final class ReleaseNotesTests: XCTestCase {
         )
     }
 
+    /// A patch BUILD without notes of its own leaves `ReleaseNotes.version`
+    /// alone, compares equal, and must not re-present old notes.
+    func testABuildWithoutItsOwnNotesDoesNotReopenTheCard() {
+        XCTAssertEqual(
+            ReleaseNotesGate.decide(lastSeen: "1.3", current: "1.3", installHasPriorUse: true),
+            .nothing
+        )
+        XCTAssertEqual(
+            ReleaseNotesGate.decide(
+                lastSeen: "1.3.1",
+                current: "1.3.1",
+                installHasPriorUse: true
+            ),
+            .nothing
+        )
+        XCTAssertEqual(
+            ReleaseNotesGate.decide(
+                lastSeen: "1.3.0",
+                current: "1.3",
+                installHasPriorUse: true
+            ),
+            .nothing
+        )
+    }
+
     /// A TestFlight build older than the stamp, and a stamp nobody can parse.
     /// Neither is a reason to nag; a broken stamp is repaired by showing once.
     func testADowngradeIsSilentAndAnUnreadableStampRecovers() {
         XCTAssertEqual(
-            ReleaseNotesGate.decide(lastSeen: "1.4", current: "1.3", installHasPriorUse: true),
+            ReleaseNotesGate.decide(lastSeen: "1.4", current: "1.3.1", installHasPriorUse: true),
             .nothing
         )
         XCTAssertEqual(
-            ReleaseNotesGate.decide(lastSeen: "beta", current: "1.3", installHasPriorUse: true),
+            ReleaseNotesGate.decide(lastSeen: "1.3.9", current: "1.3.1", installHasPriorUse: true),
+            .nothing
+        )
+        XCTAssertEqual(
+            ReleaseNotesGate.decide(lastSeen: "beta", current: "1.3.1", installHasPriorUse: true),
             .show
         )
         XCTAssertEqual(
@@ -204,7 +269,7 @@ final class ReleaseNotesTests: XCTestCase {
 
         let store = ReleaseNotesStore(defaults: defaults)
         XCTAssertNil(store.lastSeenVersion)
-        store.markSeen("1.3")
-        XCTAssertEqual(ReleaseNotesStore(defaults: defaults).lastSeenVersion, "1.3")
+        store.markSeen("1.3.1")
+        XCTAssertEqual(ReleaseNotesStore(defaults: defaults).lastSeenVersion, "1.3.1")
     }
 }
