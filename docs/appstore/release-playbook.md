@@ -91,7 +91,7 @@ PLEASE TRY
 
 KNOWN
 • <current sharp edges>
-Feedback: screenshot in TestFlight, or iainst0409@gmail.com
+Feedback: screenshot in TestFlight
 ```
 
 Builds expire after 90 days — ship something monthly or testers go dark.
@@ -159,7 +159,7 @@ The non-consumable IAP `app.multiplexterm.multiplex.pro` is configured with
 display name **Multiplex Pro**, a $19.99 USA-base/equalized price, all-territory
 availability, and review notes. App Store Connect reports it
 `READY_TO_SUBMIT`; its 2026-07-13 paywall screenshot is processed, while the
-refreshed 2026-07-16 asset (`docs/appstore/iap-review-screenshot.jpg`, updated
+refreshed 2026-07-16 asset (`local-plan/iap-review-screenshot.jpg`, untracked, updated
 for the Pro prompt-history copy; full-screen capture, not the earlier Stage
 Manager staging) still needs upload + processing before submission. Submit the
 IAP together with the first app version.
@@ -175,7 +175,8 @@ no reachable host is an empty screen → near-certain "we were unable to
 assess" rejection. Providing a host also removes their incentive to type
 random credentials at your error paths.
 
-The runbook is code: **`Tools/review-host/`** — a Dockerfile + compose file
+The runbook is code: **`Tools/review-host/`** (untracked — the live box's
+coordinates stay on the release machine) — a Dockerfile + compose file
 run the whole box as a container on any US-West VPS (Hetzner Hillsboro
 recommended, ~$5/mo, left running permanently; **rebuild the image** to pick
 up security updates — host keys persist in a volume, so the SSH identity is
@@ -216,14 +217,6 @@ The same host and credentials serve Beta App Review (TestFlight external) —
 
 ## Ship-blockers — do these BEFORE external beta / submission
 
-| # | Blocker | Why | Where |
-| --- | --- | --- | --- |
-| 1 | **Host-key TOFU pinning** | `.acceptAnything()` is fine for the sim, indefensible for real users' credentials; also the one security claim reviewers/users will test. | Citadel `.custom` validator; README "Known limits" |
-| 2 | **Re-upload the refreshed Pro IAP review screenshot** | The 2026-07-13 image is processed and IAP `6790252556` is `READY_TO_SUBMIT`, but the 2026-07-15 local asset reflects the current two-host free-tier wording and still needs upload + processing. | ASC IAP `app.multiplexterm.multiplex.pro` |
-| ~~3~~ | ~~**Ship all free-tier gates and the IAP together**~~ **Code complete 2026-07-13; host allowance raised 2026-07-15**: two-host add-intent cap, grandfathering mosh toggle, 10/day agent-command meter (built-in or custom), custom-theme mutation gate, and alert scheduling gate all ship with the StoreKit surface. Commerce policy has deterministic lifecycle tests; a live visionOS run proved 11 tap intents produce only 10 command sends and then the passive reset pill. | Never un-free a feature post-launch (`local-plan/pricing-strategy.md` §7). | pricing-strategy.md |
-| 4 | **Privacy policy live** at `multiplexterm.dev/privacy` | URL is required metadata; draft ready in `docs/appstore/privacy-policy.md`. | — |
-| 5 | **Support URL live** at `multiplexterm.dev` | Required; a page with the app name + contact email is enough. | — |
-| 6 | **France excluded or French encryption declaration filed** | Apple requires the French declaration for standard app-provided crypto only when distributing in France. | ASC availability / App Encryption Documentation |
-| ~~7~~ | ~~App name check~~ **Done 2026-07-12**: record created as "Multiplex — SSH tmux Terminal", bundle id `app.multiplexterm.multiplex`, Apple ID `6790074057`. | — | ASC |
-| 8 | **Run the signed Pro transaction sign-off above** | Simulator StoreKit proves the catalog but Xcode 27 beta cannot verify its local JWS; TestFlight/Sandbox is the authoritative buy-once/cross-device proof. | iPad + Vision Pro, same sandbox Apple ID |
-| 9 | **Confirm the app itself is Free and review storefront coverage** | The current API key receives 403 for app-level price/availability reads even though the IAP itself is `READY_TO_SUBMIT`. | ASC Pricing and Availability |
+The dated blocker table (ASC account state, IAP submission status, API-key
+access notes) is release-ops state, not product documentation — it lives in
+`local-plan/asc-account-state.md` (untracked).

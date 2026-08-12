@@ -79,7 +79,7 @@ final class HostGuideSheetUIKitTests: XCTestCase {
     }
 
     func testKeychainControllerPreservesHostInterpolationSessionsAndCommand() {
-        let host = Host(name: "studio", hostname: "studio.local", username: "jhen")
+        let host = Host(name: "studio", hostname: "studio.local", username: "demo")
         let controller = KeychainUnlockViewController(
             host: host,
             sessionNames: ["main", "agent"]
@@ -106,7 +106,7 @@ final class HostGuideSheetUIKitTests: XCTestCase {
     }
 
     func testKeychainControllerOmitsDetectedRowForEmptySnapshot() {
-        let host = Host(name: "studio", hostname: "studio.local", username: "jhen")
+        let host = Host(name: "studio", hostname: "studio.local", username: "demo")
         let controller = KeychainUnlockViewController(host: host, sessionNames: [])
         controller.loadViewIfNeeded()
 

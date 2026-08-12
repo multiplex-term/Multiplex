@@ -156,16 +156,16 @@ final class AgentSessionHistoryTests: XCTestCase {
     func testClaudeProjectDirectoryComponent() {
         XCTAssertEqual(
             AgentSessionHistory.claudeProjectDirectoryComponent(
-                forCwd: "/Users/jhen/workspace2/Multiplex"
+                forCwd: "/Users/demo/workspace2/Multiplex"
             ),
-            "-Users-jhen-workspace2-Multiplex"
+            "-Users-demo-workspace2-Multiplex"
         )
         // Dots and underscores flatten too (verified: llama.rn → llama-rn).
         XCTAssertEqual(
             AgentSessionHistory.claudeProjectDirectoryComponent(
-                forCwd: "/Users/jhen/workspace/llama.rn"
+                forCwd: "/Users/demo/workspace/llama.rn"
             ),
-            "-Users-jhen-workspace-llama-rn"
+            "-Users-demo-workspace-llama-rn"
         )
         XCTAssertEqual(
             AgentSessionHistory.claudeProjectDirectoryComponent(forCwd: "/tmp/a_b c"),

@@ -469,7 +469,7 @@ enum AgentSessionHistory {
     }
 
     /// Claude Code: every non-alphanumeric byte of the cwd becomes `-`
-    /// (verified: `/Users/jhen/workspace/llama.rn` → `…-llama-rn`).
+    /// (verified: `/Users/demo/workspace/llama.rn` → `…-llama-rn`).
     static func claudeProjectDirectoryComponent(forCwd cwd: String) -> String {
         String(cwd.map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "-" })
     }

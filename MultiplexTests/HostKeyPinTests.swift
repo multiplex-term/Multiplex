@@ -233,7 +233,7 @@ struct HostKeyPinStoreTests {
     /// the Keychain mirror continuously.
     @Test func recordingIsAdditiveAndIdempotent() {
         let store = makeStore()
-        let host = Host(name: "box", hostname: "example.test", username: "jhen")
+        let host = Host(name: "box", hostname: "example.test", username: "demo")
         store.add(host)
 
         store.recordHostKeyPin(Self.ed25519, for: host.id)
@@ -254,7 +254,7 @@ struct HostKeyPinStoreTests {
     /// connection trusts on first use again.
     @Test func forgettingClearsEveryRecordedKey() {
         let store = makeStore()
-        let host = Host(name: "box", hostname: "example.test", username: "jhen")
+        let host = Host(name: "box", hostname: "example.test", username: "demo")
         store.add(host)
         store.recordHostKeyPin(Self.ed25519, for: host.id)
         store.recordHostKeyPin(Self.ecdsa, for: host.id)
@@ -267,7 +267,7 @@ struct HostKeyPinStoreTests {
     /// verified from its first dial rather than trusting whatever answers.
     @Test func aBoundHostIsAlreadyPinnedBeforeItIsDialled() {
         let store = makeStore()
-        var host = Host(name: "box", hostname: "example.test", username: "jhen")
+        var host = Host(name: "box", hostname: "example.test", username: "demo")
         host.pinnedHostKeys = [Self.ed25519.storage]
         store.add(host)
 

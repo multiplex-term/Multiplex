@@ -112,7 +112,7 @@ enum PaneTitleDisplay {
     /// tmux seeds every new pane's title with the server's own hostname and
     /// replaces it only when the program emits an OSC 0/2 title. An untouched
     /// pane therefore reports the same noise on every window (six of the dev
-    /// harness's thirteen panes read `Jhen-MBPr14.local`), which is worth
+    /// harness's thirteen panes read `Demo-MBPr14.local`), which is worth
     /// suppressing — but only against the exact string tmux seeded it with.
     /// That string is asked of tmux directly (`#{host}`, carried on the probe's
     /// `H` record) rather than inferred from the Host record: `Host.hostname`
@@ -138,7 +138,7 @@ enum PaneTitleDisplay {
     private static func isSameHost(_ candidate: String, _ host: String) -> Bool {
         guard !host.isEmpty else { return false }
         if candidate.caseInsensitiveCompare(host) == .orderedSame { return true }
-        // Compare first DNS labels, never a substring: `Jhen-MBPr14: ~/work`
+        // Compare first DNS labels, never a substring: `Demo-MBPr14: ~/work`
         // carries no dot and so stays a real title.
         let candidateLabel = String(candidate.prefix { $0 != "." })
         let hostLabel = String(host.prefix { $0 != "." })

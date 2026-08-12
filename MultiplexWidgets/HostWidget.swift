@@ -257,7 +257,7 @@ extension WidgetHostState {
     static let sample = WidgetHostState(
         id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
         name: "devbox",
-        address: "jhen@10.0.1.7",
+        address: "demo@10.0.1.7",
         sessions: [WidgetSessionState(
             name: "main",
             agentRaw: "claudeCode",

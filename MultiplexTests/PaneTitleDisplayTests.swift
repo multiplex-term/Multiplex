@@ -23,7 +23,7 @@ final class PaneTitleDisplayTests: XCTestCase {
             PaneTitleDisplay.title(
                 paneTitle: "✳ Claude Code",
                 windowName: "cc",
-                serverHost: "Jhen-MBPr14.local"
+                serverHost: "Demo-MBPr14.local"
             ),
             "✳ Claude Code"
         )
@@ -32,9 +32,9 @@ final class PaneTitleDisplayTests: XCTestCase {
     func testTmuxSeededHostnameIsSuppressed() {
         // The exact string the dev harness reports on six of thirteen panes.
         XCTAssertNil(PaneTitleDisplay.title(
-            paneTitle: "Jhen-MBPr14.local",
+            paneTitle: "Demo-MBPr14.local",
             windowName: "editor",
-            serverHost: "Jhen-MBPr14.local"
+            serverHost: "Demo-MBPr14.local"
         ))
     }
 
@@ -42,14 +42,14 @@ final class PaneTitleDisplayTests: XCTestCase {
         // gethostname() reports either depending on network state, so a pane
         // seeded under one form must stay suppressed under the other.
         XCTAssertNil(PaneTitleDisplay.title(
-            paneTitle: "Jhen-MBPr14",
+            paneTitle: "Demo-MBPr14",
             windowName: "editor",
-            serverHost: "Jhen-MBPr14.local"
+            serverHost: "Demo-MBPr14.local"
         ))
         XCTAssertNil(PaneTitleDisplay.title(
-            paneTitle: "Jhen-MBPr14.local",
+            paneTitle: "Demo-MBPr14.local",
             windowName: "editor",
-            serverHost: "Jhen-MBPr14"
+            serverHost: "Demo-MBPr14"
         ))
     }
 
@@ -58,11 +58,11 @@ final class PaneTitleDisplayTests: XCTestCase {
         // a bare hostname is tmux's seed.
         XCTAssertEqual(
             PaneTitleDisplay.title(
-                paneTitle: "Jhen-MBPr14: ~/workspace",
+                paneTitle: "Demo-MBPr14: ~/workspace",
                 windowName: "editor",
-                serverHost: "Jhen-MBPr14.local"
+                serverHost: "Demo-MBPr14.local"
             ),
-            "Jhen-MBPr14: ~/workspace"
+            "Demo-MBPr14: ~/workspace"
         )
     }
 
@@ -86,11 +86,11 @@ final class PaneTitleDisplayTests: XCTestCase {
         // fail open: showing the hostname beats hiding a real title.
         XCTAssertEqual(
             PaneTitleDisplay.title(
-                paneTitle: "Jhen-MBPr14.local",
+                paneTitle: "Demo-MBPr14.local",
                 windowName: "editor",
                 serverHost: ""
             ),
-            "Jhen-MBPr14.local"
+            "Demo-MBPr14.local"
         )
     }
 

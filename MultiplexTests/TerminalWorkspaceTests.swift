@@ -163,7 +163,7 @@ final class TerminalWorkspaceTests: XCTestCase {
         let snapshot = try String(contentsOf: fixtureURL, encoding: .utf8)
         XCTAssertEqual(
             FileViewerController.parseAnchorDirectory(snapshot, backend: .herdr),
-            "/Users/jhen"
+            "/Users/demo"
         )
     }
 

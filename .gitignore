@@ -22,12 +22,13 @@ fastlane/README.md
 fastlane/test_output/
 fastlane/keys/
 fastlane/.env
-fastlane/metadata/review_information/demo_password.txt
+# Reviewer contact PII + demo host coordinates, local to the release machine
+fastlane/metadata/review_information/
 fastlane/multiplex-ios-demo.mp4
-Tools/review-host/.env
+# Reviewer demo-host runbook — live-box coordinates, local to the release machine
+Tools/review-host/
 
 # App Store screenshot compositor — raw captures in, composed frames out
 Tools/appstore/raw/
 Tools/appstore/out/
-fastlane/metadata/review_information/phone_number.txt
 fastlane/screenshots

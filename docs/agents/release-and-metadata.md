@@ -92,8 +92,8 @@ descriptions are platform-specific:
 `description.txt`, which can put Vision Pro-only claims on the iOS listing.
 Paywall / Pro
 value changes regenerate the real-paywall IAP review assets at
-`docs/appstore/iap-review-screenshot.{png,jpg}` (private review material,
-separate from public `fastlane/screenshots/`). Price changes also update
+`local-plan/iap-review-screenshot.{png,jpg}` (private review material, kept
+out of the public tree like `fastlane/screenshots/`). Price changes also update
 `EntitlementStore`'s DEBUG review-preview default, its tests, and the
 `MULTIPLEX_AUTO_PAYWALL` wording in `e2e-headless.md`. Record App Store
 Connect state

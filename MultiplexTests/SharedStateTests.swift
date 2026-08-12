@@ -462,7 +462,7 @@ final class SharedStateTests: XCTestCase {
             hosts: [WidgetHostState(
                 id: UUID(),
                 name: "devbox",
-                address: "jhen@10.0.1.7",
+                address: "demo@10.0.1.7",
                 sessions: [WidgetSessionState(
                     name: "main",
                     agentRaw: "claudeCode",
@@ -493,7 +493,7 @@ final class SharedStateTests: XCTestCase {
           "hosts": [{
             "id": "00000000-0000-0000-0000-000000000001",
             "name": "devbox",
-            "address": "jhen@10.0.1.7",
+            "address": "demo@10.0.1.7",
             "sessions": [{
               "name": "main",
               "windowNames": ["editor", "server"],

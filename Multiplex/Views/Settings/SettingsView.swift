@@ -1386,7 +1386,7 @@ final class UIKitThemePreviewView: UIKitTallyBorderedView {
 
     private func promptText(_ theme: TerminalTheme) -> NSAttributedString {
         let result = NSMutableAttributedString()
-        result.append(settingsThemeText("jhen@devbox", color: theme.safeANSI(2)))
+        result.append(settingsThemeText("demo@devbox", color: theme.safeANSI(2)))
         result.append(settingsThemeText(" ~", color: theme.safeANSI(4)))
         result.append(settingsThemeText(" $ tmux a", color: theme.foreground))
         result.append(settingsThemeText(" █", color: theme.cursor))

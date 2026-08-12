@@ -2,7 +2,7 @@
 # Reshape the dev-sshd harness sessions into the App Store screenshot fleet
 # (main / build / logs / agent — docs/appstore/screenshots-plan.md) and write
 # store-seed.json variants so the imported host rail reads `atlas.internal`
-# instead of `jhen@127.0.0.1`.
+# instead of `demo@127.0.0.1`.
 #
 # Run AFTER:  Tools/dev-sshd/harness.sh start && Tools/dev-sshd/harness.sh demo
 set -euo pipefail

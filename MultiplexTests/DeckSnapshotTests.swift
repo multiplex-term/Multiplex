@@ -34,7 +34,7 @@ final class DeckSnapshotTests: XCTestCase {
                     clientCount: 2,
                     created: Date(timeIntervalSince1970: 1_751_500_000),
                     tmuxID: "$0",
-                    serverHost: "Jhen-MBPr14.local"
+                    serverHost: "Demo-MBPr14.local"
                 ),
             ],
             miniatures: ["tmux:main": ["$ make test", "ok"]]
@@ -64,7 +64,7 @@ final class DeckSnapshotTests: XCTestCase {
         XCTAssertEqual(json["keysCarryBackend"] as? Bool, true)
         // A cold launch must still be able to tell a real pane title from
         // tmux's seeded hostname, so the server host rides the snapshot.
-        XCTAssertEqual(decoded.sessions[0].serverHost, "Jhen-MBPr14.local")
+        XCTAssertEqual(decoded.sessions[0].serverHost, "Demo-MBPr14.local")
         // This window carries three panes, so the active pane's title is not
         // the window's to advertise — the spine shows its pane count instead.
         XCTAssertEqual(decoded.sessions[0].windows[0].paneCount, 3)

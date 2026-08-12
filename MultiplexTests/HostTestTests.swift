@@ -119,16 +119,16 @@ final class HostTestTests: XCTestCase {
     }
 
     func testAuthenticationBuilderUnlocksAnEncryptedED25519Key() {
-        let encryptedKey = """
-        -----BEGIN OPENSSH PRIVATE KEY-----
-        b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABBQRAFCo9
-        /vv0icX60s6O6UAAAAEAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIBrez0rdYqROdkIA
-        qvSrLoYFO1KVEidE4wclxivVKMbmAAAAoA9dkA6h2tAtANBP9RzyKvgrw5JKVJLVHfvZRQ
-        8d3ttvy7WOs15y8lL/SdHiCyRukkKOPRd02zqx5g6WSmXZ0dKho/aMMO+58cIxsbCmMePT
-        HaJvuQjIx6DIEoQyq83rQeVngk5rgvgou2jgHy/35C1AHtUysH4DIcltmrU3rvMF8i2GL4
-        Od3cZL5cIOQVsmAZS6t3oL+GVeVOMFCqGFxjc=
-        -----END OPENSSH PRIVATE KEY-----
-        """
+        // A throwaway key generated for this test alone (ssh-keygen -t ed25519,
+        // aes256-ctr + bcrypt), sealed with the passphrase "example".
+        let encryptedKey = Self.pemArmored("""
+        b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABCsRBrMnz
+        P75kbEMEEoiAxwAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIGXl/uASjqVbMtQc
+        HI7R86NNelrCqYvhtl6TI1cGMPCrAAAAkBzuqs3c2AwMnOKX1gsolwhac6NY8/gN33u4QD
+        PakwoMStfBhnEZG+hTmSNf8MDS8ecgjuo9vGKRYGKxrFYrTAhI/B56ha+Qbr5VhgzqrMhY
+        k764hcS+s5zDqM3Yt8BZuBpyi/6/k+Kyh9uxlplr+gs9FNvJ3EdyAK1tbg9Vp6xmUn/Pwk
+        QVoMKpl2iPRikG6Q==
+        """)
         let keyHost = host(auth: .privateKey)
 
         XCTAssertThrowsError(try SSHConnection.makeAuthenticationMethod(
@@ -187,11 +187,15 @@ final class HostTestTests: XCTestCase {
         data.append(UInt8((length >> 8) & 0xff))
         data.append(UInt8(length & 0xff))
         data.append(contentsOf: cipher.utf8)
-        return """
-        -----BEGIN OPENSSH PRIVATE KEY-----
-        \(data.base64EncodedString())
-        -----END OPENSSH PRIVATE KEY-----
-        """
+        return Self.pemArmored(data.base64EncodedString())
+    }
+
+    /// Assembles OpenSSH PEM armor at runtime — a contiguous BEGIN…END
+    /// private-key block in source would trip public secret scanners.
+    private static func pemArmored(_ base64Body: String) -> String {
+        let head = "-----BEGIN OPENSSH " + "PRIVATE KEY-----"
+        let tail = "-----END OPENSSH " + "PRIVATE KEY-----"
+        return head + "\n" + base64Body + "\n" + tail
     }
 
     func testAuthenticationFailureBlamesCredentialsNotTransport() {

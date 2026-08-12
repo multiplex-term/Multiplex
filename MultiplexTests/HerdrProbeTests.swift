@@ -158,7 +158,7 @@ final class HerdrProbeTests: XCTestCase {
         XCTAssertEqual(home.windows[0].panes?.map(\.tmuxID), ["w1:p1"],
                        "a window carries its workspace's ACTIVE tab's panes")
         XCTAssertEqual(
-            home.windows[0].paneTitle, "jhen@Jhen-MBPr14-429:~",
+            home.windows[0].paneTitle, "demo@Demo-MBPr14-429:~",
             "the pane title mirrors herdr's stripped OSC title"
         )
 
@@ -694,7 +694,7 @@ final class HerdrProbeTests: XCTestCase {
         // The fixture's focused pane (w1:p1) reports both cwd fields.
         XCTAssertEqual(
             HerdrProbe.parseFocusedPaneWorkingDirectory(try fixtureSnapshot()),
-            "/Users/jhen"
+            "/Users/demo"
         )
         // foreground_cwd is `pane_current_path`'s analog — while an agent
         // runs, the agent's own directory beats the pane's shell cwd.

@@ -58,7 +58,7 @@ final class AgentAttentionTests: XCTestCase {
         // Pi's title identifies the TUI but stays static during work; without
         // a reliable transition signal attention deliberately fails soft.
         XCTAssertEqual(AgentAttention.classify(title: "π - Multiplex", tail: []), .idle)
-        XCTAssertEqual(AgentAttention.classify(title: "Jhen-MBPr14.local", tail: []), .idle)
+        XCTAssertEqual(AgentAttention.classify(title: "Demo-MBPr14.local", tail: []), .idle)
         XCTAssertEqual(AgentAttention.classify(title: "", tail: []), .idle)
     }
 
@@ -245,7 +245,7 @@ final class AgentAttentionTests: XCTestCase {
     func testTrustPromptDetectedEvenWithNonAgentTitle() {
         // At first launch the shell's title (a hostname) is still up.
         XCTAssertEqual(
-            AgentAttention.classify(title: "Jhen-MBPr14.local", tail: trustPrompt),
+            AgentAttention.classify(title: "Demo-MBPr14.local", tail: trustPrompt),
             .needsYou(.permission))
     }
 

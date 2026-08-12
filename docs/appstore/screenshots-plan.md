@@ -110,7 +110,7 @@ for the frame change alone (only where the slab band hides a shot's story):
   through GLASS reads as clutter. The room itself is intentional material;
   use one consistent environment for the whole set (the day living room reads
   best).
-- **No dev tells**: host must not read `jhen@127.0.0.1:2222`. Alias the
+- **No dev tells**: host must not read `demo@127.0.0.1:2222`. Alias the
   harness: add `127.0.0.1 atlas.internal` to the Mac's `/etc/hosts` (the sim
   uses the Mac's resolver) and seed via `stage-sessions.sh`'s
   `store-seed.json` (`demo@atlas.internal:2222`). Session names: `main`,

@@ -1,5 +1,0 @@
-#!/bin/bash
-while true; do
-  printf '%s  api  GET /v1/sessions 200  %dms\n' "$(date +%T)" $((RANDOM % 90 + 10))
-  sleep 2
-done

@@ -231,19 +231,19 @@ final class TmuxProbeTests: XCTestCase {
 
     func testServerHostRidesEverySession() {
         let output = """
-        H Jhen-MBPr14.local
+        H Demo-MBPr14.local
         S $0 1 1751500000 main
         S $3 0 1751600000 scratch
         W $0 0 1 0 0 editor
-        P $0 0 0 1 %0 40 /dev/pts/0 zsh Jhen-MBPr14.local
+        P $0 0 0 1 %0 40 /dev/pts/0 zsh Demo-MBPr14.local
         """
         guard case .sessions(let sessions) = TmuxProbe.parse(output) else {
             return XCTFail("expected .sessions")
         }
-        XCTAssertEqual(sessions.map(\.serverHost), ["Jhen-MBPr14.local", "Jhen-MBPr14.local"])
+        XCTAssertEqual(sessions.map(\.serverHost), ["Demo-MBPr14.local", "Demo-MBPr14.local"])
         // The pane title itself is retained verbatim — suppression is a
         // presentation rule, never a lossy parse.
-        XCTAssertEqual(sessions[0].windows[0].paneTitle, "Jhen-MBPr14.local")
+        XCTAssertEqual(sessions[0].windows[0].paneTitle, "Demo-MBPr14.local")
         XCTAssertNil(sessions[0].windows[0].displayPaneTitle(
             serverHost: sessions[0].serverHost))
     }

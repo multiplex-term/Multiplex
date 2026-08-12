@@ -10,7 +10,7 @@ final class BackgroundActivityPolicyTests: XCTestCase {
         keepAlive: Bool = false,
         enabled: Bool = true
     ) -> Host {
-        var host = Host(name: name, hostname: "\(name).invalid", username: "jhen")
+        var host = Host(name: name, hostname: "\(name).invalid", username: "demo")
         host.backgroundKeepAlive = keepAlive
         host.isEnabled = enabled
         return host
@@ -125,7 +125,7 @@ final class BackgroundActivityPolicyTests: XCTestCase {
 
     func testKeepAliveIsOffForRecordsWrittenBeforeTheSwitchExisted() throws {
         let json = Data(
-            #"{"name":"legacy","hostname":"legacy.invalid","username":"jhen"}"#.utf8
+            #"{"name":"legacy","hostname":"legacy.invalid","username":"demo"}"#.utf8
         )
         let decoded = try JSONDecoder().decode(Host.self, from: json)
         XCTAssertFalse(

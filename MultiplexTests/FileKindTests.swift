@@ -76,7 +76,7 @@ final class WrappedRowGlueTests: XCTestCase {
     func testGenuineWrappedTargetsKeepTheirJoin() {
         // Structure before the seam — a slash or a dot — is a wrapped
         // target continuing, never prose.
-        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["/Users/jhen/wor", "kspace2/x.swift"]))
+        XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["/Users/demo/wor", "kspace2/x.swift"]))
         XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["https://exam", "ple.com/x"]))
         XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["example.c", "om/docs"]))
         XCTAssertNil(WrappedRowGlue.cutTarget(fragments: ["Sources/Fo", "o/Bar.swift"]))
@@ -312,11 +312,11 @@ final class TerminalPathTargetTests: XCTestCase {
     /// ending in `.` right before a slash is the tell.
     func testWrappedProseHeadStripped() {
         XCTAssertEqual(
-            TerminalPathTarget.resolve("sentence./Users/jhen/x.swift")?.path,
-            "/Users/jhen/x.swift"
+            TerminalPathTarget.resolve("sentence./Users/demo/x.swift")?.path,
+            "/Users/demo/x.swift"
         )
         XCTAssertEqual(
-            TerminalPathTarget.resolve("sentence./Users/jhen/x.swift")?.base,
+            TerminalPathTarget.resolve("sentence./Users/demo/x.swift")?.base,
             .absolute
         )
         // The suffix survives the cut.

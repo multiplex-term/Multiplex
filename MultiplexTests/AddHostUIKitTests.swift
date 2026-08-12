@@ -9,7 +9,7 @@ final class AddHostFormStateTests: XCTestCase {
         XCTAssertFalse(form.isValid)
 
         form.hostname = "devbox.local"
-        form.username = "jhen"
+        form.username = "demo"
         XCTAssertTrue(form.isValid)
 
         form.port = "not-a-port"
@@ -384,7 +384,7 @@ final class AddHostUIKitTests: XCTestCase {
     }
 
     func testEditingIsManualOnlyAndStoredPrivateKeyStaysConcealedUntilEdit() throws {
-        var host = Host(name: "Studio", hostname: "studio.local", username: "jhen")
+        var host = Host(name: "Studio", hostname: "studio.local", username: "demo")
         host.authMethod = .privateKey
         host.useMosh = true
         let secrets = HostSecrets(
@@ -403,7 +403,7 @@ final class AddHostUIKitTests: XCTestCase {
         XCTAssertEqual(fixture.controller.navigationItem.leftBarButtonItem?.title, "Cancel")
         XCTAssertEqual(fixture.controller.navigationItem.rightBarButtonItem?.title, "Save")
         XCTAssertEqual(fixture.controller.hostnameField.text, "studio.local")
-        XCTAssertEqual(fixture.controller.usernameField.text, "jhen")
+        XCTAssertEqual(fixture.controller.usernameField.text, "demo")
         XCTAssertTrue(fixture.controller.form.privateKeyConcealed)
         XCTAssertNil(fixture.controller.privateKeyView)
 
@@ -522,7 +522,7 @@ final class AddHostUIKitTests: XCTestCase {
         var existingHost = Host(
             name: "Roaming",
             hostname: "roaming.local",
-            username: "jhen"
+            username: "demo"
         )
         existingHost.useMosh = true
         let existing = makeFixture(editing: existingHost, isPro: false)
@@ -581,7 +581,7 @@ final class AddHostUIKitTests: XCTestCase {
         fixture.controller.loadViewIfNeeded()
         fixture.controller.setMode(.manual)
         enter("devbox.local", in: fixture.controller.hostnameField)
-        enter("jhen", in: fixture.controller.usernameField)
+        enter("demo", in: fixture.controller.usernameField)
         fixture.controller.moshControl?.sendActions(for: .touchUpInside)
 
         let chip = try XCTUnwrap(fixture.controller.testChip)
@@ -591,7 +591,7 @@ final class AddHostUIKitTests: XCTestCase {
             return false
         }
         let text = renderedText(in: fixture.controller.view)
-        XCTAssertTrue(text.contains("Connected to devbox.local as jhen."))
+        XCTAssertTrue(text.contains("Connected to devbox.local as demo."))
         XCTAssertTrue(text.contains(
             "tmux wasn't found on the host — the deck can't list sessions there. "
                 + "Plain shells still work."

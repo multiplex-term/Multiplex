@@ -14,7 +14,7 @@ import Foundation
 ///
 /// The tell is the run of characters between the last space and the seam:
 /// a genuine wrapped target contributes path/address structure there — a
-/// `/` (`/Users/jhen/wor`⏎`kspace2/x`) or a `.` (`example.c`⏎`om/x`) —
+/// `/` (`/Users/demo/wor`⏎`kspace2/x`) or a `.` (`example.c`⏎`om/x`) —
 /// while a glued sentence butts a plain word against the seam (`and`,
 /// `table`). A word carrying neither means the rows below start their own
 /// target, so resolution should begin at the seam.

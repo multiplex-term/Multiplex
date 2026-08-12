@@ -63,17 +63,19 @@ deliver fails with "forbidden for security reasons".
 
 ## 5. Before review
 
-- `fastlane/metadata/review_information/phone_number.txt` — create it (one
-  line, `+886…`); left out of git on purpose.
+- `fastlane/metadata/review_information/` — the whole directory is left out
+  of git on purpose (reviewer contact PII + the demo host coordinates). On a
+  fresh machine, recreate its `*.txt` files or rely on the `.env` fallbacks;
+  `phone_number.txt` is one line (`+886…`).
 - Demo host up + credentials in `.env` (`DEMO_SSH_USER/PASSWORD`) and in the
   ASC demo-account fields — runbook in the release playbook.
 - `fastlane/testflight-whats-new.txt` written for the build.
 
 `review_information/` is the single source for App Store review *and*
 TestFlight's Beta App Review: the Fastfile reads it once and maps it into
-deliver's and pilot's respective spellings. `.env` only covers the two files
-git ignores (`phone_number`, `demo_password`); anything still empty is a hard
-error before a lane archives anything.
+deliver's and pilot's respective spellings. The directory is git-ignored; the
+`.env` keys stand in for the short fields when a file is absent, and anything
+still empty is a hard error before a lane archives anything.
 
 ## 6. TestFlight external group
 

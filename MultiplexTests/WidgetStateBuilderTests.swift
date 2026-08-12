@@ -27,7 +27,7 @@ final class WidgetStateBuilderTests: XCTestCase {
     }
 
     func testHostStateProjectsSessionsWindowsAndMiniatures() {
-        var host = Host(name: "devbox", hostname: "10.0.1.7", username: "jhen")
+        var host = Host(name: "devbox", hostname: "10.0.1.7", username: "demo")
         host.agentLaunchModels = ["codex": ["gpt-5-codex"]]
         let sessions = [session(
             name: "main",
@@ -50,7 +50,7 @@ final class WidgetStateBuilderTests: XCTestCase {
 
         XCTAssertEqual(state.id, host.id)
         XCTAssertEqual(state.name, "devbox")
-        XCTAssertEqual(state.address, "jhen@10.0.1.7")
+        XCTAssertEqual(state.address, "demo@10.0.1.7")
         XCTAssertEqual(state.probedAt, probed)
         // Configured launch models feed the widget's Model setting picker;
         // a host with none stays nil so legacy-file shape and no-config
@@ -90,17 +90,17 @@ final class WidgetStateBuilderTests: XCTestCase {
     func testPaneTitlesAreFilteredBeforeTheyReachTheWidget() {
         let sessions = [session(
             name: "main",
-            serverHost: "Jhen-MBPr14.local",
+            serverHost: "Demo-MBPr14.local",
             windows: [
                 window(0, name: "cc", paneTitle: "✳ Claude Code"),
                 // tmux's seed and a redundant repeat both project as "" so
                 // the widget process never has to know the rule.
-                window(1, name: "server", active: true, paneTitle: "Jhen-MBPr14.local"),
+                window(1, name: "server", active: true, paneTitle: "Demo-MBPr14.local"),
                 window(2, name: "logs", paneTitle: "logs"),
             ]
         )]
         let state = WidgetStateBuilder.hostState(
-            host: Host(name: "devbox", hostname: "10.0.1.7", username: "jhen"),
+            host: Host(name: "devbox", hostname: "10.0.1.7", username: "demo"),
             sessions: sessions,
             miniatures: [:],
             probedAt: nil
@@ -155,7 +155,7 @@ final class WidgetStateBuilderTests: XCTestCase {
     }
 
     func testContentFingerprintIgnoresProbeDatesButNotContent() {
-        let host = Host(name: "devbox", hostname: "10.0.1.7", username: "jhen")
+        let host = Host(name: "devbox", hostname: "10.0.1.7", username: "demo")
         func fleet(probed: TimeInterval, sessionName: String) -> WidgetFleetState {
             WidgetFleetState(
                 hosts: [WidgetStateBuilder.hostState(

@@ -72,7 +72,7 @@ final class ViewportReachTests: XCTestCase {
     // MARK: Offers
 
     private var devbox: Host {
-        Host(name: "devbox", hostname: "100.84.2.19", username: "jhen")
+        Host(name: "devbox", hostname: "100.84.2.19", username: "demo")
     }
 
     private func offer(_ target: String, host: Host?) -> ViewportOffer? {
