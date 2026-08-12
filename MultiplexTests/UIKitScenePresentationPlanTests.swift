@@ -254,6 +254,33 @@ final class UIKitScenePresentationPlanTests: XCTestCase {
         ))
     }
 
+    func testAdoptionRetiresAbandonedWindowsButNeverKeyboardHosts() {
+        // Notification arrived before SwiftUI's willConnect: nothing attached,
+        // nothing to retire.
+        XCTAssertTrue(UIKitLegacySceneMigrationPolicy.retiredWindowIndices(
+            liveWindowClassNames: []
+        ).isEmpty)
+
+        // Arrived after: whatever window the retired owner attached is
+        // foreign, whether SwiftUI's own subclass or a plain UIWindow.
+        XCTAssertEqual(UIKitLegacySceneMigrationPolicy.retiredWindowIndices(
+            liveWindowClassNames: ["SwiftUI.AppSceneWindow"]
+        ), [0])
+        XCTAssertEqual(UIKitLegacySceneMigrationPolicy.retiredWindowIndices(
+            liveWindowClassNames: ["UIWindow"]
+        ), [0])
+
+        // UIKit's keyboard-hosting windows are never the app's to touch,
+        // whichever position they occupy.
+        XCTAssertEqual(UIKitLegacySceneMigrationPolicy.retiredWindowIndices(
+            liveWindowClassNames: [
+                "UITextEffectsWindow",
+                "UIWindow",
+                "UIRemoteKeyboardWindow",
+            ]
+        ), [1])
+    }
+
     func testGeometryDefaultsAndValidatedDebugOverrides() {
         XCTAssertEqual(
             UIKitSceneGeometryPolicy.preferredSize(

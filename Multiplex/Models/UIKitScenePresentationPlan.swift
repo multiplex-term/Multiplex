@@ -242,6 +242,19 @@ enum UIKitLegacySceneMigrationPolicy {
         // owner at all. That is the blank-window case, and it is ours.
         return true
     }
+
+    /// Windows to retire before adopting a scene. When the adoption
+    /// notification arrives after SwiftUI's `willConnect`, its window is
+    /// already attached; stranding it beside the native one is the state
+    /// UIKit's keyboard input-mode snapshot asserts on
+    /// (`_UIEventDeferringManager`, SIGABRT on iOS 26.6). Everything present
+    /// is the old owner's — except UIKit's keyboard-hosting windows.
+    static func retiredWindowIndices(liveWindowClassNames: [String]) -> [Int] {
+        liveWindowClassNames.indices.filter { index in
+            let name = liveWindowClassNames[index]
+            return !name.contains("TextEffects") && !name.contains("RemoteKeyboard")
+        }
+    }
 }
 
 /// The former SwiftUI scene defaults, now shared by UIKit geometry setup and

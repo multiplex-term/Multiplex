@@ -67,6 +67,7 @@ final class MultiplexApplicationDelegate: UIResponder, UIApplicationDelegate {
             liveDelegateClassName: liveName
         ) else { return }
 
+        retireAbandonedWindows(of: scene)
         let nativeDelegate = MultiplexSceneDelegate()
         scene.delegate = nativeDelegate
         // Mount immediately from the session's own persisted state. This
@@ -80,6 +81,24 @@ final class MultiplexApplicationDelegate: UIResponder, UIApplicationDelegate {
         sceneLog.notice(
             "Adopted persisted SwiftUI scene \(session.persistentIdentifier, privacy: .public) into UIKit"
         )
+    }
+
+    /// Hide and empty any window the serialized SwiftUI delegate already
+    /// attached, before the delegate swap strands it with a dead owner
+    /// (see `UIKitLegacySceneMigrationPolicy.retiredWindowIndices`).
+    private func retireAbandonedWindows(of scene: UIWindowScene) {
+        let windows = scene.windows
+        guard !windows.isEmpty else { return }
+        let names = windows.map { NSStringFromClass(type(of: $0)) }
+        for index in UIKitLegacySceneMigrationPolicy.retiredWindowIndices(
+            liveWindowClassNames: names
+        ) {
+            sceneLog.notice(
+                "Retiring pre-adoption window \(names[index], privacy: .public) from scene \(scene.session.persistentIdentifier, privacy: .public)"
+            )
+            windows[index].isHidden = true
+            windows[index].rootViewController = nil
+        }
     }
 }
 
@@ -363,6 +382,12 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
         mountedContent = nil
         rootController = nil
         sceneRouter = nil
+        // Detach the window with the scene, not with this delegate's dealloc —
+        // a window outliving its scene is the same stale event-deferring
+        // state UIKit asserts on.
+        window?.isHidden = true
+        window?.rootViewController = nil
+        window = nil
         pendingRestorationActivity = nil
         pendingActivation = false
         if let reduceMotionObserver {
