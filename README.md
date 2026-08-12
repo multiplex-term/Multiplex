@@ -16,8 +16,9 @@ A spatial SSH terminal for remote **tmux** — visionOS first, with iPadOS and i
 - **Purpose-built input:** keyboard-focus arbitration, key rail, IME, dictation, remote scrolling, tmux Copy Mode, and text selection.
 - **More than a shell:** docked web and file viewers, SFTP uploads, optional clean-room mosh, widgets, Shortcuts, deep links, and custom themes.
 
+
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/1cd01692-ac23-4538-80f2-fa47b2d19691" alt="Multiplex AVP demo" width="400" />
+  <video src="https://github.com/user-attachments/assets/90e6e0f2-cdab-4e8f-993a-e6fc5359d7c6" alt="Multiplex AVP demo" width="400" />
 </div>
 
 > Vision Pro: Running Claude Code on herdr -> File Viewer -> Inline browser (using [serve-sim](https://github.com/EvanBacon/serve-sim)) -> send create PR message by press Agent bar key.
