@@ -34,6 +34,7 @@ private final class ProStoreDouble {
     var afterSync: [ProStoreVerification]?
     var syncError: ProStoreDoubleError?
     var syncDelay: Duration?
+    var sandboxEnvironment = false
 
     private(set) var loadCount = 0
     private(set) var purchaseCount = 0
@@ -86,6 +87,9 @@ private final class ProStoreDouble {
                 if let syncDelay { try await Task.sleep(for: syncDelay) }
                 if let syncError { throw syncError }
                 if let afterSync { current = afterSync }
+            },
+            isSandboxStoreEnvironment: { [weak self] in
+                self?.sandboxEnvironment ?? false
             }
         )
     }
@@ -413,6 +417,24 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertEqual(store.productDisplayPrice, "$19.99")
         XCTAssertNil(store.productLoadError)
         XCTAssertFalse(store.hasVerifiedStoreEntitlementForTesting)
+        storeDouble.finishUpdates()
+    }
+
+    func testStartupProbePublishesSandboxStoreEnvironment() async {
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let storeDouble = ProStoreDouble()
+        storeDouble.sandboxEnvironment = true
+        let store = lockedStore(
+            defaults: defaults,
+            startStoreKit: true,
+            storeClient: storeDouble.client()
+        )
+
+        XCTAssertFalse(store.storeEnvironmentIsSandbox)
+        await waitUntil("sandbox store environment probe") {
+            store.storeEnvironmentIsSandbox
+        }
         storeDouble.finishUpdates()
     }
 

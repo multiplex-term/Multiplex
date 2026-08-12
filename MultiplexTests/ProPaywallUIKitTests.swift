@@ -124,6 +124,61 @@ final class ProPaywallUIKitTests: XCTestCase {
         )
     }
 
+    func testEmptySandboxRestoreExplainsTheTestFlightStoreSplit() async {
+        let domain = "ProPaywallUIKitTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defaults.removePersistentDomain(forName: domain)
+        defer { defaults.removePersistentDomain(forName: domain) }
+
+        // A TestFlight-shaped client: the sync succeeds but the test store
+        // holds no purchase for this Apple ID (the production purchase can
+        // never cross into the sandbox environment).
+        let client = ProStoreClient(
+            loadProduct: {
+                ProStoreProduct(id: EntitlementStore.proProductID, displayPrice: "$19.99")
+            },
+            purchase: { _, _ in .userCancelled },
+            currentEntitlements: { AsyncStream { $0.finish() } },
+            updates: { AsyncStream { $0.finish() } },
+            sync: {},
+            isSandboxStoreEnvironment: { true }
+        )
+        let store = EntitlementStore(
+            defaults: defaults,
+            startStoreKit: true,
+            storeClient: client
+        )
+        store.setDebugUnlocked(false)
+
+        let controller = ProPaywallViewController(entitlements: store)
+        controller.loadViewIfNeeded()
+        await waitUntil("sandbox store environment probe") {
+            store.storeEnvironmentIsSandbox
+        }
+
+        controller.restoreButton.sendActions(for: .touchUpInside)
+        await waitUntil("sandbox restore explainer") {
+            controller.commerceMessageLabel.text?.contains(
+                "TestFlight builds use Apple's test store"
+            ) == true
+        }
+
+        XCTAssertEqual(store.commerceState, .restored)
+        XCTAssertFalse(store.isPro)
+        let message = controller.commerceMessageLabel.text ?? ""
+        XCTAssertTrue(message.hasPrefix(
+            "No Multiplex Pro purchase was found for this Apple ID."
+        ))
+        XCTAssertTrue(message.contains("free of charge"))
+        // An informative empty result is not a failure and must not alarm.
+        XCTAssertEqual(
+            controller.commerceMessageLabel.textColor.resolvedColor(
+                with: controller.traitCollection
+            ),
+            UIKitChassis.signal2.resolvedColor(with: controller.traitCollection)
+        )
+    }
+
     private func makeLockedStore() -> (EntitlementStore, UserDefaults, String) {
         let domain = "ProPaywallUIKitTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: domain)!

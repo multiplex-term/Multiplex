@@ -26,6 +26,7 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
         let commerceState: EntitlementStore.CommerceState
         let purchaseIsUnavailable: Bool
         let restoreIsUnavailable: Bool
+        let storeEnvironmentIsSandbox: Bool
     }
 
     let entitlements: EntitlementStore
@@ -355,7 +356,8 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
                 productLoadError: entitlements.productLoadError,
                 commerceState: entitlements.commerceState,
                 purchaseIsUnavailable: entitlements.purchaseIsUnavailable,
-                restoreIsUnavailable: entitlements.restoreIsUnavailable
+                restoreIsUnavailable: entitlements.restoreIsUnavailable,
+                storeEnvironmentIsSandbox: entitlements.storeEnvironmentIsSandbox
             )
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -412,9 +414,20 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
         case .restoring:
             return "Checking your App Store purchases…"
         case .restored:
-            return state.isPro
-                ? "Multiplex Pro was restored."
-                : "No Multiplex Pro purchase was found for this Apple ID."
+            if state.isPro {
+                return "Multiplex Pro was restored."
+            }
+            // Restore succeeded and genuinely found nothing. On TestFlight
+            // that is the expected answer for a production purchase — the
+            // test store and the App Store never share transactions — so
+            // say why instead of letting the empty result read as a bug.
+            if state.storeEnvironmentIsSandbox {
+                return "No Multiplex Pro purchase was found for this Apple ID. "
+                    + "TestFlight builds use Apple's test store, so a purchase "
+                    + "made in the App Store version doesn't appear here. Pro "
+                    + "can be unlocked again inside TestFlight free of charge."
+            }
+            return "No Multiplex Pro purchase was found for this Apple ID."
         case .failed(let message):
             return message
         }

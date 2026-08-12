@@ -81,6 +81,11 @@ struct ProStoreClient {
     var currentEntitlements: () -> AsyncStream<ProStoreVerification>
     var updates: () -> AsyncStream<ProStoreVerification>
     var sync: () async throws -> Void
+    /// Whether StoreKit is serving Apple's test commerce environment
+    /// (TestFlight/sandbox) instead of the production App Store. Informs
+    /// explanatory paywall copy only — never entitlement. Defaulted so test
+    /// doubles that predate the probe keep compiling as production.
+    var isSandboxStoreEnvironment: () async -> Bool = { false }
 
     static let live = ProStoreClient(
         loadProduct: {
@@ -105,6 +110,16 @@ struct ProStoreClient {
         },
         sync: {
             try await AppStore.sync()
+        },
+        isSandboxStoreEnvironment: {
+            // AppTransaction.shared may reach the network on a first ask; a
+            // failure simply keeps the production default, which only means
+            // the paywall skips its TestFlight explainer.
+            guard let result = try? await AppTransaction.shared else { return false }
+            switch result {
+            case .verified(let transaction), .unverified(let transaction, _):
+                return transaction.environment == .sandbox
+            }
         }
     )
 
@@ -268,6 +283,7 @@ final class EntitlementStore {
     @ObservationIgnored private var entitlementRefresh: EntitlementRefresh?
     @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
     @ObservationIgnored private var transactionTask: Task<Void, Never>?
+    @ObservationIgnored private var environmentProbeTask: Task<Void, Never>?
 
     private var commerceOperation: CommerceOperation?
     /// Changes whenever an authoritative purchase/restore/update begins. The
@@ -293,6 +309,11 @@ final class EntitlementStore {
     #endif
 
     private(set) var isPro: Bool
+    /// True when this install talks to Apple's test store (TestFlight or the
+    /// developer sandbox). A production purchase can never be restored across
+    /// that boundary, so the paywall explains an empty restore instead of
+    /// letting it read as a failure.
+    private(set) var storeEnvironmentIsSandbox = false
     private(set) var productDisplayPrice: String?
     private(set) var productIsLoading = false
     private(set) var productLoadError: String?
@@ -387,6 +408,13 @@ final class EntitlementStore {
             guard let self else { return }
             await self.refreshEntitlements(ifAuthorityUnchangedSince: bootstrapAuthority)
             await self.loadStorefront()
+        }
+        // Independent of bootstrap so a slow AppTransaction fetch can never
+        // delay the entitlement snapshot or the storefront load.
+        environmentProbeTask = Task { [weak self] in
+            guard let self else { return }
+            let sandbox = await self.storeClient.isSandboxStoreEnvironment()
+            self.storeEnvironmentIsSandbox = sandbox
         }
     }
 
