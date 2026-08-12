@@ -63,6 +63,16 @@ final class AppRuntime {
         BackgroundActivity.shared.keepAliveLookup = { [weak store] hostID in
             store?.host(id: hostID)?.backgroundKeepAlive ?? false
         }
+        // Trust on first use: the SSH validator runs on a NIO event loop
+        // inside whichever of the eight `SSHConnection` call sites dialled,
+        // none of which hold the store. One sink here is what turns a
+        // first-connection sighting into a pin every later connection is
+        // checked against.
+        HostKeyTrust.install { hostID, pin in
+            Task { @MainActor [weak store] in
+                store?.recordHostKeyPin(pin, for: hostID)
+            }
+        }
         BackgroundActivity.shared.start()
         backgroundRefresh.start()
         #if DEBUG

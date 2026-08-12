@@ -62,6 +62,12 @@ struct AddHostFormState {
     var moshPorts = ""
     var workingDirectories: [WorkingDirectory] = []
     var newWorkingDirectory = ""
+    /// A host key the person already knows, pasted before the first
+    /// connection so it is *verified* rather than trusted. Raw text, parsed
+    /// by `HostKeyPin(userInput:)` on the way out — deliberately not seeded
+    /// from `editing`, because it is an input for something new, never an
+    /// editor for what was already recorded.
+    var expectedHostKey = ""
     var newSessionTmuxConf = Host.defaultNewSessionTmuxConf
     var scripts: [ScriptRow] = []
     var modelText: [AgentKind: String] = [:]
@@ -198,6 +204,15 @@ struct AddHostFormState {
             launchModels[agentRaw] = values
         }
         host.agentLaunchModels = Host.normalizedLaunchModels(launchModels)
+
+        // Additive, and only when the field holds something parseable: the
+        // recorded keys are not otherwise the form's to edit (FORGET writes
+        // through to the store on its own), so an empty or unreadable field
+        // must leave them exactly as they were.
+        if let expected = HostKeyPin(userInput: expectedHostKey),
+           !host.pinnedHostKeys.contains(expected.storage) {
+            host.pinnedHostKeys.append(expected.storage)
+        }
         return host
     }
 
@@ -313,6 +328,16 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private var monitoringSection: AddHostSectionView!
     private var credentialsSection: AddHostSectionView!
     private var testSection: AddHostSectionView!
+    /// Not "Host identity" — that title belongs to the address section above.
+    /// This one is SSH's own term for the server's key.
+    private var hostKeySection: AddHostSectionView!
+    /// First tap on FORGET arms, second confirms. A modal confirmation would
+    /// be the usual answer, but this sheet presents none today and an
+    /// undismissed one is a known visionOS test hazard — so the confirmation
+    /// lives in the row.
+    private var forgetHostKeysArmed = false
+    private let expectedHostKeyField = UITextField()
+    private let expectedHostKeyStatus = UILabel()
     private var workingDirectoriesSection: AddHostSectionView!
     private var tmuxConfSection: AddHostSectionView!
     private var scriptsSection: AddHostSectionView!
@@ -710,6 +735,8 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         credentialsSection.accessibilityIdentifier = "addhost.section.credentials"
         testSection = AddHostSectionView(title: "Signal check", detail: nil, rows: [])
         testSection.accessibilityIdentifier = "addhost.section.signal"
+        hostKeySection = AddHostSectionView(title: "Host key", detail: nil, rows: [])
+        hostKeySection.accessibilityIdentifier = "addhost.section.hostkey"
         workingDirectoriesSection = AddHostSectionView(
             title: "New session defaults",
             detail: nil,
@@ -729,6 +756,10 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         backendSection = AddHostSectionView(title: "Backend", detail: nil, rows: [])
         backendSection.accessibilityIdentifier = "addhost.section.backend"
 
+        // Host key sits last, after Transport. It stopped being a read-out
+        // beside Signal check the moment it grew a field to type into, and it
+        // is the section a person touches least — most hosts never need it,
+        // because the first connection or `mpx bind` fills it in.
         [
             hostSection,
             monitoringSection,
@@ -740,10 +771,12 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             scriptsSection,
             agentModelsSection,
             transportSection,
+            hostKeySection,
         ].forEach { manualStack.addArrangedSubview($0) }
 
         renderCredentials()
         renderTestSection()
+        renderHostKeys()
         renderWorkingDirectories()
         renderScripts()
         renderTransport()
@@ -1118,6 +1151,157 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         }
         testSection.setDetail(testDetail)
         testSection.setRows(rows)
+    }
+
+    /// The server keys this host is checked against — written by `mpx bind`
+    /// from the machine itself, or learned on the first connection.
+    ///
+    /// Read from the live record rather than the form: `AddHostFormState`
+    /// deliberately doesn't carry `pinnedHostKeys` (its `host(liveHost:)`
+    /// preserves them untouched, which `AddHostUIKitTests` pins), and forget
+    /// is an immediate action rather than a pending edit.
+    private var recordedHostKeys: [HostKeyPin] {
+        guard let id = form.editing?.id else { return [] }
+        return HostKeyPin.parse(store.host(id: id)?.pinnedHostKeys ?? [])
+    }
+
+    private var hostKeyDetail: String {
+        if forgetHostKeysArmed {
+            return "Tap again to forget. The next connection trusts whatever answers, and records that."
+        }
+        return recordedHostKeys.isEmpty
+            ? "With nothing here, the first connection trusts what answers and records it. "
+                + "Paste a key you already have and it is checked instead."
+            : "Checked on every connection. Forget these only if you rebuilt the server."
+    }
+
+    private func renderHostKeys() {
+        let pins = recordedHostKeys
+        var rows: [UIView] = pins.map { pin in
+            let algorithm = UIKitChassisLabel(
+                pin.algorithm.uppercased(),
+                size: 8,
+                color: UIKitChassis.signal3
+            )
+            let fingerprint = addHostLabel(
+                pin.fingerprint,
+                font: UIKitChassis.monoFont(11),
+                color: UIKitChassis.signal
+            )
+            let stack = UIStackView(arrangedSubviews: [algorithm, fingerprint])
+            stack.axis = .vertical
+            stack.alignment = .fill
+            stack.spacing = 3
+            return AddHostInsetRow(contentView: stack)
+        }
+
+        if !pins.isEmpty {
+            let forget = UIKitChassisChip(
+                forgetHostKeysArmed ? "CONFIRM FORGET" : "FORGET",
+                accessibilityLabel: forgetHostKeysArmed
+                    ? "Confirm forgetting recorded host keys"
+                    : "Forget recorded host keys"
+            ) { [weak self] in self?.forgetHostKeysTapped() }
+            forget.accessibilityIdentifier = "addhost.hostkey.forget"
+            let forgetRow = UIStackView(arrangedSubviews: [forget, addHostFlexibleSpacer()])
+            forgetRow.axis = .horizontal
+            forgetRow.alignment = .center
+            forgetRow.spacing = 12
+            rows.append(AddHostInsetRow(contentView: forgetRow))
+        }
+
+        rows.append(AddHostInsetRow(contentView: expectedHostKeyRow()))
+        hostKeySection.setDetail(hostKeyDetail)
+        hostKeySection.setRows(rows)
+    }
+
+    /// The paste target for a key learned out of band — `ssh-keyscan`, a
+    /// `.pub` file, `ssh-keygen -lf`, or the `SHA256:…` a provider console
+    /// shows. The field is reused across renders so typing never loses the
+    /// caret, and it reports what it made of the text as you go: a
+    /// fingerprint silently ignored would be worse than none at all, because
+    /// the person would believe they were verified when they were not.
+    private func expectedHostKeyRow() -> UIView {
+        configureInlineField(
+            expectedHostKeyField,
+            text: form.expectedHostKey,
+            placeholder: "SHA256:… or ssh-ed25519 AAAA…",
+            font: UIKitChassis.monoFont(11)
+        )
+        expectedHostKeyField.accessibilityLabel = "Expected host key"
+        expectedHostKeyField.accessibilityIdentifier = "addhost.hostkey.expected"
+        expectedHostKeyField.autocorrectionType = .no
+        expectedHostKeyField.autocapitalizationType = .none
+        expectedHostKeyField.returnKeyType = .done
+        expectedHostKeyField.delegate = self
+        expectedHostKeyField.removeTarget(
+            self, action: #selector(expectedHostKeyChanged), for: .editingChanged
+        )
+        expectedHostKeyField.addTarget(
+            self, action: #selector(expectedHostKeyChanged), for: .editingChanged
+        )
+
+        expectedHostKeyStatus.font = UIKitChassis.uiFont(10)
+        expectedHostKeyStatus.numberOfLines = 0
+        expectedHostKeyStatus.accessibilityIdentifier = "addhost.hostkey.expectedStatus"
+        updateExpectedHostKeyStatus()
+
+        let caption = addHostLabel(
+            "Expected key (optional)",
+            font: UIKitChassis.uiFont(10, weight: .semibold),
+            color: UIKitChassis.signal2
+        )
+        let stack = UIStackView(arrangedSubviews: [
+            caption,
+            AddHostInlineWell(contentView: expectedHostKeyField),
+            expectedHostKeyStatus,
+        ])
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 7
+        return stack
+    }
+
+    @objc private func expectedHostKeyChanged() {
+        form.expectedHostKey = expectedHostKeyField.text ?? ""
+        updateExpectedHostKeyStatus()
+    }
+
+    /// Says what the text was understood as, not merely whether it parsed:
+    /// someone pasting a key wants to see the digest it resolved to, because
+    /// that is the value they can hold against the machine.
+    private func updateExpectedHostKeyStatus() {
+        let text = form.expectedHostKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            expectedHostKeyStatus.isHidden = true
+            return
+        }
+        expectedHostKeyStatus.isHidden = false
+        guard let pin = HostKeyPin(userInput: text) else {
+            expectedHostKeyStatus.textColor = TallyPalette.caution
+            expectedHostKeyStatus.text = "Not a host key. Paste a SHA256: fingerprint, or a "
+                + "public key line from the machine's /etc/ssh."
+            return
+        }
+        expectedHostKeyStatus.textColor = UIKitChassis.signal2
+        expectedHostKeyStatus.text = pin.algorithm == HostKeyPin.anyAlgorithm
+            ? "Will verify against \(pin.fingerprint)"
+            : "Will verify against \(pin.algorithm) \(pin.fingerprint)"
+    }
+
+    private func forgetHostKeysTapped() {
+        guard let id = form.editing?.id else { return }
+        guard forgetHostKeysArmed else {
+            forgetHostKeysArmed = true
+            renderHostKeys()
+            return
+        }
+        forgetHostKeysArmed = false
+        // Writes straight through rather than waiting for Save: this is a
+        // recovery action with its own meaning, and routing it through the
+        // form would make `host(liveHost:)` start carrying pins.
+        store.forgetHostKeyPins(for: id)
+        renderHostKeys()
     }
 
     private func runTest() {

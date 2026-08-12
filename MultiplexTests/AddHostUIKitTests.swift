@@ -91,6 +91,46 @@ final class AddHostFormStateTests: XCTestCase {
         XCTAssertEqual(resolved.pinnedHostKeys, ["ssh-ed25519 SHA256:live"])
     }
 
+    /// A key the person already holds turns the first connection from
+    /// trust-on-first-use into a check, so it has to reach the record before
+    /// anything dials.
+    func testExpectedHostKeyIsAppendedToTheRecord() {
+        var form = AddHostFormState(editing: nil)
+        form.hostname = "devbox.local"
+        form.username = "operator"
+        form.expectedHostKey =
+            "  ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGzvAzOMMkd4BHtz909gQaWthBZGQHtFP1QEVs9lsaih  "
+
+        XCTAssertEqual(
+            form.host(liveHost: nil).pinnedHostKeys,
+            ["ssh-ed25519 SHA256:JsAUX9CQFrzfXXeSw9rfsDuGvSDg9kwa/D4OFBI72AA"]
+        )
+    }
+
+    /// Additive, never a replacement: the field is for adding a key the user
+    /// knows, and the keys already recorded are not the form's to discard.
+    /// An unreadable field must not quietly drop them either.
+    func testExpectedHostKeyNeverDisplacesRecordedKeys() {
+        var live = Host(name: "box", hostname: "devbox.local", username: "operator")
+        live.pinnedHostKeys = ["ssh-ed25519 SHA256:live"]
+
+        var form = AddHostFormState(editing: live)
+        XCTAssertEqual(form.host(liveHost: live).pinnedHostKeys, ["ssh-ed25519 SHA256:live"])
+
+        form.expectedHostKey = "not a host key at all"
+        XCTAssertEqual(form.host(liveHost: live).pinnedHostKeys, ["ssh-ed25519 SHA256:live"])
+
+        form.expectedHostKey = "SHA256:JsAUX9CQFrzfXXeSw9rfsDuGvSDg9kwa/D4OFBI72AA"
+        XCTAssertEqual(form.host(liveHost: live).pinnedHostKeys, [
+            "ssh-ed25519 SHA256:live",
+            "* SHA256:JsAUX9CQFrzfXXeSw9rfsDuGvSDg9kwa/D4OFBI72AA",
+        ])
+
+        // Saving twice must not record it twice.
+        let once = form.host(liveHost: live)
+        XCTAssertEqual(form.host(liveHost: once).pinnedHostKeys.count, 2)
+    }
+
     func testStableRowsMoveDeleteAndFoldPendingDirectoryIntoSave() {
         var form = AddHostFormState(editing: nil)
         let first = UUID()
@@ -196,6 +236,7 @@ final class AddHostUIKitTests: XCTestCase {
             "Session setup scripts",
             "Agent launch models",
             "Transport",
+            "Host key",
         ])
         XCTAssertEqual(fixture.controller.nameField.accessibilityLabel, "Name")
         XCTAssertEqual(fixture.controller.hostnameField.accessibilityLabel, "Address")

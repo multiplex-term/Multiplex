@@ -161,6 +161,37 @@ final class HostStore {
         update(updated)
     }
 
+    // MARK: - Host key pins
+
+    /// Writes down a host key learned on first connect, so every later
+    /// connection to this host is checked against it.
+    ///
+    /// Additive and idempotent: a server that legitimately grows a second key
+    /// type keeps the first, and a repeat sighting of a key already recorded
+    /// isn't a record edit (which would bump `updatedAt` and churn the
+    /// Keychain mirror on every probe). Rides the synced record like any
+    /// other host edit, so a host verified on one device is verified on the
+    /// user's others.
+    func recordHostKeyPin(_ pin: HostKeyPin, for hostID: UUID) {
+        guard let host = host(id: hostID),
+              !host.pinnedHostKeys.contains(pin.storage)
+        else { return }
+        var updated = host
+        updated.pinnedHostKeys.append(pin.storage)
+        update(updated)
+    }
+
+    /// Drops every recorded key for a host, so the next connection trusts on
+    /// first use again. The recovery path for a server that was genuinely
+    /// rebuilt — and deliberately a user action, never something a failed
+    /// connection does for itself.
+    func forgetHostKeyPins(for hostID: UUID) {
+        guard let host = host(id: hostID), !host.pinnedHostKeys.isEmpty else { return }
+        var updated = host
+        updated.pinnedHostKeys = []
+        update(updated)
+    }
+
     func agentCommandConfiguration(for hostID: UUID) -> AgentCommandConfiguration {
         host(id: hostID)?.agentCommandConfiguration
             ?? AgentCommandConfiguration()

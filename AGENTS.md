@@ -108,8 +108,10 @@ approaches. Don't re-litigate a recorded decision without new facts.
 
 ## Known limits (v1)
 
-- Host-key validation is `.acceptAnything()` — dev only. TOFU pinning via
-  Citadel's `.custom` validator is the ship-blocker TODO.
+- Host keys are pinned per host (`HostKeyPin`, `HostKeyVerifier`). Three ways
+  a host gets one: the bind OFFER, an expected key pasted into Add Host, or
+  trust-on-first-use. Only the third has a window, and a host added before
+  pinning shipped is always in it — its next connection is the trust anchor.
 - csh/fish remote shells may need tmux on the default PATH (the probe
   prepends common Homebrew/local dirs but assumes POSIX-ish login shells).
 - Held-backspace auto-repeat rides an unverified input filler — see

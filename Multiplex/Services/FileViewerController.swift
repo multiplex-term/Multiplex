@@ -1055,7 +1055,7 @@ final class FileViewerController: AuxiliaryPaneController {
                     + "Host Settings, or open a terminal to this host first."
             case .notConnected:
                 return connectionError.userMessage(host: host) + " REFRESH dials again."
-            case .missingCredentials, .unsupportedKey, .connectFailed:
+            case .missingCredentials, .unsupportedKey, .connectFailed, .hostKeyRefused:
                 // One copy source for connection failures, app-wide.
                 return connectionError.userMessage(host: host)
             }
