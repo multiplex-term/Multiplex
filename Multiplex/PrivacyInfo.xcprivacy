@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Multiplex sends nothing to the developer: hosts and secrets live in
+	     the user's own iCloud Keychain, and there is no analytics or
+	     tracking SDK. Only the required-reason APIs below need declaring.
+	     swift-nio / swift-crypto declare their own use via SwiftPM resource
+	     bundles; vendored SwiftTerm has no manifest, so its systemUptime
+	     use (elapsed-time measurement) is declared here. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- CA92.1: the app's own preferences (theme, hosts,
+				     entitlements, attention state, …). -->
+				<string>CA92.1</string>
+				<!-- 1C8F.1: the app-group suite SharedStateStore shares
+				     with the widget extension. -->
+				<string>1C8F.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- 35F9.1: SwiftTerm reads ProcessInfo.systemUptime to
+				     measure elapsed time between input events. -->
+				<string>35F9.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
