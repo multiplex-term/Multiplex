@@ -65,7 +65,7 @@ Citadel 0.12.0 is pinned because 0.12.1 changed its `swift-nio-ssh` source to an
 
 ## Known limits
 
-- **Host-key validation is `.acceptAnything()`.** Trust-on-first-use pinning through Citadel's `.custom` validator is the open TODO; treat connections over untrusted networks accordingly.
+- **A manually added host trusts its first connection.** Host keys are pinned and checked on every connection after that; a host added with `mpx bind` has no such gap, because the machine's own fingerprints arrive before the app dials it.
 - PATH fixups assume a POSIX-like login shell; csh/fish may need tmux on the default PATH.
 - Held-backspace auto-repeat relies on an input filler verified only on device.
 
