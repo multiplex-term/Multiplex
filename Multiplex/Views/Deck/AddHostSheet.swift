@@ -313,6 +313,14 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private var monitoringSection: AddHostSectionView!
     private var credentialsSection: AddHostSectionView!
     private var testSection: AddHostSectionView!
+    /// Not "Host identity" — that title belongs to the address section above.
+    /// This one is SSH's own term for the server's key.
+    private var hostKeySection: AddHostSectionView!
+    /// First tap on FORGET arms, second confirms. A modal confirmation would
+    /// be the usual answer, but this sheet presents none today and an
+    /// undismissed one is a known visionOS test hazard — so the confirmation
+    /// lives in the row.
+    private var forgetHostKeysArmed = false
     private var workingDirectoriesSection: AddHostSectionView!
     private var tmuxConfSection: AddHostSectionView!
     private var scriptsSection: AddHostSectionView!
@@ -710,6 +718,8 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         credentialsSection.accessibilityIdentifier = "addhost.section.credentials"
         testSection = AddHostSectionView(title: "Signal check", detail: nil, rows: [])
         testSection.accessibilityIdentifier = "addhost.section.signal"
+        hostKeySection = AddHostSectionView(title: "Host key", detail: nil, rows: [])
+        hostKeySection.accessibilityIdentifier = "addhost.section.hostkey"
         workingDirectoriesSection = AddHostSectionView(
             title: "New session defaults",
             detail: nil,
@@ -729,21 +739,29 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         backendSection = AddHostSectionView(title: "Backend", detail: nil, rows: [])
         backendSection.accessibilityIdentifier = "addhost.section.backend"
 
-        [
+        var sections: [AddHostSectionView] = [
             hostSection,
             monitoringSection,
             backendSection,
             credentialsSection,
             testSection,
+        ]
+        // A host that has never been saved cannot have a recorded key, so the
+        // section doesn't exist on the Add road at all — the first connection
+        // after saving is what puts one there.
+        if form.editing != nil { sections.append(hostKeySection) }
+        sections += [
             workingDirectoriesSection,
             tmuxConfSection,
             scriptsSection,
             agentModelsSection,
             transportSection,
-        ].forEach { manualStack.addArrangedSubview($0) }
+        ]
+        sections.forEach { manualStack.addArrangedSubview($0) }
 
         renderCredentials()
         renderTestSection()
+        renderHostKeys()
         renderWorkingDirectories()
         renderScripts()
         renderTransport()
@@ -1118,6 +1136,86 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         }
         testSection.setDetail(testDetail)
         testSection.setRows(rows)
+    }
+
+    /// The server keys this host is checked against — written by `mpx bind`
+    /// from the machine itself, or learned on the first connection.
+    ///
+    /// Read from the live record rather than the form: `AddHostFormState`
+    /// deliberately doesn't carry `pinnedHostKeys` (its `host(liveHost:)`
+    /// preserves them untouched, which `AddHostUIKitTests` pins), and forget
+    /// is an immediate action rather than a pending edit.
+    private var recordedHostKeys: [HostKeyPin] {
+        guard let id = form.editing?.id else { return [] }
+        return HostKeyPin.parse(store.host(id: id)?.pinnedHostKeys ?? [])
+    }
+
+    private var hostKeyDetail: String {
+        forgetHostKeysArmed
+            ? "Tap again to forget. The next connection trusts whatever answers, and records that."
+            : "Checked on every connection. Forget these only if you rebuilt the server."
+    }
+
+    private func renderHostKeys() {
+        let pins = recordedHostKeys
+        guard !pins.isEmpty else {
+            // Nothing recorded yet — a host added before pinning existed. Its
+            // next connection writes the entry that makes this section appear,
+            // so an empty one would only puzzle.
+            hostKeySection.isHidden = true
+            hostKeySection.setRows([])
+            return
+        }
+        hostKeySection.isHidden = false
+
+        var rows: [UIView] = pins.map { pin in
+            let algorithm = UIKitChassisLabel(
+                pin.algorithm.uppercased(),
+                size: 8,
+                color: UIKitChassis.signal3
+            )
+            let fingerprint = addHostLabel(
+                pin.fingerprint,
+                font: UIKitChassis.monoFont(11),
+                color: UIKitChassis.signal
+            )
+            let stack = UIStackView(arrangedSubviews: [algorithm, fingerprint])
+            stack.axis = .vertical
+            stack.alignment = .fill
+            stack.spacing = 3
+            return AddHostInsetRow(contentView: stack)
+        }
+
+        let forget = UIKitChassisChip(
+            forgetHostKeysArmed ? "CONFIRM FORGET" : "FORGET",
+            accessibilityLabel: forgetHostKeysArmed
+                ? "Confirm forgetting recorded host keys"
+                : "Forget recorded host keys"
+        ) { [weak self] in self?.forgetHostKeysTapped() }
+        forget.accessibilityIdentifier = "addhost.hostkey.forget"
+        let forgetRow = UIStackView(arrangedSubviews: [forget, addHostFlexibleSpacer()])
+        forgetRow.axis = .horizontal
+        forgetRow.alignment = .center
+        forgetRow.spacing = 12
+        rows.append(AddHostInsetRow(contentView: forgetRow))
+
+        hostKeySection.setDetail(hostKeyDetail)
+        hostKeySection.setRows(rows)
+    }
+
+    private func forgetHostKeysTapped() {
+        guard let id = form.editing?.id else { return }
+        guard forgetHostKeysArmed else {
+            forgetHostKeysArmed = true
+            renderHostKeys()
+            return
+        }
+        forgetHostKeysArmed = false
+        // Writes straight through rather than waiting for Save: this is a
+        // recovery action with its own meaning, and routing it through the
+        // form would make `host(liveHost:)` start carrying pins.
+        store.forgetHostKeyPins(for: id)
+        renderHostKeys()
     }
 
     private func runTest() {

@@ -1,4 +1,5 @@
 NEW SINCE 1.3.0
+• HOSTS ARE VERIFIED BY THEIR SSH KEY — Multiplex records each host's SSH host key and checks it on every connection, so a machine impersonating a host is refused rather than served. `mpx bind` hosts are verified from the first connection; others record theirs on first connect. Host Settings → Host identity lists what was recorded, with FORGET for a server you rebuilt.
 • FILE VIEWER AND VIEWPORT BARS FLOAT BELOW THE WINDOW (Vision Pro) — the ▤ and ⌗ bottom bars now sit outside the window, clear of the resize corners, holding their size as it resizes. File Viewer keeps one control row; the viewport gets back/reload, address, SYSTEM/CLOSE. iPad unchanged.
 • MARKDOWN IMAGES SHOW ON A PRESS — in a rendered README the “image: …” placeholder is a link. Press it and the picture appears inline, sized to the text column; press the caption to hide it, tap for full-screen. Web-hosted images go through the link confirmation, which now offers a docked ⌗ VIEWPORT — nothing is fetched until you press.
 • SELECT BLOCK STAYS WHERE YOU PRESSED — the SELECT / SELECT ALL / PASTE block and the SELECT TEXT bar no longer drift up on mosh tabs or in scrollback, and Select Text waits for a second client's resize to settle before clamping.
@@ -20,5 +21,6 @@ PLEASE TRY
 4. In a split, long-press a path that wraps at the pane border — the confirmation should show all of it. Then `cd` the panes into different repos and press a relative path in the inactive pane.
 5. Shortcuts → Open File: an absolute path with a line number, then `:10-15`, then a bare filename.
 6. First launch after updating: the What's New card shows 1.3.1 once, and FULL NOTES lists 1.3.1 above 1.3.
+7. After connecting once, Host Settings → Host identity should list that host's key fingerprint.
 
 Feedback: screenshot in TestFlight, or iainst0409@gmail.com

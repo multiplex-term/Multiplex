@@ -23,8 +23,14 @@ Load-bearing decisions split from AGENTS.md.
   cross-repo `RELEASE_TOKEN`. `multiplexterm.dev/install-mpx-cli`
   (multiplex-home repo) covers macOS AND Linux and refuses SHA mismatches.
   The OFFER carries the host's SSH key fingerprints into
-  `Host.pinnedHostKeys` (storage only — TOFU enforcement is its own
-  change). Load-bearing: **the free host limit is checked before the
+  `Host.pinnedHostKeys`, which `HostKeyVerifier` enforces on every
+  connection — so a bound host is verified from its **first** dial, against
+  a set the machine itself vouched for, while a manually added host only
+  gets trust-on-first-use. That is the security argument for binding, and
+  it is why the OFFER's `hostkeys` array must stay complete: the validator
+  refuses an algorithm no pin covers (`HostKeyPin.decide`), so a machine
+  that offers a key type its OFFER omitted cannot connect until the user
+  forgets its keys in Host Settings. Load-bearing: **the free host limit is checked before the
   handshake** (a key must not land in `authorized_keys` for a host this
   tier can't use); **a payload from outside the modal never auto-binds**
   (`onOpenURL` → `BindController.receive` only adds a candidate row and

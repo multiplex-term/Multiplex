@@ -160,12 +160,17 @@ enum SSHConnectionError: Error {
     case unsupportedKey
     case connectFailed(String)
     case notConnected
+    /// The server's identity didn't match what this host has recorded. Kept
+    /// distinct from `connectFailed` because it is the one failure the user
+    /// must not shrug off as a flaky network.
+    case hostKeyRefused(HostKeyRefusal)
 
     var keyPassphraseReason: SSHKeyPassphraseChallenge.Reason? {
         switch self {
         case .keyPassphraseRequired: .required
         case .incorrectKeyPassphrase: .incorrect
-        case .missingCredentials, .unsupportedKey, .connectFailed, .notConnected: nil
+        case .missingCredentials, .unsupportedKey, .connectFailed, .notConnected,
+             .hostKeyRefused: nil
         }
     }
 
@@ -183,6 +188,24 @@ enum SSHConnectionError: Error {
             "Couldn't reach \(host.name) (\(detail))."
         case .notConnected:
             "Not connected to \(host.name)."
+        case .hostKeyRefused(let refusal):
+            switch refusal {
+            case .changed(let expected, let presented):
+                """
+                \(host.name) presented a different SSH host key than the one \
+                Multiplex recorded. Either the server was rebuilt, or something \
+                is impersonating it. Nothing was sent. \
+                Recorded \(expected.fingerprint), got \(presented.fingerprint). \
+                If you rebuilt it, forget the recorded key in Host Settings.
+                """
+            case .unrecognizedAlgorithm(let presented, _):
+                """
+                \(host.name) identified itself with a \(presented.algorithm) key, \
+                which isn't among the keys Multiplex recorded for it. \
+                Nothing was sent. If the server's host keys changed, forget the \
+                recorded keys in Host Settings.
+                """
+            }
         }
     }
 }
@@ -247,6 +270,10 @@ actor SSHConnection {
     /// action lands during a background connection attempt.
     private var connectTask: Task<SSHClient, Error>?
     private var connectGeneration = 0
+    /// The host-key verdict for the in-flight attempt. NIO can box our
+    /// failure inside its own error types on the way out of `connect`, so the
+    /// refusal is read from here rather than pattern-matched off the throw.
+    private var hostKeyOutcome: HostKeyOutcome?
     private var stdinWriter: TTYStdinWriter?
     private var shellTask: Task<Void, Never>?
     /// Set by `close()`. A connect that was abandoned on a deadline can
@@ -271,6 +298,8 @@ actor SSHConnection {
             generation = connectGeneration
         } else {
             let method = try Self.makeAuthenticationMethod(host: host, secrets: secrets)
+            let (verifier, outcome) = HostKeyTrust.verifier(for: host)
+            hostKeyOutcome = outcome
             connectGeneration &+= 1
             generation = connectGeneration
             task = Task {
@@ -278,7 +307,7 @@ actor SSHConnection {
                     host: host.hostname,
                     port: host.port,
                     authenticationMethod: method,
-                    hostKeyValidator: .acceptAnything(),
+                    hostKeyValidator: .custom(verifier),
                     reconnect: .never
                 )
             }
@@ -297,6 +326,12 @@ actor SSHConnection {
             throw error
         } catch {
             if generation == connectGeneration { connectTask = nil }
+            // The identity check comes first: a refused key must never read
+            // as "couldn't reach the host", which is the message people
+            // retry past without looking.
+            if let refusal = hostKeyOutcome?.refusal {
+                throw SSHConnectionError.hostKeyRefused(refusal)
+            }
             throw SSHConnectionError.connectFailed(shortDescription(of: error))
         }
     }

@@ -101,6 +101,20 @@ enum HostTest {
                 return connectFailureMessage(detail, host: host)
             case .notConnected:
                 return "The connection closed before the check finished. Try again."
+            case .hostKeyRefused(let refusal):
+                // The Host key section sits directly below this one, so
+                // "below" names a control the reader can actually see.
+                switch refusal {
+                case .changed(let expected, let presented):
+                    return "\(host.hostname) presented a different host key than the one "
+                        + "recorded for this host — \(expected.fingerprint), got "
+                        + "\(presented.fingerprint). Nothing was sent. If you rebuilt the "
+                        + "server, forget the recorded key below and check again."
+                case .unrecognizedAlgorithm(let presented, _):
+                    return "\(host.hostname) identified itself with a \(presented.algorithm) "
+                        + "key, which isn't recorded for this host. Nothing was sent. If its "
+                        + "host keys changed, forget the recorded keys below and check again."
+                }
             }
         }
         if error is DeadlineExceeded {

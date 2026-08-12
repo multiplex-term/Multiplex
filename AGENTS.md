@@ -108,8 +108,10 @@ approaches. Don't re-litigate a recorded decision without new facts.
 
 ## Known limits (v1)
 
-- Host-key validation is `.acceptAnything()` — dev only. TOFU pinning via
-  Citadel's `.custom` validator is the ship-blocker TODO.
+- Host keys are pinned per host (`HostKeyPin`, `HostKeyVerifier`) — bound
+  hosts from the OFFER, everything else on first use. A host added before
+  pinning shipped takes its next connection as the trust anchor, which is the
+  standard TOFU weakness and the reason `mpx bind` is the better path.
 - csh/fish remote shells may need tmux on the default PATH (the probe
   prepends common Homebrew/local dirs but assumes POSIX-ish login shells).
 - Held-backspace auto-repeat rides an unverified input filler — see

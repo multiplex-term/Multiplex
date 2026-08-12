@@ -184,12 +184,13 @@ struct Host: Identifiable, Codable, Hashable {
     /// while the pane reports mouse mode. `focus-events on` lets tmux pass
     /// the terminal client's focus changes through to focus-aware apps.
     static let defaultNewSessionTmuxConf = "mouse on\nfocus-events on"
-    /// SSH host key fingerprints (`"<key type> SHA256:<b64>"`) recorded for
-    /// this host — today written by the bind flow, which learns them from
-    /// the machine itself before the first connection. Storage only for now:
-    /// the TOFU validator that enforces them is its own change, but hosts
-    /// bound via `mpx bind` arrive carrying the data it needs. Rides the
-    /// synced record; empty means nothing recorded.
+    /// SSH host key fingerprints (`"<key type> SHA256:<b64>"`) this host is
+    /// verified against on every connection — written by the bind flow, which
+    /// learns them from the machine itself before the first dial, or by the
+    /// validator on first use. `HostKeyPin` owns the string form and
+    /// `HostKeyVerifier` enforces it. Rides the synced record, so a host
+    /// verified on one device is verified on the user's others; empty means
+    /// nothing recorded yet, which is the only state that trusts blindly.
     var pinnedHostKeys: [String] = []
     /// Agent-helper commands and built-in Bar/More placement for this host.
     /// This is part of the mirrored host record so the setup follows the host
