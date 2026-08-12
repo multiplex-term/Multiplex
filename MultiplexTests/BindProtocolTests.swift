@@ -355,6 +355,44 @@ struct BindProtocolTests {
         #expect(announcement.id == spub.base64EncodedString())
     }
 
+    /// Two session keys claiming one name is what the rogue-announcer attack
+    /// looks like from the app's side — mDNS authenticates nothing, so the
+    /// name and the fingerprint are both copyable.
+    @Test func contestedNamesFindsTwoKeysClaimingOneMachine() throws {
+        let names = BindAnnouncement.contestedNames(in: [
+            try announcement(name: "devbox", spub: 1),
+            try announcement(name: "devbox", spub: 2),
+            try announcement(name: "laptop", spub: 3),
+        ])
+        #expect(names == ["devbox"])
+    }
+
+    /// The pane orders case-insensitively, so an impostor must not slip past
+    /// by changing the capitalization of a name it copied.
+    @Test func contestedNamesIgnoresCase() throws {
+        let names = BindAnnouncement.contestedNames(in: [
+            try announcement(name: "DevBox", spub: 1),
+            try announcement(name: "devbox", spub: 2),
+        ])
+        #expect(names == ["devbox"])
+    }
+
+    @Test func oneAnnouncementPerNameContestsNothing() throws {
+        #expect(BindAnnouncement.contestedNames(in: []).isEmpty)
+        #expect(BindAnnouncement.contestedNames(in: [
+            try announcement(name: "devbox", spub: 1),
+            try announcement(name: "laptop", spub: 2),
+        ]).isEmpty)
+    }
+
+    private func announcement(name: String, spub byte: UInt8) throws -> BindAnnouncement {
+        try #require(BindAnnouncement(txt: [
+            "v": "1",
+            "name": name,
+            "spub": Data(repeating: byte, count: 32).base64URLNoPadString,
+        ]))
+    }
+
     @Test func announcementRejectsIncompleteRecords() {
         #expect(BindAnnouncement(txt: [:]) == nil)
         #expect(BindAnnouncement(txt: ["v": "1", "name": "devbox"]) == nil)

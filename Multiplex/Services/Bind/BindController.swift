@@ -41,6 +41,13 @@ final class BindController {
         var source: Source
         var pin: String = ""
         var stage: Stage = .awaitingPIN
+        /// Whether another announcement is claiming this row's name. Context
+        /// rather than an identity fact derived from `source` — the same
+        /// machine is contested or not depending on who else is announcing —
+        /// so it is stored, and `syncDiscovered` recomputes it on every fold.
+        /// Never set on a payload row: a scanned or pasted offer carries the
+        /// machine's own session key, so nothing on the network can contest it.
+        var isNameContested: Bool = false
 
         var id: String {
             switch source {
@@ -249,6 +256,19 @@ final class BindController {
             if candidate.isBusy { return false }
             if case .bound = candidate.stage { return false }
             return true
+        }
+        // Recomputed over the surviving rows, not the raw browse list: a row
+        // held open by an in-flight enrollment still contests, and one already
+        // retired must stop.
+        let contested = BindAnnouncement.contestedNames(
+            in: updated.compactMap { candidate in
+                guard case .discovered(let announcement) = candidate.source else { return nil }
+                return announcement
+            }
+        )
+        for index in updated.indices {
+            guard case .discovered(let announcement) = updated[index].source else { continue }
+            updated[index].isNameContested = contested.contains(announcement.name.lowercased())
         }
         if updated != pending { pending = updated }
     }
