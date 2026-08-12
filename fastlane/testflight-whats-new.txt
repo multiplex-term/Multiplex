@@ -1,25 +1,24 @@
 NEW SINCE 1.3.0
-• FILE VIEWER AND VIEWPORT BARS FLOAT BELOW THE WINDOW (Vision Pro) — the bottom bars of ▤ File Viewer and ⌗ viewport tabs now float outside the window, clear of the resize corners, holding their size as it resizes. File Viewer keeps one row of controls above the window row (one CLOSE, not two); the viewport gets three clusters — back/reload, address, SYSTEM/CLOSE. iPad unchanged.
-• MARKDOWN IMAGES SHOW ON A PRESS — in a rendered README the “image: …” placeholder is a link: press it and the picture appears in the document, sized to the text column; press the caption to hide it, or tap for full-screen zoom. Web-hosted images go through the link confirmation, which now offers a docked ⌗ VIEWPORT as well as the browser — nothing is fetched until you press.
-• TMUX + MOSH FIXES — TMUX split shortcuts no longer type `%` on iPad, and File Viewer starts in the current tmux or herdr pane directory.
-• SELECT BLOCK STAYS WHERE YOU PRESSED — the SELECT / SELECT ALL / PASTE block and the SELECT TEXT bar could drift up (a keyboard height, or off screen) on mosh tabs and in scrolled-back terminals. Both now anchor to your press.
-• MOSH TABS NO LONGER GROW A JUNK SCROLL AREA — mosh syncs one live screen, but stale frames were archived above it on every keyboard show/hide, stacking duplicate layouts. They now hold only the live screen.
-• SELECT TEXT WITH A SECOND CLIENT ATTACHED — tmux and herdr resize a shared session to whoever acted last. Select Text now waits for the geometry to settle before clamping.
-• RESTORE PURCHASES FIXED ON TESTFLIGHT — when the backend rejects the restore sync (`SKInternalErrorDomain error 14`), Restore now checks your owned purchases directly, and errors name something you can act on.
-• FILE PATHS WORK IN SPLIT PANES — a path wrapped at a pane border is stitched back together, a match never picks up the neighbouring pane's text, and a relative path opens against its own pane.
-• SMOOTHER STREAMING OUTPUT ON VISION PRO — repaints now align to the 90 Hz display instead of a 60 Hz clock, so fast-scrolling output advances evenly.
-• METAL RENDERER OPTION — Settings → Terminal renderer draws terminal text on the GPU instead of CoreGraphics. Off by default; applies to new windows.
-• KEY RAIL SITS ON THE WINDOW EDGE — on iPad the key rail now runs to the window's bottom edge instead of floating above the home-indicator strip; rails on that edge (iPhone landscape too) keep more daylight below the keys.
-• OPEN FILE FROM SHORTCUTS — takes a host, remote path, and optional line number, opening it read-only in a ▤ File Viewer tab. `Sources/App.swift:10-15` opens at the first line and highlights the range; bare paths start from the host's first working directory.
-• SCROLLING NO LONGER SWITCHES HERDR TABS (Vision Pro) — a long scroll could drift the reported wheel position onto herdr's tab bar (or the tmux status line), which switches tabs on scroll. Wheel events now stay pinned to where the scroll began.
+• FILE VIEWER AND VIEWPORT BARS FLOAT BELOW THE WINDOW (Vision Pro) — the ▤ and ⌗ bottom bars now sit outside the window, clear of the resize corners, holding their size as it resizes. File Viewer keeps one control row; the viewport gets back/reload, address, SYSTEM/CLOSE. iPad unchanged.
+• MARKDOWN IMAGES SHOW ON A PRESS — in a rendered README the “image: …” placeholder is a link. Press it and the picture appears inline, sized to the text column; press the caption to hide it, tap for full-screen. Web-hosted images go through the link confirmation, which now offers a docked ⌗ VIEWPORT — nothing is fetched until you press.
+• SELECT BLOCK STAYS WHERE YOU PRESSED — the SELECT / SELECT ALL / PASTE block and the SELECT TEXT bar no longer drift up on mosh tabs or in scrollback, and Select Text waits for a second client's resize to settle before clamping.
+• MOSH TABS NO LONGER GROW A JUNK SCROLL AREA — stale frames were archived above the live screen on every keyboard show/hide. Mosh tabs now hold only the live screen.
+• FILE PATHS WORK IN SPLIT PANES — a path wrapped at a pane border is stitched back together, never picks up the neighbouring pane's text, and a relative path opens against its own pane.
+• TMUX + MOSH FIXES — TMUX split shortcuts no longer type `%` on iPad; File Viewer starts in the current tmux or herdr pane directory.
+• RESTORE PURCHASES FIXED ON TESTFLIGHT — when the backend rejects the sync, Restore checks your owned purchases directly, and errors name something you can act on.
+• SMOOTHER STREAMING OUTPUT ON VISION PRO — repaints align to the 90 Hz display instead of a 60 Hz clock.
+• METAL RENDERER OPTION — Settings → Terminal renderer draws terminal text on the GPU. Off by default; applies to new windows.
+• KEY RAIL SITS ON THE WINDOW EDGE — on iPad (and iPhone landscape) the key rail runs to the bottom edge instead of floating above the home-indicator strip.
+• OPEN FILE FROM SHORTCUTS — host, remote path, optional line number, opened read-only in a ▤ tab. `Sources/App.swift:10-15` highlights the range.
+• SCROLLING NO LONGER SWITCHES HERDR TABS (Vision Pro) — wheel events stay pinned to where the scroll began, off herdr's tab bar and the tmux status line.
+• THE LAUNCH CARD RETURNS FOR 1.3.1 — the first launch after updating shows what 1.3.1 changed; FULL NOTES and Settings → About → What's New bank 1.3.1 above 1.3.
 
 PLEASE TRY
-1. Vision Pro: open a ▤ File Viewer and a ⌗ viewport tab — both bars should float below the window, clear of the resize corners, holding width as you resize. Check the last lines of a long file stay readable, every bar button works, and the viewport address edits and long-press-copies.
-2. Press “image: …” placeholders in a README — `../assets/x.png`, a %20-escaped space, and one with a "title". Hide with the caption, then resize the tab and text size with pictures open.
-3. Press an image at an https:// address — it must raise the confirmation, not fetch; SVG/PDF should offer OPEN FILE. Web links offer ⌗ VIEWPORT and OPEN; relative links navigate inside the viewer (`docs/setup.md#install` → setup.md).
-4. iPad: try both TMUX split shortcuts (no `%`), then open File Viewer from non-home tmux and herdr panes.
-5. In a split, long-press a path that wraps at the pane border — the confirmation should show all of it. Then `cd` the panes into different repos and press a relative path in the inactive pane.
-6. Shortcuts → Open File with an absolute path and line number, then `:10-15`, then a bare filename.
-7. If Restore Purchases failed before: Settings → Multiplex Pro → Restore Purchases.
+1. Vision Pro: open a ▤ File Viewer and a ⌗ viewport tab — both bars should float below the window, clear of the resize corners, holding width as you resize, every button working.
+2. Press “image: …” placeholders in a README — `../assets/x.png`, a %20-escaped space, one with a "title". Hide by caption, then resize the tab and text size with pictures open. An https:// image must raise the confirmation, not fetch.
+3. iPad: both TMUX split shortcuts (no `%`), then File Viewer from non-home tmux and herdr panes.
+4. In a split, long-press a path that wraps at the pane border — the confirmation should show all of it. Then `cd` the panes into different repos and press a relative path in the inactive pane.
+5. Shortcuts → Open File: an absolute path with a line number, then `:10-15`, then a bare filename.
+6. First launch after updating: the What's New card shows 1.3.1 once, and FULL NOTES lists 1.3.1 above 1.3.
 
 Feedback: screenshot in TestFlight, or iainst0409@gmail.com
