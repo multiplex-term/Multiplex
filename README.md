@@ -52,7 +52,12 @@ and each attach opens its own window you can place around the room.
 
 ![Sessions attached in their own spatial windows, UMD chrome below each](docs/visionos-multiwindow.png)
 
-![The same wall on iPad](docs/ipad-deck.png)
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/d25aa980-f3d3-4910-856b-836c3eec20cc" alt="Multiplex iPad demo" width="400" />
+</div>
+
+> iPad Pro. Running pi on herdr + File Viewer + Inline browser.
 
 The App Store build gates a few things behind a Multiplex Pro purchase
 (unlimited hosts, mosh, unmetered agent chips, agent alerts, HISTORY, custom
