@@ -17,8 +17,11 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches:
+      - main
   pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 # A newer push to the same branch supersedes this run; a ~40-minute macOS job
