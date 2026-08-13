@@ -347,6 +347,13 @@ final class ShortcutPanelViewController: UIViewController {
     }
 }
 
+/// Press feedback for the panel's rows: the pressed ground lands at once and
+/// fades away. A tap raises and clears the highlight inside one run loop, so
+/// clearing it outright drew no frame and only a long press ever looked
+/// pressed — the fade starts from the colour the touch already set, which is
+/// what makes a quick tap visible.
+private let shortcutPressFadeDuration: TimeInterval = 0.25
+
 @MainActor
 private final class ShortcutPanelRootView: UIKitTallyBorderedView {
     private var width: CGFloat
@@ -504,7 +511,9 @@ private final class ShortcutItemButton: UIControl {
     }
 
     override var isHighlighted: Bool {
-        didSet { refreshBackground() }
+        // Fading out of the pressed ground, rather than dropping it, is what
+        // makes a quick tap visible — see `shortcutPressFadeDuration`.
+        didSet { refreshBackground(animated: !isHighlighted) }
     }
 
     override func accessibilityActivate() -> Bool {
@@ -540,12 +549,18 @@ private final class ShortcutItemButton: UIControl {
         isHighlighted = false
     }
 
-    private func refreshBackground() {
-        // PROTOTYPE(GLASS): rest on strata over the popover's smoke, never
-        // opaque chassis.
-        backgroundColor = isArmed || isHighlighted
-            ? UIKitChassis.bezelHi
-            : GlassPrototype.strataChassis
+    // PROTOTYPE(GLASS): rest on strata over the popover's smoke, never
+    // opaque chassis.
+    private var restingBackgroundColor: UIColor {
+        isArmed ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
+    }
+
+    private func refreshBackground(animated: Bool = false) {
+        let ground = isHighlighted ? UIKitChassis.bezelHi : restingBackgroundColor
+        guard animated else { return backgroundColor = ground }
+        UIView.animate(withDuration: shortcutPressFadeDuration) {
+            self.backgroundColor = ground
+        }
     }
 
     private func refreshBorder() {
@@ -636,7 +651,9 @@ private final class ShortcutChoiceButton: UIControl {
     }
 
     override var isHighlighted: Bool {
-        didSet { refreshBackground() }
+        // Fading out of the pressed ground, rather than dropping it, is what
+        // makes a quick tap visible — see `shortcutPressFadeDuration`.
+        didSet { refreshBackground(animated: !isHighlighted) }
     }
 
     override func accessibilityActivate() -> Bool {
@@ -652,10 +669,15 @@ private final class ShortcutChoiceButton: UIControl {
         isHighlighted = false
     }
 
-    private func refreshBackground() {
-        // PROTOTYPE(GLASS): rest on strata over the popover's smoke.
-        backgroundColor = isHighlighted
-            ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
+    // PROTOTYPE(GLASS): rest on strata over the popover's smoke.
+    private var restingBackgroundColor: UIColor { GlassPrototype.strataChassis }
+
+    private func refreshBackground(animated: Bool = false) {
+        let ground = isHighlighted ? UIKitChassis.bezelHi : restingBackgroundColor
+        guard animated else { return backgroundColor = ground }
+        UIView.animate(withDuration: shortcutPressFadeDuration) {
+            self.backgroundColor = ground
+        }
     }
 }
 
