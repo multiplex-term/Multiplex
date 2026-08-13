@@ -1,26 +1,11 @@
-NEW SINCE 1.3.0
-• FILE VIEWER AND VIEWPORT BARS FLOAT BELOW THE WINDOW (Vision Pro) — the ▤ and ⌗ bottom bars now sit outside the window, clear of the resize corners, holding their size as it resizes. File Viewer keeps one control row; the viewport gets back/reload, address, SYSTEM/CLOSE. iPad unchanged.
-• MARKDOWN IMAGES SHOW ON A PRESS — in a rendered README the “image: …” placeholder is a link. Press it and the picture appears inline, sized to the text column; press the caption to hide it, tap for full-screen. Web-hosted images go through the link confirmation, which now offers a docked ⌗ VIEWPORT — nothing is fetched until you press.
-• SELECT BLOCK STAYS WHERE YOU PRESSED — the SELECT / SELECT ALL / PASTE block and the SELECT TEXT bar no longer drift up on mosh tabs or in scrollback, and Select Text waits for a second client's resize to settle before clamping.
-• MOSH TABS NO LONGER GROW A JUNK SCROLL AREA — stale frames were archived above the live screen on every keyboard show/hide. Mosh tabs now hold only the live screen.
-• FILE PATHS WORK IN SPLIT PANES — a path wrapped at a pane border is stitched back together, never picks up the neighbouring pane's text, and a relative path opens against its own pane.
-• TMUX + MOSH FIXES — TMUX split shortcuts no longer type `%` on iPad; File Viewer starts in the current tmux or herdr pane directory.
-• RESTORE PURCHASES FIXED ON TESTFLIGHT — when the backend rejects the sync, Restore checks your owned purchases directly, and errors name something you can act on.
-• SMOOTHER STREAMING OUTPUT ON VISION PRO — repaints align to the 90 Hz display instead of a 60 Hz clock.
-• METAL RENDERER OPTION — Settings → Terminal renderer draws terminal text on the GPU. Off by default; applies to new windows.
-• KEY RAIL SITS ON THE WINDOW EDGE — on iPad (and iPhone landscape) the key rail runs to the bottom edge instead of floating above the home-indicator strip.
-• OPEN FILE FROM SHORTCUTS — host, remote path, optional line number, opened read-only in a ▤ tab. `Sources/App.swift:10-15` highlights the range.
-• SCROLLING NO LONGER SWITCHES HERDR TABS (Vision Pro) — wheel events stay pinned to where the scroll began, off herdr's tab bar and the tmux status line.
-• HOST KEYS ARE VERIFIED — every connection checks the server against the host's recorded fingerprints (Bind Host, a pasted key in Add Host → Host key, or pinned on first connection). Host Settings → Host key lists them, with FORGET.
-• MOVING AROUND KEEPS THE SHORTCUT PANEL OPEN — in TMUX / HRDR shortcuts, the switch list and the movement rows (NEXT PANE, TOGGLE ZOOM, NEXT / PREVIOUS / LAST WINDOW, NEXT / PREVIOUS TAB) no longer close the panel, and ACTIVE follows where you land, so you can hop through several in a row. Rows that split, create, rename, close, or open Copy Mode still close it.
-• THE LAUNCH CARD RETURNS FOR 1.3.1 — the first launch after updating shows what 1.3.1 changed; FULL NOTES and Settings → About → What's New bank 1.3.1 above 1.3.
+NEW SINCE 1.3.1
+• MOVING AROUND KEEPS THE SHORTCUT PANEL OPEN — in the terminal's TMUX / HRDR shortcut panel, the window/workspace switch list and the movement rows (NEXT PANE, TOGGLE ZOOM, NEXT / PREVIOUS / LAST WINDOW, NEXT / PREVIOUS TAB) no longer close the panel, and ACTIVE follows where you land. Rows that split, create, rename, close, or open Copy Mode still close it, so the terminal is never left covered.
 
 PLEASE TRY
-1. Vision Pro: open a ▤ File Viewer and a ⌗ viewport tab — both bars should float below the window, clear of the resize corners, holding width as you resize, every button working.
-2. Press “image: …” placeholders in a README — `../assets/x.png`, a %20-escaped space, one with a "title". Hide by caption, then resize the tab and text size with pictures open. An https:// image must raise the confirmation, not fetch.
-3. iPad: both TMUX split shortcuts (no `%`), then File Viewer from non-home tmux and herdr panes.
-4. In a split, long-press a path that wraps at the pane border — the confirmation should show all of it. Then `cd` the panes into different repos and press a relative path in the inactive pane.
-5. Shortcuts → Open File: an absolute path with a line number, then `:10-15`, then a bare filename.
-6. First launch after updating: the What's New card shows 1.3.1 once, and FULL NOTES lists 1.3.1 above 1.3.
+1. Attach a tmux session with three or more windows, open the panel (TMUX on the key rail / the shortcut button on Vision Pro), and tap through the switch list — the panel should stay up and ACTIVE should move to the row you picked.
+2. From the same open panel press NEXT WINDOW twice, then LAST WINDOW: the session should follow every press and ACTIVE should settle on the window you end up in.
+3. Press CLOSE PANE / CLOSE WINDOW once, then a switch row — the armed "press again to close" state must clear, not fire.
+4. Confirm the panel still closes on COPY MODE, a split, NEW WINDOW, RENAME, and on the second press of a close row.
+5. herdr hosts: the same passes with NEXT PANE and NEXT / PREVIOUS TAB, and the Switch Workspace list.
 
 Feedback: screenshot in TestFlight
