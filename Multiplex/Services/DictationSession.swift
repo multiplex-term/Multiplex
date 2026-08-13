@@ -111,6 +111,10 @@ final class DictationSession {
         set { analyzerBox = newValue }
     }
     private var recognizer: SFSpeechRecognizer?
+    /// The take's language, decided at `start` and held for its whole life —
+    /// nil means the system language. A pick made mid-take applies to the
+    /// next one; the recognizer heard this whole take in one language.
+    private var locale: Locale?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var onStart: (() -> Void)?
@@ -151,7 +155,9 @@ final class DictationSession {
     /// ready to send verbatim. `onPending` tracks what has been heard but not
     /// yet typed. `onFinish` is called exactly once per start, including when
     /// authorization is refused or another session takes the mic away.
+    /// `locale` is the language to listen in; nil means the system language.
     func start(
+        locale: Locale? = nil,
         onStart: @escaping () -> Void,
         onText: @escaping (String) -> Void,
         onPending: @escaping (String) -> Void,
@@ -159,6 +165,7 @@ final class DictationSession {
     ) {
         guard !isListening else { return }
         Self.active?.cancel()
+        self.locale = locale
         self.onStart = onStart
         self.onText = onText
         self.onPending = onPending
@@ -280,11 +287,14 @@ final class DictationSession {
         // languages whose dictation model is not installed.
         let inputFormat = engine.inputNode.outputFormat(forBus: 0)
         if #available(iOS 26, *) {
-            analyzer = await DictationAnalyzer.make(inputFormat: inputFormat)
+            analyzer = await DictationAnalyzer.make(
+                inputFormat: inputFormat,
+                locale: locale ?? .current
+            )
         }
         guard onFinish != nil, !isListening else { return }
         if analyzerBox == nil {
-            guard let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else {
+            guard let recognizer = makeRecognizer(), recognizer.isAvailable else {
                 deliver(.failure("Dictation isn't available for this language"))
                 return
             }
@@ -309,7 +319,7 @@ final class DictationSession {
         segmentStart = nil
         observeAudioDisruption()
         Self.logger.debug(
-            "dictation-start engine=\(self.analyzerBox == nil ? "sfspeech" : "analyzer", privacy: .public) onDevice=\(self.onDeviceRecognition, privacy: .public)"
+            "dictation-start engine=\(self.analyzerBox == nil ? "sfspeech" : "analyzer", privacy: .public) onDevice=\(self.onDeviceRecognition, privacy: .public) locale=\(self.locale?.identifier ?? "system", privacy: .public)"
         )
         onStart?()
         onStart = nil
@@ -556,7 +566,7 @@ final class DictationSession {
         analyzerBox = nil
         audioSink.useAnalyzer(nil)
         if recognizer == nil {
-            recognizer = SFSpeechRecognizer()
+            recognizer = makeRecognizer()
             onDeviceRecognition = recognizer?.supportsOnDeviceRecognition ?? false
         }
         guard recognizer?.isAvailable == true else {
@@ -564,6 +574,13 @@ final class DictationSession {
             return
         }
         beginSegment()
+    }
+
+    /// The chosen language's recognizer, or the system one when nothing was
+    /// chosen — the same either/or in both places that build one.
+    private func makeRecognizer() -> SFSpeechRecognizer? {
+        if let locale { return SFSpeechRecognizer(locale: locale) }
+        return SFSpeechRecognizer()
     }
 
     /// The recognizer has finalized these words: it will not revise them, so

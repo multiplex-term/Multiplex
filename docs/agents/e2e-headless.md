@@ -213,6 +213,12 @@ app.multiplexterm.multiplex.<name>`:
   audio session, engine + tap, rolling, restart cap, failure bar, nothing
   typed — while words landing in a pane need a real device. Logged under
   category `dictation` (debug level — `log stream`, not `log show`).
+  The LISTENING bar's language chip (globe + "EN·US") appears only with
+  ≥2 preferred languages the recognizer supports — seed them BEFORE boot
+  (a booted-sim switch rots iCloud state), e.g. `plutil -replace
+  AppleLanguages` in the sim's `.GlobalPreferences.plist`. The chip's
+  menu is a native `UIMenu`: no headless press exists, so proofs stop at
+  the chip's presence in the screenshot.
 - `keycluster` — visionOS ornament key-cluster proof: a raw-mode `dd bs=1
   count=3 | od -c` in the pane reads `033 \t 003`.
 - `debug.scrollup` / `debug.scrolldown` — one remote scroll tick (wheel
