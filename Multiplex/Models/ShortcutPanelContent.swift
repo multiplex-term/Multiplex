@@ -16,6 +16,9 @@ struct ShortcutPanelItem: Equatable, Sendable, Identifiable {
     var command: String
     var bindingLabel: String
     var requiresDoubleActivation: Bool
+    /// Whether performing this row leaves the panel on screen — see
+    /// `TmuxShortcut.keepsPanelOpen`.
+    var keepsPanelOpen: Bool
     var accessibilityIdentifier: String
 
     var id: String { accessibilityIdentifier }
@@ -26,6 +29,7 @@ struct ShortcutPanelItem: Equatable, Sendable, Identifiable {
         command = shortcut.command
         bindingLabel = shortcut.bindingLabel
         requiresDoubleActivation = shortcut.requiresDoubleActivation
+        keepsPanelOpen = shortcut.keepsPanelOpen
         accessibilityIdentifier = "tmuxShortcut.\(shortcut.rawValue)"
     }
 
@@ -35,6 +39,7 @@ struct ShortcutPanelItem: Equatable, Sendable, Identifiable {
         command = shortcut.command
         bindingLabel = shortcut.bindingLabel
         requiresDoubleActivation = shortcut.requiresDoubleActivation
+        keepsPanelOpen = shortcut.keepsPanelOpen
         accessibilityIdentifier = "herdrShortcut.\(shortcut.rawValue)"
     }
 }

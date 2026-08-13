@@ -96,6 +96,20 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         self == .closePane || self == .closeWindow
     }
 
+    /// Moving between panes and windows is a switchboard action: the panel
+    /// stays up so a hop can be repeated, exactly like its window list. Rows
+    /// that create, rename, close, or enter a mode dismiss it — what they
+    /// leave behind is the terminal, and it must not be covered.
+    var keepsPanelOpen: Bool {
+        switch self {
+        case .nextPane, .togglePaneZoom, .nextWindow, .previousWindow, .lastWindow:
+            true
+        case .splitLeftRight, .splitTopBottom, .copyMode, .closePane,
+             .newWindow, .chooseWindow, .renameWindow, .closeWindow:
+            false
+        }
+    }
+
     var bindingLabel: String {
         requiresDoubleActivation ? "2×" : "⌃B \(binding.uppercased())"
     }

@@ -59,6 +59,15 @@ final class HerdrShortcutTests: XCTestCase {
         XCTAssertEqual(HerdrShortcut.closeWorkspace.command, "close_workspace")
     }
 
+    func testOnlyMovementRowsLeaveThePanelOpen() {
+        XCTAssertEqual(
+            Set(HerdrShortcut.allCases.filter(\.keepsPanelOpen)),
+            [.nextPane, .nextTab, .previousTab]
+        )
+        XCTAssertTrue(ShortcutPanelItem(HerdrShortcut.nextTab).keepsPanelOpen)
+        XCTAssertFalse(ShortcutPanelItem(HerdrShortcut.closeTab).keepsPanelOpen)
+    }
+
     func testEveryShortcutAppearsInExactlyOneMenuGroup() {
         let grouped = HerdrShortcut.Group.allCases.flatMap(HerdrShortcut.shortcuts(in:))
 

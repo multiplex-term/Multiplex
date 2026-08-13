@@ -981,20 +981,21 @@ final class UMDBarViewController: UIViewController,
             width: panelWidth,
             select: { [weak self] item in
                 guard let self else { return }
-                self.shortcutPopoverController?.dismiss(animated: true) {
-                    self.resumeFocusAfterShortcutPresentationIfNeeded()
+                if !item.keepsPanelOpen {
+                    self.shortcutPopoverController?.dismiss(animated: true) {
+                        self.resumeFocusAfterShortcutPresentationIfNeeded()
+                    }
                 }
                 self.configuration.controller?.performPanelShortcut(item)
             },
             loadChoices: { [weak controller = configuration.controller] in
                 await controller?.loadShortcutSwitchChoices()
             },
+            // Switching leaves the panel up: the list is a switchboard, and
+            // hopping workspaces should not cost a reopen. Focus resumes
+            // when the panel is actually dismissed.
             selectChoice: { [weak self] choice in
-                guard let self else { return }
-                self.shortcutPopoverController?.dismiss(animated: true) {
-                    self.resumeFocusAfterShortcutPresentationIfNeeded()
-                }
-                self.configuration.controller?.selectShortcutSwitchChoice(choice)
+                self?.configuration.controller?.selectShortcutSwitchChoice(choice)
             }
         )
         shortcutPopoverController = panel

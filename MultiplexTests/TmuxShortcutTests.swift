@@ -109,6 +109,26 @@ final class TmuxShortcutTests: XCTestCase {
         ))
     }
 
+    func testOnlyMovementRowsLeaveThePanelOpen() {
+        XCTAssertEqual(
+            Set(TmuxShortcut.allCases.filter(\.keepsPanelOpen)),
+            [.nextPane, .togglePaneZoom, .nextWindow, .previousWindow, .lastWindow]
+        )
+        // Anything that leaves you looking at the terminal — a new pane, a
+        // prompt, a mode, a close — must uncover it.
+        for shortcut in [
+            TmuxShortcut.splitLeftRight, .splitTopBottom, .copyMode, .closePane,
+            .newWindow, .chooseWindow, .renameWindow, .closeWindow,
+        ] {
+            XCTAssertFalse(shortcut.keepsPanelOpen, "\(shortcut) should dismiss")
+            XCTAssertFalse(
+                ShortcutPanelItem(shortcut).keepsPanelOpen,
+                "\(shortcut) should dismiss through the panel item too"
+            )
+        }
+        XCTAssertTrue(ShortcutPanelItem(TmuxShortcut.nextWindow).keepsPanelOpen)
+    }
+
     func testEveryShortcutAppearsInExactlyOneMenuGroup() {
         let grouped = TmuxShortcut.Group.allCases.flatMap(TmuxShortcut.shortcuts(in:))
 

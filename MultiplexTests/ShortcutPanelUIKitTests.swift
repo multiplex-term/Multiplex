@@ -119,6 +119,13 @@ final class ShortcutPanelUIKitTests: XCTestCase {
             closePane.accessibilityLabel,
             "Close Pane, kill-pane, press twice to confirm"
         )
+
+        // The panel survives a switch, so the ACTIVE marker has to move with
+        // the selection rather than wait for a reopen.
+        XCTAssertEqual(deploy.accessibilityLabel, "Window 1, deploy, current window")
+        XCTAssertEqual(active.accessibilityLabel, "Switch to window 0, main")
+        XCTAssertEqual(visibleText(in: deploy).filter { $0 == "ACTIVE" }.count, 1)
+        XCTAssertTrue(visibleText(in: active).allSatisfy { $0 != "ACTIVE" })
     }
 
     func testManyWindowsUseCappedInternalScrollRegion() {
@@ -155,6 +162,12 @@ final class ShortcutPanelUIKitTests: XCTestCase {
 
     private func renderedText(in root: UIView) -> [String] {
         descendants(of: UILabel.self, in: root).compactMap { $0.text ?? $0.attributedText?.string }
+    }
+
+    private func visibleText(in root: UIView) -> [String] {
+        descendants(of: UILabel.self, in: root)
+            .filter { !$0.isHidden }
+            .compactMap { $0.text ?? $0.attributedText?.string }
     }
 
     private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
