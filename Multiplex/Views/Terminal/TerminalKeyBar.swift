@@ -943,14 +943,17 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             content: content,
             width: panelWidth,
             select: { [weak self] item in
-                self?.shortcutPopoverController?.dismiss(animated: true)
+                if !item.keepsPanelOpen {
+                    self?.shortcutPopoverController?.dismiss(animated: true)
+                }
                 self?.press(.shortcut(item))
             },
             loadChoices: { [weak self] in
                 await self?.controller?.loadShortcutSwitchChoices()
             },
+            // Switching leaves the panel up: the list is a switchboard, and
+            // hopping windows should not cost a reopen.
             selectChoice: { [weak self] choice in
-                self?.shortcutPopoverController?.dismiss(animated: true)
                 self?.click()
                 self?.controller?.selectShortcutSwitchChoice(choice)
             }

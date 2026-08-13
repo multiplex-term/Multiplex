@@ -10,6 +10,9 @@ final class ShortcutPanelViewController: UIViewController {
     nonisolated static let preferredWidth: CGFloat =
         402 + 2 * UIKitChassis.popoverPanelInset
     nonisolated static let confirmationWindow: UInt64 = 2_000_000_000
+    /// Long enough for a prefix binding to reach tmux/herdr and change the
+    /// active window before the panel re-reads the list.
+    nonisolated static let choiceRefreshDelay: UInt64 = 600_000_000
 
     private let content: ShortcutPanelContent
     private var panelWidth: CGFloat
@@ -21,7 +24,9 @@ final class ShortcutPanelViewController: UIViewController {
     private let contentStack = UIStackView()
     private let switchSection = UIStackView()
     private var itemButtons: [String: ShortcutItemButton] = [:]
+    private var choiceButtons: [ShortcutChoiceButton] = []
     private var choiceLoadTask: Task<Void, Never>?
+    private var choiceRefreshTask: Task<Void, Never>?
     private var disarmTask: Task<Void, Never>?
     private var armedItemID: String?
     private var didRequestChoices = false
@@ -62,6 +67,8 @@ final class ShortcutPanelViewController: UIViewController {
         disarm()
         choiceLoadTask?.cancel()
         choiceLoadTask = nil
+        choiceRefreshTask?.cancel()
+        choiceRefreshTask = nil
     }
 
     /// The view controller owns an intrinsic height so UIKit popovers follow
@@ -75,6 +82,7 @@ final class ShortcutPanelViewController: UIViewController {
     /// loader and by UIKit-focused tests. A single window/workspace has no
     /// useful switch action and therefore earns no section.
     func applyChoices(_ choices: [TmuxWindowChoice]) {
+        choiceButtons = []
         switchSection.arrangedSubviews.forEach {
             switchSection.removeArrangedSubview($0)
             $0.removeFromSuperview()
@@ -204,7 +212,7 @@ final class ShortcutPanelViewController: UIViewController {
     }
 
     private func makeChoiceGrid(_ choices: [TmuxWindowChoice]) -> UIView {
-        makeTwoColumnGrid(choices.map { choice in
+        choiceButtons = choices.map { choice in
             let button = ShortcutChoiceButton(
                 choice: choice,
                 noun: content.switchNoun,
@@ -212,7 +220,8 @@ final class ShortcutPanelViewController: UIViewController {
             )
             button.addTarget(self, action: #selector(choicePressed(_:)), for: .touchUpInside)
             return button
-        })
+        }
+        return makeTwoColumnGrid(choiceButtons)
     }
 
     private func makeTwoColumnGrid(_ controls: [UIControl]) -> UIView {
@@ -247,21 +256,31 @@ final class ShortcutPanelViewController: UIViewController {
         activate(sender.item)
     }
 
+    /// Switching does not dismiss the panel — the list is a switchboard, and
+    /// hopping between windows/workspaces should not cost a reopen. The rows
+    /// re-mark ACTIVE in place so the panel keeps telling the truth without a
+    /// reload round-trip against the switch that is still in flight.
     @objc private func choicePressed(_ sender: ShortcutChoiceButton) {
         disarm()
-        selectChoice?(sender.choice)
+        let choice = sender.choice
+        for button in choiceButtons {
+            button.setActive(button.choice.id == choice.id)
+        }
+        selectChoice?(choice)
     }
 
     private func activate(_ item: ShortcutPanelItem) {
         guard item.requiresDoubleActivation else {
             disarm()
             select(item)
+            scheduleChoiceRefreshIfPanelStays(item)
             return
         }
 
         if armedItemID == item.id {
             disarm()
             select(item)
+            scheduleChoiceRefreshIfPanelStays(item)
             return
         }
 
@@ -288,6 +307,23 @@ final class ShortcutPanelViewController: UIViewController {
         }
     }
 
+    /// A row that leaves the panel up may have moved the very window the
+    /// switch list marks ACTIVE (Next / Previous / Last Window). The binding
+    /// travels through the terminal, so re-read the list once it has landed
+    /// rather than guess the destination.
+    private func scheduleChoiceRefreshIfPanelStays(_ item: ShortcutPanelItem) {
+        guard item.keepsPanelOpen, let loadChoices else { return }
+        choiceRefreshTask?.cancel()
+        choiceRefreshTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.choiceRefreshDelay)
+            guard !Task.isCancelled else { return }
+            let choices = await loadChoices() ?? []
+            guard !Task.isCancelled else { return }
+            self?.applyChoices(choices)
+            self?.choiceRefreshTask = nil
+        }
+    }
+
     private func requestChoicesIfNeeded() {
         guard !didRequestChoices, let loadChoices else { return }
         didRequestChoices = true
@@ -310,6 +346,13 @@ final class ShortcutPanelViewController: UIViewController {
         parent?.preferredContentSizeDidChange(forChildContentContainer: self)
     }
 }
+
+/// Press feedback for the panel's rows: the pressed ground lands at once and
+/// fades away. A tap raises and clears the highlight inside one run loop, so
+/// clearing it outright drew no frame and only a long press ever looked
+/// pressed — the fade starts from the colour the touch already set, which is
+/// what makes a quick tap visible.
+private let shortcutPressFadeDuration: TimeInterval = 0.25
 
 @MainActor
 private final class ShortcutPanelRootView: UIKitTallyBorderedView {
@@ -468,7 +511,9 @@ private final class ShortcutItemButton: UIControl {
     }
 
     override var isHighlighted: Bool {
-        didSet { refreshBackground() }
+        // Fading out of the pressed ground, rather than dropping it, is what
+        // makes a quick tap visible — see `shortcutPressFadeDuration`.
+        didSet { refreshBackground(animated: !isHighlighted) }
     }
 
     override func accessibilityActivate() -> Bool {
@@ -504,12 +549,18 @@ private final class ShortcutItemButton: UIControl {
         isHighlighted = false
     }
 
-    private func refreshBackground() {
-        // PROTOTYPE(GLASS): rest on strata over the popover's smoke, never
-        // opaque chassis.
-        backgroundColor = isArmed || isHighlighted
-            ? UIKitChassis.bezelHi
-            : GlassPrototype.strataChassis
+    // PROTOTYPE(GLASS): rest on strata over the popover's smoke, never
+    // opaque chassis.
+    private var restingBackgroundColor: UIColor {
+        isArmed ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
+    }
+
+    private func refreshBackground(animated: Bool = false) {
+        let ground = isHighlighted ? UIKitChassis.bezelHi : restingBackgroundColor
+        guard animated else { return backgroundColor = ground }
+        UIView.animate(withDuration: shortcutPressFadeDuration) {
+            self.backgroundColor = ground
+        }
     }
 
     private func refreshBorder() {
@@ -519,19 +570,27 @@ private final class ShortcutItemButton: UIControl {
 
 @MainActor
 private final class ShortcutChoiceButton: UIControl {
-    let choice: TmuxWindowChoice
+    private(set) var choice: TmuxWindowChoice
+
+    private let noun: String
+    private let activeLabel: ShortcutPanelLabel
 
     init(choice: TmuxWindowChoice, noun: String, accessibilityPrefix: String) {
         self.choice = choice
+        self.noun = noun
+        // Built for every row, hidden while inactive: the panel stays open
+        // across a switch, so the marker has to move without a rebuild.
+        activeLabel = ShortcutPanelLabel(
+            "ACTIVE",
+            font: UIKitChassis.monoFont(9, weight: .semibold),
+            color: UIKitChassis.signal2
+        )
         super.init(frame: .zero)
         minimumHeight(40)
         accessibilityIdentifier = accessibilityPrefix + choice.tmuxID
         isAccessibilityElement = true
         accessibilityTraits = .button
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
-        accessibilityLabel = choice.isActive
-            ? "\(noun.capitalized) \(choice.index), \(choice.name), current \(noun)"
-            : "Switch to \(noun) \(choice.index), \(choice.name)"
 
         let index = ShortcutPanelLabel(
             "\(choice.index)",
@@ -550,18 +609,8 @@ private final class ShortcutChoiceButton: UIControl {
         let spacer = UIView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        var content: [UIView] = [index, name, spacer]
-        if choice.isActive {
-            let active = ShortcutPanelLabel(
-                "ACTIVE",
-                font: UIKitChassis.monoFont(9, weight: .semibold),
-                color: UIKitChassis.signal2
-            )
-            active.setContentCompressionResistancePriority(.required, for: .horizontal)
-            content.append(active)
-        }
-
-        let row = UIStackView(arrangedSubviews: content)
+        activeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let row = UIStackView(arrangedSubviews: [index, name, spacer, activeLabel])
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 10
@@ -586,14 +635,25 @@ private final class ShortcutChoiceButton: UIControl {
             action: #selector(endPress),
             for: [.touchCancel, .touchDragExit, .touchUpInside, .touchUpOutside]
         )
+        setActive(choice.isActive)
         refreshBackground()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
+    func setActive(_ active: Bool) {
+        choice.isActive = active
+        activeLabel.isHidden = !active
+        accessibilityLabel = active
+            ? "\(noun.capitalized) \(choice.index), \(choice.name), current \(noun)"
+            : "Switch to \(noun) \(choice.index), \(choice.name)"
+    }
+
     override var isHighlighted: Bool {
-        didSet { refreshBackground() }
+        // Fading out of the pressed ground, rather than dropping it, is what
+        // makes a quick tap visible — see `shortcutPressFadeDuration`.
+        didSet { refreshBackground(animated: !isHighlighted) }
     }
 
     override func accessibilityActivate() -> Bool {
@@ -609,10 +669,15 @@ private final class ShortcutChoiceButton: UIControl {
         isHighlighted = false
     }
 
-    private func refreshBackground() {
-        // PROTOTYPE(GLASS): rest on strata over the popover's smoke.
-        backgroundColor = isHighlighted
-            ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
+    // PROTOTYPE(GLASS): rest on strata over the popover's smoke.
+    private var restingBackgroundColor: UIColor { GlassPrototype.strataChassis }
+
+    private func refreshBackground(animated: Bool = false) {
+        let ground = isHighlighted ? UIKitChassis.bezelHi : restingBackgroundColor
+        guard animated else { return backgroundColor = ground }
+        UIView.animate(withDuration: shortcutPressFadeDuration) {
+            self.backgroundColor = ground
+        }
     }
 }
 

@@ -114,6 +114,16 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
 
     var requiresDoubleActivation: Bool { closeScope != nil }
 
+    /// Cycling panes and tabs keeps the panel up so the hop can be repeated,
+    /// the same rule `TmuxShortcut.keepsPanelOpen` states.
+    var keepsPanelOpen: Bool {
+        switch self {
+        case .nextPane, .nextTab, .previousTab: true
+        case .splitLeftRight, .splitTopBottom, .closePane, .newTab, .closeTab,
+             .newWorkspace, .renameWorkspace, .closeWorkspace: false
+        }
+    }
+
     var bindingLabel: String {
         guard !requiresDoubleActivation else { return "2×" }
         switch self {
