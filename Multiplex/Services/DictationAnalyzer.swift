@@ -45,12 +45,15 @@ final class DictationAnalyzer {
         self.feed = feed
     }
 
-    /// Build one for this device's language, or nil when it cannot run here —
+    /// Build one for the take's language, or nil when it cannot run here —
     /// an unsupported locale, or a model that is not installed. The caller
     /// falls back to `SFSpeechRecognizer` rather than failing the dictation.
-    static func make(inputFormat: AVAudioFormat) async -> DictationAnalyzer? {
+    static func make(
+        inputFormat: AVAudioFormat,
+        locale: Locale
+    ) async -> DictationAnalyzer? {
         guard let locale = await DictationTranscriber.supportedLocale(
-            equivalentTo: Locale.current
+            equivalentTo: locale
         ) else {
             logger.debug("dictation-analyzer-unsupported-locale")
             return nil

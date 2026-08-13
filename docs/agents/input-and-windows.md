@@ -227,6 +227,28 @@ routing, tab moves, keyboard avoidance, or secret fields.
     no result within 10 s → fall back to `SFSpeechRecognizer` mid-flight
     (nothing typed yet, so it costs nothing); a missing dictation model
     falls back too and requests the model in the background.
+  - **The language is pickable from the LISTENING bar**: a globe chip
+    ("EN·US") opens a native `UIMenu` (checkmark rows — deliberately NOT a
+    TALLY panel; a hand-built popover fought iOS 26's corner curves and
+    was replaced) listing `Locale.preferredLanguages` kept where the
+    recognizer supports them (`DictationLanguages` pure + tested —
+    identifiers match on *maximal* language forms, bridging Settings'
+    "zh-Hant-TW" to Speech's "zh-TW", with a region-stripping fallback
+    because a real device tags EVERY preferred language with the device
+    region: "en-TW" must land on en-US, not vanish). The pick is app-wide
+    (`DictationLanguageSetting`, UserDefaults; `choices()` memoized on the
+    preferred-language list — the bar re-renders per hypothesis), rides
+    `DictationSession.start(locale:)` into both engines, and a mid-take
+    pick RESTARTS the take in the new language (typed words stay; only the
+    unsettled queue drops — deliberate: an in-place engine swap walks into
+    the born-dead-task trap the restart ladder exists for). Nothing stored
+    means the system default; a stale pick falls back rather than lingers.
+    One preferred language → no chip and no menu
+    (`DictationLanguages.effective`), matching the system keyboard. ⚠ A
+    mic long-press was the first entry point and was replaced — nobody
+    discovers a hold with no visible affordance; don't rebuild it. The
+    chip is provable headlessly (`debug.dictation` + screenshot); the open
+    menu is system UI and is not.
   - The `SFSpeechRecognizer` path rolls tasks (one utterance per task, and
     the server-backed path dies after ~a minute). Every roll waits
     `restartDelays` (200 ms → 500 ms/1 s/2 s) — a task created while the

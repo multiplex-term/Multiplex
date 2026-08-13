@@ -1176,6 +1176,22 @@ final class TerminalSessionController {
         dictationSession?.cancel()
     }
 
+    /// The LISTENING bar's language chip: persist the pick, and when a take
+    /// is live restart it in the new language — the recognizer heard the old
+    /// one, and "applies next time" from a control pressed mid-take would
+    /// read as the pick not working. The restart abandons only the unsettled
+    /// queue; words already typed stay, like any cancel. A full restart, not
+    /// an in-place engine swap: a recognition task created while the daemon
+    /// tears its predecessor down comes back dead (the session's whole
+    /// restart-backoff ladder exists for that), and the well-worn start path
+    /// costs one bar blink.
+    func selectDictationLanguage(_ choice: DictationLanguageChoice) {
+        DictationLanguageSetting.setChosen(choice.id)
+        guard dictationRequested else { return }
+        dictationSession?.cancel()
+        startDictation()
+    }
+
     private func startDictation() {
         guard status == .live else { return }
         // The jump search owns the pane's input while it pages the remote
@@ -1187,6 +1203,7 @@ final class TerminalSessionController {
         let session = dictationSession ?? DictationSession()
         dictationSession = session
         session.start(
+            locale: DictationLanguageSetting.chosenLocale(),
             onStart: { [weak self] in
                 guard let self, dictationRequested else { return }
                 dictation = .listening("")
