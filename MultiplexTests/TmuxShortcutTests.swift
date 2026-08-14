@@ -17,12 +17,43 @@ final class TmuxShortcutTests: XCTestCase {
             .renameWindow: Character(",").asciiValue!,
         ]
 
-        let safeShortcuts = TmuxShortcut.allCases.filter { !$0.requiresDoubleActivation }
+        let safeShortcuts = TmuxShortcut.allCases.filter {
+            !$0.requiresDoubleActivation && $0.group != .resize
+        }
         XCTAssertEqual(safeShortcuts.count, expected.count)
         for shortcut in safeShortcuts {
             XCTAssertEqual(shortcut.bindingInput, [0x02, expected[shortcut]!])
             XCTAssertFalse(shortcut.command.isEmpty)
         }
+    }
+
+    func testResizeRowsNudgeOneCellThroughTheControlPlaneOnly() throws {
+        // No count suffix: resize-pane's default adjustment is one cell.
+        XCTAssertEqual(
+            TmuxShortcut.shortcuts(in: .resize).map(\.command),
+            ["resize-pane -L", "resize-pane -D", "resize-pane -U", "resize-pane -R"]
+        )
+        // The stock chord is prefix + a multi-byte ⌃-arrow, so resize never
+        // travels as terminal input — only the active-pane control command.
+        XCTAssertNil(TmuxShortcut.resizeLeft.bindingInput)
+        XCTAssertEqual(TmuxShortcut.resizeLeft.bindingLabel, "⌃B ⌃←")
+        let delivery = try XCTUnwrap(TmuxProbe.shortcutDelivery(
+            .resizeLeft, sessionName: "my project"
+        ))
+        guard case .controlCommand(let command) = delivery else {
+            return XCTFail("Panel resize must use its control command")
+        }
+        XCTAssertTrue(command.contains("tmux -u list-panes -t '=my project'"))
+        XCTAssertTrue(command.contains("tmux -u resize-pane -L -t \"$target\""))
+        XCTAssertFalse(command.contains("$target\" 1"))
+
+        // The held press goes coarse: tmux's own M-arrow step, as the
+        // trailing positional adjustment.
+        XCTAssertEqual(TmuxShortcut.coarseResizeCells, 5)
+        let coarse = try XCTUnwrap(TmuxProbe.directShortcutCommand(
+            .resizeLeft, sessionName: "my project", resizeCells: 5
+        ))
+        XCTAssertTrue(coarse.contains("tmux -u resize-pane -L -t \"$target\" 5"))
     }
 
     func testCloseActionsHaveNoTerminalInputAfterUIConfirmation() {
@@ -73,9 +104,10 @@ final class TmuxShortcutTests: XCTestCase {
         XCTAssertEqual(deliveredTopBottom, topBottom)
     }
 
-    func testOnlySplitsAndConfirmedClosesHaveDirectControlCommands() {
+    func testOnlySplitsResizesAndConfirmedClosesHaveDirectControlCommands() {
         let expected: Set<TmuxShortcut> = [
             .splitLeftRight, .splitTopBottom, .closePane, .closeWindow,
+            .resizeLeft, .resizeDown, .resizeUp, .resizeRight,
         ]
         let actual = Set(TmuxShortcut.allCases.filter {
             TmuxProbe.directShortcutCommand($0, sessionName: "main") != nil
@@ -112,7 +144,10 @@ final class TmuxShortcutTests: XCTestCase {
     func testOnlyMovementRowsLeaveThePanelOpen() {
         XCTAssertEqual(
             Set(TmuxShortcut.allCases.filter(\.keepsPanelOpen)),
-            [.nextPane, .togglePaneZoom, .nextWindow, .previousWindow, .lastWindow]
+            [
+                .nextPane, .togglePaneZoom, .nextWindow, .previousWindow, .lastWindow,
+                .resizeLeft, .resizeDown, .resizeUp, .resizeRight,
+            ]
         )
         // Anything that leaves you looking at the terminal — a new pane, a
         // prompt, a mode, a close — must uncover it.
@@ -132,7 +167,7 @@ final class TmuxShortcutTests: XCTestCase {
     func testEveryShortcutAppearsInExactlyOneMenuGroup() {
         let grouped = TmuxShortcut.Group.allCases.flatMap(TmuxShortcut.shortcuts(in:))
 
-        XCTAssertEqual(TmuxShortcut.Group.allCases, [.panes, .windows])
+        XCTAssertEqual(TmuxShortcut.Group.allCases, [.panes, .resize, .windows])
         XCTAssertEqual(grouped.count, TmuxShortcut.allCases.count)
         XCTAssertEqual(Set(grouped), Set(TmuxShortcut.allCases))
         XCTAssertEqual(TmuxShortcut.copyMode.group, .panes)

@@ -988,6 +988,11 @@ final class UMDBarViewController: UIViewController,
                 }
                 self.configuration.controller?.performPanelShortcut(item)
             },
+            // A held resize row repeats coarse steps; the panel stays up
+            // throughout, so no dismissal decision rides along.
+            selectCoarse: { [weak self] item in
+                self?.configuration.controller?.performPanelShortcutCoarse(item)
+            },
             loadChoices: { [weak controller = configuration.controller] in
                 await controller?.loadShortcutSwitchChoices()
             },

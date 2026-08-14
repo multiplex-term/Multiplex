@@ -884,6 +884,15 @@ final class TerminalSessionController {
         }
     }
 
+    /// A held resize row: the same active-pane command at tmux's own coarse
+    /// step. Only resize rows hold, so anything else fails closed.
+    func performPanelShortcutCoarse(_ item: ShortcutPanelItem) {
+        guard case .tmux(let shortcut) = item.payload,
+              shortcut.resizeDirection != nil
+        else { return }
+        performTmuxShortcut(shortcut, resizeCells: TmuxShortcut.coarseResizeCells)
+    }
+
     /// Hand the visible screen to native selection on any session-backed
     /// tab. Entered from the selection block's SELECT/SELECT ALL, which carry
     /// the gesture's cell so selection targets that pane — and the backend's
@@ -997,7 +1006,7 @@ final class TerminalSessionController {
     /// into the pane, including on an SSH tab. Other ordinary rows enter
     /// through SwiftTerm exactly like keyboard input. Confirmed destructive
     /// rows already use the control path to avoid tmux's prompt.
-    func performTmuxShortcut(_ shortcut: TmuxShortcut) {
+    func performTmuxShortcut(_ shortcut: TmuxShortcut, resizeCells: Int = 1) {
         guard status == .live, route.usesTmux,
               let sessionName = route.sessionName
         else { return }
@@ -1005,7 +1014,9 @@ final class TerminalSessionController {
         // either be dropped by the input lock (leaving copy-mode UI stuck
         // half-armed) or race the remote script.
         if case .finding = historyJump { return }
-        switch TmuxProbe.shortcutDelivery(shortcut, sessionName: sessionName) {
+        switch TmuxProbe.shortcutDelivery(
+            shortcut, sessionName: sessionName, resizeCells: resizeCells
+        ) {
         case .controlCommand(let command):
             Task { await executeControlCommand(command) }
         case .terminalInput(let input):
