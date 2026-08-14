@@ -115,6 +115,15 @@ final class TerminalSurfaceView: UIView {
             )
         }
         view.terminalDelegate = coordinator
+        // Replace, never stack: an adopted view still carries the previous
+        // window's sampler. The fork calls this on the feed thread, so hop
+        // unconditionally — one path, and the sample is displayed at a ~5 s
+        // cadence anyway.
+        view.echoLatencySampleHandler = { [weak controller] milliseconds in
+            Task { @MainActor in
+                controller?.recordEchoSample(milliseconds: milliseconds)
+            }
+        }
         coordinator.terminalView = view
 
         // Tapping the terminal claims app-wide keyboard focus (and re-summons

@@ -692,6 +692,7 @@ final class TerminalWindowViewController: UIViewController,
             _ = entitlements.isPro
             _ = entitlements.canUseSlashChip
             _ = entitlements.canBrowseAgentHistory
+            _ = ConnectionStatsCenter.shared.isCollecting
             _ = activeController?.status
             _ = activeController?.keyboardObstruction
             _ = activeController?.directShellAgent
@@ -1860,6 +1861,8 @@ extension TerminalWindowViewController {
                 ? { [weak self] in self?.confirmCloseActiveSession() } : nil,
             keychainTip: activeTabKeychainNotice != nil
                 ? { [weak self] in self?.presentKeychainTip() } : nil,
+            showConnectionStats: ConnectionStatsCenter.shared.isCollecting
+                ? { [weak self] in self?.presentConnectionStats() } : nil,
             extraNewTabTarget: extraNewTabTarget,
             shortcutBackend: activeTab?.sessionBackend,
             style: profile.style,
@@ -2481,6 +2484,33 @@ extension TerminalWindowViewController {
         let navigation = UINavigationController(rootViewController: paywall)
         UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
         paywall.onDone = { [weak navigation] in navigation?.dismiss(animated: true) }
+        present(navigation, animated: true)
+    }
+
+    /// The terminal window's road to the stats board: pre-drilled into this
+    /// window's host, paywall for free users — the same gate the deck runs.
+    private func presentConnectionStats() {
+        guard !appLocked,
+              presentedViewController == nil,
+              ConnectionStatsCenter.shared.isCollecting,
+              let activeTab
+        else { return }
+        guard entitlements.canViewConnectionStats else {
+            presentPaywall()
+            return
+        }
+        let sheet = ConnectionStatsViewController(
+            store: store,
+            focusedHostID: activeTab.hostID
+        )
+        sheet.followAppAppearance(themes)
+        let navigation = UINavigationController(rootViewController: sheet)
+        UIKitChassis.configureSheetNavigationBar(navigation.navigationBar)
+        navigation.preferredContentSize = ConnectionStatsViewController.preferredSheetSize
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            navigation.modalPresentationStyle = .formSheet
+        }
+        sheet.onDone = { [weak navigation] in navigation?.dismiss(animated: true) }
         present(navigation, animated: true)
     }
 

@@ -204,12 +204,14 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertTrue(store.canEnableMosh(currentlyEnabled: true))
         XCTAssertFalse(store.canMutateCustomThemes)
         XCTAssertFalse(store.canScheduleAgentAlerts)
+        XCTAssertFalse(store.canViewConnectionStats)
 
         #if DEBUG
         store.setDebugUnlocked(true)
         XCTAssertTrue(store.canEnableMosh(currentlyEnabled: false))
         XCTAssertTrue(store.canMutateCustomThemes)
         XCTAssertTrue(store.canScheduleAgentAlerts)
+        XCTAssertTrue(store.canViewConnectionStats)
         #endif
     }
 

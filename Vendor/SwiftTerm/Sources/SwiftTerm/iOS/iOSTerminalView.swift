@@ -277,6 +277,16 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// read from the (possibly background) feed thread.
     let userInputLock = NSLock()
     let interactiveInputDisplayWindowNs: UInt64 = 150_000_000
+    /// Multiplex patch: keystroke→paint echo sampling. The first feed chunk
+    /// after each user-input stamp yields one latency sample (ms) to the
+    /// handler, invoked on the feed thread. The sampled stamp is guarded by
+    /// `userInputLock` alongside the stamp it compares against. The window
+    /// is wider than the immediate-display one: a 300 ms-RTT link's echo is
+    /// still an echo, but output seconds after the last keystroke is stream.
+    public var echoLatencySampleHandler: ((Double) -> Void)?
+    var lastEchoSampledInputNs: UInt64 = 0
+    /// App-tunable so window policy never needs a re-patch on a bump.
+    public var echoLatencySampleWindowNs: UInt64 = 2_000_000_000
 #if canImport(MetalKit)
     var metalView: MTKView?
     var metalRenderer: MetalTerminalRenderer?

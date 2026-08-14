@@ -468,6 +468,44 @@ final class UIKitTallyLamp: UIView {
     }
 }
 
+/// The NO SIGNAL surface: the screen ground with the wall's etched 45°
+/// hatch. One drawing for every dead-monitor moment — deck tiles and the
+/// stats board's empty meters both compose it.
+@MainActor
+final class UIKitTallyHatchView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        // PROTOTYPE(GLASS): a dead monitor is still a glass pane — the same
+        // screen ground as live tiles, with an etched white hatch (plan §4).
+        backgroundColor = GlassPrototype.enabled
+            ? GlassPrototype.screenGlass : TallyPalette.screen
+        isOpaque = !GlassPrototype.enabled
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
+        ) { (view: UIKitTallyHatchView, _: UITraitCollection) in
+            view.setNeedsDisplay()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        let stripe = GlassPrototype.enabled
+            ? GlassPrototype.hatchStripe : TallyPalette.screenHatch
+        context.setStrokeColor(stripe.resolvedColor(with: traitCollection).cgColor)
+        context.setLineWidth(5)
+        var x = -bounds.height
+        while x < bounds.width {
+            context.move(to: CGPoint(x: x, y: bounds.height))
+            context.addLine(to: CGPoint(x: x + bounds.height, y: 0))
+            x += 14
+        }
+        context.strokePath()
+    }
+}
+
 /// One native TALLY form section: bezel title/header, one chassis row, square
 /// divider/border, and the optional explanatory postscript below it.
 @MainActor

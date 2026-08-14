@@ -211,6 +211,11 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// read from the (possibly background) feed thread.
     let userInputLock = NSLock()
     let interactiveInputDisplayWindowNs: UInt64 = 150_000_000
+    /// Multiplex patch: keystroke→paint echo sampling — see the iOS twin.
+    public var echoLatencySampleHandler: ((Double) -> Void)?
+    var lastEchoSampledInputNs: UInt64 = 0
+    /// App-tunable so window policy never needs a re-patch on a bump.
+    public var echoLatencySampleWindowNs: UInt64 = 2_000_000_000
 #if canImport(MetalKit)
     var metalView: MTKView?
     var metalRenderer: MetalTerminalRenderer?

@@ -73,6 +73,7 @@ final class ConnectionHub {
     func dropModel(for hostID: UUID) {
         snapshots.remove(for: hostID)
         widgetProbeDates.removeValue(forKey: hostID)
+        ConnectionStatsCenter.shared.dropStats(for: hostID)
         if let model = models.removeValue(forKey: hostID) {
             Task { await model.disconnect() }
         }
@@ -655,6 +656,14 @@ final class HostConnectionModel {
                 \(Self.ms(execEnd, parseEnd), privacy: .public)ms, \
                 \(Self.byteBreakdown(results), privacy: .public)
                 """)
+            // The same exec round-trip the wall log records, promoted to the
+            // stats center — the one honest SSH latency number (no keepalive
+            // exists on this transport).
+            ConnectionStatsCenter.shared.recordProbe(
+                hostID: host.id,
+                rttMilliseconds: Double(Self.ms(execStart, execEnd)),
+                payloadBytes: results.reduce(0) { $0 + $1.outputBytes }
+            )
             lastRefreshed = Date()
             // Only the backends that actually ANSWERED. A failed
             // secondary's sessions must keep both their displayed attention
@@ -792,6 +801,8 @@ final class HostConnectionModel {
             keyPassphraseChallenge = nil
         }
         let message = friendlyMessage(for: error)
+        ConnectionStatsCenter.shared.recordUnreachable(
+            hostID: host.id, message: message)
         let failedPhase = Phase.failed(message)
         let failedTmux = TmuxState.failed(message)
         if phase != failedPhase { phase = failedPhase }
@@ -864,11 +875,19 @@ final class HostConnectionModel {
             await fresh.close()
             throw CancellationError()
         }
+        let connectEnd = ContinuousClock.now
         Self.timing.debug("""
             \(self.host.name, privacy: .public) connect: secrets \
             \(Self.ms(secretsStart, connectStart), privacy: .public)ms, ssh \
-            \(Self.ms(connectStart, .now), privacy: .public)ms
+            \(Self.ms(connectStart, connectEnd), privacy: .public)ms
             """)
+        // The connect split — secrets load vs TCP+KEX+auth — turns "slow to
+        // open" into a diagnosable answer. Sampled per (re)connect only.
+        ConnectionStatsCenter.shared.recordConnect(
+            hostID: host.id,
+            secretsMilliseconds: Double(Self.ms(secretsStart, connectStart)),
+            sshMilliseconds: Double(Self.ms(connectStart, connectEnd))
+        )
         connection = fresh
         phase = .connected
         connectRetryBackoff.reset()

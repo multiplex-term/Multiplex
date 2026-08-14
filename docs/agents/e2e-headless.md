@@ -166,6 +166,10 @@ app.multiplexterm.multiplex.<name>`:
   (the first three elsewhere) through `ThemeStore.appearance` (persisted,
   flips every window live; pair with `simctl ui <UDID> appearance` to prove
   SYSTEM).
+- `debug.connstats` — open the Connection Stats board through the deck's
+  own request path, gates included (DEBUG entitlements fail open, so the
+  Pro gate passes). The rail chip needs no hook — it renders whenever a
+  probed host has a round-trip on record.
 - `debug.agentchip` — tap the first slash chip (inject → pump → PTY → tmux).
 - `debug.newtab` — run the focused window's "+ TAB" leading New Session
   action (mints a session on either backend, attached as a new tab).

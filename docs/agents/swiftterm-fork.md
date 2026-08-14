@@ -7,7 +7,7 @@ input encoding, or terminal rendering.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5),
     patched to declare the `NIO` product it imports (Xcode 27 rejects the
     undeclared import); also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in twelve behavior groups
+  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in thirteen behavior groups
     (marked `Multiplex patch`):
     - `keyboardType` settable; kept `.default` so the user's language and
       multistage IME survive.
@@ -129,6 +129,15 @@ input encoding, or terminal rendering.
     - The visible screen's links are enumerable (`Terminal
       .visibleLinkMatches` + `TerminalView.visibleLinkRegions`, the inverse
       of `calculateTapHit`) — what visionOS gaze hover stands on.
+    - Echo-latency sampling (`echoLatencySampleHandler`): the first feed
+      chunk after each user-input stamp yields one keystroke→paint sample
+      (ms) — the delta the immediate-display gate already computes and
+      discards. Handler runs on the feed thread; the sampled stamp shares
+      `userInputLock` with the stamp itself. Window is 2 s (its own
+      constant, NOT `interactiveInputDisplayWindowNs` — a slow link's echo
+      is still an echo at 300+ ms); a first chunk outside it consumes the
+      stamp without sampling, so stream output never counts. Feeds the
+      Connection Stats center.
 
     Sample apps trimmed. When bumping either package, re-apply the patches
     and diff before trusting it.

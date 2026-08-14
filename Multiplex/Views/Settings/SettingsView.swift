@@ -242,6 +242,7 @@ final class SettingsViewController: UIViewController {
                 selectedID: selectedTheme.id
             ),
             makeRendererSection(),
+            makeConnectionStatsSection(),
             makeAlertsSection(state),
             makeAppLockSection(state),
             makeProSection(state),
@@ -447,6 +448,29 @@ final class SettingsViewController: UIViewController {
         )
     }
 
+    private func makeConnectionStatsSection() -> UIView {
+        // Writes through the center, not the defaults enum, so open boards,
+        // rail chips, and the collectors all react to the flip immediately.
+        // "Show", not "Collect" — collect reads like telemetry, and nothing
+        // here leaves the device; the detail line carries the stops-measuring
+        // half of the promise.
+        let control = SettingsBooleanRow(
+            title: "Show connection stats",
+            isOn: ConnectionStatsCenter.shared.isCollecting
+        ) { enabled in
+            ConnectionStatsCenter.shared.setCollecting(enabled)
+        }
+        return SettingsSectionView(
+            title: "Connection stats",
+            detail: "Round-trips, echo latency, loss, and volume — numbers the "
+                + "transports already compute, measured passively and kept in "
+                + "memory for this session only. Nothing is stored or synced. "
+                + "Off hides the rail chips and the stats board and stops "
+                + "measuring. The live chip is free; the board requires Pro.",
+            rows: [control]
+        )
+    }
+
     private func makeAlertsSection(_ state: ViewState) -> UIView {
         let alertsOn = state.canScheduleAgentAlerts && state.alertsEnabled
         let control = SettingsBooleanRow(
@@ -539,6 +563,7 @@ final class SettingsViewController: UIViewController {
             state: state
         ))
         rows.append(proRow("Agent Alerts", state: state))
+        rows.append(proRow("Connection Stats", state: state))
         rows.append(proRow("Custom Themes", state: state))
         rows.append(SettingsInsetRow(contentView: settingsLeadingView(UIKitChassisChip(
             state.isPro ? "PRO DETAILS" : "UNLOCK MULTIPLEX PRO",
@@ -561,8 +586,8 @@ final class SettingsViewController: UIViewController {
         return SettingsSectionView(
             title: "Multiplex Pro",
             detail: "Pro adds unlimited hosts, mosh, unlimited agent-helper commands, "
-                + "alerts, and custom themes. SSH terminals, agent detection, and the "
-                + "wall's live state stay free.",
+                + "alerts, connection stats, and custom themes. SSH terminals, agent "
+                + "detection, and the wall's live state stay free.",
             rows: rows
         )
     }

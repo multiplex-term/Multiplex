@@ -151,6 +151,13 @@ actor MoshSession: TerminalTransport {
         finish(reason: nil, notify: false)
     }
 
+    /// The transport counters as one value — read by the stats pump. Zero
+    /// network cost: everything in the report is bookkeeping the engine
+    /// already keeps. The first socket is setup, not a roam.
+    func linkReport() -> MoshLinkReport {
+        engine.linkReport(roamCount: max(0, socketGeneration - 1))
+    }
+
     /// Foregrounded / user prodded the UI: heartbeat immediately, and if
     /// the socket died while suspended, replace it.
     func nudge() {

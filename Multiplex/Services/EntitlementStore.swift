@@ -352,6 +352,10 @@ final class EntitlementStore {
     /// The HISTORY surface (reading agent session files + jump-to-message)
     /// is a Pro helper like the strip's commands; detection stays free.
     var canBrowseAgentHistory: Bool { isPro }
+    /// The Connection Stats panel (fleet board + host drill-in). The rail
+    /// chip's live number stays free — it is the standing advertisement —
+    /// and collection is passive either way; only the panel is the product.
+    var canViewConnectionStats: Bool { isPro }
 
     /// Slash commands alone consume the taste meter. Keyboard-equivalent
     /// helper chips do not call this API.
