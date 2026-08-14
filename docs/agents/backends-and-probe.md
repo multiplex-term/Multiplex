@@ -193,7 +193,8 @@ HerdrProbe, session creation/targeting, or file attach/drop.
   The shortcut panel has a herdr variant (`HerdrShortcut`, pure + tested;
   the rail key face reads HRDR; deliberately curated small — zoom,
   scrollback, rename-tab, picker, and sidebar rows were trimmed
-  2026-08-02): non-destructive rows send herdr's stock
+  2026-08-02; pane/tab cycling followed 2026-08-14 because the TUI already
+  makes those targets directly tappable): non-destructive rows send herdr's stock
   ⌃B defaults through SwiftTerm (read from `herdr --default-config`,
   splits exercised against a real 0.7.5 TUI attach 2026-08-02 —
   `split_vertical` ⌃B V is left/right, `split_horizontal` ⌃B − is

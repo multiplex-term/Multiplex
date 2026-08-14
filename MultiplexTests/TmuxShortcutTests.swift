@@ -6,14 +6,12 @@ final class TmuxShortcutTests: XCTestCase {
         let expected: [TmuxShortcut: UInt8] = [
             .splitLeftRight: Character("%").asciiValue!,
             .splitTopBottom: Character("\"").asciiValue!,
-            .nextPane: Character("o").asciiValue!,
             .togglePaneZoom: Character("z").asciiValue!,
             .copyMode: Character("[").asciiValue!,
             .newWindow: Character("c").asciiValue!,
             .chooseWindow: Character("w").asciiValue!,
             .nextWindow: Character("n").asciiValue!,
             .previousWindow: Character("p").asciiValue!,
-            .lastWindow: Character("l").asciiValue!,
             .renameWindow: Character(",").asciiValue!,
         ]
 
@@ -119,13 +117,11 @@ final class TmuxShortcutTests: XCTestCase {
         )
     }
 
-    func testWindowAndPaneRowsRunClientlessOnTheControlPlane() throws {
+    func testWindowAndZoomRowsRunClientlessOnTheControlPlane() throws {
         let cases: [(TmuxShortcut, String)] = [
             (.newWindow, "tmux -u new-window -t '=my project:'"),
             (.nextWindow, "tmux -u next-window -t '=my project'"),
             (.previousWindow, "tmux -u previous-window -t '=my project'"),
-            (.lastWindow, "tmux -u last-window -t '=my project'"),
-            (.nextPane, "tmux -u select-pane -t '=my project:.+'"),
             (.togglePaneZoom, "tmux -u resize-pane -Z -t \"$target\""),
             (.chooseWindow, "tmux -u choose-tree -Zw -t \"$target\""),
         ]
@@ -175,8 +171,8 @@ final class TmuxShortcutTests: XCTestCase {
         XCTAssertEqual(
             Set(TmuxShortcut.allCases.filter(\.keepsPanelOpen)),
             [
-                .nextPane, .togglePaneZoom, .nextWindow, .previousWindow, .lastWindow,
-                .resizeLeft, .resizeDown, .resizeUp, .resizeRight, .renameWindow,
+                .togglePaneZoom, .nextWindow, .previousWindow, .resizeLeft,
+                .resizeDown, .resizeUp, .resizeRight, .renameWindow,
             ]
         )
         // Anything that leaves you looking at the terminal — a new pane, a

@@ -4,10 +4,10 @@
 /// Defaults were read from `herdr --default-config` and the split/detach
 /// bindings exercised against a real 0.7.5 TUI attach (2026-08-02); a
 /// same-burst prefix+key registers once the client is interactive.
-/// Deliberately curated small (user-trimmed 2026-08-02): zoom, scrollback,
-/// rename-tab, the workspace picker, and the sidebar toggle are herdr UI the
-/// TUI already surfaces — the panel carries only the commands touch actually
-/// needs.
+/// Deliberately curated small (user-trimmed 2026-08-02 and 2026-08-14): zoom,
+/// scrollback, rename-tab, pane/tab cycling, the workspace picker, and the
+/// sidebar toggle are herdr UI the TUI already surfaces — the panel carries
+/// only the commands touch actually needs.
 /// Destructive commands are confirmed by our UI, then resolved and executed
 /// over the SSH control connection (`HerdrProbe.closeShortcutCommand`), so
 /// they follow herdr's server truth instead of a rebindable key and never
@@ -28,11 +28,8 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
 
     case splitLeftRight
     case splitTopBottom
-    case nextPane
     case closePane
     case newTab
-    case nextTab
-    case previousTab
     case closeTab
     case newWorkspace
     case renameWorkspace
@@ -42,9 +39,9 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
 
     var group: Group {
         switch self {
-        case .splitLeftRight, .splitTopBottom, .nextPane, .closePane:
+        case .splitLeftRight, .splitTopBottom, .closePane:
             .panes
-        case .newTab, .nextTab, .previousTab, .closeTab:
+        case .newTab, .closeTab:
             .tabs
         case .newWorkspace, .renameWorkspace, .closeWorkspace:
             .workspaces
@@ -55,11 +52,8 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .splitLeftRight: "Split Left / Right"
         case .splitTopBottom: "Split Top / Bottom"
-        case .nextPane: "Next Pane"
         case .closePane: "Close Pane"
         case .newTab: "New Tab"
-        case .nextTab: "Next Tab"
-        case .previousTab: "Previous Tab"
         case .closeTab: "Close Tab"
         case .newWorkspace: "New Workspace"
         case .renameWorkspace: "Rename Workspace"
@@ -74,11 +68,8 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .splitLeftRight: "split_vertical"
         case .splitTopBottom: "split_horizontal"
-        case .nextPane: "cycle_pane_next"
         case .closePane: "close_pane"
         case .newTab: "new_tab"
-        case .nextTab: "next_tab"
-        case .previousTab: "previous_tab"
         case .closeTab: "close_tab"
         case .newWorkspace: "new_workspace"
         case .renameWorkspace: "rename_workspace"
@@ -93,10 +84,7 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .splitLeftRight: "v"
         case .splitTopBottom: "-"
-        case .nextPane: "\t"
         case .newTab: "c"
-        case .nextTab: "n"
-        case .previousTab: "p"
         case .newWorkspace: "N"
         case .renameWorkspace: "W"
         case .closePane, .closeTab, .closeWorkspace: nil
@@ -114,20 +102,14 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
 
     var requiresDoubleActivation: Bool { closeScope != nil }
 
-    /// Cycling panes and tabs keeps the panel up so the hop can be repeated,
-    /// the same rule `TmuxShortcut.keepsPanelOpen` states.
-    var keepsPanelOpen: Bool {
-        switch self {
-        case .nextPane, .nextTab, .previousTab: true
-        case .splitLeftRight, .splitTopBottom, .closePane, .newTab, .closeTab,
-             .newWorkspace, .renameWorkspace, .closeWorkspace: false
-        }
-    }
+    /// Every curated action reveals a resulting pane, prompt, or close, so it
+    /// dismisses the panel. Live workspace switch rows have their own stay-open
+    /// behavior in `ShortcutPanelViewController`.
+    var keepsPanelOpen: Bool { false }
 
     var bindingLabel: String {
         guard !requiresDoubleActivation else { return "2×" }
         switch self {
-        case .nextPane: return "⌃B ⇥"
         case .newWorkspace: return "⌃B ⇧N"
         case .renameWorkspace: return "⌃B ⇧W"
         default: return "⌃B \(binding.map { String($0).uppercased() } ?? "")"

@@ -78,7 +78,10 @@ routing, tab moves, keyboard avoidance, or secret fields.
   HRDR — four mono characters, so every tier and cutoff holds unchanged —
   and both open the shared `ShortcutPanelViewController`, whose content
   (`ShortcutPanelContent.tmux`/`.herdr`) is the ONE place a backend's
-  shortcut set lives. The panel root scrolls when a phone popover clamps
+  shortcut set lives. Pane cycling (both backends) and herdr tab cycling are
+  deliberately absent because those targets are already directly tappable;
+  tmux Last Window is absent because the live switch list targets a window
+  directly. The panel root scrolls when a phone popover clamps
   its height — never clip rows. The top popover opens downward; while presented, the arbiter
   resigns the terminal (a docked keyboard would clip the grid) and
   restores only if that tab still owns focus. Every key sends through

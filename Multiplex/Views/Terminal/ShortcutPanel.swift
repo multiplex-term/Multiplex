@@ -383,11 +383,10 @@ final class ShortcutPanelViewController: UIViewController {
         scheduleChoiceRefresh()
     }
 
-    /// Next / Previous / Last Window may have moved the very window the
-    /// switch list marks ACTIVE while the panel stays up. The command runs
-    /// remotely, so re-read the list once it has landed rather than guess
-    /// the destination. Rows that stay put (pane hops, zoom, resize) never
-    /// pay the round trip.
+    /// Next / Previous Window may have moved the very window the switch list
+    /// marks ACTIVE while the panel stays up. The command runs remotely, so
+    /// re-read the list once it has landed rather than guess the destination.
+    /// Rows that stay put (zoom and resize) never pay the round trip.
     private func scheduleChoiceRefreshIfPanelStays(_ item: ShortcutPanelItem) {
         guard item.invalidatesSwitchChoices else { return }
         scheduleChoiceRefresh()

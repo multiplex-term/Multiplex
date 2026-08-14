@@ -10,10 +10,7 @@ final class HerdrShortcutTests: XCTestCase {
         let expected: [HerdrShortcut: UInt8] = [
             .splitLeftRight: Character("v").asciiValue!,
             .splitTopBottom: Character("-").asciiValue!,
-            .nextPane: 0x09,
             .newTab: Character("c").asciiValue!,
-            .nextTab: Character("n").asciiValue!,
-            .previousTab: Character("p").asciiValue!,
             .newWorkspace: Character("N").asciiValue!,
             .renameWorkspace: Character("W").asciiValue!,
         ]
@@ -27,10 +24,9 @@ final class HerdrShortcutTests: XCTestCase {
         }
     }
 
-    func testBindingLabelsSpellShiftAndTabHonestly() {
+    func testBindingLabelsSpellShiftHonestly() {
         XCTAssertEqual(HerdrShortcut.splitLeftRight.bindingLabel, "⌃B V")
         XCTAssertEqual(HerdrShortcut.splitTopBottom.bindingLabel, "⌃B -")
-        XCTAssertEqual(HerdrShortcut.nextPane.bindingLabel, "⌃B ⇥")
         XCTAssertEqual(HerdrShortcut.newWorkspace.bindingLabel, "⌃B ⇧N")
         XCTAssertEqual(HerdrShortcut.renameWorkspace.bindingLabel, "⌃B ⇧W")
     }
@@ -54,17 +50,13 @@ final class HerdrShortcutTests: XCTestCase {
         // spell herdr's own action names, not invented prose.
         XCTAssertEqual(HerdrShortcut.splitLeftRight.command, "split_vertical")
         XCTAssertEqual(HerdrShortcut.splitTopBottom.command, "split_horizontal")
-        XCTAssertEqual(HerdrShortcut.nextPane.command, "cycle_pane_next")
         XCTAssertEqual(HerdrShortcut.renameWorkspace.command, "rename_workspace")
         XCTAssertEqual(HerdrShortcut.closeWorkspace.command, "close_workspace")
     }
 
-    func testOnlyMovementRowsLeaveThePanelOpen() {
-        XCTAssertEqual(
-            Set(HerdrShortcut.allCases.filter(\.keepsPanelOpen)),
-            [.nextPane, .nextTab, .previousTab]
-        )
-        XCTAssertTrue(ShortcutPanelItem(HerdrShortcut.nextTab).keepsPanelOpen)
+    func testCuratedRowsDismissThePanel() {
+        XCTAssertTrue(HerdrShortcut.allCases.allSatisfy { !$0.keepsPanelOpen })
+        XCTAssertFalse(ShortcutPanelItem(HerdrShortcut.newTab).keepsPanelOpen)
         XCTAssertFalse(ShortcutPanelItem(HerdrShortcut.closeTab).keepsPanelOpen)
     }
 

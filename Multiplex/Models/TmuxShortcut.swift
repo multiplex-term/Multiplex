@@ -3,6 +3,9 @@
 /// commands are confirmed by our UI, then run over the SSH control connection
 /// so they neither enter tmux's command prompt nor ask for another confirmation.
 /// Keep the binding bytes pure so both platform surfaces use the same input.
+/// Pane cycling is intentionally omitted because every pane is directly
+/// tappable. Last Window is omitted too: the panel's live window list targets
+/// the destination directly instead of making the user remember history.
 enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
     enum Group: String, CaseIterable, Sendable {
         case panes = "Panes"
@@ -12,7 +15,6 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
 
     case splitLeftRight
     case splitTopBottom
-    case nextPane
     case togglePaneZoom
     case copyMode
     case closePane
@@ -24,7 +26,6 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
     case chooseWindow
     case nextWindow
     case previousWindow
-    case lastWindow
     case renameWindow
     case closeWindow
 
@@ -32,13 +33,13 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
 
     var group: Group {
         switch self {
-        case .splitLeftRight, .splitTopBottom, .nextPane, .togglePaneZoom,
+        case .splitLeftRight, .splitTopBottom, .togglePaneZoom,
              .copyMode, .closePane:
             .panes
         case .resizeLeft, .resizeDown, .resizeUp, .resizeRight:
             .resize
         case .newWindow, .chooseWindow, .nextWindow, .previousWindow,
-             .lastWindow, .renameWindow, .closeWindow:
+             .renameWindow, .closeWindow:
             .windows
         }
     }
@@ -47,7 +48,6 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .splitLeftRight: "Split Left / Right"
         case .splitTopBottom: "Split Top / Bottom"
-        case .nextPane: "Next Pane"
         case .togglePaneZoom: "Toggle Pane Zoom"
         case .copyMode: "Copy Mode"
         case .closePane: "Close Pane"
@@ -59,7 +59,6 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         case .chooseWindow: "Choose Window"
         case .nextWindow: "Next Window"
         case .previousWindow: "Previous Window"
-        case .lastWindow: "Last Window"
         case .renameWindow: "Rename Window"
         case .closeWindow: "Close Window"
         }
@@ -71,7 +70,6 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .splitLeftRight: "split-window -h"
         case .splitTopBottom: "split-window"
-        case .nextPane: "select-pane -t :.+"
         case .togglePaneZoom: "resize-pane -Z"
         case .copyMode: "copy-mode"
         case .closePane: "kill-pane"
@@ -85,7 +83,6 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         case .chooseWindow: "choose-tree"
         case .nextWindow: "next-window"
         case .previousWindow: "previous-window"
-        case .lastWindow: "last-window"
         case .renameWindow: "rename-window"
         case .closeWindow: "kill-window"
         }
@@ -97,7 +94,6 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .splitLeftRight: "%"
         case .splitTopBottom: "\""
-        case .nextPane: "o"
         case .togglePaneZoom: "z"
         case .copyMode: "["
         case .closePane: "x"
@@ -106,7 +102,6 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         case .chooseWindow: "w"
         case .nextWindow: "n"
         case .previousWindow: "p"
-        case .lastWindow: "l"
         case .renameWindow: ","
         case .closeWindow: "&"
         }
@@ -138,9 +133,9 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         case .resizeDown: .down
         case .resizeUp: .up
         case .resizeRight: .right
-        case .splitLeftRight, .splitTopBottom, .nextPane, .togglePaneZoom,
-             .copyMode, .closePane, .newWindow, .chooseWindow, .nextWindow,
-             .previousWindow, .lastWindow, .renameWindow, .closeWindow:
+        case .splitLeftRight, .splitTopBottom, .togglePaneZoom, .copyMode,
+             .closePane, .newWindow, .chooseWindow, .nextWindow, .previousWindow,
+             .renameWindow, .closeWindow:
             nil
         }
     }
@@ -157,8 +152,8 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
     /// covered.
     var keepsPanelOpen: Bool {
         switch self {
-        case .nextPane, .togglePaneZoom, .nextWindow, .previousWindow, .lastWindow,
-             .resizeLeft, .resizeDown, .resizeUp, .resizeRight, .renameWindow:
+        case .togglePaneZoom, .nextWindow, .previousWindow, .resizeLeft,
+             .resizeDown, .resizeUp, .resizeRight, .renameWindow:
             true
         case .splitLeftRight, .splitTopBottom, .copyMode, .closePane,
              .newWindow, .chooseWindow, .closeWindow:
@@ -174,11 +169,11 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
     /// rows whose success invalidates the panel's switch list.
     var movesActiveWindow: Bool {
         switch self {
-        case .nextWindow, .previousWindow, .lastWindow:
+        case .nextWindow, .previousWindow:
             true
-        case .splitLeftRight, .splitTopBottom, .nextPane, .togglePaneZoom,
-             .copyMode, .closePane, .resizeLeft, .resizeDown, .resizeUp,
-             .resizeRight, .newWindow, .chooseWindow, .renameWindow, .closeWindow:
+        case .splitLeftRight, .splitTopBottom, .togglePaneZoom, .copyMode,
+             .closePane, .resizeLeft, .resizeDown, .resizeUp, .resizeRight,
+             .newWindow, .chooseWindow, .renameWindow, .closeWindow:
             false
         }
     }

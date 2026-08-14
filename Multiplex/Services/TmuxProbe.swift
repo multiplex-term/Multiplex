@@ -587,8 +587,7 @@ enum TmuxProbe {
         let exactSession = "=\(sessionName)".shellQuoted
         // Verified from a plain exec against tmux 3.x (2026-08-14): the
         // `=name:` window target makes new-window create at the first free
-        // index and select it — exactly the stock `c` — and `=name:.+`
-        // steps select-pane through the current window's panes.
+        // index and select it — exactly the stock `c`.
         switch shortcut {
         case .newWindow:
             return pathPrefix
@@ -597,11 +596,6 @@ enum TmuxProbe {
             return pathPrefix + "\(tmuxCommand) next-window -t \(exactSession)"
         case .previousWindow:
             return pathPrefix + "\(tmuxCommand) previous-window -t \(exactSession)"
-        case .lastWindow:
-            return pathPrefix + "\(tmuxCommand) last-window -t \(exactSession)"
-        case .nextPane:
-            return pathPrefix
-                + "\(tmuxCommand) select-pane -t \("=\(sessionName):.+".shellQuoted)"
         default:
             break
         }
