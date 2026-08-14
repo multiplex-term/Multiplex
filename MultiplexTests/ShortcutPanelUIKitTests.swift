@@ -15,7 +15,7 @@ final class ShortcutPanelUIKitTests: XCTestCase {
         let headers = descendants(of: UIKitChassisLabel.self, in: controller.view)
             .filter { $0.accessibilityTraits.contains(.header) }
             .compactMap(\.accessibilityLabel)
-        XCTAssertEqual(headers, ["TMUX SHORTCUTS", "Panes", "Windows"])
+        XCTAssertEqual(headers, ["TMUX SHORTCUTS", "Panes", "Resize Pane", "Windows"])
 
         let size = controller.fittingContentSize()
         XCTAssertEqual(size.width, ShortcutPanelViewController.preferredWidth)
@@ -34,6 +34,20 @@ final class ShortcutPanelUIKitTests: XCTestCase {
             closePane.accessibilityLabel,
             "Close Pane, kill-pane, press twice to confirm"
         )
+
+        // Resize is a compact row: an arrow-to-bar SF Symbol face, with the
+        // full story left to assistive tech.
+        let resizeLeft = try XCTUnwrap(
+            control("tmuxShortcut.resizeLeft", in: controller.view)
+        )
+        XCTAssertEqual(
+            resizeLeft.accessibilityLabel,
+            "Resize Left, resize-pane -L, ⌃B ⌃←"
+        )
+        XCTAssertEqual(
+            descendants(of: UIImageView.self, in: resizeLeft).first?.image,
+            UIImage(systemName: "arrow.left.to.line")
+        )
     }
 
     func testSafeShortcutSelectsImmediatelyAndDestructiveShortcutRequiresSecondPress() throws {
@@ -47,11 +61,17 @@ final class ShortcutPanelUIKitTests: XCTestCase {
         copyMode.sendActions(for: .touchUpInside)
         XCTAssertEqual(selected.map(\.payload), [.tmux(.copyMode)])
 
+        // A resize press selects immediately — repeated taps keep nudging.
+        let resizeUp = try XCTUnwrap(control("tmuxShortcut.resizeUp", in: controller.view))
+        resizeUp.sendActions(for: .touchUpInside)
+        XCTAssertEqual(selected.map(\.payload), [.tmux(.copyMode), .tmux(.resizeUp)])
+        selected = []
+
         let closeWindow = try XCTUnwrap(
             control("tmuxShortcut.closeWindow", in: controller.view)
         )
         closeWindow.sendActions(for: .touchUpInside)
-        XCTAssertEqual(selected.map(\.payload), [.tmux(.copyMode)])
+        XCTAssertEqual(selected, [])
         XCTAssertEqual(
             closeWindow.accessibilityLabel,
             "Close Window, press again to close"
@@ -60,11 +80,39 @@ final class ShortcutPanelUIKitTests: XCTestCase {
         XCTAssertTrue(renderedText(in: closeWindow).contains("AGAIN"))
 
         closeWindow.sendActions(for: .touchUpInside)
-        XCTAssertEqual(selected.map(\.payload), [.tmux(.copyMode), .tmux(.closeWindow)])
+        XCTAssertEqual(selected.map(\.payload), [.tmux(.closeWindow)])
         XCTAssertEqual(
             closeWindow.accessibilityLabel,
             "Close Window, kill-window, press twice to confirm"
         )
+    }
+
+    func testHoldingAResizeRowRepeatsCoarseStepsAndSwallowsItsRelease() async throws {
+        var selected: [ShortcutPanelItem] = []
+        var coarse: [ShortcutPanelItem] = []
+        let controller = ShortcutPanelViewController(
+            content: .tmux,
+            select: { selected.append($0) },
+            selectCoarse: { coarse.append($0) }
+        )
+        controller.loadViewIfNeeded()
+        let resizeUp = try XCTUnwrap(control("tmuxShortcut.resizeUp", in: controller.view))
+
+        // Hold: one coarse step after the delay, another after the repeat
+        // interval, and the release adds no fine step on top.
+        resizeUp.sendActions(for: .touchDown)
+        try await Task.sleep(nanoseconds: 750_000_000)
+        XCTAssertEqual(coarse.map(\.payload), [.tmux(.resizeUp)])
+        try await Task.sleep(nanoseconds: 1_250_000_000)
+        XCTAssertEqual(coarse.count, 2)
+        resizeUp.sendActions(for: .touchUpInside)
+        XCTAssertEqual(selected, [])
+
+        // A quick tap still nudges one fine cell and never goes coarse.
+        resizeUp.sendActions(for: .touchDown)
+        resizeUp.sendActions(for: .touchUpInside)
+        XCTAssertEqual(selected.map(\.payload), [.tmux(.resizeUp)])
+        XCTAssertEqual(coarse.count, 2)
     }
 
     func testHerdrCloseRowsCarryTheirPayloadThroughTheSameConfirmation() throws {

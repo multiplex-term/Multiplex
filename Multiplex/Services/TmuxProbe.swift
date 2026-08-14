@@ -545,10 +545,10 @@ enum TmuxProbe {
     /// The panel's one dispatch decision. A direct command deliberately wins
     /// when a shortcut also documents stock binding bytes (both split rows).
     static func shortcutDelivery(
-        _ shortcut: TmuxShortcut, sessionName: String
+        _ shortcut: TmuxShortcut, sessionName: String, resizeCells: Int = 1
     ) -> ShortcutDelivery? {
         if let command = directShortcutCommand(
-            shortcut, sessionName: sessionName
+            shortcut, sessionName: sessionName, resizeCells: resizeCells
         ) {
             return .controlCommand(command)
         }
@@ -561,33 +561,39 @@ enum TmuxProbe {
     /// Execute one shortcut through the SSH control plane. Split rows on every
     /// transport use this because a stock-prefix burst can intermittently lose
     /// its Ctrl-B before a shifted `%` reaches tmux on iPad, leaving the
-    /// character in the pane. Confirmed
+    /// character in the pane. Resize rows use it for the same reason — their
+    /// stock chord is a multi-byte ⌃-arrow after the prefix. Confirmed
     /// closes use it so they never enter tmux's own confirmation prompt.
     /// Resolve the session's current pane/window to tmux's id first: pane
     /// commands reject `=name` targets on tmux 3.6a, and ids avoid prefix
     /// collisions. `#{pane_current_path}` is expanded by tmux against that
     /// target, preserving the stock split binding's working directory.
+    /// `resizeCells` widens a resize row's step (the panel's held press);
+    /// 1 rides resize-pane's own default and adds no argument.
     static func directShortcutCommand(
-        _ shortcut: TmuxShortcut, sessionName: String
+        _ shortcut: TmuxShortcut, sessionName: String, resizeCells: Int = 1
     ) -> String? {
         let exactSession = "=\(sessionName)".shellQuoted
+        let activePaneLookup = "\(tmuxCommand) list-panes -t \(exactSession)"
+            + " -F '#{?pane_active,#{pane_id},}' 2>/dev/null | grep -m1 ."
         let lookup: String
         let action: String
         switch shortcut {
         case .splitLeftRight:
-            lookup = "\(tmuxCommand) list-panes -t \(exactSession)"
-                + " -F '#{?pane_active,#{pane_id},}' 2>/dev/null | grep -m1 ."
+            lookup = activePaneLookup
             action = "\(tmuxCommand) split-window -h -t \"$target\""
                 + " -c '#{pane_current_path}'"
         case .splitTopBottom:
-            lookup = "\(tmuxCommand) list-panes -t \(exactSession)"
-                + " -F '#{?pane_active,#{pane_id},}' 2>/dev/null | grep -m1 ."
+            lookup = activePaneLookup
             action = "\(tmuxCommand) split-window -t \"$target\""
                 + " -c '#{pane_current_path}'"
         case .closePane:
-            lookup = "\(tmuxCommand) list-panes -t \(exactSession)"
-                + " -F '#{?pane_active,#{pane_id},}' 2>/dev/null | grep -m1 ."
+            lookup = activePaneLookup
             action = "\(tmuxCommand) kill-pane -t \"$target\""
+        case .resizeLeft, .resizeDown, .resizeUp, .resizeRight:
+            lookup = activePaneLookup
+            action = "\(tmuxCommand) \(shortcut.command) -t \"$target\""
+                + (resizeCells == 1 ? "" : " \(resizeCells)")
         case .closeWindow:
             lookup = "\(tmuxCommand) list-windows -t \(exactSession)"
                 + " -F '#{?window_active,#{window_id},}' 2>/dev/null | grep -m1 ."

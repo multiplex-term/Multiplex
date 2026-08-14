@@ -1,5 +1,6 @@
 NEW SINCE 1.3.1
 • THE SHORTCUT PANEL STAYS OPEN WHILE YOU MOVE — in the TMUX / HRDR panel, the window/workspace switch list and the movement rows keep the panel up, with ACTIVE following where you land. Splits, new/rename/close and Copy Mode still close it.
+• RESIZE PANES FROM THE TMUX PANEL — a RESIZE PANE row of four arrow buttons nudges the focused pane's border one cell per tap, and the panel stays open so you can tap until it fits. Keep a button pressed to go faster: five cells per step, repeating every second until you let go.
 • DICTATE IN YOUR OWN LANGUAGES — while dictating, the LISTENING bar shows your language next to a globe. Tap it to switch among the preferred languages from your device's Language Settings, like the system keyboard's dictation; the take restarts in the language you pick and it sticks for next time. With one language the mic works exactly as before.
 
 PLEASE TRY

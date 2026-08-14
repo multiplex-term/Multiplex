@@ -19,6 +19,14 @@ struct ShortcutPanelItem: Equatable, Sendable, Identifiable {
     /// Whether performing this row leaves the panel on screen — see
     /// `TmuxShortcut.keepsPanelOpen`.
     var keepsPanelOpen: Bool
+    /// Whether performing this row can move the switch section's ACTIVE
+    /// choice, requiring the open panel to re-read the list.
+    var invalidatesSwitchChoices: Bool
+    /// SF Symbol name for a compact-row button's face (the tmux resize
+    /// directions); nil for the ordinary grid rows. A symbol, not a text
+    /// glyph: the Unicode arrow-to-bar characters come from different
+    /// blocks and the horizontal pair draws visibly smaller.
+    var symbolName: String?
     var accessibilityIdentifier: String
 
     var id: String { accessibilityIdentifier }
@@ -30,6 +38,8 @@ struct ShortcutPanelItem: Equatable, Sendable, Identifiable {
         bindingLabel = shortcut.bindingLabel
         requiresDoubleActivation = shortcut.requiresDoubleActivation
         keepsPanelOpen = shortcut.keepsPanelOpen
+        invalidatesSwitchChoices = shortcut.movesActiveWindow
+        symbolName = shortcut.resizeDirection.map { "arrow.\($0.rawValue).to.line" }
         accessibilityIdentifier = "tmuxShortcut.\(shortcut.rawValue)"
     }
 
@@ -40,6 +50,10 @@ struct ShortcutPanelItem: Equatable, Sendable, Identifiable {
         bindingLabel = shortcut.bindingLabel
         requiresDoubleActivation = shortcut.requiresDoubleActivation
         keepsPanelOpen = shortcut.keepsPanelOpen
+        // No herdr row moves the active workspace, so none invalidates the
+        // switch list (cycling panes/tabs happens inside one workspace).
+        invalidatesSwitchChoices = false
+        symbolName = nil
         accessibilityIdentifier = "herdrShortcut.\(shortcut.rawValue)"
     }
 }
@@ -48,6 +62,13 @@ struct ShortcutPanelSection: Equatable, Sendable {
     var title: String
     var accessibilityIdentifier: String
     var items: [ShortcutPanelItem]
+
+    /// A section whose every row carries a symbol face (the tmux resize
+    /// directions) lays out as one compact row of square glyph buttons
+    /// instead of the two-column grid of full rows.
+    var usesCompactRow: Bool {
+        !items.isEmpty && items.allSatisfy { $0.symbolName != nil }
+    }
 }
 
 /// Everything one backend's panel shows. The switch section is the live list

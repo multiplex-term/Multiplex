@@ -6,6 +6,7 @@
 enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
     enum Group: String, CaseIterable, Sendable {
         case panes = "Panes"
+        case resize = "Resize Pane"
         case windows = "Windows"
     }
 
@@ -15,6 +16,10 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
     case togglePaneZoom
     case copyMode
     case closePane
+    case resizeLeft
+    case resizeDown
+    case resizeUp
+    case resizeRight
     case newWindow
     case chooseWindow
     case nextWindow
@@ -30,6 +35,8 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         case .splitLeftRight, .splitTopBottom, .nextPane, .togglePaneZoom,
              .copyMode, .closePane:
             .panes
+        case .resizeLeft, .resizeDown, .resizeUp, .resizeRight:
+            .resize
         case .newWindow, .chooseWindow, .nextWindow, .previousWindow,
              .lastWindow, .renameWindow, .closeWindow:
             .windows
@@ -44,6 +51,10 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         case .togglePaneZoom: "Toggle Pane Zoom"
         case .copyMode: "Copy Mode"
         case .closePane: "Close Pane"
+        case .resizeLeft: "Resize Left"
+        case .resizeDown: "Resize Down"
+        case .resizeUp: "Resize Up"
+        case .resizeRight: "Resize Right"
         case .newWindow: "New Window"
         case .chooseWindow: "Choose Window"
         case .nextWindow: "Next Window"
@@ -64,6 +75,12 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         case .togglePaneZoom: "resize-pane -Z"
         case .copyMode: "copy-mode"
         case .closePane: "kill-pane"
+        // No count: resize-pane's default adjustment is one cell, exactly
+        // the stock ⌃-arrow binding's step.
+        case .resizeLeft: "resize-pane -L"
+        case .resizeDown: "resize-pane -D"
+        case .resizeUp: "resize-pane -U"
+        case .resizeRight: "resize-pane -R"
         case .newWindow: "new-window"
         case .chooseWindow: "choose-tree"
         case .nextWindow: "next-window"
@@ -74,7 +91,9 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var binding: Character {
+    /// The single key after the prefix; nil for the resize rows, whose stock
+    /// bindings are the ⌃-arrow chords `bindingLabel` documents instead.
+    var binding: Character? {
         switch self {
         case .splitLeftRight: "%"
         case .splitTopBottom: "\""
@@ -82,6 +101,7 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         case .togglePaneZoom: "z"
         case .copyMode: "["
         case .closePane: "x"
+        case .resizeLeft, .resizeDown, .resizeUp, .resizeRight: nil
         case .newWindow: "c"
         case .chooseWindow: "w"
         case .nextWindow: "n"
@@ -89,6 +109,39 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         case .lastWindow: "l"
         case .renameWindow: ","
         case .closeWindow: "&"
+        }
+    }
+
+    /// The one direction fact behind a resize row; nil for every ordinary
+    /// row. The command flag, the stock ⌃-arrow chord, and the panel's
+    /// button face all derive from it, so the four directions cannot drift.
+    enum ResizeDirection: String {
+        case left, down, up, right
+
+        var arrow: String {
+            switch self {
+            case .left: "←"
+            case .down: "↓"
+            case .up: "↑"
+            case .right: "→"
+            }
+        }
+    }
+
+    /// The held resize row's step, matching tmux's own coarse default (the
+    /// stock M-arrow binding resizes five cells where ⌃-arrow resizes one).
+    static let coarseResizeCells = 5
+
+    var resizeDirection: ResizeDirection? {
+        switch self {
+        case .resizeLeft: .left
+        case .resizeDown: .down
+        case .resizeUp: .up
+        case .resizeRight: .right
+        case .splitLeftRight, .splitTopBottom, .nextPane, .togglePaneZoom,
+             .copyMode, .closePane, .newWindow, .chooseWindow, .nextWindow,
+             .previousWindow, .lastWindow, .renameWindow, .closeWindow:
+            nil
         }
     }
 
@@ -102,7 +155,8 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
     /// leave behind is the terminal, and it must not be covered.
     var keepsPanelOpen: Bool {
         switch self {
-        case .nextPane, .togglePaneZoom, .nextWindow, .previousWindow, .lastWindow:
+        case .nextPane, .togglePaneZoom, .nextWindow, .previousWindow, .lastWindow,
+             .resizeLeft, .resizeDown, .resizeUp, .resizeRight:
             true
         case .splitLeftRight, .splitTopBottom, .copyMode, .closePane,
              .newWindow, .chooseWindow, .renameWindow, .closeWindow:
@@ -110,16 +164,35 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Whether the row can land the session on a different window — the only
+    /// rows whose success invalidates the panel's switch list.
+    var movesActiveWindow: Bool {
+        switch self {
+        case .nextWindow, .previousWindow, .lastWindow:
+            true
+        case .splitLeftRight, .splitTopBottom, .nextPane, .togglePaneZoom,
+             .copyMode, .closePane, .resizeLeft, .resizeDown, .resizeUp,
+             .resizeRight, .newWindow, .chooseWindow, .renameWindow, .closeWindow:
+            false
+        }
+    }
+
     var bindingLabel: String {
-        requiresDoubleActivation ? "2×" : "⌃B \(binding.uppercased())"
+        if requiresDoubleActivation { return "2×" }
+        if let direction = resizeDirection { return "⌃B ⌃\(direction.arrow)" }
+        // Every non-resize row has a post-prefix key.
+        return "⌃B \(binding!.uppercased())"
     }
 
     /// Non-destructive actions use the stock binding through SwiftTerm.
     /// Close actions deliberately have no terminal input: after the panel's
     /// second press they execute through `TmuxProbe.directShortcutCommand`,
     /// avoiding both the timing-sensitive `:` prompt and tmux's own prompt.
+    /// Resize rows have none either — their stock chord is prefix plus a
+    /// multi-byte ⌃-arrow sequence, even more burst-fragile than the splits'
+    /// shifted `%`, so they only run through the control plane.
     var bindingInput: [UInt8]? {
-        guard !requiresDoubleActivation else { return nil }
+        guard !requiresDoubleActivation, let binding else { return nil }
         return [0x02, binding.asciiValue!]
     }
 

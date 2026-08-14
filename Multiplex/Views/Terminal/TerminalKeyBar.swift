@@ -948,6 +948,12 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                 }
                 self?.press(.shortcut(item))
             },
+            // A held resize row repeats coarse steps — clicked like a press,
+            // dispatched straight to the controller (no dismissal decision).
+            selectCoarse: { [weak self] item in
+                self?.click()
+                self?.controller?.performPanelShortcutCoarse(item)
+            },
             loadChoices: { [weak self] in
                 await self?.controller?.loadShortcutSwitchChoices()
             },
