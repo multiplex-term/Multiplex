@@ -895,7 +895,11 @@ final class FleetWallUIKitTests: XCTestCase {
         } as? FleetWallViewController)
         let item = try XCTUnwrap(wall.navigationItem.rightBarButtonItem)
         let customView = try XCTUnwrap(item.customView)
-        XCTAssertEqual(descendants(of: UIKitChassisChip.self, in: customView).count, 3)
+        // HOST · STATS · FAQ · SETTINGS (stats joins while collection is on,
+        // its default).
+        XCTAssertEqual(descendants(of: UIKitChassisChip.self, in: customView).count, 4)
+        XCTAssertNotNil(descendants(of: UIKitChassisChip.self, in: customView)
+            .first { $0.accessibilityLabel == "Connection stats" })
         if #available(iOS 26.0, *) {
             XCTAssertTrue(
                 item.hidesSharedBackground,
