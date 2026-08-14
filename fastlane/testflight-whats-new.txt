@@ -1,13 +1,13 @@
 NEW SINCE 1.3.1
-• THE SHORTCUT PANEL STAYS OPEN WHILE YOU MOVE — in the TMUX / HRDR panel, the window/workspace switch list and the movement rows keep the panel up, with ACTIVE following where you land. Splits, new/rename/close and Copy Mode still close it.
-• RESIZE PANES FROM THE TMUX PANEL — a RESIZE PANE row of four arrow buttons nudges the focused pane's border one cell per tap, and the panel stays open so you can tap until it fits. Keep a button pressed to go faster: five cells per step, repeating every second until you let go.
-• TMUX PANEL COMMANDS LAND EVERY TIME — New Window, Choose Window, the window hops, Next Pane, and Zoom now run over the SSH control connection instead of typing the prefix chord, so they can no longer drop their Ctrl-B and leave a stray letter in the pane. Rename Window opens its own name field, prefilled with the current name, and renames directly.
-• DICTATE IN YOUR OWN LANGUAGES — while dictating, the LISTENING bar shows your language next to a globe. Tap it to switch among the preferred languages from your device's Language Settings, like the system keyboard's dictation; the take restarts in the language you pick and it sticks for next time. With one language the mic works exactly as before.
-• LEANER SHORTCUT PANELS — Next Pane is gone from TMUX and HRDR, along with TMUX Last Window and HRDR Next / Previous Tab. Panes, tabs and windows are already directly selectable, so the panel now reserves space for actions that need app chrome.
+• SHORTCUT PANEL STAYS OPEN while you switch or move between windows, workspaces and panes — ACTIVE follows where you land.
+• RESIZE PANES — arrow row in the TMUX panel; tap to nudge, hold to repeat faster.
+• TMUX PANEL COMMANDS LAND EVERY TIME — they run over the control connection now, so no more stray letters from a dropped prefix. Rename Window gets its own name field.
+• DICTATE IN YOUR OWN LANGUAGES — tap the globe in the LISTENING bar to switch among your device's preferred languages.
+• LEANER PANELS — pane/tab/window cycling rows are gone; those are directly selectable already.
 
 PLEASE TRY
-1. Open the panel on a session with three or more windows and hop through the switch list, then NEXT / PREVIOUS WINDOW — the panel should stay up and ACTIVE should follow.
-2. If your device lists several languages in Settings, start dictation and tap the globe chip in the LISTENING bar — the take should restart in the language you pick, the words should land in it, and the next take should remember it.
-3. Open both TMUX and HRDR panels and confirm the pane/tab cycling rows are gone while split, resize, create, rename and close actions still work.
+1. Hop through windows from the TMUX panel — it should stay up, with ACTIVE following.
+2. If your device lists several languages, tap the globe while dictating and speak in the language you pick.
+3. Confirm split, resize, create, rename and close still work in both panels.
 
 Feedback: screenshot in TestFlight
