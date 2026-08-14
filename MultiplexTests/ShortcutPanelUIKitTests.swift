@@ -115,6 +115,28 @@ final class ShortcutPanelUIKitTests: XCTestCase {
         XCTAssertEqual(coarse.count, 2)
     }
 
+    func testRenameCommitPlumbsTrimmedNamesAndNeverRidesOrdinarySelect() {
+        var selected: [ShortcutPanelItem] = []
+        var renames: [String] = []
+        let controller = ShortcutPanelViewController(
+            content: .tmux,
+            select: { selected.append($0) },
+            rename: { _, name in renames.append(name) }
+        )
+        controller.loadViewIfNeeded()
+
+        // The row prompts rather than selecting; a scene-less test panel
+        // cannot present the alert, so drive the commit seam directly.
+        let item = ShortcutPanelItem(TmuxShortcut.renameWindow)
+        XCTAssertTrue(item.promptsForName)
+        XCTAssertTrue(item.keepsPanelOpen)
+        controller.confirmRename(item, to: "  deploy  ")
+        XCTAssertEqual(renames, ["deploy"])
+        controller.confirmRename(item, to: "   ")
+        XCTAssertEqual(renames, ["deploy"])
+        XCTAssertTrue(selected.isEmpty)
+    }
+
     func testHerdrCloseRowsCarryTheirPayloadThroughTheSameConfirmation() throws {
         var selected: [ShortcutPanelItem] = []
         let controller = ShortcutPanelViewController(content: .herdr) {

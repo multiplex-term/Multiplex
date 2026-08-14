@@ -18,8 +18,12 @@ final class ShortcutPanelViewController: UIViewController {
     private var panelWidth: CGFloat
     private var select: (ShortcutPanelItem) -> Void
     private var selectCoarse: ((ShortcutPanelItem) -> Void)?
+    private var rename: ((ShortcutPanelItem, String) -> Void)?
     private var loadChoices: (() async -> [TmuxWindowChoice]?)?
     private var selectChoice: ((TmuxWindowChoice) -> Void)?
+    /// The last loaded switch list, kept even when too short to render a
+    /// section: the rename field prefills from its active row's name.
+    private var latestChoices: [TmuxWindowChoice] = []
 
     private let panelView: ShortcutPanelRootView
     private let contentStack = UIStackView()
@@ -37,6 +41,7 @@ final class ShortcutPanelViewController: UIViewController {
         width: CGFloat = ShortcutPanelViewController.preferredWidth,
         select: @escaping (ShortcutPanelItem) -> Void,
         selectCoarse: ((ShortcutPanelItem) -> Void)? = nil,
+        rename: ((ShortcutPanelItem, String) -> Void)? = nil,
         loadChoices: (() async -> [TmuxWindowChoice]?)? = nil,
         selectChoice: ((TmuxWindowChoice) -> Void)? = nil
     ) {
@@ -44,6 +49,7 @@ final class ShortcutPanelViewController: UIViewController {
         panelWidth = width
         self.select = select
         self.selectCoarse = selectCoarse
+        self.rename = rename
         self.loadChoices = loadChoices
         self.selectChoice = selectChoice
         panelView = ShortcutPanelRootView(width: width)
@@ -85,6 +91,7 @@ final class ShortcutPanelViewController: UIViewController {
     /// loader and by UIKit-focused tests. A single window/workspace has no
     /// useful switch action and therefore earns no section.
     func applyChoices(_ choices: [TmuxWindowChoice]) {
+        latestChoices = choices
         choiceButtons = []
         switchSection.arrangedSubviews.forEach {
             switchSection.removeArrangedSubview($0)
@@ -298,6 +305,10 @@ final class ShortcutPanelViewController: UIViewController {
     }
 
     private func activate(_ item: ShortcutPanelItem) {
+        if item.promptsForName {
+            disarm()
+            return presentRenamePrompt(for: item)
+        }
         guard item.requiresDoubleActivation else {
             disarm()
             select(item)
@@ -335,13 +346,55 @@ final class ShortcutPanelViewController: UIViewController {
         }
     }
 
+    /// The rename field, hosted by the panel so both platforms share one
+    /// implementation. Prefilled with the active window's name from the
+    /// already-loaded switch list; the panel stays up and re-reads the
+    /// list once the rename lands.
+    private func presentRenamePrompt(for item: ShortcutPanelItem) {
+        let alert = UIAlertController(
+            title: item.title, message: nil, preferredStyle: .alert
+        )
+        alert.overrideUserInterfaceStyle = overrideUserInterfaceStyle
+        let activeName = latestChoices.first(where: \.isActive)?.name
+        alert.addTextField { field in
+            field.text = activeName
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+            field.clearButtonMode = .whileEditing
+        }
+        let commit = UIAlertAction(
+            title: "Rename", style: .default
+        ) { [weak self, weak alert] _ in
+            self?.confirmRename(item, to: alert?.textFields?.first?.text ?? "")
+        }
+        alert.addAction(commit)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    /// The rename field's commit — internal so UIKit-focused tests can
+    /// drive it without presenting the alert (a scene-less test panel
+    /// cannot present). An all-whitespace name declines like tmux's own
+    /// prompt declines an empty one.
+    func confirmRename(_ item: ShortcutPanelItem, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        rename?(item, trimmed)
+        scheduleChoiceRefresh()
+    }
+
     /// Next / Previous / Last Window may have moved the very window the
-    /// switch list marks ACTIVE while the panel stays up. The binding
-    /// travels through the terminal, so re-read the list once it has landed
-    /// rather than guess the destination. Rows that stay put (pane hops,
-    /// zoom, resize) never pay the round trip.
+    /// switch list marks ACTIVE while the panel stays up. The command runs
+    /// remotely, so re-read the list once it has landed rather than guess
+    /// the destination. Rows that stay put (pane hops, zoom, resize) never
+    /// pay the round trip.
     private func scheduleChoiceRefreshIfPanelStays(_ item: ShortcutPanelItem) {
-        guard item.invalidatesSwitchChoices, let loadChoices else { return }
+        guard item.invalidatesSwitchChoices else { return }
+        scheduleChoiceRefresh()
+    }
+
+    private func scheduleChoiceRefresh() {
+        guard let loadChoices else { return }
         choiceRefreshTask?.cancel()
         choiceRefreshTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: Self.choiceRefreshDelay)

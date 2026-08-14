@@ -884,6 +884,26 @@ final class TerminalSessionController {
         }
     }
 
+    /// Apply the panel's native rename field: the stock `,` binding opens a
+    /// client-side tmux prompt an exec can neither target (several clients)
+    /// nor drive — command-prompt blocks the exec until answered — so the
+    /// panel collects the name and this renames the active window directly.
+    func performPanelRename(_ item: ShortcutPanelItem, to name: String) {
+        guard case .tmux(let shortcut) = item.payload,
+              shortcut.promptsForWindowName,
+              status == .live, route.usesTmux,
+              let sessionName = route.sessionName
+        else { return }
+        if case .finding = historyJump { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        Task {
+            await executeControlCommand(TmuxProbe.renameWindowCommand(
+                sessionName: sessionName, newName: trimmed
+            ))
+        }
+    }
+
     /// A held resize row: the same active-pane command at tmux's own coarse
     /// step. Only resize rows hold, so anything else fails closed.
     func performPanelShortcutCoarse(_ item: ShortcutPanelItem) {

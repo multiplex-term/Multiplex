@@ -22,6 +22,9 @@ struct ShortcutPanelItem: Equatable, Sendable, Identifiable {
     /// Whether performing this row can move the switch section's ACTIVE
     /// choice, requiring the open panel to re-read the list.
     var invalidatesSwitchChoices: Bool
+    /// Whether the row collects a name in the panel's own field before it
+    /// performs (tmux Rename Window).
+    var promptsForName: Bool
     /// SF Symbol name for a compact-row button's face (the tmux resize
     /// directions); nil for the ordinary grid rows. A symbol, not a text
     /// glyph: the Unicode arrow-to-bar characters come from different
@@ -39,6 +42,7 @@ struct ShortcutPanelItem: Equatable, Sendable, Identifiable {
         requiresDoubleActivation = shortcut.requiresDoubleActivation
         keepsPanelOpen = shortcut.keepsPanelOpen
         invalidatesSwitchChoices = shortcut.movesActiveWindow
+        promptsForName = shortcut.promptsForWindowName
         symbolName = shortcut.resizeDirection.map { "arrow.\($0.rawValue).to.line" }
         accessibilityIdentifier = "tmuxShortcut.\(shortcut.rawValue)"
     }
@@ -53,6 +57,7 @@ struct ShortcutPanelItem: Equatable, Sendable, Identifiable {
         // No herdr row moves the active workspace, so none invalidates the
         // switch list (cycling panes/tabs happens inside one workspace).
         invalidatesSwitchChoices = false
+        promptsForName = false
         symbolName = nil
         accessibilityIdentifier = "herdrShortcut.\(shortcut.rawValue)"
     }

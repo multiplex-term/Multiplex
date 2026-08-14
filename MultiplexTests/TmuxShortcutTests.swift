@@ -104,18 +104,48 @@ final class TmuxShortcutTests: XCTestCase {
         XCTAssertEqual(deliveredTopBottom, topBottom)
     }
 
-    func testOnlySplitsResizesAndConfirmedClosesHaveDirectControlCommands() {
-        let expected: Set<TmuxShortcut> = [
-            .splitLeftRight, .splitTopBottom, .closePane, .closeWindow,
-            .resizeLeft, .resizeDown, .resizeUp, .resizeRight,
-        ]
+    func testEveryRowButCopyModeAndRenameRunsOnTheControlPlane() {
+        // Copy Mode must ride the ordered terminal pump beside the local
+        // selection-UI switch; Rename collects its name in the panel's own
+        // field and applies through renameWindowCommand instead.
+        let terminalOnly: Set<TmuxShortcut> = [.copyMode, .renameWindow]
         let actual = Set(TmuxShortcut.allCases.filter {
             TmuxProbe.directShortcutCommand($0, sessionName: "main") != nil
         })
-        XCTAssertEqual(actual, expected)
+        XCTAssertEqual(actual, Set(TmuxShortcut.allCases).subtracting(terminalOnly))
         XCTAssertEqual(
             TmuxProbe.shortcutDelivery(.copyMode, sessionName: "main"),
             .terminalInput([0x02, Character("[").asciiValue!])
+        )
+    }
+
+    func testWindowAndPaneRowsRunClientlessOnTheControlPlane() throws {
+        let cases: [(TmuxShortcut, String)] = [
+            (.newWindow, "tmux -u new-window -t '=my project:'"),
+            (.nextWindow, "tmux -u next-window -t '=my project'"),
+            (.previousWindow, "tmux -u previous-window -t '=my project'"),
+            (.lastWindow, "tmux -u last-window -t '=my project'"),
+            (.nextPane, "tmux -u select-pane -t '=my project:.+'"),
+            (.togglePaneZoom, "tmux -u resize-pane -Z -t \"$target\""),
+            (.chooseWindow, "tmux -u choose-tree -Zw -t \"$target\""),
+        ]
+        for (shortcut, fragment) in cases {
+            let command = try XCTUnwrap(TmuxProbe.directShortcutCommand(
+                shortcut, sessionName: "my project"
+            ))
+            XCTAssertTrue(command.contains(fragment), "\(shortcut): \(command)")
+        }
+    }
+
+    func testRenameAppliesTheNativeFieldThroughAnIDTargetedControlCommand() {
+        XCTAssertTrue(TmuxShortcut.renameWindow.promptsForWindowName)
+        let command = TmuxProbe.renameWindowCommand(
+            sessionName: "my project", newName: "api's logs"
+        )
+        XCTAssertTrue(command.contains("tmux -u list-windows -t '=my project'"))
+        XCTAssertTrue(command.contains("#{?window_active,#{window_id},}"))
+        XCTAssertTrue(
+            command.contains("rename-window -t \"$target\" -- 'api'\\''s logs'")
         )
     }
 
@@ -146,14 +176,14 @@ final class TmuxShortcutTests: XCTestCase {
             Set(TmuxShortcut.allCases.filter(\.keepsPanelOpen)),
             [
                 .nextPane, .togglePaneZoom, .nextWindow, .previousWindow, .lastWindow,
-                .resizeLeft, .resizeDown, .resizeUp, .resizeRight,
+                .resizeLeft, .resizeDown, .resizeUp, .resizeRight, .renameWindow,
             ]
         )
         // Anything that leaves you looking at the terminal — a new pane, a
-        // prompt, a mode, a close — must uncover it.
+        // mode, a close — must uncover it.
         for shortcut in [
             TmuxShortcut.splitLeftRight, .splitTopBottom, .copyMode, .closePane,
-            .newWindow, .chooseWindow, .renameWindow, .closeWindow,
+            .newWindow, .chooseWindow, .closeWindow,
         ] {
             XCTAssertFalse(shortcut.keepsPanelOpen, "\(shortcut) should dismiss")
             XCTAssertFalse(

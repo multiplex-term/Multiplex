@@ -954,6 +954,10 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                 self?.click()
                 self?.controller?.performPanelShortcutCoarse(item)
             },
+            rename: { [weak self] item, name in
+                self?.click()
+                self?.controller?.performPanelRename(item, to: name)
+            },
             loadChoices: { [weak self] in
                 await self?.controller?.loadShortcutSwitchChoices()
             },

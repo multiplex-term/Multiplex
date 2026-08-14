@@ -150,19 +150,25 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
     }
 
     /// Moving between panes and windows is a switchboard action: the panel
-    /// stays up so a hop can be repeated, exactly like its window list. Rows
-    /// that create, rename, close, or enter a mode dismiss it — what they
-    /// leave behind is the terminal, and it must not be covered.
+    /// stays up so a hop can be repeated, exactly like its window list.
+    /// Rename stays up too — the panel hosts its name field and then shows
+    /// the renamed list. Rows that create, close, or enter a mode dismiss
+    /// it — what they leave behind is the terminal, and it must not be
+    /// covered.
     var keepsPanelOpen: Bool {
         switch self {
         case .nextPane, .togglePaneZoom, .nextWindow, .previousWindow, .lastWindow,
-             .resizeLeft, .resizeDown, .resizeUp, .resizeRight:
+             .resizeLeft, .resizeDown, .resizeUp, .resizeRight, .renameWindow:
             true
         case .splitLeftRight, .splitTopBottom, .copyMode, .closePane,
-             .newWindow, .chooseWindow, .renameWindow, .closeWindow:
+             .newWindow, .chooseWindow, .closeWindow:
             false
         }
     }
+
+    /// Rename collects its window name in the panel's own field: the stock
+    /// `,` prompt is client-side tmux UI the control plane cannot drive.
+    var promptsForWindowName: Bool { self == .renameWindow }
 
     /// Whether the row can land the session on a different window — the only
     /// rows whose success invalidates the panel's switch list.

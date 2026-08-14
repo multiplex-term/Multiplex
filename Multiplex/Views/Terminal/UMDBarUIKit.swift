@@ -993,6 +993,9 @@ final class UMDBarViewController: UIViewController,
             selectCoarse: { [weak self] item in
                 self?.configuration.controller?.performPanelShortcutCoarse(item)
             },
+            rename: { [weak self] item, name in
+                self?.configuration.controller?.performPanelRename(item, to: name)
+            },
             loadChoices: { [weak controller = configuration.controller] in
                 await controller?.loadShortcutSwitchChoices()
             },

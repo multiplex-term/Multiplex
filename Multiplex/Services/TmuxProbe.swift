@@ -543,7 +543,9 @@ enum TmuxProbe {
     }
 
     /// The panel's one dispatch decision. A direct command deliberately wins
-    /// when a shortcut also documents stock binding bytes (both split rows).
+    /// whenever one exists — the stock binding bytes stay documented (and
+    /// serve hardware-keyboard reference), but panel rows must not depend
+    /// on a prefix burst that can lose its Ctrl-B in flight.
     static func shortcutDelivery(
         _ shortcut: TmuxShortcut, sessionName: String, resizeCells: Int = 1
     ) -> ShortcutDelivery? {
@@ -558,13 +560,22 @@ enum TmuxProbe {
         return nil
     }
 
-    /// Execute one shortcut through the SSH control plane. Split rows on every
-    /// transport use this because a stock-prefix burst can intermittently lose
-    /// its Ctrl-B before a shifted `%` reaches tmux on iPad, leaving the
-    /// character in the pane. Resize rows use it for the same reason — their
-    /// stock chord is a multi-byte ⌃-arrow after the prefix. Confirmed
-    /// closes use it so they never enter tmux's own confirmation prompt.
-    /// Resolve the session's current pane/window to tmux's id first: pane
+    /// Execute one shortcut through the SSH control plane. Every row that
+    /// can run without a tmux client goes direct, because the stock-prefix
+    /// burst through the terminal can intermittently lose its Ctrl-B and
+    /// type the bare key into the pane (first measured on the splits'
+    /// shifted `%` on iPad, on either transport; reported again 2026-08-14
+    /// on the window rows). Confirmed closes also avoid tmux's own
+    /// confirmation prompt this way. Only two rows stay off it: Copy Mode,
+    /// whose binding must travel the ordered terminal pump so the local
+    /// selection-UI switch stays in step with it, and Rename Window, whose
+    /// stock `,` opens a client-side prompt an exec can neither target
+    /// (several clients) nor drive — `command-prompt` from an exec blocks
+    /// until the prompt resolves (measured 2026-08-14); the panel collects
+    /// the name natively and applies `renameWindowCommand` instead.
+    ///
+    /// Session-target rows pass `=name` straight to tmux; rows acting on a
+    /// pane resolve the session's active pane to tmux's id first — pane
     /// commands reject `=name` targets on tmux 3.6a, and ids avoid prefix
     /// collisions. `#{pane_current_path}` is expanded by tmux against that
     /// target, preserving the stock split binding's working directory.
@@ -574,6 +585,27 @@ enum TmuxProbe {
         _ shortcut: TmuxShortcut, sessionName: String, resizeCells: Int = 1
     ) -> String? {
         let exactSession = "=\(sessionName)".shellQuoted
+        // Verified from a plain exec against tmux 3.x (2026-08-14): the
+        // `=name:` window target makes new-window create at the first free
+        // index and select it — exactly the stock `c` — and `=name:.+`
+        // steps select-pane through the current window's panes.
+        switch shortcut {
+        case .newWindow:
+            return pathPrefix
+                + "\(tmuxCommand) new-window -t \("=\(sessionName):".shellQuoted)"
+        case .nextWindow:
+            return pathPrefix + "\(tmuxCommand) next-window -t \(exactSession)"
+        case .previousWindow:
+            return pathPrefix + "\(tmuxCommand) previous-window -t \(exactSession)"
+        case .lastWindow:
+            return pathPrefix + "\(tmuxCommand) last-window -t \(exactSession)"
+        case .nextPane:
+            return pathPrefix
+                + "\(tmuxCommand) select-pane -t \("=\(sessionName):.+".shellQuoted)"
+        default:
+            break
+        }
+
         let activePaneLookup = "\(tmuxCommand) list-panes -t \(exactSession)"
             + " -F '#{?pane_active,#{pane_id},}' 2>/dev/null | grep -m1 ."
         let lookup: String
@@ -594,6 +626,15 @@ enum TmuxProbe {
             lookup = activePaneLookup
             action = "\(tmuxCommand) \(shortcut.command) -t \"$target\""
                 + (resizeCells == 1 ? "" : " \(resizeCells)")
+        case .togglePaneZoom:
+            lookup = activePaneLookup
+            action = "\(tmuxCommand) resize-pane -Z -t \"$target\""
+        case .chooseWindow:
+            // -Zw matches the stock `w` binding (windows view, zoomed);
+            // the chooser is pane state, so it opens for the attached
+            // client even though no client runs the command.
+            lookup = activePaneLookup
+            action = "\(tmuxCommand) choose-tree -Zw -t \"$target\""
         case .closeWindow:
             lookup = "\(tmuxCommand) list-windows -t \(exactSession)"
                 + " -F '#{?window_active,#{window_id},}' 2>/dev/null | grep -m1 ."
@@ -604,6 +645,20 @@ enum TmuxProbe {
         return pathPrefix
             + "target=$(\(lookup)); "
             + "if [ -n \"$target\" ]; then \(action); fi"
+    }
+
+    /// Rename the session's active window — the apply half of the panel's
+    /// native rename field (see `directShortcutCommand` for why tmux's own
+    /// `,` prompt cannot be driven from an exec). Same id-resolution
+    /// discipline as the confirmed closes; `--` guards names that start
+    /// with a dash.
+    static func renameWindowCommand(sessionName: String, newName: String) -> String {
+        let lookup = "\(tmuxCommand) list-windows -t \("=\(sessionName)".shellQuoted)"
+            + " -F '#{?window_active,#{window_id},}' 2>/dev/null | grep -m1 ."
+        return pathPrefix
+            + "target=$(\(lookup)); "
+            + "if [ -n \"$target\" ]; then "
+            + "\(tmuxCommand) rename-window -t \"$target\" -- \(newName.shellQuoted); fi"
     }
 
     /// The shortcut panel's window list for one session. Same `-F`
