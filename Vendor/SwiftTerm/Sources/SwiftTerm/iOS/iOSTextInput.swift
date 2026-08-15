@@ -142,12 +142,9 @@ extension TerminalView: UITextInput {
     }
     
     public func replace(_ range: UITextRange, withText text: String) {
-        // Multiplex patch: an incoming range addresses the real document, so the
-        // backspace filler must be cleared before it is coerced against the
-        // buffer. A non-empty range that addressed filler is a correction to
-        // characters this view invented: its delete half is meaningless, and
-        // sending the insert half alone duplicates text on the remote — the
-        // whole edit is dropped with the filler, not just its range.
+        // Multiplex patch: clear the backspace filler before coercing the
+        // range. A non-empty range that addressed filler is dropped whole —
+        // sending its insert half alone would duplicate text on the remote.
         let rangeAddressedFiller = inputFillerCount > 0 && !range.isEmpty
         clearInputFiller()
         if rangeAddressedFiller {
@@ -158,14 +155,10 @@ extension TerminalView: UITextInput {
 
         guard _markedTextRange == nil else { return }
 
-        // Multiplex patch: the only delete this view can express is a
-        // backspace at the remote cursor, which sits at the end of what the
-        // mirror tracks — so a replacement is faithful only when its range
-        // reaches the end of the document. A mid-document range (autocorrect,
-        // inline prediction, or Writing Tools rewriting an earlier word) would
-        // backspace over the *newest* characters and re-insert elsewhere,
-        // mangling the line; drop the edit whole instead. The traits opt out
-        // of those features, so this is the backstop, not the policy.
+        // Multiplex patch: backspaces only delete at the remote cursor, so a
+        // replacement is expressible only when its range reaches the document
+        // end. A mid-document edit (autocorrect/prediction fixing an earlier
+        // word) would eat the newest characters instead — drop it whole.
         guard r.endPosition.offset == textInputStorage.textInputUTF16Count else {
             uitiLog("replace(range:\(r), withText:\(text.debugDescription)) dropped — range does not reach the document end \(textInputStateDescription())")
             return
