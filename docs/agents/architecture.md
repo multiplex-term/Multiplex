@@ -68,7 +68,9 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
                      moves re-parent the live page; in-memory only
     FileViewerController one per ▤ file-viewer tab; dials its OWN lazy
                      SSHConnection; in-memory only (shares the
-                     isAuxiliaryPane rules with the viewport)
+                     isAuxiliaryPane rules with the viewport); its
+                     Document owns the PDF / audio clip, so a moved tab
+                     keeps page and position
   TerminalSessionController  one per tab; input pump + TerminalView
     TerminalTransport    the tab's byte pipe; picked by host.useMosh
                          (exec + SFTP stay SSH-only capabilities)

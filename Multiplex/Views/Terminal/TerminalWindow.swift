@@ -26,6 +26,9 @@ extension Notification.Name {
     static let multiplexDebugFileViewerImage = Notification.Name(
         "MultiplexDebugFileViewerImage"
     )
+    static let multiplexDebugFileViewerPlay = Notification.Name(
+        "MultiplexDebugFileViewerPlay"
+    )
 }
 
 /// `….debug.fileviewer` runs the focused window's + TAB ▸ File Viewer
@@ -37,6 +40,9 @@ extension Notification.Name {
 /// simulator can't tap). `….debug.fvimage` presses the first image
 /// placeholder on the rendered markdown screen — the same destination →
 /// resolve → open path a finger takes, which no sim tap can drive.
+/// `….debug.fvplay` presses PLAY/PAUSE on the active viewer's sound screen
+/// (the panel's own chip action; proof is the PLAYING lamp and a moving
+/// clock in the next screenshot).
 @MainActor
 enum FileViewerDebugHook {
     private static var installed = false
@@ -78,6 +84,14 @@ enum FileViewerDebugHook {
         ) { _ in
             NotificationCenter.default.post(
                 name: .multiplexDebugFileViewerImage, object: nil
+            )
+        }
+        var playToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.fvplay", &playToken, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugFileViewerPlay, object: nil
             )
         }
     }

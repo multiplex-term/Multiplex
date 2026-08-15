@@ -687,8 +687,13 @@ actor SSHConnection {
                     if next < offsets.count { addNext() }
                 }
             }
-            for (index, chunk) in chunks.enumerated() {
-                guard let chunk else { break }
+            // Assemble into one reserved buffer, releasing each chunk as it
+            // lands: at the media cap the pieces are 60 MB on their own, and
+            // holding them beside the growing whole doubled the peak.
+            data.reserveCapacity(total)
+            for index in chunks.indices {
+                guard let chunk = chunks[index] else { break }
+                chunks[index] = nil
                 data.append(chunk)
                 let planned = min(readChunkSize, total - offsets[index])
                 if chunk.count < planned { break }

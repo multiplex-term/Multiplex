@@ -2,6 +2,7 @@ import Citadel
 import Foundation
 import ImageIO
 import Observation
+import PDFKit
 import UIKit
 
 /// One file-viewer tab's state: its own SSH connection (dialed lazily,
@@ -24,6 +25,11 @@ final class FileViewerController: AuxiliaryPaneController {
     /// that highlighting stays interactive.
     static let textByteLimit = 1_500_000
     static let imageByteLimit = 12_000_000
+    /// PDFs and sound files are read whole (PDFKit wants random access, the
+    /// player has no streaming road over SFTP), so the cap is what a
+    /// listener will wait through and what a tab may hold in memory: a
+    /// scanned book or an hour of MP3, not a lossless album.
+    static let mediaByteLimit = 60_000_000
     /// The longest edge the viewer decodes to. Encoded bytes bound nothing
     /// about a bitmap's size, and the screen this renders on is smaller than
     /// this in every dimension.
@@ -133,6 +139,14 @@ final class FileViewerController: AuxiliaryPaneController {
         /// Decoded once at load — re-decoding megabytes per body
         /// evaluation is what image views must never do.
         var image: UIImage?
+        /// Parsed once at load (PDFKit compares by identity, so a reload is
+        /// a new value). A locked document (`isLocked`) is still a PDF — the
+        /// screen offers UNLOCK.
+        var pdf: PDFDocument?
+        /// The player behind an audio file, owned here so the position
+        /// survives the screen (merge/split rebuilds the pane, not the
+        /// document). nil under `.audio` means this device can't decode it.
+        var audio: FileViewerAudioClip?
         /// The text behind a markdown render, kept so the RAW toggle
         /// re-renders locally instead of re-downloading the file.
         var sourceText: String?
@@ -158,7 +172,19 @@ final class FileViewerController: AuxiliaryPaneController {
         case failure(title: String, message: String)
     }
 
-    private(set) var content: Content = .idle
+    /// The document leaving the screen takes its sound with it — sound with
+    /// no controls in sight is a dead end. The same clip re-published (an
+    /// unlock, a quiet reload that adopted it) keeps playing; a moved tab
+    /// never changes `content`, so merge/split plays through.
+    private(set) var content: Content = .idle {
+        didSet {
+            guard case .document(let previous) = oldValue,
+                  let clip = previous.audio
+            else { return }
+            if case .document(let next) = content, next.audio === clip { return }
+            clip.pause()
+        }
+    }
     /// Back/forward trail of the content screens this tab visited. Written
     /// only where content lands (a failed load is never a destination);
     /// `visit`'s equality gate keeps refresh and quiet watch swaps out.
@@ -366,6 +392,10 @@ final class FileViewerController: AuxiliaryPaneController {
     }
 
     func shutdown() {
+        // A closing tab silences its player now rather than whenever the
+        // last reference lets go (`lastDocument` holds every clip `content`
+        // can, and the one a failed load left behind).
+        lastDocument?.audio?.stop()
         let dying = connection
         connection = nil
         Task { await dying?.close() }
@@ -699,6 +729,13 @@ final class FileViewerController: AuxiliaryPaneController {
         }
     }
 
+    /// Carries the off-main parse home. `PDFDocument` is not `Sendable`, but a
+    /// freshly built one is referenced by nobody else — the hop back to the
+    /// main actor is the only crossing it makes.
+    private struct ParsedPDF: @unchecked Sendable {
+        let document: PDFDocument?
+    }
+
     /// A refusal the pipeline can title itself (the size cap) — one error
     /// channel: `makeDocument` throws, callers catch into the panel.
     private struct LoadRefusal: Error {
@@ -723,16 +760,32 @@ final class FileViewerController: AuxiliaryPaneController {
         switch document.kind {
         case .binary:
             break
+        case .pdf:
+            let data = try await readWhole(
+                path: path, name: name, size: size, limit: Self.mediaByteLimit, noun: "PDFs"
+            )
+            // The xref walk of a scanned book is real work — off the main
+            // actor like the highlighter; pages then render lazily on screen.
+            let parsed = await Task.detached { ParsedPDF(document: PDFDocument(data: data)) }.value
+            if let pdf = parsed.document {
+                document.pdf = pdf
+            } else {
+                // Not a PDF by any honest reading — the image verdict again.
+                document.kind = .binary
+            }
+        case .audio:
+            let data = try await readWhole(
+                path: path, name: name, size: size, limit: Self.mediaByteLimit, noun: "sound files"
+            )
+            // A decode failure keeps the AUDIO verdict: the screen says
+            // CAN'T PLAY and why, where BINARY would only say "not text".
+            document.audio = try? FileViewerAudioClip(
+                data: data, fileName: name, volumeStore: .shared
+            )
         case .image:
-            guard size <= UInt64(Self.imageByteLimit) else {
-                throw LoadRefusal(
-                    title: "TOO LARGE",
-                    message: "\(name) is \(Self.formatBytes(size)) — the viewer renders images up to \(Self.formatBytes(UInt64(Self.imageByteLimit)))."
-                )
-            }
-            let (data, _) = try await withConnection {
-                try await $0.readFile(atPath: path, limit: Self.imageByteLimit)
-            }
+            let data = try await readWhole(
+                path: path, name: name, size: size, limit: Self.imageByteLimit, noun: "images"
+            )
             // Undecodable "image" bytes are binary content by any honest
             // reading — same verdict as the NUL sniff below. Decoding goes
             // through a bounded downsample: the byte limit above says nothing
@@ -768,6 +821,38 @@ final class FileViewerController: AuxiliaryPaneController {
             }
         }
         return document
+    }
+
+    /// The whole-file read behind the media screens: the size gate names its
+    /// cap in the refusal, and the bytes come back in one piece (a document
+    /// or a sound file has no useful "head").
+    private func readWhole(
+        path: String, name: String, size: UInt64, limit: Int, noun: String
+    ) async throws -> Data {
+        guard size <= UInt64(limit) else {
+            throw LoadRefusal(
+                title: "TOO LARGE",
+                message: "\(name) is \(Self.formatBytes(size)) — the viewer opens \(noun) up to \(Self.formatBytes(UInt64(limit)))."
+            )
+        }
+        let (data, _) = try await withConnection {
+            try await $0.readFile(atPath: path, limit: limit)
+        }
+        return data
+    }
+
+    /// The LOCKED panel's UNLOCK: PDFKit unlocks the document in place, so
+    /// the same `Document` is re-published for the screen to rebuild against
+    /// the now-readable pages. Returns false when the password is wrong; the
+    /// password itself is never kept.
+    func unlockPDF(password: String) -> Bool {
+        guard case .document(let document) = content,
+              let pdf = document.pdf, pdf.isLocked,
+              pdf.unlock(withPassword: password)
+        else { return false }
+        contentGeneration += 1
+        content = .document(document)
+        return true
     }
 
     /// Markdown renders both ways from the same held text: blocks when
@@ -1033,6 +1118,11 @@ final class FileViewerController: AuxiliaryPaneController {
                   generation == contentGeneration,
                   case .document(let still) = content, still.path == current.path
             else { return }
+            // New bytes, same listener: the replacement clip picks up where
+            // the old one was and the old one goes quiet.
+            if let previous = still.audio, let replacement = document.audio {
+                replacement.adoptPosition(from: previous)
+            }
             lastDocument = document
             content = .document(document)
         case .diff:
