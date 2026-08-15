@@ -612,6 +612,58 @@ final class ThemeEditorUIKitTests: XCTestCase {
         XCTAssertEqual(saveCount, 0)
     }
 
+    func testEditsPreviewLiveAndBackClearsWhileSaveKeeps() throws {
+        let theme = TerminalTheme.tally.asCustom(named: "Live")
+        var previews: [TerminalTheme?] = []
+        var saved = 0
+        let controller = ThemeEditorViewController(theme: theme) { _ in saved += 1 }
+        controller.onPreview = { previews.append($0) }
+        let root = UIViewController()
+        let navigation = UINavigationController(rootViewController: root)
+        // Appearance callbacks (Back's viewDidDisappear) only run for a
+        // scene-attached window.
+        let scene = try XCTUnwrap(
+            UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 800, height: 900)
+        window.rootViewController = navigation
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        navigation.pushViewController(controller, animated: false)
+        controller.loadViewIfNeeded()
+        navigation.view.layoutIfNeeded()
+        XCTAssertTrue(previews.isEmpty, "an untouched draft previews nothing")
+
+        let cursor = try XCTUnwrap(controller.colorRows.first { $0.label == "Cursor" })
+        cursor.colorWell.selectedColor = UIColor(ThemeColor(0xFFEEDD))
+        cursor.colorWell.sendActions(for: .valueChanged)
+        XCTAssertEqual(previews.last??.cursor, ThemeColor(0xFFEEDD))
+
+        navigation.popViewController(animated: false)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        XCTAssertEqual(previews.count, 2)
+        XCTAssertNil(previews.last ?? nil, "Back ends the preview")
+        XCTAssertEqual(saved, 0)
+
+        // Save commits first, then ends the preview, so the store never
+        // flashes the old selection between the two.
+        previews = []
+        var order: [String] = []
+        let saver = ThemeEditorViewController(theme: theme) { _ in order.append("save") }
+        saver.onPreview = { order.append($0 == nil ? "end" : "preview") }
+        navigation.pushViewController(saver, animated: false)
+        saver.loadViewIfNeeded()
+        saver.nameField.text = "Kept"
+        saver.nameField.sendActions(for: .editingChanged)
+        send(saver.saveItem)
+        XCTAssertEqual(order, ["preview", "save", "end"])
+    }
+
     private func send(_ item: UIBarButtonItem?) {
         guard let item, let action = item.action else {
             return XCTFail("Missing bar-button action")

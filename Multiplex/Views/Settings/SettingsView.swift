@@ -651,6 +651,17 @@ final class SettingsViewController: UIViewController {
         let controller = ThemeEditorViewController(theme: theme) { [weak self] edited in
             self?.save(edited)
         }
+        // Each edit lands in the open terminal windows for the appearance
+        // being edited; Save keeps it (via `save`), Back restores the
+        // committed selection.
+        controller.onPreview = { [weak self] draft in
+            guard let self else { return }
+            if let draft {
+                themes.preview(draft, for: resolvedAppearance(for: themes.appearance))
+            } else {
+                themes.endPreview()
+            }
+        }
         controller.followAppAppearance(themes)
         navigationController?.pushViewController(controller, animated: true)
     }

@@ -66,6 +66,11 @@ final class ThemeStore {
     private(set) var selectedID: String
     /// The light-appearance selection.
     private(set) var selectedLightID: String
+    /// A theme draft standing in for one appearance's selection while its
+    /// editor is open, so every terminal window shows each edit as it lands.
+    /// Never persisted: Save commits through `add`/`update`, Back drops it.
+    private(set) var previewTheme: TerminalTheme?
+    private(set) var previewAppearance: ResolvedAppearance?
 
     var appearance: AppAppearance {
         didSet {
@@ -130,7 +135,21 @@ final class ThemeStore {
     /// custom theme, renamed built-in) falls back to that appearance's house
     /// default rather than a blank screen.
     func selected(for appearance: ResolvedAppearance) -> TerminalTheme {
-        theme(id: selectedID(for: appearance)) ?? Self.fallback(for: appearance)
+        if let previewTheme, previewAppearance == appearance {
+            return previewTheme
+        }
+        return theme(id: selectedID(for: appearance)) ?? Self.fallback(for: appearance)
+    }
+
+    /// Shows `theme` in place of `appearance`'s selection until `endPreview()`.
+    func preview(_ theme: TerminalTheme, for appearance: ResolvedAppearance) {
+        previewTheme = theme
+        previewAppearance = appearance
+    }
+
+    func endPreview() {
+        previewTheme = nil
+        previewAppearance = nil
     }
 
     func selectedID(for appearance: ResolvedAppearance) -> String {

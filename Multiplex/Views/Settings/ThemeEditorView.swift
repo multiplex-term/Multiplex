@@ -4,6 +4,9 @@ import UIKit
 
 /// Edits a private draft and commits only through Save. Popping the controller
 /// leaves the store untouched, matching the former NavigationStack behavior.
+/// `onPreview` mirrors the draft as it changes so the host can show it live in
+/// the real terminal windows; it receives `nil` once the editor leaves without
+/// saving (Back, or the sheet under it dismissing).
 @MainActor
 final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
     AppAppearanceFollowing {
@@ -17,6 +20,8 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
     private(set) var draft: TerminalTheme
     let onSave: (TerminalTheme) -> Void
     var onFinished: (() -> Void)?
+    var onPreview: ((TerminalTheme?) -> Void)?
+    private var isPreviewing = false
 
     var appAppearance = AppAppearance.system {
         didSet { applyAppearance() }
@@ -58,6 +63,17 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         applyAppearance()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // Only a real departure ends the preview; a color popover or a pushed
+        // child covering the editor keeps the draft on screen.
+        let leaving = isMovingFromParent || isBeingDismissed
+            || navigationController?.isBeingDismissed == true
+        if leaving {
+            endPreview()
+        }
     }
 
     override func viewDidLayoutSubviews() {
@@ -351,6 +367,16 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
         saveItem?.isEnabled = canSave
         saveItem?.tintColor = canSave ? UIKitChassis.signal : UIKitChassis.signal3
         colorRows.forEach { $0.refresh() }
+        if isViewLoaded, draft != initialTheme || isPreviewing {
+            isPreviewing = true
+            onPreview?(draft)
+        }
+    }
+
+    private func endPreview() {
+        guard isPreviewing else { return }
+        isPreviewing = false
+        onPreview?(nil)
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
@@ -374,6 +400,7 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
     @objc private func savePressed() {
         guard !draft.name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         onSave(draft)
+        endPreview()
         if let onFinished {
             onFinished()
         } else if let navigationController,
