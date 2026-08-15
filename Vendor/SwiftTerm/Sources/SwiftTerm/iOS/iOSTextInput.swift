@@ -144,11 +144,32 @@ extension TerminalView: UITextInput {
     public func replace(_ range: UITextRange, withText text: String) {
         // Multiplex patch: an incoming range addresses the real document, so the
         // backspace filler must be cleared before it is coerced against the
-        // buffer. Ranges the caller derived from filler are dropped with it.
+        // buffer. A non-empty range that addressed filler is a correction to
+        // characters this view invented: its delete half is meaningless, and
+        // sending the insert half alone duplicates text on the remote — the
+        // whole edit is dropped with the filler, not just its range.
+        let rangeAddressedFiller = inputFillerCount > 0 && !range.isEmpty
         clearInputFiller()
+        if rangeAddressedFiller {
+            uitiLog("replace(range:, withText:\(text.debugDescription)) dropped — range addressed input filler")
+            return
+        }
         guard let r = coerceTextRange(range) else { return }
 
         guard _markedTextRange == nil else { return }
+
+        // Multiplex patch: the only delete this view can express is a
+        // backspace at the remote cursor, which sits at the end of what the
+        // mirror tracks — so a replacement is faithful only when its range
+        // reaches the end of the document. A mid-document range (autocorrect,
+        // inline prediction, or Writing Tools rewriting an earlier word) would
+        // backspace over the *newest* characters and re-insert elsewhere,
+        // mangling the line; drop the edit whole instead. The traits opt out
+        // of those features, so this is the backstop, not the policy.
+        guard r.endPosition.offset == textInputStorage.textInputUTF16Count else {
+            uitiLog("replace(range:\(r), withText:\(text.debugDescription)) dropped — range does not reach the document end \(textInputStateDescription())")
+            return
+        }
         resetKoreanResyllabificationTransaction()
         uitiLog ("replace(range:\(r), withText:\(text.debugDescription)) \(textInputStateDescription())")
 

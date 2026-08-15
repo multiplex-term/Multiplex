@@ -2541,7 +2541,34 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     public var smartQuotesType: UITextSmartQuotesType = .no
     public var smartDashesType: UITextSmartDashesType = .no
     public var smartInsertDeleteType: UITextSmartInsertDeleteType = .no
-    
+
+    // Multiplex patch: on-device intelligence opt-outs, pinned off rather than
+    // host-settable. Left at `.default`, the system decides per device class
+    // and OS whether to rewrite input through `replace(_:withText:)` /
+    // `setMarkedText` — edits a byte-stream terminal cannot express (the
+    // remote owns the document; local backspaces cannot reach mid-line
+    // ranges), surfacing as cursor jumps and mangled lines on exactly the
+    // hardware that enables the feature. The 18.0/2.4-gated traits are
+    // computed because their types postdate the package's deployment floor.
+    @available(iOS 17.0, *)
+    public var inlinePredictionType: UITextInlinePredictionType {
+        get { .no }
+        set { }
+    }
+
+    @available(iOS 18.0, visionOS 2.4, *)
+    public var writingToolsBehavior: UIWritingToolsBehavior {
+        get { .none }
+        set { }
+    }
+
+    @available(iOS 18.0, *)
+    public var mathExpressionCompletionType: UITextMathExpressionCompletionType {
+        get { .no }
+        set { }
+    }
+
+
     open override var canBecomeFirstResponder: Bool {
         true
     }
