@@ -2612,6 +2612,9 @@ extension TerminalWindowViewController {
         else { return }
         controller.dismissPendingLink()
         openViewport(offer)
+        // The chip's own road ends with the sheet going away; the model
+        // clear above leaves the presented sheet standing otherwise.
+        dismissPresentedFeature()
     }
 
     private func debugOpenFileViewer() {
@@ -2626,6 +2629,7 @@ extension TerminalWindowViewController {
         else { return }
         controller.dismissPendingPath()
         openFileViewer(target: target)
+        dismissPresentedFeature()
     }
 
     private func debugLogLinkRegions() {

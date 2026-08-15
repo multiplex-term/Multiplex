@@ -26,6 +26,23 @@ final class FileKindTests: XCTestCase {
         XCTAssertEqual(FileKind.classify(fileName: "release.tar.gz"), .binary)
     }
 
+    /// PDFs and sound files have screens of their own now; video containers
+    /// and the formats no device here decodes stay opaque bytes.
+    func testDocumentsAndSoundFilesHaveTheirOwnScreens() {
+        XCTAssertEqual(FileKind.classify(fileName: "paper.pdf"), .pdf)
+        XCTAssertEqual(FileKind.classify(fileName: "Scan.PDF"), .pdf)
+        for name in [
+            "take.mp3", "voice.m4a", "book.m4b", "raw.aac", "hit.wav", "hit.WAVE",
+            "loop.aiff", "loop.aif", "cue.caf", "master.flac", "note.amr", "bell.au",
+            "song.ogg", "song.oga", "talk.opus",
+        ] {
+            XCTAssertEqual(FileKind.classify(fileName: name), .audio, name)
+        }
+        for name in ["clip.mp4", "clip.mov", "clip.m4v", "clip.mkv", "clip.webm", "old.wma"] {
+            XCTAssertEqual(FileKind.classify(fileName: name), .binary, name)
+        }
+    }
+
     func testDotfileIsNotAnExtension() {
         // ".zshrc" — the leading dot is a hidden-file marker, not an
         // extension separator.

@@ -238,6 +238,7 @@ final class UIKitChassisChip: UIKitTallyBorderedView {
     private let contentStack = UIStackView()
     private let action: () -> Void
     private var caption = ""
+    private var symbolName: String?
     var isProminent: Bool {
         didSet {
             tallyBorderColor = isProminent ? UIKitChassis.signal2 : UIKitChassis.bezelHi
@@ -306,14 +307,23 @@ final class UIKitChassisChip: UIKitTallyBorderedView {
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(pressed))
         addGestureRecognizer(tap)
-        setContent(caption: caption, systemImage: systemImage)
+        applyContent(caption: caption, systemImage: systemImage)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
+    /// Unchanged content is a no-op — a restyle invalidates the intrinsic
+    /// size and costs the row a layout, so readouts may set this from a
+    /// timer or a layout pass without gating it themselves.
     func setContent(caption: String, systemImage: String?) {
+        guard caption != self.caption || systemImage != symbolName else { return }
+        applyContent(caption: caption, systemImage: systemImage)
+    }
+
+    private func applyContent(caption: String, systemImage: String?) {
         self.caption = caption
+        symbolName = systemImage
         symbolView.isHidden = systemImage == nil
         symbolView.image = systemImage.flatMap {
             UIImage(

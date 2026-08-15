@@ -204,6 +204,12 @@ app.multiplexterm.multiplex.<name>`:
 - `debug.fvselect` — the file viewer's markdown SELECT mode.
 - `debug.fvimage` — press the first image placeholder on the rendered
   markdown screen (destination → resolve → open, the finger's own path).
+- `debug.fvplay` — press PLAY/PAUSE on the active viewer's sound screen;
+  proof is the PLAYING lamp and a moving clock. Reach the screen via
+  `debug.link` + `debug.pathview` on a printed `.wav` path, or launch with
+  `MULTIPLEX_AUTO_ACTION_URL='multiplex://open?host=devbox&action=file&path=/abs/x.wav'`
+  (works for `.pdf` too; the load can trail launch by ~25 s on a sim with
+  hundreds of synced hosts).
 - `debug.dictation` — press the dictation action. Grant mic with `simctl
   privacy <UDID> grant microphone …`; speech recognition has no simctl
   service — with the device SHUT DOWN insert `kTCCServiceSpeechRecognition`

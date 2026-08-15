@@ -1,4 +1,5 @@
 import Observation
+import PDFKit
 import UIKit
 
 /// Equatable projection of the controller's content enum. Observation can
@@ -162,8 +163,7 @@ final class FileViewerPaneViewController: UIViewController {
     private var watchTask: Task<Void, Never>?
 
     #if DEBUG
-    private var debugSelectObserver: NSObjectProtocol?
-    private var debugImageObserver: NSObjectProtocol?
+    private var debugObservers: [NSObjectProtocol] = []
     #endif
 
     init(
@@ -199,12 +199,7 @@ final class FileViewerPaneViewController: UIViewController {
         startTask?.cancel()
         watchTask?.cancel()
         #if DEBUG
-        if let debugSelectObserver {
-            NotificationCenter.default.removeObserver(debugSelectObserver)
-        }
-        if let debugImageObserver {
-            NotificationCenter.default.removeObserver(debugImageObserver)
-        }
+        for observer in debugObservers { NotificationCenter.default.removeObserver(observer) }
         #endif
     }
 
@@ -233,20 +228,29 @@ final class FileViewerPaneViewController: UIViewController {
         }
 
         #if DEBUG
-        debugSelectObserver = NotificationCenter.default.addObserver(
-            forName: .multiplexDebugFileViewerSelect,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.toggleMarkdownSelection() }
-        }
-        debugImageObserver = NotificationCenter.default.addObserver(
-            forName: .multiplexDebugFileViewerImage,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.pressFirstMarkdownImage() }
-        }
+        let center = NotificationCenter.default
+        debugObservers = [
+            center.addObserver(
+                forName: .multiplexDebugFileViewerSelect, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.toggleMarkdownSelection() }
+            },
+            center.addObserver(
+                forName: .multiplexDebugFileViewerImage, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.pressFirstMarkdownImage() }
+            },
+            center.addObserver(
+                forName: .multiplexDebugFileViewerPlay, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, isActive,
+                          let audio = currentBodyView as? FileViewerAudioContentView
+                    else { return }
+                    _ = audio.playChip.accessibilityActivate()
+                }
+            },
+        ]
         #endif
     }
 
@@ -695,21 +699,22 @@ final class FileViewerPaneViewController: UIViewController {
     private func headerMeta(_ state: FileViewerPaneObservedState) -> String {
         switch state.body {
         case .document(let document):
-            var parts: [String] = []
-            if case .code(let language) = document.kind {
-                parts.append(language?.rawValue ?? "TEXT")
-            } else if document.kind == .markdown {
-                parts.append(
-                    state.markdownRaw
-                        ? "MARKDOWN · RAW"
-                        : (selectingMarkdownSource ? "MARKDOWN · SOURCE" : "MARKDOWN")
-                )
-            } else if document.kind == .image {
-                parts.append("IMAGE")
-            } else {
-                parts.append("BINARY")
+            let kind: String = switch document.kind {
+            case .code(let language): language?.rawValue ?? "TEXT"
+            case .markdown where state.markdownRaw: "MARKDOWN · RAW"
+            case .markdown: selectingMarkdownSource ? "MARKDOWN · SOURCE" : "MARKDOWN"
+            case .image: "IMAGE"
+            case .pdf:
+                switch document.pdf {
+                case nil: "PDF"
+                case let pdf? where pdf.isLocked: "PDF · LOCKED"
+                case let pdf?: "PDF · \(pdf.pageCount) PAGE\(pdf.pageCount == 1 ? "" : "S")"
+                }
+            case .audio:
+                document.audio.map { "AUDIO · \(FileViewerAudioClock.label($0.duration))" } ?? "AUDIO"
+            case .binary: "BINARY"
             }
-            parts.append(FileViewerController.formatBytes(document.size))
+            var parts = [kind, FileViewerController.formatBytes(document.size)]
             if document.truncated { parts.append("TRUNCATED") }
             return parts.joined(separator: " · ")
         case .diff(let diff, .repo):
@@ -995,6 +1000,10 @@ final class FileViewerPaneViewController: UIViewController {
         case loading(String)
         case binary(String)
         case image(String)
+        case pdf(String)
+        case pdfLocked(String)
+        case audio(String)
+        case audioUnplayable(String)
         case code(String)
         case markdown(String)
         case markdownSource(String)
@@ -1013,6 +1022,11 @@ final class FileViewerPaneViewController: UIViewController {
             case .binary: return .binary(document.path)
             case .image: return document.image == nil
                 ? .binary(document.path) : .image(document.path)
+            case .pdf:
+                guard let pdf = document.pdf else { return .binary(document.path) }
+                return pdf.isLocked ? .pdfLocked(document.path) : .pdf(document.path)
+            case .audio: return document.audio == nil
+                ? .audioUnplayable(document.path) : .audio(document.path)
             case .markdown where !document.markdown.isEmpty:
                 return selectingMarkdownSource && document.sourceText != nil
                     ? .markdownSource(document.path) : .markdown(document.path)
@@ -1097,6 +1111,37 @@ final class FileViewerPaneViewController: UIViewController {
             let view = FileViewerImageContentView()
             view.apply(image: image)
             return view
+        case .pdf:
+            guard let pdf = document.pdf else { return binaryBody(document) }
+            if pdf.isLocked {
+                // Still the file that was asked for: the panel says so and
+                // offers the one action that changes it.
+                return verdictPanel(
+                    document,
+                    caption: "LOCKED",
+                    message: "Password-protected. Unlocking opens it on this screen only — the password is not kept.",
+                    action: ("UNLOCK…", { [weak self] in self?.presentPDFUnlock(retrying: false) })
+                )
+            }
+            let view = FileViewerPDFContentView()
+            view.openLink = { [weak self] in self?.openMarkdownLink($0) }
+            view.apply(document: pdf)
+            return view
+        case .audio:
+            guard let clip = document.audio else {
+                // The bytes came down and Core Audio declined them; the
+                // verdict stays AUDIO — a sound file this device can't play,
+                // not "binary".
+                return verdictPanel(
+                    document,
+                    caption: "CAN'T PLAY",
+                    message: "This device can't decode it — a format Core Audio doesn't read "
+                        + "(Ogg Vorbis, for one), or not audio at all."
+                )
+            }
+            let view = FileViewerAudioContentView(volumeStore: .shared)
+            view.apply(clip: clip, name: document.name)
+            return view
         case .markdown where !document.markdown.isEmpty:
             if selectingMarkdownSource, let text = document.sourceText {
                 let view = FileViewerMarkdownSourceContentView()
@@ -1125,21 +1170,63 @@ final class FileViewerPaneViewController: UIViewController {
     }
 
     private func binaryBody(_ document: FileViewerController.Document) -> UIView {
+        verdictPanel(
+            document, caption: "BINARY", message: "Not text — Multiplex won't render it as code."
+        )
+    }
+
+    /// The chassis verdict panels — BINARY, LOCKED, CAN'T PLAY: the file
+    /// named with its size, one sentence, at most one action.
+    private func verdictPanel(
+        _ document: FileViewerController.Document,
+        caption: String,
+        message: String,
+        action: (caption: String, handler: () -> Void)? = nil
+    ) -> UIView {
         FileViewerPanelHostView(panel: FileViewerPanelView(
-            caption: "BINARY",
+            caption: caption,
             details: [
                 (
                     "\(document.name) · \(FileViewerController.formatBytes(document.size))",
                     UIKitChassis.monoFont(12),
                     UIKitChassis.signal2
                 ),
-                (
-                    "Not text — Multiplex won't render it as code.",
-                    UIFont.preferredFont(forTextStyle: .footnote),
-                    UIKitChassis.signal3
-                ),
-            ]
+                (message, UIFont.preferredFont(forTextStyle: .footnote), UIKitChassis.signal3),
+            ],
+            action: action
         ))
+    }
+
+    /// UNLOCK asks in an alert (the only host a system secure field gets
+    /// here) whose text is cleared in every button action — the key-unlock
+    /// alert's rule.
+    private func presentPDFUnlock(retrying: Bool) {
+        guard presentedViewController == nil else { return }
+        let alert = UIAlertController(
+            title: "Unlock PDF",
+            message: retrying
+                ? "That password didn't unlock it. Try again."
+                : "Enter the document's password.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.isSecureTextEntry = true
+            field.placeholder = "Password"
+            field.returnKeyType = .go
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak alert] _ in
+            alert?.textFields?.first?.text = ""
+        })
+        alert.addAction(UIAlertAction(title: "Unlock", style: .default) { [weak self, weak alert] _ in
+            let password = alert?.textFields?.first?.text ?? ""
+            alert?.textFields?.first?.text = ""
+            guard let self else { return }
+            if !controller.unlockPDF(password: password) {
+                // The alert is dismissing itself; re-ask on the next turn.
+                Task { @MainActor [weak self] in self?.presentPDFUnlock(retrying: true) }
+            }
+        })
+        present(alert, animated: true)
     }
 
     private func applyTextScale(_ scale: CGFloat, to view: UIView?) {
@@ -1149,8 +1236,9 @@ final class FileViewerPaneViewController: UIViewController {
         case let source as FileViewerMarkdownSourceContentView: source.setTextScale(scale)
         case let diff as FileViewerDiffContentView: diff.setTextScale(scale)
         default:
-            // Image screens carry their own zoom and the state panels are
-            // chassis chrome — neither answers to the reading size.
+            // Image and PDF screens carry their own zoom, the sound panel and
+            // the state panels are chassis chrome — none answers to the
+            // reading size.
             break
         }
     }
@@ -1173,6 +1261,10 @@ final class FileViewerPaneViewController: UIViewController {
             source.apply(text: document.sourceText ?? "")
         case (.document(let document), let image as FileViewerImageContentView):
             if let uiImage = document.image { image.apply(image: uiImage) }
+        case (.document(let document), let pdf as FileViewerPDFContentView):
+            if let pdfDocument = document.pdf { pdf.apply(document: pdfDocument) }
+        case (.document(let document), let audio as FileViewerAudioContentView):
+            if let clip = document.audio { audio.apply(clip: clip, name: document.name) }
         case (.diff(let diff, let scope), let diffView as FileViewerDiffContentView):
             diffView.apply(diff: diff, scope: scope)
         default:
@@ -1280,14 +1372,7 @@ final class FileViewerBadgeView: UIKitTallyBorderedView {
         super.init(frame: .zero)
         backgroundColor = GlassPrototype.strataChassis
         isAccessibilityElement = true
-        label.attributedText = NSAttributedString(
-            string: text,
-            attributes: [
-                .font: UIKitChassis.monoFont(9, weight: .semibold),
-                .kern: 1.1,
-                .foregroundColor: UIKitChassis.signal2,
-            ]
-        )
+        setText(text)
         addSubview(label)
         label.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -1300,6 +1385,21 @@ final class FileViewerBadgeView: UIKitTallyBorderedView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
+
+    /// Readouts that move (a PDF's page) restyle the same badge in place; an
+    /// unchanged text is a no-op, so callers can set it from layout.
+    func setText(_ text: String) {
+        guard text != accessibilityLabel else { return }
+        accessibilityLabel = text
+        label.attributedText = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: UIKitChassis.monoFont(9, weight: .semibold),
+                .kern: 1.1,
+                .foregroundColor: UIKitChassis.signal2,
+            ]
+        )
+    }
 }
 
 // MARK: - Syntax + diff palette (screen content, not chrome)
@@ -1463,7 +1563,7 @@ final class FileViewerPanelView: UIKitTallyBorderedView {
 }
 
 @MainActor
-final class FileViewerPanelHostView: UIView {
+class FileViewerPanelHostView: UIView {
     init(panel: UIView, outerInset: CGFloat = 0) {
         super.init(frame: .zero)
         backgroundColor = UIKitChassis.screen
@@ -1481,6 +1581,43 @@ final class FileViewerPanelHostView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
+}
+
+// MARK: - Shared screen furniture
+
+/// The image and PDF screens' zoom-reset chip: `133% · FIT`, hidden at fit,
+/// one caption and one accessibility phrasing for both.
+@MainActor
+enum FileViewerZoomReadout {
+    static func makeChip(action: @escaping () -> Void) -> UIKitChassisChip {
+        let chip = UIKitChassisChip(
+            "100% · FIT", accessibilityLabel: "Zoom 100 percent; resets to fit", action: action
+        )
+        chip.isHidden = true
+        return chip
+    }
+
+    /// `ratio` is the current scale over the fit scale.
+    static func show(ratio: CGFloat, on chip: UIKitChassisChip) {
+        let percent = Int((ratio * 100).rounded())
+        chip.setContent(caption: "\(percent)% · FIT", systemImage: nil)
+        chip.accessibilityLabel = "Zoom \(percent) percent; resets to fit"
+        chip.isHidden = abs(ratio - 1) < 0.01
+    }
+}
+
+/// The sound panel's sliders — scrubber and volume — in one chassis dress.
+@MainActor
+private func makeChassisSlider(accessibilityLabel: String) -> UISlider {
+    let slider = UISlider()
+    slider.minimumValue = 0
+    slider.maximumValue = 1
+    slider.isContinuous = true
+    slider.minimumTrackTintColor = UIKitChassis.signal2
+    slider.maximumTrackTintColor = UIKitChassis.bezelHi
+    slider.thumbTintColor = UIKitChassis.signal
+    slider.accessibilityLabel = accessibilityLabel
+    return slider
 }
 
 // MARK: - Native selectable code and diff screens
@@ -1771,12 +1908,7 @@ final class FileViewerImageContentView: UIView, UIScrollViewDelegate {
         doubleTap.numberOfTapsRequired = 2
         scrollView.addGestureRecognizer(doubleTap)
 
-        zoomChip = UIKitChassisChip(
-            "100% · FIT",
-            accessibilityLabel: "Zoom 100 percent; resets to fit",
-            action: { [weak self] in self?.resetZoom(animated: true) }
-        )
-        zoomChip.isHidden = true
+        zoomChip = FileViewerZoomReadout.makeChip { [weak self] in self?.resetZoom(animated: true) }
         addSubview(zoomChip)
         zoomChip.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -1838,10 +1970,7 @@ final class FileViewerImageContentView: UIView, UIScrollViewDelegate {
     }
 
     private func updateZoomChip() {
-        let percent = Int((scrollView.zoomScale * 100).rounded())
-        zoomChip.setContent(caption: "\(percent)% · FIT", systemImage: nil)
-        zoomChip.accessibilityLabel = "Zoom \(percent) percent; resets to fit"
-        zoomChip.isHidden = abs(scrollView.zoomScale - 1) < 0.01
+        FileViewerZoomReadout.show(ratio: scrollView.zoomScale, on: zoomChip)
     }
 
     private func fittedSize(in container: CGSize) -> CGSize {
@@ -1864,6 +1993,412 @@ final class FileViewerImageContentView: UIView, UIScrollViewDelegate {
 private extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
         min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
+// MARK: - Native PDF screen
+
+/// PDFKit's view on the chassis screen: continuous vertical pages, pinch
+/// zoom, native text selection, with a page readout and the image screen's
+/// zoom-reset chip in the corner. A URL link inside the document is untrusted
+/// document text exactly like a markdown link — it goes to the app's link
+/// sheet through `openLink`, never straight to the system (PDFKit's default
+/// when no delegate answers). A quiet watch swap keeps the reader's page.
+///
+/// Zoom is left to `autoScales`: while it is on, PDFKit fits the page width
+/// and refits on every resize, and it sets its own absolute bounds (0.25–5×,
+/// measured 2026-08-15). A pinch — or ANY write to `minScaleFactor` /
+/// `maxScaleFactor` / `scaleFactor` — switches it off, after which a resize
+/// leaves the page where it was; the FIT chip re-arms it rather than
+/// assigning the fit scale, which is what keeps resizes fitting again.
+@MainActor
+final class FileViewerPDFContentView: UIView {
+    private(set) var pdfView = PDFView()
+    private(set) var pageBadge = FileViewerBadgeView("")
+    private(set) var zoomChip: UIKitChassisChip!
+    private var observers: [NSObjectProtocol] = []
+    /// `PDFDocument.index(for:)` walks the pages; the page changes only when
+    /// PDFKit says so, so the index is looked up once per page, not per layout.
+    private var readPage: PDFPage?
+    private var readIndex = 0
+    private var readoutSize = CGSize.zero
+    var openLink: ((String) -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIKitChassis.screen
+        pdfView.backgroundColor = UIKitChassis.screen
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.displayDirection = .vertical
+        pdfView.displaysPageBreaks = true
+        pdfView.delegate = self
+        pdfView.isAccessibilityElement = false
+        addSubview(pdfView)
+        pdfView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            pdfView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            pdfView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            pdfView.topAnchor.constraint(equalTo: topAnchor),
+            pdfView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        zoomChip = FileViewerZoomReadout.makeChip { [weak self] in self?.resetZoom() }
+        pageBadge.isHidden = true
+        let corner = UIStackView(arrangedSubviews: [pageBadge, zoomChip])
+        corner.axis = .horizontal
+        corner.alignment = .center
+        corner.spacing = 6
+        addSubview(corner)
+        corner.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            corner.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            corner.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+        ])
+
+        let center = NotificationCenter.default
+        for name in [Notification.Name.PDFViewPageChanged, .PDFViewScaleChanged] {
+            observers.append(center.addObserver(
+                forName: name, object: pdfView, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateReadouts() }
+            })
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    deinit {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    /// The document on screen. A replacement (the watch saw new bytes — a
+    /// LaTeX rebuild, say) lands on the page the reader was on when that page
+    /// still exists, so a document being rebuilt can be read as it grows; a
+    /// zoom the reader chose survives too (autoScales is already off then).
+    func apply(document: PDFDocument) {
+        guard pdfView.document !== document else { return }
+        let keptPage = pdfView.currentPage.flatMap { pdfView.document?.index(for: $0) }
+        pdfView.document = document
+        if let keptPage, keptPage < document.pageCount, let page = document.page(at: keptPage) {
+            pdfView.go(to: page)
+        }
+        updateReadouts()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // A new width is a new fit — the zoom readout must say so even when
+        // PDFKit posts no scale change for it; an unchanged size costs nothing.
+        guard pdfView.bounds.size != readoutSize else { return }
+        readoutSize = pdfView.bounds.size
+        updateReadouts()
+    }
+
+    /// PDFKit calls this INSTEAD of opening the URL itself, which is the
+    /// point: the app confirms links, it never follows them.
+    func linkPressed(_ url: URL) {
+        openLink?(url.absoluteString)
+    }
+
+    private func resetZoom() {
+        // Re-arm rather than assign: an assigned fit is stale after the next
+        // resize, an armed one follows it.
+        pdfView.autoScales = true
+        updateReadouts()
+    }
+
+    /// Runs from layout as well as from PDFKit's notifications; the widgets
+    /// gate their own restyles, so an unchanged readout costs a comparison.
+    private func updateReadouts() {
+        guard let document = pdfView.document else {
+            pageBadge.isHidden = true
+            zoomChip.isHidden = true
+            return
+        }
+        if let page = pdfView.currentPage, page !== readPage {
+            readPage = page
+            readIndex = document.index(for: page)
+        }
+        let count = document.pageCount
+        pageBadge.setText("PAGE \(readIndex + 1) / \(count)")
+        pageBadge.isHidden = count <= 1
+        let fit = pdfView.scaleFactorForSizeToFit
+        FileViewerZoomReadout.show(ratio: fit > 0 ? pdfView.scaleFactor / fit : 1, on: zoomChip)
+    }
+}
+
+extension FileViewerPDFContentView: PDFViewDelegate {
+    /// PDFKit reports the press from the main thread; the hop keeps the
+    /// compiler's word for it without isolating the whole conformance.
+    nonisolated func pdfViewWillClick(onLink sender: PDFView, with url: URL) {
+        Task { @MainActor in self.linkPressed(url) }
+    }
+}
+
+// MARK: - Native audio screen
+
+/// The transport for a sound file: a centered chassis panel with the state
+/// lamp (PLAYING wears tally red — it is live state, and captioned), the
+/// file's name, PLAY/PAUSE with ±15 s either side, a scrubber, the clock,
+/// and a volume row. The clip belongs to the document; this view is its
+/// remote and polls it a few times a second only while it plays — nothing
+/// about the position is observable state, and a paused panel costs no
+/// wakeups. The controller pauses a clip whose document leaves the screen;
+/// a tab merely hidden behind another keeps playing — listening while typing
+/// is the point of a sound file beside a session. Volume is the listener's
+/// app-wide level (`FileViewerAudioVolumeStore`): the slider writes it, the
+/// clip follows it on its own, and this panel mirrors it by observation.
+@MainActor
+final class FileViewerAudioContentView: FileViewerPanelHostView {
+    private(set) var clip: FileViewerAudioClip?
+    private let volumeStore: FileViewerAudioVolumeStore
+    private let panel = UIKitTallyBorderedView()
+    private let lampSlot = UIStackView()
+    private var lampState: LampState?
+    private let nameLabel = UILabel()
+    private(set) var playChip: UIKitChassisChip!
+    private(set) var backChip: UIKitChassisChip!
+    private(set) var forwardChip: UIKitChassisChip!
+    private(set) var slider: UISlider
+    private(set) var elapsedLabel = UILabel()
+    private(set) var remainingLabel = UILabel()
+    private(set) var volumeSlider: UISlider
+    private(set) var volumeLabel = UILabel()
+    private var timer: Timer?
+
+    enum LampState: Equatable {
+        case ready, playing, paused
+    }
+
+    init(volumeStore: FileViewerAudioVolumeStore) {
+        self.volumeStore = volumeStore
+        slider = makeChassisSlider(accessibilityLabel: "Playback position")
+        volumeSlider = makeChassisSlider(accessibilityLabel: "Volume")
+        super.init(panel: panel, outerInset: 20)
+
+        panel.backgroundColor = UIKitChassis.bezel
+        panel.layer.cornerRadius = 12
+        panel.layer.cornerCurve = .continuous
+        panel.clipsToBounds = true
+
+        nameLabel.font = UIKitChassis.monoFont(12)
+        nameLabel.textColor = UIKitChassis.signal2
+        nameLabel.numberOfLines = 1
+        nameLabel.lineBreakMode = .byTruncatingMiddle
+        nameLabel.textAlignment = .center
+
+        backChip = UIKitChassisChip(
+            "15",
+            systemImage: "gobackward",
+            accessibilityLabel: "Back 15 seconds",
+            action: { [weak self] in
+                self?.clip?.skip(by: -FileViewerAudioClip.skipInterval)
+                self?.refresh()
+            }
+        )
+        playChip = UIKitChassisChip(
+            "PLAY",
+            systemImage: "play.fill",
+            prominent: true,
+            accessibilityLabel: "Play",
+            action: { [weak self] in
+                self?.clip?.togglePlayback()
+                self?.refresh()
+            }
+        )
+        forwardChip = UIKitChassisChip(
+            "15",
+            systemImage: "goforward",
+            accessibilityLabel: "Forward 15 seconds",
+            action: { [weak self] in
+                self?.clip?.skip(by: FileViewerAudioClip.skipInterval)
+                self?.refresh()
+            }
+        )
+        let transport = UIStackView(arrangedSubviews: [backChip, playChip, forwardChip])
+        transport.axis = .horizontal
+        transport.alignment = .center
+        transport.spacing = 8
+
+        slider.addTarget(self, action: #selector(scrubbed), for: .valueChanged)
+        for label in [elapsedLabel, remainingLabel, volumeLabel] {
+            label.font = UIKitChassis.monoFont(10)
+            label.textColor = UIKitChassis.signal2
+        }
+        remainingLabel.textAlignment = .right
+        let clock = UIStackView(arrangedSubviews: [elapsedLabel, remainingLabel])
+        clock.axis = .horizontal
+        clock.distribution = .fillEqually
+
+        // Volume: a glyph, the level, and its readout.
+        let volumeGlyph = UIImageView(image: UIImage(
+            systemName: "speaker.wave.2.fill",
+            withConfiguration: UIImage.SymbolConfiguration(
+                pointSize: 10 * Theme.typeScale, weight: .semibold
+            )
+        ))
+        volumeGlyph.tintColor = UIKitChassis.signal3
+        volumeGlyph.contentMode = .scaleAspectFit
+        volumeGlyph.setContentHuggingPriority(.required, for: .horizontal)
+        volumeGlyph.isAccessibilityElement = false
+        volumeSlider.addTarget(self, action: #selector(volumeChanged), for: .valueChanged)
+        volumeLabel.textAlignment = .right
+        volumeLabel.setContentHuggingPriority(.required, for: .horizontal)
+        volumeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        volumeLabel.isAccessibilityElement = false
+        let volumeRow = UIStackView(arrangedSubviews: [volumeGlyph, volumeSlider, volumeLabel])
+        volumeRow.axis = .horizontal
+        volumeRow.alignment = .center
+        volumeRow.spacing = 10
+
+        let stack = UIStackView(
+            arrangedSubviews: [lampSlot, nameLabel, transport, slider, clock, volumeRow]
+        )
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 14
+        stack.setCustomSpacing(8, after: slider)
+        panel.addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let preferredWidth = panel.widthAnchor.constraint(equalToConstant: 440)
+        preferredWidth.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            panel.widthAnchor.constraint(lessThanOrEqualToConstant: 440),
+            preferredWidth,
+            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 26),
+            stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -26),
+            stack.topAnchor.constraint(equalTo: panel.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -24),
+            slider.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            clock.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            volumeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            // A fixed readout width keeps the slider from breathing as the
+            // digits change count.
+            volumeLabel.widthAnchor.constraint(equalToConstant: 38 * Theme.typeScale),
+            nameLabel.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor),
+        ])
+        setLamp(.ready)
+        mirrorVolume()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    deinit {
+        timer?.invalidate()
+    }
+
+    /// Bind the screen to a clip. Rebinding (a quiet watch swap handed the
+    /// position to a replacement clip) restyles in place; the panel keeps
+    /// its identity.
+    func apply(clip: FileViewerAudioClip, name: String) {
+        self.clip = clip
+        nameLabel.text = name
+        nameLabel.accessibilityLabel = name
+        remainingLabel.text = FileViewerAudioClock.label(clip.duration)
+        refresh()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            stopTimer()
+        } else {
+            refresh()
+        }
+    }
+
+    /// The remote's one repaint: transport caption, lamp, scrubber, clock.
+    /// Every write is change-gated — this runs four times a second while the
+    /// clip plays, and a restyle costs the panel a layout pass.
+    func refresh() {
+        guard let clip else { return }
+        let playing = clip.isPlaying
+        playChip.setContent(
+            caption: playing ? "PAUSE" : "PLAY",
+            systemImage: playing ? "pause.fill" : "play.fill"
+        )
+        playChip.accessibilityLabel = playing ? "Pause" : "Play"
+        setLamp(playing ? .playing : (clip.currentTime > 0 ? .paused : .ready))
+        let duration = clip.duration
+        let position = duration > 0 ? Float(clip.currentTime / duration) : 0
+        if !slider.isTracking, slider.value != position {
+            slider.setValue(position, animated: false)
+        }
+        let elapsed = FileViewerAudioClock.label(clip.currentTime)
+        if elapsedLabel.text != elapsed {
+            elapsedLabel.text = elapsed
+            slider.accessibilityValue = "\(elapsed) of \(FileViewerAudioClock.label(duration))"
+        }
+        // The clock only moves while the clip plays; a paused panel needs no
+        // wakeups, and the tick that sees playback end stops itself.
+        if playing, window != nil {
+            startTimerIfNeeded()
+        } else {
+            stopTimer()
+        }
+    }
+
+    private func startTimerIfNeeded() {
+        guard timer == nil else { return }
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func setLamp(_ state: LampState) {
+        guard state != lampState else { return }
+        lampState = state
+        for old in lampSlot.arrangedSubviews { old.removeFromSuperview() }
+        let lamp: UIKitTallyLamp = switch state {
+        case .ready: UIKitTallyLamp(caption: "READY", color: UIKitChassis.signal3)
+        case .playing: UIKitTallyLamp(caption: "PLAYING", color: TallyPalette.tally)
+        case .paused: UIKitTallyLamp(caption: "PAUSED", color: UIKitChassis.signal3)
+        }
+        lampSlot.addArrangedSubview(lamp)
+    }
+
+    /// The store is the level's owner; this panel mirrors it — the hop past
+    /// Observation's before-the-write hook is what makes the re-read current.
+    private func mirrorVolume() {
+        withObservationTracking {
+            showVolume(volumeStore.volume)
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in self?.mirrorVolume() }
+        }
+    }
+
+    private func showVolume(_ level: Float) {
+        if !volumeSlider.isTracking, volumeSlider.value != level {
+            volumeSlider.setValue(level, animated: false)
+        }
+        let readout = FileViewerAudioVolume.percentLabel(level)
+        if volumeLabel.text != readout {
+            volumeLabel.text = readout
+            volumeSlider.accessibilityValue = readout
+        }
+    }
+
+    @objc private func scrubbed() {
+        guard let clip else { return }
+        clip.seek(to: Double(slider.value) * clip.duration)
+        refresh()
+    }
+
+    /// Whole percents: the readout shows nothing finer, and it makes the
+    /// store's equality guard coalesce a drag's frames into a few writes.
+    @objc private func volumeChanged() {
+        volumeStore.set((volumeSlider.value * 100).rounded() / 100)
+        showVolume(volumeStore.volume)
     }
 }
 

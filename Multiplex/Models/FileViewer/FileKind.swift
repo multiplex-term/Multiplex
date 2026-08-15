@@ -45,6 +45,13 @@ enum FileRenderKind: Equatable {
     case markdown
     /// Fit-to-screen image.
     case image
+    /// Paged document on the PDFKit screen.
+    case pdf
+    /// A sound file behind the transport panel (play/pause, scrub, clock).
+    /// Membership is by extension only — whether THIS device can decode it
+    /// is the player's verdict, and an honest CAN'T PLAY beats a BINARY
+    /// panel for a format that is plainly audio.
+    case audio
     /// Known-opaque formats (archives, databases, executables): never read
     /// as text, the header says BINARY and the size.
     case binary
@@ -69,6 +76,8 @@ enum FileKind {
         if let language = languageByExtension[ext] { return .code(language) }
         if markdownExtensions.contains(ext) { return .markdown }
         if imageExtensions.contains(ext) { return .image }
+        if ext == "pdf" { return .pdf }
+        if audioExtensions.contains(ext) { return .audio }
         if binaryExtensions.contains(ext) { return .binary }
         return .code(nil)
     }
@@ -170,12 +179,21 @@ enum FileKind {
         "png", "jpg", "jpeg", "gif", "heic", "heif", "webp", "bmp", "tiff", "tif", "ico",
     ]
 
+    /// What Core Audio reads on these devices, plus the Ogg family — the
+    /// player decides Vorbis vs Opus at decode time and says CAN'T PLAY
+    /// rather than pretending a `.ogg` is opaque bytes. Video containers
+    /// stay binary: this is a sound panel, not a media player.
+    private static let audioExtensions: Set<String> = [
+        "mp3", "m4a", "m4b", "aac", "wav", "wave", "aif", "aiff", "aifc",
+        "caf", "flac", "alac", "au", "amr", "ogg", "oga", "opus",
+    ]
+
     private static let binaryExtensions: Set<String> = [
         "zip", "gz", "tgz", "bz2", "xz", "zst", "7z", "rar", "tar",
-        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+        "doc", "docx", "xls", "xlsx", "ppt", "pptx",
         "sqlite", "sqlite3", "db", "realm",
         "a", "o", "so", "dylib", "dll", "exe", "bin", "wasm", "class", "jar",
-        "mp3", "mp4", "mov", "m4a", "m4v", "avi", "mkv", "wav", "flac", "ogg",
+        "mp4", "mov", "m4v", "avi", "mkv", "webm", "wma",
         "ttf", "otf", "woff", "woff2",
         "car", "ipa", "apk", "dmg", "iso",
         "psd", "sketch", "fig", "afdesign",
