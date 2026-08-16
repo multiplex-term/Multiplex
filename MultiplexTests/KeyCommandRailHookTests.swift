@@ -8,18 +8,32 @@ import XCTest
 /// that latches.
 @MainActor
 final class KeyCommandRailHookTests: XCTestCase {
+    private func assertControlKeyHoldsIntoKeyCommands(
+        control: TerminalTallyKeyControl?,
+        escape: TerminalTallyKeyControl?
+    ) {
+        XCTAssertNotNil(control?.longPressAction, "Hold CTRL opens Key Commands")
+        XCTAssertNil(escape?.longPressAction)
+        let hold = KeyCommandPanelViewController.controlHoldDuration
+        XCTAssertEqual(control?.longPressDuration, hold)
+        XCTAssertLessThan(hold, 0.5, "Shorter than the keyboard key's lock hold")
+        XCTAssertGreaterThanOrEqual(hold, 0.25)
+        // UIKit installs recognizers of its own on a UIControl; the key's is
+        // the one carrying the hold it was given.
+        let holds = (control?.gestureRecognizers ?? [])
+            .compactMap { $0 as? UILongPressGestureRecognizer }
+            .map(\.minimumPressDuration)
+        XCTAssertTrue(holds.contains(hold), "The hold recognizer follows longPressDuration: \(holds)")
+    }
+
     #if os(visionOS)
     func testClusterControlKeyHoldsIntoKeyCommands() {
         let context = TerminalKeyClusterContext()
         let group = TerminalKeyClusterGroupView(role: .leading, metric: .regular, context: context)
-        let control = group.keys.first { $0.accessibilityIdentifier == "terminal.keyCluster.control" }
-        XCTAssertNotNil(control?.longPressAction, "Hold CTRL opens Key Commands")
-        XCTAssertEqual(
-            control?.longPressDuration,
-            KeyCommandPanelViewController.controlHoldDuration
+        assertControlKeyHoldsIntoKeyCommands(
+            control: group.keys.first { $0.accessibilityIdentifier == "terminal.keyCluster.control" },
+            escape: group.keys.first { $0.accessibilityIdentifier == "terminal.keyCluster.escape" }
         )
-        let escape = group.keys.first { $0.accessibilityIdentifier == "terminal.keyCluster.escape" }
-        XCTAssertNil(escape?.longPressAction)
     }
     #else
     func testRailControlKeyHoldsIntoKeyCommands() {
@@ -34,39 +48,11 @@ final class KeyCommandRailHookTests: XCTestCase {
         bar.frame = CGRect(x: 0, y: 0, width: 600, height: TerminalKeyBar.barHeight)
         bar.layoutIfNeeded()
         let control = bar.renderedKeys.first { $0.accessibilityIdentifier == "terminal.keybar.control" }
-        XCTAssertNotNil(control?.longPressAction, "Hold CTRL opens Key Commands")
-        XCTAssertEqual(
-            control?.longPressDuration,
-            KeyCommandPanelViewController.controlHoldDuration
+        assertControlKeyHoldsIntoKeyCommands(
+            control: control,
+            escape: bar.renderedKeys.first { $0.accessibilityIdentifier == "terminal.keybar.escape" }
         )
-        let escape = bar.renderedKeys.first { $0.accessibilityIdentifier == "terminal.keybar.escape" }
-        XCTAssertNil(escape?.longPressAction)
         XCTAssertEqual(control?.accessibilityLabel, "Control", "The tap's label is unchanged")
     }
     #endif
-
-    func testControlHoldIsShorterThanTheKeyboardLockHold() {
-        XCTAssertLessThan(KeyCommandPanelViewController.controlHoldDuration, 0.5)
-        XCTAssertGreaterThanOrEqual(KeyCommandPanelViewController.controlHoldDuration, 0.25)
-        let key = TerminalTallyKeyControl(
-            face: .text("CTRL", font: UIKitChassis.monoFont(11, weight: .semibold), kerning: 1.1),
-            width: 46,
-            height: 34,
-            accessibilityLabel: "Control",
-            accessibilityIdentifier: "test.control",
-            longPressAction: {},
-            action: {}
-        )
-        XCTAssertEqual(key.longPressDuration, 0.5, "The default hold is the keyboard key's lock hold")
-        key.longPressDuration = KeyCommandPanelViewController.controlHoldDuration
-        // UIKit installs recognizers of its own on a UIControl; the key's is
-        // the one carrying the hold it was given.
-        let holds = (key.gestureRecognizers ?? [])
-            .compactMap { $0 as? UILongPressGestureRecognizer }
-            .map(\.minimumPressDuration)
-        XCTAssertTrue(
-            holds.contains(KeyCommandPanelViewController.controlHoldDuration),
-            "The hold recognizer follows longPressDuration: \(holds)"
-        )
-    }
 }

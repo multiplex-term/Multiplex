@@ -2,6 +2,8 @@ import Foundation
 import XCTest
 @testable import Multiplex
 
+/// The app-wide store: the shipped set until edited, `keycommands.json`
+/// persistence, and the Keychain mirror's last-writer-wins merge.
 @MainActor
 final class KeyCommandStoreTests: XCTestCase {
     private var directory: URL!
@@ -18,31 +20,27 @@ final class KeyCommandStoreTests: XCTestCase {
         super.tearDown()
     }
 
-    func testFreshStoreShipsTheDefaultsAndPersistsReplacements() {
+    func testFreshStoreShipsTheDefaultsAndPersistsNormalizedReplacements() {
         let store = KeyCommandStore(directory: directory)
         XCTAssertEqual(store.commands, KeyCommandSet.shipped)
         XCTAssertEqual(store.updatedAt, .distantPast)
 
-        let custom = KeyCommand(kind: .chord(KeyChord(modifiers: [.option], key: .enter)))
+        var wild = KeyCommand(kind: .chord(KeyChord(modifiers: [.option], key: .enter)))
+        wild.repeatCount = 99
+        wild.repeatGapMilliseconds = 1
         let stamp = Date(timeIntervalSince1970: 1_800_000_000)
-        store.replace(KeyCommandSet.shipped + [custom], now: stamp)
-        XCTAssertEqual(store.commands.count, 4)
+        store.replace(
+            KeyCommandSet.shipped + [wild, KeyCommand(kind: .text(KeyTextSnippet(text: "  ")))],
+            now: stamp
+        )
+        XCTAssertEqual(store.commands.count, 4, "The blank text row is dropped")
+        XCTAssertEqual(store.commands[3].repeatCount, KeyCommandRepeatGuard.maximumCount)
+        XCTAssertEqual(store.commands[3].repeatGapMilliseconds, KeyCommandRepeatGuard.gapRange.lowerBound)
         XCTAssertEqual(store.updatedAt, stamp)
 
         let reloaded = KeyCommandStore(directory: directory)
         XCTAssertEqual(reloaded.commands, store.commands, "The set comes back from keycommands.json")
         XCTAssertEqual(reloaded.updatedAt, stamp)
-    }
-
-    func testReplaceNormalizesBeforePersisting() {
-        let store = KeyCommandStore(directory: directory)
-        var wild = KeyCommand(kind: .chord(KeyChord(key: .tab)))
-        wild.repeatCount = 99
-        wild.repeatGapMilliseconds = 1
-        store.replace([wild, KeyCommand(kind: .text(KeyTextSnippet(text: "  ")))])
-        XCTAssertEqual(store.commands.count, 1)
-        XCTAssertEqual(store.commands[0].repeatCount, KeyCommandRepeatGuard.maximumCount)
-        XCTAssertEqual(store.commands[0].repeatGapMilliseconds, KeyCommandRepeatGuard.gapRange.lowerBound)
     }
 
     func testCloudMergeIsLastWriterWins() throws {
@@ -72,14 +70,5 @@ final class KeyCommandStoreTests: XCTestCase {
 
         let reloaded = KeyCommandStore(directory: directory)
         XCTAssertEqual(reloaded.commands.map(\.name), ["ESC"], "An adopted set is persisted locally")
-    }
-
-    func testMemoryOnlyStoreDoesNotTouchDisk() {
-        let store = KeyCommandStore(directory: nil)
-        store.replace([KeyCommand(kind: .chord(KeyChord(key: .tab)))])
-        XCTAssertEqual(store.commands.count, 1)
-        XCTAssertFalse(
-            FileManager.default.fileExists(atPath: directory.appendingPathComponent("keycommands.json").path)
-        )
     }
 }

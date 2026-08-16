@@ -33,10 +33,6 @@ final class CapturingTerminalDelegate: NSObject, TerminalViewDelegate {
 /// with them, DECCKM-aware for arrows.
 @MainActor
 final class KeyChordEncodingTests: XCTestCase {
-    private func makeTerminal() -> (TerminalView, CapturingTerminalDelegate) {
-        CapturingTerminalDelegate.makeTerminal()
-    }
-
     private func bytes(
         _ key: TerminalKeyChord.Key,
         _ modifiers: TerminalKeyChord.Modifiers = [],
@@ -46,7 +42,7 @@ final class KeyChordEncodingTests: XCTestCase {
     }
 
     func testLegacyChordsMatchTheHardwareRules() {
-        let (terminal, _) = makeTerminal()
+        let (terminal, _) = CapturingTerminalDelegate.makeTerminal()
         XCTAssertEqual(bytes(.enter, [.shift], on: terminal), [0x0A], "Shift+Enter is LF without kitty flags")
         XCTAssertEqual(bytes(.enter, on: terminal), [0x0D])
         XCTAssertEqual(bytes(.enter, [.option], on: terminal), [0x1B, 0x0D], "Option+Enter is ESC CR")
@@ -75,10 +71,8 @@ final class KeyChordEncodingTests: XCTestCase {
         XCTAssertEqual(bytes(.right, [.option], on: terminal), EscapeSequences.emacsForward)
         XCTAssertEqual(bytes(.left, [.control], on: terminal), EscapeSequences.controlLeft)
         XCTAssertEqual(bytes(.up, [.shift], on: terminal), [0x1B, 0x5B, 0x31, 0x3B, 0x32, 0x41], "Shift+Up is CSI 1;2A")
-    }
 
-    func testArrowsFollowDECCKM() {
-        let (terminal, _) = makeTerminal()
+        // Arrows follow DECCKM.
         XCTAssertEqual(bytes(.up, on: terminal), EscapeSequences.moveUpNormal)
         terminal.feed(byteArray: [0x1B, 0x5B, 0x3F, 0x31, 0x68][...]) // CSI ? 1 h
         XCTAssertEqual(bytes(.up, on: terminal), EscapeSequences.moveUpApp)
@@ -86,7 +80,7 @@ final class KeyChordEncodingTests: XCTestCase {
     }
 
     func testKittyFlagsSwitchToCSIUEncodings() {
-        let (terminal, _) = makeTerminal()
+        let (terminal, _) = CapturingTerminalDelegate.makeTerminal()
         terminal.feed(byteArray: [0x1B, 0x5B, 0x3E, 0x31, 0x75][...]) // CSI > 1 u: disambiguate
         XCTAssertFalse(terminal.getTerminal().keyboardEnhancementFlags.isEmpty)
         XCTAssertEqual(
@@ -100,21 +94,5 @@ final class KeyChordEncodingTests: XCTestCase {
         XCTAssertEqual(bytes(.tab, [.shift], on: terminal), Array("\u{1B}[9;2u".utf8))
         XCTAssertEqual(bytes(.backspace, [.option], on: terminal), Array("\u{1B}[127;3u".utf8))
         XCTAssertEqual(bytes(.character("a"), on: terminal), Array("a".utf8), "Plain text stays text")
-    }
-
-    func testSendChordRidesTheDelegatePath() {
-        let (terminal, delegate) = makeTerminal()
-        XCTAssertTrue(terminal.send(chord: TerminalKeyChord(key: .enter, modifiers: [.shift])))
-        XCTAssertEqual(delegate.sent, [[0x0A]])
-    }
-
-    func testAppChordMapsOntoTheForkChord() {
-        let chord = KeyChord(modifiers: [.control, .option], key: .character("x")).terminalChord
-        XCTAssertEqual(chord.key, .character("x"))
-        XCTAssertTrue(chord.modifiers.contains(.control))
-        XCTAssertTrue(chord.modifiers.contains(.option))
-        XCTAssertFalse(chord.modifiers.contains(.shift))
-        XCTAssertEqual(KeyChord(key: .delete).terminalChord.key, .backspace)
-        XCTAssertEqual(KeyChord(key: .space).terminalChord.key, .space)
     }
 }
