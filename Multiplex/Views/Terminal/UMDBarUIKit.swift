@@ -29,6 +29,10 @@ struct UMDBarConfiguration {
     var detach: () -> Void
     var closeSession: (() -> Void)?
     var keychainTip: (() -> Void)?
+    /// Opens the Connection Stats board drilled into this window's host.
+    /// nil while the global stats setting is off — the row disappears with
+    /// every other entry.
+    var showConnectionStats: (() -> Void)?
     /// The herdr-only second `+ TAB` entry, if the active tab offers one —
     /// New Session leads the menu on every backend (see
     /// `TerminalRoute.NewTabTarget`).
@@ -125,6 +129,7 @@ enum UMDBarAction: Equatable {
     case closeSession
     case toggleKeyboardLock
     case showGuide
+    case showConnectionStats
     case attach(FileAttachPicker)
 }
 
@@ -248,6 +253,8 @@ final class UMDBarViewController: UIViewController,
             #endif
         case .showGuide:
             showGuide()
+        case .showConnectionStats:
+            configuration.showConnectionStats?()
         case .attach(let picker):
             fileAttachController.request(
                 picker,
@@ -810,6 +817,14 @@ final class UMDBarViewController: UIViewController,
             ))
         }
         #endif
+        if configuration.showConnectionStats != nil {
+            children.append(menuAction(
+                title: "Connection Stats…",
+                image: UIImage(systemName: "waveform.path.ecg"),
+                identifier: "umd.connectionStats",
+                action: .showConnectionStats
+            ))
+        }
         if displacesDirectActions {
             // The wide rows carry GUIDE as its own chip; it rides the menu
             // only where the direct actions have been displaced.

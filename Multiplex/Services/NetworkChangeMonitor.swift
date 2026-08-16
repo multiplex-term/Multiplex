@@ -93,6 +93,10 @@ final class NetworkChangeMonitor {
             guard let self, self.monitor != nil else { return }
             self.settleTask = nil
             self.reconnectRevision &+= 1
+            // The stats board's NET counter records at the mint, not at a
+            // consumer — the deck's reconnect fan-out is gated on scene
+            // activity and would undercount.
+            ConnectionStatsCenter.shared.recordNetworkChange()
         }
     }
 }

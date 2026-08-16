@@ -2271,11 +2271,30 @@ extension TerminalView {
     func feedFinish ()
     {
         suspendDisplayUpdates ()
+        sampleEchoLatencyIfDue()
         if shouldDisplayImmediatelyAfterUserInput() {
             displayImmediately()
             return
         }
         queuePendingDisplay()
+    }
+
+    /// Multiplex patch: hand the first feed chunk after each user-input
+    /// stamp to `echoLatencySampleHandler` as a keystroke→paint latency
+    /// sample. The delta below is the same one the immediate-display gate
+    /// computes and discards; sampling it costs one lock and a compare per
+    /// feed batch, and nothing at all when no handler is installed.
+    private func sampleEchoLatencyIfDue() {
+        guard let handler = echoLatencySampleHandler else { return }
+        userInputLock.lock()
+        let last = lastUserInputUptimeNs
+        let alreadySampled = last == lastEchoSampledInputNs
+        if !alreadySampled { lastEchoSampledInputNs = last }
+        userInputLock.unlock()
+        guard last > 0, !alreadySampled else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now >= last, now - last <= echoLatencySampleWindowNs else { return }
+        handler(Double(now - last) / 1_000_000)
     }
 
     private func shouldDisplayImmediatelyAfterUserInput() -> Bool {

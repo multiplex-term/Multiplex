@@ -1,5 +1,37 @@
 import Observation
 import UIKit
+#if DEBUG
+import notify
+
+extension Notification.Name {
+    static let multiplexDebugConnectionStats =
+        Notification.Name("multiplex.debug.connstats")
+}
+
+/// Headless-verification hook: no tap route exists on the visionOS sim
+/// (simctl has none; idb died under Xcode 27), so
+/// `xcrun simctl spawn <udid> notifyutil -p app.multiplexterm.multiplex.debug.connstats`
+/// opens the Connection Stats board through the exact request the deck's
+/// STATS chip makes — gates included. Process-level installer with a latch,
+/// like every other notify hook, so scene churn can never double-register.
+@MainActor
+enum ConnectionStatsDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.connstats", &token, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugConnectionStats, object: nil
+            )
+        }
+    }
+}
+#endif
 
 /// Tracks the live deck window's scene plus one-shot state that must not
 /// repeat per window. The data-driven scene identity prevents new duplicates;
@@ -238,6 +270,7 @@ final class DeckWindowViewController: UIViewController {
         case whatsNew
         case releaseLog
         case paywall
+        case connectionStats(UUID?)
         case localNetworkAlert
     }
 
@@ -249,6 +282,7 @@ final class DeckWindowViewController: UIViewController {
         case whatsNew
         case releaseLog
         case paywall
+        case connectionStats(Host?)
         case localNetworkAlert
 
         var kind: PresentationKind {
@@ -260,6 +294,7 @@ final class DeckWindowViewController: UIViewController {
             case .whatsNew: .whatsNew
             case .releaseLog: .releaseLog
             case .paywall: .paywall
+            case .connectionStats(let host): .connectionStats(host?.id)
             case .localNetworkAlert: .localNetworkAlert
             }
         }
@@ -360,7 +395,25 @@ final class DeckWindowViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         installWall()
+        #if DEBUG
+        ConnectionStatsDebugHook.install()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(debugOpenConnectionStats),
+            name: .multiplexDebugConnectionStats,
+            object: nil
+        )
+        #endif
     }
+
+    #if DEBUG
+    @objc private func debugOpenConnectionStats() {
+        // Focus the FIRST host so the drill-in cluster is provable
+        // headlessly too — the fleet level renders around it either way,
+        // and strips can't be tapped from the CLI.
+        requestConnectionStats(focusing: configuration.store.hosts.first)
+    }
+    #endif
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -502,7 +555,10 @@ final class DeckWindowViewController: UIViewController {
             addHost: { [weak self] in self?.requestAddHost() },
             editHost: { [weak self] host in self?.requestEditHost(host) },
             openSettings: { [weak self] in self?.requestSettings() },
-            openFAQ: { [weak self] in self?.requestFAQ() }
+            openFAQ: { [weak self] in self?.requestFAQ() },
+            openStats: { [weak self] host in
+                self?.requestConnectionStats(focusing: host)
+            }
         )
     }
 
@@ -725,6 +781,18 @@ final class DeckWindowViewController: UIViewController {
         requestPresentation(.releaseLog)
     }
 
+    /// The Connection Stats board. The chip and every other entry are hidden
+    /// while the setting is off, so the guard is belt-and-braces; the Pro
+    /// gate routes free users to the paywall — the visible-but-locked idiom.
+    func requestConnectionStats(focusing host: Host? = nil) {
+        guard ConnectionStatsCenter.shared.isCollecting else { return }
+        if configuration.entitlements.canViewConnectionStats {
+            requestPresentation(.connectionStats(host))
+        } else {
+            requestPresentation(.paywall)
+        }
+    }
+
     /// Whether this launch owes the reader the release notes, asked once the
     /// deck is genuinely presentable.
     ///
@@ -809,6 +877,8 @@ final class DeckWindowViewController: UIViewController {
             presentReleaseLog()
         case .paywall:
             presentPaywall()
+        case .connectionStats(let host):
+            presentConnectionStats(focusing: host)
         case .localNetworkAlert:
             presentLocalNetworkAlert()
         }
@@ -893,6 +963,25 @@ final class DeckWindowViewController: UIViewController {
         controller.onDone = { [weak self] in self?.dismissActivePresentation() }
         let navigation = makeNavigation(root: controller)
         beginPresentation(navigation, kind: .paywall, usesOwnerDelegate: true)
+    }
+
+    private func presentConnectionStats(focusing host: Host?) {
+        let controller = ConnectionStatsViewController(
+            store: configuration.store,
+            focusedHostID: host?.id
+        )
+        controller.followAppAppearance(configuration.themes)
+        controller.onDone = { [weak self] in self?.dismissActivePresentation() }
+        let navigation = makeNavigation(root: controller)
+        navigation.preferredContentSize = ConnectionStatsViewController.preferredSheetSize
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            navigation.modalPresentationStyle = .formSheet
+        }
+        beginPresentation(
+            navigation,
+            kind: .connectionStats(host?.id),
+            usesOwnerDelegate: true
+        )
     }
 
     private func makeNavigation(root: UIViewController) -> UINavigationController {

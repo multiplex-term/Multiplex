@@ -30,6 +30,10 @@ struct FleetWallConfiguration {
     var editHost: (Host) -> Void
     var openSettings: () -> Void
     var openFAQ: () -> Void
+    /// Opens the Connection Stats board, drilled into the given host when one
+    /// is named. The DECK owner behind this closure holds the Pro gate (free
+    /// taps present the paywall) and the setting gate.
+    var openStats: (Host?) -> Void = { _ in }
     var usesSystemNavigation = false
 }
 
@@ -44,6 +48,8 @@ final class FleetWallContainerViewController: UIViewController {
     private var embeddedController: UIViewController?
     private var navigationControllerHost: UINavigationController?
     private var navigationTitleView: FleetNavigationTitleView?
+    private weak var navigationStatsChip: UIKitChassisChip?
+    private var statsVisibilityGeneration = 0
 
     init(configuration: FleetWallConfiguration) {
         self.configuration = configuration
@@ -125,6 +131,22 @@ final class FleetWallContainerViewController: UIViewController {
         #endif
     }
 
+    /// The nav-bar STATS chip follows the global setting live — "off is fully
+    /// off" includes chrome built before the flip.
+    private func observeStatsVisibility() {
+        statsVisibilityGeneration += 1
+        let generation = statsVisibilityGeneration
+        let visible = withObservationTracking {
+            ConnectionStatsCenter.shared.isCollecting
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.statsVisibilityGeneration == generation else { return }
+                self.observeStatsVisibility()
+            }
+        }
+        navigationStatsChip?.isHidden = !visible
+    }
+
     private func configureNavigationChrome() {
         guard let navigationControllerHost else { return }
         UIKitChassis.configureSheetNavigationBar(navigationControllerHost.navigationBar)
@@ -141,6 +163,13 @@ final class FleetWallContainerViewController: UIViewController {
 
         // One custom view intentionally owns all three chips. iOS-app-on-Mac
         // otherwise reduces single custom toolbar controls to bare glyphs.
+        let statsChip = UIKitChassisChip(
+            "STATS",
+            systemImage: "waveform.path.ecg",
+            accessibilityLabel: "Connection stats"
+        ) { [weak self] in self?.configuration.openStats(nil) }
+        navigationStatsChip = statsChip
+        observeStatsVisibility()
         let actions = UIStackView(arrangedSubviews: [
             UIKitChassisChip(
                 "HOST",
@@ -148,6 +177,7 @@ final class FleetWallContainerViewController: UIViewController {
                 accessibilityLabel: "Add host",
                 action: configuration.addHost
             ),
+            statsChip,
             UIKitChassisChip(
                 "FAQ",
                 systemImage: "questionmark",
@@ -231,6 +261,9 @@ final class FleetWallViewController: UIViewController {
         let sessionCounts: [UUID: Int]
         let offline: Bool
         let passphraseChallenge: SSHKeyPassphraseChallenge?
+        /// The global connection-stats switch — rides the snapshot so a
+        /// Settings flip re-renders the header chips live.
+        let statsEnabled: Bool
     }
 
     private static let feedInterval: Duration = .seconds(5)
@@ -451,7 +484,8 @@ final class FleetWallViewController: UIViewController {
         FleetHeaderActions(
             addHost: configuration.addHost,
             openFAQ: configuration.openFAQ,
-            openSettings: configuration.openSettings
+            openSettings: configuration.openSettings,
+            openStats: { [weak self] in self?.configuration.openStats(nil) }
         )
     }
 
@@ -478,7 +512,8 @@ final class FleetWallViewController: UIViewController {
                 hosts: hosts,
                 sessionCounts: counts,
                 offline: configuration.networkChanges.isOffline,
-                passphraseChallenge: challenge
+                passphraseChallenge: challenge,
+                statsEnabled: ConnectionStatsCenter.shared.isCollecting
             )
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -633,6 +668,7 @@ final class FleetWallViewController: UIViewController {
             showKeychainGuide: { [weak self] names in
                 self?.presentKeychainGuide(for: host, sessionNames: names)
             },
+            showStats: { [weak self] in self?.configuration.openStats(host) },
             moveUp: { [weak self] in self?.configuration.store.moveUp(host) },
             moveDown: { [weak self] in self?.configuration.store.moveDown(host) },
             setEnabled: { [weak self] enabled in self?.setEnabled(enabled, for: host) },
@@ -1111,6 +1147,7 @@ private struct FleetHeaderActions {
     let addHost: () -> Void
     let openFAQ: () -> Void
     let openSettings: () -> Void
+    let openStats: () -> Void
 }
 
 @MainActor
@@ -1125,11 +1162,13 @@ private final class FleetHeaderView: UIView {
     private let railTitleLabel = UIKitChassisLabel("Multiplex", size: 13)
     private let summaryLabel = UILabel()
     private var addChip: UIKitChassisChip!
+    private var statsChip: UIKitChassisChip!
     private var faqChip: UIKitChassisChip!
     private var settingsChip: UIKitChassisChip!
     private let stack = UIStackView()
     private var presentation: FleetWall.Presentation = .standard
-    private var actions = FleetHeaderActions(addHost: {}, openFAQ: {}, openSettings: {})
+    private var actions = FleetHeaderActions(
+        addHost: {}, openFAQ: {}, openSettings: {}, openStats: {})
     private var topConstraint: NSLayoutConstraint?
     private var bottomConstraint: NSLayoutConstraint?
     private var compactLayout = CompactLayout.captions
@@ -1142,6 +1181,11 @@ private final class FleetHeaderView: UIView {
             systemImage: "plus",
             accessibilityLabel: "Add host"
         ) { [weak self] in self?.actions.addHost() }
+        statsChip = UIKitChassisChip(
+            "STATS",
+            systemImage: "waveform.path.ecg",
+            accessibilityLabel: "Connection stats"
+        ) { [weak self] in self?.actions.openStats() }
         faqChip = UIKitChassisChip(
             "FAQ",
             systemImage: "questionmark",
@@ -1261,6 +1305,7 @@ private final class FleetHeaderView: UIView {
             summaryLabel.isHidden = false
             stack.spacing = 8
             addChip.setContent(caption: "", systemImage: "plus")
+            statsChip.setContent(caption: "", systemImage: "waveform.path.ecg")
             faqChip.setContent(caption: "", systemImage: "questionmark")
             settingsChip.setContent(caption: "", systemImage: "gearshape")
             bottomConstraint?.constant = -12
@@ -1268,18 +1313,29 @@ private final class FleetHeaderView: UIView {
             summaryLabel.font = UIKitChassis.monoFont(11)
             stack.spacing = 10
             addChip.setContent(caption: "HOST", systemImage: "plus")
+            statsChip.setContent(caption: "STATS", systemImage: "waveform.path.ecg")
             faqChip.setContent(caption: "FAQ", systemImage: "questionmark")
             settingsChip.setContent(caption: "SETTINGS", systemImage: "gearshape")
             summaryLabel.isHidden = presentation == .shellCompact
             compactLayout = .captions
             bottomConstraint?.constant = -16
         }
+        // The compact phone header keeps its measured three-caption fit
+        // (pinned to iPhone's real width) — a fourth chip would shed every
+        // caption to icons. Phones still reach the board through the rail
+        // chip, the host menu, and the terminal ⋯ row. Reading the singleton
+        // here is safe because rebuild() runs on every configure, and the
+        // wall snapshot's `statsEnabled` is the tracked value that triggers
+        // those configures on a Settings flip.
+        statsChip.isHidden = !ConnectionStatsCenter.shared.isCollecting
+            || presentation == .shellCompact
         stack.addArrangedSubview(
             presentation == .shellRail ? railTitleLabel : standardTitleLabel
         )
         stack.addArrangedSubview(UIView())
         stack.addArrangedSubview(summaryLabel)
         stack.addArrangedSubview(addChip)
+        stack.addArrangedSubview(statsChip)
         stack.addArrangedSubview(faqChip)
         stack.addArrangedSubview(settingsChip)
     }
@@ -1313,6 +1369,7 @@ private struct FleetHostSectionConfiguration {
     var showUnreachable: (String) -> Void
     var showTmuxGuide: () -> Void
     var showKeychainGuide: ([String]) -> Void
+    var showStats: () -> Void
     var moveUp: () -> Void
     var moveDown: () -> Void
     var setEnabled: (Bool) -> Void
@@ -1342,6 +1399,14 @@ private final class FleetHostSectionView: UIView {
         /// Backends this host isn't monitoring that are holding sessions
         /// right now, minus any this device was told to stop mentioning.
         let offers: [FleetBackendOffer]
+        /// The global stats switch — structural: gates the chip's slot and
+        /// the host menu row.
+        let statsEnabled: Bool
+        /// The free rail chip's live reading ("12 MS"), nil while stats are
+        /// off or nothing has been measured yet. Deliberately NOT part of
+        /// the rail's structural identity — the number changes most probe
+        /// ticks and is relabeled in place.
+        let statsCaption: String?
     }
 
     private enum GridIdentity: Equatable {
@@ -1373,6 +1438,7 @@ private final class FleetHostSectionView: UIView {
         /// changes, not on every probe tick that re-counts the same
         /// sessions.
         let offers: [FleetBackendOffer]
+        let statsEnabled: Bool
     }
 
     private let stack = UIStackView()
@@ -1488,7 +1554,13 @@ private final class FleetHostSectionView: UIView {
                         backend: result.backend,
                         sessionCount: result.sessionCount
                     )
-                }
+                },
+                statsEnabled: ConnectionStatsCenter.shared.isCollecting,
+                // The per-host signal, NOT the fleet-global revision: this
+                // section wakes only when ITS host's formatted reading
+                // changes, never for other hosts' pushes.
+                statsCaption: ConnectionStatsCenter.shared
+                    .captionSignal(for: host.id).caption
             )
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -1547,7 +1619,8 @@ private final class FleetHostSectionView: UIView {
             reduceMotion: configuration.reduceMotion,
             canMoveUp: canMoveUp,
             canMoveDown: canMoveDown,
-            offers: snapshot?.offers ?? []
+            offers: snapshot?.offers ?? [],
+            statsEnabled: snapshot?.statsEnabled ?? false
         )
         rail.updateActions(
             openShell: { [weak self] in self?.configuration.openShell() },
@@ -1568,7 +1641,8 @@ private final class FleetHostSectionView: UIView {
             dismissOffer: { [weak self] backend in
                 guard let self else { return }
                 self.configuration.dismissBackendOffer(backend, self.host)
-            }
+            },
+            showStats: { [weak self] in self?.configuration.showStats() }
         )
         if renderedRailIdentity != railIdentity {
             renderedRailIdentity = railIdentity
@@ -1584,6 +1658,7 @@ private final class FleetHostSectionView: UIView {
                 canMoveUp: canMoveUp,
                 canMoveDown: canMoveDown,
                 offers: snapshot?.offers ?? [],
+                statsEnabled: snapshot?.statsEnabled ?? false,
                 menu: hostMenu,
                 openShell: { [weak self] in self?.configuration.openShell() },
                 requestPassphrase: { [weak self] in
@@ -1603,9 +1678,14 @@ private final class FleetHostSectionView: UIView {
                 dismissOffer: { [weak self] backend in
                     guard let self else { return }
                     self.configuration.dismissBackendOffer(backend, self.host)
-                }
+                },
+                showStats: { [weak self] in self?.configuration.showStats() }
             )
         }
+        // The live number rides the cheap always-run channel: a changed
+        // reading relabels the retained chip in place instead of keying the
+        // identity above and rebuilding the whole rail every probe tick.
+        rail.setStatsCaption(snapshot?.statsCaption, hostName: host.name)
 
         grid.columnCount = configuration.columnCount
         grid.centersGrid = configuration.presentation == .shellCompact
@@ -1777,10 +1857,22 @@ private final class FleetHostSectionView: UIView {
         let remove = UIAction(title: "Remove Host…", attributes: .destructive) { [weak self] _ in
             self?.configuration.removeHost()
         }
+        var actions: [UIMenuElement] = [enabled]
+        // Gated on the snapshot's structural flag, not a direct singleton
+        // read — the menu is only re-installed on identity changes, and
+        // `statsEnabled` is in the identity.
+        if currentSnapshot?.statsEnabled == true {
+            actions.append(UIAction(
+                title: "Connection Stats…",
+                image: UIImage(systemName: "waveform.path.ecg")
+            ) { [weak self] _ in self?.configuration.showStats() })
+        }
+        actions.append(edit)
+        actions.append(remove)
         return UIMenu(children: [
             moveUp,
             moveDown,
-            UIMenu(options: .displayInline, children: [enabled, edit, remove]),
+            UIMenu(options: .displayInline, children: actions),
         ])
     }
 
@@ -1846,6 +1938,10 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         /// Rides the identity so the rail re-renders when the OFFER changes,
         /// not on every probe tick that merely re-counts the same sessions.
         let offers: [FleetBackendOffer]
+        /// Structural only — whether the chip has a slot at all. The
+        /// caption itself is relabeled through `setStatsCaption`, never
+        /// through this identity.
+        let statsEnabled: Bool
     }
 
     private let stack = UIStackView()
@@ -1857,6 +1953,11 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
     private var showKeychainGuide: ([String]) -> Void = { _ in }
     private var acceptOffer: (Host.SessionBackend) -> Void = { _ in }
     private var dismissOffer: (Host.SessionBackend) -> Void = { _ in }
+    private var showStats: () -> Void = {}
+    /// Retained across rebuilds so the every-tick reading is a relabel, not
+    /// a subtree rebuild. Hidden while there is nothing to show.
+    private var statsChip: UIKitChassisChip?
+    private var statsCaption: String?
     /// Offer chip → its own "Don't offer here" menu. The rail is the context
     /// menu delegate for both itself (host options) and its chips, so the
     /// delegate method resolves by the interaction's view. Rebuilt with the
@@ -1891,13 +1992,15 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         canMoveUp: Bool,
         canMoveDown: Bool,
         offers: [FleetBackendOffer],
+        statsEnabled: Bool,
         menu: UIMenu,
         openShell: @escaping () -> Void,
         requestPassphrase: @escaping () -> Void,
         showUnreachable: @escaping (String) -> Void,
         showKeychainGuide: @escaping ([String]) -> Void,
         acceptOffer: @escaping (Host.SessionBackend) -> Void,
-        dismissOffer: @escaping (Host.SessionBackend) -> Void
+        dismissOffer: @escaping (Host.SessionBackend) -> Void,
+        showStats: @escaping () -> Void
     ) {
         updateActions(
             openShell: openShell,
@@ -1905,7 +2008,8 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
             showUnreachable: showUnreachable,
             showKeychainGuide: showKeychainGuide,
             acceptOffer: acceptOffer,
-            dismissOffer: dismissOffer
+            dismissOffer: dismissOffer,
+            showStats: showStats
         )
         let identity = PresentationIdentity(
             hostID: host.id,
@@ -1923,7 +2027,8 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
             reduceMotion: reduceMotion,
             canMoveUp: canMoveUp,
             canMoveDown: canMoveDown,
-            offers: offers
+            offers: offers,
+            statsEnabled: statsEnabled
         )
         guard renderedIdentity != identity else { return }
         renderedIdentity = identity
@@ -1981,6 +2086,27 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         shell.alpha = connected ? 1 : 0
         shell.isUserInteractionEnabled = connected
         shell.accessibilityElementsHidden = !connected
+        // The free stats chip: the host's live round-trip reading. Free for
+        // everyone — the tap's Pro gate lives behind `showStats`. One
+        // retained instance; `setStatsCaption` relabels and shows/hides it.
+        let stats: UIKitChassisChip?
+        if statsEnabled {
+            let chip = self.statsChip ?? UIKitChassisChip(
+                statsCaption ?? "",
+                accessibilityLabel: "Connection stats",
+                action: { [weak self] in self?.showStats() }
+            )
+            chip.accessibilityHint = "Opens connection stats"
+            chip.accessibilityLabel = statsCaption.map {
+                "Connection stats for \(host.name): \($0.lowercased())"
+            } ?? "Connection stats"
+            self.statsChip = chip
+            chip.isHidden = statsCaption == nil
+            stats = chip
+        } else {
+            statsChip = nil
+            stats = nil
+        }
         let menuButton = FleetMenuBadgeButton()
         menuButton.menu = menu
         menuButton.showsMenuAsPrimaryAction = true
@@ -1996,7 +2122,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
             first.spacing = 8
             let second = UIStackView(
                 arrangedSubviews: [address, mosh, backend, UIView()]
-                    + offerChips + [shell]
+                    + offerChips + [stats, shell].compactMap { $0 }
             )
             second.axis = .horizontal
             second.alignment = .center
@@ -2011,7 +2137,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
             )
             let row = UIStackView(arrangedSubviews: [
                 name, address, mosh, backend, UIView(),
-            ] + offerChips + [controls])
+            ] + offerChips + [stats, controls].compactMap { $0 })
             row.axis = .horizontal
             row.alignment = .firstBaseline
             row.spacing = 14
@@ -2026,7 +2152,8 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         showUnreachable: @escaping (String) -> Void,
         showKeychainGuide: @escaping ([String]) -> Void,
         acceptOffer: @escaping (Host.SessionBackend) -> Void,
-        dismissOffer: @escaping (Host.SessionBackend) -> Void
+        dismissOffer: @escaping (Host.SessionBackend) -> Void,
+        showStats: @escaping () -> Void
     ) {
         self.openShell = openShell
         self.requestPassphrase = requestPassphrase
@@ -2034,6 +2161,21 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         self.showKeychainGuide = showKeychainGuide
         self.acceptOffer = acceptOffer
         self.dismissOffer = dismissOffer
+        self.showStats = showStats
+    }
+
+    /// The every-render channel for the live reading: relabels the retained
+    /// chip in place. Rebuilding the rail for a number that changes most
+    /// probe ticks is exactly what the identity guard exists to prevent.
+    func setStatsCaption(_ caption: String?, hostName: String) {
+        guard caption != statsCaption else { return }
+        statsCaption = caption
+        guard let statsChip else { return }
+        statsChip.isHidden = caption == nil
+        statsChip.setContent(caption: caption ?? "", systemImage: nil)
+        statsChip.accessibilityLabel = caption.map {
+            "Connection stats for \(hostName): \($0.lowercased())"
+        } ?? "Connection stats"
     }
 
     /// `+ HERDR · 3` — press to start monitoring, long-press to stop being
@@ -2560,42 +2702,6 @@ private final class FleetColorDotView: UIView {
         layer.shadowRadius = 4
         layer.shadowOffset = .zero
     }
-}
-
-@MainActor
-private final class FleetHatchedView: UIView {
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        // PROTOTYPE(GLASS): a dead monitor is still a glass pane — the same
-        // screen ground as live tiles, with an etched white hatch (plan §4).
-        backgroundColor = GlassPrototype.enabled
-            ? GlassPrototype.screenGlass : TallyPalette.screen
-        isOpaque = !GlassPrototype.enabled
-        registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, GlassAppearanceTrait.self]
-        ) { (view: FleetHatchedView, _: UITraitCollection) in
-            view.setNeedsDisplay()
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    override func draw(_ rect: CGRect) {
-        guard let context = UIGraphicsGetCurrentContext() else { return }
-        let stripe = GlassPrototype.enabled
-            ? GlassPrototype.hatchStripe : TallyPalette.screenHatch
-        context.setStrokeColor(stripe.resolvedColor(with: traitCollection).cgColor)
-        context.setLineWidth(5)
-        var x = -bounds.height
-        while x < bounds.width {
-            context.move(to: CGPoint(x: x, y: bounds.height))
-            context.addLine(to: CGPoint(x: x + bounds.height, y: 0))
-            x += 14
-        }
-        context.strokePath()
-    }
-
 }
 
 // MARK: - Session tile
@@ -3312,7 +3418,7 @@ private final class FleetNoSignalTileView: FleetPressView {
             content.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
-        let screen = FleetHatchedView()
+        let screen = UIKitTallyHatchView()
         let caption: String
         let ink: UIColor
         let badge: String
@@ -3522,7 +3628,7 @@ private final class FleetAwaitingSignalView: UIView {
             content.bottomAnchor.constraint(equalTo: tile.bottomAnchor, constant: -5),
         ])
 
-        let screen = FleetHatchedView()
+        let screen = UIKitTallyHatchView()
         let title = UIKitChassisLabel(
             "Awaiting signal", size: 13, color: UIKitChassis.signal3
         )

@@ -153,6 +153,19 @@ final class TerminalSessionController {
     private var lastRows = 24
     private var started = false
     private var transportGeneration = 0
+    /// Session-volume counters drained by the stats pump. Written on the
+    /// MainActor by the two byte funnels (`feed`, `sendInput`).
+    private var statsBytesIn = 0
+    private var statsBytesOut = 0
+    /// Pairs live/ended pushes exactly once per transport run, so the
+    /// center's live-tab bookkeeping can't drift on paths that end a
+    /// transport that never went live (or end one twice).
+    private var statsReportedLive = false
+    /// Times this tab actually went live — the 2nd+ are RELINKS. Counted at
+    /// the state machine that owns liveness, never at attempts: a host that
+    /// is simply down must not climb the stability row while retries fail.
+    private var statsLiveRuns = 0
+    private var statsTask: Task<Void, Never>?
     private var runTask: Task<Void, Never>?
     private var inputTask: Task<Void, Never>?
     private var inputContinuation: AsyncStream<Data>.Continuation?
@@ -550,6 +563,7 @@ final class TerminalSessionController {
     var onOutputFlushed: (() -> Void)?
 
     private func feed(_ bytes: [UInt8]) {
+        statsBytesIn += bytes.count
         scanForSwallowedHandoff(bytes)
         guard let terminalView else {
             pendingOutput.append(contentsOf: bytes)
@@ -622,6 +636,7 @@ final class TerminalSessionController {
         else { return }
         stopTransportPumps()
         stopDirectShellMonitoring()
+        endStatsRun(reason: reason)
         setTmuxCopyModeUIActive(false)
         setSelectTextModeUIActive(false)
         resetHistoryState()
@@ -865,6 +880,7 @@ final class TerminalSessionController {
             setSelectTextModeUIActive(false)
             if !tmuxCopyModeUIActive { return }
         }
+        statsBytesOut += data.count
         inputContinuation?.yield(data)
         // Both the app-owned DONE action and a hardware/software Escape key
         // travel through this same delegate path. Restore normal tmux mouse
@@ -2028,6 +2044,7 @@ final class TerminalSessionController {
         outputCoalescer = nil
         stopTransportPumps()
         stopDirectShellMonitoring()
+        endStatsRun(reason: nil)
         setTmuxCopyModeUIActive(false)
         setSelectTextModeUIActive(false)
         resetHistoryState()
@@ -2141,6 +2158,89 @@ final class TerminalSessionController {
         status = .live
         resumePolicy.sessionBecameLive()
         isResuming = false
+        beginStatsRun()
+    }
+
+    // MARK: Connection stats
+
+    /// Passive-tap pushes into the app-wide stats center. Everything here is
+    /// bookkeeping the tab already does — byte counts from the two funnels,
+    /// a mosh session's own transport counters — pushed on a coarse cadence.
+    /// No network cost anywhere.
+    private static let statsPushInterval: Duration = .seconds(5)
+    /// Idle cadence while collection is off — the loop stays armed so a
+    /// mid-session re-enable resumes without a reattach, but wakes rarely.
+    private static let statsDisabledInterval: Duration = .seconds(30)
+
+    /// The one setup pairing (the teardown twin is `endStatsRun`): live push
+    /// + relink accounting + the pump, so no path can start half of it.
+    private func beginStatsRun() {
+        guard !statsReportedLive else { return }
+        statsReportedLive = true
+        statsLiveRuns += 1
+        let center = ConnectionStatsCenter.shared
+        center.recordTransportLive(hostID: host.id)
+        if statsLiveRuns > 1 {
+            center.recordRelink(hostID: host.id)
+        }
+        startStatsPump()
+    }
+
+    private func endStatsRun(reason: String?) {
+        statsTask?.cancel()
+        statsTask = nil
+        guard statsReportedLive else { return }
+        statsReportedLive = false
+        // Drain the tail window before the ended push — a session shorter
+        // than one pump tick still owes its bytes.
+        flushStatsBytes()
+        ConnectionStatsCenter.shared.recordTransportEnded(
+            hostID: host.id, reason: reason)
+    }
+
+    private func startStatsPump() {
+        statsTask?.cancel()
+        statsTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let collecting = ConnectionStatsCenter.shared.isCollecting
+                if collecting {
+                    await self.pushLinkStats()
+                }
+                try? await Task.sleep(
+                    for: collecting
+                        ? Self.statsPushInterval : Self.statsDisabledInterval
+                )
+            }
+        }
+    }
+
+    private func flushStatsBytes() {
+        let center = ConnectionStatsCenter.shared
+        if center.isCollecting, statsBytesIn > 0 || statsBytesOut > 0 {
+            center.addBytes(
+                hostID: host.id, bytesIn: statsBytesIn, bytesOut: statsBytesOut)
+        }
+        statsBytesIn = 0
+        statsBytesOut = 0
+    }
+
+    private func pushLinkStats() async {
+        guard status == .live else { return }
+        flushStatsBytes()
+        guard let session = moshSession else { return }
+        let report = await session.linkReport()
+        guard status == .live, moshSession === session else { return }
+        ConnectionStatsCenter.shared.recordMosh(hostID: host.id, report: report)
+    }
+
+    /// The fork's echo-latency window (keystroke → first echoed paint),
+    /// delivered by `SwiftTermView` — the one number that matches "feels
+    /// slow" and works identically on SSH and mosh.
+    func recordEchoSample(milliseconds: Double) {
+        guard status == .live else { return }
+        ConnectionStatsCenter.shared.recordEcho(
+            hostID: host.id, milliseconds: milliseconds)
     }
 
     /// Called app-wide after one prompt accepts an answer. Tabs that were

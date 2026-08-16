@@ -204,6 +204,7 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertTrue(store.canEnableMosh(currentlyEnabled: true))
         XCTAssertFalse(store.canMutateCustomThemes)
         XCTAssertFalse(store.canScheduleAgentAlerts)
+        XCTAssertFalse(store.canViewConnectionStats)
         XCTAssertEqual(store.keyCommandLimit, EntitlementStore.freeKeyCommandLimit)
         XCTAssertEqual(store.keyCommandLimit, 5)
 
@@ -212,6 +213,7 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertTrue(store.canEnableMosh(currentlyEnabled: false))
         XCTAssertTrue(store.canMutateCustomThemes)
         XCTAssertTrue(store.canScheduleAgentAlerts)
+        XCTAssertTrue(store.canViewConnectionStats)
         XCTAssertEqual(store.keyCommandLimit, KeyCommandSet.maximumCount)
         #endif
     }

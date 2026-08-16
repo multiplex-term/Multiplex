@@ -195,6 +195,11 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
                     + "unwatched supported session needs you."
             ),
             makeFeature(
+                "CONNECTION STATS",
+                "Open the fleet board behind every rail chip: round-trips, typing "
+                    + "echo, mosh loss and roams, reconnects, and data volume per host."
+            ),
+            makeFeature(
                 "CUSTOM THEMES",
                 "Build and edit terminal palettes while the Tally chassis stays consistent."
             ),
