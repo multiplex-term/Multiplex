@@ -191,14 +191,18 @@ enum AgentAttention {
 
     /// Classify only agents whose outside-the-pane signals are known. Keeping
     /// this boundary here prevents a newly detected agent from accidentally
-    /// inheriting Claude/Codex alerts or RUNNING telemetry.
+    /// inheriting Claude/Codex alerts or RUNNING telemetry — the switch is
+    /// exhaustive so a fifth kind must choose its classifier out loud.
     static func classifyVerified(
         title: String,
         tail: [String],
         agent: AgentKind?
     ) -> PaneAgentState? {
-        guard agent?.hasVerifiedAttentionSignals == true else { return nil }
-        return classify(title: title, tail: tail)
+        guard let agent, agent.hasVerifiedAttentionSignals else { return nil }
+        switch agent {
+        case .grok: return classifyGrok(title: title, tail: tail)
+        case .claudeCode, .codex, .pi: return classify(title: title, tail: tail)
+        }
     }
 
     static func classify(title: String, tail: [String]) -> PaneAgentState {
@@ -212,12 +216,54 @@ enum AgentAttention {
         return .idle
     }
 
+    /// Grok Build composes its title from `TitleManager` items (source,
+    /// 2026-08-16; default order `⚠ Action Required`, Braille spinner,
+    /// activity, session name, `grok`, joined by ` - `): the ⚠ prefix stands
+    /// exactly while its permission queue is non-empty, the spinner while the
+    /// turn runs, neither once the composer is back. Items are user-orderable
+    /// and each is optional, so match by presence, not position. A question
+    /// card (`ask_user_question`) is not a permission — the title keeps
+    /// spinning — so its option rows are read from the tail: two rows is the
+    /// card, one could be prose. The ⚠ item blinks only after Grok sees a
+    /// focus-out event; tmux ships with `focus-events off`, so over a
+    /// Multiplex attach it holds still.
+    static func classifyGrok(title: String, tail: [String]) -> PaneAgentState {
+        if title.contains("⚠ Action Required") { return .needsYou(.permission) }
+        var optionRows = 0
+        for line in tail.suffix(questionCaretWindow) where isGrokOptionRow(line) {
+            optionRows += 1
+            if optionRows == 2 { return .needsYou(.question) }
+        }
+        if title.unicodeScalars.contains(where: isBrailleSpinner) { return .busy }
+        return .idle
+    }
+
+    /// Grok's question card renders each option as `<shortcut> (○) label` /
+    /// `<shortcut> (●) label` (single) or `<shortcut> [ ] label` / `[x]`
+    /// (multi) — shortcuts are `1`–`9` then `a`–`f`; a modal frame may put
+    /// `│` before the shortcut.
+    private static let grokOptionMarkers = ["(●) ", "(○) ", "[ ] ", "[x] "]
+
+    private static func isGrokOptionRow(_ raw: String) -> Bool {
+        var line = raw.drop(while: \.isWhitespace)
+        if line.first == "│" { line = line.dropFirst().drop(while: { $0 == " " }) }
+        guard let shortcut = line.first?.asciiValue,
+              (0x31...0x39).contains(shortcut) || (0x61...0x66).contains(shortcut),
+              line.dropFirst().first == " "
+        else { return false }
+        let marker = line.dropFirst(2)
+        return grokOptionMarkers.contains { marker.hasPrefix($0) }
+    }
+
     /// Claude Code and Codex prefix the title with a Braille spinner while a
     /// turn is in flight (Claude Code: "⠂ Create probe.txt file", Codex:
     /// "⠦ wd") and drop it when the turn ends ("✳ …" / bare cwd).
     static func hasSpinnerPrefix(_ title: String) -> Bool {
-        guard let first = title.unicodeScalars.first else { return false }
-        return (0x2800...0x28FF).contains(first.value)
+        title.unicodeScalars.first.map(isBrailleSpinner) ?? false
+    }
+
+    private static func isBrailleSpinner(_ scalar: Unicode.Scalar) -> Bool {
+        (0x2800...0x28FF).contains(scalar.value)
     }
 
     /// A dialog blocked on the user renders a caret-selected numbered
@@ -313,7 +359,7 @@ enum AgentAttention {
         guard agent == .claudeCode else { return nil }
         var text = title
         if let first = text.unicodeScalars.first,
-           first.value == 0x2733 /* ✳ */ || (0x2800...0x28FF).contains(first.value) {
+           first.value == 0x2733 /* ✳ */ || isBrailleSpinner(first) {
             text = String(text.unicodeScalars.dropFirst())
                 .trimmingCharacters(in: .whitespaces)
         }

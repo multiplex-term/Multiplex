@@ -63,7 +63,42 @@ HISTORY/jump.
   `testNoBuiltInChipTypesABareEscape`. The
   strip and agent alerts (`AttentionCenter`) are Pro-gated; detection and
   wall telemetry stay free. Pi's attention stays fail-soft idle — no
-  RUNNING/turn-end claims without a separate reliable signal. **Slash
+  RUNNING/turn-end claims without a separate reliable signal. **Grok
+  Build** (added 2026-08-16 from the xai-org/grok-build *source*, not a
+  live process — verify on a real host before tightening anything):
+  binary `xai-grok-pager`, shipped as `grok`; the installer symlinks
+  `~/.grok/bin/grok → downloads/grok-<semver>-<os>-<arch>`, so the pane's
+  comm is the clipped target (`grok-1.0.4-maco` seen live on macOS 27)
+  while argv[0] stays `grok` — `classify(command:)` accepts `grok`,
+  `xai-grok-pager`, and `grok-<n>.<n>…`; Rust, no interpreter wrapper; `grok --model <id> "prompt"`
+  is the documented interactive shape (top-level `-m/--model`, positional
+  prompt); Shift+Tab cycles Normal → Plan → Always-approve (so MODE fits),
+  Ctrl+T toggles the todos pane (TODOS chip), and its own **Ctrl+B means
+  "background this command"** — one more reason no chip may carry the
+  tmux prefix. Its OSC title is composed by `TitleManager` (default items:
+  `⚠ Action Required`, Braille spinner, activity verb, session name,
+  `grok`, joined by ` - `) and **resets to a bare `grok` on exit** — so
+  the direct-shell fallback matches only the ` - grok` suffix, and no
+  tmux title rule exists (the process signal is enough). Attention has its
+  **own classifier** (`AgentAttention.classifyGrok`): `⚠ Action Required`
+  anywhere in the title = permission (its `permission_queue` is non-empty;
+  the spinner keeps running behind it, so ⚠ outranks it), any Braille
+  scalar anywhere = busy (title items are user-orderable — never key on
+  position), and a question card is read from the tail as ≥2 option rows
+  shaped `<1-9|a-f> (○|●) label` / `<n> [ ]|[x] label` (an
+  `ask_user_question` does not touch the title). Trap: the ⚠ item *blinks*
+  (~500 ms on/off) once Grok has seen a terminal focus-out — its
+  `FocusTracker` starts focused and tmux ships `focus-events off`, so over
+  a Multiplex attach it holds still; a host with `focus-events on` could
+  re-fire the permission alert on alternate probes. Busy/idle titles and
+  the turn-ended alert were **verified live** (grok 1.0.4 in tmux on this
+  Mac, sim build, 2026-08-16: `⠋ - Sleep for 20 seconds… - <session> - grok`
+  → `<session> - grok` → `alert posted for grok`); the ⚠ permission title
+  and the question card are still source-derived — first live capture that
+  disagrees wins (sim proof recipe: `e2e-headless.md`, attention). herdr's canonical id for it is assumed to be `grok`. Unknown-agent profiles in a synced Host record are now skipped
+  on decode instead of failing the record — from this build on, a device
+  that predates a newly added CLI keeps the host (older builds still drop
+  the whole record; that ship has sailed). **Slash
   chips submit with a CR sent ~160 ms after the text** (separate write —
   Codex treats a same-burst Enter as a pasted newline; verified
   rust-v0.144; Claude/Pi accept the shape). Bar/More choices persist per

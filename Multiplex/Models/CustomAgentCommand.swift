@@ -152,6 +152,33 @@ struct AgentCommandConfiguration: Codable, Hashable {
             self.commands = commands
             self.builtInPlacements = builtInPlacements
         }
+
+        fileprivate enum CodingKeys: String, CodingKey {
+            case agent, commands, builtInPlacements
+        }
+    }
+
+    /// `Host.sessionBackend`'s rule for a synced enum: read the raw string
+    /// and treat a value this build cannot name as absent. A profile for a
+    /// CLI added by a newer app (Grok Build arrived this way, 2026-08-16)
+    /// decodes to nil and is dropped, while a known agent's malformed
+    /// profile still throws — one unknown agent must not take the whole
+    /// Host record down, and a corrupt one must not vanish silently.
+    private struct LenientProfile: Decodable {
+        var profile: Profile?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: Profile.CodingKeys.self)
+            guard let agent = AgentKind(rawValue: try container.decode(String.self, forKey: .agent))
+            else { return }
+            profile = Profile(
+                agent: agent,
+                commands: try container.decode([CustomAgentCommand].self, forKey: .commands),
+                builtInPlacements: try container.decode(
+                    [String: AgentCommandPlacement].self, forKey: .builtInPlacements
+                )
+            )
+        }
     }
 
     private(set) var profiles: [Profile]
@@ -235,8 +262,8 @@ struct AgentCommandConfiguration: Codable, Hashable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let profiles = try container.decode([Profile].self, forKey: .profiles)
-        self.init(profiles: profiles)
+        let profiles = try container.decode([LenientProfile].self, forKey: .profiles)
+        self.init(profiles: profiles.compactMap(\.profile))
     }
 
     func encode(to encoder: Encoder) throws {

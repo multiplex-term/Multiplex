@@ -955,6 +955,9 @@ private extension AgentKind {
         case .claudeCode: "✳"
         case .codex: "◆"
         case .pi: "π"
+        // Grok has no single-glyph mark of its own in the TUI; the plain
+        // capital reads as xAI's without leaning on a font-fallback symbol.
+        case .grok: "X"
         }
     }
 }

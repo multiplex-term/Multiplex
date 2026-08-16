@@ -3,8 +3,9 @@ import XCTest
 
 /// Pins the agent-detection rules to the experiment matrix recorded in
 /// local-plan/agent-harness-helpers.md §1.1 (Claude Code v2.1.206, Codex
-/// rust-v0.144.x, Pi v0.80.7, tmux 3.6a — 2026-07-10/15). When an agent
-/// changes its signature, this file is where the new truth lands.
+/// rust-v0.144.x, Pi v0.80.7, tmux 3.6a — 2026-07-10/15; Grok Build from
+/// the xai-org/grok-build source, 2026-08-16). When an agent changes its
+/// signature, this file is where the new truth lands.
 final class AgentSignatureTests: XCTestCase {
     // MARK: new-session launch commands
 
@@ -22,6 +23,11 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(
             AgentKind.pi.launchCommand(model: nil, initialPrompt: prompt),
             "pi 'Review the SSH path'"
+        )
+        // Grok Build: `grok "fix the bug"` is its documented interactive shape.
+        XCTAssertEqual(
+            AgentKind.grok.launchCommand(model: nil, initialPrompt: prompt),
+            "grok 'Review the SSH path'"
         )
     }
 
@@ -70,6 +76,10 @@ final class AgentSignatureTests: XCTestCase {
             AgentKind.pi.launchCommand(
                 model: "anthropic/claude-opus-4:high", initialPrompt: ""),
             "pi --model 'anthropic/claude-opus-4:high'"
+        )
+        XCTAssertEqual(
+            AgentKind.grok.launchCommand(model: "grok-build", initialPrompt: "go"),
+            "grok --model 'grok-build' 'go'"
         )
     }
 
@@ -122,6 +132,14 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(AgentSignature.classify(command: "claude", title: ""), .claudeCode)
         XCTAssertEqual(AgentSignature.classify(command: "codex", title: ""), .codex)
         XCTAssertEqual(AgentSignature.classify(command: "pi", title: ""), .pi)
+        // Official installs ship `grok`; the cargo artifact keeps its name.
+        XCTAssertEqual(AgentSignature.classify(command: "grok", title: ""), .grok)
+        XCTAssertEqual(AgentSignature.classify(command: "xai-grok-pager", title: ""), .grok)
+        // Live macOS 27 comm: the installer's versioned download target,
+        // clipped by the kernel.
+        XCTAssertEqual(AgentSignature.classify(command: "grok-1.0.4-maco", title: ""), .grok)
+        XCTAssertNil(AgentSignature.classify(command: "grok-notes", title: ""))
+        XCTAssertNil(AgentSignature.classify(command: "grok-1", title: ""))
         XCTAssertNil(AgentSignature.classify(command: "zsh", title: ""))
         // Interpreter comm alone must NOT classify — the tree walk decides.
         XCTAssertNil(AgentSignature.classify(command: "node", title: ""))
@@ -160,6 +178,8 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertNil(AgentSignature.classify(command: "node", title: "pi project"))
         XCTAssertNil(AgentSignature.classify(command: "node", title: "π calculations"))
         XCTAssertNil(AgentSignature.classify(command: "node", title: "π"))
+        // No tmux title rule for Grok — only its process signals classify.
+        XCTAssertNil(AgentSignature.classify(command: "zsh", title: "fix parser - grok"))
     }
 
     func testStalePiTitleDoesNotClassifyReturnedShell() {
@@ -181,6 +201,8 @@ final class AgentSignatureTests: XCTestCase {
             AgentSignature.classify(command: "claude", title: "π - repo"), .claudeCode)
         XCTAssertEqual(
             AgentSignature.classify(command: "pi", title: "✳ Claude Code"), .pi)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "grok", title: "✳ Claude Code"), .grok)
     }
 
     // MARK: argv matching — exact argv[0] basename + interpreter rule
@@ -193,6 +215,8 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(
             AgentSignature.match(argv: "node /usr/lib/node_modules/.bin/claude"), .claudeCode)
         XCTAssertEqual(AgentSignature.match(argv: "bun /x/bin/codex resume"), .codex)
+        XCTAssertEqual(AgentSignature.match(argv: "/Users/dev/.grok/bin/grok --cwd /repo"), .grok)
+        XCTAssertEqual(AgentSignature.match(argv: "target/release/xai-grok-pager"), .grok)
     }
 
     func testMatchArgvRejectsTheTraps() {
@@ -404,6 +428,20 @@ final class AgentSignatureTests: XCTestCase {
             isAlternateScreen: false,
             previous: nil
         ))
+        // Grok's composed " - grok" suffix is live; the bare word is its
+        // stale post-exit title.
+        XCTAssertEqual(AgentSignature.classifyTerminal(
+            title: "⠋ - Thinking - fix the parser - grok",
+            visibleLines: [],
+            isAlternateScreen: true,
+            previous: nil
+        ), .grok)
+        XCTAssertNil(AgentSignature.classifyTerminal(
+            title: "grok",
+            visibleLines: [],
+            isAlternateScreen: false,
+            previous: nil
+        ))
         XCTAssertNil(AgentSignature.classifyTerminal(
             title: "ordinary shell",
             visibleLines: ["the docs mention OpenAI Codex without a version masthead"],
@@ -418,6 +456,7 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(AgentCommand.mode.payload, Data([0x1B, 0x5B, 0x5A]))     // CSI Z
         XCTAssertEqual(AgentCommand.think.payload, Data([0x1B, 0x5B, 0x5A]))    // CSI Z
         XCTAssertEqual(AgentCommand.transcript.payload, Data([0x14]))           // Ctrl+T
+        XCTAssertEqual(AgentCommand.todos.payload, Data([0x14]))                // Ctrl+T
         XCTAssertEqual(AgentCommand.tools.payload, Data([0x0F]))                // Ctrl+O
         XCTAssertEqual(AgentCommand.thinking.payload, Data([0x14]))             // Ctrl+T
         XCTAssertEqual(AgentCommand.pageUp.payload, Data([0x1B, 0x5B, 0x35, 0x7E]))   // CSI 5~
@@ -503,6 +542,20 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertTrue(piOverflow.contains(.slash("copy")))
         XCTAssertFalse(pi.contains(.mode))
         XCTAssertFalse(pi.contains(.transcript))
+
+        // Grok Build: Shift+Tab cycles Normal → Plan → Always-approve, so
+        // MODE applies; Ctrl+T is its todos pane, not a transcript.
+        let grok = AgentCommandSet.primary(for: .grok)
+        let grokOverflow = AgentCommandSet.overflow(for: .grok)
+        XCTAssertEqual(
+            grok,
+            [.slash("new"), .slash("resume"), .slash("compact"),
+             .slash("rewind"), .slash("model"), .slash("effort"), .mode]
+        )
+        XCTAssertTrue(grokOverflow.contains(.todos))
+        XCTAssertTrue(grokOverflow.contains(.slash("plan")))
+        XCTAssertFalse(grok.contains(.transcript))
+        XCTAssertFalse(grokOverflow.contains(.transcript))
     }
 
     func testBuiltInPlacementOverridesMoveCommandsWithoutChangingDefaults() {

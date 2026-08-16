@@ -189,7 +189,7 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
             ),
             makeFeature(
                 "AGENT HELPERS + ALERTS",
-                "Use Claude Code, Codex, and Pi quick commands without the daily "
+                "Use Claude Code, Codex, Pi, and Grok Build quick commands without the daily "
                     + "limit, browse a Claude Code session's prompt history and jump "
                     + "its transcript back to any message, and get a banner when an "
                     + "unwatched supported session needs you."

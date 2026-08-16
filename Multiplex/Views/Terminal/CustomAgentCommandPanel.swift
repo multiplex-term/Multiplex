@@ -360,7 +360,7 @@ final class CustomAgentCommandPanelViewController: UIViewController {
             ),
             TallyEditorLegend.row(
                 color: UIKitChassis.signal3,
-                text: "Shared keeps one editable command synchronized across Claude Code, Codex, and Pi."
+                text: "Shared keeps one editable command synchronized across Claude Code, Codex, Pi, and Grok Build."
             ),
         ])
         let actions = TallyEditorFooter.actions(
@@ -958,7 +958,7 @@ private final class CustomCommandRowView: UIView, UITextViewDelegate {
             ),
             makeSwitch(
                 label: "SHARED",
-                accessibilityLabel: "Shared across Claude Code, Codex, and Pi",
+                accessibilityLabel: "Shared across Claude Code, Codex, Pi, and Grok Build",
                 value: command.shared,
                 keyPath: \.shared
             ),

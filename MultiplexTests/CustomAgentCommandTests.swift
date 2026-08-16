@@ -186,6 +186,7 @@ final class CustomAgentCommandTests: XCTestCase {
         XCTAssertEqual(configuration.commands(for: .claudeCode), [shared])
         XCTAssertEqual(configuration.commands(for: .codex), [shared])
         XCTAssertEqual(configuration.commands(for: .pi), [shared])
+        XCTAssertEqual(configuration.commands(for: .grok), [shared])
     }
 
     func testConfigurationPersistsOrderedProfilesAndNormalizedPlacements() throws {
@@ -199,6 +200,7 @@ final class CustomAgentCommandTests: XCTestCase {
         ]
         let codex = [CustomAgentCommand(content: "/status")]
         let pi = [CustomAgentCommand(content: "/tree")]
+        let grok = [CustomAgentCommand(content: "/doctor")]
         var configuration = AgentCommandConfiguration()
 
         configuration.replace(
@@ -222,6 +224,11 @@ final class CustomAgentCommandTests: XCTestCase {
             builtInPlacements: ["/tree": .more, "/session": .bar],
             for: .pi
         )
+        configuration.replace(
+            grok,
+            builtInPlacements: [:],
+            for: .grok
+        )
 
         let expectedPlacements: [String: AgentCommandPlacement] = [
             "/clear": .more,
@@ -230,6 +237,7 @@ final class CustomAgentCommandTests: XCTestCase {
         XCTAssertEqual(configuration.commands(for: .claudeCode), claude)
         XCTAssertEqual(configuration.commands(for: .codex), codex)
         XCTAssertEqual(configuration.commands(for: .pi), pi)
+        XCTAssertEqual(configuration.commands(for: .grok), grok)
         XCTAssertEqual(configuration.profiles.map(\.agent), AgentKind.allCases)
         XCTAssertEqual(
             configuration.builtInPlacements(for: .claudeCode),
@@ -242,6 +250,32 @@ final class CustomAgentCommandTests: XCTestCase {
             from: data
         )
         XCTAssertEqual(decoded, configuration)
+    }
+
+    func testConfigurationSkipsProfilesForAgentsThisBuildDoesNotKnow() throws {
+        // A newer app can sync a profile for a CLI this build has no case
+        // for; the record must still decode with every known profile intact.
+        let json = """
+        {"profiles": [
+          {"agent": "codex", "commands": [], "builtInPlacements": {"/compact": "bar"}},
+          {"agent": "someFutureAgent", "commands": [], "builtInPlacements": {"/x": "bar"}},
+          {"agent": "grok", "commands": [], "builtInPlacements": {"/plan": "bar"}}
+        ]}
+        """
+        let decoded = try JSONDecoder().decode(
+            AgentCommandConfiguration.self,
+            from: Data(json.utf8)
+        )
+        XCTAssertEqual(decoded.profiles.map(\.agent), [.codex, .grok])
+        XCTAssertEqual(decoded.builtInPlacements(for: .grok), ["/plan": .bar])
+
+        // Leniency is for the agent name only — a known agent's corrupt
+        // profile still fails the decode rather than vanishing silently.
+        let corrupt = """
+        {"profiles": [{"agent": "codex", "commands": "nope", "builtInPlacements": {}}]}
+        """
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AgentCommandConfiguration.self, from: Data(corrupt.utf8)))
     }
 
     func testHostRecordRoundTripCarriesCommandSetupForKeychainSync() throws {

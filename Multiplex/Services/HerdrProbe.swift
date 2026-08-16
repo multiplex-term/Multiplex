@@ -1331,6 +1331,9 @@ extension AgentKind {
         case "claude": self = .claudeCode
         case "codex": self = .codex
         case "pi": self = .pi
+        // herdr's canonical id for Grok Build is unverified (2026-08-16);
+        // the raw command name is the one spelling it can plausibly report.
+        case "grok": self = .grok
         default: return nil
         }
     }

@@ -1066,6 +1066,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         case .claudeCode: return "opus, sonnet, or a full model id"
         case .codex: return "model id per line"
         case .pi: return "provider/model-id per line"
+        case .grok: return "grok-build, or a full model id"
         }
     }
 

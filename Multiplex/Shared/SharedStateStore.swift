@@ -186,6 +186,7 @@ enum SharedStateStore {
         case "claudeCode": "CLAUDE"
         case "codex": "CODEX"
         case "pi": "PI"
+        case "grok": "GROK"
         default: nil
         }
     }

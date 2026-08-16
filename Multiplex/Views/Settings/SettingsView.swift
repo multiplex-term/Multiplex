@@ -508,8 +508,8 @@ final class SettingsViewController: UIViewController {
         }
         return SettingsSectionView(
             title: "Agent alerts",
-            detail: "Posts a banner when Claude Code or Codex finishes a turn, asks a "
-                + "question, or wants permission in a session you are not typing in. "
+            detail: "Posts a banner when Claude Code, Codex, or Grok Build finishes a turn, "
+                + "asks a question, or wants permission in a session you are not typing in. "
                 + "Multiplex must remain open. Requires Pro.",
             rows: rows
         )

@@ -96,6 +96,18 @@ app.multiplexterm.multiplex`):
   working-directories editor (shown for BOTH backends — the herdr mint
   roots a session's world with these; only the tmux options editor stays
   tmux-scoped).
+- **Attention alerts** need Pro AND the `attention.alertsEnabled` switch;
+  both live in the app container's defaults, and `simctl spawn <UDID>
+  defaults write <bundle-id>` lands in a domain the sandboxed app never
+  reads — pass the container plist path as the domain instead
+  (`… defaults write <container>/Library/Preferences/app.multiplexterm.
+  multiplex.plist MultiplexProUnlocked -bool true`, same for
+  `attention.alertsEnabled`; container via `simctl get_app_container … data`).
+  A stale `false` there logs `alert dropped … locked` (category `attention`)
+  exactly like the Pro gate. Proof of a live edge: `log stream --level debug
+  --predicate 'category == "attention"'` shows `alert posted for <session>` on
+  the probe tick after the agent's title drops its spinner (Grok Build,
+  2026-08-16: a `sleep 20` turn against this Mac's tmux).
 - `MULTIPLEX_KEYCHAIN_TIP=locked|unlocked|missing` — forces the keychain
   verdict. The sign-in-screen gate still applies: inject a needle first
   (e.g. `tmux send-keys -t agent:cc 'Select login method:' Enter`).

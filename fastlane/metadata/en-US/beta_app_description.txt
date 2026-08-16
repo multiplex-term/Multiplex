@@ -2,7 +2,7 @@ Multiplex is a spatial SSH terminal built around remote tmux, with herdr as a pe
 
 The deck is a live wall: every host probes concurrently, and each session renders as a tile showing that session's real last screen lines. Tap a tile to attach and the session opens in its own window — spatial on Vision Pro, a Stage Manager scene on iPad, a full-screen pane on iPhone. Windows merge into tabs and split back out without dropping the shell. In HERDR mode one tile is one herdr session, its workspaces become the tile's spine, and agent state comes from herdr itself.
 
-Multiplex also spots Claude Code, Codex, and Pi running in a pane and puts a command strip under the terminal. Multiplex Pro adds alerts when an unwatched agent finishes a turn or asks a question, Claude Code prompt history with one-tap jump to any message, mosh, unlimited hosts, and a custom terminal theme editor.
+Multiplex also spots Claude Code, Codex, Pi, and Grok Build running in a pane and puts a command strip under the terminal. Multiplex Pro adds alerts when an unwatched agent finishes a turn or asks a question, Claude Code prompt history with one-tap jump to any message, mosh, unlimited hosts, and a custom terminal theme editor.
 
 WHAT YOU NEED
 - A host you can reach over SSH (password, or an OpenSSH ed25519/RSA key).

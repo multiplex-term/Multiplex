@@ -11,6 +11,7 @@ final class AgentAttentionTests: XCTestCase {
     func testOnlyAgentsWithVerifiedAttentionSignalsParticipate() {
         XCTAssertTrue(AgentKind.claudeCode.hasVerifiedAttentionSignals)
         XCTAssertTrue(AgentKind.codex.hasVerifiedAttentionSignals)
+        XCTAssertTrue(AgentKind.grok.hasVerifiedAttentionSignals)
         XCTAssertFalse(AgentKind.pi.hasVerifiedAttentionSignals)
 
         let permissionTail = [
@@ -45,6 +46,82 @@ final class AgentAttentionTests: XCTestCase {
             ),
             .busy
         )
+    }
+
+    // MARK: Grok Build (from the xai-org/grok-build source, 2026-08-16)
+
+    func testGrokTitleStates() {
+        // TitleManager's default composition: [⚠ Action Required] - [spinner]
+        // - [activity] - [session name] - grok, joined by " - ".
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(title: "grok", tail: [], agent: .grok), .idle)
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(title: "fix the parser - grok", tail: [], agent: .grok),
+            .idle)
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "⠋ - Thinking - fix the parser - grok", tail: [], agent: .grok),
+            .busy)
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(title: "⠧ - Waiting - grok", tail: [], agent: .grok),
+            .busy)
+        // Items are user-orderable — the spinner need not lead.
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(title: "grok - ⠋ - Running: ls", tail: [], agent: .grok),
+            .busy)
+        // A non-empty permission queue prefixes the ⚠ item; the turn keeps
+        // spinning behind it, so the ⚠ outranks the spinner.
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "⚠ Action Required - ⠋ - Waiting - fix the parser - grok",
+                tail: [], agent: .grok),
+            .needsYou(.permission))
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "grok - ⚠ Action Required", tail: [], agent: .grok),
+            .needsYou(.permission))
+        // Codex's pipe form must not leak into Grok's, nor vice versa.
+        XCTAssertEqual(
+            AgentAttention.classify(title: "⚠ Action Required - grok", tail: []), .idle)
+    }
+
+    func testGrokQuestionCardReadsOptionRowsFromTheTail() {
+        // ask_user_question keeps the title spinning; the card is the signal.
+        let single = [
+            "Which database engine?",
+            "",
+            "1 (●) Postgres    battle-tested",
+            "2 (○) SQLite      zero-ops",
+            "3 (○) Other",
+        ]
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "⠋ - Waiting for response… - grok", tail: single, agent: .grok),
+            .needsYou(.question))
+        let multi = [
+            "│ Pick the features to enable",
+            "│ 1 [x] Sync",
+            "│ 2 [ ] Widgets",
+            "│ a [ ] Everything else",
+        ]
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "⠋ - grok", tail: multi, agent: .grok),
+            .needsYou(.question))
+        // One shaped line is prose (a shell echoing "1 (○) foo"); two is a card.
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "⠋ - grok", tail: ["1 (○) lonely row", "$ ls"], agent: .grok),
+            .busy)
+        // Numbered lists and Claude's caret rows are not Grok option rows.
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "grok",
+                tail: ["1. first", "2. second", "❯ 1. Yes", "  2. No"],
+                agent: .grok),
+            .idle)
+        // The generic classifier never reads Grok's card for other agents.
+        XCTAssertEqual(AgentAttention.classify(title: "✳ Claude Code", tail: single), .idle)
     }
 
     // MARK: Title state machine
