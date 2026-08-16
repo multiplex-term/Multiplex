@@ -79,6 +79,12 @@ final class AppRuntime {
         backgroundRefresh.installDebugHook()
         #endif
 
+        // The hold-CTRL Key Commands set is read once here, not inside the
+        // first hold: its file load and Keychain-mirror check stay off the
+        // gesture path.
+        _ = KeyCommandStore.shared
+        Task { await KeyCommandStore.shared.refreshFromCloud() }
+
         // Mint the widget-link token once per install: the widget process
         // reads it from the App Group to mark its own deep links, and
         // `receive(_ url:)` confirms anything that arrives without it.

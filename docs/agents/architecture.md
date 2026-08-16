@@ -19,6 +19,14 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
                      iCloud Keychain (KeychainStore); host records include
                      per-host agent command configuration
   ThemeStore         terminal color schemes (themes.json); device-local
+  KeyCommandStore    the app-wide hold-CTRL Key Commands set (.shared;
+                     keycommands.json + ONE synchronizable Keychain item,
+                     last writer wins by updatedAt); KeyCommand/KeyChord/
+                     KeyTextSnippet pure; KeyCommandDispatcher sends through
+                     TerminalView.send, chords encoded by the fork at press
+                     time (TerminalView.bytes(for:)); the tier's cap rides
+                     KeyCommandPlan from the terminal window (which holds
+                     EntitlementStore) down to the rail / cluster presenter
   AgentCommandConfiguration  pure per-host Bar/More overrides + ordered
                      custom helpers; shared UUIDs mirror between profiles
   ConnectionHub      one HostConnectionModel per host — the probe connection;

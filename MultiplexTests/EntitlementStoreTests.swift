@@ -195,6 +195,21 @@ final class EntitlementStoreTests: XCTestCase {
         #endif
     }
 
+    func testFreeKeyCommandLimitIsFiveAndProLiftsItToTheCap() {
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = lockedStore(defaults: defaults)
+
+        XCTAssertEqual(EntitlementStore.freeKeyCommandLimit, 5)
+        XCTAssertEqual(store.keyCommandLimit, 5)
+        XCTAssertLessThan(store.keyCommandLimit, KeyCommandSet.maximumCount)
+
+        #if DEBUG
+        store.setDebugUnlocked(true)
+        XCTAssertEqual(store.keyCommandLimit, KeyCommandSet.maximumCount)
+        #endif
+    }
+
     func testProCapabilityPredicatesPreserveGrandfatheredMosh() {
         let (defaults, name) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: name) }

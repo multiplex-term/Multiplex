@@ -232,6 +232,7 @@ final class EntitlementStore {
     static let proProductID = "app.multiplexterm.multiplex.pro"
     static let freeHostLimit = 2
     static let dailySlashChipLimit = 10
+    static let freeKeyCommandLimit = 5
 
     enum CommerceState: Equatable {
         case idle
@@ -339,6 +340,14 @@ final class EntitlementStore {
     /// removed or disconnected; callers enforce this only before an add.
     func canAddHost(existingHostCount: Int) -> Bool {
         isPro || existingHostCount < Self.freeHostLimit
+    }
+
+    /// The free tier keeps five Key Commands; Pro lifts the set to its full
+    /// cap. Like hosts, a set that already holds more (synced from a Pro
+    /// device, or after an entitlement lapse) is never trimmed or disabled —
+    /// the panel enforces this only before an add.
+    var keyCommandLimit: Int {
+        isPro ? KeyCommandSet.maximumCount : Self.freeKeyCommandLimit
     }
 
     /// Turning on mosh is Pro intent; a record that already has it remains

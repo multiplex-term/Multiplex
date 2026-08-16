@@ -540,6 +540,11 @@ final class SettingsViewController: UIViewController {
         ))
         rows.append(proRow("Agent Alerts", state: state))
         rows.append(proRow("Custom Themes", state: state))
+        rows.append(proRow(
+            "Key Commands",
+            freeStatus: "UP TO \(EntitlementStore.freeKeyCommandLimit)",
+            state: state
+        ))
         rows.append(SettingsInsetRow(contentView: settingsLeadingView(UIKitChassisChip(
             state.isPro ? "PRO DETAILS" : "UNLOCK MULTIPLEX PRO",
             prominent: true,
@@ -561,8 +566,9 @@ final class SettingsViewController: UIViewController {
         return SettingsSectionView(
             title: "Multiplex Pro",
             detail: "Pro adds unlimited hosts, mosh, unlimited agent-helper commands, "
-                + "alerts, and custom themes. SSH terminals, agent detection, and the "
-                + "wall's live state stay free.",
+                + "alerts, custom themes, and a \(KeyCommandSet.maximumCount)-command Key Commands set "
+                + "(free keeps \(EntitlementStore.freeKeyCommandLimit)). SSH terminals, agent "
+                + "detection, and the wall's live state stay free.",
             rows: rows
         )
     }

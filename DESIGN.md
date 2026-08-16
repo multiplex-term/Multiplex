@@ -163,7 +163,11 @@ straddle otherwise), then the UMD title row: `DECK` chip, source label
 `+ TAB · FILE · TMUX · MERGE · DETACH`, then a key row: `ESC · CTRL · TAB`,
 the DECCKM-aware autorepeat arrows, `RET`, and the keyboard toggle (the
 floating visionOS keyboard has none of these — arrows + `RET` drive a CLI
-agent's option picker without summoning it). The iPad toolbar keeps the
+agent's option picker without summoning it). Holding `CTRL` opens **KEY
+COMMANDS**, a two-tab TALLY popover on the shortcut panel's grammar:
+COMMANDS is a hairline grid of keycap chords (⇧↩ · ⌃C ×2 · ⌥⌫, and the user's
+own, in custom ink), CUSTOM SETUP is the agent editor's numbered list with an
+inline composer — bake-off record in `local-plan/key-commands-bakeoff/`. The iPad toolbar keeps the
 full chip set: `DECK`,
 source label, lamp, then
 `A− · A+ · + TAB · FILE · TMUX · MERGE · DETACH` chips; the keyboard

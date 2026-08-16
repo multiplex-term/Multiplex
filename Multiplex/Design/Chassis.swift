@@ -153,6 +153,7 @@ final class UIKitChassisLabel: UILabel {
     required init?(coder: NSCoder) { fatalError("unused") }
 
     func setText(_ text: String) {
+        guard text != sourceText else { return }
         sourceText = text
         accessibilityLabel = text
         refreshAttributedText()
@@ -162,6 +163,7 @@ final class UIKitChassisLabel: UILabel {
     /// layout subtree. Interactive controls use this instead of replacing a
     /// label that may still be participating in the current touch/layout pass.
     func setInk(_ color: UIColor) {
+        guard color != ink else { return }
         ink = color
         refreshAttributedText()
     }
@@ -195,6 +197,82 @@ final class UIKitChassisLabel: UILabel {
                 .foregroundColor: ink.resolvedColor(with: traitCollection),
             ]
         )
+    }
+}
+
+/// A one-line panel label in a caller-chosen font — the mono readouts,
+/// bindings, and hints of the shortcut / Key Commands panels — whose
+/// RESOLVED ink is baked into its attributed string and re-resolved on every
+/// trait change and on window attach (the retained-ink defect, see
+/// `UIKitChassisLabel.didMoveToWindow`). Not an accessibility element by
+/// default: the control it decorates speaks for it.
+@MainActor
+final class UIKitChassisMonoLabel: UILabel {
+    private var sourceText = ""
+    private var sourceFont = UIFont.systemFont(ofSize: 10)
+    private var sourceColor = UIKitChassis.signal
+    private var kern: CGFloat?
+
+    convenience init(_ text: String, font: UIFont, color: UIColor, kern: CGFloat? = nil) {
+        self.init(frame: .zero)
+        configure(text, font: font, color: color, kern: kern)
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        numberOfLines = 1
+        lineBreakMode = .byClipping
+        isAccessibilityElement = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    func configure(_ text: String, font: UIFont, color: UIColor, kern: CGFloat? = nil) {
+        sourceText = text
+        sourceFont = font
+        sourceColor = color
+        self.kern = kern
+        refreshAttributedText()
+    }
+
+    /// Text and ink together, one refresh; unchanged values are a no-op so a
+    /// per-keystroke re-render costs nothing.
+    func setText(_ text: String, ink: UIColor? = nil) {
+        let nextColor = ink ?? sourceColor
+        guard text != sourceText || nextColor != sourceColor else { return }
+        sourceText = text
+        sourceColor = nextColor
+        refreshAttributedText()
+    }
+
+    func setInk(_ color: UIColor) {
+        guard color != sourceColor else { return }
+        sourceColor = color
+        refreshAttributedText()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        refreshAttributedText()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else { return }
+        refreshAttributedText()
+    }
+
+    private func refreshAttributedText() {
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: sourceFont,
+            .foregroundColor: sourceColor.resolvedColor(with: traitCollection),
+        ]
+        if let kern { attributes[.kern] = kern }
+        attributedText = NSAttributedString(string: sourceText, attributes: attributes)
+        accessibilityLabel = sourceText
     }
 }
 
