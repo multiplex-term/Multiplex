@@ -760,7 +760,12 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             arrowKey("arrow.right", .right, "Arrow right", identifier: "right"),
         ])
         if includesReturn {
-            right.append(caps("RET", .returnKey, "Return", identifier: "return"))
+            right.append(RailKey(
+                key: .returnKey,
+                face: .symbol("return", pointSize: 12, weight: .semibold),
+                accessibility: "Return",
+                identifier: "return"
+            ))
         }
         if state.hardwareKeyboardConnected {
             right.append(RailKey(
@@ -1662,9 +1667,14 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
                     normal: EscapeSequences.moveRightNormal
                 ))
             }
-            append(caps("RET", "Return", activeMetric, identifier: "return") { [weak context] in
-                context?.sendReturn()
-            })
+            append(TerminalTallyKeyControl(
+                face: .symbol("return", pointSize: 12, weight: .semibold),
+                width: activeMetric.keyWidth,
+                height: 26,
+                accessibilityLabel: "Return",
+                accessibilityIdentifier: "terminal.keyCluster.return",
+                action: { [weak context] in context?.sendReturn() }
+            ))
             let keyboard = TerminalTallyKeyControl(
                 face: .symbol("keyboard", pointSize: 12, weight: .semibold),
                 width: activeMetric.keyWidth,
