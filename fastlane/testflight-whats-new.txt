@@ -11,6 +11,7 @@ NEW SINCE 1.3.1
 • KEY COMMANDS — hold CTRL on the key rail (or the visionOS key cluster) for saved chords the software keyboard cannot press: Shift+Enter, a double Ctrl-C, Option+Backspace to delete a word (stays open). CUSTOM SETUP adds your own — any Ctrl/Shift/Option chord or a one-line text macro, repeated up to 5 times, closing the panel or not — synced to your other devices. Free keeps five; Pro raises the set to twelve. The terminal GUIDE gains a HOLD CTRL card.
 • CONNECTION STATS — a live latency chip on every host rail (free), and a Pro board with per-host drill-in: round-trips, typing echo, mosh loss and roams, reconnects, and data volume. Off switch in Settings.
 • GROK BUILD JOINS the agent roster — detected in panes, its own chip strip, NEW SESSION launch with model and first prompt, and Pro alerts when it needs permission or an answer.
+• TERMINAL ENGINE UPDATE — Arabic and Hebrew render right-to-left, Powerline separators draw seamlessly, and reverse video and combining accents paint correctly.
 
 PLEASE TRY
 1. Hop through windows from the TMUX panel — it should stay up, with ACTIVE following.
