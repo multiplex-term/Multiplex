@@ -445,6 +445,7 @@ private class ShortcutPressControl: UIControl {
         isAccessibilityElement = true
         accessibilityTraits = .button
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        addTarget(self, action: #selector(tap), for: .touchDown)
         addTarget(
             self,
             action: #selector(beginPress),
@@ -456,6 +457,10 @@ private class ShortcutPressControl: UIControl {
             for: [.touchCancel, .touchDragExit, .touchUpInside, .touchUpOutside]
         )
         refreshBackground()
+    }
+
+    @objc private func tap() {
+        TerminalKeyHaptics.keyPress(on: self)
     }
 
     @available(*, unavailable)

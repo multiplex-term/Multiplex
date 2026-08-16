@@ -137,6 +137,7 @@ final class TerminalTallyKeyControl: UIControl {
     }
 
     @objc private func pressBegan() {
+        TerminalKeyHaptics.keyPress(on: self)
         isHighlighted = true
         didRepeat = false
         didLongPress = false
@@ -183,6 +184,7 @@ final class TerminalTallyKeyControl: UIControl {
             cancelRepeat()
             return
         }
+        TerminalKeyHaptics.keyPress(on: self)
         primaryAction()
     }
 
