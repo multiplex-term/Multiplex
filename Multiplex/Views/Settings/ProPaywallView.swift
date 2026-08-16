@@ -162,7 +162,8 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
         )
         let freeTier = makeLabel(
             "The free tier stays useful: two hosts, spatial SSH terminals, "
-                + "live agent detection, built-in themes and "
+                + "live agent detection, built-in themes, "
+                + "\(EntitlementStore.freeKeyCommandLimit) saved Key Commands and "
                 + "\(EntitlementStore.dailySlashChipLimit) built-in or custom "
                 + "agent-command taps each day.",
             style: .subheadline,
@@ -201,6 +202,12 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
             makeFeature(
                 "CUSTOM THEMES",
                 "Build and edit terminal palettes while the Tally chassis stays consistent."
+            ),
+            makeFeature(
+                "\(KeyCommandSet.maximumCount) KEY COMMANDS",
+                "Grow the hold-CTRL set of saved chords and text macros from "
+                    + "\(EntitlementStore.freeKeyCommandLimit) to \(KeyCommandSet.maximumCount), "
+                    + "synced to every device."
             ),
         ])
         stack.axis = .vertical

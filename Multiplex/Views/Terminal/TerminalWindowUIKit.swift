@@ -1584,7 +1584,19 @@ extension TerminalWindowViewController {
             railOwnsBottomSafeArea: railOwnsBottomSafeArea,
             isActive: isActive,
             focusAllowed: terminalFocusAllowed,
+            keyCommandPlan: keyCommandPlan,
             close: { [weak self] in self?.closeTab(tab.id) }
+        )
+    }
+
+    /// The hold-CTRL panel's tier: the free cap with the paywall as its
+    /// route, or the full cap once Pro. `entitlements.isPro` is in this
+    /// controller's observation set, so a purchase re-renders every pane
+    /// (and, on visionOS, the cluster contexts) with the lifted plan.
+    private var keyCommandPlan: KeyCommandPlan {
+        KeyCommandPlan(
+            limit: entitlements.keyCommandLimit,
+            upgrade: entitlements.isPro ? nil : { [weak self] in self?.presentPaywall() }
         )
     }
 
@@ -2026,6 +2038,7 @@ extension TerminalWindowViewController {
 
     private func updateVisionOrnaments(forceRevision: Bool = false) {
         guard shell == nil, !appLocked else { return }
+        visionOrnaments.state.keyClusterContext.keyCommandPlan = keyCommandPlan
         visionOrnaments.update(
             tabCount: route.tabs.count,
             isAuxiliary: activeTab?.isAuxiliaryPane == true,
@@ -2087,6 +2100,7 @@ extension TerminalWindowViewController {
             visionShellKeyCluster.removeFromSuperview()
             rootView.addSubview(visionShellKeyCluster)
         }
+        visionShellKeyContext.keyCommandPlan = keyCommandPlan
         visionShellKeyCluster.update(controller: activeController)
         visionShellKeyCluster.isHidden = false
     }
@@ -2642,6 +2656,9 @@ extension TerminalWindowViewController {
         else { return }
         controller.dismissPendingLink()
         openViewport(offer)
+        // The chip's own road ends with the sheet going away; the model
+        // clear above leaves the presented sheet standing otherwise.
+        dismissPresentedFeature()
     }
 
     private func debugOpenFileViewer() {
@@ -2656,6 +2673,7 @@ extension TerminalWindowViewController {
         else { return }
         controller.dismissPendingPath()
         openFileViewer(target: target)
+        dismissPresentedFeature()
     }
 
     private func debugLogLinkRegions() {

@@ -19,6 +19,14 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
                      iCloud Keychain (KeychainStore); host records include
                      per-host agent command configuration
   ThemeStore         terminal color schemes (themes.json); device-local
+  KeyCommandStore    the app-wide hold-CTRL Key Commands set (.shared;
+                     keycommands.json + ONE synchronizable Keychain item,
+                     last writer wins by updatedAt); KeyCommand/KeyChord/
+                     KeyTextSnippet pure; KeyCommandDispatcher sends through
+                     TerminalView.send, chords encoded by the fork at press
+                     time (TerminalView.bytes(for:)); the tier's cap rides
+                     KeyCommandPlan from the terminal window (which holds
+                     EntitlementStore) down to the rail / cluster presenter
   AgentCommandConfiguration  pure per-host Bar/More overrides + ordered
                      custom helpers; shared UUIDs mirror between profiles
   ConnectionHub      one HostConnectionModel per host — the probe connection;
@@ -68,7 +76,9 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
                      moves re-parent the live page; in-memory only
     FileViewerController one per ▤ file-viewer tab; dials its OWN lazy
                      SSHConnection; in-memory only (shares the
-                     isAuxiliaryPane rules with the viewport)
+                     isAuxiliaryPane rules with the viewport); its
+                     Document owns the PDF / audio clip, so a moved tab
+                     keeps page and position
   TerminalSessionController  one per tab; input pump + TerminalView
     TerminalTransport    the tab's byte pipe; picked by host.useMosh
                          (exec + SFTP stay SSH-only capabilities)

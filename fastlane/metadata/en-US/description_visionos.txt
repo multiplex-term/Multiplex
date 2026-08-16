@@ -16,13 +16,13 @@ MOSH BUILT IN
 With Pro, switch a host to mosh and the session survives sleep, roaming, and IP changes — a native Swift mosh client, no companion app.
 
 A REAL TERMINAL
-Full xterm-256color emulation, multilingual system-keyboard input, gaze-and-pinch clicks for mouse-aware TUIs, hardware keyboards, live PTY resize, and a built-in menu of everyday tmux commands — with herdr's own set on herdr tabs. Long-press or double-pinch for pane-clamped text selection on either backend. System, Light, Dark, and smoked Glass switch the whole chassis; Glass admits the room and shares Dark's terminal theme. Ten themes built in, and Pro adds an editor for background, text, cursor, and all 16 ANSI colors.
+Full xterm-256color emulation, multilingual system-keyboard input, gaze-and-pinch clicks for mouse-aware TUIs, hardware keyboards, live PTY resize, and a built-in menu of everyday tmux commands — with herdr's own set on herdr tabs. Hold CTRL for Key Commands: saved chords the software keyboard cannot press (Shift+Enter, a double Ctrl-C, Option+Backspace to delete a word) and one-line text macros, with your own repeats and stay-open rules, kept in sync across your devices. Long-press or double-pinch for pane-clamped text selection on either backend. System, Light, Dark, and smoked Glass switch the whole chassis; Glass admits the room and shares Dark's terminal theme. Ten themes built in, and Pro adds an editor for background, text, cursor, and all 16 ANSI colors.
 
 PRIVATE BY DESIGN
 Hosts, agent-command setups, and secrets sync between your devices through iCloud Keychain, end-to-end encrypted. Nothing touches our servers — there are none. No account, no analytics, no tracking.
 
 MULTIPLEX PRO
-One purchase, no subscription: unlimited hosts, mosh, agent notifications, the unmetered command strip, and custom themes on all your devices. Free includes two hosts, the full spatial experience, and 10 agent-command chip taps a day.
+One purchase, no subscription: unlimited hosts, mosh, agent notifications, the unmetered command strip, custom themes, and twelve Key Commands on all your devices. Free includes two hosts, the full spatial experience, five Key Commands, and 10 agent-command chip taps a day.
 
 WHAT YOU NEED
 A remote host you can reach over SSH (password or OpenSSH ed25519/RSA key). The live wall and persistent sessions need tmux 1.8+ or herdr 0.7.5+; plain SSH shells work without either. mosh needs mosh-server on the host.

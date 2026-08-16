@@ -44,6 +44,12 @@ Split from AGENTS.md — the TALLY identity in code. Visual rationale: DESIGN.md
   `adjustsFontForContentSizeCategory = true` in UIKit) and get the Mac
   boost once at the scene root (`traitOverrides
   .preferredContentSizeCategory`); the two mechanisms never compound.
+  One recorded exception to "geometry stays authored": the hold-CTRL Key
+  Commands panel scales its keycap faces, row buttons, steppers, switches,
+  and fields by `Theme.typeScale` too (`KeyCommandMetrics`) — a 26-pt
+  keycap holding a scaled glyph read as a toy part on the Mac
+  (2026-08-16); the agent editor's shared switch/arrow controls keep the
+  authored size unless handed a `scale`.
 - **visionOS hover**: set `hoverStyle` (square `.rect(cornerRadius: 2)`)
   on every custom button/menu — on the CONTROL itself, never a
   subview/label (a label-level shape is silently ignored and you get the

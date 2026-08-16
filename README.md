@@ -13,7 +13,7 @@ A spatial SSH terminal for remote **tmux** — visionOS first, with iPadOS and i
 - **Fleet-wide deck:** live tmux and herdr sessions across every host, with password, OpenSSH-key, or `mpx bind` setup and iCloud Keychain sync.
 - **Real terminal windows:** spatial scenes on visionOS, Stage Manager on iPad, and an adaptive iPhone shell. Tabs can move or merge without reconnecting.
 - **Agent awareness:** detects Claude Code, Codex, and Pi; surfaces questions, permissions, and completed turns on the wall and through notifications.
-- **Purpose-built input:** keyboard-focus arbitration, key rail, IME, dictation, remote scrolling, tmux Copy Mode, and text selection.
+- **Purpose-built input:** keyboard-focus arbitration, key rail with hold-CTRL Key Commands (saved chords and text macros), IME, dictation, remote scrolling, tmux Copy Mode, and text selection.
 - **More than a shell:** docked web and file viewers, SFTP uploads, optional clean-room mosh, widgets, Shortcuts, deep links, and custom themes.
 
 
@@ -70,7 +70,6 @@ Citadel 0.12.0 is pinned because 0.12.1 changed its `swift-nio-ssh` source to an
 ## Known limits
 
 - PATH fixups assume a POSIX-like login shell; csh/fish may need tmux on the default PATH.
-- Held-backspace auto-repeat relies on an input filler verified only on device.
 
 ## License
 

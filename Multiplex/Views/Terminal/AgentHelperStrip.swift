@@ -233,6 +233,7 @@ final class AgentHelperStripViewController: UIViewController,
         var groups: [UIMenuElement] = []
         let builtIns = moreBuiltInCommands.map { command in
             UIAction(title: command.label) { [weak self] _ in
+                TerminalKeyHaptics.keyPress(on: self?.view)
                 self?.perform(.send(command))
             }
         }
@@ -242,6 +243,7 @@ final class AgentHelperStripViewController: UIViewController,
 
         let customs = moreCustomCommands.map { command in
             UIAction(title: command.menuLabel) { [weak self] _ in
+                TerminalKeyHaptics.keyPress(on: self?.view)
                 self?.perform(.send(command.agentCommand))
             }
         }
@@ -814,10 +816,15 @@ private final class AgentHelperStripTitleButton: UIControl {
         ])
         self.accessibilityLabel = accessibilityLabel
         accessibilityTraits = .button
+        addTarget(self, action: #selector(tap), for: .touchDown)
         addTarget(self, action: #selector(pressed), for: .touchUpInside)
         #if os(visionOS)
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
         #endif
+    }
+
+    @objc private func tap() {
+        TerminalKeyHaptics.keyPress(on: self)
     }
 
     @available(*, unavailable)
@@ -855,6 +862,7 @@ private final class AgentHelperStripDotButton: UIButton {
         ])
         self.accessibilityLabel = accessibilityLabel
         accessibilityTraits = .button
+        addTarget(self, action: #selector(tap), for: .touchDown)
         addTarget(self, action: #selector(pressed), for: .touchUpInside)
         translatesAutoresizingMaskIntoConstraints = false
         let diameter = AgentHelperStripViewController.collapsedDotDiameter
@@ -875,6 +883,10 @@ private final class AgentHelperStripDotButton: UIButton {
 
     @objc private func pressed() {
         storedAction()
+    }
+
+    @objc private func tap() {
+        TerminalKeyHaptics.keyPress(on: self)
     }
 }
 
@@ -996,7 +1008,10 @@ private final class AgentHelperStripButton: UIButton {
         titleLabel?.numberOfLines = 1
         self.accessibilityLabel = accessibilityLabel
         accessibilityTraits = .button
+        // Menu-only chips (⋯) skip the tap: the menu's own presentation
+        // handles that press, and its send actions tap as they fire.
         if storedAction != nil {
+            addTarget(self, action: #selector(tap), for: .touchDown)
             addTarget(self, action: #selector(pressed), for: .touchUpInside)
         }
         translatesAutoresizingMaskIntoConstraints = false
@@ -1010,6 +1025,10 @@ private final class AgentHelperStripButton: UIButton {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
+
+    @objc private func tap() {
+        TerminalKeyHaptics.keyPress(on: self)
+    }
 
     @objc private func pressed() {
         storedAction?()

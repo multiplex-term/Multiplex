@@ -230,3 +230,46 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   ⚠ `mountBlocksIfNeeded` must `setNeedsLayout` the scroll view before
   reading `contentSize`, or a teardown's stale tall height reads as a full
   viewport and the screen stays BLANK until the reader scrolls.
+- **PDFs and sound files are screens, not BINARY** (2026-08-15;
+  `FileRenderKind.pdf` / `.audio`, `FileViewerPDFContentView`,
+  `FileViewerAudioContentView`, `FileViewerAudioClip`). Both are read WHOLE
+  over SFTP under one 60 MB `mediaByteLimit` (`readWhole`, shared with
+  images; TOO LARGE names the cap) — PDFKit wants random access and there is
+  no streaming road over SFTP. Video containers stay `.binary`.
+  - **PDF = PDFKit's `PDFView`** with a PAGE n / m badge and the image
+    screen's `%·FIT` chip (`FileViewerZoomReadout`). ⚠ ANY write to
+    `minScaleFactor` / `maxScaleFactor` / `scaleFactor` (a pinch included)
+    switches `autoScales` OFF, after which a resize no longer refits
+    (measured on the visionOS sim); so nothing sets the bounds and FIT
+    re-arms `autoScales` instead of assigning a scale. **A URL link inside a
+    PDF is untrusted document text**: `pdfViewWillClick(onLink:with:)` is
+    implemented because PDFKit otherwise opens the URL itself — it rides
+    `openMarkdownLink` into the link sheet. A quiet watch swap keeps the
+    reader's page (LaTeX build loops). Locked PDFs get a LOCKED panel with
+    UNLOCK… (system secure field, cleared in every button action, password
+    never kept); PDFKit unlocks IN PLACE, so `unlockPDF` re-publishes the
+    same `Document` and the pane rebuilds only because `BodyKey` flips
+    `pdfLocked → pdf`.
+  - **The audio clip belongs to the `Document`, the screen is its remote**
+    (`Document.audio`, an `AVAudioPlayer` over the bytes): merge/split
+    rebuilds the pane, not the document, so the position survives; a quiet
+    reload hands position + playing state to the replacement
+    (`adoptPosition`); `shutdown()` silences it. ⚠ Build the player ON the
+    main actor: `AVAudioPlayer(data:)` inside `Task.detached` measured
+    100–400× slower on the visionOS sim (~9 s for a mismatched hint). The
+    screen polls at 4 Hz only while playing; `UIKitChassisChip.setContent`
+    and `FileViewerBadgeView.setText` gate themselves, so readouts may be
+    set from timers and layout. **The document leaving the screen pauses,
+    hiding it does not**: `FileViewerController.content`'s `didSet` pauses a
+    clip whose document left (another file, a diff, a failure); a hidden tab
+    keeps playing, and merge/split never touches `content`. The `.playback`
+    session is claimed only at PLAY and handed back on pause / finish /
+    release. A decode failure keeps the AUDIO verdict (CAN'T PLAY panel; the
+    Ogg family is admitted on purpose so `.opus` plays and Vorbis fails
+    honestly). **Volume is the listener's, not the file's**
+    (`FileViewerAudioVolume` + `FileViewerAudioVolumeStore`, the text-size
+    store's shape: device-local, never synced): every clip and every panel
+    follow the store through `withObservationTracking` (its hook fires
+    before the write lands — hence the main-actor hop before re-reading),
+    and the slider only writes the store, in whole percents. No
+    background-audio mode is claimed.

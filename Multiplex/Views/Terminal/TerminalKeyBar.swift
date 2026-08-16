@@ -25,6 +25,12 @@ final class TerminalTallyKeyControl: UIControl {
     var longPressAction: (() -> Void)? {
         didSet { configureLongPress() }
     }
+    /// How long a press must hold before `longPressAction` fires. The
+    /// keyboard key's lock keeps the 0.5 s default; CTRL's Key Commands
+    /// hold is shorter (`KeyCommandPanelViewController.controlHoldDuration`).
+    var longPressDuration: TimeInterval = 0.5 {
+        didSet { longPressRecognizer?.minimumPressDuration = longPressDuration }
+    }
     var preferredSize: CGSize {
         didSet { invalidateIntrinsicContentSize() }
     }
@@ -137,6 +143,7 @@ final class TerminalTallyKeyControl: UIControl {
     }
 
     @objc private func pressBegan() {
+        TerminalKeyHaptics.keyPress(on: self)
         isHighlighted = true
         didRepeat = false
         didLongPress = false
@@ -183,6 +190,7 @@ final class TerminalTallyKeyControl: UIControl {
             cancelRepeat()
             return
         }
+        TerminalKeyHaptics.keyPress(on: self)
         primaryAction()
     }
 
@@ -228,7 +236,7 @@ final class TerminalTallyKeyControl: UIControl {
             target: self,
             action: #selector(longPressed(_:))
         )
-        recognizer.minimumPressDuration = 0.5
+        recognizer.minimumPressDuration = longPressDuration
         recognizer.cancelsTouchesInView = false
         addGestureRecognizer(recognizer)
         longPressRecognizer = recognizer
@@ -609,6 +617,10 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     private(set) var renderedKeys: [TerminalTallyKeyControl] = []
     private weak var ctrlKeyControl: TerminalTallyKeyControl?
     private weak var shortcutPopoverController: UIViewController?
+    private let keyCommandsPresenter = KeyCommandPanelPresenter()
+    /// The tier's Key Commands cap and paywall route, handed down with the
+    /// pane's configuration; the rail carries it to the presenter unread.
+    var keyCommandPlan: KeyCommandPlan = .unrestricted
     private var ctrlComboView: TerminalCtrlComboView?
 
     private struct RenderSignature: Equatable {
@@ -728,9 +740,13 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         let metric = specification.metric
         let includesReturn = showsReturnKey || state.keyboardLocked
 
+        // Tap CTRL latches (and raises the C / B slab); a hold on the same
+        // key opens Key Commands and never toggles the latch.
+        var control = caps("CTRL", .ctrl, "Control", identifier: "control", latched: ctrlLatched)
+        control.longPressKey = .keyCommands
         var groups: [[RailKey]] = [[
             caps("ESC", .esc, "Escape", identifier: "escape"),
-            caps("CTRL", .ctrl, "Control", identifier: "control", latched: ctrlLatched),
+            control,
             caps("TAB", .tab, "Tab", identifier: "tab"),
         ]]
         if !specification.symbols.isEmpty {
@@ -760,7 +776,12 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             arrowKey("arrow.right", .right, "Arrow right", identifier: "right"),
         ])
         if includesReturn {
-            right.append(caps("RET", .returnKey, "Return", identifier: "return"))
+            right.append(RailKey(
+                key: .returnKey,
+                face: .symbol("return", pointSize: 12, weight: .semibold),
+                accessibility: "Return",
+                identifier: "return"
+            ))
         }
         if state.hardwareKeyboardConnected {
             right.append(RailKey(
@@ -824,6 +845,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                     },
                     action: { [weak self] in self?.press(descriptor.key) }
                 )
+                if let hold = descriptor.longPressKey { control.longPressDuration = hold.holdDuration }
                 control.accessibilityUserInputLabels = [descriptor.accessibility]
                 addSubview(control)
                 renderedKeys.append(control)
@@ -926,7 +948,29 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         case .shortcut(let item):
             click()
             performShortcut(item)
+        case .keyCommands:
+            showKeyCommandsPanel()
         }
+    }
+
+    /// Hold CTRL: the KEY COMMANDS popover, anchored to the CTRL key like the
+    /// TMUX dropdown to its own. The presenter owns the lifecycle; this rail
+    /// supplies the anchor, the click, and the opaque chassis ground.
+    private func showKeyCommandsPanel() {
+        guard let terminal, let presenter = presentingViewController else { return }
+        let sceneWidth = window?.bounds.width ?? presenter.view.bounds.width
+        keyCommandsPresenter.present(
+            from: presenter,
+            anchor: ctrlKeyControl ?? self,
+            terminal: terminal,
+            maximumWidth: max(280, sceneWidth - 24),
+            plan: keyCommandPlan,
+            feedback: { [weak self] in self?.click() },
+            configure: { panel, popover in
+                panel.view.backgroundColor = UIKitChassis.bezel
+                popover.backgroundColor = UIKitChassis.bezel
+            }
+        )
     }
 
     private func showShortcutPanel() {
@@ -1094,6 +1138,15 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         showShortcutPanel()
     }
 
+    /// Hold CTRL, headlessly. `setup` lands on the CUSTOM SETUP tab and
+    /// `compose` also adds a row so its composer is up. A panel already
+    /// present just moves, so one capture run can walk every state.
+    func debugShowKeyCommands(_ mode: KeyCommandDebugMode) {
+        guard let terminal, TerminalFocusArbiter.current === terminal else { return }
+        if !keyCommandsPresenter.isPresented { showKeyCommandsPanel() }
+        keyCommandsPresenter.panel?.debugShow(mode)
+    }
+
     func debugSendTmuxCopyMode() {
         guard let terminal, TerminalFocusArbiter.current === terminal else { return }
         press(.shortcut(ShortcutPanelItem(TmuxShortcut.copyMode)))
@@ -1185,6 +1238,17 @@ private enum TerminalKey {
     case dictation
     case showShortcutPanel
     case shortcut(ShortcutPanelItem)
+    case keyCommands
+
+    /// How long a rail key must hold before it fires this as its hold
+    /// action. Key Commands is the daily path and holds shorter than the
+    /// keyboard key's lock.
+    var holdDuration: TimeInterval {
+        switch self {
+        case .keyCommands: KeyCommandPanelViewController.controlHoldDuration
+        default: 0.5
+        }
+    }
 }
 
 extension TerminalKeyBar: UIPopoverPresentationControllerDelegate {
@@ -1240,6 +1304,13 @@ enum TmuxShortcutDebugHook {
         notify_register_dispatch(
             "app.multiplexterm.multiplex.debug.longpressmenu", &longPressMenuToken, .main
         ) { _ in focusedBar()?.debugShowLongPressMenu() }
+
+        for mode in KeyCommandDebugMode.allCases {
+            var token: Int32 = 0
+            notify_register_dispatch(
+                "app.multiplexterm.multiplex.debug.\(mode.hookName)", &token, .main
+            ) { _ in focusedBar()?.debugShowKeyCommands(mode) }
+        }
 
         var herdrMenuToken: Int32 = 0
         notify_register_dispatch(
@@ -1317,7 +1388,11 @@ struct TerminalKeyClusterMetric: Equatable {
 @MainActor
 final class TerminalKeyClusterContext {
     private weak var controller: TerminalSessionController?
-    private weak var observedTerminal: TerminalView?
+    private(set) weak var observedTerminal: TerminalView?
+    /// The tier's Key Commands cap and paywall route, set by the window that
+    /// holds the entitlement store; every group of this context presents
+    /// with it.
+    var keyCommandPlan: KeyCommandPlan = .unrestricted
     private let groups = NSHashTable<TerminalKeyClusterGroupView>.weakObjects()
     private var controlResetObserver: NSObjectProtocol?
     #if DEBUG
@@ -1344,6 +1419,16 @@ final class TerminalKeyClusterContext {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.debugShowCtrlCombos() }
+            },
+            center.addObserver(
+                forName: .multiplexDebugKeyCommands,
+                object: nil,
+                queue: .main
+            ) { [weak self] note in
+                MainActor.assumeIsolated {
+                    guard let mode = note.userInfo?["mode"] as? KeyCommandDebugMode else { return }
+                    self?.debugShowKeyCommands(mode)
+                }
             },
         ]
         #endif
@@ -1467,6 +1552,13 @@ final class TerminalKeyClusterContext {
         broadcast()
         visibleControlGroup?.showCtrlCombos()
     }
+
+    private func debugShowKeyCommands(_ mode: KeyCommandDebugMode) {
+        guard let terminal = observedTerminal,
+              TerminalFocusArbiter.current === terminal
+        else { return }
+        visibleControlGroup?.debugShowKeyCommands(mode)
+    }
     #endif
 }
 
@@ -1490,6 +1582,7 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     private var standaloneVariant: StandaloneVariant?
     private weak var ctrlKey: TerminalTallyKeyControl?
     private weak var comboPopoverController: UIViewController?
+    private let keyCommandsPresenter = KeyCommandPanelPresenter()
     private(set) var keys: [TerminalTallyKeyControl] = []
 
     var carriesControlKey: Bool { role != .trailing }
@@ -1604,6 +1697,39 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         comboPopoverController = nil
     }
 
+    /// Hold CTRL: the KEY COMMANDS popover above the ornament's CTRL key —
+    /// the C / B slab's mechanism. The presenter owns the lifecycle; this
+    /// ornament supplies the anchor and carries its appearance and glass
+    /// mirroring across the popover's own window.
+    func showKeyCommands() {
+        guard let ctrlKey,
+              let terminal = context.observedTerminal,
+              let presenter = presentingViewController
+        else { return }
+        let sceneWidth = window?.bounds.width ?? presenter.view.bounds.width
+        keyCommandsPresenter.present(
+            from: presenter,
+            anchor: ctrlKey,
+            terminal: terminal,
+            maximumWidth: max(280, sceneWidth - 24),
+            plan: context.keyCommandPlan
+        ) { panel, _ in
+            panel.overrideUserInterfaceStyle = overrideUserInterfaceStyle
+            panel.view.traitOverrides[GlassAppearanceTrait.self] =
+                traitCollection[GlassAppearanceTrait.self]
+            panel.view.backgroundColor = GlassPrototype.popoverGround(
+                fallback: TallyPalette.bezel
+            )
+        }
+    }
+
+    #if DEBUG
+    func debugShowKeyCommands(_ mode: KeyCommandDebugMode) {
+        if !keyCommandsPresenter.isPresented { showKeyCommands() }
+        keyCommandsPresenter.panel?.debugShow(mode)
+    }
+    #endif
+
     private func rebuildKeys(variant: StandaloneVariant?) {
         for key in keys { key.removeFromSuperview() }
         keys.removeAll(keepingCapacity: true)
@@ -1632,6 +1758,11 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
             ) { [weak self, weak context] in
                 guard let self, let context else { return }
                 context.toggleControl(from: self)
+            }
+            // Hold CTRL opens Key Commands and never toggles the latch.
+            control.longPressDuration = KeyCommandPanelViewController.controlHoldDuration
+            control.longPressAction = { [weak self] in
+                self?.showKeyCommands()
             }
             append(control)
             ctrlKey = control
@@ -1662,9 +1793,14 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
                     normal: EscapeSequences.moveRightNormal
                 ))
             }
-            append(caps("RET", "Return", activeMetric, identifier: "return") { [weak context] in
-                context?.sendReturn()
-            })
+            append(TerminalTallyKeyControl(
+                face: .symbol("return", pointSize: 12, weight: .semibold),
+                width: activeMetric.keyWidth,
+                height: 26,
+                accessibilityLabel: "Return",
+                accessibilityIdentifier: "terminal.keyCluster.return",
+                action: { [weak context] in context?.sendReturn() }
+            ))
             let keyboard = TerminalTallyKeyControl(
                 face: .symbol("keyboard", pointSize: 12, weight: .semibold),
                 width: activeMetric.keyWidth,
@@ -1843,6 +1979,7 @@ extension TerminalKeyClusterGroupView: UIPopoverPresentationControllerDelegate {
 extension Notification.Name {
     static let multiplexDebugKeyCluster = Notification.Name("MultiplexDebugKeyCluster")
     static let multiplexDebugCtrlCombos = Notification.Name("MultiplexDebugCtrlCombos")
+    static let multiplexDebugKeyCommands = Notification.Name("MultiplexDebugKeyCommands")
 }
 
 @MainActor
@@ -1864,6 +2001,17 @@ enum KeyClusterDebugHook {
             "app.multiplexterm.multiplex.debug.ctrlcombos", &combosToken, .main
         ) { _ in
             NotificationCenter.default.post(name: .multiplexDebugCtrlCombos, object: nil)
+        }
+
+        for mode in KeyCommandDebugMode.allCases {
+            var token: Int32 = 0
+            notify_register_dispatch(
+                "app.multiplexterm.multiplex.debug.\(mode.hookName)", &token, .main
+            ) { _ in
+                NotificationCenter.default.post(
+                    name: .multiplexDebugKeyCommands, object: nil, userInfo: ["mode": mode]
+                )
+            }
         }
     }
 }

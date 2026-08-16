@@ -186,6 +186,11 @@ Current product split:
   locked closed), app-owned terminal dictation from the physical-keyboard rail
   or software-keyboard-lock tip (on device wherever the locale supports it,
   typed into the session as it settles and never submitted),
+  Key Commands on a CTRL hold (saved chords the software keyboard cannot
+  press — Shift+Enter, a double Ctrl-C, Option+Backspace — plus custom chords and
+  one-line text macros with repeat and stay-open rules, one app-wide set
+  synced through iCloud Keychain; free keeps five saved commands, and ADD
+  COMMAND at that cap opens the paywall),
   and primary-button touch/pointer input for mouse-aware TUIs, all-pane agent
   detection and wall
   telemetry with foreground-aware helpers in tmux panes, herdr sessions,
@@ -221,7 +226,8 @@ Current product split:
   free file attachment on SSH-backed tmux and herdr tabs from Files/Photos
   (plus camera
   on iPad) and drag-and-drop through the same SSH upload path, a read-only
-  File Viewer (code, rendered Markdown, images, and git diffs) summoned from
+  File Viewer (code, rendered Markdown, images, PDFs, sound files, and git
+  diffs) summoned from
   + TAB or a confirmed path in terminal output (a percent-decoded,
   local-authority `file:` URI naming that SSH host takes the same road); a
   tree-file long press opens that file in another viewer tab, per-file
@@ -273,10 +279,14 @@ Current product split:
   the HISTORY panel (a Claude Code session's prompt history read from
   Claude's own session file, with full text where the TUI truncates, plus
   jump-back-to-message on tmux and herdr tabs — Claude Code only; Codex/Pi
-  history was deliberately withdrawn 2026-07-16 to keep the jump exact), and
-  custom-theme editing.
-- Existing/synced hosts, existing mosh configuration, and existing custom
-  themes are never deleted or disabled when Pro is absent.
+  history was deliberately withdrawn 2026-07-16 to keep the jump exact),
+  custom-theme editing, and a twelve-command Key Commands set (added
+  2026-08-16; free keeps five).
+- Existing/synced hosts, existing mosh configuration, existing custom
+  themes, and a Key Commands set that already holds more than five (synced
+  from a Pro device, or after an entitlement lapse) are never deleted,
+  trimmed, or disabled when Pro is absent — every saved command keeps
+  sending; only adding past the cap is gated.
 
 When this split changes, update this document, the local StoreKit catalog,
 the app description and release notes, review notes, paywall copy, affected
@@ -301,7 +311,10 @@ public tree in `local-plan/` (untracked).
 | `local-plan/iap-review-screenshot.png` | Lossless 2064×2752 source/export retained for regeneration (3,907,546 bytes) |
 
 The 2026-07-13 image revision is fully processed in App Store Connect; the
-2026-07-15 local replacement above is not uploaded yet. The replacement shows
+2026-07-15 local replacement above is not uploaded yet, and it predates the
+2026-08-16 paywall change (a fifth benefit, "12 KEY COMMANDS", and the free-tier
+sentence naming five saved Key Commands) — regenerate before the next upload.
+The replacement shows
 the real locked `ProPaywallView`, including the one-time US $19.99 purchase CTA
 and Restore Purchases action. It is not a hand-built mock. In DEBUG builds,
 `MULTIPLEX_AUTO_PAYWALL=1` opens that real paywall with a deterministic $19.99

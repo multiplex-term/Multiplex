@@ -191,8 +191,27 @@ enum TerminalGuide {
             ]
         ),
         TerminalGuideEntry(
-            id: "resize",
+            id: "keycommands",
             figure: 12,
+            bank: .keyboard,
+            title: "HOLD CTRL",
+            tag: nil,
+            body: [
+                .text("A tap latches "),
+                .key("CTRL"),
+                .text("; a hold opens KEY COMMANDS — "),
+                .key("⇧⏎"),
+                .text(" newline, a double "),
+                .key("⌃C"),
+                .text(", "),
+                .key("⌥⌫"),
+                .text(" delete-word, and your own chords or one-line text macros "
+                    + "from CUSTOM SETUP, on every device."),
+            ]
+        ),
+        TerminalGuideEntry(
+            id: "resize",
+            figure: 13,
             bank: .herdrPanes,
             title: "RESIZE PANES",
             tag: "herdr",
@@ -202,7 +221,7 @@ enum TerminalGuide {
         ),
         TerminalGuideEntry(
             id: "panemenu",
-            figure: 13,
+            figure: 14,
             bank: .herdrPanes,
             title: "PANE MENU",
             tag: "herdr",

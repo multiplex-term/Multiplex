@@ -7,10 +7,22 @@ input encoding, or terminal rendering.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5),
     patched to declare the `NIO` product it imports (Xcode 27 rejects the
     undeclared import); also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in thirteen behavior groups
+  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in fourteen behavior groups
     (marked `Multiplex patch`):
     - `keyboardType` settable; kept `.default` so the user's language and
       multistage IME survive.
+    - On-device intelligence is pinned OFF and `replace()` is tail-guarded:
+      `inlinePredictionType` / `writingToolsBehavior` /
+      `mathExpressionCompletionType` are computed `.no`/`.none` (upstream never
+      set them, so the system decided per device/OS — the 2026-08 TestFlight
+      "cursor jumps, mangled sentences" report on M5 AVP + visionOS 27 beta,
+      absent on M2). Backstop: `replace(_:withText:)` drops any edit whose
+      range doesn't reach the document end (backspaces can only delete at the
+      remote cursor; a mid-document correction would eat the newest
+      characters) and drops whole any non-empty range that addressed the
+      backspace filler (its insert half alone would duplicate text). The
+      traits are computed `@available` properties because their types
+      postdate the package's own deployment floor.
     - Pans scroll the *remote* (`performRemoteScroll`): wheel events under
       mouse tracking, DECCKM-aware arrows in the alternate screen with mouse
       off; plain-shell tabs keep native local scrollback. Wheel coordinates
@@ -86,6 +98,16 @@ input encoding, or terminal rendering.
       by polling the physical Shift keys at the HID layer — real hardware
       only (synthetic keystrokes never reach HID, so neither Mac path can
       be driven headlessly).
+    - **App-authored key chords** (`iOS/iOSKeyChord.swift`, the fourteenth
+      group): `TerminalKeyChord` (⌃ ⇧ ⌥ + enter/tab/escape/backspace/space/
+      arrows/one character) and `TerminalView.bytes(for:)` / `send(chord:)`.
+      The app's Key Commands panel names the chord and the view encodes it
+      through the SAME `KittyKeyboardEncoder` a hardware press uses, plus
+      the three rules the legacy `pressesBegan` path decides for itself
+      (Shift+Enter → LF, Option+Left/Right → `ESC b`/`ESC f`, Ctrl+Shift+char
+      → Ctrl+char). Never re-derive chord bytes app-side — they would drift
+      from the hardware path the moment a remote toggles kitty flags.
+      Pinned by `KeyChordEncodingTests` (legacy, DECCKM, and `CSI > 1 u`).
     - Link activation is touch-reachable and app-answerable:
       `linkActivationIgnoresHighlight` (upstream needed pointer hover),
       `linkActivationHandler` (the app can decline a match; carries the

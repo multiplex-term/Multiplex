@@ -565,6 +565,11 @@ final class SettingsViewController: UIViewController {
         rows.append(proRow("Agent Alerts", state: state))
         rows.append(proRow("Connection Stats", state: state))
         rows.append(proRow("Custom Themes", state: state))
+        rows.append(proRow(
+            "Key Commands",
+            freeStatus: "UP TO \(EntitlementStore.freeKeyCommandLimit)",
+            state: state
+        ))
         rows.append(SettingsInsetRow(contentView: settingsLeadingView(UIKitChassisChip(
             state.isPro ? "PRO DETAILS" : "UNLOCK MULTIPLEX PRO",
             prominent: true,
@@ -586,7 +591,8 @@ final class SettingsViewController: UIViewController {
         return SettingsSectionView(
             title: "Multiplex Pro",
             detail: "Pro adds unlimited hosts, mosh, unlimited agent-helper commands, "
-                + "alerts, connection stats, and custom themes. SSH terminals, agent "
+                + "alerts, connection stats, custom themes, and a \(KeyCommandSet.maximumCount)-command Key Commands set "
+                + "(free keeps \(EntitlementStore.freeKeyCommandLimit)). SSH terminals, agent "
                 + "detection, and the wall's live state stay free.",
             rows: rows
         )
@@ -675,6 +681,17 @@ final class SettingsViewController: UIViewController {
     private func showThemeEditor(_ theme: TerminalTheme) {
         let controller = ThemeEditorViewController(theme: theme) { [weak self] edited in
             self?.save(edited)
+        }
+        // Each edit lands in the open terminal windows for the appearance
+        // being edited; Save keeps it (via `save`), Back restores the
+        // committed selection.
+        controller.onPreview = { [weak self] draft in
+            guard let self else { return }
+            if let draft {
+                themes.preview(draft, for: resolvedAppearance(for: themes.appearance))
+            } else {
+                themes.endPreview()
+            }
         }
         controller.followAppAppearance(themes)
         navigationController?.pushViewController(controller, animated: true)

@@ -99,6 +99,19 @@ final class ThemeStoreTests: XCTestCase {
         XCTAssertEqual(store.selected(for: .light).id, TerminalTheme.lightDefault.id)
     }
 
+    func testPreviewStandsInForOneAppearanceOnlyUntilEnded() {
+        let store = makeStore()
+        let draft = TerminalTheme.nord.asCustom(named: "Draft")
+        store.preview(draft, for: .dark)
+        XCTAssertEqual(store.selected(for: .dark), draft)
+        XCTAssertEqual(store.selected(for: .light), .lightDefault, "other slot untouched")
+        XCTAssertEqual(store.selectedID(for: .dark), TerminalTheme.tally.id, "never persisted")
+
+        store.endPreview()
+        XCTAssertEqual(store.selected(for: .dark), .tally)
+        XCTAssertNil(makeStore().previewTheme)
+    }
+
     func testRemovingCustomThemeResetsEverySlotThatUsedIt() {
         let store = makeStore()
         let custom = TerminalTheme.tally.asCustom(named: "Mine")

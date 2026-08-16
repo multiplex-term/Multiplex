@@ -205,6 +205,8 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertFalse(store.canMutateCustomThemes)
         XCTAssertFalse(store.canScheduleAgentAlerts)
         XCTAssertFalse(store.canViewConnectionStats)
+        XCTAssertEqual(store.keyCommandLimit, EntitlementStore.freeKeyCommandLimit)
+        XCTAssertEqual(store.keyCommandLimit, 5)
 
         #if DEBUG
         store.setDebugUnlocked(true)
@@ -212,6 +214,7 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertTrue(store.canMutateCustomThemes)
         XCTAssertTrue(store.canScheduleAgentAlerts)
         XCTAssertTrue(store.canViewConnectionStats)
+        XCTAssertEqual(store.keyCommandLimit, KeyCommandSet.maximumCount)
         #endif
     }
 
