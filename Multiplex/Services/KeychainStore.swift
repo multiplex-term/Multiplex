@@ -3,11 +3,12 @@ import Security
 
 /// Minimal Keychain wrapper. Every item is written as *synchronizable*, so
 /// iCloud Keychain carries it to the user's other devices — end-to-end
-/// encrypted, no entitlement or CloudKit container required. Two item
+/// encrypted, no entitlement or CloudKit container required. Three item
 /// families share the same primitives:
 ///   - per-host secrets (password / private key / passphrase)
 ///   - mirrored host records: the non-secret `Host` JSON, one item per host,
 ///     which is how the host list itself crosses devices
+///   - the Key Commands set: one item, last writer wins by `updatedAt`
 ///
 /// Every query MUST include `kSecAttrSynchronizable` (we use `…Any`): a query
 /// without the key matches only device-local items, so synced secrets would
@@ -15,6 +16,11 @@ import Security
 enum KeychainStore {
     private static let secretService = "app.multiplexterm.multiplex"
     private static let hostRecordService = "app.multiplexterm.multiplex.hosts"
+    /// The one app-wide Key Commands set (`KeyCommandSet` JSON) — the same
+    /// synchronizable channel the host list rides, so a chord added on the
+    /// iPad reaches the Vision Pro without a CloudKit container.
+    private static let keyCommandService = "app.multiplexterm.multiplex.keycommands"
+    private static let keyCommandAccount = "set"
 
     enum Kind: String {
         case password
@@ -71,6 +77,17 @@ enum KeychainStore {
 
     static func deleteHostRecord(for hostID: UUID) {
         deleteItem(service: hostRecordService, account: hostID.uuidString)
+    }
+
+    // MARK: - Key command mirror
+
+    @discardableResult
+    static func setKeyCommandRecord(_ record: Data) -> Bool {
+        setItem(record, service: keyCommandService, account: keyCommandAccount)
+    }
+
+    static func keyCommandRecord() -> Data? {
+        getItem(service: keyCommandService, account: keyCommandAccount)
     }
 
     // MARK: - Migration

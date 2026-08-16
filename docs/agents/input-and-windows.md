@@ -87,7 +87,57 @@ routing, tab moves, keyboard avoidance, or secret fields.
   restores only if that tab still owns focus. Every key sends through
   `TerminalView.send` → delegate → ordered pump — never a side channel;
   CTRL rides `controlModifier`, latch released on
-  `.terminalViewControlModifierReset`. visionOS: `TerminalKeyCluster`
+  `.terminalViewControlModifierReset`. **Hold CTRL (0.3 s,
+  `KeyCommandPanelViewController.controlHoldDuration`; a tap still
+  latches and never fires the hold) opens KEY COMMANDS** — a popover
+  anchored to the CTRL key on both platforms (`KeyCommandPanelViewController`
+  in `KeyCommandPanel.swift`; ONE `KeyCommandPanelPresenter` owns present /
+  dismiss / focus-resume / popover delegate for both hosts — `TerminalKeyBar`
+  and the visionOS `TerminalKeyClusterGroupView` supply only the anchor and
+  their appearance step, the ornament carrying the C / B popover's appearance
+  and glass mirroring). The panel stands on the shortcut panel's now-shared
+  grammar (`ShortcutPanelRootView`, `ShortcutPressControl`,
+  `TallyHairlineGrid`, `TallyPanelHeader`, `UIKitChassisMonoLabel`) and the
+  agent editor's shared controls in `Design/TallyEditorControls.swift`
+  (`TallyEditorSwitch`, `TallyEditorRowActionButton`, `TallyEditorRowActions`,
+  `TallyEditorLegend`, `TallyEditorFooter`). Two tabs: COMMANDS is a two-column hairline grid of
+  saved rows (tap sends; a row with CLOSE ON PRESS off keeps the panel up;
+  a 0.5 s hold jumps to that row's setup); CUSTOM SETUP is the agent editor's
+  numbered list with an inline composer (TYPE KEYS | TEXT, ⌃ ⇧ ⌥ + one key
+  from ↩ ⇥ ⎋ ⌫ ␣ ↑ ↓ ← → or a one-character field, or one line of text with
+  SUBMIT = CR ~160 ms later, REPEAT count + gap under the guard ×5 · 50–500 ms ·
+  burst ≤ 2 s, PANEL, SENDS readout of the live bytes) — a draft
+  transaction, DONE normalizes once, CANCEL/outside dismissal discards.
+  The model (`KeyCommand`, `KeyChord`, `KeyTextSnippet`, `KeyCommandSet`
+  with the three shipped defaults ⇧↩ · ⌃C×2 · ⌥⌫-stays, `KeyCommandRepeatGuard`)
+  is pure; **chords are never bytes** — `KeyCommandDispatcher` asks the fork
+  (`TerminalView.bytes(for:)`, fourteenth patch group) at press time, so a
+  chord sends exactly what a hardware press would in the terminal's current
+  mode (kitty flags, DECCKM, backspace mode), and text rows ride
+  `send(txt:)` + a delayed CR like slash chips. Every send is
+  `TerminalView.send`, i.e. the ordered pump. Storage is app-wide
+  (`KeyCommandStore.shared`: `keycommands.json` beside `hosts.json` plus one
+  synchronizable Keychain item; `KeyCommandSync.merge` is the pure
+  last-writer-wins rule; refreshed at launch and when the panel opens, at
+  most once a minute — no CloudKit/KVS entitlement exists). Tier: free
+  keeps `EntitlementStore.freeKeyCommandLimit` (5) commands, Pro the model's
+  cap (12) — the same rule as hosts: a set that already holds more (synced
+  from a Pro device) is never trimmed and every row keeps sending; only
+  ADD COMMAND is gated, turning into the prominent "ADD COMMAND · PRO"
+  chip that opens the paywall (a legend line says why the cap is 5). The
+  rail and cluster never learn about Pro: the terminal window builds a
+  `KeyCommandPlan` (limit + paywall route) from its `EntitlementStore` and
+  hands it down — iPad through `TerminalPaneConfiguration` →
+  `TerminalSurfaceView.Configuration` → `TerminalKeyBar.keyCommandPlan`,
+  visionOS onto both `TerminalKeyClusterContext`s (shell + ornament) — and
+  the presenter wraps the route so the popover is down before the paywall
+  sheet presents (`presentPaywall` refuses while anything is presented).
+  `entitlements.isPro` is in the window's observation set, so a purchase
+  re-renders with the lifted plan. The terminal
+  GUIDE carries a HOLD CTRL card (figure 12). Focus: the
+  panel never suspends the terminal; only if one of its own fields took the
+  keyboard does dismissal `resumeAfterPresentation`. Design record + grill:
+  `local-plan/key-commands-bakeoff/`. visionOS: `TerminalKeyCluster`
   (same keys + latch + DEBUG hook) flanks the UMD on ONE console line in
   the bottom ornament. ViewThatFits compacts key faces first; when even
   compact can't fit, a `fixedSize` floor lets the row overflow the window

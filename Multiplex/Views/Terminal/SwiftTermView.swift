@@ -18,6 +18,9 @@ final class TerminalSurfaceView: UIView {
         /// Which multiplexer owns the rail's shortcut key (TMUX/HRDR); nil
         /// drops the key — plain shells and auxiliary panes have no panel.
         var shortcutBackend: Host.SessionBackend?
+        /// The tier's Key Commands cap and paywall route for the rail's
+        /// hold-CTRL panel.
+        var keyCommandPlan: KeyCommandPlan = .unrestricted
     }
 
     private static let focusTapName = "multiplex.focus-tap"
@@ -191,6 +194,7 @@ final class TerminalSurfaceView: UIView {
         )
         keyBar.contentSafeArea = configuration.contentSafeArea
         keyBar.spendsBottomStrip = configuration.railOwnsBottomSafeArea
+        keyBar.keyCommandPlan = configuration.keyCommandPlan
         coordinator.keyBar = keyBar
         addSubview(view)
         addSubview(keyBar)
@@ -334,6 +338,7 @@ final class TerminalSurfaceView: UIView {
         )
         coordinator.updateContentSafeArea(configuration.contentSafeArea)
         coordinator.setRailOwnsBottomSafeArea(configuration.railOwnsBottomSafeArea)
+        coordinator.keyBar?.keyCommandPlan = configuration.keyCommandPlan
         if fontChanged {
             coordinator.terminalMetricsDidChange()
         }

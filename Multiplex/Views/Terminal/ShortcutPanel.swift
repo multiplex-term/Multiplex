@@ -167,35 +167,13 @@ final class ShortcutPanelViewController: UIViewController {
     }
 
     private func makeHeader() -> UIView {
-        let title = UIKitChassisLabel(content.headerTitle, size: 13)
-        title.accessibilityTraits.insert(.header)
-        let prefix = ShortcutPanelLabel(
+        let prefix = UIKitChassisMonoLabel(
             content.prefixLabel,
             font: UIKitChassis.monoFont(9, weight: .semibold),
             color: UIKitChassis.signal2,
             kern: 0.8
         )
-        prefix.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        let spacer = UIView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let row = UIStackView(arrangedSubviews: [title, spacer, prefix])
-        row.axis = .horizontal
-        row.alignment = .firstBaseline
-        row.spacing = 16
-
-        let container = UIView()
-        container.addSubview(row)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 1),
-            row.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            row.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
-            row.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ])
-        return container
+        return TallyPanelHeader.make(title: content.headerTitle, trailing: prefix)
     }
 
     private func makeShortcutSection(_ section: ShortcutPanelSection) -> UIView {
@@ -211,12 +189,15 @@ final class ShortcutPanelViewController: UIViewController {
         if section.usesCompactRow {
             grid = makeCompactRow(section.items)
         } else {
-            grid = makeGrid(section.items.map { item in
-                let button = ShortcutItemButton(item: item)
-                button.addTarget(self, action: #selector(itemPressed(_:)), for: .touchUpInside)
-                itemButtons[item.id] = button
-                return button
-            })
+            grid = TallyHairlineGrid.grid(
+                section.items.map { item in
+                    let button = ShortcutItemButton(item: item)
+                    button.addTarget(self, action: #selector(itemPressed(_:)), for: .touchUpInside)
+                    itemButtons[item.id] = button
+                    return button
+                },
+                columns: 2
+            )
         }
 
         let stack = UIStackView(arrangedSubviews: [title, grid])
@@ -230,7 +211,7 @@ final class ShortcutPanelViewController: UIViewController {
     /// routes through the same `activate` path as the grid rows; a hold goes
     /// coarse and repeats until release. Both leave the panel up.
     private func makeCompactRow(_ items: [ShortcutPanelItem]) -> UIView {
-        makeGrid(
+        TallyHairlineGrid.grid(
             items.map { item in
                 let button = ShortcutCompactItemButton(item: item)
                 button.onTap = { [weak self] in self?.activate(item) }
@@ -255,36 +236,7 @@ final class ShortcutPanelViewController: UIViewController {
             button.addTarget(self, action: #selector(choicePressed(_:)), for: .touchUpInside)
             return button
         }
-        return makeGrid(choiceButtons)
-    }
-
-    /// Equal-width cells over the 1 pt bezel hairline — the panel's one grid
-    /// treatment, whether two columns of full rows or one compact row.
-    private func makeGrid(_ controls: [UIControl], columns: Int = 2) -> UIView {
-        let grid = UIStackView()
-        grid.axis = .vertical
-        grid.alignment = .fill
-        grid.spacing = 1
-        grid.backgroundColor = UIKitChassis.bezelHi
-
-        for offset in stride(from: 0, to: controls.count, by: columns) {
-            let cells = (offset..<offset + columns).map { index -> UIView in
-                guard controls.indices.contains(index) else {
-                    let filler = UIView()
-                    filler.backgroundColor = UIKitChassis.bezelHi
-                    filler.isAccessibilityElement = false
-                    return filler
-                }
-                return controls[index]
-            }
-            let row = UIStackView(arrangedSubviews: cells)
-            row.axis = .horizontal
-            row.alignment = .fill
-            row.distribution = .fillEqually
-            row.spacing = 1
-            grid.addArrangedSubview(row)
-        }
-        return grid
+        return TallyHairlineGrid.grid(choiceButtons, columns: 2)
     }
 
     @objc private func itemPressed(_ sender: ShortcutItemButton) {
@@ -428,6 +380,79 @@ final class ShortcutPanelViewController: UIViewController {
     }
 }
 
+/// Equal-width cells over the 1 pt bezel hairline — the one grid treatment
+/// every TALLY panel uses, whether two columns of full rows, one compact
+/// row, or the Key Commands grid.
+@MainActor
+enum TallyHairlineGrid {
+    static func grid(_ cells: [UIView], columns: Int) -> UIView {
+        let grid = UIStackView()
+        grid.axis = .vertical
+        grid.alignment = .fill
+        grid.spacing = 1
+        grid.backgroundColor = UIKitChassis.bezelHi
+        for offset in stride(from: 0, to: cells.count, by: columns) {
+            let rowCells = (offset..<offset + columns).map { index -> UIView in
+                guard cells.indices.contains(index) else {
+                    let filler = UIView()
+                    filler.backgroundColor = UIKitChassis.bezelHi
+                    filler.isAccessibilityElement = false
+                    return filler
+                }
+                return cells[index]
+            }
+            grid.addArrangedSubview(row(rowCells))
+        }
+        return grid
+    }
+
+    static func row(_ cells: [UIView]) -> UIView {
+        let row = UIStackView(arrangedSubviews: cells)
+        row.axis = .horizontal
+        row.alignment = .fill
+        row.distribution = .fillEqually
+        row.spacing = 1
+        row.backgroundColor = UIKitChassis.bezelHi
+        return row
+    }
+}
+
+/// A panel's title row: compressed-caps title with the header trait, a
+/// spacer, and a trailing readout at the first baseline.
+@MainActor
+enum TallyPanelHeader {
+    static func make(
+        title: String,
+        trailing: UIView,
+        titleIdentifier: String? = nil
+    ) -> UIView {
+        let titleLabel = UIKitChassisLabel(title, size: 13)
+        titleLabel.accessibilityTraits.insert(.header)
+        titleLabel.accessibilityIdentifier = titleIdentifier
+        trailing.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let spacer = UIView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let row = UIStackView(arrangedSubviews: [titleLabel, spacer, trailing])
+        row.axis = .horizontal
+        row.alignment = .firstBaseline
+        row.spacing = 16
+
+        let container = UIView()
+        container.addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 1),
+            row.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            row.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+            row.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        return container
+    }
+}
+
 /// Press feedback for the panel's rows: the pressed ground lands at once and
 /// fades away. A tap raises and clears the highlight inside one run loop, so
 /// clearing it outright drew no frame and only a long press ever looked
@@ -435,11 +460,12 @@ final class ShortcutPanelViewController: UIViewController {
 /// what makes a quick tap visible.
 private let shortcutPressFadeDuration: TimeInterval = 0.25
 
-/// Shared press chassis for every control in the panel: the square hover
-/// shape, the press wiring, and the fade above. Subclasses supply only their
-/// content and, where state changes it, the resting ground.
+/// Shared press chassis for every control in a TALLY panel — the shortcut
+/// panel's rows and the Key Commands panel's cells and segment cells: the
+/// square hover shape, the press wiring, and the fade above. Subclasses
+/// supply only their content and, where state changes it, the resting ground.
 @MainActor
-private class ShortcutPressControl: UIControl {
+class ShortcutPressControl: UIControl {
     override init(frame: CGRect) {
         super.init(frame: frame)
         isAccessibilityElement = true
@@ -491,9 +517,15 @@ private class ShortcutPressControl: UIControl {
     @objc private func endPress() { isHighlighted = false }
 }
 
+/// The measuring, scrolling root every popover-hosted TALLY panel stands on
+/// (shortcut panel, Key Commands): its intrinsic size is the content stack
+/// measured at `width`, and a panel that changes width (Key Commands' two
+/// tabs) sets it and re-measures.
 @MainActor
-private final class ShortcutPanelRootView: UIKitTallyBorderedView {
-    private var width: CGFloat
+final class ShortcutPanelRootView: UIKitTallyBorderedView {
+    var width: CGFloat {
+        didSet { invalidateIntrinsicContentSize() }
+    }
     private let scrollView = UIScrollView()
     private weak var contentStack: UIStackView?
 
@@ -510,6 +542,9 @@ private final class ShortcutPanelRootView: UIKitTallyBorderedView {
         self.contentStack = contentStack
         scrollView.alwaysBounceVertical = false
         scrollView.showsVerticalScrollIndicator = true
+        #if !os(visionOS)
+        scrollView.keyboardDismissMode = .interactive
+        #endif
         addSubview(scrollView)
         scrollView.addSubview(contentStack)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -554,9 +589,9 @@ private final class ShortcutPanelRootView: UIKitTallyBorderedView {
 private final class ShortcutItemButton: ShortcutPressControl {
     let item: ShortcutPanelItem
 
-    private let titleLabel = ShortcutPanelLabel()
-    private let commandLabel = ShortcutPanelLabel()
-    private let bindingLabel = ShortcutPanelLabel()
+    private let titleLabel = UIKitChassisMonoLabel()
+    private let commandLabel = UIKitChassisMonoLabel()
+    private let bindingLabel = UIKitChassisMonoLabel()
     private let bindingBorder = UIKitTallyBorderedView()
     private var isArmed = false
 
@@ -758,14 +793,14 @@ private final class ShortcutChoiceButton: ShortcutPressControl {
     private(set) var choice: TmuxWindowChoice
 
     private let noun: String
-    private let activeLabel: ShortcutPanelLabel
+    private let activeLabel: UIKitChassisMonoLabel
 
     init(choice: TmuxWindowChoice, noun: String, accessibilityPrefix: String) {
         self.choice = choice
         self.noun = noun
         // Built for every row, hidden while inactive: the panel stays open
         // across a switch, so the marker has to move without a rebuild.
-        activeLabel = ShortcutPanelLabel(
+        activeLabel = UIKitChassisMonoLabel(
             "ACTIVE",
             font: UIKitChassis.monoFont(9, weight: .semibold),
             color: UIKitChassis.signal2
@@ -774,13 +809,13 @@ private final class ShortcutChoiceButton: ShortcutPressControl {
         minimumHeight(40)
         accessibilityIdentifier = accessibilityPrefix + choice.tmuxID
 
-        let index = ShortcutPanelLabel(
+        let index = UIKitChassisMonoLabel(
             "\(choice.index)",
             font: UIKitChassis.monoFont(9, weight: .semibold),
             color: UIKitChassis.signal2
         )
         index.setContentHuggingPriority(.required, for: .horizontal)
-        let name = ShortcutPanelLabel(
+        let name = UIKitChassisMonoLabel(
             choice.name.uppercased(),
             font: UIKitChassis.compressedLabelFont(10),
             color: UIKitChassis.signal,
@@ -816,68 +851,6 @@ private final class ShortcutChoiceButton: ShortcutPressControl {
         accessibilityLabel = active
             ? "\(noun.capitalized) \(choice.index), \(choice.name), current \(noun)"
             : "Switch to \(noun) \(choice.index), \(choice.name)"
-    }
-}
-
-@MainActor
-private final class ShortcutPanelLabel: UILabel {
-    private var sourceText = ""
-    private var sourceFont = UIFont.systemFont(ofSize: 10)
-    private var sourceColor = UIKitChassis.signal
-    private var kern: CGFloat?
-
-    convenience init(
-        _ text: String,
-        font: UIFont,
-        color: UIColor,
-        kern: CGFloat? = nil
-    ) {
-        self.init(frame: .zero)
-        configure(text, font: font, color: color, kern: kern)
-    }
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        numberOfLines = 1
-        lineBreakMode = .byClipping
-        isAccessibilityElement = false
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    func configure(
-        _ text: String,
-        font: UIFont,
-        color: UIColor,
-        kern: CGFloat? = nil
-    ) {
-        sourceText = text
-        sourceFont = font
-        sourceColor = color
-        self.kern = kern
-        refreshAttributedText()
-    }
-
-    func setText(_ text: String) {
-        sourceText = text
-        refreshAttributedText()
-    }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
-        else { return }
-        refreshAttributedText()
-    }
-
-    private func refreshAttributedText() {
-        var attributes: [NSAttributedString.Key: Any] = [
-            .font: sourceFont,
-            .foregroundColor: sourceColor.resolvedColor(with: traitCollection),
-        ]
-        if let kern { attributes[.kern] = kern }
-        attributedText = NSAttributedString(string: sourceText, attributes: attributes)
     }
 }
 

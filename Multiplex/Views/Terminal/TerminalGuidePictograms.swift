@@ -63,6 +63,7 @@ final class TerminalGuidePictogramView: UIView {
         case "dictate": drawDictation()
         case "shiftreturn": drawShiftReturn()
         case "shortcutkey": drawShortcutKey()
+        case "keycommands": drawKeyCommands()
         case "resize": drawResize()
         case "panemenu": drawPaneMenu()
         case "paste": drawPastePermission()
@@ -295,6 +296,55 @@ final class TerminalGuidePictogramView: UIView {
             row.addLine(to: CGPoint(x: 82, y: y))
             stroke(
                 row,
+                color: UIKitChassis.signal2.withAlphaComponent(0.5),
+                dashed: true
+            )
+        }
+    }
+
+    /// A held CTRL key (the long-press arc, "0.3 s") raising the two-column
+    /// Key Commands grid.
+    private func drawKeyCommands() {
+        drawKeycap(
+            CGRect(x: 7, y: 26, width: 30, height: 18),
+            label: "CTRL",
+            labelSize: 6.5
+        )
+        drawMonoText(
+            "0.3 s",
+            at: CGPoint(x: 8, y: 6),
+            size: 6.5,
+            color: UIKitChassis.signal3
+        )
+        let center = CGPoint(x: 22, y: 35)
+        let arc = UIBezierPath(
+            arcCenter: center,
+            radius: 15,
+            startAngle: -.pi / 2,
+            endAngle: .pi,
+            clockwise: true
+        )
+        stroke(arc, color: UIKitChassis.signal)
+        drawArrow(
+            from: CGPoint(x: 41, y: 35),
+            to: CGPoint(x: 49, y: 35),
+            color: UIKitChassis.signal2,
+            endHead: true
+        )
+        let panel = UIBezierPath(roundedRect: CGRect(x: 52, y: 12, width: 38, height: 44), cornerRadius: 2)
+        stroke(panel, color: UIKitChassis.signal)
+        for (row, label) in [(0, "⇧⏎"), (1, "⌃C"), (2, "⌥⌫")] {
+            let y = 18 + CGFloat(row) * 13
+            drawKeycap(
+                CGRect(x: 56, y: y, width: 14, height: 9),
+                label: label,
+                labelSize: 5
+            )
+            let line = UIBezierPath()
+            line.move(to: CGPoint(x: 73, y: y + 4.5))
+            line.addLine(to: CGPoint(x: 86, y: y + 4.5))
+            stroke(
+                line,
                 color: UIKitChassis.signal2.withAlphaComponent(0.5),
                 dashed: true
             )

@@ -14,6 +14,10 @@ struct TerminalPaneConfiguration {
     var railOwnsBottomSafeArea: Bool
     var isActive: Bool
     var focusAllowed: Bool
+    /// The tier's Key Commands cap and paywall route for the rail's
+    /// hold-CTRL panel (iPad/iPhone; the visionOS cluster gets it from the
+    /// window directly).
+    var keyCommandPlan: KeyCommandPlan = .unrestricted
     var close: () -> Void
 }
 
@@ -228,7 +232,8 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             contentSafeArea: configuration.contentSafeArea,
             railOwnsBottomSafeArea: configuration.railOwnsBottomSafeArea,
             isActive: configuration.isActive && configuration.focusAllowed,
-            shortcutBackend: configuration.controller?.route.sessionBackend
+            shortcutBackend: configuration.controller?.route.sessionBackend,
+            keyCommandPlan: configuration.keyCommandPlan
         )
     }
 

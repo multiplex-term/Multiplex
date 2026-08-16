@@ -57,7 +57,7 @@ final class CustomAgentCommandPanelViewController: UIViewController {
     /// The list viewport keeps its rows 2 pt inside the header/footer text
     /// edge at every panel inset.
     nonisolated static let listInset: CGFloat = UIKitChassis.popoverPanelInset - 2
-    /// Below the footer legend's own resistance (see `legendRow`), so a
+    /// Below the footer legend's own resistance (see `TallyEditorLegend`), so a
     /// shortened popover spends the scroll viewport before any chrome.
     private static let listHeightPriority = UILayoutPriority(650)
 
@@ -353,51 +353,22 @@ final class CustomAgentCommandPanelViewController: UIViewController {
     }
 
     private func makeFooter() -> UIView {
-        let legend = UIStackView(arrangedSubviews: [
-            legendRow(
+        let legend = TallyEditorLegend.stack([
+            TallyEditorLegend.row(
                 color: TallyPalette.customCommand,
                 text: "Built-ins and custom commands each live in Bar or More; custom Bar labels keep 9 characters."
             ),
-            legendRow(
+            TallyEditorLegend.row(
                 color: UIKitChassis.signal3,
                 text: "Shared keeps one editable command synchronized across Claude Code, Codex, and Pi."
             ),
         ])
-        legend.axis = .vertical
-        legend.alignment = .fill
-        legend.spacing = 6
-
-        let add = UIKitChassisChip(
-            "ADD COMMAND",
-            systemImage: "plus",
-            accessibilityLabel: "Add command",
-            action: { [weak self] in self?.addCommand() }
+        let actions = TallyEditorFooter.actions(
+            identifierPrefix: "customCommands",
+            add: { [weak self] in self?.addCommand() },
+            cancel: { [weak self] in self?.cancelDrafts() },
+            done: { [weak self] in self?.saveDrafts() }
         )
-        add.accessibilityIdentifier = "customCommands.add"
-        let spacer = UIView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let cancel = UIKitChassisChip(
-            "CANCEL",
-            accessibilityLabel: "Cancel",
-            action: { [weak self] in self?.cancelDrafts() }
-        )
-        cancel.accessibilityIdentifier = "customCommands.cancel"
-        let done = UIKitChassisChip(
-            "DONE",
-            prominent: true,
-            accessibilityLabel: "Done",
-            action: { [weak self] in self?.saveDrafts() }
-        )
-        done.accessibilityIdentifier = "customCommands.done"
-        for chip in [add, cancel, done] {
-            chip.setContentHuggingPriority(.required, for: .horizontal)
-            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
-        }
-
-        let actions = UIStackView(arrangedSubviews: [add, spacer, cancel, done])
-        actions.axis = .horizontal
-        actions.alignment = .center
-        actions.spacing = 8
 
         let stack = UIStackView(arrangedSubviews: [legend, actions])
         stack.axis = .vertical
@@ -411,34 +382,6 @@ final class CustomAgentCommandPanelViewController: UIViewController {
             trailing: UIKitChassis.popoverPanelInset
         )
         return stack
-    }
-
-    private func legendRow(color: UIColor, text: String) -> UIView {
-        let dot = UIView()
-        dot.backgroundColor = color
-        dot.layer.cornerRadius = 3
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            dot.widthAnchor.constraint(equalToConstant: 6),
-            dot.heightAnchor.constraint(equalToConstant: 6),
-        ])
-        dot.isAccessibilityElement = false
-
-        let label = UILabel()
-        label.text = text
-        label.font = UIKitChassis.monoFont(8, weight: .medium)
-        label.textColor = UIKitChassis.signal2
-        label.numberOfLines = 0
-        // Above the list viewport's resting height, below required: the legend
-        // is the last thing in the panel to give way, and a required floor here
-        // would make a popover shorter than the whole panel unsatisfiable.
-        label.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
-
-        let row = UIStackView(arrangedSubviews: [dot, label])
-        row.axis = .horizontal
-        row.alignment = .firstBaseline
-        row.spacing = 8
-        return row
     }
 
     private func divider() -> UIView {
@@ -811,7 +754,7 @@ private final class CustomBuiltInCommandRow: UIView {
 enum CustomCommandChoiceMetrics {
     static let height: CGFloat = 34
     static let seam: CGFloat = 1
-    static let selectionAnimationDuration: TimeInterval = 0.14
+    static let selectionAnimationDuration = TallyEditorMetrics.selectionAnimationDuration
 }
 
 @MainActor
@@ -1025,32 +968,15 @@ private final class CustomCommandRowView: UIView, UITextViewDelegate {
         switches.spacing = 8
         switches.setContentHuggingPriority(.required, for: .horizontal)
 
-        let up = CustomCommandRowActionButton(
-            systemImage: "arrow.up",
-            accessibilityLabel: "Move command up",
-            enabled: index > 0,
-            action: { move(command.id, -1) }
-        )
-        up.accessibilityIdentifier = "customCommands.moveUp.\(command.id.uuidString)"
-        let down = CustomCommandRowActionButton(
-            systemImage: "arrow.down",
-            accessibilityLabel: "Move command down",
-            enabled: index < commandCount - 1,
-            action: { move(command.id, 1) }
-        )
-        down.accessibilityIdentifier = "customCommands.moveDown.\(command.id.uuidString)"
-        let trash = CustomCommandRowActionButton(
-            systemImage: "trash",
-            accessibilityLabel: "Delete command",
-            enabled: true,
-            action: { delete(command.id) }
-        )
-        trash.accessibilityIdentifier = "customCommands.delete.\(command.id.uuidString)"
-        let actions = UIStackView(arrangedSubviews: [up, down, trash])
-        actions.axis = .horizontal
-        actions.alignment = .center
-        actions.spacing = 8
-        actions.setContentHuggingPriority(.required, for: .horizontal)
+        let commandID = command.id
+        let actions = TallyEditorRowActions.make(
+            index: index,
+            count: commandCount,
+            identifierPrefix: "customCommands",
+            rowID: commandID,
+            move: { offset in move(commandID, offset) },
+            delete: { delete(commandID) }
+        ).stack
 
         refreshPlacementLabel()
         placementLabel.setContentHuggingPriority(.required, for: .horizontal)
@@ -1146,10 +1072,11 @@ private final class CustomCommandRowView: UIView, UITextViewDelegate {
         value: Bool,
         keyPath: WritableKeyPath<CustomAgentCommand, Bool>
     ) -> UIView {
-        CustomCommandSwitch(
+        TallyEditorSwitch(
             label: label,
             accessibilityLabel: accessibilityLabel,
             isOn: value,
+            identifierPrefix: "customCommands",
             changed: { [weak self] value in
                 guard let self else { return }
                 self.command[keyPath: keyPath] = value
@@ -1230,186 +1157,6 @@ private final class CustomCommandTextView: UITextView {
         }), abs(height.constant - needed) >= 0.5 {
             height.constant = needed
         }
-    }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
-        else { return }
-        layer.borderColor = UIKitChassis.bezelHi
-            .resolvedColor(with: traitCollection).cgColor
-    }
-}
-
-@MainActor
-private final class CustomCommandSwitch: UIControl {
-    private let track = CustomCommandSwitchTrack()
-    private let caption: UIKitChassisLabel
-    private var isOn: Bool
-    private let changed: (Bool) -> Void
-
-    init(
-        label: String,
-        accessibilityLabel: String,
-        isOn: Bool,
-        changed: @escaping (Bool) -> Void
-    ) {
-        self.isOn = isOn
-        self.changed = changed
-        caption = UIKitChassisLabel(
-            label,
-            size: 8,
-            color: isOn ? UIKitChassis.signal : UIKitChassis.signal2
-        )
-        super.init(frame: .zero)
-        isAccessibilityElement = true
-        // The SwiftUI row was a real `Toggle`; `.toggleButton` is UIKit's
-        // equivalent identity, so the switch rotor and the spoken On/Off
-        // state survive the port.
-        accessibilityTraits = [.button, .toggleButton]
-        self.accessibilityLabel = accessibilityLabel
-        accessibilityIdentifier = "customCommands.switch.\(label.lowercased())"
-        addTarget(self, action: #selector(pressed), for: .touchUpInside)
-        #if os(visionOS)
-        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
-        #endif
-
-        let row = UIStackView(arrangedSubviews: [track, caption])
-        row.axis = .horizontal
-        row.alignment = .center
-        row.spacing = 7
-        row.isUserInteractionEnabled = false
-        addSubview(row)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor),
-            row.topAnchor.constraint(equalTo: topAnchor),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-        render()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    @objc private func pressed() {
-        isOn.toggle()
-        render(animated: true)
-        changed(isOn)
-    }
-
-    private func render(animated: Bool = false) {
-        track.setOn(isOn, animated: animated)
-        caption.setInk(isOn ? UIKitChassis.signal : UIKitChassis.signal2)
-        accessibilityValue = isOn ? "On" : "Off"
-        if isOn {
-            accessibilityTraits.insert(.selected)
-        } else {
-            accessibilityTraits.remove(.selected)
-        }
-    }
-}
-
-@MainActor
-private final class CustomCommandSwitchTrack: UIKitTallyBorderedView {
-    private let thumb = UIView()
-    private var leading: NSLayoutConstraint!
-    private var trailing: NSLayoutConstraint!
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 26),
-            heightAnchor.constraint(equalToConstant: 14),
-        ])
-        thumb.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(thumb)
-        leading = thumb.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 3)
-        trailing = thumb.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -3)
-        NSLayoutConstraint.activate([
-            thumb.widthAnchor.constraint(equalToConstant: 8),
-            thumb.heightAnchor.constraint(equalToConstant: 8),
-            thumb.centerYAnchor.constraint(equalTo: centerYAnchor),
-            leading,
-        ])
-        isAccessibilityElement = false
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    func setOn(_ on: Bool, animated: Bool = false) {
-        leading.isActive = false
-        trailing.isActive = false
-        (on ? trailing : leading).isActive = true
-        let apply = {
-            self.backgroundColor = on ? UIKitChassis.bezelHi : UIKitChassis.screen
-            self.thumb.backgroundColor = on ? UIKitChassis.signal : UIKitChassis.signal3
-            self.tallyBorderColor = on ? UIKitChassis.signal2 : UIKitChassis.bezelHi
-            // The swapped constraint only moves the thumb inside an animation
-            // transaction if the layout pass runs there too.
-            self.layoutIfNeeded()
-        }
-        guard animated, window != nil, !UIAccessibility.isReduceMotionEnabled else {
-            apply()
-            return
-        }
-        UIView.animate(
-            withDuration: CustomCommandChoiceMetrics.selectionAnimationDuration,
-            delay: 0,
-            options: [.curveEaseOut, .beginFromCurrentState],
-            animations: apply
-        )
-    }
-}
-
-@MainActor
-private final class CustomCommandRowActionButton: UIButton {
-    private let action: () -> Void
-
-    init(
-        systemImage: String,
-        accessibilityLabel: String,
-        enabled: Bool,
-        action: @escaping () -> Void
-    ) {
-        self.action = action
-        super.init(frame: .zero)
-        backgroundColor = GlassPrototype.strataChassis
-        layer.borderWidth = 1
-        layer.borderColor = UIKitChassis.bezelHi
-            .resolvedColor(with: traitCollection).cgColor
-        setImage(
-            UIImage(
-                systemName: systemImage,
-                withConfiguration: UIImage.SymbolConfiguration(
-                    pointSize: 9 * Theme.typeScale,
-                    weight: .semibold
-                )
-            ),
-            for: .normal
-        )
-        tintColor = enabled ? UIKitChassis.signal2 : UIKitChassis.signal3
-        isEnabled = enabled
-        self.accessibilityLabel = accessibilityLabel
-        addTarget(self, action: #selector(pressed), for: .touchUpInside)
-        translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 25),
-            heightAnchor.constraint(equalToConstant: 23),
-        ])
-        #if os(visionOS)
-        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
-        #endif
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    @objc private func pressed() {
-        action()
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {

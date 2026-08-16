@@ -175,6 +175,10 @@ app.multiplexterm.multiplex.<name>`:
 - `debug.tmuxshortcuts` / `debug.customcommands` / `debug.msghistory` — open
   the focused tab's shortcut popover (TMUX content, or HRDR on a herdr
   tab) / Command Setup editor / agent HISTORY panel for layout capture.
+- `debug.keycommands` / `debug.keycommandsetup` / `debug.keycommandcompose` —
+  the hold-CTRL KEY COMMANDS popover (iPad rail or visionOS cluster) on its
+  COMMANDS grid / CUSTOM SETUP list / with a fresh row's composer expanded.
+  A panel already up just switches, so one run can capture all three.
 - `debug.guide` — open the focused terminal's GUIDE field manual for layout capture.
 - `debug.link` — activate the first visible link through the resolve →
   policy → confirmation path (URL → link sheet, path → file-viewer sheet;
