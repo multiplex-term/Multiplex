@@ -708,7 +708,7 @@ private final class ShortcutItemButton: ShortcutPressControl {
 @MainActor
 private final class ShortcutCompactItemButton: ShortcutPressControl {
     nonisolated static let holdDelay: UInt64 = 500_000_000
-    nonisolated static let holdRepeatInterval: UInt64 = 1_000_000_000
+    nonisolated static let holdRepeatInterval: UInt64 = 500_000_000
 
     var onTap: () -> Void = {}
     var onHoldStep: () -> Void = {}

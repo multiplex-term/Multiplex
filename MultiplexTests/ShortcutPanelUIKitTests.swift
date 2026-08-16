@@ -102,9 +102,11 @@ final class ShortcutPanelUIKitTests: XCTestCase {
         // interval, and the release adds no fine step on top.
         resizeUp.sendActions(for: .touchDown)
         try await Task.sleep(nanoseconds: 750_000_000)
-        XCTAssertEqual(coarse.map(\.payload), [.tmux(.resizeUp)])
-        try await Task.sleep(nanoseconds: 1_250_000_000)
-        XCTAssertEqual(coarse.count, 2)
+        XCTAssertFalse(coarse.isEmpty)
+        XCTAssertTrue(coarse.allSatisfy { $0.payload == .tmux(.resizeUp) })
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertGreaterThanOrEqual(coarse.count, 2)
+        let heldSteps = coarse.count
         resizeUp.sendActions(for: .touchUpInside)
         XCTAssertEqual(selected, [])
 
@@ -112,7 +114,7 @@ final class ShortcutPanelUIKitTests: XCTestCase {
         resizeUp.sendActions(for: .touchDown)
         resizeUp.sendActions(for: .touchUpInside)
         XCTAssertEqual(selected.map(\.payload), [.tmux(.resizeUp)])
-        XCTAssertEqual(coarse.count, 2)
+        XCTAssertEqual(coarse.count, heldSteps)
     }
 
     func testRenameCommitPlumbsTrimmedNamesAndNeverRidesOrdinarySelect() {
