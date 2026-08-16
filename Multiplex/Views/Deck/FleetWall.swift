@@ -294,6 +294,10 @@ final class FleetWallViewController: UIViewController {
     private var feedIdentity: FleetFeedID?
     private var availableColumnCount: Int?
     private var resolvedColumnCount = 1
+    /// True in the phone-width Shell, or once the DECK window has been
+    /// squeezed to a single tile column. The host rail then drops the
+    /// address so the name, badges, and controls keep one uncrowded row.
+    private var windowCompacted = false
     private var keyPassphraseHostID: UUID?
     private var isOnScreen = false
 
@@ -633,6 +637,7 @@ final class FleetWallViewController: UIViewController {
             networkOffline: latestSnapshot?.offline ?? false,
             reduceMotion: configuration.reduceMotion,
             columnCount: resolvedColumnCount,
+            hidesHostAddress: windowCompacted,
             duplicateAttachTitle: configuration.terminalOpener.duplicateAttachTitle,
             openTabAccessibilityText: configuration.terminalOpener.openTabAccessibilityText,
             openShell: { [weak self] in
@@ -747,8 +752,13 @@ final class FleetWallViewController: UIViewController {
                 ?? FleetTileGridSizing.initialColumnCount(availableWidth: availableWidth),
             tileCount: fullest
         )
-        guard resolvedColumnCount != resolved else { return }
+        // The phone-width Shell is compact by definition; the DECK window is
+        // compact once it fits a single tile column.
+        let compacted = configuration.presentation == .shellCompact
+            || (configuration.presentation == .standard && (availableColumnCount ?? 1) == 1)
+        guard resolvedColumnCount != resolved || windowCompacted != compacted else { return }
         resolvedColumnCount = resolved
+        windowCompacted = compacted
         propagateConfiguration()
     }
 
@@ -1356,6 +1366,9 @@ private struct FleetHostSectionConfiguration {
     var networkOffline: Bool
     var reduceMotion: Bool
     var columnCount: Int
+    /// Set while the window is compacted: the rail hides the address label
+    /// (the host name still names the host).
+    var hidesHostAddress: Bool
     var duplicateAttachTitle: String
     var openTabAccessibilityText: String
     var openShell: () -> Void
@@ -1439,6 +1452,7 @@ private final class FleetHostSectionView: UIView {
         /// sessions.
         let offers: [FleetBackendOffer]
         let statsEnabled: Bool
+        let hidesHostAddress: Bool
     }
 
     private let stack = UIStackView()
@@ -1620,7 +1634,8 @@ private final class FleetHostSectionView: UIView {
             canMoveUp: canMoveUp,
             canMoveDown: canMoveDown,
             offers: snapshot?.offers ?? [],
-            statsEnabled: snapshot?.statsEnabled ?? false
+            statsEnabled: snapshot?.statsEnabled ?? false,
+            hidesHostAddress: configuration.hidesHostAddress
         )
         rail.updateActions(
             openShell: { [weak self] in self?.configuration.openShell() },
@@ -1659,6 +1674,7 @@ private final class FleetHostSectionView: UIView {
                 canMoveDown: canMoveDown,
                 offers: snapshot?.offers ?? [],
                 statsEnabled: snapshot?.statsEnabled ?? false,
+                hidesHostAddress: configuration.hidesHostAddress,
                 menu: hostMenu,
                 openShell: { [weak self] in self?.configuration.openShell() },
                 requestPassphrase: { [weak self] in
@@ -1942,6 +1958,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         /// caption itself is relabeled through `setStatsCaption`, never
         /// through this identity.
         let statsEnabled: Bool
+        let hidesHostAddress: Bool
     }
 
     private let stack = UIStackView()
@@ -1993,6 +2010,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         canMoveDown: Bool,
         offers: [FleetBackendOffer],
         statsEnabled: Bool,
+        hidesHostAddress: Bool,
         menu: UIMenu,
         openShell: @escaping () -> Void,
         requestPassphrase: @escaping () -> Void,
@@ -2028,7 +2046,8 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
             canMoveUp: canMoveUp,
             canMoveDown: canMoveDown,
             offers: offers,
-            statsEnabled: statsEnabled
+            statsEnabled: statsEnabled,
+            hidesHostAddress: hidesHostAddress
         )
         guard renderedIdentity != identity else { return }
         renderedIdentity = identity
@@ -2059,6 +2078,9 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         address.numberOfLines = presentation == .shellRail ? 1 : 2
         address.lineBreakMode = .byTruncatingTail
         address.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // A compacted window drops the address; the name still names the
+        // host and the rail's accessibility label keeps both.
+        address.isHidden = hidesHostAddress
         let mosh = FleetBadgeView(caption: "MOSH")
         mosh.accessibilityLabel = "Connects over mosh"
         mosh.isHidden = !host.useMosh
