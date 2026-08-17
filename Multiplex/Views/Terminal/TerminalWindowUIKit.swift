@@ -2280,8 +2280,14 @@ extension TerminalWindowViewController {
             composer.onContentSizeChange = { [weak self] in
                 // Reported from the composer's own layout pass; re-inset the
                 // pane on the next turn rather than inside that pass — with
-                // the card and the pane moving together.
-                Task { @MainActor [weak self] in self?.animateTalkbackGrowth() }
+                // the card and the pane moving together where it is docked.
+                Task { @MainActor [weak self] in
+                    #if os(visionOS)
+                    self?.renderNow()
+                    #else
+                    self?.animateTalkbackGrowth()
+                    #endif
+                }
             }
             talkbackController = composer
             #if !os(visionOS)
