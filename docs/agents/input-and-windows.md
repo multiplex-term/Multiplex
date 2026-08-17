@@ -498,7 +498,17 @@ routing, tab moves, keyboard avoidance, or secret fields.
   anchor at one, two and three-row heights, sim 2026-08-17). Opening
   folds the helper strip to its dot (deferred a turn — the collapse posts
   app-wide and runs inside a render); closing unfolds only what this window
-  folded. **Focus split**: the field is a native `UITextView` (system
+  folded. **iPad/iPhone motion** (`animateTalkbackTransition`, the helper
+  strip's 0.35 s / 0.85 spring; Reduce Motion cuts to the result): opening
+  mounts unanimated, parks the band at its final frame with the card pushed
+  BELOW it (the band clips, so the card rises out from behind the rail's edge
+  and never crosses the keys) and runs `renderNow` inside the spring — the
+  surface lays its inset constraint out inside the block, so the pane cedes
+  its rows in the same motion; closing sinks a snapshot inside a clipping
+  stand-in while `renderNow` unmounts and the pane reclaims; growth (a line,
+  a chip) is a 0.25 s spring around `renderNow`. The transition is decided in
+  `observeAndRender` from `talkbackOpen` vs `talkbackController != nil`.
+  **Focus split**: the field is a native `UITextView` (system
   autocorrect / IME / the keyboard's own mic; hardware ↩ = SEND, ⇧↩ newline,
   ⌘↩ SEND, Escape hands the keyboard back — `UIKeyCommand`s on the field);
   the arbiter still counts the TERMINAL as owner (the composer never claims):

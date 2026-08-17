@@ -770,6 +770,12 @@ final class TerminalWindowViewController: UIViewController,
             }
         }
         updateShownAgent(from: snapshot)
+        #if !os(visionOS)
+        if let transition = pendingTalkbackTransition {
+            animateTalkbackTransition(transition)
+            return
+        }
+        #endif
         renderNow()
     }
 
@@ -1463,6 +1469,127 @@ final class TerminalWindowViewController: UIViewController,
         )
     }
 
+    #if !os(visionOS)
+    /// The card's arrival or departure, when the next render will mount or
+    /// drop it. Same curve as the helper strip's fold — the two share the
+    /// chrome band and should move like one instrument.
+    private enum TalkbackTransition {
+        case opening
+        case closing
+    }
+
+    private var pendingTalkbackTransition: TalkbackTransition? {
+        if talkbackOpen, talkbackController == nil { return .opening }
+        if !talkbackOpen, talkbackController != nil { return .closing }
+        return nil
+    }
+
+    private static let talkbackSpring: (duration: TimeInterval, damping: CGFloat) = (0.35, 0.85)
+
+    /// Opening: the card rises out from behind the rail's edge (its band
+    /// clips it, so it never crosses the keys) while the pane cedes its rows;
+    /// closing: a snapshot of the card sinks back the same way while the pane
+    /// reclaims them. Reduce Motion cuts straight to the result.
+    private func animateTalkbackTransition(_ transition: TalkbackTransition) {
+        guard !UIAccessibility.isReduceMotionEnabled, isViewLoaded, rootView.window != nil else {
+            renderNow()
+            return
+        }
+        switch transition {
+        case .opening:
+            // Mount unanimated and park the band at its final frame with the
+            // card pushed below it (clipped, so it never crosses the keys);
+            // the animated render then insets the pane — the surface lays its
+            // constraint out inside the block, so it animates — while the
+            // card slides up into the band.
+            UIView.performWithoutAnimation {
+                renderTalkback()
+                let container = rootView.talkbackContainer
+                let height = renderedTalkbackHeight
+                container.frame = CGRect(
+                    x: 0,
+                    y: paneChromeBottom - height,
+                    width: rootView.bounds.width,
+                    height: height
+                )
+                container.isHidden = false
+                if let card = talkbackController?.view {
+                    card.frame = container.bounds
+                    card.layoutIfNeeded()
+                    card.transform = CGAffineTransform(translationX: 0, y: height)
+                }
+            }
+            UIView.animate(
+                withDuration: Self.talkbackSpring.duration,
+                delay: 0,
+                usingSpringWithDamping: Self.talkbackSpring.damping,
+                initialSpringVelocity: 0
+            ) { [self] in
+                renderNow()
+                talkbackController?.view.transform = .identity
+                rootView.layoutIfNeeded()
+            }
+        case .closing:
+            // The real card unmounts in the render; a snapshot inside a
+            // clipping stand-in at the same frame sinks out of view while the
+            // pane takes its rows back.
+            let container = rootView.talkbackContainer
+            let clip = UIView(frame: container.frame)
+            clip.clipsToBounds = true
+            clip.isUserInteractionEnabled = false
+            if let ghost = container.snapshotView(afterScreenUpdates: false) {
+                ghost.frame = clip.bounds
+                clip.addSubview(ghost)
+                rootView.insertSubview(clip, aboveSubview: container)
+            }
+            UIView.animate(
+                withDuration: Self.talkbackSpring.duration,
+                delay: 0,
+                usingSpringWithDamping: Self.talkbackSpring.damping,
+                initialSpringVelocity: 0
+            ) { [self] in
+                renderNow()
+                rootView.layoutIfNeeded()
+                clip.subviews.first?.transform = CGAffineTransform(
+                    translationX: 0,
+                    y: clip.bounds.height
+                )
+            } completion: { _ in
+                clip.removeFromSuperview()
+            }
+        }
+    }
+
+    /// A line typed, a chip attached: the card grows upward and the pane
+    /// cedes the row in one motion.
+    private func animateTalkbackGrowth() {
+        guard !UIAccessibility.isReduceMotionEnabled,
+              talkbackController != nil,
+              rootView.window != nil
+        else {
+            renderNow()
+            return
+        }
+        UIView.animate(
+            withDuration: 0.25,
+            delay: 0,
+            usingSpringWithDamping: 0.9,
+            initialSpringVelocity: 0
+        ) { [self] in
+            renderNow()
+            rootView.layoutIfNeeded()
+        }
+    }
+
+    /// Where the pane's bottom chrome starts: the rail's top edge, lifted
+    /// with it over a docked keyboard.
+    private var paneChromeBottom: CGFloat {
+        rootView.paneContainer.frame.maxY
+            - (activeController?.keyboardObstruction ?? 0)
+            - TerminalKeyBar.barHeight(spendsBottomStrip: railOwnsBottomSafeArea)
+    }
+    #endif
+
     private func configurePassphrasePresenter() {
         addChild(passphrasePresenter)
         rootView.addSubview(passphrasePresenter.view)
@@ -2152,8 +2279,9 @@ extension TerminalWindowViewController {
             let composer = TalkbackComposerViewController(configuration: configuration)
             composer.onContentSizeChange = { [weak self] in
                 // Reported from the composer's own layout pass; re-inset the
-                // pane on the next turn rather than inside that pass.
-                Task { @MainActor [weak self] in self?.renderNow() }
+                // pane on the next turn rather than inside that pass — with
+                // the card and the pane moving together.
+                Task { @MainActor [weak self] in self?.animateTalkbackGrowth() }
             }
             talkbackController = composer
             #if !os(visionOS)
@@ -2476,9 +2604,7 @@ extension TerminalWindowViewController {
         // with it over a docked keyboard): the Talkback card first, then the
         // helper strip — docked or its dot. One cursor places both.
         #if !os(visionOS)
-        var chromeBottom = rootView.paneContainer.frame.maxY
-            - (activeController?.keyboardObstruction ?? 0)
-            - TerminalKeyBar.barHeight(spendsBottomStrip: railOwnsBottomSafeArea)
+        var chromeBottom = paneChromeBottom
         let composerHeight = renderedTalkbackHeight
         if let talkbackController, composerHeight > 0 {
             chromeBottom -= composerHeight
