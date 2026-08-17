@@ -7,8 +7,18 @@ input encoding, or terminal rendering.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5),
     patched to declare the `NIO` product it imports (Xcode 27 rejects the
     undeclared import); also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.15.0 (rev `dd2fb8a`), patched in fourteen behavior groups
-    (marked `Multiplex patch`):
+  - `SwiftTerm` — 1.18.0 (rev `7691f85`; bumped from 1.15.0 on 2026-08-16 by
+    reconstructing the patch set as a commit on the old rev and 3-way merging
+    it onto the new tag — do the same next time), patched in fourteen behavior
+    groups plus a remote-input hardening set (all marked `Multiplex patch`).
+    Three hardening patches were retired at 1.18.0 because upstream now
+    carries the fix (CSI parameter cap + guard-before-arithmetic digit
+    accumulation, `CSI 1 J` bottom-row trap); `appendingDecimalDigit`
+    survives only for the Sixel field parser. Upstream 1.18.0 also added
+    `implicitLinkCouldBeVisible`, an early-out that skips implicit link
+    detection when the highlight mode would discard the match — it must
+    honour `linkActivationIgnoresHighlight` or every touch-activated path
+    link disappears (patched at the merge). Behavior groups:
     - `keyboardType` settable; kept `.default` so the user's language and
       multistage IME survive.
     - On-device intelligence is pinned OFF and `replace()` is tail-guarded:

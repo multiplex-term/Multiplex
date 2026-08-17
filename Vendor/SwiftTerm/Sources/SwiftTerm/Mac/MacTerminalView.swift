@@ -268,6 +268,16 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     public var isUsingMetalRenderer: Bool {
         return useMetalRenderer
     }
+
+    /// Draws one Metal frame immediately when the Metal renderer is active.
+    ///
+    /// Normal applications do not need this method. It supports deterministic
+    /// snapshots and tests when the main run loop cannot process an on-demand
+    /// `MTKView` draw before the snapshot starts.
+    public func drawMetalFrameNow() {
+        guard useMetalRenderer else { return }
+        metalView?.draw()
+    }
 #endif
 
     var cellDimension: CellDimension!
@@ -284,7 +294,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     private var progressReportTimer: Timer?
     private var lastProgressValue: UInt8?
 
-    var selection: SelectionService!
+    /// Tracks the selection state of the terminal, and can be used to set it
+    /// programmatically (see `SelectionService`).
+    public var selection: SelectionService!
     private var scroller: NSScroller!
     
     // Attribute dictionary, maps a console attribute (color, flags) to the corresponding dictionary
@@ -310,6 +322,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     public var disableFullRedrawOnAnyChanges = false
     var fontSet: FontSet
 
+    /// Options used to create the `Terminal` that backs this view; set by `init(frame:font:options:)`,
+    /// consumed by `setupOptions` when the view creates its terminal
+    var startupOptions: TerminalOptions = TerminalOptions.default
+
     /// The font to use to render the terminal
     public var font: NSFont {
         get {
@@ -328,7 +344,18 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         super.init (frame: frame)
         setup()
     }
-    
+
+    /// Creates a terminal view with explicit startup options; the `cols` and `rows` in the options
+    /// are used as-is for a zero-sized frame, and are otherwise recomputed from the frame size
+    public init(frame: CGRect, font: NSFont? = nil, options: TerminalOptions) {
+        self.startupOptions = options
+        self.fontSet = FontSet (font: font ?? FontSet.defaultFont)
+
+        super.init (frame: frame)
+        setup()
+    }
+
+
     public override init (frame: CGRect)
     {
         self.fontSet = FontSet (font: FontSet.defaultFont)
@@ -408,6 +435,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             metalView = mtkView
             metalRenderer = renderer
             metalBoundWindow = window
+            // Metal's clear color paints the background; if the host layer
+            // painted it too, a translucent background would composite twice
+            layer?.backgroundColor = NSColor.clear.cgColor
             needsDisplay = false
             mtkView.setNeedsDisplay(mtkView.bounds)
         } else {
@@ -416,6 +446,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             metalView = nil
             metalRenderer = nil
             metalBoundWindow = nil
+            layer?.backgroundColor = nativeBackgroundColor.cgColor
             if let caretView = caretView {
                 caretView.isHidden = false
                 caretView.updateCursorStyle()
@@ -450,6 +481,8 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         // so this is the colorspace they actually live in.
         if let metalLayer = mtkView.layer as? CAMetalLayer {
             metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
+            // Composite through the layer when the background is translucent
+            metalLayer.isOpaque = backgroundOpacity >= 1.0
         }
         return mtkView
     }
@@ -589,10 +622,12 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     func setupFocusNotification() {
         becomeMainObserver = NotificationCenter.default.addObserver(forName: .init("NSWindowDidBecomeMainNotification"), object: nil, queue: nil) { [unowned self] notification in
             self.caretView.updateCursorStyle()
+            self.queueMetalDisplay()
         }
         resignMainObserver = NotificationCenter.default.addObserver(forName: .init("NSWindowDidResignMainNotification"), object: nil, queue: nil) { [unowned self] notification in
             self.caretView.disableAnimations()
             self.caretView.updateView()
+            self.queueMetalDisplay()
         }
     }
 
@@ -696,12 +731,52 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             settingBg = true
             _nativeBg = newValue
             terminal.backgroundColor = nativeBackgroundColor.getTerminalColor ()
+            // Keep the layer background (which paints the margins) in sync,
+            // including any translucency carried in the alpha channel; when
+            // Metal renders, its clear color owns the background instead
+            layer?.backgroundColor = metalView == nil ? newValue.cgColor : NSColor.clear.cgColor
             settingBg = false
         }
     }
     
+    /**
+     * Opacity of the terminal's default background, in the 0...1 range (values are clamped).
+     *
+     * Values below 1 render the default background translucently, in the style of
+     * Terminal.app's background opacity: only the default background is affected;
+     * text, the caret, selections and cells with explicit background colors stay
+     * fully opaque. The opacity is carried in the alpha channel of
+     * `nativeBackgroundColor`, so assigning that property with an alpha-bearing
+     * color is equivalent.
+     *
+     * For the translucency to be visible, the hosting window must be configured
+     * to composite it: `window.isOpaque = false` and a clear
+     * `window.backgroundColor`.
+     */
+    public var backgroundOpacity: CGFloat {
+        get {
+            return _nativeBg.cgColor.alpha
+        }
+        set {
+            let clamped = max (0.0, min (1.0, newValue))
+            nativeBackgroundColor = _nativeBg.withAlphaComponent (clamped)
+            // CAMetalLayer defaults to opaque; it must composite when translucent
+            metalView?.layer?.isOpaque = clamped >= 1.0
+            colorsChanged ()
+        }
+    }
+
     /// Controls weather to use high ansi colors, if false terminal will use bold text instead of high ansi colors
     public var useBrightColors: Bool = true
+
+    /// Controls whether this view applies the terminal's BiDi presentation state.
+    public var bidiHostPolicy: BidiHostPolicy = .respectTerminal {
+        didSet {
+            terminal.updateFullScreen()
+            queuePendingDisplay()
+            updateCursorPosition()
+        }
+    }
 
     /// When true, block element (U+2580-U+259F) and box drawing (U+2500-U+257F) characters use custom rendering.
     public var customBlockGlyphs: Bool = true {
@@ -2401,10 +2476,20 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         let displayBuffer = terminal.displayBuffer
         let col = Int (point.x / cellDimension.width)
         let row = Int ((frame.height-point.y) / cellDimension.height)
-        let colValue = min (max (0, col), terminal.cols-1)
+        var colValue = min (max (0, col), terminal.cols-1)
         let bufferRow = row + displayBuffer.yDisp
         let maxRow = max (0, displayBuffer.lines.count - 1)
         let rowValue = min (max (0, bufferRow), maxRow)
+        // In BiDi rows the clicked (visual) column is translated back to the
+        // logical buffer column it displays.
+        if rowValue < displayBuffer.lines.count,
+           let bidiLayout = TerminalBidi.layout(row: rowValue, buffer: displayBuffer,
+                                                cols: terminal.cols, terminal: terminal,
+                                                font: fontSet.normal,
+                                                hostPolicy: bidiHostPolicy),
+           colValue < bidiLayout.visualToLogicalCol.count {
+            colValue = bidiLayout.visualToLogicalCol[colValue]
+        }
         return (Position(col: colValue, row: rowValue), toInt (point))
     }
     
@@ -2468,14 +2553,46 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         event.modifierFlags.contains(.shift) && !terminal.mouseShiftCapture
     }
 
+    private func semanticPromptModifiers(for event: NSEvent) -> SemanticPromptClickModifiers {
+        var result: SemanticPromptClickModifiers = []
+        let flags = event.modifierFlags
+        if flags.contains(.shift) { result.insert(.shift) }
+        if flags.contains(.control) { result.insert(.control) }
+        if flags.contains(.option) { result.insert(.option) }
+        if flags.contains(.command) { result.insert(.command) }
+        return result
+    }
+
+    // R6: the gesture state is captured at press time, before any handler
+    // mutates it; guards that test live view state after earlier handlers
+    // changed it are a known defect class.
+    private var pointerPressSnapshot = SemanticPromptPointerSnapshot(
+        selectionWasActive: false, didDrag: false, clickCount: 0,
+        pressWasSemanticEligible: false)
+    private var pendingSemanticClick: DispatchWorkItem?
+    var semanticClickCoalescingDelay: TimeInterval = NSEvent.doubleClickInterval
+    /// Number of times a semantic-prompt click deferral was scheduled. Used by
+    /// tests to confirm the F.5 pre-gate skips scheduling when routing cannot
+    /// apply.
+    private(set) var semanticDeferralScheduleCount = 0
+
     open override func mouseDown(with event: NSEvent) {
+        pendingSemanticClick?.cancel()
+        pendingSemanticClick = nil
+        didSelectionDrag = false
+        pointerPressSnapshot = SemanticPromptPointerSnapshot(
+            selectionWasActive: selection.active,
+            didDrag: false,
+            clickCount: event.clickCount,
+            pressWasSemanticEligible: false)
         if allowMouseReporting && !shiftBypassesMouseReporting(for: event) && terminal.mouseMode.sendButtonPress() {
             sharedMouseEvent(with: event)
             return
         }
-        
+        pointerPressSnapshot.pressWasSemanticEligible = true
+
         let hit = calculateMouseHit(with: event).grid
-        
+
         switch event.clickCount {
         case 1:
             if selection.active == true {
@@ -2488,10 +2605,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         case 2:
             let displayBuffer = terminal.displayBuffer
             selection.selectWordOrExpression(at: Position(col: hit.col, row: hit.row), in: displayBuffer)
-            
+
         default:
             // 3 and higher
-            
+
             selection.select(row: hit.row)
         }
         setNeedsDisplay(bounds)
@@ -2508,6 +2625,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     var didSelectionDrag: Bool = false
     
     open override func mouseUp(with event: NSEvent) {
+        defer {
+            didSelectionDrag = false
+            pointerPressSnapshot.pressWasSemanticEligible = false
+        }
         stopSelectionAutoScrollTimer()
         autoScrollDelta = 0
         lastSelectionDragPoint = nil
@@ -2521,13 +2642,51 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             sharedMouseEvent(with: event)
             return
         }
-        
+
+        // The semantic route runs last, after the double-click interval.
+        // A second press cancels this work before word selection completes.
+        var snapshot = pointerPressSnapshot
+        snapshot.didDrag = didSelectionDrag
+        guard snapshot.clickCount == 1 else { return }
+        let modifiers = semanticPromptModifiers(for: event)
+        // F.5: don't schedule the deferral (retaining a line and arming a
+        // timer for the full double-click interval) when routing can never
+        // apply — before any OSC 133, when disabled, not armed, no click mode,
+        // or the gesture disqualifies. Eligibility is re-derived at fire time
+        // too; this only skips pointless scheduling.
+        guard terminal.mightRouteSemanticPromptClick(modifiers: modifiers, snapshot: snapshot) else {
+            return
+        }
+        semanticDeferralScheduleCount += 1
+        // Capture the clicked line's identity, not its absolute row: the row
+        // index shifts if scrollback trims during the coalescing delay, so
+        // re-resolve it at fire time and drop the click if the line is gone.
+        let hitColumn = hit.col
+        let hitLine = terminal.bufferLine(atRow: hit.row)
+        let hitGeneration = hitLine?.recycleGeneration ?? 0
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingSemanticClick = nil
+            guard let hitLine,
+                  let resolvedRow = self.terminal.semanticRow(forLineIdentity: hitLine,
+                                                              recycleGeneration: hitGeneration) else {
+                return
+            }
+            if self.terminal.handleSemanticPromptClick(at: Position(col: hitColumn, row: resolvedRow),
+                                                       modifiers: modifiers,
+                                                       snapshot: snapshot) {
+                self.setNeedsDisplay(self.bounds)
+            }
+        }
+        pendingSemanticClick = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + semanticClickCoalescingDelay,
+                                      execute: workItem)
+
         #if DEBUG
         // let hit = calculateMouseHit(with: event)
         //print ("Up at col=\(hit.col) row=\(hit.row) count=\(event.clickCount) selection.active=\(selection.active) didSelectionDrag=\(didSelectionDrag) ")
         #endif
-        
-        didSelectionDrag = false
+
     }
     
     open override func mouseDragged(with event: NSEvent) {
@@ -2801,7 +2960,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     
     public func resetFontSize ()
     {
+        // Recompute metrics and redraw, but unlike the font setter do not
+        // clear the active selection
         fontSet = FontSet (font: FontSet.defaultFont)
+        resetFont ()
     }
     
     func getImageScale () -> CGFloat {
@@ -2876,8 +3038,46 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         }
     }
 
+    /// Controls how this view responds to the bell character; `.sound`
+    /// preserves the historical behavior of invoking the delegate's `bell`
+    public var bellStyle: BellStyle = .sound
+
     open func bell(source: Terminal) {
-        terminalDelegate?.bell (source: self)
+        switch bellStyle {
+        case .none:
+            break
+        case .sound:
+            terminalDelegate?.bell (source: self)
+        case .visual:
+            flashVisualBell ()
+        case .soundAndVisual:
+            terminalDelegate?.bell (source: self)
+            flashVisualBell ()
+        }
+    }
+
+    /// Briefly flashes the view with the foreground color, the "visual bell"
+    func flashVisualBell ()
+    {
+        guard let layer = self.layer else {
+            return
+        }
+        let flash = CALayer ()
+        flash.frame = bounds
+        flash.backgroundColor = nativeForegroundColor.cgColor
+        flash.opacity = 0
+        layer.addSublayer (flash)
+
+        CATransaction.begin ()
+        CATransaction.setCompletionBlock {
+            flash.removeFromSuperlayer ()
+        }
+        let animation = CAKeyframeAnimation (keyPath: "opacity")
+        animation.values = [0.0, 0.35, 0.0]
+        animation.keyTimes = [0, 0.3, 1]
+        animation.duration = 0.2
+        flash.add (animation, forKey: "visualBell")
+        CATransaction.commit ()
     }
 
     public func progressReport(source: Terminal, report: Terminal.ProgressReport) {

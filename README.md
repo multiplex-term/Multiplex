@@ -61,7 +61,7 @@ Point `MULTIPLEX_SEED_HOST` at `Tools/dev-sshd/state/seed.json` to seed a DEBUG 
 
 | Library | Version | Role |
 | --- | --- | --- |
-| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | 1.15.0, vendored | Terminal emulator |
+| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | 1.18.0, vendored | Terminal emulator |
 | [Citadel](https://github.com/orlandos-nl/Citadel) | 0.12.0, exact | SSH, exec, SFTP, and key parsing |
 | [swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | 0.3.5, vendored | SSH transport dependency |
 

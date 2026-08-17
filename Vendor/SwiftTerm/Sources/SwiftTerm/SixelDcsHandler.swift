@@ -121,6 +121,11 @@ class SixelDcsHandler : DcsHandler {
                 break
             }
         }
+
+        // A sixel stream is allowed to end without a carriage return ($) or
+        // new-line (-).  Include the cursor's final position in that case so
+        // the pixel buffer covers the last band that was scanned.
+        maxX = max(maxX, x)
         
         // Multiplex patch: the sizing pass only widened maxX at a line
         // terminator, so data ending mid-row sized the buffer for fewer
