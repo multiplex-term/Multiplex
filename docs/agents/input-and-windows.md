@@ -470,98 +470,57 @@ routing, tab moves, keyboard avoidance, or secret fields.
   action. Don't regress any of these.
 
 - **Talkback — the chat-style message box under a pane — is per-tab state
-  rendered by one composer per window** (`TalkbackDraft` /
-  `TalkbackMessage` pure + tested in `Models/Talkback.swift`;
-  `TerminalSessionController.talkbackOpen` (what the window / rail / cluster
-  observe — it flips on the talk key) beside `.talkback` (the draft only the
-  composer observes, WITHOUT its text: the field is the text's writer, so a
-  keystroke re-renders nothing), `attachTalkbackFiles` / `sendTalkback`;
-  `TalkbackComposerViewController` in `Views/Terminal/TalkbackComposer.swift`
-  gates its render on an Equatable key — presentation + controller identity +
-  observed state — and measures the field once per (text, width); decided B
-  "MESSAGE CARD" in `local-plan/talkback-bakeoff/`, 2026-08-17). The talk key is `RET · talk ·
-  keyboard` on the iPad/iPhone rail and the same slot in the visionOS
-  cluster, latched while the box is open; **the phone rail tiers run 36 pt
-  faces** since it joined (40 pt overflowed every phone cutoff), which is
-  what keeps `SingleWindowShellLayout`'s 390 / 420 cutoffs and the 375
-  locked floor unchanged — and costs a 768 pt iPad its page keys (the ladder
-  drops them first). Docking: iPad/iPhone mount it in the window's
-  `talkbackContainer` above the rail (lifted with the rail over a docked
-  keyboard) and the pane insets by its measured height
-  (`terminalBottomChromeHeight`, arithmetic in
-  `fittingContentSize(for:)` — read BEFORE the panes are configured, so
-  `renderTalkback()` runs first in `renderNow()`); visionOS mounts it as its
-  own content-sized slab BELOW the console row (`TerminalVisionConsoleGeometry
-  .talkbackSize`, width `min(620, TerminalVisionOrnamentPresentation
-  .consoleClamp)`, never in-window; growth reaches the ornament through the
-  window's render → `revision`, no mirrored size — proven rendering below the
-  anchor at one, two and three-row heights, sim 2026-08-17). Opening
-  folds the helper strip to its dot (deferred a turn — the collapse posts
-  app-wide and runs inside a render); closing unfolds only what this window
-  folded. **iPad/iPhone motion** (`animateTalkbackTransition`, the helper
-  strip's 0.35 s / 0.85 spring; Reduce Motion cuts to the result): opening
-  mounts unanimated, parks the band at its final frame with the card pushed
-  BELOW it (the band clips, so the card rises out from behind the rail's edge
-  and never crosses the keys) and runs `renderNow` inside the spring — the
-  surface lays its inset constraint out inside the block, so the pane cedes
-  its rows in the same motion; closing sinks a snapshot inside a clipping
-  stand-in while `renderNow` unmounts and the pane reclaims; growth (a line,
-  a chip) is a 0.25 s spring around `renderNow`. The transition is decided in
-  `observeAndRender` from `talkbackOpen` vs `talkbackController != nil`.
-  ⚠ Because that render runs inside an animation block, `TerminalKeyBar
-  .layoutSubviews` wraps its own key layout in `performWithoutAnimation`
-  (a row rebuilt in that pass flew every key in from a zero frame —
-  shipped-and-caught 2026-08-17), and the talk latch is NOT part of the
-  rail's rebuild signature — it flips in place like CTRL's, so opening the
-  box never re-creates the keys under the finger.
-  **Focus split**: the field is a native `UITextView` (system
-  autocorrect / IME / the keyboard's own mic; hardware ↩ = SEND, ⇧↩ newline,
-  ⌘↩ SEND, Escape hands the keyboard back — `UIKeyCommand`s on the field);
-  the arbiter still counts the TERMINAL as owner (the composer never claims):
-  on begin-editing the field `suspendForPresentation`s the terminal and
-  makes its OWN window key — ⚠ on visionOS the card lives in the ornament's
-  window and UIKit resigns responders only within one window, so without
-  this the terminal stayed first responder in the scene's key window and
-  every keystroke went to the pane (shipped-and-caught 2026-08-17; proof is
-  the `kbd` log line `talkback field focused key=true terminalResponder=
-  false`); the terminal's window becoming key again (a pane tap, Escape, a
-  scene activation) resigns the field through a `didBecomeKeyNotification`
-  observer scoped to ANOTHER window, so the card dims to 0.72; a keypress-scoped
-  `focusRequest` counter (consumed once per press) is what focuses the field
-  — a tab switch back to an open box never steals the keyboard; on close a
-  field that held the keyboard `resumeAfterPresentation`s the terminal.
-  **Bytes**: SEND = ONE paste — landed attachment paths first (the FILE drop
-  path's `DropText.typedPaths`, quoted only where needed) then the sanitized
-  body (CR/CRLF → LF, every other C0/C1/DEL dropped, trailing blank trimmed),
-  bracketed with `ESC[200~ … ESC[201~` only when the pane has mode 2004 on,
-  through `TerminalView.send` (the typing-quiet stamp) — then a CR as its own
-  write ~160 ms later (the slash chips' Codex-safe shape); long-press SEND
-  omits the CR. Attachments upload ON PICK through the ONE upload primitive
-  the pane's drop path also uses (`uploadForTypedPaths` — destination,
-  sanitized names, the 64 MB cap, typed paths back; `canUploadFiles` +
-  `uploadUnavailableMessage` are the shared eligibility rule) on a serial
-  per-tab queue; the composer owns FILE's base picker presenter
-  (`FileAttachPickerPresenterViewController.makeSourceMenu` + `.deliver`
-  reroutes the pickers into the SNAPSHOTTED target's draft; mosh / `.shell`
-  tabs fail the chip with the drop path's message); SEND waits on uploads
-  (dashed ↑) and refuses a failed chip (tap retries, ✕ removes). Phone
-  previews are 28 pt thumbs + compact document chips (Jhen), 46 pt squares
-  elsewhere; photo thumbnails are ImageIO thumbnails made off-main
-  (`Services/TalkbackThumbnail.swift` — never the full bitmap). ⚠ Not verified headlessly: the docked
-  software keyboard under the card (the sim reports a hardware keyboard) —
-  it rides the same `keyboardObstruction` the helper strip does; and
-  `restoreActiveTerminalFocusIfOwner` on scene activation re-claims the
-  terminal, so a foregrounded app hands the keyboard back to the pane.
-  **Locking the keyboard closes every box in the window, and a box opened
-  while locked releases the lock first** — both halves live in
-  `renderTalkback` (the lock's false→true transition closes; the composer's
-  creation under a lock calls `TerminalFocusArbiter.unlock(_, summoning:
-  false)`, the deferred terminal claim would race the field's focus), so
-  every opener — key, cluster, hook, whatever comes next — inherits the rule;
-  the rail key is a plain `toggleTalkback()`. Pinned by
-  `testLockingTheKeyboardClosesEveryTalkbackBoxInTheWindow`.
-  Hooks: `debug.talkback` (toggle) / `talkbacktype` / `talkbackattach` /
-  `talkbacksend` — proof is `tmux capture-pane` on the harness `agent:0`.
+  rendered by one composer per window** (`Models/Talkback.swift` pure +
+  tested; `TerminalSessionController.talkbackOpen` is what the window / rail
+  / cluster observe, the draft is observed by the composer alone and WITHOUT
+  its text — the field is the text's writer, so a keystroke re-renders
+  nothing; `Views/Terminal/TalkbackComposer.swift`; decided B "MESSAGE CARD",
+  `local-plan/talkback-bakeoff/`, 2026-08-17). The talk key sits at
+  `RET · talk · keyboard` on the rail and in the visionOS cluster, latched
+  while open; **the phone rail runs 36 pt faces** since it joined (40 pt
+  overflowed every phone cutoff — the 390 / 420 / 375 rules are unchanged;
+  a 768 pt iPad pays with its page keys). Docking: iPad/iPhone mount it in
+  the window's `talkbackContainer` above the rail and the pane insets by
+  its measured height — `renderTalkback()` runs FIRST in `renderNow()`
+  because `terminalBottomChromeHeight` is read before the panes are
+  configured; visionOS mounts it as its own slab BELOW the console row
+  (`TerminalVisionConsoleGeometry.talkbackSize`, never in-window; growth
+  reaches the ornament through the window's render → `revision`). Opening
+  folds the helper strip (deferred a turn — the collapse posts app-wide and
+  runs inside a render); closing unfolds only what this window folded.
+  iPad/iPhone motion (`animateTalkbackTransition`, the strip's spring):
+  opening mounts unanimated and runs `renderNow` inside the spring — the
+  card rises from behind the rail band and the pane cedes its rows in the
+  same motion. ⚠ That render lands inside an animation block, so
+  `TerminalKeyBar.layoutSubviews` wraps its key layout in
+  `performWithoutAnimation` and the talk latch is NOT part of the rail's
+  rebuild signature (a rebuilt row flew every key in from a zero frame —
+  shipped-and-caught 2026-08-17). **Focus**: the field is a native
+  `UITextView` (hardware ↩ = SEND, ⇧↩ newline, ⌘↩ SEND, Escape hands the
+  keyboard back); the arbiter still counts the TERMINAL as owner — on
+  begin-editing `TerminalFocusArbiter.lend` steps the terminal down, keys
+  the field's window and remembers the field as the keyboard's BORROWER,
+  which the next `claim` of any terminal (a pane tap, Escape, a scene
+  activation) resigns. ⚠ visionOS: the card lives in the ornament's window
+  and UIKit resigns responders only within one window — without the lend
+  the terminal stayed first responder and every keystroke went to the pane
+  (shipped-and-caught 2026-08-17; proof is the `kbd` log line `talkback
+  field focused key=true terminalResponder=false`). A per-press
+  `focusRequest` counter is what focuses the field, so a tab switch back to
+  an open box never steals the keyboard.
+  **Bytes**: SEND = ONE paste (landed attachment paths via
+  `DropText.typedPaths`, then the sanitized body — `ComposedText`, bracketed
+  only when the pane has mode 2004 on) through `TerminalView.send`, then a
+  CR as its own write ~160 ms later (the slash chips' Codex-safe shape;
+  long-press SEND omits it). Attachments upload ON PICK through the drop
+  path's one primitive (`uploadForTypedPaths`; `canUploadFiles` is the shared
+  eligibility rule — mosh / `.shell` tabs fail the chip); SEND waits on
+  uploads and refuses a failed chip. **Locking the keyboard closes every box
+  in the window, and a box opened while locked releases the lock first** —
+  both halves live in `renderTalkback`, so every opener inherits the rule
+  (`testLockingTheKeyboardClosesEveryTalkbackBoxInTheWindow`). ⚠ Not
+  verified headlessly: the docked software keyboard under the card (the sim
+  reports a hardware keyboard). Hooks: `docs/agents/e2e-headless.md`.
 
 ## Known limit: held-backspace input filler
 

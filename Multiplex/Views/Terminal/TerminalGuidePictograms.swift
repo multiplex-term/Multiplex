@@ -421,14 +421,7 @@ final class TerminalGuidePictogramView: UIView {
         caret.addLine(to: CGPoint(x: 65.5, y: 51))
         stroke(caret, color: UIKitChassis.signal)
         // The filled ↑.
-        let send = UIBezierPath(
-            arcCenter: CGPoint(x: 80, y: 47),
-            radius: 5.5,
-            startAngle: 0,
-            endAngle: 2 * .pi,
-            clockwise: true
-        )
-        fill(send, color: UIKitChassis.signal)
+        fillCircle(center: CGPoint(x: 80, y: 47), radius: 5.5, color: UIKitChassis.signal)
         let up = UIBezierPath()
         up.move(to: CGPoint(x: 80, y: 50))
         up.addLine(to: CGPoint(x: 80, y: 44))

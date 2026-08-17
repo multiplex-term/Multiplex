@@ -1448,31 +1448,48 @@ final class TerminalWindowViewController: UIViewController,
             return
         }
         #endif
+        animateChromeRender()
+    }
 
+    /// The chrome band's one motion: the helper strip's fold and the
+    /// Talkback card's arrival, departure and growth all run the window's
+    /// render inside this spring, so the pane cedes or reclaims its rows in
+    /// the same curve as the band. `alongside` rides the block; Reduce
+    /// Motion (or a window not yet on screen) cuts straight to the result.
+    private typealias ChromeSpring = (duration: TimeInterval, damping: CGFloat)
+    private nonisolated static let chromeBandSpring: ChromeSpring = (0.35, 0.85)
+
+    private var animatesChrome: Bool {
+        !UIAccessibility.isReduceMotionEnabled && rootView.window != nil
+    }
+
+    private func animateChromeRender(
+        _ spring: ChromeSpring = chromeBandSpring,
+        alongside: @escaping () -> Void = {},
+        completion: (() -> Void)? = nil
+    ) {
         let changes = { [self] in
             renderNow()
+            alongside()
             rootView.layoutIfNeeded()
         }
-        guard !UIAccessibility.isReduceMotionEnabled else {
+        guard animatesChrome else {
             changes()
+            completion?()
             return
         }
-        // The strip cross-dissolves its own content; this spring folds the
-        // slab into (or out of) the corner dot and lets the terminal reclaim
-        // or cede the docked row.
         UIView.animate(
-            withDuration: 0.35,
+            withDuration: spring.duration,
             delay: 0,
-            usingSpringWithDamping: 0.85,
+            usingSpringWithDamping: spring.damping,
             initialSpringVelocity: 0,
             animations: changes
-        )
+        ) { _ in completion?() }
     }
 
     #if !os(visionOS)
     /// The card's arrival or departure, when the next render will mount or
-    /// drop it. Same curve as the helper strip's fold — the two share the
-    /// chrome band and should move like one instrument.
+    /// drop it.
     private enum TalkbackTransition {
         case opening
         case closing
@@ -1484,14 +1501,12 @@ final class TerminalWindowViewController: UIViewController,
         return nil
     }
 
-    private static let talkbackSpring: (duration: TimeInterval, damping: CGFloat) = (0.35, 0.85)
-
     /// Opening: the card rises out from behind the rail's edge (its band
     /// clips it, so it never crosses the keys) while the pane cedes its rows;
     /// closing: a snapshot of the card sinks back the same way while the pane
-    /// reclaims them. Reduce Motion cuts straight to the result.
+    /// reclaims them.
     private func animateTalkbackTransition(_ transition: TalkbackTransition) {
-        guard !UIAccessibility.isReduceMotionEnabled, isViewLoaded, rootView.window != nil else {
+        guard animatesChrome else {
             renderNow()
             return
         }
@@ -1519,16 +1534,9 @@ final class TerminalWindowViewController: UIViewController,
                     card.transform = CGAffineTransform(translationX: 0, y: height)
                 }
             }
-            UIView.animate(
-                withDuration: Self.talkbackSpring.duration,
-                delay: 0,
-                usingSpringWithDamping: Self.talkbackSpring.damping,
-                initialSpringVelocity: 0
-            ) { [self] in
-                renderNow()
+            animateChromeRender(alongside: { [self] in
                 talkbackController?.view.transform = .identity
-                rootView.layoutIfNeeded()
-            }
+            })
         case .closing:
             // The real card unmounts in the render; a snapshot inside a
             // clipping stand-in at the same frame sinks out of view while the
@@ -1542,43 +1550,23 @@ final class TerminalWindowViewController: UIViewController,
                 clip.addSubview(ghost)
                 rootView.insertSubview(clip, aboveSubview: container)
             }
-            UIView.animate(
-                withDuration: Self.talkbackSpring.duration,
-                delay: 0,
-                usingSpringWithDamping: Self.talkbackSpring.damping,
-                initialSpringVelocity: 0
-            ) { [self] in
-                renderNow()
-                rootView.layoutIfNeeded()
+            animateChromeRender(alongside: {
                 clip.subviews.first?.transform = CGAffineTransform(
                     translationX: 0,
                     y: clip.bounds.height
                 )
-            } completion: { _ in
+            }, completion: {
                 clip.removeFromSuperview()
-            }
+            })
         }
     }
+
+    private nonisolated static let chromeGrowthSpring: ChromeSpring = (0.25, 0.9)
 
     /// A line typed, a chip attached: the card grows upward and the pane
     /// cedes the row in one motion.
     private func animateTalkbackGrowth() {
-        guard !UIAccessibility.isReduceMotionEnabled,
-              talkbackController != nil,
-              rootView.window != nil
-        else {
-            renderNow()
-            return
-        }
-        UIView.animate(
-            withDuration: 0.25,
-            delay: 0,
-            usingSpringWithDamping: 0.9,
-            initialSpringVelocity: 0
-        ) { [self] in
-            renderNow()
-            rootView.layoutIfNeeded()
-        }
+        animateChromeRender(Self.chromeGrowthSpring)
     }
 
     /// Where the pane's bottom chrome starts: the rail's top edge, lifted

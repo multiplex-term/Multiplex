@@ -74,7 +74,6 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
     private var renderedPreviewKey: PreviewKey?
     private var renderedAttachKey: AttachKey?
     private var pendingFocus = false
-    private var lastReportedSize: CGSize = .zero
     /// One TextKit measurement per (text, width) — every sizing question in a
     /// pass reads it instead of re-laying the body out.
     private var measuredField: FieldMeasurement?
@@ -90,7 +89,7 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
     private let stateLabel = UIKitChassisMonoLabel()
     private var needsYouLamp: UIKitTallyLamp?
     private let closeButton = TalkbackRoundButton(diameter: 20, symbol: "xmark", pointSize: 9)
-    private let previewScroll = UIScrollView()
+    private let previewScroll = AgentHelperCommandScrollView()
     private let previewRow = UIStackView()
     private var previewHeightConstraint: NSLayoutConstraint?
     private let line = UIStackView()
@@ -113,7 +112,6 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
     /// The paperclip's pickers: FILE's own presenter, with its deliveries
     /// routed into the target's draft instead of the pane.
     private let attachPresenter = FileAttachPickerPresenterViewController()
-    private var keyWindowObserver: NSObjectProtocol?
     #if DEBUG
     private var debugObservers: [NSObjectProtocol] = []
     private static let keyboardLogger = Logger(
@@ -153,16 +151,13 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
+    #if DEBUG
     deinit {
-        if let keyWindowObserver {
-            NotificationCenter.default.removeObserver(keyWindowObserver)
-        }
-        #if DEBUG
         for observer in debugObservers {
             NotificationCenter.default.removeObserver(observer)
         }
-        #endif
     }
+    #endif
 
     // MARK: Lifecycle
 
@@ -172,7 +167,6 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         view = root
         buildHierarchy()
         installAttachPresenter()
-        installKeyWindowObserver()
         #if DEBUG
         installDebugObservers()
         #endif
@@ -316,11 +310,11 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         }
     }
 
+    /// `preferredContentSize` is the memo (the visionOS host reads it too).
     private func reportSizeIfChanged() {
         let size = fittingContentSize()
-        guard size != lastReportedSize else { return }
-        lastReportedSize = size
-        if preferredContentSize != size { preferredContentSize = size }
+        guard size != preferredContentSize else { return }
+        preferredContentSize = size
         onContentSizeChange?()
     }
 
@@ -524,30 +518,6 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         line.addArrangedSubview(sendButton)
     }
 
-    /// The pane taking the keyboard back is a window becoming key on
-    /// visionOS (the card lives in the ornament's own window, the terminal in
-    /// the scene's): the field then steps down so the card dims and a later
-    /// tap on it starts a fresh hand-over. Only ANOTHER window counts — the
-    /// iPad card shares the terminal's window, and Stage Manager flips a
-    /// window's key state transiently while it is moved.
-    private func installKeyWindowObserver() {
-        keyWindowObserver = NotificationCenter.default.addObserver(
-            forName: UIWindow.didBecomeKeyNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            MainActor.assumeIsolated {
-                guard let self,
-                      let window = note.object as? UIWindow,
-                      window !== self.textView.window,
-                      window === self.configuration.controller.terminalView?.window,
-                      self.textView.isFirstResponder
-                else { return }
-                self.textView.resignFirstResponder()
-            }
-        }
-    }
-
     private func installAttachPresenter() {
         addChild(attachPresenter)
         attachPresenter.view.frame = .zero
@@ -596,6 +566,7 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         )
         guard key != renderedKey else { return }
         let controllerChanged = key.controllerID != renderedKey?.controllerID
+        let presentationChanged = key.presentation != renderedKey?.presentation
         renderedKey = key
 
         if controllerChanged {
@@ -605,11 +576,15 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
             textView.text = controller.talkback.text
             placeholder.isHidden = !textView.text.isEmpty
         }
-        renderChrome()
-        renderHeader()
-        placeholder.text = TalkbackMessage.placeholder(
-            agentName: configuration.presentation.agent?.displayName
-        )
+        // The chrome and the eyebrow read only the presentation — an
+        // upload's progress ticks leave them alone.
+        if presentationChanged {
+            renderChrome()
+            renderHeader()
+            placeholder.text = TalkbackMessage.placeholder(
+                agentName: configuration.presentation.agent?.displayName
+            )
+        }
         renderPreviews(state.attachments)
         renderButtons(state)
         refreshFieldHeight()
@@ -703,7 +678,9 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
             renderedPreviewKey = key
         } else {
             for (view, attachment) in zip(previewRow.arrangedSubviews, attachments) {
-                (view as? TalkbackAttachmentView)?.update(attachment)
+                guard let chip = view as? TalkbackAttachmentView, chip.attachment != attachment
+                else { continue }
+                chip.update(attachment)
             }
         }
         let hidden = attachments.isEmpty
@@ -772,25 +749,18 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         view.setNeedsLayout()
     }
 
-    /// The field takes the keyboard from the pane. UIKit resigns a previous
-    /// responder only within one window — and on visionOS the card lives in
-    /// the ornament's own window while the pane's terminal stays first
-    /// responder in the scene's window, which is where key events go. So the
-    /// terminal is suspended explicitly (ownership stays with it;
-    /// `resumeAfterPresentation` hands the keyboard back on close) and the
-    /// field's window is made key. Runs for a tap on the field as well as
-    /// for the talk key's programmatic focus.
+    /// The field takes the keyboard from the pane: the arbiter steps the
+    /// terminal down and keys this window (visionOS mounts the card in the
+    /// ornament's own window, where UIKit would leave the terminal first
+    /// responder in the scene's), and remembers the field as the keyboard's
+    /// borrower — a pane tap, Escape or a scene activation claims a
+    /// terminal, which resigns the field so the card dims. Ownership stays
+    /// with the terminal; `resumeAfterPresentation` hands the keyboard back
+    /// on close.
     func textViewDidBeginEditing(_ textView: UITextView) {
-        if let terminal = configuration.controller.terminalView,
-           terminal.isFirstResponder,
-           !TerminalFocusArbiter.suspendForPresentation(terminal) {
-            terminal.resignFirstResponder()
-        }
-        if let window = textView.window, !window.isKeyWindow {
-            window.makeKey()
-        }
-        #if DEBUG
         let terminal = configuration.controller.terminalView
+        TerminalFocusArbiter.lend(terminal, to: textView)
+        #if DEBUG
         Self.keyboardLogger.debug(
             "talkback field focused key=\(textView.window?.isKeyWindow == true, privacy: .public) terminalResponder=\(terminal?.isFirstResponder == true, privacy: .public) terminalWindowKey=\(terminal?.window?.isKeyWindow == true, privacy: .public) sameWindow=\(terminal?.window === textView.window, privacy: .public)"
         )
@@ -799,6 +769,12 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
     }
 
     func textViewDidEndEditing(_ textView: UITextView) {
+        #if DEBUG
+        let terminal = configuration.controller.terminalView
+        Self.keyboardLogger.debug(
+            "talkback field resigned terminalResponder=\(terminal?.isFirstResponder == true, privacy: .public) terminalWindowKey=\(terminal?.window?.isKeyWindow == true, privacy: .public)"
+        )
+        #endif
         setCardFocused(false)
     }
 
@@ -814,27 +790,25 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
     private func installDebugObservers() {
         TalkbackDebugHook.install()
         let center = NotificationCenter.default
-        func observe(_ name: Notification.Name, _ action: @escaping @MainActor (Notification) -> Void) {
+        func observe(_ name: Notification.Name, _ action: @escaping @MainActor () -> Void) {
             debugObservers.append(center.addObserver(
                 forName: name,
                 object: nil,
                 queue: .main
-            ) { note in
-                MainActor.assumeIsolated { action(note) }
+            ) { _ in
+                MainActor.assumeIsolated { action() }
             })
         }
-        observe(.multiplexDebugTalkbackType) { [weak self] note in
+        observe(.multiplexDebugTalkbackType) { [weak self] in
             guard let self, self.view.window != nil else { return }
-            let text = (note.userInfo?["text"] as? String)
-                ?? "Talkback headless proof\nsecond line"
-            self.textView.text = text
+            self.textView.text = "Talkback headless proof\nsecond line"
             self.textViewDidChange(self.textView)
         }
-        observe(.multiplexDebugTalkbackSend) { [weak self] _ in
+        observe(.multiplexDebugTalkbackSend) { [weak self] in
             guard let self, self.view.window != nil else { return }
             self.send(submit: true)
         }
-        observe(.multiplexDebugTalkbackAttach) { [weak self] _ in
+        observe(.multiplexDebugTalkbackAttach) { [weak self] in
             guard let self, self.view.window != nil else { return }
             self.configuration.controller.attachTalkbackFiles(Self.debugSampleFiles())
         }
@@ -1262,7 +1236,6 @@ final class TalkbackAttachmentView: UIControl {
             accessibilityLabel = "\(attachment.name), upload failed, \(reason)"
             accessibilityHint = "Retries the upload"
         }
-        setNeedsLayout()
     }
 
     private func refreshColors() {
@@ -1308,29 +1281,19 @@ enum TalkbackDebugHook {
     static func install() {
         guard !installed else { return }
         installed = true
-        var toggleToken: Int32 = 0
-        notify_register_dispatch(
-            "app.multiplexterm.multiplex.debug.talkback", &toggleToken, .main
-        ) { _ in
-            NotificationCenter.default.post(name: .multiplexDebugTalkbackToggle, object: nil)
-        }
-        var typeToken: Int32 = 0
-        notify_register_dispatch(
-            "app.multiplexterm.multiplex.debug.talkbacktype", &typeToken, .main
-        ) { _ in
-            NotificationCenter.default.post(name: .multiplexDebugTalkbackType, object: nil)
-        }
-        var sendToken: Int32 = 0
-        notify_register_dispatch(
-            "app.multiplexterm.multiplex.debug.talkbacksend", &sendToken, .main
-        ) { _ in
-            NotificationCenter.default.post(name: .multiplexDebugTalkbackSend, object: nil)
-        }
-        var attachToken: Int32 = 0
-        notify_register_dispatch(
-            "app.multiplexterm.multiplex.debug.talkbackattach", &attachToken, .main
-        ) { _ in
-            NotificationCenter.default.post(name: .multiplexDebugTalkbackAttach, object: nil)
+        let hooks: [(suffix: String, name: Notification.Name)] = [
+            ("talkback", .multiplexDebugTalkbackToggle),
+            ("talkbacktype", .multiplexDebugTalkbackType),
+            ("talkbacksend", .multiplexDebugTalkbackSend),
+            ("talkbackattach", .multiplexDebugTalkbackAttach),
+        ]
+        for hook in hooks {
+            var token: Int32 = 0
+            notify_register_dispatch(
+                "app.multiplexterm.multiplex.debug.\(hook.suffix)", &token, .main
+            ) { _ in
+                NotificationCenter.default.post(name: hook.name, object: nil)
+            }
         }
     }
 }

@@ -562,11 +562,11 @@ private struct TerminalVisionConsoleLayout: Layout {
         subviews: Subviews,
         cache: inout ()
     ) -> CGSize {
-        guard let console = console(in: subviews) else { return .zero }
+        guard let console = subview(.console, in: subviews) else { return .zero }
         return TerminalVisionConsoleGeometry.resolve(
-            helperSize: helper(in: subviews)?.sizeThatFits(proposal),
+            helperSize: subview(.helper, in: subviews)?.sizeThatFits(proposal),
             consoleSize: console.sizeThatFits(proposal),
-            talkbackSize: talkback(in: subviews)?.sizeThatFits(proposal),
+            talkbackSize: subview(.talkback, in: subviews)?.sizeThatFits(proposal),
             helperLeading: helperLeading,
             spacing: spacing
         ).size
@@ -578,11 +578,11 @@ private struct TerminalVisionConsoleLayout: Layout {
         subviews: Subviews,
         cache: inout ()
     ) {
-        guard let console = console(in: subviews) else { return }
-        let helper = helper(in: subviews)
+        guard let console = subview(.console, in: subviews) else { return }
+        let helper = subview(.helper, in: subviews)
         let helperSize = helper?.sizeThatFits(proposal)
         let consoleSize = console.sizeThatFits(proposal)
-        let talkback = talkback(in: subviews)
+        let talkback = subview(.talkback, in: subviews)
         let talkbackSize = talkback?.sizeThatFits(proposal)
         let geometry = TerminalVisionConsoleGeometry.resolve(
             helperSize: helperSize,
@@ -638,22 +638,8 @@ private struct TerminalVisionConsoleLayout: Layout {
         }
     }
 
-    private func talkback(in subviews: Subviews) -> LayoutSubview? {
-        subviews.first {
-            $0[TerminalVisionConsoleRoleKey.self] == .talkback
-        }
-    }
-
-    private func helper(in subviews: Subviews) -> LayoutSubview? {
-        subviews.first {
-            $0[TerminalVisionConsoleRoleKey.self] == .helper
-        }
-    }
-
-    private func console(in subviews: Subviews) -> LayoutSubview? {
-        subviews.first {
-            $0[TerminalVisionConsoleRoleKey.self] == .console
-        }
+    private func subview(_ role: TerminalVisionConsoleRole, in subviews: Subviews) -> LayoutSubview? {
+        subviews.first { $0[TerminalVisionConsoleRoleKey.self] == role }
     }
 }
 

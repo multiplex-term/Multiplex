@@ -1820,16 +1820,29 @@ final class TerminalSessionController {
     }
 
     /// The one upload for both roads — the pane's drop path and the Talkback
-    /// draft: the destination resolved once, names sanitized, the 64 MB cap
-    /// applied, and the paths as they will be typed handed back. Progress
-    /// arrives per file index; failure throws (`DropError` carries the
-    /// user-facing words).
+    /// draft: the destination resolved once per batch, names sanitized, the
+    /// 64 MB cap applied, and the paths as they will be typed handed back.
+    /// Progress arrives per file index; failure throws (`DropError` carries
+    /// the user-facing words).
     private func uploadForTypedPaths(
         _ files: [DroppedFile],
         over connection: SSHConnection,
         onProgress: @escaping @Sendable (_ index: Int, _ fraction: Double) -> Void
     ) async throws -> [String] {
-        let destination = try await dropDestination(over: connection)
+        try await upload(
+            files,
+            to: dropDestination(over: connection),
+            over: connection,
+            onProgress: onProgress
+        )
+    }
+
+    private func upload(
+        _ files: [DroppedFile],
+        to destination: DropDestination,
+        over connection: SSHConnection,
+        onProgress: @escaping @Sendable (_ index: Int, _ fraction: Double) -> Void
+    ) async throws -> [String] {
         let uploads = try files.map { file -> SSHUpload in
             guard file.data.count <= DropText.maxBytes else {
                 throw DropError(message: "\(file.name) is over 64 MB")
@@ -1939,7 +1952,12 @@ final class TerminalSessionController {
     /// sent or the chip removed, so a failed upload retries without another
     /// trip through the picker.
     @ObservationIgnored private var talkbackFiles: [UUID: DroppedFile] = [:]
-    @ObservationIgnored private var talkbackUploadQueue: [UUID] = []
+    /// Each queued chip remembers its pick: the drop destination is resolved
+    /// once per pick (one exec, like a drop's batch), not once per file — a
+    /// later pick re-resolves, the pane's cwd may have moved between picks.
+    @ObservationIgnored private var talkbackUploadQueue: [(id: UUID, pick: Int)] = []
+    @ObservationIgnored private var talkbackPicks = 0
+    @ObservationIgnored private var talkbackPickDestination: (pick: Int, destination: DropDestination)?
     @ObservationIgnored private var talkbackUploadTask: Task<Void, Never>?
     /// The last focus request the composer consumed — per tab, so a tab
     /// switch back to an open box never re-takes the keyboard.
@@ -1985,6 +2003,7 @@ final class TerminalSessionController {
     /// with the drop path's own words instead of dropping the intent
     /// silently.
     func attachTalkbackFiles(_ files: [DroppedFile]) {
+        talkbackPicks &+= 1
         for file in files {
             let kind = TalkbackAttachment.kind(forName: file.name)
             let attachment = TalkbackAttachment(
@@ -1994,7 +2013,7 @@ final class TerminalSessionController {
             )
             talkbackFiles[attachment.id] = file
             talkback.attachments.append(attachment)
-            enqueueTalkbackUpload(attachment.id)
+            enqueueTalkbackUpload(attachment.id, pick: talkbackPicks)
             guard kind == .image else { continue }
             // Decoding a camera-sized photo is tens of milliseconds; the chip
             // shows its ring first and its picture a beat later.
@@ -2016,13 +2035,16 @@ final class TerminalSessionController {
         talkbackFiles[id] = nil
     }
 
-    /// A failed chip's tap: back to uploading, back in the queue.
+    /// A failed chip's tap: back to uploading, back in the queue as a pick
+    /// of its own (the destination is resolved afresh — it may be what
+    /// failed).
     func retryTalkbackAttachment(_ id: UUID) {
         guard talkbackFiles[id] != nil,
               talkback.attachments.first(where: { $0.id == id })?.isFailed == true
         else { return }
         talkback.update(id) { $0.state = .uploading(fraction: 0) }
-        enqueueTalkbackUpload(id)
+        talkbackPicks &+= 1
+        enqueueTalkbackUpload(id, pick: talkbackPicks)
     }
 
     /// SEND (`submit`) or a long-press SEND (type only): one paste through
@@ -2064,8 +2086,8 @@ final class TerminalSessionController {
         }
     }
 
-    private func enqueueTalkbackUpload(_ id: UUID) {
-        talkbackUploadQueue.append(id)
+    private func enqueueTalkbackUpload(_ id: UUID, pick: Int) {
+        talkbackUploadQueue.append((id, pick))
         guard talkbackUploadTask == nil else { return }
         talkbackUploadTask = Task { [weak self] in
             await self?.drainTalkbackUploads()
@@ -2075,18 +2097,17 @@ final class TerminalSessionController {
 
     private func drainTalkbackUploads() async {
         while !talkbackUploadQueue.isEmpty {
-            let id = talkbackUploadQueue.removeFirst()
-            guard let file = talkbackFiles[id],
-                  talkback.attachments.contains(where: { $0.id == id })
+            let entry = talkbackUploadQueue.removeFirst()
+            guard let file = talkbackFiles[entry.id],
+                  talkback.attachments.contains(where: { $0.id == entry.id })
             else { continue }
-            await uploadTalkbackAttachment(id, file: file)
+            await uploadTalkbackAttachment(entry.id, file: file, pick: entry.pick)
         }
     }
 
     /// The drop path's upload, one file at a time so a failure marks only
-    /// its own chip; the destination is re-resolved per file, like drops
-    /// re-resolve per batch — the pane's cwd may have moved between picks.
-    private func uploadTalkbackAttachment(_ id: UUID, file: DroppedFile) async {
+    /// its own chip, into the destination resolved for this chip's pick.
+    private func uploadTalkbackAttachment(_ id: UUID, file: DroppedFile, pick: Int) async {
         guard canUploadFiles else {
             failTalkbackAttachment(id, Self.uploadUnavailableMessage)
             return
@@ -2096,7 +2117,14 @@ final class TerminalSessionController {
             return
         }
         do {
-            let paths = try await uploadForTypedPaths([file], over: connection) { [weak self] _, fraction in
+            let destination: DropDestination
+            if let memo = talkbackPickDestination, memo.pick == pick {
+                destination = memo.destination
+            } else {
+                destination = try await dropDestination(over: connection)
+                talkbackPickDestination = (pick, destination)
+            }
+            let paths = try await upload([file], to: destination, over: connection) { [weak self] _, fraction in
                 Task { @MainActor [weak self] in
                     self?.talkback.update(id) { attachment in
                         guard attachment.isUploading else { return }

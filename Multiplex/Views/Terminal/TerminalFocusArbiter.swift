@@ -32,6 +32,10 @@ private final class LockedKeyboardInputView: UIView {}
 @MainActor
 enum TerminalFocusArbiter {
     private(set) static weak var current: TerminalView?
+    /// An app-owned field that borrowed the keyboard from the current
+    /// terminal (the Talkback composer's). Any claim resigns it first, so
+    /// one input session stays live app-wide even across scenes.
+    private static weak var borrower: UIView?
     private static var keyboardVisible = false
     private static var observersInstalled = false
 
@@ -60,6 +64,12 @@ enum TerminalFocusArbiter {
     static func claim(_ view: TerminalView) {
         guard !inputSuppressed else { return }
         installObserversIfNeeded()
+        // A borrowed keyboard comes back before any terminal takes it —
+        // even one in another window, which UIKit would leave alone.
+        if let borrower, borrower.isFirstResponder {
+            _ = borrower.resignFirstResponder()
+        }
+        borrower = nil
         // Stage Manager can transiently clear `isKeyWindow` while the user
         // moves that very window. The terminal still owns the live input
         // session and remains first responder during that transition. Do not
@@ -159,6 +169,26 @@ enum TerminalFocusArbiter {
         #endif
         _ = view.resignFirstResponder()
         return true
+    }
+
+    /// An app-owned field takes the keyboard while this terminal keeps
+    /// ownership: the terminal steps down and the field's window is made
+    /// key — UIKit resigns responders only within one window, and on
+    /// visionOS the Talkback composer lives in the ornament's window while
+    /// the terminal stays first responder in the scene's, where key events
+    /// go. The next `claim` of ANY terminal resigns the borrower;
+    /// `resumeAfterPresentation` hands the keyboard back on close.
+    static func lend(_ view: TerminalView?, to field: UIView) {
+        borrower = field
+        if let view, view.isFirstResponder {
+            #if DEBUG
+            keyboardLogger.debug("kbd-focus-lend current=\(current === view, privacy: .public)")
+            #endif
+            _ = view.resignFirstResponder()
+        }
+        if let window = field.window, !window.isKeyWindow {
+            window.makeKey()
+        }
     }
 
     /// Resume a presentation-suspended terminal only if it still owns focus.

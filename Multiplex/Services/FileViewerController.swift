@@ -33,7 +33,7 @@ final class FileViewerController: AuxiliaryPaneController {
     /// The longest edge the viewer decodes to. Encoded bytes bound nothing
     /// about a bitmap's size, and the screen this renders on is smaller than
     /// this in every dimension.
-    static let imageMaxPixelEdge = 4096
+    nonisolated static let imageMaxPixelEdge = 4096
 
     /// The ceiling for an image shown INSIDE a document. A rendered column is
     /// at most 760 pt wide, so this is retina-generous — and a README can
@@ -43,7 +43,8 @@ final class FileViewerController: AuxiliaryPaneController {
     /// Decode through ImageIO with a pixel ceiling, so a decompression bomb
     /// from the host costs a downsample instead of the app's memory.
     /// Falls back to nothing (i.e. "binary") when the bytes aren't an image.
-    static func decodeImage(_ data: Data, maxPixelEdge: Int = imageMaxPixelEdge) -> UIImage? {
+    /// Actor-free: the Talkback thumbnail runs it off the main thread.
+    nonisolated static func decodeImage(_ data: Data, maxPixelEdge: Int = imageMaxPixelEdge) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               CGImageSourceGetCount(source) > 0
         else { return nil }

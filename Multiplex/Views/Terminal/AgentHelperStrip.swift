@@ -948,12 +948,13 @@ private final class AgentHelperStripDotGlyphView: UIView {
     }
 }
 
-/// The command rail's scroller. Same contract as the tab rail's: a scroll
-/// view delays content touches by 150 ms and drops them if the finger drifts
-/// during that window, so an overflowing chip row loses ordinary presses.
-/// Track at once, and keep drag-to-scroll from a chip by answering the cancel
-/// question for controls, whose UIKit default (false) would otherwise pin the
-/// rail once touches are undelayed.
+/// The command rail's scroller — and the Talkback composer's attachment
+/// row's. Same contract as the tab rail's: a scroll view delays content
+/// touches by 150 ms and drops them if the finger drifts during that window,
+/// so an overflowing chip row loses ordinary presses. Track at once, and keep
+/// drag-to-scroll from a chip by answering the cancel question for controls,
+/// whose UIKit default (false) would otherwise pin the rail once touches are
+/// undelayed.
 @MainActor
 final class AgentHelperCommandScrollView: UIScrollView {
     override init(frame: CGRect) {
@@ -965,7 +966,7 @@ final class AgentHelperCommandScrollView: UIScrollView {
     required init?(coder: NSCoder) { fatalError("unused") }
 
     override func touchesShouldCancel(in view: UIView) -> Bool {
-        if view is UIButton { return true }
+        if view is UIControl { return true }
         return super.touchesShouldCancel(in: view)
     }
 }

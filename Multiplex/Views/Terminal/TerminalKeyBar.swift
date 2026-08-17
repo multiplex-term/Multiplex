@@ -371,6 +371,12 @@ final class TerminalCtrlComboViewController: UIViewController {
     }
 }
 
+/// The talk key's VoiceOver name on the rail and in the visionOS cluster —
+/// one wording, flipped in place with the latch.
+private func talkbackKeyLabel(open: Bool) -> String {
+    open ? "Close the message box" : "Open the message box"
+}
+
 #if !os(visionOS)
 
 /// Pure layout ladder for the native rail. Its last two exact floors are
@@ -725,8 +731,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                 renderedSignature = signature
             }
             talkKeyControl?.isLatched = state.talkbackOpen
-            talkKeyControl?.accessibilityLabel = state.talkbackOpen
-                ? "Close the message box" : "Open the message box"
+            talkKeyControl?.accessibilityLabel = talkbackKeyLabel(open: state.talkbackOpen)
             layoutRow(specification: specification, includesReturn: includesReturn)
             bringSubviewToFront(topBorder)
         }
@@ -828,9 +833,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         right.append(RailKey(
             key: .talkback,
             face: .symbol("text.bubble", pointSize: 13, weight: .semibold),
-            accessibility: state.talkbackOpen
-                ? "Close the message box"
-                : "Open the message box",
+            accessibility: talkbackKeyLabel(open: state.talkbackOpen),
             identifier: "talkback",
             latched: state.talkbackOpen
         ))
@@ -1704,8 +1707,7 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     func applyContextState() {
         ctrlKey?.isLatched = context.ctrlLatched
         talkKey?.isLatched = context.talkbackOpen
-        talkKey?.accessibilityLabel = context.talkbackOpen
-            ? "Close the message box" : "Open the message box"
+        talkKey?.accessibilityLabel = talkbackKeyLabel(open: context.talkbackOpen)
     }
 
     func fittingSize(maximumWidth: CGFloat?) -> CGSize {
@@ -1880,8 +1882,7 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
                 face: .symbol("text.bubble", pointSize: 12, weight: .semibold),
                 width: activeMetric.keyWidth,
                 height: 26,
-                accessibilityLabel: context.talkbackOpen
-                    ? "Close the message box" : "Open the message box",
+                accessibilityLabel: talkbackKeyLabel(open: context.talkbackOpen),
                 accessibilityIdentifier: "terminal.keyCluster.talkback",
                 latched: context.talkbackOpen,
                 action: { [weak context] in context?.toggleTalkback() }
