@@ -215,12 +215,17 @@ final class FileViewerTextScaleTests: XCTestCase {
         let blocks = MarkdownDocument.parse(String(repeating: unit, count: 60))
         let screen = FileViewerMarkdownContentView()
         screen.frame = CGRect(x: 0, y: 0, width: 900, height: 900)
+        // Building the mounted depth is the cost a rebuilding resize would
+        // pay again — the yardstick below, so a slow CI runner scales both
+        // sides instead of tripping an absolute wall-clock bound.
+        let fillStarted = CFAbsoluteTimeGetCurrent()
         screen.apply(blocks: blocks)
         screen.layoutIfNeeded()
         for step in stride(from: 0, through: 6000, by: 600) {
             screen.scrollView.contentOffset = CGPoint(x: 0, y: CGFloat(step))
             screen.layoutIfNeeded()
         }
+        let fillElapsed = CFAbsoluteTimeGetCurrent() - fillStarted
         let mountedWhileReading = screen.blockStack.arrangedSubviews.count
         XCTAssertGreaterThan(mountedWhileReading, 100, "the reader scrolled deep")
         let readingAt = screen.scrollView.contentOffset.y
@@ -234,7 +239,10 @@ final class FileViewerTextScaleTests: XCTestCase {
             mountedWhileReading,
             "the screen must never empty itself to resize"
         )
-        XCTAssertLessThan(elapsed, 1.0, "resize regressed to rebuilding the scroll depth")
+        XCTAssertLessThan(
+            elapsed, max(1.0, fillElapsed * 0.5),
+            "resize regressed to rebuilding the scroll depth (fill took \(fillElapsed) s)"
+        )
         // The reader keeps their place: the anchor block is held, so the
         // offset moves with the reflow instead of staying a stale pixel count.
         XCTAssertGreaterThan(screen.scrollView.contentOffset.y, readingAt * 0.5)
