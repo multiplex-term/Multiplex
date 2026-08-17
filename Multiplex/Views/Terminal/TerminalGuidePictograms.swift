@@ -64,6 +64,7 @@ final class TerminalGuidePictogramView: UIView {
         case "shiftreturn": drawShiftReturn()
         case "shortcutkey": drawShortcutKey()
         case "keycommands": drawKeyCommands()
+        case "talkback": drawTalkback()
         case "resize": drawResize()
         case "panemenu": drawPaneMenu()
         case "paste": drawPastePermission()
@@ -349,6 +350,92 @@ final class TerminalGuidePictogramView: UIView {
                 dashed: true
             )
         }
+    }
+
+    /// The message card: eyebrow, paperclip, a line of message, the filled ↑
+    /// — with the talk key that opens it above.
+    private func drawTalkback() {
+        // The talk key: a keycap wearing a small speech bubble.
+        let keycap = CGRect(x: 7, y: 3, width: 16, height: 10)
+        drawKeycap(keycap, label: "", labelSize: 5)
+        let bubble = UIBezierPath(
+            roundedRect: CGRect(x: 11, y: 5, width: 8, height: 5),
+            cornerRadius: 1.2
+        )
+        bubble.move(to: CGPoint(x: 13, y: 10))
+        bubble.addLine(to: CGPoint(x: 12.5, y: 12))
+        bubble.addLine(to: CGPoint(x: 15, y: 10))
+        stroke(bubble, color: UIKitChassis.signal)
+        drawArrow(
+            from: CGPoint(x: 15, y: 14),
+            to: CGPoint(x: 15, y: 20),
+            color: UIKitChassis.signal2,
+            endHead: true
+        )
+
+        // The card.
+        let card = UIBezierPath(
+            roundedRect: CGRect(x: 6, y: 22, width: 84, height: 38),
+            cornerRadius: 5
+        )
+        stroke(card, color: UIKitChassis.signal)
+        drawMonoText(
+            "TO MAIN · DEVBOX",
+            at: CGPoint(x: 11, y: 24.5),
+            size: 4.8,
+            color: UIKitChassis.signal3
+        )
+        // ✕ at the trailing end of the eyebrow.
+        strokeCircle(
+            center: CGPoint(x: 83, y: 28),
+            radius: 3,
+            color: UIKitChassis.signal2
+        )
+        let cross = UIBezierPath()
+        cross.move(to: CGPoint(x: 81.8, y: 26.8))
+        cross.addLine(to: CGPoint(x: 84.2, y: 29.2))
+        cross.move(to: CGPoint(x: 84.2, y: 26.8))
+        cross.addLine(to: CGPoint(x: 81.8, y: 29.2))
+        stroke(cross, color: UIKitChassis.signal2)
+        // Paperclip (a hairline circle stands in for the round button).
+        strokeCircle(
+            center: CGPoint(x: 15, y: 47),
+            radius: 5,
+            color: UIKitChassis.signal2
+        )
+        let clip = UIBezierPath()
+        clip.move(to: CGPoint(x: 13.5, y: 48.5))
+        clip.addLine(to: CGPoint(x: 16.5, y: 45.5))
+        clip.addLine(to: CGPoint(x: 17.5, y: 46.5))
+        clip.addLine(to: CGPoint(x: 14, y: 50))
+        stroke(clip, color: UIKitChassis.signal2)
+        // The message.
+        drawMonoText(
+            "Fix the test",
+            at: CGPoint(x: 24, y: 43.5),
+            size: 5.6,
+            color: UIKitChassis.signal
+        )
+        let caret = UIBezierPath()
+        caret.move(to: CGPoint(x: 65.5, y: 43))
+        caret.addLine(to: CGPoint(x: 65.5, y: 51))
+        stroke(caret, color: UIKitChassis.signal)
+        // The filled ↑.
+        let send = UIBezierPath(
+            arcCenter: CGPoint(x: 80, y: 47),
+            radius: 5.5,
+            startAngle: 0,
+            endAngle: 2 * .pi,
+            clockwise: true
+        )
+        fill(send, color: UIKitChassis.signal)
+        let up = UIBezierPath()
+        up.move(to: CGPoint(x: 80, y: 50))
+        up.addLine(to: CGPoint(x: 80, y: 44))
+        up.move(to: CGPoint(x: 77.5, y: 46.5))
+        up.addLine(to: CGPoint(x: 80, y: 44))
+        up.addLine(to: CGPoint(x: 82.5, y: 46.5))
+        stroke(up, color: UIKitChassis.chassis)
     }
 
     private func drawResize() {

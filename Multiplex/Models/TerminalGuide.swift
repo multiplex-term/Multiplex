@@ -210,8 +210,26 @@ enum TerminalGuide {
             ]
         ),
         TerminalGuideEntry(
-            id: "resize",
+            id: "talkback",
             figure: 13,
+            bank: .keyboard,
+            title: "MESSAGE BOX",
+            tag: nil,
+            body: [
+                .text("The speech-bubble key beside "),
+                .key("RET"),
+                .text(" opens a message box: write with autocorrect and your keyboard's "
+                    + "own dictation, attach photos or files, then "),
+                .control("↑"),
+                .text(" sends it all as one message. The rail keeps driving the pane "
+                    + "while you write; hold "),
+                .control("↑"),
+                .text(" to type without submitting. Locking the keyboard closes it."),
+            ]
+        ),
+        TerminalGuideEntry(
+            id: "resize",
+            figure: 14,
             bank: .herdrPanes,
             title: "RESIZE PANES",
             tag: "herdr",
@@ -221,7 +239,7 @@ enum TerminalGuide {
         ),
         TerminalGuideEntry(
             id: "panemenu",
-            figure: 14,
+            figure: 15,
             bank: .herdrPanes,
             title: "PANE MENU",
             tag: "herdr",

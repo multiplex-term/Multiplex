@@ -4,11 +4,11 @@ import XCTest
 final class TerminalGuideTests: XCTestCase {
     func testDeckIntegrityAndCanonicalFigures() {
         let entries = TerminalGuide.allEntries
-        XCTAssertEqual(entries.count, 15)
+        XCTAssertEqual(entries.count, 16)
 
         let figures = entries.compactMap(\.figure)
-        XCTAssertEqual(figures, Array(1...14))
-        XCTAssertEqual(Set(figures).count, 14)
+        XCTAssertEqual(figures, Array(1...15))
+        XCTAssertEqual(Set(figures).count, 15)
         for entry in entries {
             XCTAssertFalse(entry.title.isEmpty, entry.id)
             XCTAssertFalse(entry.body.isEmpty, entry.id)
@@ -23,7 +23,7 @@ final class TerminalGuideTests: XCTestCase {
         ))
         XCTAssertEqual(entries.map(\.id), [
             "doubletap", "longpress", "rightclick", "pan",
-            "link", "path", "shiftreturn", "shortcutkey", "keycommands",
+            "link", "path", "shiftreturn", "shortcutkey", "keycommands", "talkback",
         ])
     }
 
@@ -55,7 +55,7 @@ final class TerminalGuideTests: XCTestCase {
         ))
         let link = try XCTUnwrap(entries.first { $0.id == "link" })
         XCTAssertEqual(link.figure, 6)
-        XCTAssertEqual(entries.compactMap(\.figure), [1, 2, 3, 4, 6, 7, 10, 11, 12])
+        XCTAssertEqual(entries.compactMap(\.figure), [1, 2, 3, 4, 6, 7, 10, 11, 12, 13])
     }
 
     func testBankOrder() {

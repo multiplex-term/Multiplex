@@ -134,7 +134,7 @@ routing, tab moves, keyboard avoidance, or secret fields.
   sheet presents (`presentPaywall` refuses while anything is presented).
   `entitlements.isPro` is in the window's observation set, so a purchase
   re-renders with the lifted plan. The terminal
-  GUIDE carries a HOLD CTRL card (figure 12). Focus: the
+  GUIDE carries a HOLD CTRL card (figure 12) and a MESSAGE BOX card (figure 13). Focus: the
   panel never suspends the terminal; only if one of its own fields took the
   keyboard does dismissal `resumeAfterPresentation`. Design record + grill:
   `local-plan/key-commands-bakeoff/`. visionOS: `TerminalKeyCluster`
