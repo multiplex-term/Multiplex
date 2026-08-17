@@ -1,4 +1,5 @@
 import Observation
+import os
 import UIKit
 #if DEBUG
 import notify
@@ -112,8 +113,13 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
     /// The paperclip's pickers: FILE's own presenter, with its deliveries
     /// routed into the target's draft instead of the pane.
     private let attachPresenter = FileAttachPickerPresenterViewController()
+    private var keyWindowObserver: NSObjectProtocol?
     #if DEBUG
     private var debugObservers: [NSObjectProtocol] = []
+    private static let keyboardLogger = Logger(
+        subsystem: "app.multiplexterm.multiplex",
+        category: "kbd"
+    )
     #endif
 
     private struct RenderKey: Equatable {
@@ -148,6 +154,9 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
     required init?(coder: NSCoder) { fatalError("unused") }
 
     deinit {
+        if let keyWindowObserver {
+            NotificationCenter.default.removeObserver(keyWindowObserver)
+        }
         #if DEBUG
         for observer in debugObservers {
             NotificationCenter.default.removeObserver(observer)
@@ -163,6 +172,7 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         view = root
         buildHierarchy()
         installAttachPresenter()
+        installKeyWindowObserver()
         #if DEBUG
         installDebugObservers()
         #endif
@@ -514,6 +524,30 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         line.addArrangedSubview(sendButton)
     }
 
+    /// The pane taking the keyboard back is a window becoming key on
+    /// visionOS (the card lives in the ornament's own window, the terminal in
+    /// the scene's): the field then steps down so the card dims and a later
+    /// tap on it starts a fresh hand-over. Only ANOTHER window counts — the
+    /// iPad card shares the terminal's window, and Stage Manager flips a
+    /// window's key state transiently while it is moved.
+    private func installKeyWindowObserver() {
+        keyWindowObserver = NotificationCenter.default.addObserver(
+            forName: UIWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self,
+                      let window = note.object as? UIWindow,
+                      window !== self.textView.window,
+                      window === self.configuration.controller.terminalView?.window,
+                      self.textView.isFirstResponder
+                else { return }
+                self.textView.resignFirstResponder()
+            }
+        }
+    }
+
     private func installAttachPresenter() {
         addChild(attachPresenter)
         attachPresenter.view.frame = .zero
@@ -738,7 +772,29 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         view.setNeedsLayout()
     }
 
+    /// The field takes the keyboard from the pane. UIKit resigns a previous
+    /// responder only within one window — and on visionOS the card lives in
+    /// the ornament's own window while the pane's terminal stays first
+    /// responder in the scene's window, which is where key events go. So the
+    /// terminal is suspended explicitly (ownership stays with it;
+    /// `resumeAfterPresentation` hands the keyboard back on close) and the
+    /// field's window is made key. Runs for a tap on the field as well as
+    /// for the talk key's programmatic focus.
     func textViewDidBeginEditing(_ textView: UITextView) {
+        if let terminal = configuration.controller.terminalView,
+           terminal.isFirstResponder,
+           !TerminalFocusArbiter.suspendForPresentation(terminal) {
+            terminal.resignFirstResponder()
+        }
+        if let window = textView.window, !window.isKeyWindow {
+            window.makeKey()
+        }
+        #if DEBUG
+        let terminal = configuration.controller.terminalView
+        Self.keyboardLogger.debug(
+            "talkback field focused key=\(textView.window?.isKeyWindow == true, privacy: .public) terminalResponder=\(terminal?.isFirstResponder == true, privacy: .public) terminalWindowKey=\(terminal?.window?.isKeyWindow == true, privacy: .public) sameWindow=\(terminal?.window === textView.window, privacy: .public)"
+        )
+        #endif
         setCardFocused(true)
     }
 

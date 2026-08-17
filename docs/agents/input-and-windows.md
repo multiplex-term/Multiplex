@@ -501,8 +501,16 @@ routing, tab moves, keyboard avoidance, or secret fields.
   folded. **Focus split**: the field is a native `UITextView` (system
   autocorrect / IME / the keyboard's own mic; hardware ↩ = SEND, ⇧↩ newline,
   ⌘↩ SEND, Escape hands the keyboard back — `UIKeyCommand`s on the field);
-  the arbiter still counts the TERMINAL as owner (the composer never claims),
-  so a pane tap `claim`s it back and the card dims to 0.72; a keypress-scoped
+  the arbiter still counts the TERMINAL as owner (the composer never claims):
+  on begin-editing the field `suspendForPresentation`s the terminal and
+  makes its OWN window key — ⚠ on visionOS the card lives in the ornament's
+  window and UIKit resigns responders only within one window, so without
+  this the terminal stayed first responder in the scene's key window and
+  every keystroke went to the pane (shipped-and-caught 2026-08-17; proof is
+  the `kbd` log line `talkback field focused key=true terminalResponder=
+  false`); the terminal's window becoming key again (a pane tap, Escape, a
+  scene activation) resigns the field through a `didBecomeKeyNotification`
+  observer scoped to ANOTHER window, so the card dims to 0.72; a keypress-scoped
   `focusRequest` counter (consumed once per press) is what focuses the field
   — a tab switch back to an open box never steals the keyboard; on close a
   field that held the keyboard `resumeAfterPresentation`s the terminal.
