@@ -106,12 +106,13 @@ struct FleetWidgetView: View {
 
     private func hostRow(_ host: WidgetHostState) -> some View {
         HStack(spacing: 8) {
+            let session = host.featuredSession()
             Link(destination: WidgetLink.shellURL(
-                hostID: host.id, sessionName: host.mostRecentSession?.name,
+                hostID: host.id, sessionName: session?.name,
                 // The row's own backend, present only where the host shows
                 // more than one — without it a same-named session on the
                 // other multiplexer could answer the tap.
-                backendRaw: host.mostRecentSession?.backendRaw
+                backendRaw: session?.backendRaw
             )) {
                 HStack(spacing: 6) {
                     WidgetLabel(
@@ -136,7 +137,7 @@ struct FleetWidgetView: View {
                 }
                 Link(destination: WidgetLink.agentURL(
                     hostID: host.id,
-                    agentRaw: host.mostRecentSession?.agentRaw ?? "claudeCode",
+                    agentRaw: session?.agentRaw ?? "claudeCode",
                     askForPrompt: false
                 )) {
                     keyChip("✳")

@@ -45,3 +45,21 @@ Load-bearing decisions split from AGENTS.md.
   simctl-originated open per install. The failure alert presents from
   the mode root (`ExternalActionHost`) — never the deck pane, which the
   expanded shell clips to zero width.
+- **A widget's featured session is the last one OPENED, not the newest
+  created** (`WidgetHostState.featuredSession`, pure + tested): the Host
+  widget's own Session setting first (an explicit Backend is strict; Host
+  Default tries the host's default namespace, then wherever the name lives,
+  because the picker lists both backends' names), then the host's
+  `lastAttached`, then `mostRecentSession` (creation date, kept as the final
+  fallback; the bare shell deep link's router fallback follows the same
+  last-opened → newest order). Creation order was the old rule and is
+  meaningless on herdr — `HerdrProbe` synthesizes near-epoch dates from
+  list order, so a mixed host featured a tmux session forever.
+  `HostStore.recentSessions` (device-local UserDefaults beside tile order;
+  never synced) is written from ONE place, `TerminalWindowUIKit`'s
+  active-tab chokepoint (first appearance, tab switch, deck/notification
+  reveal) — never from `TerminalWorkspace`'s controller getter, which runs
+  for every restored tab in array order. The deck observes it like `hosts`
+  and republishes; the ref rides the snapshot name-only on single-backend
+  hosts and backend-qualified on mixed ones (the row convention); a stale
+  name falls through, never blanks.

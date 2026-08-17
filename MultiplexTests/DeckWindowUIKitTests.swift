@@ -400,7 +400,7 @@ private final class LifecycleRecorder {
             refreshHostsFromCloud: { [weak self] in
                 self?.events.append(.refreshHostsFromCloud)
             },
-            publishWidgetState: { [weak self] hosts in
+            publishWidgetState: { [weak self] hosts, _ in
                 self?.events.append(.publish(hosts.map(\.id)))
             },
             checkLocalNetwork: { [weak self] hosts in

@@ -20,7 +20,7 @@ WHERE THINGS ARE
 - + TAB → File Viewer browses host files and git diffs; long-press a path in terminal output to open that file beside the session. Web links in rendered Markdown can open in a docked viewport or the system browser.
 - A terminal's GUIDE chip is an illustrated field manual of the gestures for that tab.
 - DETACH closes the window; the remote session keeps running and its tile stays on the wall.
-- Home Screen widgets show a host's last-known sessions plus SHELL and AGENT keys; Shortcuts and Siri can open a shell, show a remote file at a line or line range, or launch an agent.
+- Home Screen widgets show the session you last opened on a host — or one you pick — plus SHELL and AGENT keys; Shortcuts and Siri can open a shell, show a remote file at a line or line range, or launch an agent.
 
 Hosts, agent command setups, and secrets sync between your devices through iCloud Keychain, end-to-end encrypted. There is no Multiplex server, no account, and no analytics.
 

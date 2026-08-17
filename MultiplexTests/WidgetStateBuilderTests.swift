@@ -154,6 +154,25 @@ final class WidgetStateBuilderTests: XCTestCase {
         ])))
     }
 
+    func testLastAttachedRidesTheSnapshotQualifiedLikeRows() {
+        var host = Host(name: "devbox", hostname: "h", username: "u")
+        let key = SessionKey(backend: .herdr, name: "main")
+        // Single-backend host: rows carry no backend, and neither does the
+        // last-attached ref — same lenient match either way.
+        let single = WidgetStateBuilder.hostState(
+            host: host, sessions: [], miniatures: [:], probedAt: nil, lastAttached: key)
+        XCTAssertEqual(single.lastAttached, WidgetSessionRef(name: "main", backendRaw: nil))
+        // Mixed host: the ref names its namespace so the widget can pick the
+        // right namesake.
+        host.secondaryBackends = [.herdr]
+        let mixed = WidgetStateBuilder.hostState(
+            host: host, sessions: [], liveMiniatures: [:], probedAt: nil, lastAttached: key)
+        XCTAssertEqual(mixed.lastAttached, WidgetSessionRef(name: "main", backendRaw: "herdr"))
+        // Unknown stays nil (legacy-file shape).
+        XCTAssertNil(WidgetStateBuilder.hostState(
+            host: host, sessions: [], miniatures: [:], probedAt: nil).lastAttached)
+    }
+
     func testContentFingerprintIgnoresProbeDatesButNotContent() {
         let host = Host(name: "devbox", hostname: "10.0.1.7", username: "demo")
         func fleet(probed: TimeInterval, sessionName: String) -> WidgetFleetState {

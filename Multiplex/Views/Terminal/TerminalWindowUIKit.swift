@@ -354,6 +354,7 @@ final class TerminalWindowViewController: UIViewController,
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        noteActiveSessionOpened()
         restoreActiveTerminalFocusIfOwner()
         presentPendingFeatureIfPossible()
         #if !os(visionOS)
@@ -805,6 +806,7 @@ final class TerminalWindowViewController: UIViewController,
             reveal: { [weak self] tabID in
                 guard let self else { return }
                 activate(tabID)
+                noteActiveSessionOpened()
                 if let shell = self.shell {
                     shell.revealTab(tabID)
                 } else {
@@ -838,7 +840,15 @@ final class TerminalWindowViewController: UIViewController,
         }
     }
 
+    /// The one place "the user is now in this session" is known — first
+    /// appearance, tab switch, deck/notification reveal.
+    private func noteActiveSessionOpened() {
+        guard let tab = activeTab, let key = tab.sessionKey else { return }
+        store.recordSessionAttach(hostID: tab.hostID, session: key)
+    }
+
     private func activeTabDidChange(from previousTabID: UUID?) {
+        noteActiveSessionOpened()
         if activeTab?.isAuxiliaryPane == true {
             if let previousTabID {
                 workspace.controller(for: previousTabID)?.releaseFocus()

@@ -7,7 +7,7 @@ import Foundation
 struct HostWidgetConfigurationIntent: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Host Widget"
     static let description = IntentDescription(
-        "Pick the host this widget monitors and what a tap opens.")
+        "Pick the host this widget monitors, which session it shows, and what a tap opens.")
 
     @Parameter(title: "Host")
     var host: HostEntity?
@@ -27,10 +27,10 @@ struct HostWidgetConfigurationIntent: WidgetConfigurationIntent {
     @Parameter(title: "Backend", optionsProvider: WidgetBackendOptionsProvider())
     var backend: String?
 
-    /// The AGENT key launches inside this existing session; unset/empty
-    /// mints a fresh one (the original behavior). Choices are the
-    /// snapshot's last-known session names; the app revalidates against
-    /// the live probe and a dead name falls back to a fresh session.
+    /// The session this widget features and the AGENT key launches inside;
+    /// unset/empty shows the host's last-opened session and mints a fresh
+    /// one for the agent. Choices are the snapshot's session names; a dead
+    /// name falls back app-side.
     /// Declared before Model on purpose: the config sheet renders fields
     /// in declaration order, and where the agent lands reads before how
     /// it launches.

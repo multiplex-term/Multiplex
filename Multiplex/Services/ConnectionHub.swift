@@ -26,6 +26,8 @@ final class ConnectionHub {
             .compactMap { host in host.probedAt.map { (host.id, $0) } }
     )
 
+    @ObservationIgnored private var widgetRecentSessions: [UUID: SessionKey] = [:]
+
     init(attention: AttentionCenter? = nil) {
         self.attention = attention
     }
@@ -106,10 +108,12 @@ final class ConnectionHub {
 
     // MARK: Widget snapshot
 
-    /// The deck calls this on appear and whenever the host list changes;
-    /// settled probes republish through `onSnapshot` with the same list.
-    func publishWidgetState(hosts: [Host]) {
+    /// The deck calls this on appear and whenever the host list or the
+    /// last-opened sessions change; settled probes republish through
+    /// `onSnapshot` with the same inputs.
+    func publishWidgetState(hosts: [Host], recentSessions: [UUID: SessionKey] = [:]) {
         widgetHosts = hosts
+        widgetRecentSessions = recentSessions
         scheduleWidgetStatePublish()
     }
 
@@ -137,7 +141,8 @@ final class ConnectionHub {
                     host: host,
                     sessions: model.allSessions,
                     liveMiniatures: model.miniatures,
-                    probedAt: widgetProbeDates[host.id]
+                    probedAt: widgetProbeDates[host.id],
+                    lastAttached: widgetRecentSessions[host.id]
                 )
             }
             let cached = snapshots.snapshot(for: host.id)
@@ -147,7 +152,8 @@ final class ConnectionHub {
                 host: host,
                 sessions: snapshot?.sessions ?? [],
                 miniatures: snapshot?.miniatures ?? [:],
-                probedAt: widgetProbeDates[host.id]
+                probedAt: widgetProbeDates[host.id],
+                lastAttached: widgetRecentSessions[host.id]
             )
         }
         widgetState.schedule(WidgetFleetState(hosts: states, generatedAt: Date()))

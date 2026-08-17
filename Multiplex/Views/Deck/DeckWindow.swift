@@ -145,7 +145,7 @@ struct DeckWindowLifecycleDriver {
     var attachBind: () -> Void
     var rotatePendingBindKeys: () async -> Void
     var refreshHostsFromCloud: () async -> Void
-    var publishWidgetState: ([Host]) -> Void
+    var publishWidgetState: ([Host], [UUID: SessionKey]) -> Void
     var checkLocalNetwork: ([Host]) -> Void
     var suspendLocalNetwork: () -> Void
     var beginNetworkChanges: () -> Void
@@ -167,7 +167,7 @@ struct DeckWindowLifecycleDriver {
             attachBind: { bind.attach(store: store, entitlements: entitlements) },
             rotatePendingBindKeys: { await bind.rotatePendingKeysIfNeeded() },
             refreshHostsFromCloud: { await store.refreshFromCloud() },
-            publishWidgetState: { hub.publishWidgetState(hosts: $0) },
+            publishWidgetState: { hub.publishWidgetState(hosts: $0, recentSessions: $1) },
             checkLocalNetwork: { localNetworkAccess.check(hosts: $0) },
             suspendLocalNetwork: { localNetworkAccess.suspend() },
             beginNetworkChanges: { networkChanges.begin() },
@@ -302,6 +302,7 @@ final class DeckWindowViewController: UIViewController {
 
     private struct ObservedState: Equatable {
         let hosts: [Host]
+        let recentSessions: [UUID: SessionKey]
         let wantsBindSurface: Bool
         let bindSurfaceOpen: Bool
         let enrollmentInFlight: Bool
@@ -338,7 +339,7 @@ final class DeckWindowViewController: UIViewController {
     private var deferredPresentationSupersession = false
     private var observationGeneration = 0
     private var latestObservedState: ObservedState?
-    private var lastPublishedHosts: [Host]?
+    private var lastPublishedWidgetInput: (hosts: [Host], recentSessions: [UUID: SessionKey])?
     private var localNetworkCheckIdentity: LocalNetworkCheckIdentity?
     private var bindBrowseIdentity: BindBrowseIdentity?
     private var networkMonitorActive: Bool?
@@ -613,7 +614,7 @@ final class DeckWindowViewController: UIViewController {
     }
 
     private func resetLifecycleTracking() {
-        lastPublishedHosts = nil
+        lastPublishedWidgetInput = nil
         localNetworkCheckIdentity = nil
         bindBrowseIdentity = nil
         networkMonitorActive = nil
@@ -628,6 +629,7 @@ final class DeckWindowViewController: UIViewController {
         let snapshot = withObservationTracking {
             ObservedState(
                 hosts: configuration.store.hosts,
+                recentSessions: configuration.store.recentSessions,
                 wantsBindSurface: configuration.bind.wantsBindSurface,
                 bindSurfaceOpen: configuration.bind.bindSurfaceOpen,
                 enrollmentInFlight: configuration.bind.enrollmentInFlight,
@@ -651,9 +653,10 @@ final class DeckWindowViewController: UIViewController {
     private func process(_ state: ObservedState) {
         guard lifecycleStarted, !lifecycleStopped else { return }
 
-        if lastPublishedHosts != state.hosts {
-            lastPublishedHosts = state.hosts
-            configuration.lifecycleDriver.publishWidgetState(state.hosts)
+        if lastPublishedWidgetInput?.hosts != state.hosts
+            || lastPublishedWidgetInput?.recentSessions != state.recentSessions {
+            lastPublishedWidgetInput = (state.hosts, state.recentSessions)
+            configuration.lifecycleDriver.publishWidgetState(state.hosts, state.recentSessions)
         }
 
         let localIdentity = LocalNetworkCheckIdentity(

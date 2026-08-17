@@ -149,6 +149,49 @@ final class SharedStateTests: XCTestCase {
         )
     }
 
+    func testFeaturedSessionPrefersConfiguredThenLastOpenedThenNewest() throws {
+        func row(_ name: String, created: TimeInterval = 0, backend: String? = nil) -> WidgetSessionState {
+            WidgetSessionState(
+                name: name, createdAt: Date(timeIntervalSince1970: created), backendRaw: backend)
+        }
+        var host = WidgetHostState(
+            id: UUID(), name: "devbox", address: "a@b",
+            sessions: [row("alpha", created: 100), row("beta", created: 400), row("gamma", created: 250)]
+        )
+        // Nothing known: newest by creation. Last-opened outranks creation
+        // order (what makes "last session" mean something on herdr); a
+        // stale name falls through; the Session setting wins over both.
+        XCTAssertEqual(host.featuredSession()?.name, "beta")
+        host.lastAttached = WidgetSessionRef(name: "gone")
+        XCTAssertEqual(host.featuredSession()?.name, "beta")
+        host.lastAttached = WidgetSessionRef(name: "alpha")
+        XCTAssertEqual(host.featuredSession()?.name, "alpha")
+        XCTAssertEqual(host.featuredSession(configuredName: "gamma")?.name, "gamma")
+        XCTAssertEqual(host.featuredSession(configuredName: "gone")?.name, "alpha")
+
+        // Mixed host: the asked namespace wins and stays strict; Host
+        // Default ("") is the host's default namespace first, then wherever
+        // the name lives — the picker offered it with Backend untouched.
+        host.sessions = [row("main", created: 900, backend: "tmux"), row("main", backend: "herdr"),
+                         row("agents", backend: "herdr")]
+        host.backendRaw = "tmux"
+        XCTAssertEqual(host.featuredSession(configuredName: "main", configuredBackendRaw: "herdr")?.backendRaw, "herdr")
+        XCTAssertEqual(host.featuredSession(configuredName: "main", configuredBackendRaw: "")?.backendRaw, "tmux")
+        XCTAssertEqual(host.featuredSession(configuredName: "agents", configuredBackendRaw: "")?.backendRaw, "herdr")
+        XCTAssertNotEqual(host.featuredSession(configuredName: "agents", configuredBackendRaw: "tmux")?.name, "agents")
+        host.lastAttached = WidgetSessionRef(name: "main", backendRaw: "herdr")
+        XCTAssertEqual(host.featuredSession()?.backendRaw, "herdr")
+
+        // A file written before `lastAttached` existed still decodes.
+        let legacy = Data("""
+        {"hosts":[{"id":"00000000-0000-0000-0000-000000000009","name":"h","address":"a@b",
+        "sessions":[{"name":"main"}]}],"generatedAt":0}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(WidgetFleetState.self, from: legacy)
+        XCTAssertNil(decoded.hosts[0].lastAttached)
+        XCTAssertEqual(decoded.hosts[0].featuredSession()?.name, "main")
+    }
+
     func testWidgetAgentLinkParsesToOpenAgentForEveryAgent() {
         let id = UUID()
         for agent in AgentKind.allCases {

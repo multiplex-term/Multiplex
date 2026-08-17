@@ -209,12 +209,15 @@ enum ExternalActionPerformer {
         let sessions = backend.map { scopedSessions(model, to: $0) }
             ?? model.allSessions
         // A widget tile names the exact session it showed; a session that
-        // died since that snapshot falls back to the most recent (fail-soft,
-        // same spirit as the deck's tiles resurrecting from a live probe).
+        // died since that snapshot falls back to the last one opened here,
+        // then the most recent — the widgets' own order.
         let requested = requestedSession.flatMap { name in
             sessions.first { $0.name == name }
         }
-        let fallback = ExternalActionPlan.mostRecentSession(in: sessions)
+        let lastOpened = context.store.recentSessions[host.id].flatMap { key in
+            sessions.first { $0.id == key }
+        }
+        let fallback = lastOpened ?? ExternalActionPlan.mostRecentSession(in: sessions)
         if let target = requested ?? fallback {
             if context.workspace.focusTab(
                 hostID: host.id,

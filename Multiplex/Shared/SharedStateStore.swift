@@ -94,14 +94,57 @@ struct WidgetHostState: Codable, Hashable, Identifiable {
     /// optional for the same legacy-file reason.
     var workingDirs: [String]?
 
-    /// The session the per-host widget features and a bare shell deep link
-    /// attaches — newest by creation, name-ordered on a tie. Must mirror
-    /// `ExternalActionPlan.mostRecentSession` (unit-tested app-side).
+    /// The session the user last opened on this host (`HostStore.recentSessions`).
+    /// Optional for the legacy-file reason; `backendRaw` follows the row
+    /// convention.
+    var lastAttached: WidgetSessionRef?
+
+    /// Newest by creation, name-ordered on a tie. Must mirror
+    /// `ExternalActionPlan.mostRecentSession` (unit-tested app-side). Only
+    /// `featuredSession`'s last resort — creation order is meaningless on
+    /// herdr (synthesized near-epoch dates).
     var mostRecentSession: WidgetSessionState? {
         sessions.max { lhs, rhs in
             (lhs.createdAt, lhs.name) < (rhs.createdAt, rhs.name)
         }
     }
+
+    /// The session a widget features: its Session setting, else the last
+    /// opened, else `mostRecentSession`; a stale name falls through. A row
+    /// without `backendRaw` matches any ask; an explicit Backend is strict;
+    /// Host Default tries the host's default namespace, then wherever the
+    /// name lives (the picker lists both backends' names on a mixed host).
+    func featuredSession(
+        configuredName: String? = nil, configuredBackendRaw: String? = nil
+    ) -> WidgetSessionState? {
+        if let configuredName, configuredName != SessionTargetChoices.newSessionValue {
+            let backend = configuredBackendRaw.flatMap {
+                $0 == SessionTargetChoices.hostDefaultBackendValue ? nil : $0
+            }
+            if let match = session(named: configuredName, backendRaw: backend ?? backendRaw)
+                ?? (backend == nil ? session(named: configuredName, backendRaw: nil) : nil) {
+                return match
+            }
+        }
+        if let lastAttached,
+           let match = session(named: lastAttached.name, backendRaw: lastAttached.backendRaw) {
+            return match
+        }
+        return mostRecentSession
+    }
+
+    private func session(named name: String, backendRaw: String?) -> WidgetSessionState? {
+        sessions.first {
+            $0.name == name
+                && ($0.backendRaw == nil || backendRaw == nil || $0.backendRaw == backendRaw)
+        }
+    }
+}
+
+/// A session named across the App Group boundary without its content.
+struct WidgetSessionRef: Codable, Hashable {
+    var name: String
+    var backendRaw: String?
 }
 
 struct WidgetFleetState: Codable, Hashable {

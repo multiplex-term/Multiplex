@@ -64,9 +64,12 @@ enum WidgetStateBuilder {
         host: Host,
         sessions: [TmuxSession],
         miniatures: [String: [String]],
-        probedAt: Date?
+        probedAt: Date?,
+        lastAttached: SessionKey? = nil
     ) -> WidgetHostState {
-        hostState(host: host, sessions: sessions, probedAt: probedAt) {
+        hostState(
+            host: host, sessions: sessions, probedAt: probedAt, lastAttached: lastAttached
+        ) {
             miniatures[$0.id.storageKey] ?? []
         }
     }
@@ -82,17 +85,24 @@ enum WidgetStateBuilder {
         host: Host,
         sessions: [TmuxSession],
         liveMiniatures: [SessionKey: [String]],
-        probedAt: Date?
+        probedAt: Date?,
+        lastAttached: SessionKey? = nil
     ) -> WidgetHostState {
-        hostState(host: host, sessions: sessions, probedAt: probedAt) {
+        hostState(
+            host: host, sessions: sessions, probedAt: probedAt, lastAttached: lastAttached
+        ) {
             liveMiniatures[$0.id] ?? []
         }
     }
 
+    /// `lastAttached` rides the snapshot unfiltered against `sessions`: the
+    /// widget falls through when the name is gone, and one stale probe
+    /// should not erase the memory.
     private static func hostState(
         host: Host,
         sessions: [TmuxSession],
         probedAt: Date?,
+        lastAttached: SessionKey?,
         miniatureLines: (TmuxSession) -> [String]
     ) -> WidgetHostState {
         WidgetHostState(
@@ -116,7 +126,13 @@ enum WidgetStateBuilder {
             // the explicit rows agree without the widget process knowing the
             // rule. A single entry means there is nothing to pick.
             backendsRaw: host.monitoredBackends.map(\.rawValue),
-            workingDirs: host.workingDirs.isEmpty ? nil : host.workingDirs
+            workingDirs: host.workingDirs.isEmpty ? nil : host.workingDirs,
+            lastAttached: lastAttached.map {
+                WidgetSessionRef(
+                    name: $0.name,
+                    backendRaw: host.showsBackendIdentity ? $0.backend.rawValue : nil
+                )
+            }
         )
     }
 

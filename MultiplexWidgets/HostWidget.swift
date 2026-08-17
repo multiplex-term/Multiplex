@@ -6,7 +6,7 @@ import WidgetKit
 /// screen + spine on the left and trades the telemetry column for the
 /// SHELL / AGENT key pair. All content is the last-known App Group
 /// snapshot; taps deep-link into the app, which runs the status-guarded
-/// flows.
+/// flows. The tile shows one session (`featuredSession`).
 struct HostWidget: Widget {
     static let kind = "MultiplexHostWidget"
 
@@ -75,6 +75,13 @@ struct HostWidgetView: View {
     @Environment(\.widgetFamily) private var family
     @Environment(\.tallyPalette) private var palette
 
+    private func featuredSession(of host: WidgetHostState) -> WidgetSessionState? {
+        host.featuredSession(
+            configuredName: entry.configuration.session,
+            configuredBackendRaw: entry.configuration.backend
+        )
+    }
+
     var body: some View {
         Group {
             if let host = entry.host {
@@ -91,9 +98,10 @@ struct HostWidgetView: View {
     // MARK: Small — pure Monitor tile
 
     private func smallView(_ host: WidgetHostState) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            heldFrame(for: host.mostRecentSession)
-            WidgetLabel(smallTitle(for: host), size: 9.5)
+        let session = featuredSession(of: host)
+        return VStack(alignment: .leading, spacing: 0) {
+            heldFrame(for: session)
+            WidgetLabel(session.map { "\(host.name) · \($0.name)" } ?? host.name, size: 9.5)
                 .padding(.top, 9)
             HStack {
                 SeenStamp(date: host.probedAt)
@@ -105,26 +113,19 @@ struct HostWidgetView: View {
             .padding(.top, 4)
         }
         .padding(13)
-        .widgetURL(smallTapURL(for: host))
+        .widgetURL(smallTapURL(for: host, session: session))
     }
 
-    private func smallTitle(for host: WidgetHostState) -> String {
-        if let session = host.mostRecentSession {
-            return "\(host.name) · \(session.name)"
-        }
-        return host.name
-    }
-
-    private func smallTapURL(for host: WidgetHostState) -> URL {
+    private func smallTapURL(for host: WidgetHostState, session: WidgetSessionState?) -> URL {
         switch entry.configuration.action {
         case .shell:
             WidgetLink.shellURL(
                 hostID: host.id,
-                sessionName: host.mostRecentSession?.name,
+                sessionName: session?.name,
                 // The row's own backend, present only where the host shows
                 // more than one — without it a same-named session on the
                 // other multiplexer could answer the tap.
-                backendRaw: host.mostRecentSession?.backendRaw
+                backendRaw: session?.backendRaw
             )
         case .agent:
             agentURL(for: host)
@@ -151,7 +152,7 @@ struct HostWidgetView: View {
     // MARK: Medium — hybrid (Monitor left, Switchboard keys right)
 
     private func mediumView(_ host: WidgetHostState) -> some View {
-        let session = host.mostRecentSession
+        let session = featuredSession(of: host)
         return HStack(spacing: 12) {
             VStack(spacing: 5) {
                 Link(destination: WidgetLink.shellURL(

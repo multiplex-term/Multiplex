@@ -30,6 +30,10 @@ final class HostStore {
     /// keys — exactly what they were — so the file needs no migration.
     private var sessionOrders: [UUID: [String]] = [:]
     private static let sessionOrdersKey = "MultiplexSessionOrders"
+    /// Host → the session the user last opened there — the widgets' "last
+    /// session". Device-local like the tile order, never synced.
+    private(set) var recentSessions: [UUID: SessionKey] = [:]
+    private static let recentSessionsKey = "MultiplexRecentSessions"
     private var isRefreshingFromCloud = false
 
     init(
@@ -49,6 +53,7 @@ final class HostStore {
         // An injected directory is a persistence test boundary; do not pull
         // unrelated device presentation preferences into that isolated store.
         sessionOrders = overrideDirectory == nil ? Self.loadSessionOrders() : [:]
+        recentSessions = overrideDirectory == nil ? Self.loadRecentSessions() : [:]
         load()
         if overrideDirectory == nil {
             seedFromEnvironmentIfNeeded()
@@ -86,6 +91,7 @@ final class HostStore {
         persistMirroredIDs()
         sessionOrders.removeValue(forKey: host.id)
         persistSessionOrders()
+        if recentSessions.removeValue(forKey: host.id) != nil { persistRecentSessions() }
         BackendOfferPreferences().forget(hostID: host.id)
         save()
     }
@@ -215,6 +221,30 @@ final class HostStore {
         var updated = host
         updated.agentCommandConfiguration = configuration
         update(updated)
+    }
+
+    // MARK: - Last-opened session
+
+    func recordSessionAttach(hostID: UUID, session: SessionKey) {
+        guard recentSessions[hostID] != session else { return }
+        recentSessions[hostID] = session
+        persistRecentSessions()
+    }
+
+    private static func loadRecentSessions() -> [UUID: SessionKey] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: recentSessionsKey) as? [String: String]
+        else { return [:] }
+        return Dictionary(uniqueKeysWithValues: raw.compactMap { key, value in
+            UUID(uuidString: key).map { ($0, SessionKey(storageKey: value)) }
+        })
+    }
+
+    private func persistRecentSessions() {
+        guard persistsDevicePreferences else { return }
+        UserDefaults.standard.set(
+            Dictionary(uniqueKeysWithValues: recentSessions.map { ($0.key.uuidString, $0.value.storageKey) }),
+            forKey: Self.recentSessionsKey
+        )
     }
 
     // MARK: - Session presentation order
