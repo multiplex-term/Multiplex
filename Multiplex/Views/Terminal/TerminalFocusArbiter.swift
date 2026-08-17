@@ -119,17 +119,20 @@ enum TerminalFocusArbiter {
     }
 
     /// Short press on the (locked) keyboard key: release the lock and ask
-    /// for the keyboard — the press means "I want to type again".
-    static func unlock(_ view: TerminalView) {
+    /// for the keyboard — the press means "I want to type again". The
+    /// Talkback key passes `summoning: false`: its own field is about to
+    /// take the keyboard, and a deferred terminal summon would race it.
+    static func unlock(_ view: TerminalView, summoning: Bool = true) {
         guard KeyboardLock.shared.isLocked else { return }
         #if DEBUG
-        keyboardLogger.debug("kbd-lock released")
+        keyboardLogger.debug("kbd-lock released summoning=\(summoning, privacy: .public)")
         #endif
         KeyboardLock.shared.isLocked = false
         applyLockState(to: view)
         if let current, current !== view {
             applyLockState(to: current)
         }
+        guard summoning else { return }
         summon(view, force: true)
     }
 

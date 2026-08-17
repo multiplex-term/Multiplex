@@ -888,6 +888,47 @@ final class TerminalWindowUIKitTests: XCTestCase {
     }
     #endif
 
+    #if !os(visionOS)
+    func testLockingTheKeyboardClosesEveryTalkbackBoxInTheWindow() async throws {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        let first = TerminalRoute(hostID: host.id, mode: .attach(sessionName: "main"))
+        let second = TerminalRoute(hostID: host.id, mode: .attach(sessionName: "agent"))
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tabs: [first, second], activeTabID: first.id),
+            hosts: [host]
+        )
+        fixture.controller.loadViewIfNeeded()
+        let active = try XCTUnwrap(fixture.workspace.controller(for: first.id))
+        let other = try XCTUnwrap(fixture.workspace.controller(for: second.id))
+        active.setTalkbackOpen(true)
+        other.setTalkbackOpen(true)
+        for _ in 0..<8 { await Task.yield() }
+        XCTAssertNotNil(
+            view("terminal.talkback.card", in: fixture.controller.view),
+            "the active tab's open box mounts its card"
+        )
+
+        // The lock is app-wide state only the arbiter writes; a scratch
+        // terminal engages it and the defer releases it for the next test.
+        let terminal = TerminalView(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        TerminalFocusArbiter.lock(terminal)
+        defer { TerminalFocusArbiter.unlock(terminal, summoning: false) }
+        for _ in 0..<8 { await Task.yield() }
+
+        XCTAssertFalse(active.talkbackOpen, "locking closes the active tab's box")
+        XCTAssertFalse(other.talkbackOpen, "and every other tab's in this window")
+        XCTAssertNil(view("terminal.talkback.card", in: fixture.controller.view))
+
+        // Opening again while still locked is allowed — the talk key
+        // releases the lock first — and the box mounts once more.
+        TerminalFocusArbiter.unlock(terminal, summoning: false)
+        active.setTalkbackOpen(true)
+        for _ in 0..<8 { await Task.yield() }
+        XCTAssertTrue(active.talkbackOpen)
+        XCTAssertNotNil(view("terminal.talkback.card", in: fixture.controller.view))
+    }
+    #endif
+
     private struct Fixture {
         let controller: TerminalWindowViewController
         let workspace: TerminalWorkspace

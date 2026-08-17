@@ -336,7 +336,7 @@ final class AgentHelperStripViewController: UIViewController,
 
         if isCollapsed {
             let dot = AgentHelperStripDotButton(
-                glyph: configuration.agent.dotGlyph,
+                glyph: configuration.agent.glyph,
                 accessibilityLabel: "Show \(configuration.agent.displayName) helpers",
                 action: { [weak self] in self?.perform(.expand) }
             )
@@ -945,20 +945,6 @@ private final class AgentHelperStripDotGlyphView: UIView {
         )
         CTLineDraw(line, context)
         context.restoreGState()
-    }
-}
-
-private extension AgentKind {
-    /// The collapsed dot's face — each agent's own mark where it has one.
-    var dotGlyph: String {
-        switch self {
-        case .claudeCode: "✳"
-        case .codex: "◆"
-        case .pi: "π"
-        // Grok has no single-glyph mark of its own in the TUI; the plain
-        // capital reads as xAI's without leaning on a font-fallback symbol.
-        case .grok: "X"
-        }
     }
 }
 

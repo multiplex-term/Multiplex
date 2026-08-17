@@ -55,16 +55,7 @@ struct CustomAgentCommand: Identifiable, Codable, Hashable {
     }
 
     private static func normalizeContent(_ content: String) -> String {
-        let normalizedLineEndings = content
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") { result, scalar in
-            let allowedControl = scalar.value == 0x09 || scalar.value == 0x0A
-            if allowedControl || !CharacterSet.controlCharacters.contains(scalar) {
-                result.append(Character(scalar))
-            }
-        }
-        return safeText
+        ComposedText.lineNormalized(content)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

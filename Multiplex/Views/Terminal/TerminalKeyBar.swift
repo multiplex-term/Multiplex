@@ -16,7 +16,10 @@ final class TerminalTallyKeyControl: UIControl {
     }
 
     var isLatched = false {
-        didSet { refreshAppearance() }
+        didSet {
+            guard isLatched != oldValue else { return }
+            refreshAppearance()
+        }
     }
     var faceInset: CGFloat = 0 {
         didSet { setNeedsLayout() }
@@ -407,20 +410,26 @@ enum TerminalKeyBarLayout {
         var faceInset: CGFloat = 0
 
         static let regular = Metric(keyWidth: 46, spacing: 6, groupGap: 12)
-        static let tight = Metric(keyWidth: 40, spacing: 1, groupGap: 1, faceInset: 1)
+        /// The phone tiers run 36 pt faces (the visionOS compact cluster's
+        /// width) since the talk key joined the right group: at 40 pt every
+        /// phone tier overflowed its cutoff (tight 425 > 390, RET floor 400 >
+        /// 375), and the key is essential at every tier — so the faces
+        /// yield, and `SingleWindowShellLayout`'s 390 / 420 cutoffs and the
+        /// 375 locked floor hold unchanged (pinned by the width-ladder test).
+        static let tight = Metric(keyWidth: 36, spacing: 1, groupGap: 1, faceInset: 1)
         static let returnAndTmux = Metric(
-            keyWidth: 40,
+            keyWidth: 36,
             spacing: 0,
             groupGap: 4,
             faceInset: 1
         )
         static let returnFloor = Metric(
-            keyWidth: 40,
+            keyWidth: 36,
             spacing: 0,
             groupGap: 1,
             faceInset: 1
         )
-        static let compact = Metric(keyWidth: 40, spacing: 4, groupGap: 4)
+        static let compact = Metric(keyWidth: 36, spacing: 4, groupGap: 4)
     }
 
     struct Specification: Equatable {
@@ -435,9 +444,11 @@ enum TerminalKeyBarLayout {
             let gap = includesReturn ? min(metric.groupGap, 8) : metric.groupGap
             var groupCounts = [3]
             if !symbols.isEmpty { groupCounts.append(symbols.count) }
+            // arrows · RET · talk · keyboard/mic · TMUX
             let rightCount = (pageKeys ? 2 : 0)
                 + 4
                 + (includesReturn ? 1 : 0)
+                + 1
                 + 1
                 + (tmux ? 1 : 0)
             groupCounts.append(rightCount)
@@ -539,6 +550,8 @@ struct TerminalKeyBarObservedState: Equatable {
     var hardwareKeyboardConnected: Bool
     var keyboardLocked: Bool
     var isDictating: Bool
+    /// The talk key latches while this tab's message box is open.
+    var talkbackOpen: Bool
 }
 
 /// The iPad terminal's app-owned TALLY key rail. It is a normal UIKit sibling
@@ -711,7 +724,8 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         TerminalKeyBarObservedState(
             hardwareKeyboardConnected: HardwareKeyboardMonitor.shared.isConnected,
             keyboardLocked: KeyboardLock.shared.isLocked,
-            isDictating: controller?.isDictating == true
+            isDictating: controller?.isDictating == true,
+            talkbackOpen: controller?.talkbackOpen == true
         )
     }
 
@@ -783,6 +797,17 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                 identifier: "return"
             ))
         }
+        // Talkback — the message box under the pane; RET · talk · keyboard.
+        // Latched while the box is open, like CTRL and the keyboard lock.
+        right.append(RailKey(
+            key: .talkback,
+            face: .symbol("text.bubble", pointSize: 13, weight: .semibold),
+            accessibility: state.talkbackOpen
+                ? "Close the message box"
+                : "Open the message box",
+            identifier: "talkback",
+            latched: state.talkbackOpen
+        ))
         if state.hardwareKeyboardConnected {
             right.append(RailKey(
                 key: .dictation,
@@ -938,6 +963,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             terminal.send(EscapeSequences.cmdPageDown)
         case .keyboard:
             TerminalFocusArbiter.toggle(terminal)
+        case .talkback:
+            click()
+            controller?.toggleTalkback()
         case .lockKeyboard:
             click()
             TerminalFocusArbiter.lock(terminal)
@@ -1236,6 +1264,7 @@ private enum TerminalKey {
     case keyboard
     case lockKeyboard
     case dictation
+    case talkback
     case showShortcutPanel
     case shortcut(ShortcutPanelItem)
     case keyCommands
@@ -1400,6 +1429,9 @@ final class TerminalKeyClusterContext {
     #endif
 
     private(set) var ctrlLatched = false
+    /// The talk key latches while the active tab's message box is open —
+    /// read from the controller, never mirrored.
+    var talkbackOpen: Bool { controller?.talkbackOpen == true }
 
     init() {
         #if DEBUG
@@ -1454,6 +1486,8 @@ final class TerminalKeyClusterContext {
         let controllerChanged = self.controller !== controller
         self.controller = controller
         let terminal = controller?.terminalView
+        // Every group applies the context's state on its own update; only a
+        // changed terminal re-registers the latch-reset observer.
         guard controllerChanged || observedTerminal !== terminal else { return }
         if let controlResetObserver {
             NotificationCenter.default.removeObserver(controlResetObserver)
@@ -1488,6 +1522,13 @@ final class TerminalKeyClusterContext {
 
     func toggleKeyboard() {
         controller?.toggleKeyboard()
+    }
+
+    func toggleTalkback() {
+        controller?.toggleTalkback()
+        // The window re-renders every group on the open flip; the broadcast
+        // latches the sibling candidates this same turn.
+        broadcast()
     }
 
     func toggleControl(from group: TerminalKeyClusterGroupView) {
@@ -1581,6 +1622,7 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     private let context: TerminalKeyClusterContext
     private var standaloneVariant: StandaloneVariant?
     private weak var ctrlKey: TerminalTallyKeyControl?
+    private weak var talkKey: TerminalTallyKeyControl?
     private weak var comboPopoverController: UIViewController?
     private let keyCommandsPresenter = KeyCommandPanelPresenter()
     private(set) var keys: [TerminalTallyKeyControl] = []
@@ -1634,6 +1676,9 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
 
     func applyContextState() {
         ctrlKey?.isLatched = context.ctrlLatched
+        talkKey?.isLatched = context.talkbackOpen
+        talkKey?.accessibilityLabel = context.talkbackOpen
+            ? "Close the message box" : "Open the message box"
     }
 
     func fittingSize(maximumWidth: CGFloat?) -> CGSize {
@@ -1734,6 +1779,7 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         for key in keys { key.removeFromSuperview() }
         keys.removeAll(keepingCapacity: true)
         ctrlKey = nil
+        talkKey = nil
         standaloneVariant = variant
         let activeMetric: TerminalKeyClusterMetric
         let minimal: Bool
@@ -1801,6 +1847,20 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
                 accessibilityIdentifier: "terminal.keyCluster.return",
                 action: { [weak context] in context?.sendReturn() }
             ))
+            // Talkback — RET · talk · keyboard, mirroring the iPad rail;
+            // latched while the message box is open.
+            let talk = TerminalTallyKeyControl(
+                face: .symbol("text.bubble", pointSize: 12, weight: .semibold),
+                width: activeMetric.keyWidth,
+                height: 26,
+                accessibilityLabel: context.talkbackOpen
+                    ? "Close the message box" : "Open the message box",
+                accessibilityIdentifier: "terminal.keyCluster.talkback",
+                latched: context.talkbackOpen,
+                action: { [weak context] in context?.toggleTalkback() }
+            )
+            append(talk)
+            talkKey = talk
             let keyboard = TerminalTallyKeyControl(
                 face: .symbol("keyboard", pointSize: 12, weight: .semibold),
                 width: activeMetric.keyWidth,
@@ -1882,8 +1942,10 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         24 + metric.keyWidth * 3 + metric.spacing * 2
     }
 
+    /// arrows · RET · talk · keyboard — four arrows in a run, then three
+    /// tail keys each a group gap apart.
     private func trailingWidth(_ metric: TerminalKeyClusterMetric) -> CGFloat {
-        24 + metric.keyWidth * 6 + metric.spacing * 3 + metric.groupGap * 2
+        24 + metric.keyWidth * 7 + metric.spacing * 3 + metric.groupGap * 3
     }
 
     private func standaloneWidth(
@@ -1892,8 +1954,8 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     ) -> CGFloat {
         let left = metric.keyWidth * 3 + metric.spacing * 2
         let arrows = minimal ? 0 : metric.keyWidth * 4 + metric.spacing * 3
-        let groups = minimal ? 3 : 4
-        return 24 + left + arrows + metric.keyWidth * 2
+        let groups = minimal ? 4 : 5
+        return 24 + left + arrows + metric.keyWidth * 3
             + CGFloat(groups - 1) * metric.groupGap
     }
 

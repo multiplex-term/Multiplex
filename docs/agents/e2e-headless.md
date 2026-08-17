@@ -191,6 +191,12 @@ app.multiplexterm.multiplex.<name>`:
 - `debug.tmuxshortcuts` / `debug.customcommands` / `debug.msghistory` — open
   the focused tab's shortcut popover (TMUX content, or HRDR on a herdr
   tab) / Command Setup editor / agent HISTORY panel for layout capture.
+- `debug.talkback` / `debug.talkbacktype` / `debug.talkbackattach` /
+  `debug.talkbacksend` — toggle the focused terminal's Talkback message box
+  (the talk key), put a two-line sample in its field, attach a sample photo +
+  text file through the real upload queue, press ↑. Proof: `tmux
+  capture-pane -t agent:0 -p` shows the paths and both lines land as one
+  paste + CR; the uploads sit in the pane cwd's `.multiplex-drops/`.
 - `debug.keycommands` / `debug.keycommandsetup` / `debug.keycommandcompose` —
   the hold-CTRL KEY COMMANDS popover (iPad rail or visionOS cluster) on its
   COMMANDS grid / CUSTOM SETUP list / with a fresh row's composer expanded.

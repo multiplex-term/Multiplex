@@ -80,6 +80,13 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
                      Document owns the PDF / audio clip, so a moved tab
                      keeps page and position
   TerminalSessionController  one per tab; input pump + TerminalView
+    TalkbackDraft        the tab's chat-style message box (text +
+                         attachments; pure) beside its observed talkbackOpen
+                         — sendTalkback = one paste + CR through the pump,
+                         attachTalkbackFiles = the drop path's one upload
+                         primitive, held until SEND; rendered by
+                         TalkbackComposerViewController (window-docked on
+                         iPad/iPhone, an ornament slab on visionOS)
     TerminalTransport    the tab's byte pipe; picked by host.useMosh
                          (exec + SFTP stay SSH-only capabilities)
     SessionResumePolicy  pure: suspension damage vs user-ended session

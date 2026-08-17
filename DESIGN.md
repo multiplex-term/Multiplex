@@ -167,7 +167,19 @@ agent's option picker without summoning it). Holding `CTRL` opens **KEY
 COMMANDS**, a two-tab TALLY popover on the shortcut panel's grammar:
 COMMANDS is a hairline grid of keycap chords (⇧↩ · ⌃C ×2 · ⌥⌫, and the user's
 own, in custom ink), CUSTOM SETUP is the agent editor's numbered list with an
-inline composer — bake-off record in `local-plan/key-commands-bakeoff/`. The iPad toolbar keeps the
+inline composer — bake-off record in `local-plan/key-commands-bakeoff/`. The
+speech-bubble key beside `RET` (`RET · talk · keyboard`, latched while open)
+opens **Talkback**, the chat-style message box: on visionOS a rounded card in
+its own slab hanging below the console row, on iPad and iPhone the same card
+docked between the pane and the key rail. Its eyebrow names the target in
+mono (`TO MAIN · DEVBOX`) beside the agent's mark and name, with RUNNING as
+grey telemetry and NEEDS YOU as the amber lamp; a round paperclip, a native
+text field, and a filled ↑ that sends the message as one paste — attached
+files upload on pick and show as 46 pt previews (28 pt thumbs and compact
+document chips on the phone), their paths typed first. Chat grammar on the
+chassis: rounded, hairlined, chassis-grounded, so it still belongs to the
+window — bake-off record in `local-plan/talkback-bakeoff/` (Candidate B).
+The iPad toolbar keeps the
 full chip set: `DECK`,
 source label, lamp, then
 `A− · A+ · + TAB · FILE · TMUX · MERGE · DETACH` chips; the keyboard

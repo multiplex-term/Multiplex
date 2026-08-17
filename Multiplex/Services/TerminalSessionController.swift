@@ -1757,17 +1757,25 @@ final class TerminalSessionController {
     /// upload each into the active pane's working directory over this tab's
     /// own connection, then type the resulting paths through the input pump
     /// — no Enter, the user finishes the prompt. One batch at a time.
+    /// Whether this tab can take a file: an SSH-backed session tab. Mosh has
+    /// no SFTP channel, and a plain shell has no multiplexer pane whose
+    /// foreground cwd could be resolved. The chrome's FILE rule and the
+    /// Talkback paperclip both read this.
+    var canUploadFiles: Bool {
+        !host.useMosh && route.sessionBackend != nil
+    }
+
+    static let uploadUnavailableMessage = "File upload requires tmux or herdr over SSH"
+
     func deliverDrop(_ files: [DroppedFile]) {
         // The jump search owns the pane's input while it pages; the FINDING
         // veil is visible over the drop target for its few seconds.
         if case .finding = historyJump { return }
-        if host.useMosh || route.sessionBackend == nil,
-           status == .live, dropTask == nil, !files.isEmpty {
-            // Mosh has no SFTP channel, while a plain shell has no
-            // multiplexer pane whose foreground cwd can be resolved. Say so
-            // instead of silently discarding the user's attach/drop intent.
+        if !canUploadFiles, status == .live, dropTask == nil, !files.isEmpty {
+            // Say so instead of silently discarding the user's attach/drop
+            // intent.
             dropClearTask?.cancel()
-            dropState = .failed("File upload requires tmux or herdr over SSH")
+            dropState = .failed(Self.uploadUnavailableMessage)
             dropClearTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled else { return }
@@ -1786,37 +1794,16 @@ final class TerminalSessionController {
 
     private func performDrop(_ files: [DroppedFile], over connection: SSHConnection) async {
         do {
-            let destination = try await dropDestination(over: connection)
-            let uploads = try files.map { file -> SSHUpload in
-                guard file.data.count <= DropText.maxBytes else {
-                    throw DropError(message: "\(file.name) is over 64 MB")
-                }
-                return SSHUpload(
-                    data: file.data,
-                    preferredName: DropText.sanitizedName(file.name)
-                )
-            }
             let displayNames = files.map(\.name)
             dropState = .uploading(name: files[0].name, fraction: 0)
-            let finalNames = try await connection.uploadFiles(
-                uploads,
-                toDirectory: destination.directory,
-                prepareGitIgnoredDirectory: destination.prepareGitIgnoredDirectory,
-                onProgress: { [weak self] index, fraction in
-                    Task { @MainActor [weak self] in
-                        guard case .uploading = self?.dropState else { return }
-                        self?.dropState = .uploading(
-                            name: displayNames[index],
-                            fraction: fraction
-                        )
-                    }
+            let typedPaths = try await uploadForTypedPaths(files, over: connection) { [weak self] index, fraction in
+                Task { @MainActor [weak self] in
+                    guard case .uploading = self?.dropState else { return }
+                    self?.dropState = .uploading(
+                        name: displayNames[index],
+                        fraction: fraction
+                    )
                 }
-            )
-            let typedPaths = finalNames.map { finalName in
-                // Relative names read best in a prompt, but only when the
-                // file verifiably sits under the pane's cwd.
-                destination.typedPrefix.map { $0 + finalName }
-                    ?? destination.directory + "/" + finalName
             }
             dropState = nil
             sendInput(Data(DropText.typedPaths(typedPaths).utf8))
@@ -1832,12 +1819,47 @@ final class TerminalSessionController {
         }
     }
 
+    /// The one upload for both roads — the pane's drop path and the Talkback
+    /// draft: the destination resolved once, names sanitized, the 64 MB cap
+    /// applied, and the paths as they will be typed handed back. Progress
+    /// arrives per file index; failure throws (`DropError` carries the
+    /// user-facing words).
+    private func uploadForTypedPaths(
+        _ files: [DroppedFile],
+        over connection: SSHConnection,
+        onProgress: @escaping @Sendable (_ index: Int, _ fraction: Double) -> Void
+    ) async throws -> [String] {
+        let destination = try await dropDestination(over: connection)
+        let uploads = try files.map { file -> SSHUpload in
+            guard file.data.count <= DropText.maxBytes else {
+                throw DropError(message: "\(file.name) is over 64 MB")
+            }
+            return SSHUpload(
+                data: file.data,
+                preferredName: DropText.sanitizedName(file.name)
+            )
+        }
+        let finalNames = try await connection.uploadFiles(
+            uploads,
+            toDirectory: destination.directory,
+            prepareGitIgnoredDirectory: destination.prepareGitIgnoredDirectory,
+            onProgress: onProgress
+        )
+        return finalNames.map(destination.typedPath(for:))
+    }
+
     private struct DropDestination {
         var directory: String
         /// Prefix for typed relative paths ("" = bare name,
         /// ".multiplex-drops/" inside git worktrees); nil types absolute.
         var typedPrefix: String?
         var prepareGitIgnoredDirectory: Bool
+
+        /// Relative names read best in a prompt, but only when the file
+        /// verifiably sits under the pane's cwd.
+        func typedPath(for finalName: String) -> String {
+            typedPrefix.map { $0 + finalName } ?? directory + "/" + finalName
+        }
     }
 
     /// The pane's cwd when the session backend can tell us (both follow
@@ -1901,6 +1923,198 @@ final class TerminalSessionController {
         case nil:
             return (nil, false)
         }
+    }
+
+    // MARK: Talkback
+
+    /// The chat-style message box under this tab's pane. `talkbackOpen` is
+    /// what the window, the rail and the cluster watch (it flips on the talk
+    /// key); `talkback` is the draft only the composer renders — text and
+    /// attachments — so a keystroke never re-renders a window. Both follow
+    /// the tab across windows and die with it; never persisted. SEND is
+    /// `sendTalkback`. Design record: `local-plan/talkback-bakeoff/`.
+    private(set) var talkbackOpen = false
+    private(set) var talkback = TalkbackDraft()
+    /// The picked bytes behind each attachment, kept until the message is
+    /// sent or the chip removed, so a failed upload retries without another
+    /// trip through the picker.
+    @ObservationIgnored private var talkbackFiles: [UUID: DroppedFile] = [:]
+    @ObservationIgnored private var talkbackUploadQueue: [UUID] = []
+    @ObservationIgnored private var talkbackUploadTask: Task<Void, Never>?
+    /// The last focus request the composer consumed — per tab, so a tab
+    /// switch back to an open box never re-takes the keyboard.
+    @ObservationIgnored private var talkbackFocusHandled = 0
+
+    /// The SEND face with this tab's own input rules folded in: nothing goes
+    /// while the tab isn't live or the history jump owns the pane.
+    var talkbackSendState: TalkbackDraft.SendState {
+        guard status == .live else { return .disabled }
+        if case .finding = historyJump { return .disabled }
+        return talkback.sendState
+    }
+
+    /// The talk key. Opening asks the composer to take the keyboard; a key
+    /// pressed on an already-open box asks again (the box may have lost the
+    /// keyboard to the pane).
+    func setTalkbackOpen(_ open: Bool) {
+        if open { talkback.focusRequest &+= 1 }
+        if talkbackOpen != open { talkbackOpen = open }
+    }
+
+    func toggleTalkback() {
+        setTalkbackOpen(!talkbackOpen)
+    }
+
+    /// True exactly once per open/keypress: the composer focuses its field
+    /// on it and never on a mere re-render.
+    func consumeTalkbackFocusRequest() -> Bool {
+        guard talkback.focusRequest != talkbackFocusHandled else { return false }
+        talkbackFocusHandled = talkback.focusRequest
+        return true
+    }
+
+    /// The field's edits — the composer is the writer, this is the record.
+    func setTalkbackText(_ text: String) {
+        guard talkback.text != text else { return }
+        talkback.text = text
+    }
+
+    /// Files picked through the composer's paperclip: each becomes an
+    /// uploading chip and joins one serial upload queue (the drop path's
+    /// SFTP, into the pane's cwd). Tabs that can't upload fail the chips
+    /// with the drop path's own words instead of dropping the intent
+    /// silently.
+    func attachTalkbackFiles(_ files: [DroppedFile]) {
+        for file in files {
+            let kind = TalkbackAttachment.kind(forName: file.name)
+            let attachment = TalkbackAttachment(
+                name: file.name,
+                byteCount: file.data.count,
+                kind: kind
+            )
+            talkbackFiles[attachment.id] = file
+            talkback.attachments.append(attachment)
+            enqueueTalkbackUpload(attachment.id)
+            guard kind == .image else { continue }
+            // Decoding a camera-sized photo is tens of milliseconds; the chip
+            // shows its ring first and its picture a beat later.
+            let id = attachment.id
+            let data = file.data
+            Task.detached(priority: .userInitiated) { [weak self] in
+                let preview = TalkbackThumbnail.jpeg(from: data)
+                await MainActor.run { [weak self] in
+                    self?.talkback.update(id) { $0.preview = preview }
+                }
+            }
+        }
+    }
+
+    /// The drain loop skips an id no longer attached, so removal needs no
+    /// queue surgery.
+    func removeTalkbackAttachment(_ id: UUID) {
+        talkback.attachments.removeAll { $0.id == id }
+        talkbackFiles[id] = nil
+    }
+
+    /// A failed chip's tap: back to uploading, back in the queue.
+    func retryTalkbackAttachment(_ id: UUID) {
+        guard talkbackFiles[id] != nil,
+              talkback.attachments.first(where: { $0.id == id })?.isFailed == true
+        else { return }
+        talkback.update(id) { $0.state = .uploading(fraction: 0) }
+        enqueueTalkbackUpload(id)
+    }
+
+    /// SEND (`submit`) or a long-press SEND (type only): one paste through
+    /// the ordered pump — the landed paths first, then the body, wrapped in
+    /// the bracketed-paste markers when the pane has mode 2004 on — and, for
+    /// SEND, a CR as its own write ~160 ms later (the slash chips' shape).
+    /// Clears the draft; the box stays open. False when nothing went.
+    @discardableResult
+    func sendTalkback(submit: Bool) -> Bool {
+        guard talkbackSendState == .ready else { return false }
+        let bracketed = terminalView?.getTerminal().bracketedPasteMode == true
+        let payload = TalkbackMessage.payload(
+            body: talkback.text,
+            paths: talkback.readyPaths,
+            bracketed: bracketed
+        )
+        guard !payload.isEmpty else { return false }
+        typeTalkback(payload)
+        if submit {
+            Task { [weak self] in
+                try? await Task.sleep(for: TalkbackMessage.submitDelay)
+                self?.typeTalkback(TalkbackMessage.submit)
+            }
+        }
+        // `.ready` means nothing is uploading or queued, so the kept bytes
+        // are exactly the attachments that just went.
+        talkbackFiles.removeAll()
+        talkback.clearAfterSend()
+        return true
+    }
+
+    /// The view's send path when it exists (it stamps the typing-quiet
+    /// clock and keeps the caret in view), the pump directly otherwise.
+    private func typeTalkback(_ data: Data) {
+        if let terminalView {
+            terminalView.send(data: [UInt8](data)[...])
+        } else {
+            sendInput(data)
+        }
+    }
+
+    private func enqueueTalkbackUpload(_ id: UUID) {
+        talkbackUploadQueue.append(id)
+        guard talkbackUploadTask == nil else { return }
+        talkbackUploadTask = Task { [weak self] in
+            await self?.drainTalkbackUploads()
+            self?.talkbackUploadTask = nil
+        }
+    }
+
+    private func drainTalkbackUploads() async {
+        while !talkbackUploadQueue.isEmpty {
+            let id = talkbackUploadQueue.removeFirst()
+            guard let file = talkbackFiles[id],
+                  talkback.attachments.contains(where: { $0.id == id })
+            else { continue }
+            await uploadTalkbackAttachment(id, file: file)
+        }
+    }
+
+    /// The drop path's upload, one file at a time so a failure marks only
+    /// its own chip; the destination is re-resolved per file, like drops
+    /// re-resolve per batch — the pane's cwd may have moved between picks.
+    private func uploadTalkbackAttachment(_ id: UUID, file: DroppedFile) async {
+        guard canUploadFiles else {
+            failTalkbackAttachment(id, Self.uploadUnavailableMessage)
+            return
+        }
+        guard status == .live, let connection else {
+            failTalkbackAttachment(id, "Not connected")
+            return
+        }
+        do {
+            let paths = try await uploadForTypedPaths([file], over: connection) { [weak self] _, fraction in
+                Task { @MainActor [weak self] in
+                    self?.talkback.update(id) { attachment in
+                        guard attachment.isUploading else { return }
+                        attachment.state = .uploading(fraction: fraction)
+                    }
+                }
+            }
+            guard let path = paths.first else { throw DropError(message: "Upload failed") }
+            talkback.update(id) { $0.state = .ready(path: path) }
+        } catch is CancellationError {
+            failTalkbackAttachment(id, "Cancelled")
+        } catch {
+            failTalkbackAttachment(id, (error as? DropError)?.message ?? "Upload failed")
+        }
+    }
+
+    private func failTalkbackAttachment(_ id: UUID, _ message: String) {
+        talkback.update(id) { $0.state = .failed(message) }
     }
 
     // MARK: Links
