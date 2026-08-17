@@ -508,6 +508,12 @@ routing, tab moves, keyboard avoidance, or secret fields.
   stand-in while `renderNow` unmounts and the pane reclaims; growth (a line,
   a chip) is a 0.25 s spring around `renderNow`. The transition is decided in
   `observeAndRender` from `talkbackOpen` vs `talkbackController != nil`.
+  ⚠ Because that render runs inside an animation block, `TerminalKeyBar
+  .layoutSubviews` wraps its own key layout in `performWithoutAnimation`
+  (a row rebuilt in that pass flew every key in from a zero frame —
+  shipped-and-caught 2026-08-17), and the talk latch is NOT part of the
+  rail's rebuild signature — it flips in place like CTRL's, so opening the
+  box never re-creates the keys under the finger.
   **Focus split**: the field is a native `UITextView` (system
   autocorrect / IME / the keyboard's own mic; hardware ↩ = SEND, ⇧↩ newline,
   ⌘↩ SEND, Escape hands the keyboard back — `UIKeyCommand`s on the field);

@@ -629,6 +629,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     private var renderedSignature: RenderSignature?
     private(set) var renderedKeys: [TerminalTallyKeyControl] = []
     private weak var ctrlKeyControl: TerminalTallyKeyControl?
+    private weak var talkKeyControl: TerminalTallyKeyControl?
     private weak var shortcutPopoverController: UIViewController?
     private let keyCommandsPresenter = KeyCommandPanelPresenter()
     /// The tier's Key Commands cap and paywall route, handed down with the
@@ -636,9 +637,21 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     var keyCommandPlan: KeyCommandPlan = .unrestricted
     private var ctrlComboView: TerminalCtrlComboView?
 
+    /// What forces a rebuild of the row. The talk key's latch is deliberately
+    /// not part of it — it flips in place, like CTRL's, so opening the
+    /// message box never re-creates the keys under the finger.
     private struct RenderSignature: Equatable {
         var tier: TerminalKeyBarLayout.Tier
-        var state: TerminalKeyBarObservedState
+        var hardwareKeyboardConnected: Bool
+        var keyboardLocked: Bool
+        var isDictating: Bool
+
+        init(tier: TerminalKeyBarLayout.Tier, state: TerminalKeyBarObservedState) {
+            self.tier = tier
+            hardwareKeyboardConnected = state.hardwareKeyboardConnected
+            keyboardLocked = state.keyboardLocked
+            isDictating = state.isDictating
+        }
     }
 
     init(
@@ -691,22 +704,32 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        topBorder.frame = CGRect(x: 0, y: 0, width: bounds.width, height: 1)
-        let state = observedState ?? currentObservedState
-        let includesReturn = showsReturnKey || state.keyboardLocked
-        let specification = TerminalKeyBarLayout.specification(
-            width: bounds.width,
-            contentSafeArea: contentSafeArea,
-            showsTmux: shortcutBackend != nil,
-            includesReturn: includesReturn
-        )
-        let signature = RenderSignature(tier: specification.tier, state: state)
-        if renderedSignature != signature {
-            rebuildRow(specification: specification, state: state)
-            renderedSignature = signature
+        // The rail's own faces never animate: a row rebuilt or re-tiered
+        // inside someone else's animation block (the Talkback card's spring
+        // runs the window's whole render, and this pass lands in its
+        // `layoutIfNeeded`) would otherwise fly its keys in from zero
+        // frames. The rail as a whole still rides its container's motion.
+        UIView.performWithoutAnimation {
+            topBorder.frame = CGRect(x: 0, y: 0, width: bounds.width, height: 1)
+            let state = observedState ?? currentObservedState
+            let includesReturn = showsReturnKey || state.keyboardLocked
+            let specification = TerminalKeyBarLayout.specification(
+                width: bounds.width,
+                contentSafeArea: contentSafeArea,
+                showsTmux: shortcutBackend != nil,
+                includesReturn: includesReturn
+            )
+            let signature = RenderSignature(tier: specification.tier, state: state)
+            if renderedSignature != signature {
+                rebuildRow(specification: specification, state: state)
+                renderedSignature = signature
+            }
+            talkKeyControl?.isLatched = state.talkbackOpen
+            talkKeyControl?.accessibilityLabel = state.talkbackOpen
+                ? "Close the message box" : "Open the message box"
+            layoutRow(specification: specification, includesReturn: includesReturn)
+            bringSubviewToFront(topBorder)
         }
-        layoutRow(specification: specification, includesReturn: includesReturn)
-        bringSubviewToFront(topBorder)
     }
 
     override func willMove(toWindow newWindow: UIWindow?) {
@@ -740,7 +763,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         }
         guard state != observedState else { return }
         observedState = state
-        renderedSignature = nil
+        // The layout pass compares render signatures itself: a state change
+        // that only moves the talk latch re-latches in place; the rest
+        // rebuild the row.
         setNeedsLayout()
     }
 
@@ -751,6 +776,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         for key in renderedKeys { key.removeFromSuperview() }
         renderedKeys.removeAll(keepingCapacity: true)
         ctrlKeyControl = nil
+        talkKeyControl = nil
         let metric = specification.metric
         let includesReturn = showsReturnKey || state.keyboardLocked
 
@@ -875,6 +901,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                 addSubview(control)
                 renderedKeys.append(control)
                 if descriptor.identifier == "control" { ctrlKeyControl = control }
+                if descriptor.identifier == "talkback" { talkKeyControl = control }
             }
         }
     }
