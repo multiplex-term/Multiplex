@@ -4,7 +4,7 @@ A spatial SSH terminal for remote **tmux** — visionOS first, with iPadOS and i
 
 [App Store](https://apps.apple.com/us/app/multiplex-ssh-tmux-terminal/id6790074057)
 · [multiplexterm.dev](https://multiplexterm.dev) ·
-[Design rationale](DESIGN.md) · [Contributor guide](AGENTS.md)
+[Design rationale](DESIGN.md) · [Contributing](CONTRIBUTING.md) · [Contributor guide](AGENTS.md)
 
 ![The deck: a live monitor wall of tmux and herdr sessions](docs/visionos-deck.png)
 
