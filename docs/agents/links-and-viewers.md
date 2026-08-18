@@ -124,7 +124,11 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   link-then-path with the join as fallback, so a wrong cut can never kill
   a working press. Accepted trade: a bare path whose whole first segment
   sat on the upper row (`local-p`⏎`lan/x`) cuts wrong — visible in the
-  editable field. `strippingWrappedProseHead` is the textual fallback for
+  editable field. The fork's row-join *heuristic* (rows never
+  `isWrapped`) also refuses a finished-file⏎word seam
+  (`test.ts`⏎`modified`, the `git status` shape) before any join —
+  see `swiftterm-fork.md`; the cut here handles seams that still join.
+  `strippingWrappedProseHead` is the textual fallback for
   seamless callers (edited field, gaze regions). visionOS gaze regions
   stay URL-only on purpose (hover regions are hit regions; build logs are
   walls of paths). Details: **the viewer dials its own SSHConnection** —

@@ -8070,10 +8070,53 @@ open class Terminal {
             if suppressGhosttyLikeMatch(textRange, in: candidate) {
                 continue
             }
+            let seamIndex = candidate.utf16.index(candidate.utf16.startIndex, offsetBy: seamOffset)
+            if Self.seamGluesFinishedFileToWord(upper: candidate[textRange.lowerBound..<seamIndex],
+                                                lower: candidate[seamIndex..<textRange.upperBound]) {
+                continue
+            }
             return true
         }
 
         return false
+    }
+
+    // Multiplex patch: a seam that butts a finished file name against a
+    // plain word is two rows, not one wrapped target. Rows of a listing
+    // (`modified:   Sources/foo/test.ts` over `modified:   Sources/bar/…`,
+    // build logs, `ls -l`) reach the right edge routinely, and the join
+    // heuristic then reads `test.tsmodified` as one relative path. The
+    // tell: the upper side of the straddling match ends in a dot-extension
+    // (`.` + 2–8 word characters, so `.s`⏎`wift` and `.htm`⏎`l` — a wrap
+    // landing inside an extension — keep joining) and the lower side opens
+    // with three or more word characters carrying neither `/` nor `.`
+    // before anything else. Accepted trade: a genuine wrap that lands
+    // inside a long extension (`.swi`⏎`ft`, `.pl`⏎`ist`) splits into two
+    // presses; a wrap that lands anywhere else in the path still joins.
+    static func seamGluesFinishedFileToWord(upper: Substring, lower: Substring) -> Bool
+    {
+        // The upper's last path segment must end in a dot-extension.
+        let segment = upper.lastIndex(of: "/").map { upper[upper.index(after: $0)...] } ?? upper
+        guard let dot = segment.lastIndex(of: "."), dot != segment.startIndex else {
+            return false
+        }
+        let ext = segment[segment.index(after: dot)...]
+        guard (2...8).contains(ext.count),
+              ext.allSatisfy({ $0.isLetter || $0.isNumber }) else {
+            return false
+        }
+        // The lower's head: word characters only, three or more, before any
+        // path structure or the match's end.
+        let head = lower.prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+        guard head.count >= 3 else {
+            return false
+        }
+        // A head that IS the whole rest of the match, or one followed by
+        // something other than path structure, reads as a word. A head
+        // followed by `/` or `.` continues a path (`test.ts`⏎`bak/…` is
+        // odd but not glue evidence).
+        let after = lower[head.endIndex...]
+        return after.isEmpty || !(after.first == "/" || after.first == ".")
     }
 
     private func implicitLineSegmentText(line: BufferLine, startCol: Int, endCol: Int) -> String
