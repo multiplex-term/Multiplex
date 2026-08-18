@@ -1,121 +1,121 @@
 {
-  "sourceLanguage": "en",
-  "strings": {
-    "NSCameraUsageDescription": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Multiplex uses the camera when you take a photo to send to your remote SSH session, and when you scan the code that binds a machine to the app."
+  "sourceLanguage" : "en",
+  "strings" : {
+    "NSCameraUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex uses the camera when you take a photo to send to your remote SSH session, and when you scan the code that binds a machine to the app."
           }
         },
-        "ja": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Multiplex は、リモートの SSH セッションへ送る写真を撮るときと、マシンをこの App にバインドするコードをスキャンするときにカメラを使用します。"
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex は、リモートの SSH セッションへ送る写真を撮るときと、マシンをこの App にバインドするコードをスキャンするときにカメラを使用します。"
           }
         },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Multiplex 會在你拍照傳送到遠端 SSH 工作階段，以及掃描綁定機器的條碼時使用相機。"
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex 會在你拍照傳送到遠端 SSH 工作階段，以及掃描綁定機器的條碼時使用相機。"
           }
         }
       }
     },
-    "NSFaceIDUsageDescription": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Multiplex unlocks with Face ID when the optional App Lock setting is turned on."
+    "NSFaceIDUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex unlocks with Face ID when the optional App Lock setting is turned on."
           }
         },
-        "ja": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "オプションの「App ロック」設定をオンにすると、Multiplex は Face ID でロックを解除します。"
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オプションの「App ロック」設定をオンにすると、Multiplex は Face ID でロックを解除します。"
           }
         },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "開啟選用的「App 鎖定」設定後，Multiplex 會使用 Face ID 解鎖。"
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟選用的「App 鎖定」設定後，Multiplex 會使用 Face ID 解鎖。"
           }
         }
       }
     },
-    "NSLocalNetworkUsageDescription": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Multiplex connects to SSH hosts on your local network, and finds machines offering to bind themselves to the app."
+    "NSLocalNetworkUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex connects to SSH hosts on your local network, and finds machines offering to bind themselves to the app."
           }
         },
-        "ja": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Multiplex はローカルネットワーク上の SSH ホストに接続し、この App へのバインドを申し出ているマシンを見つけます。"
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex はローカルネットワーク上の SSH ホストに接続し、この App へのバインドを申し出ているマシンを見つけます。"
           }
         },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Multiplex 會連接區域網路上的 SSH 主機，並尋找正在提供綁定的機器。"
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex 會連接區域網路上的 SSH 主機，並尋找正在提供綁定的機器。"
           }
         }
       }
     },
-    "NSMicrophoneUsageDescription": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Multiplex listens only while you hold a dictation going from the terminal key bar."
+    "NSMicrophoneUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex listens only while you hold a dictation going from the terminal key bar."
           }
         },
-        "ja": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Multiplex がマイクを使うのは、ターミナルのキーバーから音声入力を押し続けている間だけです。"
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex がマイクを使うのは、ターミナルのキーバーから音声入力を押し続けている間だけです。"
           }
         },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "只有在你從終端機按鍵列按住聽寫時，Multiplex 才會使用麥克風。"
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有在你從終端機按鍵列按住聽寫時，Multiplex 才會使用麥克風。"
           }
         }
       }
     },
-    "NSSpeechRecognitionUsageDescription": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Multiplex transcribes your dictation so the words can be typed into the terminal session you are attached to. Recognition stays on device wherever your language supports it."
+    "NSSpeechRecognitionUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex transcribes your dictation so the words can be typed into the terminal session you are attached to. Recognition stays on device wherever your language supports it."
           }
         },
-        "ja": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Multiplex は音声入力を文字に起こし、接続中のターミナルセッションに入力します。お使いの言語が対応していれば、認識はデバイス上で行われます。"
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex は音声入力を文字に起こし、接続中のターミナルセッションに入力します。お使いの言語が対応していれば、認識はデバイス上で行われます。"
           }
         },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Multiplex 會轉寫你的聽寫內容，好把文字輸入到你目前連接的終端機工作階段。只要你的語言支援，辨識就會在裝置上完成。"
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex 會轉寫你的聽寫內容，好把文字輸入到你目前連接的終端機工作階段。只要你的語言支援，辨識就會在裝置上完成。"
           }
         }
       }
     }
   },
-  "version": "1.0"
+  "version" : "1.0"
 }
