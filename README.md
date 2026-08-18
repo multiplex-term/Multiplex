@@ -22,11 +22,11 @@ Some features require Multiplex Pro; see [`docs/store-metadata.md`](docs/store-m
 
 | Vision Pro | iPad |
 | :-: | :-: |
-| <video src="https://github.com/user-attachments/assets/90e6e0f2-cdab-4e8f-993a-e6fc5359d7c6" alt="Multiplex AVP demo" width="200" /> | <video src="https://github.com/user-attachments/assets/d25aa980-f3d3-4910-856b-836c3eec20cc" alt="Multiplex iPad demo" width="200" /> | 
+| <video src="https://github.com/user-attachments/assets/90e6e0f2-cdab-4e8f-993a-e6fc5359d7c6" alt="Multiplex AVP demo" width="200" /> | <video src="https://github.com/user-attachments/assets/b6cd31c8-17d8-4fd2-b742-ffcaa30451b4" alt="Multiplex iPad demo" width="200" /> | 
 
-> Vision Pro: Run Claude Code in herdr, open the File Viewer and inline browser (using [serve-sim](https://github.com/EvanBacon/serve-sim)), then send a “create PR” message by pressing an Agent Bar key.
+> Vision Pro: Run Claude Code in herdr, open the File Viewer and inline browser (using [serve-sim](https://github.com/EvanBacon/serve-sim)), then send a "create PR" message by pressing an Agent Bar key.
 
-> iPad: Run Pi in herdr, open the File Viewer and inline browser, then send a “create PR” message by pressing an Agent Bar key.
+> iPad: Run Claude Code in tmux, use tmux shortcuts to split and resize panes, see diff in the File Viewer, then send a "commit in current branch" message by pressing an Agent Bar key.
 
 ## Screenshots
 
