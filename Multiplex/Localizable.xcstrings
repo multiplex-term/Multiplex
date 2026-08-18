@@ -70,7 +70,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : " で単語削除、そして CUSTOM SETUP で作った自分のコードや 1 行のテキストマクロが、すべてのデバイスで使えます。"
+            "value" : " で単語削除、そしてCUSTOM SETUPで作った自分のコードや1行のテキストマクロが、すべてのデバイスで使えます。"
           }
         },
         "zh-Hant" : {
@@ -86,7 +86,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : " は長押しブロックからリモートを右クリックします — herdr のペインメニューが指の下に開きます。"
+            "value" : " は長押しブロックからリモートを右クリックします — herdrのペインメニューが指の下に開きます。"
           }
         },
         "zh-Hant" : {
@@ -102,7 +102,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : " キーを約 0.5 秒長押しすると、タップしてもキーボードが出なくなります。もう一度長押しする — または ⋯ → Unlock Keyboard — で解除できます。"
+            "value" : " キーを約0.5秒長押しすると、タップしてもキーボードが出なくなります。もう一度長押しする — または ⋯ → Unlock Keyboard — で解除できます。"
           }
         },
         "zh-Hant" : {
@@ -118,7 +118,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : " で改行、2 回連続の "
+            "value" : " で改行、2回連続の "
           }
         },
         "zh-Hant" : {
@@ -166,7 +166,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : " ですべてを 1 つのメッセージとして送信します。書いている間もキーバーはペインを操作し続けます。長押しすると "
+            "value" : " ですべてを1つのメッセージとして送信します。書いている間もキーバーはペインを操作し続けます。長押しすると "
           }
         },
         "zh-Hant" : {
@@ -198,7 +198,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : " — 他 %lld 件。"
+            "value" : " — 他%lld件。"
           }
         },
         "zh-Hant" : {
@@ -271,7 +271,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ はフォルダです"
+            "value" : "%@はフォルダです"
           }
         },
         "zh-Hant" : {
@@ -287,7 +287,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に接続できません"
+            "value" : "%@に接続できません"
           }
         },
         "zh-Hant" : {
@@ -303,7 +303,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ アクティブ"
+            "value" : "%@アクティブ"
           }
         },
         "zh-Hant" : {
@@ -319,7 +319,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ 接続済み"
+            "value" : "%@接続済み"
           }
         },
         "zh-Hant" : {
@@ -335,7 +335,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ から応答がありません — ポートと、このデバイスとホストの間のファイアウォールを確認してください。"
+            "value" : "%@から応答がありません — ポートと、このデバイスとホストの間のファイアウォールを確認してください。"
           }
         },
         "zh-Hant" : {
@@ -351,7 +351,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ が接続を切断しました — そのポートは SSH ではない可能性があります。"
+            "value" : "%@が接続を切断しました — そのポートはSSHではない可能性があります。"
           }
         },
         "zh-Hant" : {
@@ -367,7 +367,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ が完了しました"
+            "value" : "%@が完了しました"
           }
         },
         "zh-Hant" : {
@@ -383,7 +383,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ から質問があります"
+            "value" : "%@から質問があります"
           }
         },
         "zh-Hant" : {
@@ -405,7 +405,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ は %@ 鍵で自身を証明しましたが、Multiplex が記録している鍵に含まれていません。何も送信していません。サーバのホスト鍵が変わった場合は、ホスト設定で記録済みの鍵を削除してください。"
+            "value" : "%@は%@鍵で自身を証明しましたが、Multiplexが記録している鍵に含まれていません。何も送信していません。サーバのホスト鍵が変わった場合は、ホスト設定で記録済みの鍵を削除してください。"
           }
         },
         "zh-Hant" : {
@@ -427,7 +427,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ は %@ 鍵で自身を証明しましたが、このホストには記録がありません。何も送信していません。ホスト鍵が変わった場合は、「ホスト鍵」で記録済みの鍵を削除してもう一度確認してください。"
+            "value" : "%@は%@鍵で自身を証明しましたが、このホストには記録がありません。何も送信していません。ホスト鍵が変わった場合は、「ホスト鍵」で記録済みの鍵を削除してもう一度確認してください。"
           }
         },
         "zh-Hant" : {
@@ -449,7 +449,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ のセッション %@"
+            "value" : "%@のセッション%@"
           }
         },
         "zh-Hant" : {
@@ -471,7 +471,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ は %@ です — ビューアが開ける%@の上限は %@ です。"
+            "value" : "%@は%@です — ビューアが開ける%@の上限は%@です。"
           }
         },
         "zh-Hant" : {
@@ -493,7 +493,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ は %@ も %@ で実行しています"
+            "value" : "%@は%@も%@で実行しています"
           }
         },
         "zh-Hant" : {
@@ -509,7 +509,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ がバインドを要求しています"
+            "value" : "%@がバインドを要求しています"
           }
         },
         "zh-Hant" : {
@@ -525,7 +525,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ は無効なので接続しません"
+            "value" : "%@は無効なので接続しません"
           }
         },
         "zh-Hant" : {
@@ -541,7 +541,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ は無効です。有効にする"
+            "value" : "%@は無効です。有効にする"
           }
         },
         "zh-Hant" : {
@@ -557,7 +557,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ は無効です。Deck で有効にすると、セッションを開けます。"
+            "value" : "%@は無効です。Deckで有効にすると、セッションを開けます。"
           }
         },
         "zh-Hant" : {
@@ -573,7 +573,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ は 64 MB を超えています"
+            "value" : "%@は64 MBを超えています"
           }
         },
         "zh-Hant" : {
@@ -595,7 +595,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ は %@ と %@ の両方を実行しています。どちらの%@も表示します。\n\n新しいセッションは引き続き %@ で作成されます。"
+            "value" : "%@は%@と%@の両方を実行しています。どちらの%@も表示します。\n\n新しいセッションは引き続き%@で作成されます。"
           }
         },
         "zh-Hant" : {
@@ -617,7 +617,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ が %@ にインストールされていないため、セッションを作成できません。"
+            "value" : "%@が%@にインストールされていないため、セッションを作成できません。"
           }
         },
         "zh-Hant" : {
@@ -633,7 +633,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ のライセンス本文"
+            "value" : "%@のライセンス本文"
           }
         },
         "zh-Hant" : {
@@ -649,7 +649,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ 接続中"
+            "value" : "%@接続中"
           }
         },
         "zh-Hant" : {
@@ -665,7 +665,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ リンクはここから出ません"
+            "value" : "%@リンクはここから出ません"
           }
         },
         "zh-Hant" : {
@@ -681,7 +681,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ のモデル、1 行に 1 つ"
+            "value" : "%@のモデル、1行に1つ"
           }
         },
         "zh-Hant" : {
@@ -697,7 +697,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ には SSH 鍵のパスフレーズが必要です"
+            "value" : "%@にはSSH鍵のパスフレーズが必要です"
           }
         },
         "zh-Hant" : {
@@ -713,7 +713,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ には SSH 鍵のパスフレーズが必要です。ロック解除"
+            "value" : "%@にはSSH鍵のパスフレーズが必要です。ロック解除"
           }
         },
         "zh-Hant" : {
@@ -735,7 +735,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ / %@"
+            "value" : "%@/%@"
           }
         },
         "zh-Hant" : {
@@ -779,7 +779,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ が提示した SSH ホスト鍵は Multiplex が記録したものと異なります。サーバが再構築されたか、何かが成りすましています。何も送信していません。記録は %@、受信は %@ です。再構築した場合は、ホスト設定で記録済みの鍵を削除してください。"
+            "value" : "%@が提示したSSHホスト鍵はMultiplexが記録したものと異なります。サーバが再構築されたか、何かが成りすましています。何も送信していません。記録は%@、受信は%@です。再構築した場合は、ホスト設定で記録済みの鍵を削除してください。"
           }
         },
         "zh-Hant" : {
@@ -801,7 +801,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ が提示したホスト鍵はこのホストの記録と異なります — 記録は %@、受信は %@ です。何も送信していません。サーバを再構築した場合は、「ホスト鍵」で記録済みの鍵を削除してもう一度確認してください。"
+            "value" : "%@が提示したホスト鍵はこのホストの記録と異なります — 記録は%@、受信は%@です。何も送信していません。サーバを再構築した場合は、「ホスト鍵」で記録済みの鍵を削除してもう一度確認してください。"
           }
         },
         "zh-Hant" : {
@@ -817,7 +817,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ がベルを鳴らしました"
+            "value" : "%@がベルを鳴らしました"
           }
         },
         "zh-Hant" : {
@@ -839,7 +839,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ がポート %@ での接続を拒否しました — そこで SSH サーバは待ち受けていますか？"
+            "value" : "%@がポート%@での接続を拒否しました — そこでSSHサーバは待ち受けていますか？"
           }
         },
         "zh-Hant" : {
@@ -855,7 +855,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ が鍵を拒否しました — ユーザ名と、鍵の公開部分がホストの ~/.ssh/authorized_keys にあるかを確認してください。"
+            "value" : "%@が鍵を拒否しました — ユーザ名と、鍵の公開部分がホストの ~/.ssh/authorized_keysにあるかを確認してください。"
           }
         },
         "zh-Hant" : {
@@ -871,7 +871,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ がサインインを拒否しました — ユーザ名とパスワードを確認してください。"
+            "value" : "%@がサインインを拒否しました — ユーザ名とパスワードを確認してください。"
           }
         },
         "zh-Hant" : {
@@ -887,7 +887,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ 待機"
+            "value" : "%@待機"
           }
         },
         "zh-Hant" : {
@@ -903,7 +903,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ タブ"
+            "value" : "%@タブ"
           }
         },
         "zh-Hant" : {
@@ -919,7 +919,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ タブ、アクティブ"
+            "value" : "%@タブ、アクティブ"
           }
         },
         "zh-Hant" : {
@@ -935,7 +935,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ テーマ"
+            "value" : "%@テーマ"
           }
         },
         "zh-Hant" : {
@@ -951,7 +951,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ 接続不可"
+            "value" : "%@接続不可"
           }
         },
         "zh-Hant" : {
@@ -967,7 +967,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に接続できません。再接続"
+            "value" : "%@に接続できません。再接続"
           }
         },
         "zh-Hant" : {
@@ -983,7 +983,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ が許可を求めています"
+            "value" : "%@が許可を求めています"
           }
         },
         "zh-Hant" : {
@@ -999,7 +999,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ がホストで見つかりません — Deck はそこのセッションを一覧できません。通常のシェルは使えます。"
+            "value" : "%@がホストで見つかりません — Deckはそこのセッションを一覧できません。通常のシェルは使えます。"
           }
         },
         "zh-Hant" : {
@@ -1043,7 +1043,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@、%@、2 回押して確定"
+            "value" : "%@、%@、2回押して確定"
           }
         },
         "zh-Hant" : {
@@ -1113,7 +1113,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@、%@ 行目"
+            "value" : "%@、%@行目"
           }
         },
         "zh-Hant" : {
@@ -1189,7 +1189,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@、アップロード中 %lld パーセント"
+            "value" : "%@、アップロード中%lldパーセント"
           }
         },
         "zh-Hant" : {
@@ -1205,7 +1205,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@: Mac のキーチェーンがロックされているため、Claude Code はサインアウト表示になります"
+            "value" : "%@: Macのキーチェーンがロックされているため、Claude Codeはサインアウト表示になります"
           }
         },
         "zh-Hant" : {
@@ -1221,7 +1221,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%lld 件のキーコマンド"
+            "value" : "%lld件のキーコマンド"
           }
         },
         "zh-Hant" : {
@@ -1243,7 +1243,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%lld 行追加、%lld 行削除"
+            "value" : "%lld行追加、%lld行削除"
           }
         },
         "zh-Hant" : {
@@ -1259,7 +1259,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%lld セッション"
+            "value" : "%lldセッション"
           }
         },
         "zh-Hant" : {
@@ -1275,7 +1275,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%lld タブ"
+            "value" : "%lldタブ"
           }
         },
         "zh-Hant" : {
@@ -1297,7 +1297,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%lld ウインドウ、%lld ペイン"
+            "value" : "%lldウインドウ、%lldペイン"
           }
         },
         "zh-Hant" : {
@@ -1319,7 +1319,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%lld ウインドウ、%lld ペイン。%@%@"
+            "value" : "%lldウインドウ、%lldペイン。%@%@"
           }
         },
         "zh-Hant" : {
@@ -1367,7 +1367,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "、%lld 回"
+            "value" : "、%lld回"
           }
         },
         "zh-Hant" : {
@@ -1383,7 +1383,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "、および %@。"
+            "value" : "、および%@。"
           }
         },
         "zh-Hant" : {
@@ -1479,7 +1479,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "、その後 Enter"
+            "value" : "、その後Enter"
           }
         },
         "zh-Hant" : {
@@ -1495,7 +1495,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "、タイトルは %@"
+            "value" : "、タイトルは%@"
           }
         },
         "zh-Hant" : {
@@ -1543,7 +1543,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "。Vision Pro では、視線を向けるとリンクが光ります。ピンチで同じシートが開きます。"
+            "value" : "。Vision Proでは、視線を向けるとリンクが光ります。ピンチで同じシートが開きます。"
           }
         },
         "zh-Hant" : {
@@ -1559,7 +1559,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "1 セッション"
+            "value" : "1セッション"
           }
         },
         "zh-Hant" : {
@@ -1575,7 +1575,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "90 Hz の再描画"
+            "value" : "90 Hzの再描画"
           }
         },
         "zh-Hant" : {
@@ -1591,7 +1591,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "を固定、長押しで KEY COMMANDS — "
+            "value" : "を固定、長押しでKEY COMMANDS — "
           }
         },
         "zh-Hant" : {
@@ -1607,7 +1607,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "必要なら Metal レンダラーも"
+            "value" : "必要ならMetalレンダラーも"
           }
         },
         "zh-Hant" : {
@@ -1623,7 +1623,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ドラッグはリモート画面そのものをスクロールします — App はホイールを、フルスクリーンアプリでは矢印キーを送ります。ずれてしまう別個のローカルスクロールバックはありません。"
+            "value" : "ドラッグはリモート画面そのものをスクロールします — Appはホイールを、フルスクリーンアプリでは矢印キーを送ります。ずれてしまう別個のローカルスクロールバックはありません。"
           }
         },
         "zh-Hant" : {
@@ -1639,7 +1639,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "SYSTEM、LIGHT、DARK に並ぶ 4 つ目の外観 — すべてのウインドウにすぐ反映されます。"
+            "value" : "SYSTEM、LIGHT、DARKに並ぶ4つ目の外観 — すべてのウインドウにすぐ反映されます。"
           }
         },
         "zh-Hant" : {
@@ -1655,7 +1655,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "SYSTEM、LIGHT、DARK に並ぶ 4 つ目の外観。Deck、ターミナル、フォーム、ポップオーバーにすぐ反映されます。入力時は変更された行だけを再描画します。"
+            "value" : "SYSTEM、LIGHT、DARKに並ぶ4つ目の外観。Deck、ターミナル、フォーム、ポップオーバーにすぐ反映されます。入力時は変更された行だけを再描画します。"
           }
         },
         "zh-Hant" : {
@@ -1671,7 +1671,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "新しい %@ セッションを作成し、Deck に独自のタイルを持ちます。セッションを選ぶと、代わりにそのフォーカス中のワークスペースにタブを追加します。"
+            "value" : "新しい%@セッションを作成し、Deckに独自のタイルを持ちます。セッションを選ぶと、代わりにそのフォーカス中のワークスペースにタブを追加します。"
           }
         },
         "zh-Hant" : {
@@ -1687,7 +1687,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ホストに tmux も herdr も表示されない"
+            "value" : "ホストにtmuxもherdrも表示されない"
           }
         },
         "zh-Hant" : {
@@ -1719,7 +1719,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ホスト、リモートパス、任意で行番号: Sources/App.swift:10-15 は読み出し専用の ▤ ファイルビューアタブで開き、その範囲をハイライトします。ターミナル内で押したパスも同じように行範囲を引き継ぎます。"
+            "value" : "ホスト、リモートパス、任意で行番号：Sources/App.swift:10-15は読み出し専用の ▤ ファイルビューアタブで開き、その範囲をハイライトします。ターミナル内で押したパスも同じように行範囲を引き継ぎます。"
           }
         },
         "zh-Hant" : {
@@ -1735,7 +1735,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "長いスクロールでは、報告されるホイール位置が herdr のタブバーや tmux のステータス行にずれることがあります — そこはスクロールで内容が切り替わります。ホイールイベントはパンを開始した位置に固定されます。"
+            "value" : "長いスクロールでは、報告されるホイール位置がherdrのタブバーやtmuxのステータス行にずれることがあります — そこはスクロールで内容が切り替わります。ホイールイベントはパンを開始した位置に固定されます。"
           }
         },
         "zh-Hant" : {
@@ -1751,7 +1751,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "別のネットワークにあるマシン — VPS やファイアウォールの内側のマシン — はここに自身を通知できません。ターミナルに表示された QR コードをスキャンするか、コードを教えてもらってください。"
+            "value" : "別のネットワークにあるマシン — VPSやファイアウォールの内側のマシン — はここに自身を通知できません。ターミナルに表示されたQRコードをスキャンするか、コードを教えてもらってください。"
           }
         },
         "zh-Hant" : {
@@ -1767,7 +1767,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "マウスの副ボタンクリックは長押しと同じ動作をします。herdr ではさらに "
+            "value" : "マウスの副ボタンクリックは長押しと同じ動作をします。herdrではさらに "
           }
         },
         "zh-Hant" : {
@@ -1799,7 +1799,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ 上のパス"
+            "value" : "%@上のパス"
           }
         },
         "zh-Hant" : {
@@ -2039,7 +2039,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ の操作"
+            "value" : "%@の操作"
           }
         },
         "zh-Hant" : {
@@ -2087,7 +2087,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex Pro でコマンドを追加"
+            "value" : "Multiplex Proでコマンドを追加"
           }
         },
         "zh-Hant" : {
@@ -2151,7 +2151,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "追加しました — Deck に表示されています。"
+            "value" : "追加しました — Deckに表示されています。"
           }
         },
         "zh-Hant" : {
@@ -2359,7 +2359,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ セッションも表示"
+            "value" : "%@セッションも表示"
           }
         },
         "zh-Hant" : {
@@ -2375,7 +2375,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ にも： "
+            "value" : "%@にも："
           }
         },
         "zh-Hant" : {
@@ -2397,7 +2397,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ にはさらに %lld 個の %@ があります。"
+            "value" : "%@にはさらに%lld個の%@があります。"
           }
         },
         "zh-Hant" : {
@@ -2445,7 +2445,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "別のアナウンスが同じ名前を使っています。mpx bind を 1 回しか実行していない場合、どちらかはあなたのマシンではありません — 代わりに QR コードをスキャンしてください。"
+            "value" : "別のアナウンスが同じ名前を使っています。mpx bindを1回しか実行していない場合、どちらかはあなたのマシンではありません — 代わりにQRコードをスキャンしてください。"
           }
         },
         "zh-Hant" : {
@@ -2461,7 +2461,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App ロック"
+            "value" : "Appロック"
           }
         },
         "zh-Hant" : {
@@ -2701,7 +2701,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "15 秒戻す"
+            "value" : "15秒戻す"
           }
         },
         "zh-Hant" : {
@@ -2733,7 +2733,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "レンダリングされた Markdown に戻る"
+            "value" : "レンダリングされたMarkdownに戻る"
           }
         },
         "zh-Hant" : {
@@ -2797,7 +2797,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "バックグラウンドのキープアライブがオフです: App を離れると一時停止し、このホストのセッションは切断され、戻るとタブが再アタッチされます。"
+            "value" : "バックグラウンドのキープアライブがオフです：Appを離れると一時停止し、このホストのセッションは切断され、戻るとタブが再アタッチされます。"
           }
         },
         "zh-Hant" : {
@@ -2861,7 +2861,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "バインドで秘密鍵が送信されることはありません: このデバイスが自分で鍵を作成し、マシンは公開鍵を authorized_keys に追加します。mpx unbind で削除できます。"
+            "value" : "バインドで秘密鍵が送信されることはありません：このデバイスが自分で鍵を作成し、マシンは公開鍵をauthorized_keysに追加します。mpx unbindで削除できます。"
           }
         },
         "zh-Hant" : {
@@ -2925,7 +2925,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "1 台のホストで両方"
+            "value" : "1台のホストで両方"
           }
         },
         "zh-Hant" : {
@@ -2941,7 +2941,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "バインドしましたが、最初の接続に失敗しました: %@"
+            "value" : "バインドしましたが、最初の接続に失敗しました：%@"
           }
         },
         "zh-Hant" : {
@@ -3085,7 +3085,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Tally のシャーシは一貫したまま、ターミナルパレットを作成・編集できます。"
+            "value" : "Tallyのシャーシは一貫したまま、ターミナルパレットを作成・編集できます。"
           }
         },
         "zh-Hant" : {
@@ -3133,7 +3133,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "組み込みコマンドもカスタムコマンドも Bar か More に配置します。カスタムの Bar ラベルは 9 文字までです。"
+            "value" : "組み込みコマンドもカスタムコマンドもBarかMoreに配置します。カスタムのBarラベルは9文字までです。"
           }
         },
         "zh-Hant" : {
@@ -3149,7 +3149,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "一度購入すれば、iPad と Vision Pro の両方で使えます。"
+            "value" : "一度購入すれば、iPadとVision Proの両方で使えます。"
           }
         },
         "zh-Hant" : {
@@ -3165,7 +3165,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ の差分を表示できません"
+            "value" : "%@の差分を表示できません"
           }
         },
         "zh-Hant" : {
@@ -3181,7 +3181,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ を読み込めません"
+            "value" : "%@を読み込めません"
           }
         },
         "zh-Hant" : {
@@ -3277,7 +3277,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ を開けません"
+            "value" : "%@を開けません"
           }
         },
         "zh-Hant" : {
@@ -3389,7 +3389,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ への接続を確認して、もう一度お試しください。"
+            "value" : "%@への接続を確認して、もう一度お試しください。"
           }
         },
         "zh-Hant" : {
@@ -3453,7 +3453,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App Store の購入項目を確認中…"
+            "value" : "App Storeの購入項目を確認中…"
           }
         },
         "zh-Hant" : {
@@ -3469,7 +3469,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "この Apple ID に Multiplex Pro の購入があるか確認します"
+            "value" : "このApple IDにMultiplex Proの購入があるか確認します"
           }
         },
         "zh-Hant" : {
@@ -3485,7 +3485,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Claude Code、Codex、Pi、Grok Build から選択します"
+            "value" : "Claude Code、Codex、Pi、Grok Buildから選択します"
           }
         },
         "zh-Hant" : {
@@ -3501,7 +3501,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Focused Pane を選ぶと、セッション自身のディレクトリを引き継ぎます。"
+            "value" : "Focused Paneを選ぶと、セッション自身のディレクトリを引き継ぎます。"
           }
         },
         "zh-Hant" : {
@@ -3517,7 +3517,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Home を選ぶと、ログインシェルのデフォルトを使います。"
+            "value" : "Homeを選ぶと、ログインシェルのデフォルトを使います。"
           }
         },
         "zh-Hant" : {
@@ -3597,7 +3597,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Deck からセッションを選ぶと、ここにアタッチできます。"
+            "value" : "Deckからセッションを選ぶと、ここにアタッチできます。"
           }
         },
         "zh-Hant" : {
@@ -3677,7 +3677,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "コードはハードウェアキーボードと同じ入力を送ります。テキスト行は 1 行を入力し、SUBMIT がオンならそのあとに Enter を送ります。"
+            "value" : "コードはハードウェアキーボードと同じ入力を送ります。テキスト行は1行を入力し、SUBMITがオンならそのあとにEnterを送ります。"
           }
         },
         "zh-Hant" : {
@@ -3715,7 +3715,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ の Claude Code はサインイン画面で待機していますが、保存されたログインはおそらく無事です。Mac では Claude Code は認証情報をログインキーチェーンに保存しますが、SSH や tmux のセッションではそれが解除されません — GUI ログインが行われていないためです。%@ 上のいずれかのシェルで一度解除してから、Claude Code を再起動してください："
+            "value" : "%@のClaude Codeはサインイン画面で待機していますが、保存されたログインはおそらく無事です。MacではClaude Codeは認証情報をログインキーチェーンに保存しますが、SSHやtmuxのセッションではそれが解除されません — GUIログインが行われていないためです。%@上のいずれかのシェルで一度解除してから、Claude Codeを再起動してください："
           }
         },
         "zh-Hant" : {
@@ -3731,7 +3731,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Claude Code がサインアウト表示になる"
+            "value" : "Claude Codeがサインアウト表示になる"
           }
         },
         "zh-Hant" : {
@@ -3747,7 +3747,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "tmux で Claude Code がサインアウト表示になる"
+            "value" : "tmuxでClaude Codeがサインアウト表示になる"
           }
         },
         "zh-Hant" : {
@@ -3811,7 +3811,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "すべてのビューポートページの Cookie、キャッシュ、サイトストレージを消去します — 開発サーバーのログインも含みます。このページはサインアウトした状態で再読み込みされます。"
+            "value" : "すべてのビューポートページのCookie、キャッシュ、サイトストレージを消去します — 開発サーバーのログインも含みます。このページはサインアウトした状態で再読み込みされます。"
           }
         },
         "zh-Hant" : {
@@ -4147,7 +4147,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に設定されたモデル"
+            "value" : "%@に設定されたモデル"
           }
         },
         "zh-Hant" : {
@@ -4163,7 +4163,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ で確認して、Multiplex を開くときに要求します"
+            "value" : "%@で確認して、Multiplexを開くときに要求します"
           }
         },
         "zh-Hant" : {
@@ -4211,7 +4211,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Deck で接続します"
+            "value" : "Deckで接続します"
           }
         },
         "zh-Hant" : {
@@ -4227,7 +4227,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "mosh で接続"
+            "value" : "moshで接続"
           }
         },
         "zh-Hant" : {
@@ -4249,7 +4249,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に %@ として接続しました。"
+            "value" : "%@に%@として接続しました。"
           }
         },
         "zh-Hant" : {
@@ -4265,7 +4265,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に接続中…"
+            "value" : "%@に接続中…"
           }
         },
         "zh-Hant" : {
@@ -4351,7 +4351,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ の接続統計：%@"
+            "value" : "%@の接続統計：%@"
           }
         },
         "zh-Hant" : {
@@ -4367,7 +4367,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "mosh で接続します"
+            "value" : "moshで接続します"
           }
         },
         "zh-Hant" : {
@@ -4431,7 +4431,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ のライセンス文をコピー"
+            "value" : "%@のライセンス文をコピー"
           }
         },
         "zh-Hant" : {
@@ -4479,7 +4479,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "いずれかの行をコピーし、追加したいマシンのターミナルで実行して、mpx bind を実行したままにします。ここのコマンドはこのデバイスでは実行されません。"
+            "value" : "いずれかの行をコピーし、追加したいマシンのターミナルで実行して、mpx bindを実行したままにします。ここのコマンドはこのデバイスでは実行されません。"
           }
         },
         "zh-Hant" : {
@@ -4581,7 +4581,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に接続できませんでした：%@"
+            "value" : "%@に接続できませんでした：%@"
           }
         },
         "zh-Hant" : {
@@ -4597,7 +4597,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ を作成できませんでした"
+            "value" : "%@を作成できませんでした"
           }
         },
         "zh-Hant" : {
@@ -4613,7 +4613,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ でセッションを作成できませんでした。"
+            "value" : "%@でセッションを作成できませんでした。"
           }
         },
         "zh-Hant" : {
@@ -4651,7 +4651,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%3$@ のセッション %2$@ で新しい %1$@ を開けませんでした。"
+            "value" : "%3$@のセッション%2$@で新しい%1$@を開けませんでした。"
           }
         },
         "zh-Hant" : {
@@ -4673,7 +4673,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%2$@ のセッション %1$@ で新しいタブを開けませんでした。"
+            "value" : "%2$@のセッション%1$@で新しいタブを開けませんでした。"
           }
         },
         "zh-Hant" : {
@@ -4695,7 +4695,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に接続できませんでした（%@）。"
+            "value" : "%@に接続できませんでした（%@）。"
           }
         },
         "zh-Hant" : {
@@ -4717,7 +4717,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "mosh で %@ に接続できませんでした。%@"
+            "value" : "moshで%@に接続できませんでした。%@"
           }
         },
         "zh-Hant" : {
@@ -4739,7 +4739,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "mosh を開始するため %@ に接続できませんでした（%@）。"
+            "value" : "moshを開始するため%@に接続できませんでした（%@）。"
           }
         },
         "zh-Hant" : {
@@ -4761,7 +4761,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に接続できませんでした。%@"
+            "value" : "%@に接続できませんでした。%@"
           }
         },
         "zh-Hant" : {
@@ -4777,7 +4777,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に接続できませんでした。応答がありません。"
+            "value" : "%@に接続できませんでした。応答がありません。"
           }
         },
         "zh-Hant" : {
@@ -4809,7 +4809,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ を解決できませんでした。"
+            "value" : "%@を解決できませんでした。"
           }
         },
         "zh-Hant" : {
@@ -4911,7 +4911,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ セッションを作成し、そのログインシェルにアタッチします。%@"
+            "value" : "%@セッションを作成し、そのログインシェルにアタッチします。%@"
           }
         },
         "zh-Hant" : {
@@ -4927,7 +4927,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "カスタムテーマの作成、複製、編集には Multiplex Pro が必要です。既存のテーマは引き続き選択および削除できます。"
+            "value" : "カスタムテーマの作成、複製、編集にはMultiplex Proが必要です。既存のテーマは引き続き選択および削除できます。"
           }
         },
         "zh-Hant" : {
@@ -5045,7 +5045,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "カスタムコマンド %@、%@"
+            "value" : "カスタムコマンド%@、%@"
           }
         },
         "zh-Hant" : {
@@ -5109,7 +5109,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "DECK、セッション、LIVE、+ TAB、FILE、TMUX、DETACH — システムバーの代わりに 1 本の細いバーにまとめます。"
+            "value" : "DECK、セッション、LIVE、+ TAB、FILE、TMUX、DETACH — システムバーの代わりに1本の細いバーにまとめます。"
           }
         },
         "zh-Hant" : {
@@ -5125,7 +5125,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "DECK、セッション、LIVE、A− A+、+ TAB、FILE、TMUX、DETACH を 1 本の細いバーにまとめ、ペインの反対側のキーバーと揃えます。"
+            "value" : "DECK、セッション、LIVE、A− A+、+ TAB、FILE、TMUX、DETACHを1本の細いバーにまとめ、ペインの反対側のキーバーと揃えます。"
           }
         },
         "zh-Hant" : {
@@ -5173,7 +5173,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ダークは、このターミナルテーマを Glass と共有します。"
+            "value" : "ダークは、このターミナルテーマをGlassと共有します。"
           }
         },
         "zh-Hant" : {
@@ -5349,7 +5349,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "検出場所： "
+            "value" : "検出場所："
           }
         },
         "zh-Hant" : {
@@ -5413,7 +5413,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ を閉じる"
+            "value" : "%@を閉じる"
           }
         },
         "zh-Hant" : {
@@ -5445,7 +5445,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ここでは %@ を表示しない"
+            "value" : "ここでは%@を表示しない"
           }
         },
         "zh-Hant" : {
@@ -5525,7 +5525,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ターミナルのテキストを CoreGraphics ではなく GPU で描画します。新しく開いたターミナルウインドウから有効になります。"
+            "value" : "ターミナルのテキストをCoreGraphicsではなくGPUで描画します。新しく開いたターミナルウインドウから有効になります。"
           }
         },
         "zh-Hant" : {
@@ -5797,7 +5797,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "接続のたびに、ホストに記録されたフィンガープリントとサーバを照合します — フィンガープリントは Bind Host、Add Host ▸ Host key に貼り付けた鍵、または初回接続時のピン留めから得られます。Host Settings ▸ Host key に一覧が表示され、FORGET も行えます。"
+            "value" : "接続のたびに、ホストに記録されたフィンガープリントとサーバを照合します — フィンガープリントはBind Host、Add Host ▸ Host keyに貼り付けた鍵、または初回接続時のピン留めから得られます。Host Settings ▸ Host keyに一覧が表示され、FORGETも行えます。"
           }
         },
         "zh-Hant" : {
@@ -5813,7 +5813,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このペインからバインドしたマシンは、すべてこのバックエンドで追加されます — バインドが証明するのはマシンの身元であって、動作しているものではありません。Deck は herdr CLI を通じて herdr（herdr.dev）のセッションとそのエージェントを監視し、セッションごとに 1 つのタイルを表示します。後から Host Settings で変更できます。"
+            "value" : "このペインからバインドしたマシンは、すべてこのバックエンドで追加されます — バインドが証明するのはマシンの身元であって、動作しているものではありません。Deckはherdr CLIを通じてherdr（herdr.dev）のセッションとそのエージェントを監視し、セッションごとに1つのタイルを表示します。後からHost Settingsで変更できます。"
           }
         },
         "zh-Hant" : {
@@ -5829,7 +5829,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このペインからバインドしたマシンは、すべてこのバックエンドで追加されます — バインドが証明するのはマシンの身元であって、動作しているものではありません。tmux は Deck が監視するリモートのサーバで、セッション、ウインドウ、エージェントのペインを対象とします。後から Host Settings で変更できます。"
+            "value" : "このペインからバインドしたマシンは、すべてこのバックエンドで追加されます — バインドが証明するのはマシンの身元であって、動作しているものではありません。tmuxはDeckが監視するリモートのサーバで、セッション、ウインドウ、エージェントのペインを対象とします。後からHost Settingsで変更できます。"
           }
         },
         "zh-Hant" : {
@@ -5845,7 +5845,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このペインからバインドしたマシンは、両方を表示する形で追加されます — バインドが証明するのはマシンの身元であって、動作しているものではありません。各タイルには由来するバックエンドが表示され、%@。後から Host Settings で変更できます。"
+            "value" : "このペインからバインドしたマシンは、両方を表示する形で追加されます — バインドが証明するのはマシンの身元であって、動作しているものではありません。各タイルには由来するバックエンドが表示され、%@。後からHost Settingsで変更できます。"
           }
         },
         "zh-Hant" : {
@@ -5893,7 +5893,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "すべての tmux セッションに、空間上の専用ウインドウを。"
+            "value" : "すべてのtmuxセッションに、空間上の専用ウインドウを。"
           }
         },
         "zh-Hant" : {
@@ -5909,7 +5909,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex %@ での変更点と、同梱されたサードパーティコードのライセンス表示。"
+            "value" : "Multiplex %@での変更点と、同梱されたサードパーティコードのライセンス表示。"
           }
         },
         "zh-Hant" : {
@@ -6053,7 +6053,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ファイルのアップロードには SSH 経由の tmux または herdr が必要です"
+            "value" : "ファイルのアップロードにはSSH経由のtmuxまたはherdrが必要です"
           }
         },
         "zh-Hant" : {
@@ -6085,7 +6085,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ 上のファイル"
+            "value" : "%@上のファイル"
           }
         },
         "zh-Hant" : {
@@ -6229,7 +6229,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "15 秒進む"
+            "value" : "15秒進む"
           }
         },
         "zh-Hant" : {
@@ -6267,7 +6267,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "無料版ではコマンドは %lld 個まで、Multiplex Pro なら %lld 個に増えます。"
+            "value" : "無料版ではコマンドは%lld個まで、Multiplex Proなら%lld個に増えます。"
           }
         },
         "zh-Hant" : {
@@ -6331,7 +6331,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "画面の左端から右にスワイプすると Deck に戻ります。"
+            "value" : "画面の左端から右にスワイプするとDeckに戻ります。"
           }
         },
         "zh-Hant" : {
@@ -6465,7 +6465,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "CTRL 長押しで使う保存済みのコードとテキストマクロを %lld 個から %lld 個に増やし、すべてのデバイスに同期します。"
+            "value" : "CTRL長押しで使う保存済みのコードとテキストマクロを%lld個から%lld個に増やし、すべてのデバイスに同期します。"
           }
         },
         "zh-Hant" : {
@@ -6497,7 +6497,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "herdr ペイン"
+            "value" : "herdrペイン"
           }
         },
         "zh-Hant" : {
@@ -6561,7 +6561,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "CTRL を長押し"
+            "value" : "CTRLを長押し"
           }
         },
         "zh-Hant" : {
@@ -6593,7 +6593,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ネットワーク上で検出しました。ターミナルに表示されたアドレスと指紋を確認してから、PIN を入力してください。"
+            "value" : "ネットワーク上で検出しました。ターミナルに表示されたアドレスと指紋を確認してから、PINを入力してください。"
           }
         },
         "zh-Hant" : {
@@ -6609,7 +6609,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ を隠す"
+            "value" : "%@を隠す"
           }
         },
         "zh-Hant" : {
@@ -6625,7 +6625,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ のヘルパーチップを隠す"
+            "value" : "%@のヘルパーチップを隠す"
           }
         },
         "zh-Hant" : {
@@ -6689,7 +6689,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "長押しすると %lld セル単位で、離すまで繰り返し移動します。"
+            "value" : "長押しすると%lldセル単位で、離すまで繰り返し移動します。"
           }
         },
         "zh-Hant" : {
@@ -6721,7 +6721,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App を離れた後に iOS が与える数秒間、このホストのセッションと監視を維持します"
+            "value" : "Appを離れた後にiOSが与える数秒間、このホストのセッションと監視を維持します"
           }
         },
         "zh-Hant" : {
@@ -6753,7 +6753,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Homebrew と /usr/local へのインストールはすでにプローブの PATH に含まれています。"
+            "value" : "Homebrewと/usr/localへのインストールはすでにプローブのPATHに含まれています。"
           }
         },
         "zh-Hant" : {
@@ -6769,7 +6769,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Homebrew、~/.local/bin、~/.cargo/bin へのインストールはすでにプローブの PATH に含まれています。"
+            "value" : "Homebrew、~/.local/bin、~/.cargo/binへのインストールはすでにプローブのPATHに含まれています。"
           }
         },
         "zh-Hant" : {
@@ -6833,7 +6833,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ホスト設定 ▸ バックエンドで、ホストを tmux と herdr の間で切り替えられます — どちらでもセッションごとに Deck タイルが 1 つで、ショートカットパネル、ファイル添付、分割のサイズ変更、Claude Code の履歴もそのまま使えます。"
+            "value" : "ホスト設定 ▸ バックエンドで、ホストをtmuxとherdrの間で切り替えられます — どちらでもセッションごとにDeckタイルが1つで、ショートカットパネル、ファイル添付、分割のサイズ変更、Claude Codeの履歴もそのまま使えます。"
           }
         },
         "zh-Hant" : {
@@ -6849,7 +6849,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ホスト設定 ▸ モニタリング（デフォルトはオフ）。オンにすると、離脱する App に iOS が与える追加時間だけそのホストが動き続け、その後 iOS が Multiplex を起こして再確認することもあります — 離れた後に終わったターンも届きます。タイミングは iOS 次第で、オンにしていないホストでは何も実行されません。"
+            "value" : "ホスト設定 ▸ モニタリング（デフォルトはオフ）。オンにすると、離脱するAppにiOSが与える追加時間だけそのホストが動き続け、その後iOSがMultiplexを起こして再確認することもあります — 離れた後に終わったターンも届きます。タイミングはiOS次第で、オンにしていないホストでは何も実行されません。"
           }
         },
         "zh-Hant" : {
@@ -6913,7 +6913,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ のホストオプション"
+            "value" : "%@のホストオプション"
           }
         },
         "zh-Hant" : {
@@ -6977,7 +6977,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ のホーム内"
+            "value" : "%@のホーム内"
           }
         },
         "zh-Hant" : {
@@ -6993,7 +6993,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "レンダリングされた書類では「image: …」のプレースホルダがリンクです — 押すと画像がテキスト列に表示されます。キャプションを押すと隠れ、タップすると全画面で拡大できます。Web 上の画像は従来どおりリンク確認を経由し、その確認からドッキングした ⌗ ビューポートを開けるようになりました。"
+            "value" : "レンダリングされた書類では「image: …」のプレースホルダがリンクです — 押すと画像がテキスト列に表示されます。キャプションを押すと隠れ、タップすると全画面で拡大できます。Web上の画像は従来どおりリンク確認を経由し、その確認からドッキングした ⌗ ビューポートを開けるようになりました。"
           }
         },
         "zh-Hant" : {
@@ -7025,7 +7025,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "離れたばかりのセッションも含みます — 以前は唯一通知されなかったケースです。許可の確認は Multiplex が画面に表示されているときに行い、バックグラウンドからは求めません。"
+            "value" : "離れたばかりのセッションも含みます — 以前は唯一通知されなかったケースです。許可の確認はMultiplexが画面に表示されているときに行い、バックグラウンドからは求めません。"
           }
         },
         "zh-Hant" : {
@@ -7073,7 +7073,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ をインストール"
+            "value" : "%@をインストール"
           }
         },
         "zh-Hant" : {
@@ -7169,7 +7169,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ヘッドセットのスリープ、ネットワークの切り替え、IP の変更をまたいでもターミナルを維持します。"
+            "value" : "ヘッドセットのスリープ、ネットワークの切り替え、IPの変更をまたいでもターミナルを維持します。"
           }
         },
         "zh-Hant" : {
@@ -7185,7 +7185,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "仕事用マシン、ホームラボ、サーバーを 1 枚のライブなフリートウォールにまとめます。"
+            "value" : "仕事用マシン、ホームラボ、サーバーを1枚のライブなフリートウォールにまとめます。"
           }
         },
         "zh-Hant" : {
@@ -7271,7 +7271,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "「%@」（%@ 上）とその中で実行中のすべてを終了し、タブを閉じます。"
+            "value" : "「%@」（%@上）とその中で実行中のすべてを終了し、タブを閉じます。"
           }
         },
         "zh-Hant" : {
@@ -7293,7 +7293,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%2$@ の「%1$@」と、その中で実行中のすべてを終了します。"
+            "value" : "%2$@の「%1$@」と、その中で実行中のすべてを終了します。"
           }
         },
         "zh-Hant" : {
@@ -7459,7 +7459,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%2$@ で %1$@ を起動しますか？"
+            "value" : "%2$@で%1$@を起動しますか？"
           }
         },
         "zh-Hant" : {
@@ -7475,7 +7475,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ として起動します。"
+            "value" : "%@として起動します。"
           }
         },
         "zh-Hant" : {
@@ -7507,7 +7507,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "--model にこの値を設定してエージェントを起動します。選択肢は Multiplex のホスト設定で構成できます。空欄にするとエージェントのデフォルトモデルを使います。"
+            "value" : "--modelにこの値を設定してエージェントを起動します。選択肢はMultiplexのホスト設定で構成できます。空欄にするとエージェントのデフォルトモデルを使います。"
           }
         },
         "zh-Hant" : {
@@ -7523,7 +7523,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex から離れます"
+            "value" : "Multiplexから離れます"
           }
         },
         "zh-Hant" : {
@@ -7539,7 +7539,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App を離れても、iOS が許可する追加の時間だけこのホストのセッションとプローブを維持します — 数分ではなく数十秒です。その間はエージェント通知も届きます。それ以降は通常どおり App が中断され、戻るとタブが再アタッチします。"
+            "value" : "Appを離れても、iOSが許可する追加の時間だけこのホストのセッションとプローブを維持します — 数分ではなく数十秒です。その間はエージェント通知も届きます。それ以降は通常どおりAppが中断され、戻るとタブが再アタッチします。"
           }
         },
         "zh-Hant" : {
@@ -7619,7 +7619,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このデバイスではなく %@ にあります"
+            "value" : "このデバイスではなく%@にあります"
           }
         },
         "zh-Hant" : {
@@ -7651,7 +7651,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App Store の価格を読み込み中…"
+            "value" : "App Storeの価格を読み込み中…"
           }
         },
         "zh-Hant" : {
@@ -7683,7 +7683,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ で App をロックします"
+            "value" : "%@でAppをロックします"
           }
         },
         "zh-Hant" : {
@@ -7715,7 +7715,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ペインを長押し、ダブルタップ、または右クリックすると、その場で SELECT / SELECT ALL / PASTE が使えます。選択範囲は押したペインの内側にとどまり、COPY と DONE がその横に表示されます。herdr のタブではさらに MENU が加わります。"
+            "value" : "ペインを長押し、ダブルタップ、または右クリックすると、その場でSELECT/SELECT ALL/PASTEが使えます。選択範囲は押したペインの内側にとどまり、COPYとDONEがその横に表示されます。herdrのタブではさらにMENUが加わります。"
           }
         },
         "zh-Hant" : {
@@ -7779,7 +7779,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Mosh リンク — SRTT はすべてのデータグラムから · 損失はシーケンスの欠落から"
+            "value" : "Moshリンク — SRTTはすべてのデータグラムから · 損失はシーケンスの欠落から"
           }
         },
         "zh-Hant" : {
@@ -7795,7 +7795,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Mosh はすべてのデータグラムをサンプリング · SSH にはキープアライブがありません — RTT は Deck のプローブによるもの · エコーは入力中に測定 · セッション内のみで、このデバイスから出ません"
+            "value" : "Moshはすべてのデータグラムをサンプリング · SSHにはキープアライブがありません — RTTはDeckのプローブによるもの · エコーは入力中に測定 · セッション内のみで、このデバイスから出ません"
           }
         },
         "zh-Hant" : {
@@ -7811,7 +7811,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Mosh トランスポート"
+            "value" : "Moshトランスポート"
           }
         },
         "zh-Hant" : {
@@ -7827,7 +7827,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このネットワークで mpx bind を実行しているマシンは自動的にここに表示されます。それぞれのターミナルに表示された 6 桁の PIN で確認してください。"
+            "value" : "このネットワークでmpx bindを実行しているマシンは自動的にここに表示されます。それぞれのターミナルに表示された6桁のPINで確認してください。"
           }
         },
         "zh-Hant" : {
@@ -7939,7 +7939,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ にメッセージ…"
+            "value" : "%@にメッセージ…"
           }
         },
         "zh-Hant" : {
@@ -7955,7 +7955,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ のメッセージ履歴"
+            "value" : "%@のメッセージ履歴"
           }
         },
         "zh-Hant" : {
@@ -7987,7 +7987,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Metal レンダラー"
+            "value" : "Metalレンダラー"
           }
         },
         "zh-Hant" : {
@@ -8051,7 +8051,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "その他の %@ コマンド"
+            "value" : "その他の%@コマンド"
           }
         },
         "zh-Hant" : {
@@ -8067,7 +8067,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Mosh トランスポート"
+            "value" : "Moshトランスポート"
           }
         },
         "zh-Hant" : {
@@ -8083,7 +8083,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Mosh トランスポート"
+            "value" : "Moshトランスポート"
           }
         },
         "zh-Hant" : {
@@ -8243,7 +8243,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex ホスト"
+            "value" : "Multiplexホスト"
           }
         },
         "zh-Hant" : {
@@ -8259,7 +8259,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex Pro は現在購入できません。"
+            "value" : "Multiplex Proは現在購入できません。"
           }
         },
         "zh-Hant" : {
@@ -8275,7 +8275,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex Pro は現在 App Store から入手できません。"
+            "value" : "Multiplex Proは現在App Storeから入手できません。"
           }
         },
         "zh-Hant" : {
@@ -8291,7 +8291,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "この App Store ストアフロントでは Multiplex Pro を提供していません。"
+            "value" : "このApp StoreストアフロントではMultiplex Proを提供していません。"
           }
         },
         "zh-Hant" : {
@@ -8307,7 +8307,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex Pro のロックが解除されています"
+            "value" : "Multiplex Proのロックが解除されています"
           }
         },
         "zh-Hant" : {
@@ -8323,7 +8323,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex Pro のロックが解除されています。この購入項目は、同じ Apple ID のデバイスでご利用いただけます。"
+            "value" : "Multiplex Proのロックが解除されています。この購入項目は、同じApple IDのデバイスでご利用いただけます。"
           }
         },
         "zh-Hant" : {
@@ -8339,7 +8339,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex Pro を復元しました。"
+            "value" : "Multiplex Proを復元しました。"
           }
         },
         "zh-Hant" : {
@@ -8355,7 +8355,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex はローカルネットワーク上の SSH ホストに接続できません。「設定」でローカルネットワークのアクセスをオンにしてください。"
+            "value" : "Multiplexはローカルネットワーク上のSSHホストに接続できません。「設定」でローカルネットワークのアクセスをオンにしてください。"
           }
         },
         "zh-Hant" : {
@@ -8371,7 +8371,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex は「設定」で選んだ言語に従います。英語、繁体字中国語、日本語が利用できます。ターミナルの表示は英語のままです。"
+            "value" : "Multiplexは「設定」で選んだ言語に従います。英語、繁体字中国語、日本語が利用できます。ターミナルの表示は英語のままです。"
           }
         },
         "zh-Hant" : {
@@ -8387,7 +8387,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex はロックされています。%@ でロックを解除してください。"
+            "value" : "Multiplexはロックされています。%@でロックを解除してください。"
           }
         },
         "zh-Hant" : {
@@ -8403,7 +8403,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex はウェブとメールのリンクのみを開きます。リモートのペインからの %@: リンクはこのデバイス上で動作してしまうため、開かずに表示します — 別の場所で使う場合はコピーしてください。"
+            "value" : "Multiplexはウェブとメールのリンクのみを開きます。リモートのペインからの%@: リンクはこのデバイス上で動作してしまうため、開かずに表示します — 別の場所で使う場合はコピーしてください。"
           }
         },
         "zh-Hant" : {
@@ -8531,7 +8531,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex が読み取れるパスではありません"
+            "value" : "Multiplexが読み取れるパスではありません"
           }
         },
         "zh-Hant" : {
@@ -8547,7 +8547,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex が読み取れるアドレスではありません"
+            "value" : "Multiplexが読み取れるアドレスではありません"
           }
         },
         "zh-Hant" : {
@@ -8771,7 +8771,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ で新規セッション"
+            "value" : "%@で新規セッション"
           }
         },
         "zh-Hant" : {
@@ -8787,7 +8787,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "新規セッションの tmux 設定"
+            "value" : "新規セッションのtmux設定"
           }
         },
         "zh-Hant" : {
@@ -8851,7 +8851,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "新規タブ：別のセッション、この herdr ワークスペース内のタブ、またはファイルビューア"
+            "value" : "新規タブ：別のセッション、このherdrワークスペース内のタブ、またはファイルビューア"
           }
         },
         "zh-Hant" : {
@@ -8915,7 +8915,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ホストに %@ がありません"
+            "value" : "ホストに%@がありません"
           }
         },
         "zh-Hant" : {
@@ -8931,7 +8931,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "この Apple ID では Multiplex Pro の購入が見つかりませんでした。"
+            "value" : "このApple IDではMultiplex Proの購入が見つかりませんでした。"
           }
         },
         "zh-Hant" : {
@@ -8947,7 +8947,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "この Apple ID では Multiplex Pro の購入が見つかりませんでした。TestFlight ビルドは Apple のテスト用ストアを使うため、App Store 版での購入はここには表示されません。TestFlight 内では Pro を無料で再度アンロックできます。"
+            "value" : "このApple IDではMultiplex Proの購入が見つかりませんでした。TestFlightビルドはAppleのテスト用ストアを使うため、App Store版での購入はここには表示されません。TestFlight内ではProを無料で再度アンロックできます。"
           }
         },
         "zh-Hant" : {
@@ -8985,7 +8985,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ から %lld 秒待っても応答がありません — アドレスとポート、そしてこのネットワークからホストに到達できるかを確認してください。"
+            "value" : "%@から%lld秒待っても応答がありません — アドレスとポート、そしてこのネットワークからホストに到達できるかを確認してください。"
           }
         },
         "zh-Hant" : {
@@ -9001,7 +9001,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "mpx bind から応答がありません — まだ実行中ですか？"
+            "value" : "mpx bindから応答がありません — まだ実行中ですか？"
           }
         },
         "zh-Hant" : {
@@ -9097,7 +9097,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ への経路がありません — このデバイスのネットワーク接続を確認してください。"
+            "value" : "%@への経路がありません — このデバイスのネットワーク接続を確認してください。"
           }
         },
         "zh-Hant" : {
@@ -9113,7 +9113,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ の保存された認証情報がありません。ホストを編集して再度サインインしてください。"
+            "value" : "%@の保存された認証情報がありません。ホストを編集して再度サインインしてください。"
           }
         },
         "zh-Hant" : {
@@ -9161,7 +9161,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ホストに tmux がありません"
+            "value" : "ホストにtmuxがありません"
           }
         },
         "zh-Hant" : {
@@ -9209,7 +9209,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ホスト鍵ではありません。SHA256: フィンガープリント、またはマシンの /etc/ssh にある公開鍵の行を貼り付けてください。"
+            "value" : "ホスト鍵ではありません。SHA256: フィンガープリント、またはマシンの/etc/sshにある公開鍵の行を貼り付けてください。"
           }
         },
         "zh-Hant" : {
@@ -9273,7 +9273,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に接続していません。"
+            "value" : "%@に接続していません。"
           }
         },
         "zh-Hant" : {
@@ -9305,7 +9305,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "テキストではありません — Multiplex はコードとして表示しません。"
+            "value" : "テキストではありません — Multiplexはコードとして表示しません。"
           }
         },
         "zh-Hant" : {
@@ -9401,7 +9401,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "オフにすると、ホストは接続せずに Deck に置かれます：プローブもタイルもなく、ウィジェットやショートカットでは無効と表示されます。すでに開いているターミナルウインドウは動き続け、下の Signal チェックは必要に応じて接続します。"
+            "value" : "オフにすると、ホストは接続せずにDeckに置かれます：プローブもタイルもなく、ウィジェットやショートカットでは無効と表示されます。すでに開いているターミナルウインドウは動き続け、下のSignalチェックは必要に応じて接続します。"
           }
         },
         "zh-Hant" : {
@@ -9433,7 +9433,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Mac ホストでは、Claude Code は認証情報をログインキーチェーンに保存しますが、SSH や tmux セッションではロック解除されません — GUI ログインが行われないためです — そのため、ログインが有効なままでも Claude Code はサインアウト状態で起動します。tmux セッション内で一度キーチェーンをロック解除してから、Claude Code を再起動してください："
+            "value" : "Macホストでは、Claude Codeは認証情報をログインキーチェーンに保存しますが、SSHやtmuxセッションではロック解除されません — GUIログインが行われないためです — そのため、ログインが有効なままでもClaude Codeはサインアウト状態で起動します。tmuxセッション内で一度キーチェーンをロック解除してから、Claude Codeを再起動してください："
           }
         },
         "zh-Hant" : {
@@ -9449,7 +9449,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "iPad ではキーバーがホームインジケータの上に浮かず、ウインドウの下端まで伸びます — キーの下により余白が生まれ、iPhone の横向きでも同様です。"
+            "value" : "iPadではキーバーがホームインジケータの上に浮かず、ウインドウの下端まで伸びます — キーの下により余白が生まれ、iPhoneの横向きでも同様です。"
           }
         },
         "zh-Hant" : {
@@ -9497,7 +9497,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "キーバーの 1 つのキーでショートカットパネル全体を開けます：コピーモード、分割、ウインドウ、ワークスペース、確認付きのクローズ。"
+            "value" : "キーバーの1つのキーでショートカットパネル全体を開けます：コピーモード、分割、ウインドウ、ワークスペース、確認付きのクローズ。"
           }
         },
         "zh-Hant" : {
@@ -9513,7 +9513,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "1 行、そのまま入力"
+            "value" : "1行、そのまま入力"
           }
         },
         "zh-Hant" : {
@@ -9529,7 +9529,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "1 行に 1 つのモデル ID を、ピッカーの順序で記述します。新規セッション、「エージェントを開く」ショートカット、ホストウィジェットがこれらを選択肢として提示し、--model として渡します。起動時に選ばない限り何も適用されません。"
+            "value" : "1行に1つのモデルIDを、ピッカーの順序で記述します。新規セッション、「エージェントを開く」ショートカット、ホストウィジェットがこれらを選択肢として提示し、--modelとして渡します。起動時に選ばない限り何も適用されません。"
           }
         },
         "zh-Hant" : {
@@ -9545,7 +9545,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "1 行に 1 つのオプションを、.tmux.conf のように記述します（mouse on、history-limit 50000）。各行は Multiplex がセッションを作成するときに、tmux set-option -t でそのセッションに適用されます。アタッチ時には何も適用されず、セッション単位のオプションはホスト側で作成されたセッションを変更しません。ホストの初期値は mouse on と focus-events on です。フィールドを空にすると何も適用されません。focus events などサーバー単位のオプションは tmux サーバー全体に影響します。"
+            "value" : "1行に1つのオプションを、.tmux.confのように記述します（mouse on、history-limit 50000）。各行はMultiplexがセッションを作成するときに、tmux set-option -tでそのセッションに適用されます。アタッチ時には何も適用されず、セッション単位のオプションはホスト側で作成されたセッションを変更しません。ホストの初期値はmouse onとfocus-events onです。フィールドを空にすると何も適用されません。focus eventsなどサーバー単位のオプションはtmuxサーバー全体に影響します。"
           }
         },
         "zh-Hant" : {
@@ -9593,7 +9593,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ を開きますか？"
+            "value" : "%@を開きますか？"
           }
         },
         "zh-Hant" : {
@@ -9737,7 +9737,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ でファイルを開きますか？"
+            "value" : "%@でファイルを開きますか？"
           }
         },
         "zh-Hant" : {
@@ -9801,7 +9801,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "複数のファイルを一度に開き、◂ ▸ で行き来し、A− / A+ またはピンチで文字サイズを設定できます — 設定は記憶され、すべてのファイルビューアタブに適用されます。"
+            "value" : "複数のファイルを一度に開き、◂ ▸ で行き来し、A−/A+ またはピンチで文字サイズを設定できます — 設定は記憶され、すべてのファイルビューアタブに適用されます。"
           }
         },
         "zh-Hant" : {
@@ -9817,7 +9817,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ でシェルを開く"
+            "value" : "%@でシェルを開く"
           }
         },
         "zh-Hant" : {
@@ -9849,7 +9849,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "各キーバーのチップの背後にあるフリートボードを開きます：往復、入力エコー、mosh のロスとローミング、再接続、ホストごとのデータ量。"
+            "value" : "各キーバーのチップの背後にあるフリートボードを開きます：往復、入力エコー、moshのロスとローミング、再接続、ホストごとのデータ量。"
           }
         },
         "zh-Hant" : {
@@ -9929,7 +9929,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "リモートファイルを Multiplex で読み取り専用として開きます。行番号の指定も可能です。"
+            "value" : "リモートファイルをMultiplexで読み取り専用として開きます。行番号の指定も可能です。"
           }
         },
         "zh-Hant" : {
@@ -9961,7 +9961,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "SSH 鍵のパスフレーズ入力を開きます"
+            "value" : "SSH鍵のパスフレーズ入力を開きます"
           }
         },
         "zh-Hant" : {
@@ -9977,7 +9977,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ホストの最新の tmux セッションを Multiplex で開きます。存在しない場合は新規作成します。"
+            "value" : "ホストの最新のtmuxセッションをMultiplexで開きます。存在しない場合は新規作成します。"
           }
         },
         "zh-Hant" : {
@@ -10079,7 +10079,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ のモデル（省略可）"
+            "value" : "%@のモデル（省略可）"
           }
         },
         "zh-Hant" : {
@@ -10095,7 +10095,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "省略可。このペインからバインドするすべてのマシンに適用されます：SSH 鍵はこのパスフレーズで保護して生成され、パスフレーズはホスト設定に保存されるため接続はそのまま使えます。ホスト設定で消すと、接続時に入力を求められます。空欄の場合、鍵は従来どおりロックなしで保存されます。"
+            "value" : "省略可。このペインからバインドするすべてのマシンに適用されます：SSH鍵はこのパスフレーズで保護して生成され、パスフレーズはホスト設定に保存されるため接続はそのまま使えます。ホスト設定で消すと、接続時に入力を求められます。空欄の場合、鍵は従来どおりロックなしで保存されます。"
           }
         },
         "zh-Hant" : {
@@ -10127,7 +10127,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "または、macOS か Linux"
+            "value" : "または、macOSかLinux"
           }
         },
         "zh-Hant" : {
@@ -10143,7 +10143,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "OSC 52 を使う SSH 経由なので、コードはローカルターミナルのクリップボードに入り、ユニバーサルクリップボードでここに届きます。"
+            "value" : "OSC 52を使うSSH経由なので、コードはローカルターミナルのクリップボードに入り、ユニバーサルクリップボードでここに届きます。"
           }
         },
         "zh-Hant" : {
@@ -10207,7 +10207,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ のターミナルに表示された PIN"
+            "value" : "%@のターミナルに表示されたPIN"
           }
         },
         "zh-Hant" : {
@@ -10351,7 +10351,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ペーストにはこのデバイスのクリップボードにコードが必要ですが、mpx は指示しない限りクリップボードを取得しません。代わりに --copy を付けて実行してください:"
+            "value" : "ペーストにはこのデバイスのクリップボードにコードが必要ですが、mpxは指示しない限りクリップボードを取得しません。代わりに --copyを付けて実行してください："
           }
         },
         "zh-Hant" : {
@@ -10383,7 +10383,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "お支払いは Apple ID に請求されます。サブスクリプションではありません。"
+            "value" : "お支払いはApple IDに請求されます。サブスクリプションではありません。"
           }
         },
         "zh-Hant" : {
@@ -10447,7 +10447,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "README 内の画像"
+            "value" : "README内の画像"
           }
         },
         "zh-Hant" : {
@@ -10463,7 +10463,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "README 内の画像、分割ペインでも効くファイルパス、そして選択・スクロール・mosh の整理。"
+            "value" : "README内の画像、分割ペインでも効くファイルパス、そして選択・スクロール・moshの整理。"
           }
         },
         "zh-Hant" : {
@@ -10479,7 +10479,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "各ビルトインを Bar または More に配置します。カスタム内容は複数行にできます。Submit をオフにすると、編集できる状態のまま残ります。"
+            "value" : "各ビルトインをBarまたはMoreに配置します。カスタム内容は複数行にできます。Submitをオフにすると、編集できる状態のまま残ります。"
           }
         },
         "zh-Hant" : {
@@ -10559,7 +10559,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "入力していないセッションで Claude Code、Codex、Grok Build がターンを終えた、質問した、許可を求めたときにバナーを表示します。Multiplex を開いたままにする必要があります。Pro が必要です。"
+            "value" : "入力していないセッションでClaude Code、Codex、Grok Buildがターンを終えた、質問した、許可を求めたときにバナーを表示します。Multiplexを開いたままにする必要があります。Proが必要です。"
           }
         },
         "zh-Hant" : {
@@ -10575,7 +10575,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ESC でターンを中断できます — キーバーと visionOS のキークラスターのどちらにもあります。"
+            "value" : "ESCでターンを中断できます — キーバーとvisionOSのキークラスターのどちらにもあります。"
           }
         },
         "zh-Hant" : {
@@ -10591,7 +10591,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "レンダリングされた README で「image: …」プレースホルダを押すと、画像がそのまま文書内に表示されます。"
+            "value" : "レンダリングされたREADMEで「image: …」プレースホルダを押すと、画像がそのまま文書内に表示されます。"
           }
         },
         "zh-Hant" : {
@@ -10607,7 +10607,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ ターミナルテーマのプレビュー"
+            "value" : "%@ターミナルテーマのプレビュー"
           }
         },
         "zh-Hant" : {
@@ -10677,7 +10677,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Pro では、ホスト数無制限、mosh、エージェントヘルパーコマンド無制限、通知、接続統計、カスタムテーマ、そして %lld 個のキーコマンドセットが使えます（無料版は %lld 個）。SSH ターミナル、エージェント検出、ウォールのライブ状態は無料のままです。"
+            "value" : "Proでは、ホスト数無制限、mosh、エージェントヘルパーコマンド無制限、通知、接続統計、カスタムテーマ、そして%lld個のキーコマンドセットが使えます（無料版は%lld個）。SSHターミナル、エージェント検出、ウォールのライブ状態は無料のままです。"
           }
         },
         "zh-Hant" : {
@@ -10693,7 +10693,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Pro の詳細"
+            "value" : "Proの詳細"
           }
         },
         "zh-Hant" : {
@@ -10709,7 +10709,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Pro のロックを解除しました"
+            "value" : "Proのロックを解除しました"
           }
         },
         "zh-Hant" : {
@@ -10741,7 +10741,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "PIN を検証中…"
+            "value" : "PINを検証中…"
           }
         },
         "zh-Hant" : {
@@ -10773,7 +10773,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "購入は承認待ちです。承認されると Pro は自動的にロック解除されます。拒否された場合は「購入を復元」をタップしてもう一度確認してください。"
+            "value" : "購入は承認待ちです。承認されるとProは自動的にロック解除されます。拒否された場合は「購入を復元」をタップしてもう一度確認してください。"
           }
         },
         "zh-Hant" : {
@@ -10789,7 +10789,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このデバイスではこの Apple ID での購入が許可されていません。"
+            "value" : "このデバイスではこのApple IDでの購入が許可されていません。"
           }
         },
         "zh-Hant" : {
@@ -10805,7 +10805,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "非消耗型の Multiplex Pro 解除を購入します"
+            "value" : "非消耗型のMultiplex Pro解除を購入します"
           }
         },
         "zh-Hant" : {
@@ -10837,7 +10837,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "REFRESH でもう一度接続します。"
+            "value" : "REFRESHでもう一度接続します。"
           }
         },
         "zh-Hant" : {
@@ -10853,7 +10853,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "REMEMBER は起動の選択のみを保存します。"
+            "value" : "REMEMBERは起動の選択のみを保存します。"
           }
         },
         "zh-Hant" : {
@@ -10869,7 +10869,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "REMEMBER は起動とセットアップスクリプトの選択を保存します。"
+            "value" : "REMEMBERは起動とセットアップスクリプトの選択を保存します。"
           }
         },
         "zh-Hant" : {
@@ -10885,7 +10885,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "リモートループバック → %@ に書き換え"
+            "value" : "リモートループバック → %@に書き換え"
           }
         },
         "zh-Hant" : {
@@ -10949,7 +10949,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "接続経路: %@"
+            "value" : "接続経路：%@"
           }
         },
         "zh-Hant" : {
@@ -10981,7 +10981,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に再アタッチ中…"
+            "value" : "%@に再アタッチ中…"
           }
         },
         "zh-Hant" : {
@@ -10997,7 +10997,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "UIKit で再構築"
+            "value" : "UIKitで再構築"
           }
         },
         "zh-Hant" : {
@@ -11029,7 +11029,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に再接続中…"
+            "value" : "%@に再接続中…"
           }
         },
         "zh-Hant" : {
@@ -11189,7 +11189,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "「%@」と保存されたシークレットを、このデバイスと同期中のデバイスから削除します。ホスト上の tmux セッションは動作し続けます。"
+            "value" : "「%@」と保存されたシークレットを、このデバイスと同期中のデバイスから削除します。ホスト上のtmuxセッションは動作し続けます。"
           }
         },
         "zh-Hant" : {
@@ -11269,7 +11269,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "再描画が 60 Hz のクロックではなく 90 Hz ディスプレイに合うため、高速にスクロールする出力が均等に進みます。"
+            "value" : "再描画が60 Hzのクロックではなく90 Hzディスプレイに合うため、高速にスクロールする出力が均等に進みます。"
           }
         },
         "zh-Hant" : {
@@ -11307,7 +11307,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "リピートガード: 最大 ×%lld、送信間隔 %lld–%lld ms、バースト全体は %lld 秒以内。値は自動的に制限されます。"
+            "value" : "リピートガード：最大 ×%lld、送信間隔%lld–%lld ms、バースト全体は%lld秒以内。値は自動的に制限されます。"
           }
         },
         "zh-Hant" : {
@@ -11323,7 +11323,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ を要求"
+            "value" : "%@を要求"
           }
         },
         "zh-Hant" : {
@@ -11339,7 +11339,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex を開いたとき、またはバックグラウンドから復帰したときに %@ を要求します。認証するまで Deck とすべてのターミナルは覆われたままですが、接続とウォールは動作し続けます。このデバイスのみ。"
+            "value" : "Multiplexを開いたとき、またはバックグラウンドから復帰したときに%@を要求します。認証するまでDeckとすべてのターミナルは覆われたままですが、接続とウォールは動作し続けます。このデバイスのみ。"
           }
         },
         "zh-Hant" : {
@@ -11371,7 +11371,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex Pro が必要です"
+            "value" : "Multiplex Proが必要です"
           }
         },
         "zh-Hant" : {
@@ -11387,7 +11387,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ をリセット"
+            "value" : "%@をリセット"
           }
         },
         "zh-Hant" : {
@@ -11579,7 +11579,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "往復、エコーレイテンシ、損失、転送量 — トランスポートがすでに計算している数値を受動的に測定し、このセッションの間だけメモリに保持します。保存も同期もしません。オフにするとバーのチップと統計ボードを非表示にし、測定を停止します。ライブチップは無料で、ボードには Pro が必要です。"
+            "value" : "往復、エコーレイテンシ、損失、転送量 — トランスポートがすでに計算している数値を受動的に測定し、このセッションの間だけメモリに保持します。保存も同期もしません。オフにするとバーのチップと統計ボードを非表示にし、測定を停止します。ライブチップは無料で、ボードにはProが必要です。"
           }
         },
         "zh-Hant" : {
@@ -11611,7 +11611,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "tmux の代わりに herdr を実行し、どのペインでもテキストを選択でき、席を外している間もエージェントからの知らせが届きます。"
+            "value" : "tmuxの代わりにherdrを実行し、どのペインでもテキストを選択でき、席を外している間もエージェントからの知らせが届きます。"
           }
         },
         "zh-Hant" : {
@@ -11627,7 +11627,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "追加したいマシンで mpx CLI を実行すると、そのマシンが自ら名乗り出ます — ここでアドレスやユーザ、鍵を入力する必要はありません。インストールできない場合は MANUAL に切り替えてください。"
+            "value" : "追加したいマシンでmpx CLIを実行すると、そのマシンが自ら名乗り出ます — ここでアドレスやユーザ、鍵を入力する必要はありません。インストールできない場合はMANUALに切り替えてください。"
           }
         },
         "zh-Hant" : {
@@ -11643,7 +11643,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "エージェントの前に実行します。空欄にすると Multiplex に記憶されたセットアップスクリプトを使います。"
+            "value" : "エージェントの前に実行します。空欄にするとMultiplexに記憶されたセットアップスクリプトを使います。"
           }
         },
         "zh-Hant" : {
@@ -11723,7 +11723,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "SSH リンク — キープアライブなし · RTT は Deck のプローブで取得 · エコーは入力中に測定"
+            "value" : "SSHリンク — キープアライブなし · RTTはDeckのプローブで取得 · エコーは入力中に測定"
           }
         },
         "zh-Hant" : {
@@ -11739,7 +11739,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "SSH は制御用の接続とアタッチしたターミナルの両方を運びます。"
+            "value" : "SSHは制御用の接続とアタッチしたターミナルの両方を運びます。"
           }
         },
         "zh-Hant" : {
@@ -12065,7 +12065,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ の起動引数として送信され、すぐに作業を開始します。空欄にするとプロンプトなしで %@ を開きます。"
+            "value" : "%@の起動引数として送信され、すぐに作業を開始します。空欄にするとプロンプトなしで%@を開きます。"
           }
         },
         "zh-Hant" : {
@@ -12129,7 +12129,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "セッションは herdr で実行されます"
+            "value" : "セッションはherdrで実行されます"
           }
         },
         "zh-Hant" : {
@@ -12151,7 +12151,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "セッション、ライブタイル、アタッチはすべて各ホストの %@ サーバーから提供されますが、%@ にはまだ %@ がありません。通常のシェルは使えます — ホストのバーにある SHELL チップで開けます。Deck をすべて使うには、ホストに %@ をインストールしてください："
+            "value" : "セッション、ライブタイル、アタッチはすべて各ホストの%@サーバーから提供されますが、%@にはまだ%@がありません。通常のシェルは使えます — ホストのバーにあるSHELLチップで開けます。Deckをすべて使うには、ホストに%@をインストールしてください："
           }
         },
         "zh-Hant" : {
@@ -12199,7 +12199,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "設定 ▸ ターミナルレンダラーは、ターミナルの文字を CoreGraphics ではなく GPU で描画します。デフォルトはオフで、新しく開いたターミナルウインドウに適用されます。"
+            "value" : "設定 ▸ ターミナルレンダラーは、ターミナルの文字をCoreGraphicsではなくGPUで描画します。デフォルトはオフで、新しく開いたターミナルウインドウに適用されます。"
           }
         },
         "zh-Hant" : {
@@ -12247,7 +12247,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Claude Code、Codex、Pi、Grok Build で共有"
+            "value" : "Claude Code、Codex、Pi、Grok Buildで共有"
           }
         },
         "zh-Hant" : {
@@ -12263,7 +12263,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "「共有」にすると、編集できる 1 つのコマンドが Claude Code、Codex、Pi、Grok Build の間で同期されます。"
+            "value" : "「共有」にすると、編集できる1つのコマンドがClaude Code、Codex、Pi、Grok Buildの間で同期されます。"
           }
         },
         "zh-Hant" : {
@@ -12295,7 +12295,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ を表示"
+            "value" : "%@を表示"
           }
         },
         "zh-Hant" : {
@@ -12311,7 +12311,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ のヘルパーチップを表示"
+            "value" : "%@のヘルパーチップを表示"
           }
         },
         "zh-Hant" : {
@@ -12391,7 +12391,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "herdr のショートカットを表示"
+            "value" : "herdrのショートカットを表示"
           }
         },
         "zh-Hant" : {
@@ -12519,7 +12519,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "tmux のショートカットを表示"
+            "value" : "tmuxのショートカットを表示"
           }
         },
         "zh-Hant" : {
@@ -12535,7 +12535,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "最初の %@ を表示しています。"
+            "value" : "最初の%@を表示しています。"
           }
         },
         "zh-Hant" : {
@@ -12567,7 +12567,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Deck とターミナルウインドウのソースラベルに表示されます。"
+            "value" : "Deckとターミナルウインドウのソースラベルに表示されます。"
           }
         },
         "zh-Hant" : {
@@ -12663,7 +12663,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このホストの Deck に表示します"
+            "value" : "このホストのDeckに表示します"
           }
         },
         "zh-Hant" : {
@@ -12727,7 +12727,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "上記の設定で SSH にサインインし、ホスト上で %@ と mosh-server を探します。"
+            "value" : "上記の設定でSSHにサインインし、ホスト上で%@とmosh-serverを探します。"
           }
         },
         "zh-Hant" : {
@@ -12743,7 +12743,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "上記の設定で SSH にサインインし、ホスト上で %@ を探します。"
+            "value" : "上記の設定でSSHにサインインし、ホスト上で%@を探します。"
           }
         },
         "zh-Hant" : {
@@ -12813,7 +12813,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex の外部から、%@ を %@ で起動するよう要求がありました。最初のプロンプトは次のとおりです：\n\n%@\n\n心当たりがある場合のみ実行してください。"
+            "value" : "Multiplexの外部から、%@を%@で起動するよう要求がありました。最初のプロンプトは次のとおりです：\n\n%@\n\n心当たりがある場合のみ実行してください。"
           }
         },
         "zh-Hant" : {
@@ -12835,7 +12835,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex の外部から、%@ を %@ で起動するよう要求がありました。\n\n心当たりがある場合のみ実行してください。"
+            "value" : "Multiplexの外部から、%@を%@で起動するよう要求がありました。\n\n心当たりがある場合のみ実行してください。"
           }
         },
         "zh-Hant" : {
@@ -12857,7 +12857,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex の外部から、%@ を %@ で開くよう要求がありました。心当たりがある場合のみ開いてください。"
+            "value" : "Multiplexの外部から、%@を%@で開くよう要求がありました。心当たりがある場合のみ開いてください。"
           }
         },
         "zh-Hant" : {
@@ -12879,7 +12879,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex の外部から、%@ を %@ で表示するよう要求がありました。ファイルは読み取り専用で開きます。心当たりがある場合のみ開いてください。"
+            "value" : "Multiplexの外部から、%@を%@で表示するよう要求がありました。ファイルは読み取り専用で開きます。心当たりがある場合のみ開いてください。"
           }
         },
         "zh-Hant" : {
@@ -13007,7 +13007,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "現在のパレットから始めて、表面と ANSI カラーを調整します。"
+            "value" : "現在のパレットから始めて、表面とANSIカラーを調整します。"
           }
         },
         "zh-Hant" : {
@@ -13045,7 +13045,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "新しいシェルで %1$@ を起動します。任意のプロンプトが最初のメッセージになります。%2$@"
+            "value" : "新しいシェルで%1$@を起動します。任意のプロンプトが最初のメッセージになります。%2$@"
           }
         },
         "zh-Hant" : {
@@ -13067,7 +13067,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "新しいタブで %1$@ を起動します。任意のプロンプトが最初のメッセージになります。%2$@"
+            "value" : "新しいタブで%1$@を起動します。任意のプロンプトが最初のメッセージになります。%2$@"
           }
         },
         "zh-Hant" : {
@@ -13083,7 +13083,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "新しい tmux セッションで CLI エージェントを起動します。作業ディレクトリ、セットアップスクリプト、最初のプロンプトは任意です。"
+            "value" : "新しいtmuxセッションでCLIエージェントを起動します。作業ディレクトリ、セットアップスクリプト、最初のプロンプトは任意です。"
           }
         },
         "zh-Hant" : {
@@ -13121,7 +13121,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%1$@ から開始します。%2$@"
+            "value" : "%1$@から開始します。%2$@"
           }
         },
         "zh-Hant" : {
@@ -13137,7 +13137,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ から開始します。ログインシェルのデフォルトを使うには「ホーム」を選択します。"
+            "value" : "%@から開始します。ログインシェルのデフォルトを使うには「ホーム」を選択します。"
           }
         },
         "zh-Hant" : {
@@ -13185,7 +13185,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このホストを Deck で再び監視します"
+            "value" : "このホストをDeckで再び監視します"
           }
         },
         "zh-Hant" : {
@@ -13223,7 +13223,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%2$@ 上の「%1$@」とその中で実行中のすべてを停止し、保存された状態を削除します（herdr はデフォルトセッションを停止した状態でディスクに残します）。"
+            "value" : "%2$@上の「%1$@」とその中で実行中のすべてを停止し、保存された状態を削除します（herdrはデフォルトセッションを停止した状態でディスクに残します）。"
           }
         },
         "zh-Hant" : {
@@ -13245,7 +13245,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%2$@ 上の「%1$@」を停止し、herdr が許可すれば保存された状態を削除してから、タブを閉じます。"
+            "value" : "%2$@上の「%1$@」を停止し、herdrが許可すれば保存された状態を削除してから、タブを閉じます。"
           }
         },
         "zh-Hant" : {
@@ -13261,7 +13261,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "iCloud キーチェーンに保存され、ホストの記録には保存されません。"
+            "value" : "iCloudキーチェーンに保存され、ホストの記録には保存されません。"
           }
         },
         "zh-Hant" : {
@@ -13277,7 +13277,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Enter で送信"
+            "value" : "Enterで送信"
           }
         },
         "zh-Hant" : {
@@ -13341,7 +13341,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ホスト設定でバックエンドを切り替えられます — 1 つのウォールに tmux と herdr のセッションを並べて表示することもできます。"
+            "value" : "ホスト設定でバックエンドを切り替えられます — 1つのウォールにtmuxとherdrのセッションを並べて表示することもできます。"
           }
         },
         "zh-Hant" : {
@@ -13357,7 +13357,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このホストを herdr バックエンドに切り替えます"
+            "value" : "このホストをherdrバックエンドに切り替えます"
           }
         },
         "zh-Hant" : {
@@ -13379,7 +13379,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%1$@ %2$lld に切り替え、%3$@"
+            "value" : "%1$@ %2$lldに切り替え、%3$@"
           }
         },
         "zh-Hant" : {
@@ -13491,7 +13491,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "tmux / HRDR キー"
+            "value" : "tmux/HRDRキー"
           }
         },
         "zh-Hant" : {
@@ -13619,7 +13619,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "2 回タップまたはクリックします。リモートにはまず実際のクリックが 2 回届き — その後その位置に選択ブロックが現れます: "
+            "value" : "2回タップまたはクリックします。リモートにはまず実際のクリックが2回届き — その後その位置に選択ブロックが現れます："
           }
         },
         "zh-Hant" : {
@@ -13699,7 +13699,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ターミナルは UDP でアタッチし、ローミングやスリープ後も維持されます。SSH は引き続きサインインし、mosh-server を起動して Deck を探索します。"
+            "value" : "ターミナルはUDPでアタッチし、ローミングやスリープ後も維持されます。SSHは引き続きサインインし、mosh-serverを起動してDeckを探索します。"
           }
         },
         "zh-Hant" : {
@@ -13763,7 +13763,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "文字サイズ %@、100 パーセントにリセット"
+            "value" : "文字サイズ%@、100パーセントにリセット"
           }
         },
         "zh-Hant" : {
@@ -13795,7 +13795,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "PIN が一致しません — ターミナルを確認してもう一度お試しください。"
+            "value" : "PINが一致しません — ターミナルを確認してもう一度お試しください。"
           }
         },
         "zh-Hant" : {
@@ -13827,7 +13827,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "そのマシンは通知を停止しました — mpx bind をもう一度実行してください。"
+            "value" : "そのマシンは通知を停止しました — mpx bindをもう一度実行してください。"
           }
         },
         "zh-Hant" : {
@@ -13843,7 +13843,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "そのパスフレーズでは「%@」の秘密鍵を解除できませんでした。もう一度お試しください。「保存して接続」は iCloud キーチェーン内のコピーを置き換えます。"
+            "value" : "そのパスフレーズでは「%@」の秘密鍵を解除できませんでした。もう一度お試しください。「保存して接続」はiCloudキーチェーン内のコピーを置き換えます。"
           }
         },
         "zh-Hant" : {
@@ -13891,7 +13891,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App Store に接続できませんでした。インターネット接続を確認してもう一度お試しください。"
+            "value" : "App Storeに接続できませんでした。インターネット接続を確認してもう一度お試しください。"
           }
         },
         "zh-Hant" : {
@@ -13913,7 +13913,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App Store がリクエストを完了できませんでした。このデバイスが App Store にサインインしていることを確認してから、もう一度お試しください。(%1$@ %2$lld)"
+            "value" : "App Storeがリクエストを完了できませんでした。このデバイスがApp Storeにサインインしていることを確認してから、もう一度お試しください。(%1$@ %2$lld)"
           }
         },
         "zh-Hant" : {
@@ -13929,7 +13929,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App Store がリクエストを完了できませんでした。しばらくしてからもう一度お試しください。"
+            "value" : "App Storeがリクエストを完了できませんでした。しばらくしてからもう一度お試しください。"
           }
         },
         "zh-Hant" : {
@@ -13945,7 +13945,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このウインドウから App Store の購入シートを表示できませんでした。"
+            "value" : "このウインドウからApp Storeの購入シートを表示できませんでした。"
           }
         },
         "zh-Hant" : {
@@ -13961,7 +13961,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App Store がシステムエラーを報告しました。(%@)"
+            "value" : "App Storeがシステムエラーを報告しました。(%@)"
           }
         },
         "zh-Hant" : {
@@ -13977,7 +13977,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App Store が不明な購入結果を返しました。"
+            "value" : "App Storeが不明な購入結果を返しました。"
           }
         },
         "zh-Hant" : {
@@ -13993,7 +13993,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App Store の取引を検証できませんでした。"
+            "value" : "App Storeの取引を検証できませんでした。"
           }
         },
         "zh-Hant" : {
@@ -14009,7 +14009,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Mac のキーチェーンがロックされているため、Claude Code はサインアウト状態で表示されます"
+            "value" : "Macのキーチェーンがロックされているため、Claude Codeはサインアウト状態で表示されます"
           }
         },
         "zh-Hant" : {
@@ -14025,7 +14025,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "OpenSSH 鍵は iCloud キーチェーンに保存されます。パスフレーズを空欄のままにすると接続時に入力でき、パスフレーズも一緒に保存できます。"
+            "value" : "OpenSSH鍵はiCloudキーチェーンに保存されます。パスフレーズを空欄のままにすると接続時に入力でき、パスフレーズも一緒に保存できます。"
           }
         },
         "zh-Hant" : {
@@ -14041,7 +14041,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "mosh タブやスクロールバックしたターミナルで、SELECT ブロックと SELECT TEXT バーがキーボードの高さ分だけ上へ — あるいは画面外へ — ずれることがありました。どちらも現在は押した位置に固定され、2 つ目のクライアントがアタッチしている場合は共有ジオメトリが落ち着くまで選択が待機します。"
+            "value" : "moshタブやスクロールバックしたターミナルで、SELECTブロックとSELECT TEXTバーがキーボードの高さ分だけ上へ — あるいは画面外へ — ずれることがありました。どちらも現在は押した位置に固定され、2つ目のクライアントがアタッチしている場合は共有ジオメトリが落ち着くまで選択が待機します。"
           }
         },
         "zh-Hant" : {
@@ -14057,7 +14057,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "STOP チップを廃止"
+            "value" : "STOPチップを廃止"
           }
         },
         "zh-Hant" : {
@@ -14089,7 +14089,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "バインドが完了しませんでした。mpx bind をもう一度実行してください。"
+            "value" : "バインドが完了しませんでした。mpx bindをもう一度実行してください。"
           }
         },
         "zh-Hant" : {
@@ -14137,7 +14137,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "クリップボードにバインドコードがありません。CLI が出力した multiplex:// の行をコピーしてください。"
+            "value" : "クリップボードにバインドコードがありません。CLIが出力したmultiplex://の行をコピーしてください。"
           }
         },
         "zh-Hant" : {
@@ -14153,7 +14153,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このコマンドはその Mac アカウントのログインパスワードを尋ねます。ロック解除は macOS が再びキーチェーンをロックするまで — 再起動後、またはキーチェーン自体のロック設定に従って — 続きます。"
+            "value" : "このコマンドはそのMacアカウントのログインパスワードを尋ねます。ロック解除はmacOSが再びキーチェーンをロックするまで — 再起動後、またはキーチェーン自体のロック設定に従って — 続きます。"
           }
         },
         "zh-Hant" : {
@@ -14169,7 +14169,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このコマンドはその Mac アカウントのログインパスワードを尋ねます。ロック解除は macOS が再びキーチェーンをロックするまで — 再起動後、またはキーチェーン自体のロック設定に従って — 続きます。Deck がこの状態を検出した場合もここを案内します: ホストのレールに KEYCHAIN LOCKED と表示されます。"
+            "value" : "このコマンドはそのMacアカウントのログインパスワードを尋ねます。ロック解除はmacOSが再びキーチェーンをロックするまで — 再起動後、またはキーチェーン自体のロック設定に従って — 続きます。Deckがこの状態を検出した場合もここを案内します：ホストのレールにKEYCHAIN LOCKEDと表示されます。"
           }
         },
         "zh-Hant" : {
@@ -14201,7 +14201,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Deck は各ホスト上のセッションマルチプレクサを中心に構成されています — セッション、ライブタイル、アタッチはすべてそこから来ます。各ホストは tmux か herdr のどちらか 1 つを実行し、ホスト設定の「セッションの実行先」で選択します。マルチプレクサのないホストも通常のシェルとしては動作しますが（レールの SHELL チップ）、セッションタイルはありません。Deck をフルに使うには、そのホストに設定されている方をインストールしてください:"
+            "value" : "Deckは各ホスト上のセッションマルチプレクサを中心に構成されています — セッション、ライブタイル、アタッチはすべてそこから来ます。各ホストはtmuxかherdrのどちらか1つを実行し、ホスト設定の「セッションの実行先」で選択します。マルチプレクサのないホストも通常のシェルとしては動作しますが（レールのSHELLチップ）、セッションタイルはありません。Deckをフルに使うには、そのホストに設定されている方をインストールしてください："
           }
         },
         "zh-Hant" : {
@@ -14217,7 +14217,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Deck はリモートの tmux サーバー — セッション、ウインドウ、エージェントのペイン — を監視します。herdr (herdr.dev) はそれを実行するホスト向けの選択肢です。"
+            "value" : "Deckはリモートのtmuxサーバー — セッション、ウインドウ、エージェントのペイン — を監視します。herdr (herdr.dev) はそれを実行するホスト向けの選択肢です。"
           }
         },
         "zh-Hant" : {
@@ -14233,7 +14233,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Deck は herdr CLI を通じて herdr (herdr.dev) のセッションとそのエージェントを監視します — セッションごとに 1 つのタイル、そのワークスペースがタイルのウインドウ行になります。タイルからは herdr クライアント全体にアタッチします。tmux オプションエディタは herdr セッションには適用されません。"
+            "value" : "Deckはherdr CLIを通じてherdr (herdr.dev) のセッションとそのエージェントを監視します — セッションごとに1つのタイル、そのワークスペースがタイルのウインドウ行になります。タイルからはherdrクライアント全体にアタッチします。tmuxオプションエディタはherdrセッションには適用されません。"
           }
         },
         "zh-Hant" : {
@@ -14249,7 +14249,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このホストが前面にある間、Deck は約 5 秒ごとに探索し、そのセッションがライブタイルとして表示されます。"
+            "value" : "このホストが前面にある間、Deckは約5秒ごとに探索し、そのセッションがライブタイルとして表示されます。"
           }
         },
         "zh-Hant" : {
@@ -14265,7 +14265,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Deck は数秒ごとに再探索し、マルチプレクサが入るとすぐにタイルが点灯します — 再起動も、ホスト側の設定も不要です。"
+            "value" : "Deckは数秒ごとに再探索し、マルチプレクサが入るとすぐにタイルが点灯します — 再起動も、ホスト側の設定も不要です。"
           }
         },
         "zh-Hant" : {
@@ -14287,7 +14287,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Deck は数秒ごとに再探索します — %1$@ がホストに入るとすぐにセッションタイルが点灯します。%2$@"
+            "value" : "Deckは数秒ごとに再探索します — %1$@がホストに入るとすぐにセッションタイルが点灯します。%2$@"
           }
         },
         "zh-Hant" : {
@@ -14303,7 +14303,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Deck は %@ で動作します"
+            "value" : "Deckは%@で動作します"
           }
         },
         "zh-Hant" : {
@@ -14319,7 +14319,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ターミナルプログラムが出力する 8 つの標準カラー。"
+            "value" : "ターミナルプログラムが出力する8つの標準カラー。"
           }
         },
         "zh-Hant" : {
@@ -14335,7 +14335,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このフィールドには Multiplex が開けるものがありません — 対象には Web またはメールのアドレスが必要です。編集するか、テキストが役に立つならコピーしてください。"
+            "value" : "このフィールドにはMultiplexが開けるものがありません — 対象にはWebまたはメールのアドレスが必要です。編集するか、テキストが役に立つならコピーしてください。"
           }
         },
         "zh-Hant" : {
@@ -14351,7 +14351,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このフィールドにはビューアが解決できるものがありません — 相対パスにはディレクトリが必要で、スペースは /、~/、./、$HOME/ の後ろでのみ有効です。編集するか、テキストが役に立つならコピーしてください。"
+            "value" : "このフィールドにはビューアが解決できるものがありません — 相対パスにはディレクトリが必要で、スペースは/、~/、./、$HOME/の後ろでのみ有効です。編集するか、テキストが役に立つならコピーしてください。"
           }
         },
         "zh-Hant" : {
@@ -14389,7 +14389,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "無料プランも十分に使えます: ホスト 2 台、空間 SSH ターミナル、リアルタイムのエージェント検出、内蔵テーマ、保存できるキーコマンド %1$lld 件、内蔵またはカスタムのエージェントコマンドのタップが 1 日 %2$lld 回。"
+            "value" : "無料プランも十分に使えます：ホスト2台、空間SSHターミナル、リアルタイムのエージェント検出、内蔵テーマ、保存できるキーコマンド%1$lld件、内蔵またはカスタムのエージェントコマンドのタップが1日%2$lld回。"
           }
         },
         "zh-Hant" : {
@@ -14421,7 +14421,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ホストが拒否しました: 許可がありません。"
+            "value" : "ホストが拒否しました：許可がありません。"
           }
         },
         "zh-Hant" : {
@@ -14437,7 +14437,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ホストによると %@ はもう存在しません。"
+            "value" : "ホストによると%@はもう存在しません。"
           }
         },
         "zh-Hant" : {
@@ -14549,7 +14549,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "マシンが拒否しました: %@"
+            "value" : "マシンが拒否しました：%@"
           }
         },
         "zh-Hant" : {
@@ -14565,7 +14565,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "名前は Deck 上でこのホストを示すラベルです。アドレス、ポート、ユーザが SSH の接続先になります。"
+            "value" : "名前はDeck上でこのホストを示すラベルです。アドレス、ポート、ユーザがSSHの接続先になります。"
           }
         },
         "zh-Hant" : {
@@ -14581,7 +14581,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "パスフレーズで %@ の秘密鍵を解除できませんでした。もう一度お試しください。"
+            "value" : "パスフレーズで%@の秘密鍵を解除できませんでした。もう一度お試しください。"
           }
         },
         "zh-Hant" : {
@@ -14597,7 +14597,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "保留中の購入では有効な Multiplex Pro の権利が付与されませんでした。"
+            "value" : "保留中の購入では有効なMultiplex Proの権利が付与されませんでした。"
           }
         },
         "zh-Hant" : {
@@ -14613,7 +14613,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "秘密鍵を読み取れませんでした。BEGIN/END の行を含む OpenSSH の ed25519 または RSA 鍵を貼り付けてください。"
+            "value" : "秘密鍵を読み取れませんでした。BEGIN/ENDの行を含むOpenSSHのed25519またはRSA鍵を貼り付けてください。"
           }
         },
         "zh-Hant" : {
@@ -14629,7 +14629,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ の秘密鍵を読み取れませんでした。OpenSSH の ed25519 または RSA 鍵を貼り付けてください。"
+            "value" : "%@の秘密鍵を読み取れませんでした。OpenSSHのed25519またはRSA鍵を貼り付けてください。"
           }
         },
         "zh-Hant" : {
@@ -14645,7 +14645,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ の秘密鍵は暗号化されています。接続するにはパスフレーズを入力してください。"
+            "value" : "%@の秘密鍵は暗号化されています。接続するにはパスフレーズを入力してください。"
           }
         },
         "zh-Hant" : {
@@ -14661,7 +14661,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "「%@」の秘密鍵は暗号化されています。Connect Once は Multiplex を終了するまでパスフレーズを保持します。Save & Connect は iCloud キーチェーンに保存し、ほかのデバイスでも使えます。"
+            "value" : "「%@」の秘密鍵は暗号化されています。Connect OnceはMultiplexを終了するまでパスフレーズを保持します。Save & ConnectはiCloudキーチェーンに保存し、ほかのデバイスでも使えます。"
           }
         },
         "zh-Hant" : {
@@ -14677,7 +14677,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "この購入は有効な Multiplex Pro の権利ではありません。"
+            "value" : "この購入は有効なMultiplex Proの権利ではありません。"
           }
         },
         "zh-Hant" : {
@@ -14725,7 +14725,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このタブのホストは Deck に存在しないため、再接続できません。"
+            "value" : "このタブのホストはDeckに存在しないため、再接続できません。"
           }
         },
         "zh-Hant" : {
@@ -14757,7 +14757,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "リンクのように見えますが、Multiplex が開けるアドレスがありません。必要であればコピーしてください。"
+            "value" : "リンクのように見えますが、Multiplexが開けるアドレスがありません。必要であればコピーしてください。"
           }
         },
         "zh-Hant" : {
@@ -14773,7 +14773,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "iPad で tmux の分割ショートカットが余分な % を入力しなくなり、ファイルビューアは tmux でも herdr でも押したペインの作業ディレクトリで開きます。"
+            "value" : "iPadでtmuxの分割ショートカットが余分な % を入力しなくなり、ファイルビューアはtmuxでもherdrでも押したペインの作業ディレクトリで開きます。"
           }
         },
         "zh-Hant" : {
@@ -14789,7 +14789,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ビューポートはこのアドレスを Multiplex 内で表示します。OPEN を使うとシステムのブラウザに渡されます。これはホストから来たものです—開く前に上のアドレスを確認してください。"
+            "value" : "ビューポートはこのアドレスをMultiplex内で表示します。OPENを使うとシステムのブラウザに渡されます。これはホストから来たものです — 開く前に上のアドレスを確認してください。"
           }
         },
         "zh-Hant" : {
@@ -14805,7 +14805,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ここでは作業ツリーが HEAD と一致しています。"
+            "value" : "ここでは作業ツリーがHEADと一致しています。"
           }
         },
         "zh-Hant" : {
@@ -14869,7 +14869,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このアドレスはホストから来たもので、ハイパーリンクの表示テキストはリンク先と異なる場合があります—Multiplex の外で開く前に上のホストを確認してください。検出が誤っている場合はリンク先を編集できます。"
+            "value" : "このアドレスはホストから来たもので、ハイパーリンクの表示テキストはリンク先と異なる場合があります — Multiplexの外で開く前に上のホストを確認してください。検出が誤っている場合はリンク先を編集できます。"
           }
         },
         "zh-Hant" : {
@@ -14885,7 +14885,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このアドレスは %@ のネットワーク上にあります—ページを読み込むには、デバイスが同じネットワークに接続している必要があります。"
+            "value" : "このアドレスは%@のネットワーク上にあります — ページを読み込むには、デバイスが同じネットワークに接続している必要があります。"
           }
         },
         "zh-Hant" : {
@@ -14901,7 +14901,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "この App には App Store の購入に対する権利がありません。"
+            "value" : "このAppにはApp Storeの購入に対する権利がありません。"
           }
         },
         "zh-Hant" : {
@@ -14917,7 +14917,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このデバイスではデコードできません—Core Audio が読めない形式（Ogg Vorbis など）か、そもそも音声ではありません。"
+            "value" : "このデバイスではデコードできません — Core Audioが読めない形式（Ogg Vorbisなど）か、そもそも音声ではありません。"
           }
         },
         "zh-Hant" : {
@@ -14981,7 +14981,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "これは現在画面に表示されている %@ テーマです。"
+            "value" : "これは現在画面に表示されている%@テーマです。"
           }
         },
         "zh-Hant" : {
@@ -14997,7 +14997,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "この mosh セッションはすでに開いています。"
+            "value" : "このmoshセッションはすでに開いています。"
           }
         },
         "zh-Hant" : {
@@ -15013,7 +15013,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "このページは %@ 自身のアドレスを使います。応答を得るには、サーバがループバック以外でも待ち受ける必要があります（vite --host、-H 0.0.0.0）。"
+            "value" : "このページは%@自身のアドレスを使います。応答を得るには、サーバがループバック以外でも待ち受ける必要があります（vite --host、-H 0.0.0.0）。"
           }
         },
         "zh-Hant" : {
@@ -15045,7 +15045,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "この購入は、同じ Apple ID を使用しているデバイスで利用できます。"
+            "value" : "この購入は、同じApple IDを使用しているデバイスで利用できます。"
           }
         },
         "zh-Hant" : {
@@ -15109,7 +15109,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ を入力"
+            "value" : "%@を入力"
           }
         },
         "zh-Hant" : {
@@ -15125,7 +15125,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "SSH の接続先を自分で入力します。マシンにインストールするものはありません。"
+            "value" : "SSHの接続先を自分で入力します。マシンにインストールするものはありません。"
           }
         },
         "zh-Hant" : {
@@ -15141,7 +15141,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "新しいシェルでまず %@ を入力し、その設定を引き継いだ状態で起動します。"
+            "value" : "新しいシェルでまず%@を入力し、その設定を引き継いだ状態で起動します。"
           }
         },
         "zh-Hant" : {
@@ -15157,7 +15157,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "UDP ポートまたは範囲"
+            "value" : "UDPポートまたは範囲"
           }
         },
         "zh-Hant" : {
@@ -15205,7 +15205,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "マウスレポート中は、タップごとに即座に 1 クリックが送られるため、TUI 自身のダブルクリックが機能します。"
+            "value" : "マウスレポート中は、タップごとに即座に1クリックが送られるため、TUI自身のダブルクリックが機能します。"
           }
         },
         "zh-Hant" : {
@@ -15253,7 +15253,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex のロックを解除"
+            "value" : "Multiplexのロックを解除"
           }
         },
         "zh-Hant" : {
@@ -15269,7 +15269,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex Pro のロックを解除"
+            "value" : "Multiplex Proのロックを解除"
           }
         },
         "zh-Hant" : {
@@ -15285,7 +15285,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex Pro のロックを解除 · %@"
+            "value" : "Multiplex Proのロックを解除 · %@"
           }
         },
         "zh-Hant" : {
@@ -15301,7 +15301,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "PDF のロックを解除"
+            "value" : "PDFのロックを解除"
           }
         },
         "zh-Hant" : {
@@ -15317,7 +15317,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "SSH 鍵のロックを解除"
+            "value" : "SSH鍵のロックを解除"
           }
         },
         "zh-Hant" : {
@@ -15333,7 +15333,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ で Multiplex のロックを解除します"
+            "value" : "%@でMultiplexのロックを解除します"
           }
         },
         "zh-Hant" : {
@@ -15365,7 +15365,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Claude Code、Codex、Pi、Grok Build のクイックコマンドを 1 日の上限なしで使用でき、Claude Code セッションのプロンプト履歴を閲覧してトランスクリプトを任意のメッセージまでジャンプでき、見ていない対応セッションがあなたを必要とするときにバナーを受け取れます。"
+            "value" : "Claude Code、Codex、Pi、Grok Buildのクイックコマンドを1日の上限なしで使用でき、Claude Codeセッションのプロンプト履歴を閲覧してトランスクリプトを任意のメッセージまでジャンプでき、見ていない対応セッションがあなたを必要とするときにバナーを受け取れます。"
           }
         },
         "zh-Hant" : {
@@ -15381,7 +15381,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "1 から 65535 までの単一のポートまたは範囲を指定してください。"
+            "value" : "1から65535までの単一のポートまたは範囲を指定してください。"
           }
         },
         "zh-Hant" : {
@@ -15413,7 +15413,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ 自身のデフォルトモデルを使用します。"
+            "value" : "%@自身のデフォルトモデルを使用します。"
           }
         },
         "zh-Hant" : {
@@ -15429,7 +15429,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "フォーカス中のペインのディレクトリ—セッションが今見ている場所を使用します。"
+            "value" : "フォーカス中のペインのディレクトリ — セッションが今見ている場所を使用します。"
           }
         },
         "zh-Hant" : {
@@ -15461,7 +15461,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "VIEW はこのセッションの横にあるファイルビューアで読み取り専用として開きます—何も実行されず、何も書き込まれません。検出が誤っている場合はパスを編集できます。"
+            "value" : "VIEWはこのセッションの横にあるファイルビューアで読み取り専用として開きます — 何も実行されず、何も書き込まれません。検出が誤っている場合はパスを編集できます。"
           }
         },
         "zh-Hant" : {
@@ -15477,7 +15477,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "バージョン %@"
+            "value" : "バージョン%@"
           }
         },
         "zh-Hant" : {
@@ -15493,7 +15493,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "バージョン %@、"
+            "value" : "バージョン%@、"
           }
         },
         "zh-Hant" : {
@@ -15525,7 +15525,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex Pro を見る"
+            "value" : "Multiplex Proを見る"
           }
         },
         "zh-Hant" : {
@@ -15621,7 +15621,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App Store を待っています…"
+            "value" : "App Storeを待っています…"
           }
         },
         "zh-Hant" : {
@@ -15637,7 +15637,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ に何をさせますか？"
+            "value" : "%@に何をさせますか？"
           }
         },
         "zh-Hant" : {
@@ -15701,7 +15701,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "App Store の復元の同期が失敗した場合、復元は所有している購入を直接確認します—エラーには対処できる内容が示されるようになりました。"
+            "value" : "App Storeの復元の同期が失敗した場合、復元は所有している購入を直接確認します — エラーには対処できる内容が示されるようになりました。"
           }
         },
         "zh-Hant" : {
@@ -15717,7 +15717,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "もう一方のマルチプレクサにセッションがあると、ホストバーがそれらの追加を提案し、追加のチェックにかかるコストを示します。承認すると両方が 1 つのウォールを共有し、herdr のタイルは軽いシャーシで表示されます。提案を長押しすると、ここでは今後尋ねられなくなります。"
+            "value" : "もう一方のマルチプレクサにセッションがあると、ホストバーがそれらの追加を提案し、追加のチェックにかかるコストを示します。承認すると両方が1つのウォールを共有し、herdrのタイルは軽いシャーシで表示されます。提案を長押しすると、ここでは今後尋ねられなくなります。"
           }
         },
         "zh-Hant" : {
@@ -15733,7 +15733,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "既存セッションでの起動先: tmux では新しいウインドウ、herdr ではフォーカス中のワークスペースの新しいタブまたは新しいワークスペースです。"
+            "value" : "既存セッションでの起動先：tmuxでは新しいウインドウ、herdrではフォーカス中のワークスペースの新しいタブまたは新しいワークスペースです。"
           }
         },
         "zh-Hant" : {
@@ -15749,7 +15749,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "新しいセッション—または既存セッション内の新しいウインドウ、タブ、ワークスペース—が開始する場所です。空欄にするとホストのデフォルトを使用します。"
+            "value" : "新しいセッション — または既存セッション内の新しいウインドウ、タブ、ワークスペース — が開始する場所です。空欄にするとホストのデフォルトを使用します。"
           }
         },
         "zh-Hant" : {
@@ -15829,7 +15829,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ と照合して検証します"
+            "value" : "%@と照合して検証します"
           }
         },
         "zh-Hant" : {
@@ -15851,7 +15851,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ %@ と照合して検証します"
+            "value" : "%@ %@と照合して検証します"
           }
         },
         "zh-Hant" : {
@@ -15931,7 +15931,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "作業ツリーと HEAD の差分"
+            "value" : "作業ツリーとHEADの差分"
           }
         },
         "zh-Hant" : {
@@ -15979,7 +15979,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "通常のシェルも使えます — SHELL を押してください。"
+            "value" : "通常のシェルも使えます — SHELLを押してください。"
           }
         },
         "zh-Hant" : {
@@ -16011,7 +16011,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ズーム %lld パーセント。リセットで全体表示に戻ります"
+            "value" : "ズーム%lldパーセント。リセットで全体表示に戻ります"
           }
         },
         "zh-Hant" : {
@@ -16027,7 +16027,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ズーム 100 パーセント。リセットで全体表示に戻ります"
+            "value" : "ズーム100パーセント。リセットで全体表示に戻ります"
           }
         },
         "zh-Hant" : {
@@ -16155,7 +16155,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "オプションの Metal レンダラー"
+            "value" : "オプションのMetalレンダラー"
           }
         },
         "zh-Hant" : {
@@ -16363,7 +16363,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "grok-build、または完全なモデル ID"
+            "value" : "grok-build、または完全なモデルID"
           }
         },
         "zh-Hant" : {
@@ -16379,7 +16379,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "herdr %@ はこの App が対応するバージョンより古すぎます — ホストで herdr を更新してください"
+            "value" : "herdr %@はこのAppが対応するバージョンより古すぎます — ホストでherdrを更新してください"
           }
         },
         "zh-Hant" : {
@@ -16395,7 +16395,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "herdr はステータスを返しましたが、セッション一覧を返しませんでした"
+            "value" : "herdrはステータスを返しましたが、セッション一覧を返しませんでした"
           }
         },
         "zh-Hant" : {
@@ -16411,7 +16411,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "どのホストでも使える herdr"
+            "value" : "どのホストでも使えるherdr"
           }
         },
         "zh-Hant" : {
@@ -16443,7 +16443,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "host:port または https://…"
+            "value" : "host:portまたはhttps://…"
           }
         },
         "zh-Hant" : {
@@ -16459,7 +16459,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "他の App がコピーした内容を Multiplex が読み取る前に、iOS が確認します。確認を止めるには：設定 → Multiplex → 他の App からペースト → 許可。"
+            "value" : "他のAppがコピーした内容をMultiplexが読み取る前に、iOSが確認します。確認を止めるには：設定 → Multiplex → 他のAppからペースト → 許可。"
           }
         },
         "zh-Hant" : {
@@ -16523,7 +16523,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "リモートペインの localhost はホスト自身のループバックであり、このデバイスからは接続できないアドレスです。VIA はビューポートを、すでにホストに到達できるアドレスへ向けます。応答させるには、サーバがループバック以外でも待ち受ける必要があります（vite --host）。"
+            "value" : "リモートペインのlocalhostはホスト自身のループバックであり、このデバイスからは接続できないアドレスです。VIAはビューポートを、すでにホストに到達できるアドレスへ向けます。応答させるには、サーバがループバック以外でも待ち受ける必要があります（vite --host）。"
           }
         },
         "zh-Hant" : {
@@ -16571,7 +16571,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "1 行に 1 つのモデル ID"
+            "value" : "1行に1つのモデルID"
           }
         },
         "zh-Hant" : {
@@ -16603,7 +16603,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "mosh のスクロールバックを整理"
+            "value" : "moshのスクロールバックを整理"
           }
         },
         "zh-Hant" : {
@@ -16619,7 +16619,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "mosh セッションの同期が失われました"
+            "value" : "moshセッションの同期が失われました"
           }
         },
         "zh-Hant" : {
@@ -16635,7 +16635,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "mosh は 1 つのライブ画面だけを同期しますが、キーボードの表示・非表示のたびに古いフレームがその上に積み重なっていました。不要なスクロール領域はなくなり、ライブ画面だけが残ります。"
+            "value" : "moshは1つのライブ画面だけを同期しますが、キーボードの表示・非表示のたびに古いフレームがその上に積み重なっていました。不要なスクロール領域はなくなり、ライブ画面だけが残ります。"
           }
         },
         "zh-Hant" : {
@@ -16651,7 +16651,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "mosh のタブは画面を 1 つに保つ"
+            "value" : "moshのタブは画面を1つに保つ"
           }
         },
         "zh-Hant" : {
@@ -16673,7 +16673,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ で mosh-server が起動しませんでした：%@"
+            "value" : "%@でmosh-serverが起動しませんでした：%@"
           }
         },
         "zh-Hant" : {
@@ -16689,7 +16689,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ で mosh-server は起動しましたが、UDP の応答が届きませんでした。mosh のポート範囲（デフォルト 60000-61000）についてファイアウォール／NAT を確認してください。"
+            "value" : "%@でmosh-serverは起動しましたが、UDPの応答が届きませんでした。moshのポート範囲（デフォルト60000-61000）についてファイアウォール／NATを確認してください。"
           }
         },
         "zh-Hant" : {
@@ -16705,7 +16705,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "mosh-server が見つかりません — mosh でのアタッチは失敗します。ホストにインストールするか、下でパスを指定してください。"
+            "value" : "mosh-serverが見つかりません — moshでのアタッチは失敗します。ホストにインストールするか、下でパスを指定してください。"
           }
         },
         "zh-Hant" : {
@@ -16769,7 +16769,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "%@ 上"
+            "value" : "%@上"
           }
         },
         "zh-Hant" : {
@@ -16785,7 +16785,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "opus、sonnet、または完全なモデル ID"
+            "value" : "opus、sonnet、または完全なモデルID"
           }
         },
         "zh-Hant" : {
@@ -16833,7 +16833,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "1 行に 1 つの provider/model-id"
+            "value" : "1行に1つのprovider/model-id"
           }
         },
         "zh-Hant" : {
@@ -16865,7 +16865,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Deck を更新するたびに、このホストが取得するデータ量がおよそ倍になります"
+            "value" : "Deckを更新するたびに、このホストが取得するデータ量がおよそ倍になります"
           }
         },
         "zh-Hant" : {
@@ -16913,7 +16913,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "セッション %@"
+            "value" : "セッション%@"
           }
         },
         "zh-Hant" : {
@@ -17025,7 +17025,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "GLASS 外観"
+            "value" : "GLASS外観"
           }
         },
         "zh-Hant" : {
@@ -17073,7 +17073,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "tmux と herdr が 1 つのウォールに同居"
+            "value" : "tmuxとherdrが1つのウォールに同居"
           }
         },
         "zh-Hant" : {
@@ -17121,7 +17121,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "herdr の応答を読み取れません"
+            "value" : "herdrの応答を読み取れません"
           }
         },
         "zh-Hant" : {
@@ -17217,7 +17217,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ワークスペース %lld"
+            "value" : "ワークスペース%lld"
           }
         },
         "zh-Hant" : {
