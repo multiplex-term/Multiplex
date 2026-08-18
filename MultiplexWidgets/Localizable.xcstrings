@@ -345,7 +345,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "1 台のホストの最後に確認されたセッション。タップしてシェルを開くか、エージェントを起動します。"
+            "value" : "1台のホストの最後に確認されたセッション。タップしてシェルを開くか、エージェントを起動します。"
           }
         },
         "zh-Hant" : {
@@ -377,7 +377,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex ホスト"
+            "value" : "Multiplexホスト"
           }
         },
         "zh-Hant" : {
@@ -521,7 +521,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex を一度開いてください"
+            "value" : "Multiplexを一度開いてください"
           }
         },
         "zh-Hant" : {
