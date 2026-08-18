@@ -1,12 +1,13 @@
-Multiplex 1.3.1 — pictures in your READMEs, file paths that work in split panes, and a cleanup pass over selection, scrolling and mosh.
+Multiplex 1.4 — hold CTRL for the chords your keyboard cannot press, write to your agent in a message box, and watch every host's latency from the deck.
 
-• In a rendered README the “image: …” placeholder is now a link: press it and the picture appears right in the document, sized to the text column — press the caption to hide it, or tap for full-screen zoom. Web-hosted images stay behind the link confirmation, which now offers a docked ⌗ viewport as well as the browser, and nothing is fetched until you press.
-• File paths work in split panes. A path wrapped at a pane border is stitched back together, a match never picks up the neighbouring pane's text, and a relative path resolves against the pane you pressed.
-• Shortcuts gains Open File: a host, a remote path, and an optional line — Sources/App.swift:10-15 opens read-only in a ▤ File Viewer tab with the range highlighted. Pressed paths in the terminal carry line ranges the same way.
-• The key rail runs to the window's bottom edge on iPad instead of floating above the home-indicator strip — more daylight below the keys, in iPhone landscape too.
-• Selection stays where you pressed. The SELECT block and the SELECT TEXT bar no longer drift upward on mosh tabs or in scrolled-back terminals, and with a second client attached the selection waits for the shared geometry to settle.
-• mosh tabs keep one screen — the junk scroll area that stacked stale layouts above the live screen is gone.
-• The tmux split shortcuts no longer type a stray % on iPad, and the File Viewer opens in the pressed pane's working directory on tmux and herdr alike.
-• Every connection now verifies the server's SSH host key against the fingerprints recorded for that host — from Bind Host, a key pasted into Add Host → Host key, or pinned on first connection. Host Settings → Host key lists what's recorded.
-• Settings → Terminal renderer can draw terminal text on the GPU with Metal — off by default, applied to newly opened terminal windows.
-• Restore Purchases recovers when the App Store's restore sync fails, and its errors now name something you can act on.
+• Key Commands: hold CTRL on the key rail for saved chords the software keyboard cannot press — Shift+Enter, a double Ctrl-C, Option+Backspace to delete a word. CUSTOM SETUP adds any Ctrl/Shift/Option chord or a one-line text macro, repeated up to five times, closing the panel or not, synced to your other devices. Free keeps five; Pro raises the set to twelve. The Guide gains a HOLD CTRL card.
+• Message box: the speech-bubble key opens a chat-style field under the terminal — write with autocorrect and your keyboard's dictation, attach photos or files (uploaded to the pane's folder), then send it all as one message. The key rail keeps driving the pane while you write.
+• Connection Stats: a live latency chip on every host rail, and a Pro board with per-host drill-in — round-trips, typing echo, mosh loss and roams, reconnects, and data volume. Off switch in Settings.
+• Keys tap back: the key rail, panel buttons and agent chips give a light haptic on press.
+• The TMUX panel stays open while you switch or move between windows, workspaces and panes, with ACTIVE following where you land. An arrow row resizes panes — tap to nudge, hold to repeat. Commands run over the control connection, so no more stray letters from a dropped prefix; Rename Window gets its own name field, and the cycling rows are gone.
+• Dictate in your own languages: tap the globe in the LISTENING bar to switch among your preferred languages.
+• Tap a link or path and its sheet comes up on the first press, tmux mouse on or not; a file name at the right edge no longer swallows the next row's word.
+• The File Viewer opens PDFs — continuous pages, pinch to zoom, page readout, UNLOCK for locked files — and plays MP3, M4A, WAV, FLAC, AIFF and CAF with a scrubber, 15 s skips and a remembered volume, on while you type elsewhere.
+• Grok Build joins the agent roster: detected in panes, its own chip strip, NEW SESSION launch with model and first prompt, and Pro alerts when it needs permission or an answer.
+• Theme edits show live in open terminal windows — Save keeps them, Back restores the old theme.
+• Widgets show the session you last opened on each host, herdr included — or the one you pick in the widget's Session setting.
