@@ -24,23 +24,23 @@ Some features require Multiplex Pro; see [`docs/store-metadata.md`](docs/store-m
 | :-: | :-: |
 | <video src="https://github.com/user-attachments/assets/90e6e0f2-cdab-4e8f-993a-e6fc5359d7c6" alt="Multiplex AVP demo" width="200" /> | <video src="https://github.com/user-attachments/assets/d25aa980-f3d3-4910-856b-836c3eec20cc" alt="Multiplex iPad demo" width="200" /> | 
 
-> Vision Pro: Running Claude Code on herdr -> File Viewer -> Inline browser (using [serve-sim](https://github.com/EvanBacon/serve-sim)) -> send create PR message by press Agent bar key.
+> Vision Pro: Run Claude Code in herdr, open the File Viewer and inline browser (using [serve-sim](https://github.com/EvanBacon/serve-sim)), then send a “create PR” message by pressing an Agent Bar key.
 
-> iPad: Running pi on herdr -> File Viewer -> Inline browser -> send create PR message by press Agent bar key.
+> iPad: Run Pi in herdr, open the File Viewer and inline browser, then send a “create PR” message by pressing an Agent Bar key.
 
 ## Screenshots
 
 | Bind | Deck | Terminal | Shortcuts |
 | :-: | :-: | :-: | :-: |
-| <img width="250" alt="Screenshot 2026-08-18 at 07 45 17" src="https://github.com/user-attachments/assets/060cf789-8060-4ee4-82c6-87129c7992d5" /> | <img width="250" alt="iphone-deck" src="https://github.com/user-attachments/assets/86bb4789-24b6-434c-8295-bc5def0e9959" /> | <img width="250" lt="iphone-terminal" src="https://github.com/user-attachments/assets/f1c4c2ed-3479-482f-a579-76dd2876feba" /> | <img width="250" alt="iphone-fileviewer" src="https://github.com/user-attachments/assets/1c438564-4764-4493-b312-dab75c207743" /> | <img width="250" alt="iphone-shortcut-edit" src="https://github.com/user-attachments/assets/fbdd4920-ad86-4734-b79f-146311c9f763" /> |
+| <img width="250" alt="Bind Host screen" src="https://github.com/user-attachments/assets/060cf789-8060-4ee4-82c6-87129c7992d5" /> | <img width="250" alt="Deck screen" src="https://github.com/user-attachments/assets/86bb4789-24b6-434c-8295-bc5def0e9959" /> | <img width="250" alt="Terminal screen" src="https://github.com/user-attachments/assets/f1c4c2ed-3479-482f-a579-76dd2876feba" /> | <img width="250" alt="Shortcut editor" src="https://github.com/user-attachments/assets/fbdd4920-ad86-4734-b79f-146311c9f763" /> |
 
-> Bind a host with [mpx-cli](https://multiplexterm.dev/mpx/) or maunally. Host settings will sync to your every iDevices by iCloud Keychain.
+> Bind a host with [mpx-cli](https://multiplexterm.dev/mpx/) or manually. Host settings sync to all your devices through iCloud Keychain.
 
-> Deck: Show every tmux / herdr sessions
+> Deck: See every tmux and herdr session.
 
-> Terminal: Agent bar for supported CLI Agent. Long-press CTRL for commands. Press chat button for composer.
+> Terminal: Use the Agent Bar with supported CLI agents. Long-press CTRL to access commands. Tap the chat button to open the composer.
 
-> Shortcuts: Setting up Multiplex shortcuts for quick open session/agent in Widget or Action Button.
+> Shortcuts: Set up Multiplex shortcuts to quickly open a session or agent from a widget or the Action Button.
 
 ## Building
 
