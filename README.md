@@ -30,9 +30,20 @@ Some features require Multiplex Pro; see [`docs/store-metadata.md`](docs/store-m
 
 ## Screenshots
 
-| Bind | Deck | Terminal | Shortcuts |
-| :-: | :-: | :-: | :-: |
-| <img width="250" alt="Bind Host screen" src="https://github.com/user-attachments/assets/060cf789-8060-4ee4-82c6-87129c7992d5" /> | <img width="250" alt="Deck screen" src="https://github.com/user-attachments/assets/86bb4789-24b6-434c-8295-bc5def0e9959" /> | <img width="250" alt="Terminal screen" src="https://github.com/user-attachments/assets/f1c4c2ed-3479-482f-a579-76dd2876feba" /> | <img width="250" alt="Shortcut editor" src="https://github.com/user-attachments/assets/fbdd4920-ad86-4734-b79f-146311c9f763" /> |
+<table>
+  <tr>
+    <th width="25%" align="center">Bind</th>
+    <th width="25%" align="center">Deck</th>
+    <th width="25%" align="center">Terminal</th>
+    <th width="25%" align="center">Shortcuts</th>
+  </tr>
+  <tr>
+    <td width="25%" align="center"><img width="100%" alt="Bind Host screen" src="https://github.com/user-attachments/assets/060cf789-8060-4ee4-82c6-87129c7992d5" /></td>
+    <td width="25%" align="center"><img width="100%" alt="Deck screen" src="https://github.com/user-attachments/assets/86bb4789-24b6-434c-8295-bc5def0e9959" /></td>
+    <td width="25%" align="center"><img width="100%" alt="Terminal screen" src="https://github.com/user-attachments/assets/f1c4c2ed-3479-482f-a579-76dd2876feba" /></td>
+    <td width="25%" align="center"><img width="100%" alt="Shortcut editor" src="https://github.com/user-attachments/assets/fbdd4920-ad86-4734-b79f-146311c9f763" /></td>
+  </tr>
+</table>
 
 > Bind a host with [mpx-cli](https://multiplexterm.dev/mpx/) or manually. Host settings sync to all your devices through iCloud Keychain.
 
