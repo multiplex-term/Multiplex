@@ -203,7 +203,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "，%lld 次"
           }
         }
@@ -219,7 +219,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "，會關閉面板"
           }
         }
@@ -235,7 +235,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "，已展開"
           }
         }
@@ -251,7 +251,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "，或把頁面停靠在這個標籤頁旁成為 "
           }
         }
@@ -267,7 +267,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "，或從 ± 計數開啟該分支的差異"
           }
         }
@@ -283,7 +283,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "，面板會保持開啟"
           }
         }
@@ -299,7 +299,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "，然後按 Enter"
           }
         }
@@ -315,7 +315,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "，標題為 %@"
           }
         }
@@ -331,7 +331,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "，已內嵌"
           }
         }
@@ -347,7 +347,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "，長按開啟 KEY COMMANDS — "
           }
         }
@@ -363,7 +363,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "。連接"
           }
         }
@@ -379,7 +379,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "。在 Vision Pro 上，你注視時連結會發亮；捏合可開啟同一張表單。"
           }
         }
@@ -390,13 +390,13 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "毎回「ペーストを許可」と聞かれる？"
+            "value" : "毎回「ペーストを許可」が表示される"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "每次都問「允許貼上」？"
+            "state" : "translated",
+            "value" : "老是跳出「允許貼上」？"
           }
         }
       }
@@ -414,13 +414,13 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ %lld、%@、現在の%@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ %lld，%@，目前的%@"
           }
         }
@@ -436,7 +436,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 使用中"
           }
         }
@@ -446,13 +446,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@接続済み"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 已連線"
           }
         }
@@ -462,13 +462,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@から応答がありません — ポートと、このデバイスとホストの間のファイアウォールを確認してください。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 沒有回應 — 請檢查連接埠，以及這部裝置與主機之間的防火牆。"
           }
         }
@@ -478,13 +478,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@が接続を切断しました — そのポートはSSHではない可能性があります。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 中斷了連線 — 該連接埠可能不是 SSH。"
           }
         }
@@ -494,13 +494,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@が完了しました"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 已完成"
           }
         }
@@ -510,13 +510,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@から質問があります"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 有問題要問"
           }
         }
@@ -532,14 +532,14 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@は%@鍵で自身を証明しましたが、Multiplexが記録している鍵に含まれていません。何も送信していません。サーバのホスト鍵が変わった場合は、ホスト設定で記録済みの鍵を削除してください。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "%@ 以 %@ 金鑰表明身分，但那不在 Multiplex 為它記錄的金鑰之中。沒有送出任何資料。如果伺服器的主機金鑰變更了，請在主機設定中忘記已記錄的金鑰。"
+            "state" : "translated",
+            "value" : "%@ 以 %@ 金鑰表明身分，但那不在 Multiplex 為它記錄的金鑰之中。沒有送出任何資料。如果伺服器的主機金鑰變更了，請在主機設定中移除已記錄的金鑰。"
           }
         }
       }
@@ -554,14 +554,14 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@は%@鍵で自身を証明しましたが、このホストには記録がありません。何も送信していません。ホスト鍵が変わった場合は、「ホスト鍵」で記録済みの鍵を削除してもう一度確認してください。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "%@ 以 %@ 金鑰表明身分，但這部主機沒有記錄該金鑰。沒有送出任何資料。如果主機金鑰變更了，請在「主機金鑰」中忘記已記錄的金鑰後再檢查一次。"
+            "state" : "translated",
+            "value" : "%@ 以 %@ 金鑰表明身分，但這部主機沒有記錄該金鑰。沒有送出任何資料。如果主機金鑰變更了，請在「主機金鑰」中移除已記錄的金鑰後再檢查一次。"
           }
         }
       }
@@ -576,13 +576,13 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@のセッション%@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 的工作階段 %@"
           }
         }
@@ -598,13 +598,13 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@は%@です — ビューアが開ける%@の上限は%@です。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 為 %@ — 檢視器可開啟的%@上限為 %@。"
           }
         }
@@ -614,13 +614,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@はフォルダです"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 是資料夾"
           }
         }
@@ -636,13 +636,13 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@は%@も%@で実行しています"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 另外還有 %@ 在 %@ 上"
           }
         }
@@ -652,13 +652,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@がバインドを要求しています"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 要求綁定"
           }
         }
@@ -668,13 +668,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@は無効なので接続しません"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 已停用，不會連線"
           }
         }
@@ -684,13 +684,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@は無効です。有効にする"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 已停用。啟用"
           }
         }
@@ -700,13 +700,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@は無効です。Deckで有効にすると、セッションを開けます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 已停用。請在 Deck 上啟用它，才能在上面開啟工作階段。"
           }
         }
@@ -716,13 +716,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@は64 MBを超えています"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 超過 64 MB"
           }
         }
@@ -738,13 +738,13 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@は%@と%@の両方を実行しています。どちらの%@も表示します。\n\n新しいセッションは引き続き%@で作成されます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 同時執行 %@ 和 %@。兩者的%@都會顯示。\n\n新的工作階段仍會在 %@ 上建立。"
           }
         }
@@ -760,13 +760,13 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@が%@にインストールされていないため、セッションを作成できません。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 沒有安裝在 %@ 上，因此無法用它建立工作階段。"
           }
         }
@@ -776,7 +776,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@のライセンス本文"
           }
         },
@@ -792,7 +792,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@接続中"
           }
         },
@@ -808,7 +808,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@リンクはここから出ません"
           }
         },
@@ -824,7 +824,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@のモデル、1行に1つ"
           }
         },
@@ -840,7 +840,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@にはSSH鍵のパスフレーズが必要です"
           }
         },
@@ -856,7 +856,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@にはSSH鍵のパスフレーズが必要です。ロック解除"
           }
         },
@@ -878,13 +878,13 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@/%@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ / %@"
           }
         }
@@ -900,13 +900,13 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@（%@）"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 於 %@"
           }
         }
@@ -922,14 +922,14 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@が提示したホスト鍵はこのホストの記録と異なります — 記録は%@、受信は%@です。何も送信していません。サーバを再構築した場合は、「ホスト鍵」で記録済みの鍵を削除してもう一度確認してください。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "%@ 提供的主機金鑰與這部主機記錄的不同 — 記錄為 %@，收到 %@。沒有送出任何資料。如果你重建了伺服器，請在「主機金鑰」中忘記已記錄的金鑰後再檢查一次。"
+            "state" : "translated",
+            "value" : "%@ 提供的主機金鑰與這部主機記錄的不同 — 記錄為 %@，收到 %@。沒有送出任何資料。如果你重建了伺服器，請在「主機金鑰」中移除已記錄的金鑰後再檢查一次。"
           }
         }
       }
@@ -944,14 +944,14 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@が提示したSSHホスト鍵はMultiplexが記録したものと異なります。サーバが再構築されたか、何かが成りすましています。何も送信していません。記録は%@、受信は%@です。再構築した場合は、ホスト設定で記録済みの鍵を削除してください。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "%@ 提供的 SSH 主機金鑰與 Multiplex 記錄的不同。可能是伺服器重建了，也可能有東西正在冒充它。沒有送出任何資料。記錄為 %@，收到 %@。如果是你重建的，請在主機設定中忘記已記錄的金鑰。"
+            "state" : "translated",
+            "value" : "%@ 提供的 SSH 主機金鑰與 Multiplex 記錄的不同。可能是伺服器重建了，也可能有東西正在冒充它。沒有送出任何資料。記錄為 %@，收到 %@。如果是你重建的，請在主機設定中移除已記錄的金鑰。"
           }
         }
       }
@@ -960,13 +960,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@がベルを鳴らしました"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 發出了響鈴"
           }
         }
@@ -983,7 +983,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@がポート%2$lld での接続を拒否しました — SSHサーバーが接続待ち状態になっているかどうか確認してください。"
+            "value" : "%1$@がポート%2$lldでの接続を拒否しました — SSHサーバーが待ち受けているか確認してください。"
           }
         },
         "zh-Hant" : {
@@ -1004,7 +1004,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 拒絕了金鑰 — 請檢查使用者名稱，以及金鑰的公開部分是否在主機的 ~/.ssh/authorized_keys 中。"
           }
         }
@@ -1020,7 +1020,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 拒絕了登入 — 請檢查使用者名稱和密碼。"
           }
         }
@@ -1036,7 +1036,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 待命"
           }
         }
@@ -1052,7 +1052,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 標籤頁"
           }
         }
@@ -1068,7 +1068,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 標籤頁，使用中"
           }
         }
@@ -1084,7 +1084,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 主題"
           }
         }
@@ -1100,7 +1100,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 無法連線"
           }
         }
@@ -1116,7 +1116,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 無法連線"
           }
         }
@@ -1132,7 +1132,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 無法連線。重新連線"
           }
         }
@@ -1148,7 +1148,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 要求權限"
           }
         }
@@ -1164,7 +1164,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 在主機上找不到 — Deck 無法列出上面的工作階段。一般的 Shell 仍可使用。"
           }
         }
@@ -1186,7 +1186,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@，%@，已連接"
           }
         }
@@ -1208,7 +1208,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@，%@，按兩次以確認"
           }
         }
@@ -1279,7 +1279,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@，第 %2$lld 行 line "
+            "value" : "%1$@，第 %2$lld 行"
           }
         }
       }
@@ -1294,7 +1294,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@，增加"
           }
         }
@@ -1304,13 +1304,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@、もう一度押すと閉じます"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@，再按一次可關閉"
           }
         }
@@ -1326,13 +1326,13 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@、アップロード失敗、%@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@，上傳失敗，%@"
           }
         }
@@ -1348,13 +1348,13 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@、アップロード中%lldパーセント"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@，上傳中，百分之 %lld"
           }
         }
@@ -1364,13 +1364,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@: Macのキーチェーンがロックされているため、Claude Codeはサインアウト表示になります"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@：Mac 的鑰匙圈已鎖定，因此 Claude Code 顯示為已登出"
           }
         }
@@ -1392,7 +1392,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新增 %lld 行，刪除 %lld 行"
           }
         }
@@ -1456,7 +1456,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%lldウインドウ、%lldペイン"
           }
         },
@@ -1478,7 +1478,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%lldウインドウ、%lldペイン。%@%@"
           }
         },
@@ -1494,13 +1494,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "+ 新規セッション"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "+ 新增工作階段"
           }
         }
@@ -1510,13 +1510,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "✳ エージェントヘルパー · PRO"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "✳ AGENT 輔助按鈕 · PRO"
           }
         }
@@ -1532,7 +1532,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "1 個工作階段"
           }
         }
@@ -1542,13 +1542,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ドラッグはリモート画面そのものをスクロールします — Appはホイールを、フルスクリーンアプリでは矢印キーを送ります。ずれてしまう別個のローカルスクロールバックはありません。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "拖曳會直接捲動遠端畫面 — App 送出滾輪事件，在全螢幕程式中則送方向鍵。這裡沒有另一份本機捲動記錄會脫節。"
           }
         }
@@ -1558,13 +1558,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新しい%@セッションを作成し、Deckに独自のタイルを持ちます。セッションを選ぶと、代わりにそのフォーカス中のワークスペースにタブを追加します。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "全新的 %@ 工作階段，在 Deck 上有自己的方塊。也可以選擇某個工作階段，改為在它的焦點工作區加一個標籤頁。"
           }
         }
@@ -1574,7 +1574,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ホストにtmuxもherdrも表示されない"
           }
         },
@@ -1606,13 +1606,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "マウスの副ボタンクリックは長押しと同じ動作をします。herdrではさらに "
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "滑鼠的次要點按會執行和長按相同的流程。在 herdr 上還會加上 "
           }
         }
@@ -1654,7 +1654,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "パブリックアドレス"
           }
         },
@@ -2108,7 +2108,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "同時顯示 %@ 工作階段"
           }
         }
@@ -2124,7 +2124,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "主機上的絕對路徑，或相對於家目錄、工作目錄的路徑。"
           }
         }
@@ -2140,7 +2140,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "另一則廣播也用了這個名稱。如果你只執行了一次 mpx bind，其中一台就不是你的機器 — 請改為掃描它的 QR 碼。"
           }
         }
@@ -2534,13 +2534,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "バックグラウンドのキープアライブがオフです：Appを離れると一時停止し、このホストのセッションは切断され、戻るとタブが再アタッチされます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "背景保持連線已關閉：離開 App 會讓它暫停，這台主機的工作階段會中斷，回來時它的標籤頁會重新連接。"
           }
         }
@@ -2550,13 +2550,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ベル"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "提示音"
           }
         }
@@ -2566,13 +2566,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "バイナリファイルが異なります。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "二進位檔案內容不同。"
           }
         }
@@ -2582,13 +2582,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "バインドで秘密鍵が送信されることはありません：このデバイスが自分で鍵を作成し、マシンは公開鍵をauthorized_keysに追加します。mpx unbindで削除できます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "綁定絕不會傳送私鑰：這台裝置會自行產生金鑰，機器只把公鑰加進 authorized_keys。mpx unbind 可以移除它。"
           }
         }
@@ -2598,13 +2598,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ブラック"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "黑色"
           }
         }
@@ -2614,13 +2614,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ブルー"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "藍色"
           }
         }
@@ -2630,13 +2630,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "両方が表示され、各タイルにはどのバックエンド由来かが示されます。これにより%@。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "兩者都會顯示，每個方塊都標示它來自哪個後端。這%@。"
           }
         }
@@ -2646,13 +2646,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "バインドしましたが、最初の接続に失敗しました：%@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "已綁定，但第一次連線失敗：%@"
           }
         }
@@ -2662,13 +2662,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ブライトブラック"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "亮黑色"
           }
         }
@@ -2678,13 +2678,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ブライトブルー"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "亮藍色"
           }
         }
@@ -2694,13 +2694,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ブライトシアン"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "亮青色"
           }
         }
@@ -2710,13 +2710,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ブライトグリーン"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "亮綠色"
           }
         }
@@ -2726,13 +2726,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ブライトマゼンタ"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "亮洋紅色"
           }
         }
@@ -2742,13 +2742,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ブライトレッド"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "亮紅色"
           }
         }
@@ -2758,13 +2758,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ブライトホワイト"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "亮白色"
           }
         }
@@ -2774,13 +2774,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ブライトイエロー"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "亮黃色"
           }
         }
@@ -2790,13 +2790,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Tallyのシャーシは一貫したまま、ターミナルパレットを作成・編集できます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "建立並編輯終端機調色盤，Tally 外框維持一致。"
           }
         }
@@ -2806,13 +2806,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "組み込みコマンド"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "內建指令"
           }
         }
@@ -2822,13 +2822,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "内蔵パレット"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "內建調色盤"
           }
         }
@@ -2838,13 +2838,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "組み込みテーマ"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "內建主題"
           }
         }
@@ -2854,13 +2854,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "組み込みコマンドもカスタムコマンドもBarかMoreに配置します。カスタムのBarラベルは9文字までです。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "內建與自訂指令都可放在 Bar 或 More；自訂 Bar 標籤限 9 個字元。"
           }
         }
@@ -2870,13 +2870,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "一度購入すれば、iPadとVision Proの両方で使えます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "一次購買，iPad 與 Vision Pro 都能使用。"
           }
         }
@@ -2886,13 +2886,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@の差分を表示できません"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "無法比對 %@ 的差異"
           }
         }
@@ -2908,7 +2908,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "無法開啟 %@"
           }
         }
@@ -2924,7 +2924,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "無法開啟連結"
           }
         }
@@ -2934,13 +2934,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@を読み込めません"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "無法讀取 %@"
           }
         }
@@ -2950,13 +2950,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "表示できません — %@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "無法顯示 — %@"
           }
         }
@@ -2966,13 +2966,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "この画像を表示できません。%@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "無法顯示這張圖片。%@"
           }
         }
@@ -2982,13 +2982,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "キャンセル"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "取消"
           }
         }
@@ -2998,13 +2998,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "アドレスの編集をキャンセル"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "取消編輯網址"
           }
         }
@@ -3014,13 +3014,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "メッセージの検索をキャンセル"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "取消尋找訊息"
           }
         }
@@ -3030,13 +3030,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "キャンセル済み"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "已取消"
           }
         }
@@ -3046,13 +3046,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@への接続を確認して、もう一度お試しください。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "請檢查與 %@ 的連線後再試一次。"
           }
         }
@@ -3062,13 +3062,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "チェック済み"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "已勾選"
           }
         }
@@ -3078,13 +3078,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "接続のたびに確認されます。サーバーを再構築した場合にのみ削除してください。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "每次連線都會檢查。只有在你重建伺服器後才需要忘記這些金鑰。"
           }
         }
@@ -3094,13 +3094,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "接続を確認中…"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "正在檢查連線…"
           }
         }
@@ -3110,13 +3110,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "App Storeの購入項目を確認中…"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "正在檢查你的 App Store 購買項目…"
           }
         }
@@ -3126,13 +3126,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "このApple IDにMultiplex Proの購入があるか確認します"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "檢查此 Apple ID 是否購買過 Multiplex Pro"
           }
         }
@@ -3142,13 +3142,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "バックエンドを選択"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選擇後端"
           }
         }
@@ -3158,13 +3158,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "モデルを選択"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選擇模型"
           }
         }
@@ -3174,13 +3174,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セッションを選択"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選擇工作階段"
           }
         }
@@ -3190,13 +3190,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Deckからセッションを選ぶと、ここにアタッチできます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "從 Deck 選擇一個工作階段，即可在此連接。"
           }
         }
@@ -3206,13 +3206,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セットアップスクリプトを選択"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選擇設定指令碼"
           }
         }
@@ -3222,13 +3222,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ターミナルパレットを選びます。テーマを長押しすると複製され、カスタムの出発点になります。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選擇終端機調色盤。長按主題可複製一份，作為自訂主題的起點。"
           }
         }
@@ -3238,13 +3238,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "作業ディレクトリを選択"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選擇工作目錄"
           }
         }
@@ -3254,13 +3254,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Claude Code、Codex、Pi、Grok Buildから選択します"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選擇 Claude Code、Codex、Pi 或 Grok Build"
           }
         }
@@ -3270,13 +3270,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Focused Paneを選ぶと、セッション自身のディレクトリを引き継ぎます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選擇 Focused Pane 可沿用工作階段本身的目錄。"
           }
         }
@@ -3286,13 +3286,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Homeを選ぶと、ログインシェルのデフォルトを使います。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選擇 Home 可使用登入 Shell 的預設值。"
           }
         }
@@ -3302,13 +3302,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "エージェントを開く場所を選択"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選擇 Agent 開啟的位置"
           }
         }
@@ -3318,13 +3318,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ウインドウを選択"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選擇視窗"
           }
         }
@@ -3334,13 +3334,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "コードはハードウェアキーボードと同じ入力を送ります。テキスト行は1行を入力し、SUBMITがオンならそのあとにEnterを送ります。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "組合鍵會送出硬體鍵盤的按鍵；文字列會輸入一行，並在 SUBMIT 開啟時按下 Enter。"
           }
         }
@@ -3350,13 +3350,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Claude Code"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Claude Code"
           }
         }
@@ -3372,13 +3372,13 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@のClaude Codeはサインイン画面で待機していますが、保存されたログインはおそらく無事です。MacではClaude Codeは認証情報をログインキーチェーンに保存しますが、SSHやtmuxのセッションではそれが解除されません — GUIログインが行われていないためです。%@上のいずれかのシェルで一度解除してから、Claude Codeを再起動してください："
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 上的 Claude Code 停在登入畫面，但已儲存的登入資訊很可能仍然完好：在 Mac 上，Claude Code 會把憑證存在登入鑰匙圈中，而 SSH 或 tmux 工作階段永遠不會解鎖它 — 因為沒有經過 GUI 登入。請在 %@ 上的任一 Shell 中解鎖一次，然後重新啟動 Claude Code："
           }
         }
@@ -3388,13 +3388,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Claude Codeがサインアウト表示になる"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Claude Code 顯示為已登出"
           }
         }
@@ -3404,13 +3404,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "tmuxでClaude Codeがサインアウト表示になる"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Claude Code 在 tmux 中顯示為已登出"
           }
         }
@@ -3420,13 +3420,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "消去"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "清除"
           }
         }
@@ -3436,13 +3436,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "閲覧データを消去"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "清除瀏覽資料"
           }
         }
@@ -3452,13 +3452,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "閲覧データを消去…"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "清除瀏覽資料…"
           }
         }
@@ -3468,13 +3468,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "クリア済み — 何も適用されません"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "已清除 — 不會套用任何內容"
           }
         }
@@ -3484,13 +3484,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "すべてのビューポートページのCookie、キャッシュ、サイトストレージを消去します — 開発サーバーのログインも含みます。このページはサインアウトした状態で再読み込みされます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "清除所有檢視區頁面的 cookie、快取與網站儲存空間 — 包含開發伺服器的登入。此頁面會以登出狀態重新載入。"
           }
         }
@@ -3500,13 +3500,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "クリップボード"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "剪貼板"
           }
         }
@@ -3516,13 +3516,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "閉じる"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉"
           }
         }
@@ -3532,13 +3532,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ファイルビューアを閉じる"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉檔案檢視器"
           }
         }
@@ -3548,13 +3548,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "メッセージボックスを閉じる"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉訊息框"
           }
         }
@@ -3564,13 +3564,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ペインを閉じる"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉窗格"
           }
         }
@@ -3580,13 +3580,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セッションを閉じる"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉工作階段"
           }
         }
@@ -3596,13 +3596,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "タブを閉じる"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉標籤頁"
           }
         }
@@ -3612,13 +3612,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "タブを閉じる"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉標籤頁"
           }
         }
@@ -3628,13 +3628,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "メッセージボックスを閉じます"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉訊息框"
           }
         }
@@ -3644,13 +3644,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "押すとパネルを閉じます"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "按下可關閉面板"
           }
         }
@@ -3660,13 +3660,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ビューポートを閉じる"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉檢視區"
           }
         }
@@ -3676,13 +3676,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ウインドウを閉じる"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉視窗"
           }
         }
@@ -3692,13 +3692,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ワークスペースを閉じる"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉工作區"
           }
         }
@@ -3708,13 +3708,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Codex"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Codex"
           }
         }
@@ -3724,13 +3724,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "メッセージを折りたたむ"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "收合訊息"
           }
         }
@@ -3740,13 +3740,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "折りたたみ済み"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "已收合"
           }
         }
@@ -3756,13 +3756,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "接続の詳細を折りたたみます"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "收合連線詳細資訊"
           }
         }
@@ -3772,13 +3772,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "コマンド"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "指令"
           }
         }
@@ -3788,13 +3788,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "コマンドの内容"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "指令內容"
           }
         }
@@ -3804,13 +3804,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "コマンド"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "指令"
           }
         }
@@ -3820,13 +3820,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "コンポーネント"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "元件"
           }
         }
@@ -3836,13 +3836,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@に設定されたモデル"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 已設定的模型"
           }
         }
@@ -3852,13 +3852,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@で確認して、Multiplexを開くときに要求します"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "確認 %@ 以要求開啟 Multiplex 時驗證"
           }
         }
@@ -3868,13 +3868,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "記録済みのホスト鍵の削除を確認"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "確認忘記已記錄的主機金鑰"
           }
         }
@@ -3884,13 +3884,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "コンフリクト"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "衝突"
           }
         }
@@ -3900,13 +3900,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Deckで接続します"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "在 Deck 上連線"
           }
         }
@@ -3916,13 +3916,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "今回のみ接続"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "僅這次連線"
           }
         }
@@ -3932,13 +3932,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "moshで接続"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "使用 mosh 連線"
           }
         }
@@ -3954,13 +3954,13 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@に%@として接続しました。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "已連線到 %@，登入身分為 %@。"
           }
         }
@@ -3970,13 +3970,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@に接続中…"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "正在連線到 %@…"
           }
         }
@@ -3986,13 +3986,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "接続統計"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "連線統計"
           }
         }
@@ -4002,13 +4002,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "接続統計"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "連線統計"
           }
         }
@@ -4018,13 +4018,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "接続統計"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "連線統計"
           }
         }
@@ -4034,13 +4034,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "接続統計は設定でオフになっています。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "連線統計已在設定中關閉。"
           }
         }
@@ -4056,7 +4056,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@の接続統計：%@"
           }
         },
@@ -4072,7 +4072,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "接続統計…"
           }
         },
@@ -4088,7 +4088,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "moshで接続します"
           }
         },
@@ -4104,7 +4104,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Control"
           }
         },
@@ -4120,7 +4120,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Control %@"
           }
         },
@@ -4136,14 +4136,14 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "コピー"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "拷貝"
+            "value" : "複製"
           }
         }
       }
@@ -4152,14 +4152,14 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@のライセンス文をコピー"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "拷貝 %@ 的授權文字"
+            "value" : "複製 %@ 的授權文字"
           }
         }
       }
@@ -4168,14 +4168,14 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "いずれかの行をコピーし、追加したいマシンのターミナルで実行して、mpx bindを実行したままにします。ここのコマンドはこのデバイスでは実行されません。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "拷貝其中一行，在你要加入的機器上以終端機執行，然後讓 mpx bind 保持執行。這裡的指令都不會在本裝置上執行。"
+            "value" : "複製其中一行，在你要加入的機器上以終端機執行，然後讓 mpx bind 保持執行。這裡的指令都不會在本裝置上執行。"
           }
         }
       }
@@ -4184,14 +4184,14 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "アドレスをコピー"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "拷貝位址"
+            "value" : "複製位址"
           }
         }
       }
@@ -4200,14 +4200,14 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "コマンドをコピー"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "拷貝指令"
+            "value" : "複製指令"
           }
         }
       }
@@ -4216,14 +4216,14 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ライセンス文をコピー"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "拷貝授權文字"
+            "value" : "複製授權文字"
           }
         }
       }
@@ -4232,14 +4232,14 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "コピーモード"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "拷貝模式"
+            "value" : "複製模式"
           }
         }
       }
@@ -4248,14 +4248,14 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選択範囲をコピー"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "拷貝選取內容"
+            "value" : "複製選取內容"
           }
         }
       }
@@ -4270,7 +4270,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@に接続できませんでした：%@"
           }
         },
@@ -4286,7 +4286,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@を作成できませんでした"
           }
         },
@@ -4302,7 +4302,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セッションを作成できません"
           }
         },
@@ -4318,7 +4318,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "タブを作成できません"
           }
         },
@@ -4334,7 +4334,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@でセッションを作成できませんでした。"
           }
         },
@@ -4350,7 +4350,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "「%@」が見つかりません — アドレスに誤りがないか確認してください。"
           }
         },
@@ -4372,7 +4372,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%3$@のセッション%2$@で新しい%1$@を開けませんでした。"
           }
         },
@@ -4394,7 +4394,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%2$@のセッション%1$@で新しいタブを開けませんでした。"
           }
         },
@@ -4416,7 +4416,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@に接続できませんでした（%@）。"
           }
         },
@@ -4438,7 +4438,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "moshで%@に接続できませんでした。%@"
           }
         },
@@ -4460,7 +4460,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "moshを開始するため%@に接続できませんでした（%@）。"
           }
         },
@@ -4482,7 +4482,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@に接続できませんでした。%@"
           }
         },
@@ -4498,7 +4498,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@に接続できませんでした。応答がありません。"
           }
         },
@@ -4514,7 +4514,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "マシンに接続できませんでした — %@"
           }
         },
@@ -4530,7 +4530,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@を解決できませんでした。"
           }
         },
@@ -4546,7 +4546,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "そのパスフレーズで鍵を封印できませんでした — 何も登録されていません。"
           }
         },
@@ -4562,7 +4562,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "そのパスフレーズで鍵を封印できませんでした — 何も保存されていません。"
           }
         },
@@ -6769,7 +6769,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "iOS 會在 Multiplex 讀取其他 App 拷貝的內容前先詢問。若要停止詢問：設定 → Multiplex → 從其他 App 貼上 → 允許。"
+            "value" : "iOS 會在 Multiplex 讀取其他 App 複製的內容前先詢問。若要停止詢問：設定 → Multiplex → 從其他 App 貼上 → 允許。"
           }
         }
       }
@@ -7187,7 +7187,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "已拷貝授權"
+            "value" : "已複製授權"
           }
         }
       }
@@ -8121,7 +8121,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Multiplex 只會開啟網頁與郵件連結。來自遠端窗格的 %@: 連結會作用在本裝置上，因此只顯示而不開啟 — 若要在別處使用，請拷貝它。"
+            "value" : "Multiplex 只會開啟網頁與郵件連結。來自遠端窗格的 %@: 連結會作用在本裝置上，因此只顯示而不開啟 — 若要在別處使用，請複製它。"
           }
         }
       }
@@ -8232,7 +8232,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Multiplex，%@"
           }
         }
@@ -8248,7 +8248,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "名稱"
           }
         }
@@ -8264,7 +8264,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "需要你"
           }
         }
@@ -8280,7 +8280,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新增工作階段"
           }
         }
@@ -8296,7 +8296,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "「新增工作階段」可以在任何東西啟動前，把選定的指令碼輸入到全新的 Shell 中。加入一個即可使用。"
           }
         }
@@ -8312,7 +8312,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新增工作階段預設值"
           }
         }
@@ -8328,7 +8328,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新工作階段預設值"
           }
         }
@@ -8344,7 +8344,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "「新增工作階段」會依名稱提供這些項目；選定的那一個會在啟動指令之前輸入到全新的 Shell 中。"
           }
         }
@@ -8360,7 +8360,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "在 %@ 上新增工作階段"
           }
         }
@@ -8376,7 +8376,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新工作階段 tmux 設定"
           }
         }
@@ -8392,7 +8392,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新工作階段執行於"
           }
         }
@@ -8408,7 +8408,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新工作階段會從主機的家目錄開始。加入路徑後，就能在「新增工作階段」中選用。"
           }
         }
@@ -8424,7 +8424,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新增標籤頁"
           }
         }
@@ -8440,7 +8440,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新增標籤頁（聚焦的工作區）"
           }
         }
@@ -8456,7 +8456,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "在工作區中新增標籤頁"
           }
         }
@@ -8472,7 +8472,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新標籤頁：另一個工作階段或檔案檢視器"
           }
         }
@@ -8488,7 +8488,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新標籤頁：另一個工作階段、此 herdr 工作區中的標籤頁，或檔案檢視器"
           }
         }
@@ -8504,7 +8504,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新增主題"
           }
         }
@@ -8520,7 +8520,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新主題以目前使用的調色盤為起點。使用列表選單可編輯、複製或刪除主題。"
           }
         }
@@ -8536,7 +8536,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新增視窗"
           }
         }
@@ -8552,7 +8552,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "新增工作區"
           }
         }
@@ -8568,7 +8568,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "下一個視窗"
           }
         }
@@ -8584,7 +8584,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "主機上沒有 %@"
           }
         }
@@ -8606,7 +8606,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 在 %lld 秒後仍未回應 — 請檢查位址與埠號，以及此網路是否連得到該主機。"
           }
         }
@@ -8617,13 +8617,13 @@
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "mpx bindから応答がありません — まだ実行中ですか？"
+            "value" : "mpx bindから応答がありません — 実行中であることを確認してください。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "mpx bind 沒有回應 — 它還在執行嗎？"
+            "state" : "translated",
+            "value" : "mpx bind 沒有回應 — 請確保它正在執行。"
           }
         }
       }
@@ -8638,7 +8638,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "沒有指令"
           }
         }
@@ -8654,7 +8654,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "沒有指令 · 自訂設定"
           }
         }
@@ -8670,7 +8670,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "沒有已設定的主機符合此捷徑。請在小工具或捷徑設定中選擇主機。"
           }
         }
@@ -8686,7 +8686,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "沒有自訂指令"
           }
         }
@@ -8702,7 +8702,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "沒有自訂主題"
           }
         }
@@ -8718,7 +8718,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "沒有主機"
           }
         }
@@ -8734,7 +8734,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "還沒有主機。"
           }
         }
@@ -8750,7 +8750,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "還沒有機器回應。"
           }
         }
@@ -8766,7 +8766,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "尚無訊息"
           }
         }
@@ -8782,7 +8782,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "找不到此 Apple ID 的 Multiplex Pro 購買項目。"
           }
         }
@@ -8798,7 +8798,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "找不到此 Apple ID 的 Multiplex Pro 購買項目。TestFlight 版本使用 Apple 的測試商店，因此在 App Store 版本中的購買不會出現在這裡。你可以在 TestFlight 中免費再次解鎖 Pro。"
           }
         }
@@ -8814,7 +8814,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "沒有輸出"
           }
         }
@@ -8830,7 +8830,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "無法連到 %@ — 請檢查這台裝置的網路連線。"
           }
         }
@@ -8846,7 +8846,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "沒有 %@ 的已儲存憑證。請編輯主機並重新登入。"
           }
         }
@@ -8862,7 +8862,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "沒有工作階段檔案"
           }
         }
@@ -8878,7 +8878,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "無訊號"
           }
         }
@@ -8894,7 +8894,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "未選取終端機"
           }
         }
@@ -8910,7 +8910,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "沒有文字差異區塊。"
           }
         }
@@ -8926,7 +8926,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "主機上沒有 tmux"
           }
         }
@@ -8942,7 +8942,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "沒有工作目錄"
           }
         }
@@ -8958,7 +8958,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "無"
           }
         }
@@ -8974,7 +8974,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "這不是主機金鑰。請貼上 SHA256: 指紋，或機器 /etc/ssh 中的公鑰行。"
           }
         }
@@ -8990,7 +8990,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Multiplex 無法讀取的路徑"
           }
         }
@@ -9006,7 +9006,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "不是可用的位址"
           }
         }
@@ -9022,7 +9022,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "不是可用的路徑"
           }
         }
@@ -9038,7 +9038,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Multiplex 無法讀取的位址"
           }
         }
@@ -9054,7 +9054,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "這個檢視器無法繪製的圖片"
           }
         }
@@ -9070,7 +9070,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "未連接"
           }
         }
@@ -9086,7 +9086,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "未連線"
           }
         }
@@ -9102,7 +9102,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "未連線到 %@。"
           }
         }
@@ -9118,7 +9118,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "不在可見的對話記錄中"
           }
         }
@@ -9134,7 +9134,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "現在不要"
           }
         }
@@ -9150,7 +9150,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "未選取"
           }
         }
@@ -9166,7 +9166,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "不是文字 — Multiplex 不會以程式碼呈現。"
           }
         }
@@ -9182,7 +9182,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "不會執行額外的內容。設定指令碼會在啟動前輸入到全新的 Shell 中。"
           }
         }
@@ -9198,7 +9198,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "不會自行開啟任何東西。面板會顯示它實際指向的位置 — "
           }
         }
@@ -9214,7 +9214,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉"
           }
         }
@@ -9230,7 +9230,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉後主機仍留在機群中，但不會連線"
           }
         }
@@ -9246,7 +9246,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "關閉會讓主機停在 Deck 上而不撥號：不探測、沒有方塊，小工具或捷徑會回報為已停用。已開啟的終端機視窗會繼續執行，下方的 Signal 檢查仍會在需要時連線。"
           }
         }
@@ -9359,7 +9359,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "按鍵列上的一個按鍵就能開啟整個捷徑面板：拷貝模式、分割、視窗、工作區，以及需要確認的關閉動作。"
+            "value" : "按鍵列上的一個按鍵就能開啟整個捷徑面板：複製模式、分割、視窗、工作區，以及需要確認的關閉動作。"
           }
         }
       }
@@ -9758,7 +9758,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "在 Multiplex 中以唯讀方式開啟遠端檔案，可指定行號。"
           }
         }
@@ -9790,7 +9790,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "在 Multiplex 中開啟主機最近的 tmux 工作階段，若沒有則建立一個。"
           }
         }
@@ -9812,7 +9812,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "在「%@」中開啟新標籤頁的 Shell。%@"
           }
         }
@@ -9828,7 +9828,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "開啟 SSH 金鑰密語提示"
           }
         }
@@ -9844,7 +9844,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選填"
           }
         }
@@ -9860,7 +9860,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選填的初始提示"
           }
         }
@@ -9876,7 +9876,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選填的模型"
           }
         }
@@ -9892,7 +9892,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 的選填模型"
           }
         }
@@ -9908,7 +9908,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選填，適用於從此面板綁定的每台機器：它的 SSH 金鑰會以此密語封裝產生，密語隨後儲存在主機設定中，讓連線持續可用。在主機設定中清除它，改為在連線時詢問。留空表示金鑰以未鎖定的方式儲存，與以往完全相同。"
           }
         }
@@ -9940,7 +9940,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "opus、sonnet，或完整的模型 ID"
           }
         }
@@ -9956,7 +9956,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "或在主機設定中更改這台主機的後端。"
           }
         }
@@ -9972,7 +9972,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "或者，macOS 或 Linux"
           }
         }
@@ -9988,7 +9988,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "透過使用 OSC 52 的 SSH，綁定碼會進到你本機終端機的剪貼板，再由「通用剪貼板」帶到這裡。"
           }
         }
@@ -10004,7 +10004,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "拖曳以捲動"
           }
         }
@@ -10020,7 +10020,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "窗格選單"
           }
         }
@@ -10100,7 +10100,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "受密碼保護。解鎖只會在此畫面開啟 — 密碼不會被保留。"
           }
         }
@@ -10116,7 +10116,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "貼上"
           }
         }
@@ -10132,7 +10132,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "請先貼上私鑰。"
           }
         }
@@ -10148,7 +10148,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "貼上綁定碼"
           }
         }
@@ -10164,7 +10164,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "貼上需要綁定碼位於這台裝置的剪貼板上，而 mpx 除非你要求，否則不會動剪貼板。請改用 --copy 執行："
           }
         }
@@ -10180,7 +10180,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "暫停"
           }
         }
@@ -10196,7 +10196,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "款項會向你的 Apple ID 收取。非訂閱制。"
           }
         }
@@ -10212,7 +10212,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "PDF"
           }
         }
@@ -10228,7 +10228,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "照片圖庫…"
           }
         }
@@ -10244,7 +10244,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Pi"
           }
         }
@@ -10260,7 +10260,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "從樹狀結構中挑選檔案%@。"
           }
         }
@@ -10276,7 +10276,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "來自 %@ 終端機的 PIN"
           }
         }
@@ -10292,7 +10292,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "把每個內建項目放進 Bar 或 More。自訂內容可以跨多行；關掉 Submit 就會停在可編輯的狀態。"
           }
         }
@@ -10308,7 +10308,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "播放"
           }
         }
@@ -10324,7 +10324,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "播放位置"
           }
         }
@@ -10340,7 +10340,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "指標"
           }
         }
@@ -10356,7 +10356,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "連接埠"
           }
         }
@@ -10372,7 +10372,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "當 Claude Code、Codex 或 Grok Build 在你沒有在輸入的工作階段中完成回合、提出問題或請求權限時顯示橫幅。Multiplex 必須保持開啟。需要 Pro。"
           }
         }
@@ -10388,7 +10388,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "再按一次以關閉"
           }
         }
@@ -10404,7 +10404,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@ 終端機主題的預覽"
           }
         }
@@ -10420,7 +10420,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "上一個視窗"
           }
         }
@@ -10436,7 +10436,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "隱私權政策"
           }
         }
@@ -10452,7 +10452,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "私鑰"
           }
         }
@@ -10474,7 +10474,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Pro 加上無限主機、mosh、無限 Agent 輔助指令、提醒、連線統計、自訂主題，以及 %lld 組按鍵指令（免費版為 %lld 組）。SSH 終端機、Agent 偵測與監控牆的即時狀態維持免費。"
           }
         }
@@ -10490,7 +10490,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Pro 詳細資訊"
           }
         }
@@ -10506,7 +10506,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "已解鎖 Pro"
           }
         }
@@ -10522,7 +10522,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "提示"
           }
         }
@@ -10538,7 +10538,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "每行一個 provider/model-id"
           }
         }
@@ -10554,7 +10554,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "正在驗證 PIN…"
           }
         }
@@ -10570,7 +10570,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "購買完成。"
           }
         }
@@ -10586,7 +10586,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "購買正在等待批准。若獲批准，Pro 會自動解鎖。若遭拒絕，請點一下「回復購買項目」再檢查一次。"
           }
         }
@@ -10602,7 +10602,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "這台裝置上的這個 Apple ID 不允許購買。"
           }
         }
@@ -10618,7 +10618,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "購買非消耗性的 Multiplex Pro 解鎖項目"
           }
         }
@@ -10634,7 +10634,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "連線途徑：%@"
           }
         }
@@ -10650,7 +10650,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "正在讀取工作階段檔案"
           }
         }
@@ -10666,7 +10666,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "正在讀取工作階段檔案"
           }
         }
@@ -10682,7 +10682,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "正在重新連接 %@…"
           }
         }
@@ -11088,7 +11088,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "在 Multiplex 開啟或從背景返回時需要 %@。在你完成驗證前，Deck 與每個終端機都會保持遮蔽；連線與監控牆持續運作。僅限這台裝置。"
           }
         }
@@ -11104,7 +11104,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "必填"
           }
         }
@@ -11120,7 +11120,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "需要 Multiplex Pro"
           }
         }
@@ -11136,7 +11136,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "重設 %@"
           }
         }
@@ -11248,7 +11248,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "跳至途中尺寸改變 — 請再試一次"
           }
         }
@@ -11264,7 +11264,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "回復購買項目"
           }
         }
@@ -11280,7 +11280,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "正在回復購買項目…"
           }
         }
@@ -11296,7 +11296,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "重試上傳"
           }
         }
@@ -11312,7 +11312,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "重試"
           }
         }
@@ -11328,7 +11328,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Return"
           }
         }
@@ -11344,7 +11344,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "右鍵點按"
           }
         }
@@ -11360,7 +11360,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "每次 Deck 重新整理時，這台主機抓取的資料量大約會加倍"
           }
         }
@@ -11392,7 +11392,7 @@
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "執行"
           }
         }
@@ -11402,7 +11402,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "追加したいマシンでmpx CLIを実行すると、そのマシンが自ら名乗り出ます — ここでアドレスやユーザ、鍵を入力する必要はありません。インストールできない場合はMANUALに切り替えてください。"
           }
         },
@@ -11418,7 +11418,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "実行中"
           }
         },
@@ -11434,7 +11434,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "エージェントの前に実行します。空欄にするとMultiplexに記憶されたセットアップスクリプトを使います。"
           }
         },
@@ -11450,7 +11450,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "最初に実行"
           }
         },
@@ -11466,7 +11466,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "実行環境"
           }
         },
@@ -11482,7 +11482,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "保存"
           }
         },
@@ -11498,7 +11498,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "保存して接続"
           }
         },
@@ -11514,7 +11514,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "テーマを保存"
           }
         },
@@ -11530,7 +11530,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "スクリプト"
           }
         },
@@ -11546,7 +11546,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "スクリプトのコマンド"
           }
         },
@@ -11562,7 +11562,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "スクリプト名"
           }
         },
@@ -11578,7 +11578,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ターミナルをこのメッセージまでスクロールして戻す"
           }
         },
@@ -11594,7 +11594,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "検索に失敗しました"
           }
         },
@@ -11610,7 +11610,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "トランスクリプトを検索中"
           }
         },
@@ -11626,7 +11626,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ペイン内をすべて選択"
           }
         },
@@ -11642,14 +11642,14 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "コピーするソーステキストを選択"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "選取原始碼文字以拷貝"
+            "value" : "選取原始碼文字以複製"
           }
         }
       }
@@ -11658,7 +11658,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "テキストを選択"
           }
         },
@@ -11674,7 +11674,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選択中"
           }
         },
@@ -11690,7 +11690,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "選択はすべてのターミナルに即座に適用されます。%@"
           }
         },
@@ -11706,7 +11706,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "送信"
           }
         },
@@ -11722,7 +11722,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "このセッションにファイルを送信"
           }
         },
@@ -11738,7 +11738,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ファイルを送信…"
           }
         },
@@ -11754,7 +11754,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "送信（アップロード待ち）"
           }
         },
@@ -11776,7 +11776,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@の起動引数として送信され、すぐに作業を開始します。空欄にするとプロンプトなしで%@を開きます。"
           }
         },
@@ -11792,7 +11792,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セッション"
           }
         },
@@ -11808,7 +11808,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セッション%@"
           }
         },
@@ -11824,7 +11824,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セッションの識別情報"
           }
         },
@@ -11840,7 +11840,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セッションが見つかりません"
           }
         },
@@ -11856,7 +11856,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セッションのセットアップスクリプト"
           }
         },
@@ -11872,7 +11872,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セッションはherdrで実行されます"
           }
         },
@@ -11894,7 +11894,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セッション、ライブタイル、アタッチはすべて各ホストの%@サーバーから提供されますが、%@にはまだ%@がありません。通常のシェルは使えます — ホストのバーにあるSHELLチップで開けます。Deckをすべて使うには、ホストに%@をインストールしてください："
           }
         },
@@ -11926,7 +11926,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セットアップスクリプト"
           }
         },
@@ -11942,7 +11942,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "セットアップスクリプト"
           }
         },
@@ -11958,7 +11958,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Claude Code、Codex、Pi、Grok Buildで共有"
           }
         },
@@ -11974,7 +11974,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "「共有」にすると、編集できる1つのコマンドがClaude Code、Codex、Pi、Grok Buildの間で同期されます。"
           }
         },
@@ -11990,7 +11990,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Shell"
           }
         },
@@ -12006,7 +12006,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@を表示"
           }
         },
@@ -12022,7 +12022,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "%@のヘルパーチップを表示"
           }
         },
@@ -12038,7 +12038,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "接続統計を表示"
           }
         },
@@ -12054,7 +12054,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "差分を表示"
           }
         },
@@ -12070,7 +12070,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "herdrのショートカットを表示"
           }
         },
@@ -12086,7 +12086,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "バーに表示"
           }
         },
@@ -12102,7 +12102,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "鍵のパスフレーズを表示"
           }
         },
@@ -12118,7 +12118,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "変更されたファイルのみ表示"
           }
         },
@@ -12134,7 +12134,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "キーボードを表示／非表示"
           }
         },
@@ -12150,7 +12150,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ソースを表示"
           }
         },
@@ -12166,7 +12166,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ファイルツリーを表示"
           }
         },
@@ -12182,7 +12182,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "親ディレクトリを表示"
           }
         },
@@ -12198,7 +12198,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ツリー全体を表示"
           }
         },
@@ -12214,7 +12214,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "表示する"
           }
         },
@@ -12230,7 +12230,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "tmuxのショートカットを表示"
           }
         },
@@ -12246,7 +12246,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "最初の%@を表示しています。"
           }
         },
@@ -12262,7 +12262,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "設定と、このパレットが選択されているすべての場所に表示されます。"
           }
         },
@@ -12278,7 +12278,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Deckとターミナルウインドウのソースラベルに表示されます。"
           }
         },
@@ -12294,7 +12294,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "キーチェーンのロック解除方法を表示"
           }
         },
@@ -12310,7 +12310,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "開いているタブを表示"
           }
         },
@@ -12326,7 +12326,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "開いているウインドウを表示"
           }
         },
@@ -12342,7 +12342,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "内蔵コマンドの配置コントロールを表示"
           }
         },
@@ -12358,7 +12358,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "保存された鍵を表示"
           }
         },
@@ -12374,7 +12374,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "このホストのDeckに表示します"
           }
         },
@@ -12390,7 +12390,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ホストに接続できなかった理由を表示"
           }
         },
@@ -12406,7 +12406,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "サインイン方法"
           }
         },
@@ -12422,7 +12422,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "シグナルチェック"
           }
         },
@@ -12438,7 +12438,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "上記の設定でSSHにサインインし、ホスト上で%@とmosh-serverを探します。"
           }
         },
@@ -12454,7 +12454,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "上記の設定でSSHにサインインし、ホスト上で%@を探します。"
           }
         },
@@ -12508,7 +12508,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Multiplexの外部から、%@を%@で起動するよう要求がありました。最初のプロンプトは次のとおりです：\n\n%@\n\n心当たりがある場合のみ実行してください。"
           }
         },
@@ -12530,7 +12530,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Multiplexの外部から、%@を%@で起動するよう要求がありました。\n\n心当たりがある場合のみ実行してください。"
           }
         },
@@ -12552,7 +12552,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Multiplexの外部から、%@を%@で開くよう要求がありました。心当たりがある場合のみ開いてください。"
           }
         },
@@ -12574,7 +12574,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Multiplexの外部から、%@を%@で表示するよう要求がありました。ファイルは読み取り専用で開きます。心当たりがある場合のみ開いてください。"
           }
         },
@@ -12590,7 +12590,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "その他の場所"
           }
         },
@@ -12606,7 +12606,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "サウンドファイル"
           }
         },
@@ -12622,7 +12622,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ソースまたは差分"
           }
         },
@@ -13490,7 +13490,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "そのバインドコードには鍵がありません。"
           }
         },
@@ -13506,7 +13506,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "そのマシンは通知を停止しました — mpx bindをもう一度実行してください。"
           }
         },
@@ -13522,7 +13522,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "そのパスフレーズでは「%@」の秘密鍵を解除できませんでした。もう一度お試しください。「保存して接続」はiCloudキーチェーン内のコピーを置き換えます。"
           }
         },
@@ -13538,7 +13538,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "そのパスフレーズでは秘密鍵を解除できませんでした。もう一度お試しください。"
           }
         },
@@ -13554,7 +13554,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "そのパスワードでは解除できませんでした。もう一度お試しください。"
           }
         },
@@ -13570,7 +13570,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "PINが一致しません — ターミナルを確認してもう一度お試しください。"
           }
         },
@@ -13586,7 +13586,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "App Storeに接続できませんでした。インターネット接続を確認してもう一度お試しください。"
           }
         },
@@ -13608,7 +13608,7 @@
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "App Storeがリクエストを完了できませんでした。このデバイスがApp Storeにサインインしていることを確認してから、もう一度お試しください。(%1$@ %2$lld)"
           }
         },
@@ -13759,7 +13759,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "剪貼板中沒有綁定碼。請拷貝 CLI 印出的 multiplex:// 那一行。"
+            "value" : "剪貼板中沒有綁定碼。請複製 CLI 印出的 multiplex:// 那一行。"
           }
         }
       }
@@ -13957,7 +13957,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "這個欄位中沒有 Multiplex 能開啟的內容 — 目標需要一個網址或郵件地址。你可以編輯它，或在文字仍有用時拷貝起來。"
+            "value" : "這個欄位中沒有 Multiplex 能開啟的內容 — 目標需要一個網址或郵件地址。你可以編輯它，或在文字仍有用時複製起來。"
           }
         }
       }
@@ -13973,7 +13973,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "這個欄位中沒有檢視器能解析的內容 — 相對路徑需要包含目錄，而空格只有接在 /、~/、./ 或 $HOME/ 之後才有效。你可以編輯它，或在文字仍有用時拷貝起來。"
+            "value" : "這個欄位中沒有檢視器能解析的內容 — 相對路徑需要包含目錄，而空格只有接在 /、~/、./ 或 $HOME/ 之後才有效。你可以編輯它，或在文字仍有用時複製起來。"
           }
         }
       }
@@ -14411,7 +14411,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "這段文字看起來像連結，但沒有 Multiplex 能開啟的位址。若仍有用，可以拷貝它。"
+            "value" : "這段文字看起來像連結，但沒有 Multiplex 能開啟的位址。若仍有用，可以複製它。"
           }
         }
       }
@@ -15706,7 +15706,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "通常のシェルも使えます — SHELLを押してください。"
           }
         },
@@ -15738,7 +15738,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ズーム%lldパーセント。リセットで全体表示に戻ります"
           }
         },
@@ -15754,7 +15754,7 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ズーム100パーセント。リセットで全体表示に戻ります"
           }
         },
