@@ -19,9 +19,7 @@ enum FileAttachAvailability {
     /// Mosh has no SFTP channel; a plain shell has no pane to ask.
     @MainActor
     static func canOffer(for controller: TerminalSessionController?) -> Bool {
-        guard let controller else { return false }
-        return !controller.host.useMosh
-            && controller.route.sessionBackend != nil
+        controller?.canUploadFiles == true
     }
 
     #if !os(visionOS)
@@ -66,6 +64,14 @@ class FileAttachPickerPresenterViewController: UIViewController,
 {
     private(set) var queuedPicker: FileAttachPicker?
     private(set) weak var queuedTarget: TerminalSessionController?
+    /// The tab the menu built here aims its pickers at. The FILE chip and
+    /// the Talkback paperclip both point one presenter at the active tab.
+    fileprivate(set) var terminalController: TerminalSessionController?
+    /// Where picked files land. nil = the target's own drop path
+    /// (`deliverDrop`: upload, then type the paths into the pane); the
+    /// Talkback composer routes them into the target's draft instead. The
+    /// target still decides eligibility either way.
+    var deliver: ((TerminalSessionController, [DroppedFile]) -> Void)?
 
     private var activeTarget: TerminalSessionController?
     private var externalRequestIsLatched = false
@@ -81,6 +87,58 @@ class FileAttachPickerPresenterViewController: UIViewController,
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         presentQueuedPickerIfPossible()
+    }
+
+    /// Re-aim at another tab. The FILE chip re-renders its button on top.
+    func update(controller: TerminalSessionController?) {
+        terminalController = controller
+    }
+
+    /// The direct FILE chip, the compact terminal overflow and the Talkback
+    /// paperclip share these exact picker actions. Capturing `target` when
+    /// the menu is built preserves the selected session if a tab switch
+    /// races the system picker.
+    func makeSourceMenu(
+        title: String = "",
+        image: UIImage? = nil,
+        availability: FileAttachMenuAvailability? = nil
+    ) -> UIMenu? {
+        guard let target = terminalController,
+              FileAttachAvailability.canOffer(for: target)
+        else { return nil }
+        let availability = availability
+            ?? FileAttachMenuAvailability(controller: target)
+        guard availability.canOffer else { return nil }
+        let enabled = availability.actionsEnabled
+        var actions: [UIMenuElement] = []
+        #if !os(visionOS)
+        actions.append(UIAction(
+            title: "Camera…",
+            image: UIImage(systemName: "camera"),
+            identifier: UIAction.Identifier("terminal.attach.camera"),
+            attributes: enabled && FileAttachAvailability.cameraAvailable
+                ? [] : .disabled
+        ) { [weak self, weak target] _ in
+            self?.request(.camera, target: target)
+        })
+        #endif
+        actions.append(UIAction(
+            title: "Photo Library…",
+            image: UIImage(systemName: "photo.on.rectangle"),
+            identifier: UIAction.Identifier("terminal.attach.photos"),
+            attributes: enabled ? [] : .disabled
+        ) { [weak self, weak target] _ in
+            self?.request(.photoLibrary, target: target)
+        })
+        actions.append(UIAction(
+            title: "Files…",
+            image: UIImage(systemName: "folder"),
+            identifier: UIAction.Identifier("terminal.attach.files"),
+            attributes: enabled ? [] : .disabled
+        ) { [weak self, weak target] _ in
+            self?.request(.files, target: target)
+        })
+        return UIMenu(title: title, image: image, children: actions)
     }
 
     func request(
@@ -155,8 +213,9 @@ class FileAttachPickerPresenterViewController: UIViewController,
     ) {
         let target = activeTarget
         activeTarget = nil
-        Task { @MainActor in
-            target?.deliverDrop(await FileAttachDataLoader.readSecurityScopedFiles(urls))
+        Task { @MainActor [weak self] in
+            let files = await FileAttachDataLoader.readSecurityScopedFiles(urls)
+            self?.deliverPicked(files, to: target)
         }
         scheduleQueuedPresentation()
     }
@@ -173,8 +232,9 @@ class FileAttachPickerPresenterViewController: UIViewController,
             self?.presentQueuedPickerIfPossible()
         }
         guard !results.isEmpty else { return }
-        Task { @MainActor in
-            target?.deliverDrop(await FileAttachDataLoader.loadPhotos(results))
+        Task { @MainActor [weak self] in
+            let files = await FileAttachDataLoader.loadPhotos(results)
+            self?.deliverPicked(files, to: target)
         }
     }
 
@@ -196,6 +256,17 @@ class FileAttachPickerPresenterViewController: UIViewController,
         guard let picker = makePicker(for: source) else { return }
         activeTarget = target
         present(picker, animated: true)
+    }
+
+    /// One landing for every picker: the composer's draft when it asked, the
+    /// pane's drop path otherwise.
+    func deliverPicked(_ files: [DroppedFile], to target: TerminalSessionController?) {
+        guard let target, !files.isEmpty else { return }
+        if let deliver {
+            deliver(target, files)
+        } else {
+            target.deliverDrop(files)
+        }
     }
 
     private func scheduleQueuedPresentation() {
@@ -239,9 +310,7 @@ extension FileAttachPickerPresenterViewController: UINavigationControllerDelegat
         picker.dismiss(animated: true) { [weak self] in
             self?.presentQueuedPickerIfPossible()
         }
-        target?.deliverDrop([
-            DroppedFile(name: DropText.photoName(), data: data),
-        ])
+        deliverPicked([DroppedFile(name: DropText.photoName(), data: data)], to: target)
     }
 }
 #endif
@@ -297,13 +366,12 @@ enum FileAttachDataLoader {
 final class FileAttachMenuViewController: FileAttachPickerPresenterViewController {
     private(set) var attachButton = FileAttachBadgeButton()
 
-    private var terminalController: TerminalSessionController?
     private var observationGeneration = 0
     private var buttonParkingConstraints: [NSLayoutConstraint] = []
 
     init(controller: TerminalSessionController?) {
-        terminalController = controller
         super.init(nibName: nil, bundle: nil)
+        terminalController = controller
     }
 
     @available(*, unavailable)
@@ -350,8 +418,8 @@ final class FileAttachMenuViewController: FileAttachPickerPresenterViewControlle
         NSLayoutConstraint.activate(buttonParkingConstraints)
     }
 
-    func update(controller: TerminalSessionController?) {
-        terminalController = controller
+    override func update(controller: TerminalSessionController?) {
+        super.update(controller: controller)
         guard isViewLoaded else { return }
         observationGeneration &+= 1
         renderAndObserve(generation: observationGeneration)
@@ -377,53 +445,6 @@ final class FileAttachMenuViewController: FileAttachPickerPresenterViewControlle
             ? makeSourceMenu(availability: availability)
             : nil
     }
-
-    /// The direct FILE chip and compact terminal overflows share these exact
-    /// picker actions. Capturing `target` when the menu is built preserves
-    /// the selected session if a tab switch races the system picker.
-    func makeSourceMenu(
-        title: String = "",
-        image: UIImage? = nil,
-        availability: FileAttachMenuAvailability? = nil
-    ) -> UIMenu? {
-        guard let target = terminalController,
-              FileAttachAvailability.canOffer(for: target)
-        else { return nil }
-        let availability = availability
-            ?? FileAttachMenuAvailability(controller: target)
-        guard availability.canOffer else { return nil }
-        let enabled = availability.actionsEnabled
-        var actions: [UIMenuElement] = []
-        #if !os(visionOS)
-        actions.append(UIAction(
-            title: "Camera…",
-            image: UIImage(systemName: "camera"),
-            identifier: UIAction.Identifier("terminal.attach.camera"),
-            attributes: enabled && FileAttachAvailability.cameraAvailable
-                ? [] : .disabled
-        ) { [weak self, weak target] _ in
-            self?.request(.camera, target: target)
-        })
-        #endif
-        actions.append(UIAction(
-            title: "Photo Library…",
-            image: UIImage(systemName: "photo.on.rectangle"),
-            identifier: UIAction.Identifier("terminal.attach.photos"),
-            attributes: enabled ? [] : .disabled
-        ) { [weak self, weak target] _ in
-            self?.request(.photoLibrary, target: target)
-        })
-        actions.append(UIAction(
-            title: "Files…",
-            image: UIImage(systemName: "folder"),
-            identifier: UIAction.Identifier("terminal.attach.files"),
-            attributes: enabled ? [] : .disabled
-        ) { [weak self, weak target] _ in
-            self?.request(.files, target: target)
-        })
-        return UIMenu(title: title, image: image, children: actions)
-    }
-
 }
 
 @MainActor

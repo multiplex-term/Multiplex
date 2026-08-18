@@ -16,7 +16,10 @@ final class TerminalTallyKeyControl: UIControl {
     }
 
     var isLatched = false {
-        didSet { refreshAppearance() }
+        didSet {
+            guard isLatched != oldValue else { return }
+            refreshAppearance()
+        }
     }
     var faceInset: CGFloat = 0 {
         didSet { setNeedsLayout() }
@@ -368,6 +371,12 @@ final class TerminalCtrlComboViewController: UIViewController {
     }
 }
 
+/// The talk key's VoiceOver name on the rail and in the visionOS cluster —
+/// one wording, flipped in place with the latch.
+private func talkbackKeyLabel(open: Bool) -> String {
+    open ? "Close the message box" : "Open the message box"
+}
+
 #if !os(visionOS)
 
 /// Pure layout ladder for the native rail. Its last two exact floors are
@@ -407,20 +416,26 @@ enum TerminalKeyBarLayout {
         var faceInset: CGFloat = 0
 
         static let regular = Metric(keyWidth: 46, spacing: 6, groupGap: 12)
-        static let tight = Metric(keyWidth: 40, spacing: 1, groupGap: 1, faceInset: 1)
+        /// The phone tiers run 36 pt faces (the visionOS compact cluster's
+        /// width) since the talk key joined the right group: at 40 pt every
+        /// phone tier overflowed its cutoff (tight 425 > 390, RET floor 400 >
+        /// 375), and the key is essential at every tier — so the faces
+        /// yield, and `SingleWindowShellLayout`'s 390 / 420 cutoffs and the
+        /// 375 locked floor hold unchanged (pinned by the width-ladder test).
+        static let tight = Metric(keyWidth: 36, spacing: 1, groupGap: 1, faceInset: 1)
         static let returnAndTmux = Metric(
-            keyWidth: 40,
+            keyWidth: 36,
             spacing: 0,
             groupGap: 4,
             faceInset: 1
         )
         static let returnFloor = Metric(
-            keyWidth: 40,
+            keyWidth: 36,
             spacing: 0,
             groupGap: 1,
             faceInset: 1
         )
-        static let compact = Metric(keyWidth: 40, spacing: 4, groupGap: 4)
+        static let compact = Metric(keyWidth: 36, spacing: 4, groupGap: 4)
     }
 
     struct Specification: Equatable {
@@ -435,9 +450,11 @@ enum TerminalKeyBarLayout {
             let gap = includesReturn ? min(metric.groupGap, 8) : metric.groupGap
             var groupCounts = [3]
             if !symbols.isEmpty { groupCounts.append(symbols.count) }
+            // arrows · RET · talk · keyboard/mic · TMUX
             let rightCount = (pageKeys ? 2 : 0)
                 + 4
                 + (includesReturn ? 1 : 0)
+                + 1
                 + 1
                 + (tmux ? 1 : 0)
             groupCounts.append(rightCount)
@@ -539,6 +556,8 @@ struct TerminalKeyBarObservedState: Equatable {
     var hardwareKeyboardConnected: Bool
     var keyboardLocked: Bool
     var isDictating: Bool
+    /// The talk key latches while this tab's message box is open.
+    var talkbackOpen: Bool
 }
 
 /// The iPad terminal's app-owned TALLY key rail. It is a normal UIKit sibling
@@ -616,6 +635,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     private var renderedSignature: RenderSignature?
     private(set) var renderedKeys: [TerminalTallyKeyControl] = []
     private weak var ctrlKeyControl: TerminalTallyKeyControl?
+    private weak var talkKeyControl: TerminalTallyKeyControl?
     private weak var shortcutPopoverController: UIViewController?
     private let keyCommandsPresenter = KeyCommandPanelPresenter()
     /// The tier's Key Commands cap and paywall route, handed down with the
@@ -623,9 +643,21 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     var keyCommandPlan: KeyCommandPlan = .unrestricted
     private var ctrlComboView: TerminalCtrlComboView?
 
+    /// What forces a rebuild of the row. The talk key's latch is deliberately
+    /// not part of it — it flips in place, like CTRL's, so opening the
+    /// message box never re-creates the keys under the finger.
     private struct RenderSignature: Equatable {
         var tier: TerminalKeyBarLayout.Tier
-        var state: TerminalKeyBarObservedState
+        var hardwareKeyboardConnected: Bool
+        var keyboardLocked: Bool
+        var isDictating: Bool
+
+        init(tier: TerminalKeyBarLayout.Tier, state: TerminalKeyBarObservedState) {
+            self.tier = tier
+            hardwareKeyboardConnected = state.hardwareKeyboardConnected
+            keyboardLocked = state.keyboardLocked
+            isDictating = state.isDictating
+        }
     }
 
     init(
@@ -678,22 +710,31 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        topBorder.frame = CGRect(x: 0, y: 0, width: bounds.width, height: 1)
-        let state = observedState ?? currentObservedState
-        let includesReturn = showsReturnKey || state.keyboardLocked
-        let specification = TerminalKeyBarLayout.specification(
-            width: bounds.width,
-            contentSafeArea: contentSafeArea,
-            showsTmux: shortcutBackend != nil,
-            includesReturn: includesReturn
-        )
-        let signature = RenderSignature(tier: specification.tier, state: state)
-        if renderedSignature != signature {
-            rebuildRow(specification: specification, state: state)
-            renderedSignature = signature
+        // The rail's own faces never animate: a row rebuilt or re-tiered
+        // inside someone else's animation block (the Talkback card's spring
+        // runs the window's whole render, and this pass lands in its
+        // `layoutIfNeeded`) would otherwise fly its keys in from zero
+        // frames. The rail as a whole still rides its container's motion.
+        UIView.performWithoutAnimation {
+            topBorder.frame = CGRect(x: 0, y: 0, width: bounds.width, height: 1)
+            let state = observedState ?? currentObservedState
+            let includesReturn = showsReturnKey || state.keyboardLocked
+            let specification = TerminalKeyBarLayout.specification(
+                width: bounds.width,
+                contentSafeArea: contentSafeArea,
+                showsTmux: shortcutBackend != nil,
+                includesReturn: includesReturn
+            )
+            let signature = RenderSignature(tier: specification.tier, state: state)
+            if renderedSignature != signature {
+                rebuildRow(specification: specification, state: state)
+                renderedSignature = signature
+            }
+            talkKeyControl?.isLatched = state.talkbackOpen
+            talkKeyControl?.accessibilityLabel = talkbackKeyLabel(open: state.talkbackOpen)
+            layoutRow(specification: specification, includesReturn: includesReturn)
+            bringSubviewToFront(topBorder)
         }
-        layoutRow(specification: specification, includesReturn: includesReturn)
-        bringSubviewToFront(topBorder)
     }
 
     override func willMove(toWindow newWindow: UIWindow?) {
@@ -711,7 +752,8 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         TerminalKeyBarObservedState(
             hardwareKeyboardConnected: HardwareKeyboardMonitor.shared.isConnected,
             keyboardLocked: KeyboardLock.shared.isLocked,
-            isDictating: controller?.isDictating == true
+            isDictating: controller?.isDictating == true,
+            talkbackOpen: controller?.talkbackOpen == true
         )
     }
 
@@ -726,7 +768,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         }
         guard state != observedState else { return }
         observedState = state
-        renderedSignature = nil
+        // The layout pass compares render signatures itself: a state change
+        // that only moves the talk latch re-latches in place; the rest
+        // rebuild the row.
         setNeedsLayout()
     }
 
@@ -737,6 +781,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         for key in renderedKeys { key.removeFromSuperview() }
         renderedKeys.removeAll(keepingCapacity: true)
         ctrlKeyControl = nil
+        talkKeyControl = nil
         let metric = specification.metric
         let includesReturn = showsReturnKey || state.keyboardLocked
 
@@ -783,6 +828,15 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                 identifier: "return"
             ))
         }
+        // Talkback — the message box under the pane; RET · talk · keyboard.
+        // Latched while the box is open, like CTRL and the keyboard lock.
+        right.append(RailKey(
+            key: .talkback,
+            face: .symbol("text.bubble", pointSize: 13, weight: .semibold),
+            accessibility: talkbackKeyLabel(open: state.talkbackOpen),
+            identifier: "talkback",
+            latched: state.talkbackOpen
+        ))
         if state.hardwareKeyboardConnected {
             right.append(RailKey(
                 key: .dictation,
@@ -850,6 +904,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                 addSubview(control)
                 renderedKeys.append(control)
                 if descriptor.identifier == "control" { ctrlKeyControl = control }
+                if descriptor.identifier == "talkback" { talkKeyControl = control }
             }
         }
     }
@@ -938,6 +993,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             terminal.send(EscapeSequences.cmdPageDown)
         case .keyboard:
             TerminalFocusArbiter.toggle(terminal)
+        case .talkback:
+            click()
+            controller?.toggleTalkback()
         case .lockKeyboard:
             click()
             TerminalFocusArbiter.lock(terminal)
@@ -1236,6 +1294,7 @@ private enum TerminalKey {
     case keyboard
     case lockKeyboard
     case dictation
+    case talkback
     case showShortcutPanel
     case shortcut(ShortcutPanelItem)
     case keyCommands
@@ -1400,6 +1459,9 @@ final class TerminalKeyClusterContext {
     #endif
 
     private(set) var ctrlLatched = false
+    /// The talk key latches while the active tab's message box is open —
+    /// read from the controller, never mirrored.
+    var talkbackOpen: Bool { controller?.talkbackOpen == true }
 
     init() {
         #if DEBUG
@@ -1454,6 +1516,8 @@ final class TerminalKeyClusterContext {
         let controllerChanged = self.controller !== controller
         self.controller = controller
         let terminal = controller?.terminalView
+        // Every group applies the context's state on its own update; only a
+        // changed terminal re-registers the latch-reset observer.
         guard controllerChanged || observedTerminal !== terminal else { return }
         if let controlResetObserver {
             NotificationCenter.default.removeObserver(controlResetObserver)
@@ -1488,6 +1552,13 @@ final class TerminalKeyClusterContext {
 
     func toggleKeyboard() {
         controller?.toggleKeyboard()
+    }
+
+    func toggleTalkback() {
+        controller?.toggleTalkback()
+        // The window re-renders every group on the open flip; the broadcast
+        // latches the sibling candidates this same turn.
+        broadcast()
     }
 
     func toggleControl(from group: TerminalKeyClusterGroupView) {
@@ -1581,6 +1652,7 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     private let context: TerminalKeyClusterContext
     private var standaloneVariant: StandaloneVariant?
     private weak var ctrlKey: TerminalTallyKeyControl?
+    private weak var talkKey: TerminalTallyKeyControl?
     private weak var comboPopoverController: UIViewController?
     private let keyCommandsPresenter = KeyCommandPanelPresenter()
     private(set) var keys: [TerminalTallyKeyControl] = []
@@ -1634,6 +1706,8 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
 
     func applyContextState() {
         ctrlKey?.isLatched = context.ctrlLatched
+        talkKey?.isLatched = context.talkbackOpen
+        talkKey?.accessibilityLabel = talkbackKeyLabel(open: context.talkbackOpen)
     }
 
     func fittingSize(maximumWidth: CGFloat?) -> CGSize {
@@ -1734,6 +1808,7 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         for key in keys { key.removeFromSuperview() }
         keys.removeAll(keepingCapacity: true)
         ctrlKey = nil
+        talkKey = nil
         standaloneVariant = variant
         let activeMetric: TerminalKeyClusterMetric
         let minimal: Bool
@@ -1801,6 +1876,19 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
                 accessibilityIdentifier: "terminal.keyCluster.return",
                 action: { [weak context] in context?.sendReturn() }
             ))
+            // Talkback — RET · talk · keyboard, mirroring the iPad rail;
+            // latched while the message box is open.
+            let talk = TerminalTallyKeyControl(
+                face: .symbol("text.bubble", pointSize: 12, weight: .semibold),
+                width: activeMetric.keyWidth,
+                height: 26,
+                accessibilityLabel: talkbackKeyLabel(open: context.talkbackOpen),
+                accessibilityIdentifier: "terminal.keyCluster.talkback",
+                latched: context.talkbackOpen,
+                action: { [weak context] in context?.toggleTalkback() }
+            )
+            append(talk)
+            talkKey = talk
             let keyboard = TerminalTallyKeyControl(
                 face: .symbol("keyboard", pointSize: 12, weight: .semibold),
                 width: activeMetric.keyWidth,
@@ -1882,8 +1970,10 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         24 + metric.keyWidth * 3 + metric.spacing * 2
     }
 
+    /// arrows · RET · talk · keyboard — four arrows in a run, then three
+    /// tail keys each a group gap apart.
     private func trailingWidth(_ metric: TerminalKeyClusterMetric) -> CGFloat {
-        24 + metric.keyWidth * 6 + metric.spacing * 3 + metric.groupGap * 2
+        24 + metric.keyWidth * 7 + metric.spacing * 3 + metric.groupGap * 3
     }
 
     private func standaloneWidth(
@@ -1892,8 +1982,8 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     ) -> CGFloat {
         let left = metric.keyWidth * 3 + metric.spacing * 2
         let arrows = minimal ? 0 : metric.keyWidth * 4 + metric.spacing * 3
-        let groups = minimal ? 3 : 4
-        return 24 + left + arrows + metric.keyWidth * 2
+        let groups = minimal ? 4 : 5
+        return 24 + left + arrows + metric.keyWidth * 3
             + CGFloat(groups - 1) * metric.groupGap
     }
 

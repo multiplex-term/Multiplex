@@ -63,8 +63,14 @@ final class TerminalTallyKeyControlTests: XCTestCase {
 final class TerminalKeyBarUIKitTests: XCTestCase {
     func testWidthLadderPreservesEveryDocumentedFloor() {
         XCTAssertEqual(specification(width: 1024, returns: true).tier, .full)
+        // The talk key (RET · talk · keyboard) costs a 768 pt window its page
+        // keys — the ladder's first sacrifice — and nothing below.
         XCTAssertEqual(
             specification(width: 768, returns: true).tier,
+            .twoSymbols
+        )
+        XCTAssertEqual(
+            specification(width: 820, returns: true).tier,
             .twoSymbolsAndPages
         )
         XCTAssertEqual(
@@ -164,6 +170,18 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
                 "terminal.keybar.tab",
             ]
         )
+        // Talkback sits between RET and the keyboard / mic slot on every tier.
+        let identifiers = bar.renderedKeys.compactMap(\.accessibilityIdentifier)
+        let talk = try XCTUnwrap(identifiers.firstIndex(of: "terminal.keybar.talkback"))
+        XCTAssertEqual(identifiers[talk - 1], "terminal.keybar.return")
+        XCTAssertTrue(
+            ["terminal.keybar.keyboard", "terminal.keybar.dictation"]
+                .contains(identifiers[talk + 1])
+        )
+        XCTAssertEqual(
+            bar.renderedKeys[talk].accessibilityLabel,
+            "Open the message box"
+        )
         XCTAssertEqual(
             bar.renderedKeys.first {
                 $0.accessibilityIdentifier == "terminal.keybar.control"
@@ -215,18 +233,21 @@ final class TerminalKeyClusterUIKitTests: XCTestCase {
         )
 
         XCTAssertEqual(leading.intrinsicContentSize, CGSize(width: 174, height: 44))
-        XCTAssertEqual(trailing.intrinsicContentSize, CGSize(width: 342, height: 44))
+        // arrows · RET · talk · keyboard: seven faces, three tail gaps.
+        XCTAssertEqual(trailing.intrinsicContentSize, CGSize(width: 400, height: 44))
         XCTAssertEqual(
             standalone.fittingSize(maximumWidth: 600),
-            CGSize(width: 504, height: 44)
+            CGSize(width: 562, height: 44)
         )
+        // 420 no longer holds the compact run with its arrows (436): the
+        // standalone slab drops to its minimal tier there.
         XCTAssertEqual(
             standalone.fittingSize(maximumWidth: 420),
-            CGSize(width: 392, height: 44)
+            CGSize(width: 272, height: 44)
         )
         XCTAssertEqual(
             standalone.fittingSize(maximumWidth: 375),
-            CGSize(width: 228, height: 44)
+            CGSize(width: 272, height: 44)
         )
     }
 
@@ -259,11 +280,12 @@ final class TerminalKeyClusterUIKitTests: XCTestCase {
                 "terminal.keyCluster.down",
                 "terminal.keyCluster.right",
                 "terminal.keyCluster.return",
+                "terminal.keyCluster.talkback",
                 "terminal.keyCluster.keyboard",
             ]
         )
         XCTAssertTrue(trailing.keys.prefix(4).allSatisfy(\.repeats))
-        XCTAssertFalse(trailing.keys.suffix(2).contains(where: \.repeats))
+        XCTAssertFalse(trailing.keys.suffix(3).contains(where: \.repeats))
         XCTAssertEqual(leading.layer.cornerRadius, 12)
         XCTAssertEqual(leading.layer.borderWidth, 1)
         XCTAssertFalse((leading.subviews + trailing.subviews).contains {

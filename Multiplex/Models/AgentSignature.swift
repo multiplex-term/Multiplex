@@ -17,6 +17,19 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         }
     }
 
+    /// The agent's own mark — the helper strip's folded dot and the Talkback
+    /// eyebrow wear it. Grok has no single-glyph mark of its own in the TUI;
+    /// the plain capital reads as xAI's without leaning on a font-fallback
+    /// symbol.
+    var glyph: String {
+        switch self {
+        case .claudeCode: "✳"
+        case .codex: "◆"
+        case .pi: "π"
+        case .grok: "X"
+        }
+    }
+
     /// Deck telemetry token ("3 WIN · 2h · CLAUDE").
     var telemetryLabel: String {
         switch self {
@@ -307,6 +320,9 @@ struct AgentCommand: Identifiable, Hashable {
     /// "/new\r" leaves the text sitting in the composer; a CR ≥120 ms later
     /// submits). The other supported agents accept the delayed shape too.
     var submitsAfterPause = false
+    /// The pause — one number for every "type, then Enter" road (slash
+    /// chips, Key Commands text rows, Talkback SEND).
+    static let submitDelay: Duration = .milliseconds(160)
 
     var id: String { label }
 

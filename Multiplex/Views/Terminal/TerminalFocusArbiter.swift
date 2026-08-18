@@ -32,6 +32,10 @@ private final class LockedKeyboardInputView: UIView {}
 @MainActor
 enum TerminalFocusArbiter {
     private(set) static weak var current: TerminalView?
+    /// An app-owned field that borrowed the keyboard from the current
+    /// terminal (the Talkback composer's). Any claim resigns it first, so
+    /// one input session stays live app-wide even across scenes.
+    private static weak var borrower: UIView?
     private static var keyboardVisible = false
     private static var observersInstalled = false
 
@@ -60,6 +64,12 @@ enum TerminalFocusArbiter {
     static func claim(_ view: TerminalView) {
         guard !inputSuppressed else { return }
         installObserversIfNeeded()
+        // A borrowed keyboard comes back before any terminal takes it —
+        // even one in another window, which UIKit would leave alone.
+        if let borrower, borrower.isFirstResponder {
+            _ = borrower.resignFirstResponder()
+        }
+        borrower = nil
         // Stage Manager can transiently clear `isKeyWindow` while the user
         // moves that very window. The terminal still owns the live input
         // session and remains first responder during that transition. Do not
@@ -119,17 +129,20 @@ enum TerminalFocusArbiter {
     }
 
     /// Short press on the (locked) keyboard key: release the lock and ask
-    /// for the keyboard — the press means "I want to type again".
-    static func unlock(_ view: TerminalView) {
+    /// for the keyboard — the press means "I want to type again". The
+    /// Talkback key passes `summoning: false`: its own field is about to
+    /// take the keyboard, and a deferred terminal summon would race it.
+    static func unlock(_ view: TerminalView, summoning: Bool = true) {
         guard KeyboardLock.shared.isLocked else { return }
         #if DEBUG
-        keyboardLogger.debug("kbd-lock released")
+        keyboardLogger.debug("kbd-lock released summoning=\(summoning, privacy: .public)")
         #endif
         KeyboardLock.shared.isLocked = false
         applyLockState(to: view)
         if let current, current !== view {
             applyLockState(to: current)
         }
+        guard summoning else { return }
         summon(view, force: true)
     }
 
@@ -156,6 +169,26 @@ enum TerminalFocusArbiter {
         #endif
         _ = view.resignFirstResponder()
         return true
+    }
+
+    /// An app-owned field takes the keyboard while this terminal keeps
+    /// ownership: the terminal steps down and the field's window is made
+    /// key — UIKit resigns responders only within one window, and on
+    /// visionOS the Talkback composer lives in the ornament's window while
+    /// the terminal stays first responder in the scene's, where key events
+    /// go. The next `claim` of ANY terminal resigns the borrower;
+    /// `resumeAfterPresentation` hands the keyboard back on close.
+    static func lend(_ view: TerminalView?, to field: UIView) {
+        borrower = field
+        if let view, view.isFirstResponder {
+            #if DEBUG
+            keyboardLogger.debug("kbd-focus-lend current=\(current === view, privacy: .public)")
+            #endif
+            _ = view.resignFirstResponder()
+        }
+        if let window = field.window, !window.isKeyWindow {
+            window.makeKey()
+        }
     }
 
     /// Resume a presentation-suspended terminal only if it still owns focus.

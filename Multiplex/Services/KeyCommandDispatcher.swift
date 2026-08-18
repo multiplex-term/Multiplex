@@ -10,7 +10,7 @@ import SwiftTerm
 enum KeyCommandDispatcher {
     /// The slash-chip shape: a text row's Enter is a separate write this long
     /// after the text (Codex treats a same-burst CR as a pasted newline).
-    static let submitDelay: Duration = .milliseconds(160)
+    static let submitDelay = AgentCommand.submitDelay
 
     /// Starts the send (or the repeat burst) and returns its task; nil when
     /// the command has nothing to send in this terminal's mode. The burst

@@ -243,6 +243,18 @@ final class TerminalWindowViewController: UIViewController,
     private var paneControllers: [UUID: UIViewController] = [:]
     private var umdController: UIViewController?
     private var helperController: AgentHelperStripViewController?
+    /// The active tab's open Talkback composer — one per window, re-pointed
+    /// at whichever tab is active; nil while that tab's box is closed.
+    private var talkbackController: TalkbackComposerViewController?
+    /// Whether opening the box folded the helper strip to its dot (so
+    /// closing can unfold it) — the strip stays as the user left it otherwise.
+    private var talkbackFoldedHelper = false
+    /// The open box's height at this render's width, measured once per
+    /// render (before the panes are configured) — never per tab.
+    private var renderedTalkbackHeight: CGFloat = 0
+    #if !os(visionOS)
+    private var lastRenderedKeyboardLocked = false
+    #endif
     /// Mirrors the legacy helper's `.id(activeTab.hostID)`: even when two
     /// hosts expose the same agent kind, their editor drafts and command
     /// configuration must never share controller state.
@@ -600,14 +612,47 @@ final class TerminalWindowViewController: UIViewController,
     private var showsAgentHelper: Bool {
         shownAgent != nil && activeController?.status == .live
     }
+    /// The active tab's Talkback box is open (auxiliary panes have no pane
+    /// to talk to).
+    private var talkbackOpen: Bool {
+        activeTab?.isAuxiliaryPane != true && activeController?.talkbackOpen == true
+    }
+    /// The width the composer lays out for: the window's on iPad / iPhone
+    /// (the shell's available width where the shell insets), the console
+    /// clamp on visionOS — content-sized like every ornament slab, capped so
+    /// a wide window never grows a window-wide card.
+    private var talkbackWidth: CGFloat {
+        #if os(visionOS)
+        if shell == nil {
+            return min(
+                620,
+                TerminalVisionOrnamentPresentation.consoleClamp(windowWidth: rootView.bounds.width)
+            )
+        }
+        #endif
+        return shell?.availableWidth ?? rootView.bounds.width
+    }
+    /// The eyebrow's telemetry: the tmux/herdr session's attention record for
+    /// this tab, or a plain shell's own. Fail-soft — nil says nothing.
+    private var activeTabAgentState: PaneAgentState? {
+        guard let activeTab else { return nil }
+        guard let key = activeTab.sessionKey else {
+            return activeController?.directShellAttention
+        }
+        guard let host = store.host(id: activeTab.hostID) else { return nil }
+        return hub.model(for: host).attention[key]
+    }
     private var terminalBottomChromeHeight: CGFloat {
         #if os(visionOS)
         0
         #else
         // A collapsed strip is a small dot floating over the terminal's
-        // bottom-leading corner; the pane reclaims the docked row.
-        showsAgentHelper && !AgentHelperStripCollapse.shared.isCollapsed
+        // bottom-leading corner; the pane reclaims the docked row. The
+        // Talkback card docks below the strip (or its dot) and above the
+        // rail, and the pane insets by both.
+        let helper = showsAgentHelper && !AgentHelperStripCollapse.shared.isCollapsed
             ? AgentHelperStripViewController.dockedHeight : 0
+        return helper + renderedTalkbackHeight
         #endif
     }
     private var mergeSources: [TerminalWorkspace.WindowEntry] {
@@ -700,6 +745,10 @@ final class TerminalWindowViewController: UIViewController,
             _ = activeController?.directShellAttention
             _ = activeController?.pendingLink
             _ = activeController?.pendingPath
+            _ = activeController?.talkbackOpen
+            // The eyebrow's telemetry matters only while a box is open —
+            // otherwise an attention edge on the host is not this window's.
+            if talkbackOpen { _ = activeTabAgentState }
             _ = keyPassphraseChallenge
             _ = activeTabKeychainNotice
             #if !os(visionOS)
@@ -721,6 +770,12 @@ final class TerminalWindowViewController: UIViewController,
             }
         }
         updateShownAgent(from: snapshot)
+        #if !os(visionOS)
+        if let transition = pendingTalkbackTransition {
+            animateTalkbackTransition(transition)
+            return
+        }
+        #endif
         renderNow()
     }
 
@@ -751,6 +806,8 @@ final class TerminalWindowViewController: UIViewController,
 
     private func renderNow() {
         guard isViewLoaded, !preparedForRemoval else { return }
+        // Before the panes: their bottom inset reads the composer's height.
+        renderTalkback()
         reconcilePaneControllers()
         renderTabStrip()
         renderUMD()
@@ -1337,7 +1394,7 @@ final class TerminalWindowViewController: UIViewController,
         controller.sendInput(command.payload)
         guard command.submitsAfterPause else { return }
         Task {
-            try? await Task.sleep(for: .milliseconds(160))
+            try? await Task.sleep(for: AgentCommand.submitDelay)
             controller.sendInput(Data([0x0D]))
         }
     }
@@ -1391,26 +1448,135 @@ final class TerminalWindowViewController: UIViewController,
             return
         }
         #endif
+        animateChromeRender()
+    }
 
+    /// The chrome band's one motion: the helper strip's fold and the
+    /// Talkback card's arrival, departure and growth all run the window's
+    /// render inside this spring, so the pane cedes or reclaims its rows in
+    /// the same curve as the band. `alongside` rides the block; Reduce
+    /// Motion (or a window not yet on screen) cuts straight to the result.
+    private typealias ChromeSpring = (duration: TimeInterval, damping: CGFloat)
+    private nonisolated static let chromeBandSpring: ChromeSpring = (0.35, 0.85)
+
+    private var animatesChrome: Bool {
+        !UIAccessibility.isReduceMotionEnabled && rootView.window != nil
+    }
+
+    private func animateChromeRender(
+        _ spring: ChromeSpring = chromeBandSpring,
+        alongside: @escaping () -> Void = {},
+        completion: (() -> Void)? = nil
+    ) {
         let changes = { [self] in
             renderNow()
+            alongside()
             rootView.layoutIfNeeded()
         }
-        guard !UIAccessibility.isReduceMotionEnabled else {
+        guard animatesChrome else {
             changes()
+            completion?()
             return
         }
-        // The strip cross-dissolves its own content; this spring folds the
-        // slab into (or out of) the corner dot and lets the terminal reclaim
-        // or cede the docked row.
         UIView.animate(
-            withDuration: 0.35,
+            withDuration: spring.duration,
             delay: 0,
-            usingSpringWithDamping: 0.85,
+            usingSpringWithDamping: spring.damping,
             initialSpringVelocity: 0,
             animations: changes
-        )
+        ) { _ in completion?() }
     }
+
+    #if !os(visionOS)
+    /// The card's arrival or departure, when the next render will mount or
+    /// drop it.
+    private enum TalkbackTransition {
+        case opening
+        case closing
+    }
+
+    private var pendingTalkbackTransition: TalkbackTransition? {
+        if talkbackOpen, talkbackController == nil { return .opening }
+        if !talkbackOpen, talkbackController != nil { return .closing }
+        return nil
+    }
+
+    /// Opening: the card rises out from behind the rail's edge (its band
+    /// clips it, so it never crosses the keys) while the pane cedes its rows;
+    /// closing: a snapshot of the card sinks back the same way while the pane
+    /// reclaims them.
+    private func animateTalkbackTransition(_ transition: TalkbackTransition) {
+        guard animatesChrome else {
+            renderNow()
+            return
+        }
+        switch transition {
+        case .opening:
+            // Mount unanimated and park the band at its final frame with the
+            // card pushed below it (clipped, so it never crosses the keys);
+            // the animated render then insets the pane — the surface lays its
+            // constraint out inside the block, so it animates — while the
+            // card slides up into the band.
+            UIView.performWithoutAnimation {
+                renderTalkback()
+                let container = rootView.talkbackContainer
+                let height = renderedTalkbackHeight
+                container.frame = CGRect(
+                    x: 0,
+                    y: paneChromeBottom - height,
+                    width: rootView.bounds.width,
+                    height: height
+                )
+                container.isHidden = false
+                if let card = talkbackController?.view {
+                    card.frame = container.bounds
+                    card.layoutIfNeeded()
+                    card.transform = CGAffineTransform(translationX: 0, y: height)
+                }
+            }
+            animateChromeRender(alongside: { [self] in
+                talkbackController?.view.transform = .identity
+            })
+        case .closing:
+            // The real card unmounts in the render; a snapshot inside a
+            // clipping stand-in at the same frame sinks out of view while the
+            // pane takes its rows back.
+            let container = rootView.talkbackContainer
+            let clip = UIView(frame: container.frame)
+            clip.clipsToBounds = true
+            clip.isUserInteractionEnabled = false
+            if let ghost = container.snapshotView(afterScreenUpdates: false) {
+                ghost.frame = clip.bounds
+                clip.addSubview(ghost)
+                rootView.insertSubview(clip, aboveSubview: container)
+            }
+            animateChromeRender(alongside: {
+                clip.subviews.first?.transform = CGAffineTransform(
+                    translationX: 0,
+                    y: clip.bounds.height
+                )
+            }, completion: {
+                clip.removeFromSuperview()
+            })
+        }
+    }
+
+    private nonisolated static let chromeGrowthSpring: ChromeSpring = (0.25, 0.9)
+
+    /// A line typed, a chip attached: the card grows upward and the pane
+    /// cedes the row in one motion.
+    private func animateTalkbackGrowth() {
+        animateChromeRender(Self.chromeGrowthSpring)
+    }
+
+    /// Where the pane's bottom chrome starts: the rail's top edge, lifted
+    /// with it over a docked keyboard.
+    private var paneChromeBottom: CGFloat {
+        rootView.paneContainer.frame.maxY
+            - (activeController?.keyboardObstruction ?? 0)
+            - TerminalKeyBar.barHeight(spendsBottomStrip: railOwnsBottomSafeArea)
+    }
+    #endif
 
     private func configurePassphrasePresenter() {
         addChild(passphrasePresenter)
@@ -2020,6 +2186,143 @@ extension TerminalWindowViewController {
         replacement.didMove(toParent: self)
     }
 
+    /// The Talkback composer follows the active tab's draft: mounted while
+    /// that tab's box is open (docked above the rail on iPad / iPhone, its
+    /// own slab under the visionOS console), dropped when it closes or the
+    /// active tab has no box. Opening folds the helper strip to its dot;
+    /// closing unfolds it if this window folded it. Runs first in a render:
+    /// the panes' bottom inset reads the height it measures.
+    private func renderTalkback() {
+        #if !os(visionOS)
+        // Locking the keyboard closes every message box in this window: the
+        // box exists to type, and the lock says "no keyboard". A box opened
+        // while locked is the user's word that they want to type again —
+        // the lock releases (without the terminal summon that would race the
+        // field's own focus) before the box mounts.
+        let locked = KeyboardLock.shared.isLocked
+        if locked, !lastRenderedKeyboardLocked {
+            for tab in route.tabs {
+                workspace.controller(for: tab.id)?.setTalkbackOpen(false)
+            }
+        }
+        lastRenderedKeyboardLocked = locked
+        #endif
+        guard talkbackOpen, let controller = activeController else {
+            if let existing = talkbackController {
+                let hadKeyboard = existing.prepareForRemoval()
+                // visionOS mounts the composer in the bottom ornament, never
+                // in-window (the shell there is a test-only configuration).
+                #if !os(visionOS)
+                unmount(existing)
+                #endif
+                talkbackController = nil
+                // The field held the keyboard: hand it back to the pane it
+                // was talking to, if that pane still owns focus.
+                if hadKeyboard {
+                    let terminal = existing.configuration.controller.terminalView
+                    if let terminal { TerminalFocusArbiter.resumeAfterPresentation(terminal) }
+                }
+                unfoldHelperAfterTalkback()
+            }
+            renderedTalkbackHeight = 0
+            return
+        }
+        let configuration = TalkbackComposerConfiguration(
+            controller: controller,
+            presentation: TalkbackComposerPresentation(
+                targetLabel: umdTitle,
+                agent: shownAgent,
+                agentState: activeTabAgentState,
+                compactPreviews: UIDevice.current.userInterfaceIdiom == .phone,
+                floating: {
+                    #if os(visionOS)
+                    shell == nil
+                    #else
+                    false
+                    #endif
+                }(),
+                availableWidth: talkbackWidth,
+                contentSafeArea: {
+                    #if os(visionOS)
+                    .zero
+                    #else
+                    contentSafeArea
+                    #endif
+                }()
+            ),
+            close: { [weak controller] in controller?.setTalkbackOpen(false) },
+            focusTerminal: { [weak controller] in
+                guard let terminal = controller?.terminalView else { return }
+                TerminalFocusArbiter.claim(terminal)
+            }
+        )
+        if let talkbackController {
+            talkbackController.update(configuration: configuration)
+        } else {
+            #if !os(visionOS)
+            if KeyboardLock.shared.isLocked, let terminal = controller.terminalView {
+                TerminalFocusArbiter.unlock(terminal, summoning: false)
+            }
+            #endif
+            let composer = TalkbackComposerViewController(configuration: configuration)
+            composer.onContentSizeChange = { [weak self] in
+                // Reported from the composer's own layout pass; re-inset the
+                // pane on the next turn rather than inside that pass — with
+                // the card and the pane moving together where it is docked.
+                Task { @MainActor [weak self] in
+                    #if os(visionOS)
+                    self?.renderNow()
+                    #else
+                    self?.animateTalkbackGrowth()
+                    #endif
+                }
+            }
+            talkbackController = composer
+            #if !os(visionOS)
+            mountTalkback(composer)
+            #endif
+            foldHelperForTalkback()
+        }
+        #if os(visionOS)
+        renderedTalkbackHeight = 0
+        #else
+        renderedTalkbackHeight = talkbackController?.fittingContentSize().height ?? 0
+        #endif
+    }
+
+    #if !os(visionOS)
+    private func mountTalkback(_ composer: TalkbackComposerViewController) {
+        addChild(composer)
+        rootView.talkbackContainer.addSubview(composer.view)
+        composer.view.frame = rootView.talkbackContainer.bounds
+        composer.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        composer.didMove(toParent: self)
+    }
+    #endif
+
+    /// The strip's chips are one tap away on the dot; the rows they cost are
+    /// the pane's while a message is being written. Deferred a turn: the
+    /// collapse posts app-wide and every window re-renders on it, and this
+    /// runs inside a render.
+    private func foldHelperForTalkback() {
+        guard !AgentHelperStripCollapse.shared.isCollapsed else { return }
+        talkbackFoldedHelper = true
+        DispatchQueue.main.async {
+            AgentHelperStripCollapse.shared.setCollapsed(true)
+        }
+    }
+
+    private func unfoldHelperAfterTalkback() {
+        guard talkbackFoldedHelper else { return }
+        talkbackFoldedHelper = false
+        // Only if the user left it folded meanwhile — an expanded strip is
+        // their choice, not this window's to undo.
+        guard AgentHelperStripCollapse.shared.isCollapsed else { return }
+        DispatchQueue.main.async {
+            AgentHelperStripCollapse.shared.setCollapsed(false)
+        }
+    }
+
     private func changeFont(by delta: CGFloat) {
         fontSize = min(32, max(9, fontSize + delta))
         renderNow()
@@ -2055,6 +2358,7 @@ extension TerminalWindowViewController {
             activeTerminalController: activeController,
             umdController: umdController,
             helperController: helperController,
+            talkbackController: talkbackController,
             windowWidth: rootView.bounds.width,
             interfaceStyle: themes.appearance.interfaceStyle,
             forceRevision: forceRevision
@@ -2166,6 +2470,8 @@ extension TerminalWindowViewController {
             rootView.umdContainer.frame = .zero
             rootView.helperContainer.frame = .zero
             rootView.helperContainer.isHidden = true
+            rootView.talkbackContainer.frame = .zero
+            rootView.talkbackContainer.isHidden = true
             for pane in paneControllers.values {
                 pane.view.frame = rootView.paneContainer.bounds
             }
@@ -2288,24 +2594,37 @@ extension TerminalWindowViewController {
         )
         umdController?.view.frame = rootView.umdContainer.bounds
 
+        // The pane's bottom chrome stacks upward from the key rail (lifted
+        // with it over a docked keyboard): the Talkback card first, then the
+        // helper strip — docked or its dot. One cursor places both.
+        #if !os(visionOS)
+        var chromeBottom = paneChromeBottom
+        let composerHeight = renderedTalkbackHeight
+        if let talkbackController, composerHeight > 0 {
+            chromeBottom -= composerHeight
+            rootView.talkbackContainer.frame = CGRect(
+                x: 0,
+                y: max(rootView.paneContainer.frame.minY, chromeBottom),
+                width: bounds.width,
+                height: composerHeight
+            )
+            talkbackController.view.frame = rootView.talkbackContainer.bounds
+            rootView.talkbackContainer.isHidden = false
+        } else {
+            rootView.talkbackContainer.frame = .zero
+            rootView.talkbackContainer.isHidden = true
+        }
+        #endif
+
         if let helperController {
             #if !os(visionOS)
-            let obstruction = activeController?.keyboardObstruction ?? 0
-            // The rail grows its chassis where it spends the bottom strip.
-            let railHeight = TerminalKeyBar.barHeight(
-                spendsBottomStrip: railOwnsBottomSafeArea
-            )
             if AgentHelperStripCollapse.shared.isCollapsed {
                 let dotSize = helperController.fittingContentSize()
                 rootView.helperContainer.frame = CGRect(
                     x: rootView.paneContainer.frame.minX + 10 + contentSafeArea.left,
                     y: max(
                         rootView.paneContainer.frame.minY,
-                        rootView.paneContainer.frame.maxY
-                            - obstruction
-                            - railHeight
-                            - dotSize.height
-                            - 8
+                        chromeBottom - dotSize.height - 8
                     ),
                     width: dotSize.width,
                     height: dotSize.height
@@ -2315,10 +2634,7 @@ extension TerminalWindowViewController {
                     x: 0,
                     y: max(
                         rootView.paneContainer.frame.minY,
-                        rootView.paneContainer.frame.maxY
-                            - obstruction
-                            - railHeight
-                            - AgentHelperStripViewController.dockedHeight
+                        chromeBottom - AgentHelperStripViewController.dockedHeight
                     ),
                     width: bounds.width,
                     height: AgentHelperStripViewController.dockedHeight
@@ -2597,6 +2913,13 @@ extension TerminalWindowViewController {
             Task { await fileViewer.showRepoDiff() }
         }
         observe(.multiplexDebugLinkRegions) { [weak self] in self?.debugLogLinkRegions() }
+        // Talkback: the talk key for the focused terminal (the composer's
+        // own type/send hooks install with the composer).
+        TalkbackDebugHook.install()
+        observe(.multiplexDebugTalkbackToggle) { [weak self] in
+            guard let self, ownsFocusedTerminal else { return }
+            activeController?.toggleTalkback()
+        }
     }
 
     private var ownsFocusedTerminal: Bool {
@@ -2756,6 +3079,9 @@ final class TerminalWindowUIKitRootView: UIView {
     let tabScrollView = TerminalTabScrollView()
     let umdContainer = UIView()
     let helperContainer = UIView()
+    /// The Talkback card's band on iPad / iPhone (and the visionOS shell):
+    /// docked between the pane's chrome and its key rail.
+    let talkbackContainer = UIView()
     private let bottomSafeAreaBackfill = UIView()
     private let tabDivider = UIView()
 
@@ -2777,6 +3103,8 @@ final class TerminalWindowUIKitRootView: UIView {
         tabDivider.backgroundColor = UIKitChassis.bezelHi
         umdContainer.backgroundColor = .clear
         helperContainer.backgroundColor = .clear
+        talkbackContainer.backgroundColor = .clear
+        talkbackContainer.clipsToBounds = true
         bottomSafeAreaBackfill.backgroundColor = UIKitChassis.bezel
         bottomSafeAreaBackfill.isUserInteractionEnabled = false
         bottomSafeAreaBackfill.isAccessibilityElement = false
@@ -2787,12 +3115,14 @@ final class TerminalWindowUIKitRootView: UIView {
         addSubview(tabScrollView)
         addSubview(tabDivider)
         addSubview(umdContainer)
+        addSubview(talkbackContainer)
         addSubview(helperContainer)
         addSubview(bottomSafeAreaBackfill)
         paneContainer.accessibilityIdentifier = "terminalWindow.panes"
         tabScrollView.accessibilityIdentifier = "terminalWindow.tabs"
         umdContainer.accessibilityIdentifier = "terminalWindow.umd"
         helperContainer.accessibilityIdentifier = "terminalWindow.helpers"
+        talkbackContainer.accessibilityIdentifier = "terminalWindow.talkback"
     }
 
     @available(*, unavailable)

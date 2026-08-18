@@ -12,6 +12,7 @@ NEW SINCE 1.3.1
 • CONNECTION STATS — a live latency chip on every host rail (free), and a Pro board with per-host drill-in: round-trips, typing echo, mosh loss and roams, reconnects, and data volume. Off switch in Settings.
 • GROK BUILD JOINS the agent roster — detected in panes, its own chip strip, NEW SESSION launch with model and first prompt, and Pro alerts when it needs permission or an answer.
 • WIDGETS SHOW THE SESSION YOU LAST OPENED on each host (herdr included) — or the one you pick in the widget's Session setting.
+• MESSAGE BOX — the speech-bubble key on the key rail opens a chat-style field under the terminal: write with autocorrect and your keyboard's dictation, attach photos or files (uploaded to the pane's folder), then send it all as one message. The rail keeps driving the pane while you write; the GUIDE gains a MESSAGE BOX card.
 
 PLEASE TRY
 1. Hop through windows from the TMUX panel — it should stay up, with ACTIVE following.
@@ -22,5 +23,6 @@ PLEASE TRY
 6. Open STATS on the deck, expand a host, and type in a session — the ECHO number should follow your keystrokes.
 7. Run `grok` in a pane: the tile should read GROK and the strip should show Grok's chips (MODE cycles Normal → Plan → Always-approve). Let it ask for permission while you look elsewhere — a banner should arrive.
 8. Open a herdr session from the deck, then check the Host widget — its tile should switch to that session. Pick another in the widget's Session setting and confirm the tile and shell tap follow.
+9. In a Claude Code session tap the speech-bubble key, attach a photo, write two lines and send — the paths and both lines should land as one prompt; the box should stay open and empty. Tap the pane and the arrows should still move the agent's picker.
 
 Feedback: screenshot in TestFlight
