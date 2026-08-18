@@ -179,7 +179,7 @@ targets:
         # Citadel carries the decrypt side; the app only needed the encrypt
         # side, which no Swift dependency offers.
         SWIFT_OBJC_BRIDGING_HEADER: Multiplex/Multiplex-Bridging-Header.h
-        MARKETING_VERSION: "1.3.1"
+        MARKETING_VERSION: "1.4.0"
         CURRENT_PROJECT_VERSION: "202608070"
         # One target produces the universal iOS binary (iPhone + iPad) and the
         # separate visionOS binary. Fastlane archives Release, so family 1 must
@@ -227,7 +227,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.multiplexterm.multiplex.widgets
         PRODUCT_NAME: MultiplexWidgets
-        MARKETING_VERSION: "1.3.1"
+        MARKETING_VERSION: "1.4.0"
         CURRENT_PROJECT_VERSION: "202608070"
         TARGETED_DEVICE_FAMILY: "1,2,7"
         SUPPORTS_MACCATALYST: NO
