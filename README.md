@@ -79,6 +79,12 @@ The local harness runs a user-mode sshd on `127.0.0.1:2222` without touching `~/
 
 Point `MULTIPLEX_SEED_HOST` at `Tools/dev-sshd/state/seed.json` to seed a DEBUG build. See [`docs/agents/e2e-headless.md`](docs/agents/e2e-headless.md) for the full headless workflow.
 
+## mpx CLI
+
+[`mpx`](https://github.com/multiplex-term/mpx-cli) is the companion CLI for binding a machine. Run `mpx bind` on the remote host and it appears on the deck with the app's SSH key enrolled and the host key fingerprints pinned from the first connection — nothing typed. The offer reaches the app by QR, local-network announcement with a PIN, or `--copy` to the clipboard; the default handshake never moves a private key.
+
+Install and usage: [multiplex-term/mpx-cli](https://github.com/multiplex-term/mpx-cli).
+
 ## Third-party code
 
 | Library | Version | Role |
