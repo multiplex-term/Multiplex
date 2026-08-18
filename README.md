@@ -16,20 +16,31 @@ A spatial SSH terminal for remote **tmux** — visionOS first, with iPadOS and i
 - **Purpose-built input:** keyboard-focus arbitration, key rail with hold-CTRL Key Commands (saved chords and text macros), IME, dictation, remote scrolling, tmux Copy Mode, and text selection.
 - **More than a shell:** docked web and file viewers, SFTP uploads, optional clean-room mosh, widgets, Shortcuts, deep links, and custom themes.
 
+Some features require Multiplex Pro; see [`docs/store-metadata.md`](docs/store-metadata.md). This repository contains the complete app.
 
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/90e6e0f2-cdab-4e8f-993a-e6fc5359d7c6" alt="Multiplex AVP demo" width="400" />
-</div>
+## Demo
+
+| Vision Pro | iPad |
+| :-: | :-: |
+| <video src="https://github.com/user-attachments/assets/90e6e0f2-cdab-4e8f-993a-e6fc5359d7c6" alt="Multiplex AVP demo" width="200" /> | <video src="https://github.com/user-attachments/assets/d25aa980-f3d3-4910-856b-836c3eec20cc" alt="Multiplex iPad demo" width="200" /> | 
 
 > Vision Pro: Running Claude Code on herdr -> File Viewer -> Inline browser (using [serve-sim](https://github.com/EvanBacon/serve-sim)) -> send create PR message by press Agent bar key.
 
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/d25aa980-f3d3-4910-856b-836c3eec20cc" alt="Multiplex iPad demo" width="400" />
-</div>
+> iPad: Running pi on herdr -> File Viewer -> Inline browser -> send create PR message by press Agent bar key.
 
-> iPad Pro: Running pi on herdr -> File Viewer -> Inline browser -> send create PR message by press Agent bar key.
+## Screenshots
 
-Some features require Multiplex Pro; see [`docs/store-metadata.md`](docs/store-metadata.md). This repository contains the complete app.
+| Bind | Deck | Terminal | Shortcuts |
+| :-: | :-: | :-: | :-: |
+| <img width="250" alt="Screenshot 2026-08-18 at 07 45 17" src="https://github.com/user-attachments/assets/060cf789-8060-4ee4-82c6-87129c7992d5" /> | <img width="250" alt="iphone-deck" src="https://github.com/user-attachments/assets/86bb4789-24b6-434c-8295-bc5def0e9959" /> | <img width="250" lt="iphone-terminal" src="https://github.com/user-attachments/assets/f1c4c2ed-3479-482f-a579-76dd2876feba" /> | <img width="250" alt="iphone-fileviewer" src="https://github.com/user-attachments/assets/1c438564-4764-4493-b312-dab75c207743" /> | <img width="250" alt="iphone-shortcut-edit" src="https://github.com/user-attachments/assets/fbdd4920-ad86-4734-b79f-146311c9f763" /> |
+
+> Bind a host with [mpx-cli](https://multiplexterm.dev/mpx/) or maunally. Host settings will sync to your every iDevices by iCloud Keychain.
+
+> Deck: Show every tmux / herdr sessions
+
+> Terminal: Agent bar for supported CLI Agent. Long-press CTRL for commands. Press chat button for composer.
+
+> Shortcuts: Setting up Multiplex shortcuts for quick open session/agent in Widget or Action Button.
 
 ## Building
 
