@@ -166,7 +166,7 @@ final class FleetWallContainerViewController: UIViewController {
         let statsChip = UIKitChassisChip(
             "STATS",
             systemImage: "waveform.path.ecg",
-            accessibilityLabel: "Connection stats"
+            accessibilityLabel: String(localized: "Connection stats")
         ) { [weak self] in self?.configuration.openStats(nil) }
         navigationStatsChip = statsChip
         observeStatsVisibility()
@@ -174,20 +174,20 @@ final class FleetWallContainerViewController: UIViewController {
             UIKitChassisChip(
                 "HOST",
                 systemImage: "plus",
-                accessibilityLabel: "Add host",
+                accessibilityLabel: String(localized: "Add host"),
                 action: configuration.addHost
             ),
             statsChip,
             UIKitChassisChip(
                 "FAQ",
                 systemImage: "questionmark",
-                accessibilityLabel: "Frequently asked questions",
+                accessibilityLabel: String(localized: "Frequently asked questions"),
                 action: configuration.openFAQ
             ),
             UIKitChassisChip(
                 "SETTINGS",
                 systemImage: "gearshape",
-                accessibilityLabel: "Settings",
+                accessibilityLabel: String(localized: "Settings"),
                 action: configuration.openSettings
             ),
         ])
@@ -248,7 +248,7 @@ private final class FleetNavigationTitleView: UIView {
 
     func setSummary(_ summary: String) {
         summaryLabel.text = summary
-        accessibilityLabel = "Multiplex, \(summary)"
+        accessibilityLabel = String(localized: "Multiplex, \(summary)")
     }
 }
 
@@ -716,14 +716,20 @@ final class FleetWallViewController: UIViewController {
         let name = backend.rawValue
         let primary = host.sessionBackend.rawValue
         let alert = UIAlertController(
-            title: "Also Show \(name) Sessions",
-            message: "\(host.name) is running \(name) as well as \(primary). "
-                + "Showing both \(HostGuide.secondBackendCost)."
-                + "\n\nNew sessions still start on \(primary).",
+            title: String(localized: "Also Show \(name) Sessions"),
+            message: String(localized: """
+                \(host.name) is running \(name) as well as \(primary). \
+                Showing both \(HostGuide.secondBackendCost).
+
+                New sessions still start on \(primary).
+                """),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Show Them", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Show Them"), style: .default
+        ) { [weak self] _ in
             self?.configuration.store.setSecondaryBackend(
                 true, backend: backend, for: host.id)
         })
@@ -913,15 +919,16 @@ final class FleetWallViewController: UIViewController {
             if case .failed(let reason) = model.phase {
                 message = reason
             } else {
-                message = "Couldn't create the session on \(host.name)."
+                message = String(
+                    localized: "Couldn't create the session on \(host.name).")
             }
         }
         let alert = UIAlertController(
-            title: "Couldn't Create Session",
+            title: String(localized: "Couldn't Create Session"),
             message: message,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        alert.addAction(UIAlertAction(title: String(localized: "OK"), style: .cancel))
         // The sheet dismisses on the press and the mint answers a
         // round-trip later, so the sheet is normally gone — but a slow
         // dismissal must not swallow the alert. Present from whatever is
@@ -1019,14 +1026,16 @@ final class FleetWallViewController: UIViewController {
         if case .failed(let reason) = model.phase {
             message = reason
         } else {
-            message = "Couldn't open a new tab in session \(session) on \(host.name)."
+            message = String(localized: """
+                Couldn't open a new tab in session \(session) on \(host.name).
+                """)
         }
         let alert = UIAlertController(
-            title: "Couldn't Create Tab",
+            title: String(localized: "Couldn't Create Tab"),
             message: message,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        alert.addAction(UIAlertAction(title: String(localized: "OK"), style: .cancel))
         present(alert, animated: true)
     }
 
@@ -1036,45 +1045,58 @@ final class FleetWallViewController: UIViewController {
         // The copy carries both truths because the app deliberately
         // doesn't know which session is the default.
         let message = host.sessionBackend == .herdr
-            ? "Stops “\(session.name)” on \(host.name) and everything running in it, "
-                + "and deletes its saved state (herdr keeps its default session on disk, stopped)."
-            : "Kills “\(session.name)” on \(host.name) and everything running in it."
+            ? String(localized: """
+                Stops “\(session.name)” on \(host.name) and everything running in it, \
+                and deletes its saved state (herdr keeps its default session on disk, stopped).
+                """)
+            : String(localized: """
+                Kills “\(session.name)” on \(host.name) and everything running in it.
+                """)
         let alert = UIAlertController(
-            title: "Delete Session",
+            title: String(localized: "Delete Session"),
             message: message,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Delete"), style: .destructive
+        ) { [weak self] _ in
             guard let self else { return }
             let model = self.configuration.hub.model(for: host)
             Task { await model.killSession(session) }
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Cancel"), style: .cancel))
         present(alert, animated: true)
     }
 
     private func confirmRemove(_ host: Host) {
         let alert = UIAlertController(
-            title: "Remove Host",
-            message: "Removes “\(host.name)” and its saved secret from this device and your synced devices. tmux sessions on the host keep running.",
+            title: String(localized: "Remove Host"),
+            message: String(localized: """
+                Removes “\(host.name)” and its saved secret from this device and \
+                your synced devices. tmux sessions on the host keep running.
+                """),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Remove", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Remove"), style: .destructive
+        ) { [weak self] _ in
             guard let self else { return }
             self.configuration.hub.dropModel(for: host.id)
             self.configuration.store.remove(host)
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Cancel"), style: .cancel))
         present(alert, animated: true)
     }
 
     private func presentUnreachable(host: Host, reason: String) {
         let alert = UIAlertController(
-            title: "\(host.name) Unreachable",
+            title: String(localized: "\(host.name) Unreachable"),
             message: reason,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        alert.addAction(UIAlertAction(title: String(localized: "OK"), style: .cancel))
         present(alert, animated: true)
     }
 
@@ -1189,22 +1211,22 @@ private final class FleetHeaderView: UIView {
         addChip = UIKitChassisChip(
             "HOST",
             systemImage: "plus",
-            accessibilityLabel: "Add host"
+            accessibilityLabel: String(localized: "Add host")
         ) { [weak self] in self?.actions.addHost() }
         statsChip = UIKitChassisChip(
             "STATS",
             systemImage: "waveform.path.ecg",
-            accessibilityLabel: "Connection stats"
+            accessibilityLabel: String(localized: "Connection stats")
         ) { [weak self] in self?.actions.openStats() }
         faqChip = UIKitChassisChip(
             "FAQ",
             systemImage: "questionmark",
-            accessibilityLabel: "Frequently asked questions"
+            accessibilityLabel: String(localized: "Frequently asked questions")
         ) { [weak self] in self?.actions.openFAQ() }
         settingsChip = UIKitChassisChip(
             "SETTINGS",
             systemImage: "gearshape",
-            accessibilityLabel: "Settings"
+            accessibilityLabel: String(localized: "Settings")
         ) { [weak self] in self?.actions.openSettings() }
         summaryLabel.font = UIKitChassis.monoFont(11)
         summaryLabel.textColor = UIKitChassis.signal2
@@ -1851,26 +1873,30 @@ private final class FleetHostSectionView: UIView {
 
     private var hostMenu: UIMenu {
         let moveUp = UIAction(
-            title: "Move Up",
+            title: String(localized: "Move Up"),
             image: UIImage(systemName: "arrow.up"),
             attributes: configuration.store.canMoveUp(host) ? [] : [.disabled]
         ) { [weak self] _ in self?.configuration.moveUp() }
         let moveDown = UIAction(
-            title: "Move Down",
+            title: String(localized: "Move Down"),
             image: UIImage(systemName: "arrow.down"),
             attributes: configuration.store.canMoveDown(host) ? [] : [.disabled]
         ) { [weak self] _ in self?.configuration.moveDown() }
         let enabled = UIAction(
-            title: host.isEnabled ? "Disable Host" : "Enable Host",
+            title: host.isEnabled
+                ? String(localized: "Disable Host")
+                : String(localized: "Enable Host"),
             image: UIImage(systemName: host.isEnabled ? "pause.circle" : "play.circle")
         ) { [weak self] _ in
             guard let self else { return }
             self.configuration.setEnabled(!self.host.isEnabled)
         }
-        let edit = UIAction(title: "Edit Host…") { [weak self] _ in
+        let edit = UIAction(title: String(localized: "Edit Host…")) { [weak self] _ in
             self?.configuration.editHost()
         }
-        let remove = UIAction(title: "Remove Host…", attributes: .destructive) { [weak self] _ in
+        let remove = UIAction(
+            title: String(localized: "Remove Host…"), attributes: .destructive
+        ) { [weak self] _ in
             self?.configuration.removeHost()
         }
         var actions: [UIMenuElement] = [enabled]
@@ -1879,7 +1905,7 @@ private final class FleetHostSectionView: UIView {
         // `statsEnabled` is in the identity.
         if currentSnapshot?.statsEnabled == true {
             actions.append(UIAction(
-                title: "Connection Stats…",
+                title: String(localized: "Connection Stats…"),
                 image: UIImage(systemName: "waveform.path.ecg")
             ) { [weak self] _ in self?.configuration.showStats() })
         }
@@ -1930,7 +1956,9 @@ struct FleetBackendOffer: Equatable {
     }
 
     var sessionNoun: String {
-        sessionCount == 1 ? "1 session" : "\(sessionCount) sessions"
+        sessionCount == 1
+            ? String(localized: "1 session")
+            : String(localized: "\(sessionCount) sessions")
     }
 }
 
@@ -2082,12 +2110,12 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         // host and the rail's accessibility label keeps both.
         address.isHidden = hidesHostAddress
         let mosh = FleetBadgeView(caption: "MOSH")
-        mosh.accessibilityLabel = "Connects over mosh"
+        mosh.accessibilityLabel = String(localized: "Connects over mosh")
         mosh.isHidden = !host.useMosh
         // tmux is the app's premise, so only the deviation is badged —
         // the same rule the mosh badge follows for SSH.
         let backend = FleetBadgeView(caption: "HERDR")
-        backend.accessibilityLabel = "Sessions run under herdr"
+        backend.accessibilityLabel = String(localized: "Sessions run under herdr")
         backend.isHidden = host.sessionBackend != .herdr
         let status = makeStatus(
             host: host,
@@ -2102,7 +2130,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         )
         let shell = UIKitChassisChip(
             "SHELL",
-            accessibilityLabel: "Open shell on \(host.name)",
+            accessibilityLabel: String(localized: "Open shell on \(host.name)"),
             action: { [weak self] in self?.openShell() }
         )
         shell.alpha = connected ? 1 : 0
@@ -2115,13 +2143,13 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         if statsEnabled {
             let chip = self.statsChip ?? UIKitChassisChip(
                 statsCaption ?? "",
-                accessibilityLabel: "Connection stats",
+                accessibilityLabel: String(localized: "Connection stats"),
                 action: { [weak self] in self?.showStats() }
             )
-            chip.accessibilityHint = "Opens connection stats"
+            chip.accessibilityHint = String(localized: "Opens connection stats")
             chip.accessibilityLabel = statsCaption.map {
-                "Connection stats for \(host.name): \($0.lowercased())"
-            } ?? "Connection stats"
+                String(localized: "Connection stats for \(host.name): \($0.lowercased())")
+            } ?? String(localized: "Connection stats")
             self.statsChip = chip
             chip.isHidden = statsCaption == nil
             stats = chip
@@ -2132,7 +2160,8 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         let menuButton = FleetMenuBadgeButton()
         menuButton.menu = menu
         menuButton.showsMenuAsPrimaryAction = true
-        menuButton.accessibilityLabel = "Host options for \(host.name)"
+        menuButton.accessibilityLabel = String(
+            localized: "Host options for \(host.name)")
         // Neutral chips: an offer is an available ACTION, not live state, so
         // it never wears tally red (`DESIGN.md` — color is state).
         let offerChips = offers.map { makeOfferChip($0, host: host) }
@@ -2196,8 +2225,8 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         statsChip.isHidden = caption == nil
         statsChip.setContent(caption: caption ?? "", systemImage: nil)
         statsChip.accessibilityLabel = caption.map {
-            "Connection stats for \(hostName): \($0.lowercased())"
-        } ?? "Connection stats"
+            String(localized: "Connection stats for \(hostName): \($0.lowercased())")
+        } ?? String(localized: "Connection stats")
     }
 
     /// `+ HERDR · 3` — press to start monitoring, long-press to stop being
@@ -2210,14 +2239,15 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
         let name = offer.backend.rawValue
         let chip = UIKitChassisChip(
             offer.chipCaption,
-            accessibilityLabel:
-                "\(host.name) is also running \(offer.sessionNoun) under \(name)",
+            accessibilityLabel: String(localized: """
+                \(host.name) is also running \(offer.sessionNoun) under \(name)
+                """),
             action: { [weak self] in self?.acceptOffer(offer.backend) }
         )
-        chip.accessibilityHint = "Shows them on this host's deck"
+        chip.accessibilityHint = String(localized: "Shows them on this host's deck")
         offerMenus[ObjectIdentifier(chip)] = UIMenu(children: [
             UIAction(
-                title: "Don't Offer \(name) Here",
+                title: String(localized: "Don't Offer \(name) Here"),
                 image: UIImage(systemName: "bell.slash")
             ) { [weak self] _ in self?.dismissOffer(offer.backend) },
         ])
@@ -2253,7 +2283,9 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
                 text: "DISABLED",
                 dotColor: TallyPalette.signal3,
                 textColor: UIKitChassis.signal3,
-                accessibilityLabel: "\(host.name) is disabled and is not being connected"
+                accessibilityLabel: String(localized: """
+                    \(host.name) is disabled and is not being connected
+                    """)
             )
         }
         if networkOffline {
@@ -2261,7 +2293,8 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
                 text: "OFFLINE",
                 dotColor: TallyPalette.signal3,
                 textColor: UIKitChassis.signal3,
-                accessibilityLabel: "This device has no network connection"
+                accessibilityLabel: String(
+                    localized: "This device has no network connection")
             )
         }
         guard let phase else {
@@ -2269,7 +2302,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
                 text: "STANDBY",
                 dotColor: nil,
                 textColor: UIKitChassis.signal3,
-                accessibilityLabel: "Standby"
+                accessibilityLabel: String(localized: "Standby")
             )
         }
         switch phase {
@@ -2279,8 +2312,12 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
                     text: "KEYCHAIN LOCKED",
                     dotColor: TallyPalette.caution,
                     textColor: TallyPalette.caution,
-                    accessibilityLabel: "\(host.name): the Mac's keychain is locked, so Claude Code shows signed out",
-                    accessibilityHint: "Shows how to unlock the keychain",
+                    accessibilityLabel: String(localized: """
+                        \(host.name): the Mac's keychain is locked, so Claude Code \
+                        shows signed out
+                        """),
+                    accessibilityHint: String(
+                        localized: "Shows how to unlock the keychain"),
                     action: { showKeychainGuide(keychainNotice.sessionNames) }
                 )
             }
@@ -2288,14 +2325,14 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
                 text: "CONNECTED",
                 dotColor: TallyPalette.ok,
                 textColor: UIKitChassis.signal2,
-                accessibilityLabel: "\(host.name) connected"
+                accessibilityLabel: String(localized: "\(host.name) connected")
             )
         case .connecting:
             return FleetRailStatusView(
                 text: "LINKING",
                 dotColor: UIKitChassis.signal2,
                 textColor: UIKitChassis.signal2,
-                accessibilityLabel: "\(host.name) linking",
+                accessibilityLabel: String(localized: "\(host.name) linking"),
                 pulsing: !reduceMotion
             )
         case .failed(let reason):
@@ -2304,8 +2341,10 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
                     text: "NEEDS PASSPHRASE",
                     dotColor: TallyPalette.caution,
                     textColor: TallyPalette.caution,
-                    accessibilityLabel: "\(host.name) needs its SSH key passphrase",
-                    accessibilityHint: "Opens the SSH key passphrase prompt",
+                    accessibilityLabel: String(
+                        localized: "\(host.name) needs its SSH key passphrase"),
+                    accessibilityHint: String(
+                        localized: "Opens the SSH key passphrase prompt"),
                     action: requestPassphrase
                 )
             }
@@ -2313,8 +2352,9 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
                 text: "UNREACHABLE",
                 dotColor: TallyPalette.signal3,
                 textColor: UIKitChassis.signal3,
-                accessibilityLabel: "\(host.name) unreachable",
-                accessibilityHint: "Shows why the host could not be reached",
+                accessibilityLabel: String(localized: "\(host.name) unreachable"),
+                accessibilityHint: String(
+                    localized: "Shows why the host could not be reached"),
                 action: { showUnreachable(reason) }
             )
         case .idle:
@@ -2322,7 +2362,7 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
                 text: "STANDBY",
                 dotColor: nil,
                 textColor: UIKitChassis.signal3,
-                accessibilityLabel: "\(host.name) standby"
+                accessibilityLabel: String(localized: "\(host.name) standby")
             )
         }
     }
@@ -2900,7 +2940,10 @@ final class FleetSessionTileView: FleetPressView,
                 })
             }
             children.append(
-                UIAction(title: "Delete Session…", attributes: .destructive) { _ in
+                UIAction(
+                    title: String(localized: "Delete Session…"),
+                    attributes: .destructive
+                ) { _ in
                     configuration.delete()
                 })
             return UIMenu(children: children)
@@ -2915,7 +2958,8 @@ final class FleetSessionTileView: FleetPressView,
             agentRunning: running,
             agentNeedsYou: needsYou
         )
-        accessibilityHint = "Long press and drag to reorder within this host"
+        accessibilityHint = String(
+            localized: "Long press and drag to reorder within this host")
         invalidateIntrinsicContentSize()
     }
 
@@ -3256,11 +3300,13 @@ final class FleetSessionTileView: FleetPressView,
 
     private func spineSummary(_ session: TmuxSession) -> String {
         let activeWindow = session.windows.first(where: \.isActive)
-        let active = activeWindow.map { "\($0.name) active" } ?? ""
+        let active = activeWindow.map { String(localized: "\($0.name) active") } ?? ""
         let title = activeWindow?
             .displayPaneTitle(serverHost: session.serverHost)
-            .map { ", titled \($0)" } ?? ""
-        return "\(session.windowCount) windows, \(session.paneCount) panes. \(active)\(title)"
+            .map { String(localized: ", titled \($0)") } ?? ""
+        return String(localized: """
+            \(session.windowCount) windows, \(session.paneCount) panes. \(active)\(title)
+            """)
     }
 
     private func accessibilitySummary(
@@ -3275,16 +3321,21 @@ final class FleetSessionTileView: FleetPressView,
         // lives. Said right after the name it qualifies, and only where it
         // qualifies anything.
         if configuration.showsBackendIdentity {
-            parts.append("on \(configuration.sessionBackend.rawValue)")
+            parts.append(String(
+                localized: "on \(configuration.sessionBackend.rawValue)"))
         }
-        parts.append(configuration.isLive ? "live" : "not attached")
-        if agentNeedsYou { parts.append("agent needs your input") }
-        if agentRunning { parts.append("agent running") }
-        parts.append("\(session.windowCount) windows and \(session.paneCount) panes")
+        parts.append(configuration.isLive
+            ? String(localized: "live")
+            : String(localized: "not attached"))
+        if agentNeedsYou { parts.append(String(localized: "agent needs your input")) }
+        if agentRunning { parts.append(String(localized: "agent running")) }
+        parts.append(String(localized: """
+            \(session.windowCount) windows and \(session.paneCount) panes
+            """))
         return parts.joined(separator: ", ")
             + (configuration.hasOpenTab
                 ? ". \(configuration.openTabAccessibilityText)"
-                : ". Attach")
+                : String(localized: ". Attach"))
     }
 }
 
@@ -3357,7 +3408,8 @@ private final class FleetWindowSegmentView: UIView {
 
 @MainActor
 private final class FleetNewSessionTileView: FleetPressView {
-    private let label = UIKitChassisLabel("+ New Session", size: 11, color: UIKitChassis.signal2)
+    private let label = UIKitChassisLabel(
+        String(localized: "+ New Session"), size: 11, color: UIKitChassis.signal2)
     private let dashLayer = CAShapeLayer()
     private var heightConstraint: NSLayoutConstraint?
 
@@ -3388,7 +3440,7 @@ private final class FleetNewSessionTileView: FleetPressView {
     func configure(hostName: String, compact: Bool, action: @escaping () -> Void) {
         pressAction = action
         heightConstraint?.constant = compact ? 92 : 138
-        accessibilityLabel = "New session on \(hostName)"
+        accessibilityLabel = String(localized: "New session on \(hostName)")
         setNeedsLayout()
     }
 
@@ -3446,21 +3498,25 @@ private final class FleetNoSignalTileView: FleetPressView {
         let badge: String
         switch mode {
         case .unreachable:
-            caption = "No Signal"
+            caption = String(localized: "No Signal")
             ink = UIKitChassis.signal3
             badge = "RECONNECT"
-            accessibilityLabel = "\(host.name) unreachable. Reconnect"
+            accessibilityLabel = String(
+                localized: "\(host.name) unreachable. Reconnect")
         case .passphrase:
-            caption = "Passphrase Required"
+            caption = String(localized: "Passphrase Required")
             ink = TallyPalette.caution
             badge = "UNLOCK"
-            accessibilityLabel = "\(host.name) needs its SSH key passphrase. Unlock"
+            accessibilityLabel = String(localized: """
+                \(host.name) needs its SSH key passphrase. Unlock
+                """)
         case .disabled:
-            caption = "Disabled"
+            caption = String(localized: "Disabled")
             ink = UIKitChassis.signal3
             badge = "ENABLE"
-            accessibilityLabel = "\(host.name) is disabled. Enable"
-            accessibilityHint = "Starts monitoring this host on the deck again"
+            accessibilityLabel = String(localized: "\(host.name) is disabled. Enable")
+            accessibilityHint = String(
+                localized: "Starts monitoring this host on the deck again")
         }
         let title = UIKitChassisLabel(caption, size: 13, color: ink)
         screen.addSubview(title)
@@ -3511,7 +3567,7 @@ private final class FleetAcquiringTileView: UIKitTallyBorderedView {
         addSubview(screen)
         screen.translatesAutoresizingMaskIntoConstraints = false
         let label = UIKitChassisLabel(
-            "Acquiring signal", size: 10, color: UIKitChassis.signal3
+            String(localized: "Acquiring signal"), size: 10, color: UIKitChassis.signal3
         )
         let stack = UIStackView(arrangedSubviews: [spinner, label])
         stack.axis = .vertical
@@ -3536,7 +3592,7 @@ private final class FleetAcquiringTileView: UIKitTallyBorderedView {
         spinner.color = UIKitChassis.signal2
         spinner.startAnimating()
         isAccessibilityElement = true
-        accessibilityLabel = "Acquiring signal"
+        accessibilityLabel = String(localized: "Acquiring signal")
     }
 
     func configure(compact: Bool) {
@@ -3557,17 +3613,18 @@ private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
         super.init(frame: frame)
         installChip = UIKitChassisChip(
             "INSTALL GUIDE",
-            accessibilityLabel: "Install guide"
+            accessibilityLabel: String(localized: "Install guide")
         ) { [weak self] in self?.action?() }
         // The one-tap side of decision "explicit + detect hint": shown only
         // when the probe saw herdr installed while tmux is missing. A tap
         // rewrites the host record; nothing ever flips it automatically.
         switchChip = UIKitChassisChip(
             "USE HERDR",
-            accessibilityLabel: "Switch this host to the herdr backend"
+            accessibilityLabel: String(
+                localized: "Switch this host to the herdr backend")
         ) { [weak self] in self?.switchAction?() }
         title = UIKitChassisLabel(
-            "No tmux on host", size: 11, color: UIKitChassis.signal3
+            String(localized: "No tmux on host"), size: 11, color: UIKitChassis.signal3
         )
         let body = UILabel()
         // A semantic role keeps Dynamic Type and the scene root's
@@ -3576,7 +3633,7 @@ private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
         body.font = .preferredFont(forTextStyle: .footnote)
         body.adjustsFontForContentSizeCategory = true
         body.textColor = UIKitChassis.signal2
-        body.text = "You can still use a plain shell — press SHELL."
+        body.text = String(localized: "You can still use a plain shell — press SHELL.")
         body.numberOfLines = 0
         body.textAlignment = .center
         let stack = UIStackView(arrangedSubviews: [title, body, installChip, switchChip])
@@ -3603,7 +3660,7 @@ private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
     ) {
         self.action = action
         switchAction = switchToHerdr
-        title.setText("No \(backend.rawValue) on host")
+        title.setText(String(localized: "No \(backend.rawValue) on host"))
         // The hint only ever means "tmux is dead but herdr is installed" —
         // the tmux probe is the sole writer — so it alone decides the chip.
         switchChip.isHidden = !herdrHint
@@ -3623,7 +3680,7 @@ private final class FleetAwaitingSignalView: UIView {
             "ADD HOST",
             systemImage: "plus",
             prominent: true,
-            accessibilityLabel: "Add host"
+            accessibilityLabel: String(localized: "Add host")
         ) { [weak self] in self?.action?() }
         tile.backgroundColor = UIKitChassis.bezel
         addSubview(tile)
@@ -3652,13 +3709,13 @@ private final class FleetAwaitingSignalView: UIView {
 
         let screen = UIKitTallyHatchView()
         let title = UIKitChassisLabel(
-            "Awaiting signal", size: 13, color: UIKitChassis.signal3
+            String(localized: "Awaiting signal"), size: 13, color: UIKitChassis.signal3
         )
         let body = UILabel()
         body.font = .preferredFont(forTextStyle: .footnote)
         body.adjustsFontForContentSizeCategory = true
         body.textColor = UIKitChassis.signal2
-        body.text = "Every tmux session, its own window in space."
+        body.text = String(localized: "Every tmux session, its own window in space.")
         body.textAlignment = .center
         let route = UILabel()
         route.font = UIKitChassis.monoFont(10)
@@ -3680,7 +3737,8 @@ private final class FleetAwaitingSignalView: UIView {
         ])
         content.addArrangedSubview(screen)
 
-        let noHosts = UIKitChassisLabel("No hosts", size: 12, color: UIKitChassis.signal3)
+        let noHosts = UIKitChassisLabel(
+            String(localized: "No hosts"), size: 12, color: UIKitChassis.signal3)
         let row = UIStackView(arrangedSubviews: [noHosts, UIView(), addChip])
         row.axis = .horizontal
         row.alignment = .center
@@ -3863,7 +3921,7 @@ struct NewSessionFormState {
     }
 
     var commandPreview: String {
-        guard let agentToLaunch else { return "login shell" }
+        guard let agentToLaunch else { return String(localized: "login shell") }
         return agentToLaunch.launchCommand(model: modelToLaunch, initialPrompt: "")
     }
 
@@ -3914,36 +3972,56 @@ struct NewSessionFormState {
 
     var targetDetail: String {
         guard let tabTargetSession else {
-            return "A fresh \(backend.rawValue) session, its own tile "
-                + "on the deck. Choose a session to add a tab to its focused "
-                + "workspace instead."
+            return String(localized: """
+                A fresh \(backend.rawValue) session, its own tile \
+                on the deck. Choose a session to add a tab to its focused \
+                workspace instead.
+                """)
         }
-        return "Adds a tab to “\(tabTargetSession)”'s focused workspace — "
-            + "no new session is created."
+        return String(localized: """
+            Adds a tab to “\(tabTargetSession)”'s focused workspace — \
+            no new session is created.
+            """)
     }
 
     var launchDetail: String {
         let remembers = host.sessionScripts.isEmpty
-            ? "REMEMBER saves only the launch choice."
-            : "REMEMBER saves the launch and setup-script choices."
+            ? String(localized: "REMEMBER saves only the launch choice.")
+            : String(localized: "REMEMBER saves the launch and setup-script choices.")
         if let tabTargetSession {
             guard let agentToLaunch else {
-                return "Opens the new tab's shell in “\(tabTargetSession)”. \(remembers)"
+                return String(localized: """
+                    Opens the new tab's shell in “\(tabTargetSession)”. \(remembers)
+                    """)
             }
-            return "Starts \(agentToLaunch.displayName) in the new tab. The optional prompt becomes its first message; \(remembers)"
+            return String(localized: """
+                Starts \(agentToLaunch.displayName) in the new tab. The optional \
+                prompt becomes its first message; \(remembers)
+                """)
         }
         guard let agentToLaunch else {
-            return "Creates the \(backend.rawValue) session, then attaches "
-                + "to its login shell. \(remembers)"
+            return String(localized: """
+                Creates the \(backend.rawValue) session, then attaches \
+                to its login shell. \(remembers)
+                """)
         }
-        return "Starts \(agentToLaunch.displayName) in the fresh shell. The optional prompt becomes its first message; \(remembers)"
+        return String(localized: """
+            Starts \(agentToLaunch.displayName) in the fresh shell. The optional \
+            prompt becomes its first message; \(remembers)
+            """)
     }
 
     var scriptDetail: String {
         guard let script else {
-            return "Nothing extra runs. A setup script is typed into the fresh shell before the launch."
+            return String(localized: """
+                Nothing extra runs. A setup script is typed into the fresh shell \
+                before the launch.
+                """)
         }
-        return "Types \(script.displayName) into the fresh shell first, so the launch inherits what it sets up."
+        return String(localized: """
+            Types \(script.displayName) into the fresh shell first, so the launch \
+            inherits what it sets up.
+            """)
     }
 
     /// What an empty directory means, by target: a fresh session spawns at
@@ -3951,19 +4029,25 @@ struct NewSessionFormState {
     /// starts it where the session's focused pane is (the `+ TAB` row's
     /// behavior — "another one here").
     var directoryFallbackTitle: String {
-        tabTargetSession == nil ? "Home" : "Focused Pane"
+        tabTargetSession == nil
+            ? String(localized: "Home")
+            : String(localized: "Focused Pane")
     }
 
     var directoryDetail: String {
         let fallback = tabTargetSession == nil
-            ? "Uses the host's login-shell home directory."
-            : "Uses the focused pane's directory — where the session is looking now."
+            ? String(localized: "Uses the host's login-shell home directory.")
+            : String(localized: """
+                Uses the focused pane's directory — where the session is looking now.
+                """)
         guard !host.workingDirs.isEmpty else { return fallback }
         if let directory {
             let alternative = tabTargetSession == nil
-                ? "Choose Home to use the login shell's default."
-                : "Choose Focused Pane to inherit the session's own directory."
-            return "Starts in \(directory). \(alternative)"
+                ? String(localized: "Choose Home to use the login shell's default.")
+                : String(localized: """
+                    Choose Focused Pane to inherit the session's own directory.
+                    """)
+            return String(localized: "Starts in \(directory). \(alternative)")
         }
         return fallback
     }
@@ -4036,30 +4120,31 @@ final class NewSessionViewController: UIViewController,
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "New Session"
+        title = String(localized: "New Session")
         view.backgroundColor = GlassPrototype.sheetGround
         navigationItem.largeTitleDisplayMode = .never
         #if os(visionOS)
-        navigationItem.titleView = UIKitChassisLabel("New Session", size: 12)
+        navigationItem.titleView = UIKitChassisLabel(
+            String(localized: "New Session"), size: 12)
         #endif
 
         let cancel = UIBarButtonItem(
-            title: "Cancel",
+            title: String(localized: "Cancel"),
             style: .plain,
             target: self,
             action: #selector(cancelPressed)
         )
         cancel.tintColor = UIKitChassis.signal
-        cancel.accessibilityLabel = "Cancel"
+        cancel.accessibilityLabel = String(localized: "Cancel")
         navigationItem.leftBarButtonItem = cancel
         let createItem = UIBarButtonItem(
-            title: "Create & Attach",
+            title: String(localized: "Create & Attach"),
             style: .plain,
             target: self,
             action: #selector(createPressed)
         )
         createItem.tintColor = UIKitChassis.signal
-        createItem.accessibilityLabel = "Create and attach"
+        createItem.accessibilityLabel = String(localized: "Create and attach")
         navigationItem.rightBarButtonItem = createItem
         self.createItem = createItem
 
@@ -4174,9 +4259,11 @@ final class NewSessionViewController: UIViewController,
         bar.accessibilityIdentifier = "newSession.backend"
         backendChoiceBar = bar
         return FleetFormSectionView(
-            title: "Runs on",
-            detail: "This host shows both. New sessions start on the one "
-                + "chosen here; its default is set in Host Settings.",
+            title: String(localized: "Runs on"),
+            detail: String(localized: """
+                This host shows both. New sessions start on the one \
+                chosen here; its default is set in Host Settings.
+                """),
             rows: [bar]
         )
     }
@@ -4198,7 +4285,8 @@ final class NewSessionViewController: UIViewController,
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 12
-        return FleetFormSectionView(title: "Target host", rows: [row])
+        return FleetFormSectionView(
+            title: String(localized: "Target host"), rows: [row])
     }
 
     /// The herdr-only Creates row: a fresh session (the default), or a tab
@@ -4207,11 +4295,11 @@ final class NewSessionViewController: UIViewController,
     /// a tab could land in.
     private func makeCreatesSection() -> FleetFormSectionView {
         let button = FleetMenuFieldButton()
-        button.accessibilityLabel = "Creates"
+        button.accessibilityLabel = String(localized: "Creates")
         button.accessibilityIdentifier = "newSession.creates"
         createsButton = button
         return FleetFormSectionView(
-            title: "Creates",
+            title: String(localized: "Creates"),
             detail: form.targetDetail,
             rows: [button]
         )
@@ -4221,16 +4309,21 @@ final class NewSessionViewController: UIViewController,
         configureTextField(
             nameField,
             placeholder: form.defaultNameBase,
-            accessibilityLabel: "Name"
+            accessibilityLabel: String(localized: "Name")
         )
         nameField.text = form.name
         nameField.returnKeyType = .next
         nameField.addTarget(self, action: #selector(nameChanged), for: .editingChanged)
         nameField.accessibilityIdentifier = "newSession.name"
-        let row = makeField(label: "Name", input: makeWell(containing: nameField))
+        let row = makeField(
+            label: String(localized: "Name"),
+            input: makeWell(containing: nameField)
+        )
         return FleetFormSectionView(
-            title: "Session identity",
-            detail: "Shown on the deck and in the terminal window's source label.",
+            title: String(localized: "Session identity"),
+            detail: String(localized: """
+                Shown on the deck and in the terminal window's source label.
+                """),
             rows: [row]
         )
     }
@@ -4250,8 +4343,8 @@ final class NewSessionViewController: UIViewController,
 
         configureTextField(
             modelField,
-            placeholder: "Agent default",
-            accessibilityLabel: "Optional model"
+            placeholder: String(localized: "Agent default"),
+            accessibilityLabel: String(localized: "Optional model")
         )
         modelField.returnKeyType = .next
         modelField.addTarget(self, action: #selector(modelChanged), for: .editingChanged)
@@ -4266,8 +4359,11 @@ final class NewSessionViewController: UIViewController,
         promptView.accessibilityIdentifier = "newSession.initialPrompt"
         promptView.onTextChange = { [weak self] text in self?.form.initialPrompt = text }
         let fields = UIStackView(arrangedSubviews: [
-            makeField(label: "Model (optional)", input: modelWell),
-            makeField(label: "Initial prompt (optional)", input: makeWell(containing: promptView)),
+            makeField(label: String(localized: "Model (optional)"), input: modelWell),
+            makeField(
+                label: String(localized: "Initial prompt (optional)"),
+                input: makeWell(containing: promptView)
+            ),
         ])
         fields.axis = .vertical
         fields.alignment = .fill
@@ -4284,7 +4380,8 @@ final class NewSessionViewController: UIViewController,
         commandLabel.lineBreakMode = .byTruncatingHead
         commandLabel.textAlignment = .right
         commandLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let commandCaption = UIKitChassisLabel("Command", size: 7, color: UIKitChassis.signal3)
+        let commandCaption = UIKitChassisLabel(
+            String(localized: "Command"), size: 7, color: UIKitChassis.signal3)
         let commandStack = UIStackView(arrangedSubviews: [commandCaption, commandLabel])
         commandStack.axis = .vertical
         commandStack.alignment = .trailing
@@ -4295,7 +4392,7 @@ final class NewSessionViewController: UIViewController,
         rememberRow.spacing = 12
 
         let section = FleetFormSectionView(
-            title: "Launch",
+            title: String(localized: "Launch"),
             detail: form.launchDetail,
             rows: [launchChoice, fields, rememberRow]
         )
@@ -4305,13 +4402,13 @@ final class NewSessionViewController: UIViewController,
 
     private func makeScriptSection() -> FleetFormSectionView {
         let button = FleetMenuFieldButton()
-        button.accessibilityLabel = "Setup script"
+        button.accessibilityLabel = String(localized: "Setup script")
         button.accessibilityIdentifier = "newSession.script"
         scriptButton = button
         return FleetFormSectionView(
-            title: "Setup script",
+            title: String(localized: "Setup script"),
             detail: form.scriptDetail,
-            rows: [makeField(label: "Runs first", input: button)]
+            rows: [makeField(label: String(localized: "Runs first"), input: button)]
         )
     }
 
@@ -4320,7 +4417,7 @@ final class NewSessionViewController: UIViewController,
             let starts = UILabel()
             starts.font = UIKitChassis.uiFont(10, weight: .semibold)
             starts.textColor = UIKitChassis.signal2
-            starts.text = "Starts in"
+            starts.text = String(localized: "Starts in")
             let home = UILabel()
             home.font = UIKitChassis.monoFont(10, weight: .medium)
             home.textColor = UIKitChassis.signal
@@ -4331,22 +4428,23 @@ final class NewSessionViewController: UIViewController,
             row.alignment = .center
             row.spacing = 12
             row.isAccessibilityElement = true
-            row.accessibilityLabel = "Starts in, \(form.directoryFallbackTitle)"
+            row.accessibilityLabel = String(
+                localized: "Starts in, \(form.directoryFallbackTitle)")
             directoryHomeRow = row
             return FleetFormSectionView(
-                title: "Directory",
+                title: String(localized: "Directory"),
                 detail: form.directoryDetail,
                 rows: [row]
             )
         }
         let button = FleetMenuFieldButton()
-        button.accessibilityLabel = "Starting directory"
+        button.accessibilityLabel = String(localized: "Starting directory")
         button.accessibilityIdentifier = "newSession.directory"
         directoryButton = button
         return FleetFormSectionView(
-            title: "Directory",
+            title: String(localized: "Directory"),
             detail: form.directoryDetail,
-            rows: [makeField(label: "Starts in", input: button)]
+            rows: [makeField(label: String(localized: "Starts in"), input: button)]
         )
     }
 
@@ -4366,11 +4464,11 @@ final class NewSessionViewController: UIViewController,
             launchSection?.setRow(agentFieldsRow, visible: form.agentToLaunch != nil)
         }
         modelField.accessibilityLabel = form.agentToLaunch.map {
-            "Optional model for \($0.displayName)"
-        } ?? "Optional model"
+            String(localized: "Optional model for \($0.displayName)")
+        } ?? String(localized: "Optional model")
         promptView.setPlaceholder(form.agentToLaunch.map {
-            "What should \($0.displayName) do?"
-        } ?? "Initial prompt")
+            String(localized: "What should \($0.displayName) do?")
+        } ?? String(localized: "Initial prompt"))
         updateCreatesMenu()
         updateModelMenu()
         updateScriptMenu()
@@ -4387,24 +4485,26 @@ final class NewSessionViewController: UIViewController,
         scriptSection?.setDetail(form.scriptDetail)
         directorySection?.setDetail(form.directoryDetail)
         directoryHomeLabel?.text = form.directoryFallbackTitle.uppercased()
-        directoryHomeRow?.accessibilityLabel = "Starts in, \(form.directoryFallbackTitle)"
+        directoryHomeRow?.accessibilityLabel = String(
+            localized: "Starts in, \(form.directoryFallbackTitle)")
         createItem?.isEnabled = form.canSubmit
     }
 
     private func updateCreatesMenu() {
         guard let createsButton else { return }
-        let value = form.tabTargetSession.map { "Tab in “\($0)”" } ?? "New Session"
+        let value = form.tabTargetSession.map { String(localized: "Tab in “\($0)”") }
+            ?? String(localized: "New Session")
         createsButton.setValue(value)
         createsButton.accessibilityValue = value
         var actions: [UIMenuElement] = [
-            UIAction(title: "New Session") { [weak self] _ in
+            UIAction(title: String(localized: "New Session")) { [weak self] _ in
                 self?.form.selectTabTarget(nil)
                 self?.renderForm()
             },
         ]
         actions.append(UIMenu(options: .displayInline, children:
             form.tabTargetChoices.map { session in
-                UIAction(title: "Tab in “\(session)”") { [weak self] _ in
+                UIAction(title: String(localized: "Tab in “\(session)”")) { [weak self] _ in
                     self?.form.selectTabTarget(session)
                     self?.renderForm()
                 }
@@ -4442,7 +4542,8 @@ final class NewSessionViewController: UIViewController,
                 .resolvedColor(with: button.traitCollection).cgColor
         }
         button.showsMenuAsPrimaryAction = true
-        button.accessibilityLabel = "Configured models for \(agent.displayName)"
+        button.accessibilityLabel = String(
+            localized: "Configured models for \(agent.displayName)")
         button.accessibilityIdentifier = "newSession.modelMenu"
         var children: [UIMenuElement] = configured.map { candidate in
             UIAction(title: candidate) { [weak self] _ in
@@ -4451,7 +4552,7 @@ final class NewSessionViewController: UIViewController,
             }
         }
         children.append(UIMenu(options: .displayInline, children: [
-            UIAction(title: "Agent default") { [weak self] _ in
+            UIAction(title: String(localized: "Agent default")) { [weak self] _ in
                 self?.form.model = ""
                 self?.renderForm()
             },
@@ -4467,7 +4568,7 @@ final class NewSessionViewController: UIViewController,
 
     private func updateScriptMenu() {
         guard let scriptButton else { return }
-        scriptButton.setValue(form.script?.displayName ?? "None")
+        scriptButton.setValue(form.script?.displayName ?? String(localized: "None"))
         var actions: [UIMenuElement] = form.host.sessionScripts.map { script in
             UIAction(title: script.displayName) { [weak self] _ in
                 self?.form.script = script
@@ -4475,7 +4576,7 @@ final class NewSessionViewController: UIViewController,
             }
         }
         actions.append(UIMenu(options: .displayInline, children: [
-            UIAction(title: "None") { [weak self] _ in
+            UIAction(title: String(localized: "None")) { [weak self] _ in
                 self?.form.script = nil
                 self?.renderForm()
             },
@@ -4761,7 +4862,7 @@ private final class FleetBackendChoiceBar: UIView {
             heightAnchor.constraint(equalToConstant: 34),
         ])
         isAccessibilityElement = false
-        accessibilityLabel = "Which backend the session runs on"
+        accessibilityLabel = String(localized: "Which backend the session runs on")
         refresh(animated: false)
     }
 
@@ -4825,7 +4926,7 @@ private final class FleetLaunchChoiceView: UIView {
         shell.addAction(UIAction { [weak self] _ in self?.onSelectShell?() }, for: .touchUpInside)
         agents.showsMenuAsPrimaryAction = true
         isAccessibilityElement = false
-        accessibilityLabel = "What to launch"
+        accessibilityLabel = String(localized: "What to launch")
     }
 
     @available(*, unavailable)
@@ -4836,20 +4937,25 @@ private final class FleetLaunchChoiceView: UIView {
         renderedMode = mode
         self.selectedAgent = selectedAgent
         shell.configure(
-            title: "Shell",
+            title: String(localized: "Shell"),
             selected: mode == .shell,
             showsChevron: false,
             animationDuration: animatesSelection ? Self.selectionAnimationDuration : nil
         )
         agents.configure(
-            title: mode == .agents ? selectedAgent.displayName : "Agents",
+            title: mode == .agents
+                ? selectedAgent.displayName
+                : String(localized: "Agents"),
             selected: mode == .agents,
             showsChevron: true,
             animationDuration: animatesSelection ? Self.selectionAnimationDuration : nil
         )
-        agents.accessibilityLabel = "Agents"
-        agents.accessibilityValue = mode == .agents ? selectedAgent.displayName : "Not selected"
-        agents.accessibilityHint = "Choose Claude Code, Codex, Pi, or Grok Build"
+        agents.accessibilityLabel = String(localized: "Agents")
+        agents.accessibilityValue = mode == .agents
+            ? selectedAgent.displayName
+            : String(localized: "Not selected")
+        agents.accessibilityHint = String(
+            localized: "Choose Claude Code, Codex, Pi, or Grok Build")
         agents.menu = UIMenu(children: AgentKind.allCases.map { agent in
             UIAction(title: agent.displayName, state: agent == selectedAgent ? .on : .off) { [weak self] _ in
                 self?.onSelectAgent?(agent)
@@ -4989,7 +5095,7 @@ private final class FleetToggleView: UIView {
         ])
         isAccessibilityElement = true
         accessibilityTraits = .button
-        accessibilityLabel = "Remember launch choice"
+        accessibilityLabel = String(localized: "Remember launch choice")
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(toggle)))
         render()
@@ -5018,7 +5124,7 @@ private final class FleetToggleView: UIView {
         thumbLeading?.constant = isOn ? 19 : 3
         thumb.backgroundColor = isOn ? UIKitChassis.signal : UIKitChassis.signal3
         track.tallyBorderColor = isOn ? UIKitChassis.signal2 : UIKitChassis.bezelHi
-        accessibilityValue = isOn ? "On" : "Off"
+        accessibilityValue = isOn ? String(localized: "On") : String(localized: "Off")
     }
 }
 
@@ -5121,7 +5227,7 @@ private final class FleetPromptTextView: UITextView, UITextViewDelegate {
 
     func setPlaceholder(_ value: String) {
         placeholderLabel.text = value
-        accessibilityLabel = "Optional initial prompt"
+        accessibilityLabel = String(localized: "Optional initial prompt")
     }
 
     func setText(_ value: String) {

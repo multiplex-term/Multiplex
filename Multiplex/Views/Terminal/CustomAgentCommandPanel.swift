@@ -271,8 +271,10 @@ final class CustomAgentCommandPanelViewController: UIViewController {
         titleRow.spacing = 12
 
         let description = UILabel()
-        description.text = "Place each built-in in Bar or More. Custom content may span "
-            + "many lines; turn Submit off to leave it ready to edit."
+        description.text = String(localized: """
+            Place each built-in in Bar or More. Custom content may span \
+            many lines; turn Submit off to leave it ready to edit.
+            """)
         description.font = UIKitChassis.uiFont(11)
         description.textColor = UIKitChassis.signal2
         description.numberOfLines = 0
@@ -356,11 +358,17 @@ final class CustomAgentCommandPanelViewController: UIViewController {
         let legend = TallyEditorLegend.stack([
             TallyEditorLegend.row(
                 color: TallyPalette.customCommand,
-                text: "Built-ins and custom commands each live in Bar or More; custom Bar labels keep 9 characters."
+                text: String(localized: """
+                    Built-ins and custom commands each live in Bar or More; \
+                    custom Bar labels keep 9 characters.
+                    """)
             ),
             TallyEditorLegend.row(
                 color: UIKitChassis.signal3,
-                text: "Shared keeps one editable command synchronized across Claude Code, Codex, Pi, and Grok Build."
+                text: String(localized: """
+                    Shared keeps one editable command synchronized across \
+                    Claude Code, Codex, Pi, and Grok Build.
+                    """)
             ),
         ])
         let actions = TallyEditorFooter.actions(
@@ -456,7 +464,7 @@ final class CustomAgentCommandPanelViewController: UIViewController {
 
         if drafts.commands.isEmpty {
             let empty = UIKitChassisLabel(
-                "NO CUSTOM COMMANDS",
+                String(localized: "NO CUSTOM COMMANDS"),
                 size: 10,
                 color: UIKitChassis.signal3
             )
@@ -624,8 +632,10 @@ private final class CustomCommandAccordionControl: UIControl {
         accessibilityIdentifier = "customCommands.builtInAccordion"
         isAccessibilityElement = true
         accessibilityTraits = .button
-        accessibilityLabel = "Built-in commands"
-        accessibilityHint = "Shows placement controls for built-in commands"
+        accessibilityLabel = String(localized: "Built-in commands")
+        accessibilityHint = String(
+            localized: "Shows placement controls for built-in commands"
+        )
         addTarget(self, action: #selector(pressed), for: .touchUpInside)
         #if os(visionOS)
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
@@ -671,7 +681,9 @@ private final class CustomCommandAccordionControl: UIControl {
     }
 
     private func updateState() {
-        accessibilityValue = expanded ? "Expanded" : "Collapsed"
+        accessibilityValue = expanded
+            ? String(localized: "Expanded")
+            : String(localized: "Collapsed")
         chevron.transform = expanded
             ? CGAffineTransform(rotationAngle: .pi / 2)
             : .identity
@@ -927,7 +939,7 @@ private final class CustomCommandRowView: UIView, UITextViewDelegate {
         editor.smartQuotesType = .no
         editor.smartInsertDeleteType = .no
         editor.delegate = self
-        editor.accessibilityLabel = "Command content"
+        editor.accessibilityLabel = String(localized: "Command content")
         editor.accessibilityIdentifier = "customCommands.content.\(command.id.uuidString)"
         editor.layer.borderWidth = 1
         editor.layer.borderColor = UIKitChassis.bezelHi
@@ -946,19 +958,21 @@ private final class CustomCommandRowView: UIView, UITextViewDelegate {
         let switches = UIStackView(arrangedSubviews: [
             makeSwitch(
                 label: "SUBMIT",
-                accessibilityLabel: "Auto Submit",
+                accessibilityLabel: String(localized: "Auto Submit"),
                 value: command.autoSubmit,
                 keyPath: \.autoSubmit
             ),
             makeSwitch(
                 label: "BAR",
-                accessibilityLabel: "Show in Bar",
+                accessibilityLabel: String(localized: "Show in Bar"),
                 value: command.showInBar,
                 keyPath: \.showInBar
             ),
             makeSwitch(
                 label: "SHARED",
-                accessibilityLabel: "Shared across Claude Code, Codex, Pi, and Grok Build",
+                accessibilityLabel: String(
+                    localized: "Shared across Claude Code, Codex, Pi, and Grok Build"
+                ),
                 value: command.shared,
                 keyPath: \.shared
             ),
@@ -1118,7 +1132,7 @@ private final class CustomCommandTextView: UITextView {
         self.textContainer.lineFragmentPadding = 4
         isScrollEnabled = false
 
-        placeholderLabel.text = "Command content"
+        placeholderLabel.text = String(localized: "Command content")
         placeholderLabel.font = UIKitChassis.monoFont(11)
         placeholderLabel.textColor = UIKitChassis.signal3
         placeholderLabel.isAccessibilityElement = false

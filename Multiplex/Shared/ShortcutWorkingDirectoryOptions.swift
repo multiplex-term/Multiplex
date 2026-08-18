@@ -36,11 +36,11 @@ enum ShortcutWorkingDirectoryOptions {
     /// query flash-dismisses the picker), then the configured dirs, then
     /// Home titled as such.
     static func choices(configured: [String]) -> [Choice] {
-        var choices = [Choice(value: hostDefaultValue, title: "Host Default")]
+        var choices = [Choice(value: hostDefaultValue, title: String(localized: "Host Default"))]
         choices += values(configured: configured).dropLast().map {
             Choice(value: $0, title: $0)
         }
-        choices.append(Choice(value: "~", title: "Home"))
+        choices.append(Choice(value: "~", title: String(localized: "Home")))
         return choices
     }
 }

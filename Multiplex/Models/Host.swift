@@ -9,8 +9,8 @@ struct Host: Identifiable, Codable, Hashable {
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .password: "Password"
-            case .privateKey: "Private key"
+            case .password: String(localized: "Password")
+            case .privateKey: String(localized: "Private key")
             }
         }
     }

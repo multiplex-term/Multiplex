@@ -1,3 +1,5 @@
+import Foundation
+
 /// The deck's only terminal-presentation seam. Classic Multiplex opens a new
 /// scene; the single-window shell adopts the same route as one or more tabs.
 /// Keeping the destination alongside the closure also lets the tile's
@@ -25,15 +27,15 @@ struct TerminalRouteOpener {
 
     var duplicateAttachTitle: String {
         switch destination {
-        case .window: "Attach in New Window"
-        case .shell: "Attach as New Tab"
+        case .window: String(localized: "Attach in New Window")
+        case .shell: String(localized: "Attach as New Tab")
         }
     }
 
     var openTabAccessibilityText: String {
         switch destination {
-        case .window: "Shows its open window"
-        case .shell: "Shows its open tab"
+        case .window: String(localized: "Shows its open window")
+        case .shell: String(localized: "Shows its open tab")
         }
     }
 }

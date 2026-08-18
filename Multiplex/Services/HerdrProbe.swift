@@ -223,7 +223,7 @@ enum HerdrProbe {
 
     static func parseProbe(_ output: String) -> ParsedProbe {
         var result = ParsedProbe(
-            state: .failed("unreadable herdr probe response"),
+            state: .failed(String(localized: "unreadable herdr probe response")),
             tails: [:], miniatures: [:], paneStatuses: [:],
             tailTargets: [], sessionNames: []
         )
@@ -255,14 +255,16 @@ enum HerdrProbe {
         if let clientProtocol = status?.client.protocolVersion,
            clientProtocol < minimumProtocol {
             result.state = .updateNeeded(
-                installedVersion: status?.client.version ?? "unknown")
+                installedVersion: status?.client.version ?? String(localized: "unknown"))
             return result
         }
 
         let region = sessionsRegion(lines)
         guard let list = region.list else {
             if status != nil {
-                result.state = .failed("herdr answered status but not the session list")
+                result.state = .failed(
+                    String(localized: "herdr answered status but not the session list")
+                )
             }
             return result
         }
@@ -634,7 +636,9 @@ enum HerdrProbe {
     /// names in tmux-land too — duplicates are fine, only emptiness isn't.
     private static func displayLabel(_ workspace: Workspace) -> String {
         let label = workspace.label.trimmingCharacters(in: .whitespaces)
-        return label.isEmpty ? "workspace \(workspace.number)" : label
+        return label.isEmpty
+            ? String(localized: "workspace \(workspace.number)")
+            : label
     }
 
     /// The one pane a session fronts — its focused pane, falling back
@@ -1314,7 +1318,9 @@ extension HerdrProbe.State {
         case .herdrMissing: .tmuxMissing
         case .noServer: .noServer
         case .updateNeeded(let version):
-            .failed("herdr \(version) is older than this app speaks — update herdr on the host")
+            .failed(String(
+                localized: "herdr \(version) is older than this app speaks — update herdr on the host"
+            ))
         case .sessions(let sessions): .sessions(sessions)
         case .failed(let message): .failed(message)
         }

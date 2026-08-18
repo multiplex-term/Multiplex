@@ -280,10 +280,12 @@ final class FileViewerController: AuxiliaryPaneController {
         let name = FileTree.name(of: path)
         do {
             let stat = try await withConnection { try await $0.statFile(atPath: path) }
-            if stat.isDirectory { return .failed("\(name.uppercased()) IS A FOLDER") }
+            if stat.isDirectory {
+                return .failed(String(localized: "\(name.uppercased()) IS A FOLDER"))
+            }
             let size = stat.size ?? 0
             guard size <= UInt64(Self.imageByteLimit) else {
-                return .failed("TOO LARGE — \(Self.formatBytes(size))")
+                return .failed(String(localized: "TOO LARGE — \(Self.formatBytes(size))"))
             }
             let (data, _) = try await withConnection {
                 try await $0.readFile(atPath: path, limit: Self.imageByteLimit)
@@ -294,7 +296,7 @@ final class FileViewerController: AuxiliaryPaneController {
             guard let image = Self.decodeImage(
                 data, maxPixelEdge: Self.inlineImageMaxPixelEdge
             ) else {
-                return .failed("NOT AN IMAGE THIS VIEWER CAN DRAW")
+                return .failed(String(localized: "NOT AN IMAGE THIS VIEWER CAN DRAW"))
             }
             return .ready(image)
         } catch {
@@ -723,7 +725,7 @@ final class FileViewerController: AuxiliaryPaneController {
                 content = .failure(title: refusal.title, message: refusal.message)
             } else {
                 content = .failure(
-                    title: "CAN'T READ \(name.uppercased())",
+                    title: String(localized: "CAN'T READ \(name.uppercased())"),
                     message: failureMessage(error)
                 )
             }
@@ -763,7 +765,8 @@ final class FileViewerController: AuxiliaryPaneController {
             break
         case .pdf:
             let data = try await readWhole(
-                path: path, name: name, size: size, limit: Self.mediaByteLimit, noun: "PDFs"
+                path: path, name: name, size: size, limit: Self.mediaByteLimit,
+                noun: String(localized: "PDFs")
             )
             // The xref walk of a scanned book is real work — off the main
             // actor like the highlighter; pages then render lazily on screen.
@@ -776,7 +779,8 @@ final class FileViewerController: AuxiliaryPaneController {
             }
         case .audio:
             let data = try await readWhole(
-                path: path, name: name, size: size, limit: Self.mediaByteLimit, noun: "sound files"
+                path: path, name: name, size: size, limit: Self.mediaByteLimit,
+                noun: String(localized: "sound files")
             )
             // A decode failure keeps the AUDIO verdict: the screen says
             // CAN'T PLAY and why, where BINARY would only say "not text".
@@ -785,7 +789,8 @@ final class FileViewerController: AuxiliaryPaneController {
             )
         case .image:
             let data = try await readWhole(
-                path: path, name: name, size: size, limit: Self.imageByteLimit, noun: "images"
+                path: path, name: name, size: size, limit: Self.imageByteLimit,
+                noun: String(localized: "images")
             )
             // Undecodable "image" bytes are binary content by any honest
             // reading — same verdict as the NUL sniff below. Decoding goes
@@ -833,7 +838,10 @@ final class FileViewerController: AuxiliaryPaneController {
         guard size <= UInt64(limit) else {
             throw LoadRefusal(
                 title: "TOO LARGE",
-                message: "\(name) is \(Self.formatBytes(size)) — the viewer opens \(noun) up to \(Self.formatBytes(UInt64(limit)))."
+                message: String(localized: """
+                    \(name) is \(Self.formatBytes(size)) — the viewer opens \(noun) up to \
+                    \(Self.formatBytes(UInt64(limit))).
+                    """)
             )
         }
         let (data, _) = try await withConnection {
@@ -959,7 +967,7 @@ final class FileViewerController: AuxiliaryPaneController {
         } catch {
             guard generation == contentGeneration else { return }
             content = .failure(
-                title: "CAN'T DIFF \(emptyLabel.uppercased())",
+                title: String(localized: "CAN'T DIFF \(emptyLabel.uppercased())"),
                 message: failureMessage(error)
             )
         }
@@ -1094,7 +1102,7 @@ final class FileViewerController: AuxiliaryPaneController {
                case .document(let document) = content {
                 content = .failure(
                     title: "FILE GONE",
-                    message: "The host says \(document.name) no longer exists."
+                    message: String(localized: "The host says \(document.name) no longer exists.")
                 )
             }
         }
@@ -1142,10 +1150,13 @@ final class FileViewerController: AuxiliaryPaneController {
                 // The stock copy asks for the passphrase; the viewer has no
                 // prompt to offer, so point at the two places that can
                 // unlock the key instead.
-                return "The host's key is sealed. Set its passphrase in "
-                    + "Host Settings, or open a terminal to this host first."
+                return String(localized: """
+                    The host's key is sealed. Set its passphrase in Host Settings, or open \
+                    a terminal to this host first.
+                    """)
             case .notConnected:
-                return connectionError.userMessage(host: host) + " REFRESH dials again."
+                return connectionError.userMessage(host: host)
+                    + " " + String(localized: "REFRESH dials again.")
             case .missingCredentials, .unsupportedKey, .connectFailed, .hostKeyRefused:
                 // One copy source for connection failures, app-wide.
                 return connectionError.userMessage(host: host)
@@ -1153,10 +1164,10 @@ final class FileViewerController: AuxiliaryPaneController {
         }
         let message = "\(error)"
         if message.localizedCaseInsensitiveContains("no such file") {
-            return "The host says there is no such file."
+            return String(localized: "The host says there is no such file.")
         }
         if message.localizedCaseInsensitiveContains("permission denied") {
-            return "The host refused: permission denied."
+            return String(localized: "The host refused: permission denied.")
         }
         return message
     }

@@ -242,7 +242,7 @@ final class KeyCommandPanelViewController: UIViewController {
         case .commands:
             contentStack.addArrangedSubview(makeCommandGrid())
             contentStack.addArrangedSubview(makeFootnote(
-                "TAP SENDS · DOT = STAYS OPEN · HOLD A CELL TO EDIT · TAP OUTSIDE CLOSES"
+                String(localized: "TAP SENDS · DOT = STAYS OPEN · HOLD A CELL TO EDIT · TAP OUTSIDE CLOSES")
             ))
         case .setup:
             contentStack.addArrangedSubview(makeRows())
@@ -290,13 +290,13 @@ final class KeyCommandPanelViewController: UIViewController {
     private func makeTabPair() -> UIView {
         let commands = KeyCommandSegmentCell(
             title: "COMMANDS",
-            accessibilityLabel: "Commands",
+            accessibilityLabel: String(localized: "Commands"),
             selected: selectedTab == .commands
         ) { [weak self] in self?.selectTab(.commands) }
         commands.accessibilityIdentifier = "keyCommands.tab.commands"
         let setup = KeyCommandSegmentCell(
             title: "CUSTOM SETUP",
-            accessibilityLabel: "Custom setup",
+            accessibilityLabel: String(localized: "Custom setup"),
             selected: selectedTab == .setup
         ) { [weak self] in self?.selectTab(.setup) }
         setup.accessibilityIdentifier = "keyCommands.tab.setup"
@@ -315,7 +315,7 @@ final class KeyCommandPanelViewController: UIViewController {
             )
         }
         if cells.isEmpty {
-            cells.append(makeEmptyLabel("NO COMMANDS · CUSTOM SETUP"))
+            cells.append(makeEmptyLabel(String(localized: "NO COMMANDS · CUSTOM SETUP")))
         }
         return TallyHairlineGrid.grid(cells, columns: 2)
     }
@@ -364,7 +364,7 @@ final class KeyCommandPanelViewController: UIViewController {
             stack.addArrangedSubview(row)
         }
         if drafts.isEmpty {
-            stack.addArrangedSubview(makeEmptyLabel("NO COMMANDS"))
+            stack.addArrangedSubview(makeEmptyLabel(String(localized: "NO COMMANDS")))
         }
         return stack
     }
@@ -384,14 +384,19 @@ final class KeyCommandPanelViewController: UIViewController {
         var rows = [
             TallyEditorLegend.row(
                 color: TallyPalette.customCommand,
-                text: "Chords send what a hardware keyboard would; text rows type one line, "
-                    + "then Enter when SUBMIT is on."
+                text: String(localized: """
+                    Chords send what a hardware keyboard would; text rows type one line, \
+                    then Enter when SUBMIT is on.
+                    """)
             ),
             TallyEditorLegend.row(
                 color: UIKitChassis.signal3,
-                text: "Repeat guard: ×\(KeyCommandRepeatGuard.maximumCount) at most, "
-                    + "\(KeyCommandRepeatGuard.gapRange.lowerBound)–\(KeyCommandRepeatGuard.gapRange.upperBound) ms "
-                    + "between sends, whole burst within \(KeyCommandRepeatGuard.burstLimitMilliseconds / 1000) s. Values clamp."
+                text: String(localized: """
+                    Repeat guard: ×\(KeyCommandRepeatGuard.maximumCount) at most, \
+                    \(KeyCommandRepeatGuard.gapRange.lowerBound)–\(KeyCommandRepeatGuard.gapRange.upperBound) ms \
+                    between sends, whole burst within \
+                    \(KeyCommandRepeatGuard.burstLimitMilliseconds / 1000) s. Values clamp.
+                    """)
             ),
         ]
         // The tier line exists only where a tier applies: Pro (and the
@@ -399,8 +404,10 @@ final class KeyCommandPanelViewController: UIViewController {
         if plan.upgrade != nil, limit < KeyCommandSet.maximumCount {
             let tier = TallyEditorLegend.row(
                 color: UIKitChassis.signal2,
-                text: "Free keeps \(limit) commands; Multiplex Pro raises the set to "
-                    + "\(KeyCommandSet.maximumCount)."
+                text: String(localized: """
+                    Free keeps \(limit) commands; Multiplex Pro raises the set to \
+                    \(KeyCommandSet.maximumCount).
+                    """)
             )
             tier.accessibilityIdentifier = "keyCommands.legend.tier"
             rows.append(tier)
@@ -931,8 +938,8 @@ final class KeyCommandRowView: UIView {
         ])
         headerControl.accessibilityIdentifier = "keyCommands.rowHeader.\(command.id.uuidString)"
         headerControl.accessibilityLabel = expanded
-            ? "\(command.name), editing"
-            : "\(command.name), edit"
+            ? String(localized: "\(command.name), editing")
+            : String(localized: "\(command.name), edit")
         headerControl.addTarget(self, action: #selector(headerPressed), for: .touchUpInside)
 
         let headerLine = UIStackView(arrangedSubviews: [headerControl, trio.stack])
@@ -1163,11 +1170,13 @@ final class KeyCommandComposerView: UIView, UITextFieldDelegate {
 
         // TYPE
         let keysCell = KeyCommandSegmentCell(
-            title: "KEYS", accessibilityLabel: "Keys", selected: true, size: 8, inset: 6
+            title: "KEYS", accessibilityLabel: String(localized: "Keys"),
+            selected: true, size: 8, inset: 6
         ) { [weak self] in self?.setKind(isText: false) }
         keysCell.accessibilityIdentifier = "keyCommands.composer.type.keys"
         let textCell = KeyCommandSegmentCell(
-            title: "TEXT", accessibilityLabel: "Text", selected: false, size: 8, inset: 6
+            title: "TEXT", accessibilityLabel: String(localized: "Text"),
+            selected: false, size: 8, inset: 6
         ) { [weak self] in self?.setKind(isText: true) }
         textCell.accessibilityIdentifier = "keyCommands.composer.type.text"
         keysTypeCell = keysCell
@@ -1224,7 +1233,7 @@ final class KeyCommandComposerView: UIView, UITextFieldDelegate {
             return row
         }
         characterField.configure(placeholder: "A", width: 30, monoSize: 12, height: KeyCommandMetrics.composerCap)
-        characterField.accessibilityLabel = "Letter or digit"
+        characterField.accessibilityLabel = String(localized: "Letter or digit")
         characterField.accessibilityIdentifier = "keyCommands.composer.character"
         characterField.delegate = self
         characterField.addTarget(self, action: #selector(characterEdited), for: .editingChanged)
@@ -1268,19 +1277,19 @@ final class KeyCommandComposerView: UIView, UITextFieldDelegate {
         textBlock.alignment = .fill
         textBlock.spacing = 10
         textField.configure(
-            placeholder: "One line, typed as-is",
+            placeholder: String(localized: "One line, typed as-is"),
             width: 220,
             monoSize: 11,
             height: KeyCommandMetrics.composerCap
         )
-        textField.accessibilityLabel = "Text to type"
+        textField.accessibilityLabel = String(localized: "Text to type")
         textField.accessibilityIdentifier = "keyCommands.composer.text"
         textField.delegate = self
         textField.addTarget(self, action: #selector(textEdited), for: .editingChanged)
         textField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let submit = TallyEditorSwitch(
             label: "SUBMIT",
-            accessibilityLabel: "Submit with Enter",
+            accessibilityLabel: String(localized: "Submit with Enter"),
             isOn: command.textSnippet?.submits ?? true,
             identifierPrefix: "keyCommands",
             scale: KeyCommandMetrics.scale
@@ -1299,7 +1308,7 @@ final class KeyCommandComposerView: UIView, UITextFieldDelegate {
             range: 1...KeyCommandRepeatGuard.maximumCount,
             step: 1,
             format: { "×\($0)" },
-            accessibilityLabel: "Repeat count",
+            accessibilityLabel: String(localized: "Repeat count"),
             changed: { [weak self] value in self?.setRepeatCount(value) }
         )
         count.accessibilityIdentifier = "keyCommands.composer.count"
@@ -1315,7 +1324,7 @@ final class KeyCommandComposerView: UIView, UITextFieldDelegate {
             range: KeyCommandRepeatGuard.gapRange,
             step: KeyCommandRepeatGuard.gapStep,
             format: { "\($0) MS" },
-            accessibilityLabel: "Gap between sends",
+            accessibilityLabel: String(localized: "Gap between sends"),
             changed: { [weak self] value in self?.setRepeatGap(value) }
         )
         gap.accessibilityIdentifier = "keyCommands.composer.gap"
@@ -1340,7 +1349,7 @@ final class KeyCommandComposerView: UIView, UITextFieldDelegate {
         // PANEL
         let closes = TallyEditorSwitch(
             label: "CLOSE ON PRESS",
-            accessibilityLabel: "Close the panel on press",
+            accessibilityLabel: String(localized: "Close the panel on press"),
             isOn: command.closesPanel,
             identifierPrefix: "keyCommands",
             scale: KeyCommandMetrics.scale
@@ -1565,14 +1574,14 @@ final class KeyCommandStepper: UIView {
         super.init(frame: .zero)
         minus = TallyEditorRowActionButton(
             systemImage: "minus",
-            accessibilityLabel: "\(accessibilityLabel), less",
+            accessibilityLabel: String(localized: "\(accessibilityLabel), less"),
             enabled: true,
             scale: KeyCommandMetrics.scale,
             action: { [weak self] in self?.adjust(-1) }
         )
         plus = TallyEditorRowActionButton(
             systemImage: "plus",
-            accessibilityLabel: "\(accessibilityLabel), more",
+            accessibilityLabel: String(localized: "\(accessibilityLabel), more"),
             enabled: true,
             scale: KeyCommandMetrics.scale,
             action: { [weak self] in self?.adjust(1) }

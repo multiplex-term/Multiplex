@@ -186,8 +186,8 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         /// follows them on herdr tabs.
         var menuTitle: String {
             switch self {
-            case .session: "New Session"
-            case .herdrWorkspaceTab: "New Tab in Workspace"
+            case .session: String(localized: "New Session")
+            case .herdrWorkspaceTab: String(localized: "New Tab in Workspace")
             }
         }
 
@@ -196,15 +196,17 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
             offering extra: NewTabTarget?
         ) -> String {
             extra == .herdrWorkspaceTab
-                ? "New tab: another session, a tab in this herdr workspace, "
-                    + "or the file viewer"
-                : "New tab: another session or the file viewer"
+                ? String(localized: """
+                    New tab: another session, a tab in this herdr workspace, \
+                    or the file viewer
+                    """)
+                : String(localized: "New tab: another session or the file viewer")
         }
 
         var failureTitle: String {
             switch self {
-            case .session: "Couldn't Create Session"
-            case .herdrWorkspaceTab: "Couldn't Create Tab"
+            case .session: String(localized: "Couldn't Create Session")
+            case .herdrWorkspaceTab: String(localized: "Couldn't Create Tab")
             }
         }
     }

@@ -86,13 +86,13 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
     private func configureNavigation() {
         navigationItem.largeTitleDisplayMode = .never
         saveItem = UIBarButtonItem(
-            title: "Save",
+            title: String(localized: "Save"),
             style: .plain,
             target: self,
             action: #selector(savePressed)
         )
         saveItem.tintColor = UIKitChassis.signal
-        saveItem.accessibilityLabel = "Save theme"
+        saveItem.accessibilityLabel = String(localized: "Save theme")
         navigationItem.rightBarButtonItem = saveItem
     }
 
@@ -103,7 +103,7 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
         view.addSubview(livePreviewContainer)
         livePreviewContainer.translatesAutoresizingMaskIntoConstraints = false
 
-        let label = UIKitChassisLabel("Live preview", size: 10)
+        let label = UIKitChassisLabel(String(localized: "Live preview"), size: 10)
         livePreviewName.font = UIKitChassis.monoFont(8, weight: .semibold)
         livePreviewName.textColor = UIKitChassis.signal3
         livePreviewName.numberOfLines = 1
@@ -191,13 +191,13 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
         contentStack.addArrangedSubview(makeIdentitySection())
         contentStack.addArrangedSubview(makeSurfaceSection())
         contentStack.addArrangedSubview(makeANSISection(
-            title: "ANSI · Normal",
-            detail: "The eight standard colors emitted by terminal programs.",
+            title: String(localized: "ANSI · Normal"),
+            detail: String(localized: "The eight standard colors emitted by terminal programs."),
             range: 0..<8
         ))
         contentStack.addArrangedSubview(makeANSISection(
-            title: "ANSI · Bright",
-            detail: "The high-intensity variants used for bold and bright output.",
+            title: String(localized: "ANSI · Bright"),
+            detail: String(localized: "The high-intensity variants used for bold and bright output."),
             range: 8..<16
         ))
         scrollView.addSubview(contentStack)
@@ -236,7 +236,7 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
 
     private func makeIdentitySection() -> UIView {
         let fieldLabel = themeEditorLabel(
-            "Name",
+            String(localized: "Name"),
             font: UIKitChassis.uiFont(10, weight: .semibold),
             color: UIKitChassis.signal2
         )
@@ -250,7 +250,7 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
         nameField.clearButtonMode = .whileEditing
         nameField.returnKeyType = .done
         nameField.delegate = self
-        nameField.accessibilityLabel = "Name"
+        nameField.accessibilityLabel = String(localized: "Name")
         nameField.addTarget(self, action: #selector(nameChanged), for: .editingChanged)
         let well = UIKitTallyBorderedView()
         well.tallyBorderColor = UIKitChassis.bezelHi
@@ -267,8 +267,8 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
         body.axis = .vertical
         body.spacing = 7
         return SettingsSectionView(
-            title: "Theme identity",
-            detail: "Shown in Settings and anywhere this palette is selected.",
+            title: String(localized: "Theme identity"),
+            detail: String(localized: "Shown in Settings and anywhere this palette is selected."),
             rows: [SettingsInsetRow(contentView: body)]
         )
     }
@@ -276,27 +276,27 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
     private func makeSurfaceSection() -> UIView {
         let rows = [
             makeColorRow(
-                label: "Background",
+                label: String(localized: "Background"),
                 value: { [weak self] in self?.draft.background ?? ThemeColor(0) },
                 initial: initialTheme.background,
                 update: { [weak self] color in self?.draft.background = color }
             ),
             makeColorRow(
-                label: "Text",
+                label: String(localized: "Text"),
                 value: { [weak self] in self?.draft.foreground ?? ThemeColor(0) },
                 initial: initialTheme.foreground,
                 update: { [weak self] color in self?.draft.foreground = color }
             ),
             makeColorRow(
-                label: "Cursor",
+                label: String(localized: "Cursor"),
                 value: { [weak self] in self?.draft.cursor ?? ThemeColor(0) },
                 initial: initialTheme.cursor,
                 update: { [weak self] color in self?.draft.cursor = color }
             ),
         ]
         return SettingsSectionView(
-            title: "Surface",
-            detail: "The terminal's canvas, text, and insertion cursor.",
+            title: String(localized: "Surface"),
+            detail: String(localized: "The terminal's canvas, text, and insertion cursor."),
             rows: rows
         )
     }
@@ -348,7 +348,7 @@ final class ThemeEditorViewController: UIViewController, UITextFieldDelegate,
     }
 
     private func refreshDraftRendering() {
-        let displayName = draft.name.isEmpty ? "Theme" : draft.name
+        let displayName = draft.name.isEmpty ? String(localized: "Theme") : draft.name
         title = displayName
         #if os(visionOS)
         chassisNavigationTitle.setText(displayName)
@@ -470,7 +470,7 @@ final class ThemeEditorColorRow: UIView {
             effect: .highlight,
             shape: .rect(cornerRadius: 2)
         )
-        resetButton.accessibilityLabel = "Reset \(label)"
+        resetButton.accessibilityLabel = String(localized: "Reset \(label)")
         resetButton.addTarget(self, action: #selector(resetPressed), for: .touchUpInside)
         let resetBadge = SettingsBadgeView("", systemImage: "arrow.counterclockwise")
         resetBadge.isAccessibilityElement = false

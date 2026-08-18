@@ -385,7 +385,7 @@ final class BindController {
         } else if let sealed = await Self.sealedOffMain(key: raw, passphrase: keyPassphrase) {
             storedPrivateKey = sealed
         } else {
-            fail(id: id, "Couldn’t seal the key with that passphrase — nothing was enrolled.")
+            fail(id: id, String(localized: "Couldn’t seal the key with that passphrase — nothing was enrolled."))
             return
         }
         let device = Self.deviceName
@@ -402,7 +402,7 @@ final class BindController {
                 )
             case .discovered(let announcement):
                 guard let endpoint = discovery.endpoint(for: announcement) else {
-                    fail(id: id, "That machine stopped announcing — run mpx bind again.")
+                    fail(id: id, String(localized: "That machine stopped announcing — run mpx bind again."))
                     return
                 }
                 completion = try await BindClient.run(
@@ -435,7 +435,7 @@ final class BindController {
             )
         } catch {
             fail(id: id, (error as? LocalizedError)?.errorDescription
-                ?? "The bind didn’t complete. Run mpx bind again.")
+                ?? String(localized: "The bind didn’t complete. Run mpx bind again."))
         }
     }
 
@@ -465,7 +465,7 @@ final class BindController {
         guard let offline = payload.offline,
               let raw = try? Curve25519.Signing.PrivateKey(rawRepresentation: offline.seed)
         else {
-            fail(id: id, "That bind code is missing its key.")
+            fail(id: id, String(localized: "That bind code is missing its key."))
             return
         }
         let key = BindSSHKey.make(from: raw)
@@ -481,7 +481,7 @@ final class BindController {
         } else {
             guard let sealed = await Self.sealedOffMain(key: raw, passphrase: keyPassphrase)
             else {
-                fail(id: id, "Couldn’t seal the key with that passphrase — nothing was saved.")
+                fail(id: id, String(localized: "Couldn’t seal the key with that passphrase — nothing was saved."))
                 return
             }
             privateKey = sealed
@@ -571,7 +571,9 @@ final class BindController {
             // The record and its key are saved either way — the host is on
             // the wall and can be fixed in Host Settings. Say what happened.
             log.debug("bind test connect failed: \(message, privacy: .public)")
-            setStage(id: id, .failed("Bound, but the first connection failed: \(message)"))
+            setStage(id: id, .failed(
+                String(localized: "Bound, but the first connection failed: \(message)")
+            ))
         }
     }
 

@@ -205,7 +205,7 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
         }) else { return nil }
         return UIMenu(children: [
             UIAction(
-                title: "Open in New Tab",
+                title: String(localized: "Open in New Tab"),
                 image: UIImage(systemName: "plus.square.on.square")
             ) { [weak self] _ in
                 self?.openInNewTab(path: path)
@@ -274,7 +274,7 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
             } else {
                 cell.accessibilityCustomActions = [
                     UIAccessibilityCustomAction(
-                        name: "Open in New Tab",
+                        name: String(localized: "Open in New Tab"),
                         actionHandler: { [weak self] _ in
                             guard let self else { return false }
                             self.openInNewTab(path: row.entry.path)
@@ -350,7 +350,7 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
 
         let chip = UIKitChassisChip(
             "UP",
-            accessibilityLabel: "Show the parent directory",
+            accessibilityLabel: String(localized: "Show the parent directory"),
             action: { [weak self] in self?.onUp() }
         )
         upChip = chip
@@ -383,7 +383,7 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
         counts.backgroundColor = .clear
         counts.contentEdgeInsets = .zero
         counts.contentHorizontalAlignment = .leading
-        counts.accessibilityLabel = "Open the working tree's diff"
+        counts.accessibilityLabel = String(localized: "Open the working tree's diff")
         counts.hoverStyle = UIHoverStyle(
             effect: .highlight,
             shape: .rect(cornerRadius: 2)
@@ -393,7 +393,7 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
 
         let changed = UIKitChassisChip(
             "CHANGED",
-            accessibilityLabel: "Show only changed files",
+            accessibilityLabel: String(localized: "Show only changed files"),
             action: { [weak self] in self?.onChangedFilter() }
         )
         changedChip = changed
@@ -447,7 +447,8 @@ final class FileViewerTreeColumnView: UIView, UITableViewDataSource,
         if first || previous?.changedFilter != snapshot.changedFilter {
             changedChip?.isProminent = snapshot.changedFilter
             changedChip?.accessibilityLabel = snapshot.changedFilter
-                ? "Show the whole tree" : "Show only changed files"
+                ? String(localized: "Show the whole tree")
+                : String(localized: "Show only changed files")
         }
     }
 
@@ -724,7 +725,9 @@ enum FileViewerTreeColumn {
     static func rowAccessibilityLabel(_ row: FileTree.Row) -> String {
         var label = row.entry.name
         if row.entry.isDirectory {
-            label += row.isExpanded ? ", expanded folder" : ", folder"
+            label += ", " + (row.isExpanded
+                ? String(localized: "expanded folder")
+                : String(localized: "folder"))
         }
         if let badge = row.badge {
             label += ", " + badgeWord(badge)
@@ -734,12 +737,12 @@ enum FileViewerTreeColumn {
 
     static func badgeWord(_ badge: GitFileStatus.Badge) -> String {
         switch badge {
-        case .modified: "modified"
-        case .added: "staged addition"
-        case .deleted: "deleted"
-        case .renamed: "renamed"
-        case .untracked: "untracked"
-        case .conflicted: "conflicted"
+        case .modified: String(localized: "modified")
+        case .added: String(localized: "staged addition")
+        case .deleted: String(localized: "deleted")
+        case .renamed: String(localized: "renamed")
+        case .untracked: String(localized: "untracked")
+        case .conflicted: String(localized: "conflicted")
         }
     }
 

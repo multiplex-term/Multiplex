@@ -8,11 +8,12 @@ NEW SINCE 1.3.1
 • FILE VIEWER OPENS PDFs — continuous pages, pinch to zoom, page readout; locked PDFs offer UNLOCK.
 • FILE VIEWER PLAYS SOUND FILES — MP3, M4A, WAV, FLAC, AIFF, CAF: PLAY/PAUSE, scrubber, 15 s skips, a volume slider that is remembered; keeps playing while you type in another tab.
 • KEYS TAP BACK on iPhone and iPad — the key rail, TMUX/HRDR panel buttons and agent chips give a light haptic on press.
-• KEY COMMANDS — hold CTRL on the key rail (or the visionOS key cluster) for saved chords the software keyboard cannot press: Shift+Enter, a double Ctrl-C, Option+Backspace to delete a word (stays open). CUSTOM SETUP adds your own — any Ctrl/Shift/Option chord or a one-line text macro, repeated up to 5 times, closing the panel or not — synced to your other devices. Free keeps five; Pro raises the set to twelve. The terminal GUIDE gains a HOLD CTRL card.
-• CONNECTION STATS — a live latency chip on every host rail (free), and a Pro board with per-host drill-in: round-trips, typing echo, mosh loss and roams, reconnects, and data volume. Off switch in Settings.
-• GROK BUILD JOINS the agent roster — detected in panes, its own chip strip, NEW SESSION launch with model and first prompt, and Pro alerts when it needs permission or an answer.
-• WIDGETS SHOW THE SESSION YOU LAST OPENED on each host (herdr included) — or the one you pick in the widget's Session setting.
-• MESSAGE BOX — the speech-bubble key on the key rail opens a chat-style field under the terminal: write with autocorrect and your keyboard's dictation, attach photos or files (uploaded to the pane's folder), then send it all as one message. The rail keeps driving the pane while you write; the GUIDE gains a MESSAGE BOX card.
+• KEY COMMANDS — hold CTRL on the key rail (or the visionOS key cluster) for saved chords the software keyboard cannot press: Shift+Enter, a double Ctrl-C, Option+Backspace. CUSTOM SETUP adds your own chords and text macros, synced across devices. Free keeps five; Pro raises it to twelve. The GUIDE gains a HOLD CTRL card.
+• CONNECTION STATS — a live latency chip on every host rail (free), and a Pro board with per-host drill-in: round-trips, typing echo, mosh loss and roams, reconnects, data volume. Off switch in Settings.
+• GROK BUILD JOINS the agent roster — detected in panes, its own chip strip, NEW SESSION launch with model and first prompt, Pro alerts when it needs permission or an answer.
+• WIDGETS SHOW THE SESSION YOU LAST OPENED on each host (herdr included), or the one picked in the widget's Session setting.
+• MESSAGE BOX — the speech-bubble key on the key rail opens a chat-style field under the terminal: write with autocorrect and dictation, attach photos or files (uploaded to the pane's folder), then send it all as one message. The rail keeps driving the pane while you write; the GUIDE gains a MESSAGE BOX card.
+• TRADITIONAL CHINESE AND JAPANESE — pick per app in Settings → Multiplex → Language (LANGUAGE in Multiplex Settings takes you there).
 
 PLEASE TRY
 1. Hop through windows from the TMUX panel — it should stay up, with ACTIVE following.
@@ -24,5 +25,6 @@ PLEASE TRY
 7. Run `grok` in a pane: the tile should read GROK and the strip should show Grok's chips (MODE cycles Normal → Plan → Always-approve). Let it ask for permission while you look elsewhere — a banner should arrive.
 8. Open a herdr session from the deck, then check the Host widget — its tile should switch to that session. Pick another in the widget's Session setting and confirm the tile and shell tap follow.
 9. In a Claude Code session tap the speech-bubble key, attach a photo, write two lines and send — the paths and both lines should land as one prompt; the box should stay open and empty. Tap the pane and the arrows should still move the agent's picker.
+10. Switch to Chinese or Japanese; open Add Host, Settings, GUIDE and an alert — report anything clipped or odd.
 
 Feedback: screenshot in TestFlight

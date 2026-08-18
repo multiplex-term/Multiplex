@@ -322,7 +322,7 @@ final class TerminalCtrlComboView: UIKitTallyBorderedView {
                 ),
                 width: 46,
                 height: faceHeight,
-                accessibilityLabel: "Control \(letter.uppercased())",
+                accessibilityLabel: String(localized: "Control \(letter.uppercased())"),
                 accessibilityIdentifier: "terminal.ctrlCombos.\(letter)",
                 action: { send(letter) }
             )
@@ -374,7 +374,9 @@ final class TerminalCtrlComboViewController: UIViewController {
 /// The talk key's VoiceOver name on the rail and in the visionOS cluster —
 /// one wording, flipped in place with the latch.
 private func talkbackKeyLabel(open: Bool) -> String {
-    open ? "Close the message box" : "Open the message box"
+    open
+        ? String(localized: "Close the message box")
+        : String(localized: "Open the message box")
 }
 
 #if !os(visionOS)
@@ -787,12 +789,15 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
 
         // Tap CTRL latches (and raises the C / B slab); a hold on the same
         // key opens Key Commands and never toggles the latch.
-        var control = caps("CTRL", .ctrl, "Control", identifier: "control", latched: ctrlLatched)
+        var control = caps(
+            "CTRL", .ctrl, String(localized: "Control"),
+            identifier: "control", latched: ctrlLatched
+        )
         control.longPressKey = .keyCommands
         var groups: [[RailKey]] = [[
-            caps("ESC", .esc, "Escape", identifier: "escape"),
+            caps("ESC", .esc, String(localized: "Escape"), identifier: "escape"),
             control,
-            caps("TAB", .tab, "Tab", identifier: "tab"),
+            caps("TAB", .tab, String(localized: "Tab"), identifier: "tab"),
         ]]
         if !specification.symbols.isEmpty {
             groups.append(specification.symbols.map { symbol in
@@ -808,23 +813,24 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         var right: [RailKey] = []
         if specification.pageKeys {
             right.append(arrowKey(
-                "arrow.up.to.line", .pageUp, "Page up", identifier: "pageUp"
+                "arrow.up.to.line", .pageUp, String(localized: "Page up"), identifier: "pageUp"
             ))
             right.append(arrowKey(
-                "arrow.down.to.line", .pageDown, "Page down", identifier: "pageDown"
+                "arrow.down.to.line", .pageDown, String(localized: "Page down"),
+                identifier: "pageDown"
             ))
         }
         right.append(contentsOf: [
-            arrowKey("arrow.left", .left, "Arrow left", identifier: "left"),
-            arrowKey("arrow.up", .up, "Arrow up", identifier: "up"),
-            arrowKey("arrow.down", .down, "Arrow down", identifier: "down"),
-            arrowKey("arrow.right", .right, "Arrow right", identifier: "right"),
+            arrowKey("arrow.left", .left, String(localized: "Arrow left"), identifier: "left"),
+            arrowKey("arrow.up", .up, String(localized: "Arrow up"), identifier: "up"),
+            arrowKey("arrow.down", .down, String(localized: "Arrow down"), identifier: "down"),
+            arrowKey("arrow.right", .right, String(localized: "Arrow right"), identifier: "right"),
         ])
         if includesReturn {
             right.append(RailKey(
                 key: .returnKey,
                 face: .symbol("return", pointSize: 12, weight: .semibold),
-                accessibility: "Return",
+                accessibility: String(localized: "Return"),
                 identifier: "return"
             ))
         }
@@ -845,7 +851,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                     pointSize: 13,
                     weight: .semibold
                 ),
-                accessibility: state.isDictating ? "Stop dictation" : "Dictate",
+                accessibility: state.isDictating
+                    ? String(localized: "Stop dictation")
+                    : String(localized: "Dictate"),
                 identifier: "dictation",
                 latched: state.isDictating
             ))
@@ -858,8 +866,10 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                     weight: .semibold
                 ),
                 accessibility: state.keyboardLocked
-                    ? "Unlock keyboard"
-                    : "Show or hide keyboard. Hold to lock the keyboard closed",
+                    ? String(localized: "Unlock keyboard")
+                    : String(localized: """
+                        Show or hide keyboard. Hold to lock the keyboard closed
+                        """),
                 identifier: "keyboard",
                 latched: state.keyboardLocked,
                 longPressKey: state.keyboardLocked ? nil : .lockKeyboard
@@ -876,8 +886,8 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                     kerning: 0.7
                 ),
                 accessibility: backend == .herdr
-                    ? "Show herdr shortcuts"
-                    : "Show tmux shortcuts",
+                    ? String(localized: "Show herdr shortcuts")
+                    : String(localized: "Show tmux shortcuts"),
                 identifier: "tmux"
             ))
         }
@@ -1821,12 +1831,14 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         }
 
         if role != .trailing {
-            append(caps("ESC", "Escape", activeMetric, identifier: "escape") { [weak context] in
+            append(caps(
+                "ESC", String(localized: "Escape"), activeMetric, identifier: "escape"
+            ) { [weak context] in
                 context?.sendEscape()
             })
             let control = caps(
                 "CTRL",
-                "Control",
+                String(localized: "Control"),
                 activeMetric,
                 identifier: "control",
                 latched: context.ctrlLatched
@@ -1841,29 +1853,35 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
             }
             append(control)
             ctrlKey = control
-            append(caps("TAB", "Tab", activeMetric, identifier: "tab") { [weak context] in
+            append(caps(
+                "TAB", String(localized: "Tab"), activeMetric, identifier: "tab"
+            ) { [weak context] in
                 context?.sendTab()
             })
         }
         if role != .leading {
             if !minimal {
                 append(arrow(
-                    "arrow.left", "Arrow left", activeMetric, identifier: "left",
+                    "arrow.left", String(localized: "Arrow left"), activeMetric,
+                    identifier: "left",
                     app: EscapeSequences.moveLeftApp,
                     normal: EscapeSequences.moveLeftNormal
                 ))
                 append(arrow(
-                    "arrow.up", "Arrow up", activeMetric, identifier: "up",
+                    "arrow.up", String(localized: "Arrow up"), activeMetric,
+                    identifier: "up",
                     app: EscapeSequences.moveUpApp,
                     normal: EscapeSequences.moveUpNormal
                 ))
                 append(arrow(
-                    "arrow.down", "Arrow down", activeMetric, identifier: "down",
+                    "arrow.down", String(localized: "Arrow down"), activeMetric,
+                    identifier: "down",
                     app: EscapeSequences.moveDownApp,
                     normal: EscapeSequences.moveDownNormal
                 ))
                 append(arrow(
-                    "arrow.right", "Arrow right", activeMetric, identifier: "right",
+                    "arrow.right", String(localized: "Arrow right"), activeMetric,
+                    identifier: "right",
                     app: EscapeSequences.moveRightApp,
                     normal: EscapeSequences.moveRightNormal
                 ))
@@ -1872,7 +1890,7 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
                 face: .symbol("return", pointSize: 12, weight: .semibold),
                 width: activeMetric.keyWidth,
                 height: 26,
-                accessibilityLabel: "Return",
+                accessibilityLabel: String(localized: "Return"),
                 accessibilityIdentifier: "terminal.keyCluster.return",
                 action: { [weak context] in context?.sendReturn() }
             ))
@@ -1893,7 +1911,7 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
                 face: .symbol("keyboard", pointSize: 12, weight: .semibold),
                 width: activeMetric.keyWidth,
                 height: 26,
-                accessibilityLabel: "Show or hide keyboard",
+                accessibilityLabel: String(localized: "Show or hide keyboard"),
                 accessibilityIdentifier: "terminal.keyCluster.keyboard",
                 action: { [weak context] in context?.toggleKeyboard() }
             )

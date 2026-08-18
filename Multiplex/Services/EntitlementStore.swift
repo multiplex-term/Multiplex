@@ -64,9 +64,9 @@ private enum ProStoreClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingProduct:
-            "Multiplex Pro is not available from the App Store right now."
+            String(localized: "Multiplex Pro is not available from the App Store right now.")
         case .missingPurchasePresenter:
-            "The App Store purchase sheet could not be presented from this window."
+            String(localized: "The App Store purchase sheet could not be presented from this window.")
         }
     }
 }
@@ -453,7 +453,9 @@ final class EntitlementStore {
                     guard let product = try await storeClient.loadProduct(),
                           product.id == Self.proProductID else {
                         Self.logger.error("product load returned no Pro product")
-                        return .failed("Multiplex Pro is not available from the App Store right now.")
+                        return .failed(String(
+                            localized: "Multiplex Pro is not available from the App Store right now."
+                        ))
                     }
                     return .loaded(product)
                 } catch {
@@ -519,7 +521,8 @@ final class EntitlementStore {
         }
         guard let product = proProduct else {
             return settlePurchase(withFallback: .failed(
-                productLoadError ?? "Multiplex Pro is not available from the App Store right now."
+                productLoadError
+                    ?? String(localized: "Multiplex Pro is not available from the App Store right now.")
             ))
         }
 
@@ -530,13 +533,13 @@ final class EntitlementStore {
             case .success(.unverified):
                 Self.logger.error("purchase returned an unverified transaction")
                 return settlePurchase(withFallback: .failed(
-                    "The App Store transaction could not be verified."
+                    String(localized: "The App Store transaction could not be verified.")
                 ))
 
             case .success(.verified(let transaction)):
                 guard transactionGrantsPro(transaction) else {
                     return settlePurchase(withFallback: .failed(
-                        "The purchase is not an active Multiplex Pro entitlement."
+                        String(localized: "The purchase is not an active Multiplex Pro entitlement.")
                     ))
                 }
                 advanceEntitlementAuthority()
@@ -567,7 +570,7 @@ final class EntitlementStore {
 
             case .unknown:
                 return settlePurchase(withFallback: .failed(
-                    "The App Store returned an unknown purchase result."
+                    String(localized: "The App Store returned an unknown purchase result.")
                 ))
             }
         } catch {
@@ -821,7 +824,9 @@ final class EntitlementStore {
                     switch (wasAwaitingApproval, commerceState) {
                     case (true, _):
                         commerceState = .failed(
-                            "The pending purchase did not grant an active Multiplex Pro entitlement."
+                            String(
+                                localized: "The pending purchase did not grant an active Multiplex Pro entitlement."
+                            )
                         )
                     case (false, .purchased):
                         commerceState = .idle
@@ -836,7 +841,9 @@ final class EntitlementStore {
                 )
                 guard productID == Self.proProductID, purchaseAwaitingApproval else { continue }
                 purchaseAwaitingApproval = false
-                commerceState = .failed("The App Store transaction could not be verified.")
+                commerceState = .failed(
+                    String(localized: "The App Store transaction could not be verified.")
+                )
             }
         }
     }
@@ -879,22 +886,22 @@ final class EntitlementStore {
     static func storeErrorMessage(_ error: Error) -> String {
         switch error {
         case StoreKitError.networkError:
-            return "The App Store could not be reached. Check the internet "
-                + "connection and try again."
+            return String(localized: """
+                The App Store could not be reached. Check the internet \
+                connection and try again.
+                """)
         case StoreKitError.systemError(let underlying):
-            return "The App Store reported a system error. "
-                + "(\(underlying.localizedDescription))"
+            return String(localized: "The App Store reported a system error. (\(underlying.localizedDescription))")
         case StoreKitError.notAvailableInStorefront:
-            return "Multiplex Pro is not available in this App Store storefront."
+            return String(localized: "Multiplex Pro is not available in this App Store storefront.")
         case StoreKitError.notEntitled:
-            return "This copy of the app is not entitled to App Store purchases."
+            return String(localized: "This copy of the app is not entitled to App Store purchases.")
         case StoreKitError.unknown:
-            return "The App Store could not complete the request. "
-                + "Try again in a moment."
+            return String(localized: "The App Store could not complete the request. Try again in a moment.")
         case Product.PurchaseError.purchaseNotAllowed:
-            return "Purchases are not allowed for this Apple ID on this device."
+            return String(localized: "Purchases are not allowed for this Apple ID on this device.")
         case Product.PurchaseError.productUnavailable:
-            return "Multiplex Pro is not available for purchase right now."
+            return String(localized: "Multiplex Pro is not available for purchase right now.")
         default:
             // An error with no authored description renders as the opaque
             // "operation couldn't be completed (SKInternalErrorDomain error
@@ -904,9 +911,10 @@ final class EntitlementStore {
             let nsError = error as NSError
             if nsError.userInfo[NSLocalizedDescriptionKey] == nil,
                (error as? LocalizedError)?.errorDescription == nil {
-                return "The App Store could not complete the request. Check "
-                    + "that this device is signed in to the App Store, then "
-                    + "try again. (\(nsError.domain) \(nsError.code))"
+                return String(localized: """
+                    The App Store could not complete the request. Check that this device is \
+                    signed in to the App Store, then try again. (\(nsError.domain) \(nsError.code))
+                    """)
             }
             return error.localizedDescription
         }

@@ -18,9 +18,12 @@ actor MoshSession: TerminalTransport {
         func userMessage(host: Host) -> String {
             switch self {
             case .noResponse:
-                "mosh-server started on \(host.name) but no UDP reply arrived. Check firewalls/NAT for the mosh port range (default 60000-61000)."
+                String(localized: """
+                    mosh-server started on \(host.name) but no UDP reply arrived. \
+                    Check firewalls/NAT for the mosh port range (default 60000-61000).
+                    """)
             case .alreadyOpen:
-                "This mosh session is already open."
+                String(localized: "This mosh session is already open.")
             }
         }
     }
@@ -328,7 +331,7 @@ actor MoshSession: TerminalTransport {
                 return
             }
             if engine.isDesynced(now: now) {
-                finish(reason: "mosh session lost sync", notify: true)
+                finish(reason: String(localized: "mosh session lost sync"), notify: true)
                 return
             }
             updateContact(now: now)

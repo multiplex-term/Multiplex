@@ -312,16 +312,17 @@ final class AttentionCenter {
     }
 
     nonisolated static func copy(for alert: AttentionAlert) -> NotificationCopy {
-        let agent = alert.agent?.displayName ?? "Session"
+        let agent = alert.agent?.displayName ?? String(localized: "Session")
         let title: String = switch alert.event {
         case .turnEnded:
-            "\(agent) finished"
+            String(localized: "\(agent) finished")
         case .needsInput(.permission):
-            "\(agent) wants permission"
+            String(localized: "\(agent) wants permission")
         case .needsInput(.question):
-            "\(agent) has a question"
+            String(localized: "\(agent) has a question")
         case .bell:
-            alert.agent.map { "\($0.displayName) rang the bell" } ?? "Bell"
+            alert.agent.map { String(localized: "\($0.displayName) rang the bell") }
+                ?? String(localized: "Bell")
         }
         let place = "\(alert.sessionName) · \(alert.host.name)"
         // The dialog's own copy outranks the pane-title task summary, which

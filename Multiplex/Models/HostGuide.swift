@@ -28,7 +28,7 @@ enum HostGuide {
     static let herdrInstall: [Command] = [
         Command(label: "Homebrew", command: "brew install herdr"),
         Command(
-            label: "Or, macOS or Linux",
+            label: String(localized: "Or, macOS or Linux"),
             command: "curl -fsSL https://herdr.dev/install.sh | sh"),
     ]
 
@@ -51,14 +51,17 @@ enum HostGuide {
         _ backend: Host.SessionBackend, hostName: String
     ) -> String {
         let install = multiplexerInstall(for: backend).first?.command
-        var message = "\(backend.rawValue) isn’t installed on \(hostName), so there’s "
-            + "nothing to create the session with."
+        var message = String(localized: """
+            \(backend.rawValue) isn’t installed on \(hostName), so there’s \
+            nothing to create the session with.
+            """)
         if let install {
-            message += " Install it there (\(install)), "
+            message += String(localized: " Install it there (\(install)), ")
         } else {
-            message += " Install it there, "
+            message += String(localized: " Install it there, ")
         }
-        return message + "or change this host’s backend in Host Settings."
+        return message + String(
+            localized: "or change this host’s backend in Host Settings.")
     }
 
     /// Why a default install needs no further host setup: both probes
@@ -68,10 +71,13 @@ enum HostGuide {
     static func probePathDetail(for backend: Host.SessionBackend) -> String {
         switch backend {
         case .tmux:
-            "Homebrew and /usr/local installs are already on the probe's PATH."
+            String(localized:
+                "Homebrew and /usr/local installs are already on the probe's PATH.")
         case .herdr:
-            "Homebrew, ~/.local/bin, and ~/.cargo/bin installs are already on "
-                + "the probe's PATH."
+            String(localized: """
+                Homebrew, ~/.local/bin, and ~/.cargo/bin installs are already on \
+                the probe's PATH.
+                """)
         }
     }
 
@@ -82,8 +88,8 @@ enum HostGuide {
     /// must agree: the deck rail's offer confirmation, which is the press
     /// that spends it, and Host Settings' Backend detail, which is where it
     /// can be undone. A stale copy in either one misstates the trade.
-    static let secondBackendCost =
-        "roughly doubles what this host fetches on every deck refresh"
+    static let secondBackendCost = String(
+        localized: "roughly doubles what this host fetches on every deck refresh")
 
     /// The macOS locked-keychain fix (see `KeychainLockCheck`): unlock once
     /// in any shell on the host, then restart the signed-out agent.
@@ -104,12 +110,13 @@ enum HostGuide {
             label: "Homebrew",
             command: "brew install multiplex-term/tap/mpx"),
         Command(
-            label: "Or, macOS or Linux",
+            label: String(localized: "Or, macOS or Linux"),
             command: "curl -fsSL https://multiplexterm.dev/install-mpx-cli | sh"),
     ]
 
     /// The one command the whole flow turns on.
-    static let mpxBind = Command(label: "Then run", command: "mpx bind")
+    static let mpxBind = Command(
+        label: String(localized: "Then run"), command: "mpx bind")
 
     /// The clipboard is opt-in in the CLI — a bind payload is
     /// credential-grade, and over Universal Clipboard it would land on every
@@ -117,5 +124,5 @@ enum HostGuide {
     /// copy, and the app has to say so rather than let someone press a
     /// button that cannot do anything.
     static let mpxBindCopy = Command(
-        label: "For paste", command: "mpx bind --copy")
+        label: String(localized: "For paste"), command: "mpx bind --copy")
 }

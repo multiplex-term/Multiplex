@@ -88,38 +88,44 @@ enum HostTest {
             switch ssh {
             case .missingCredentials:
                 return host.authMethod == .password
-                    ? "Enter a password first."
-                    : "Paste a private key first."
+                    ? String(localized: "Enter a password first.")
+                    : String(localized: "Paste a private key first.")
             case .keyPassphraseRequired:
-                return "This private key is encrypted. Enter its passphrase above."
+                return String(localized: "This private key is encrypted. Enter its passphrase above.")
             case .incorrectKeyPassphrase:
-                return "That passphrase didn't unlock the private key. Try again."
+                return String(localized: "That passphrase didn't unlock the private key. Try again.")
             case .unsupportedKey:
-                return "The private key couldn't be read. Paste an OpenSSH ed25519 "
-                    + "or RSA key, including its BEGIN/END lines."
+                return String(localized: """
+                    The private key couldn't be read. Paste an OpenSSH ed25519 \
+                    or RSA key, including its BEGIN/END lines.
+                    """)
             case .connectFailed(let detail):
                 return connectFailureMessage(detail, host: host)
             case .notConnected:
-                return "The connection closed before the check finished. Try again."
+                return String(localized: "The connection closed before the check finished. Try again.")
             case .hostKeyRefused(let refusal):
                 // Named rather than placed: Host key is the last section in
                 // the form, not the next one down, so "below" would send the
                 // reader looking in the wrong place.
                 switch refusal {
                 case .changed(let expected, let presented):
-                    return "\(host.hostname) presented a different host key than the one "
-                        + "recorded for this host — \(expected.fingerprint), got "
-                        + "\(presented.fingerprint). Nothing was sent. If you rebuilt the "
-                        + "server, forget the recorded key under Host key and check again."
+                    return String(localized: """
+                        \(host.hostname) presented a different host key than the one \
+                        recorded for this host — \(expected.fingerprint), got \
+                        \(presented.fingerprint). Nothing was sent. If you rebuilt the \
+                        server, forget the recorded key under Host key and check again.
+                        """)
                 case .unrecognizedAlgorithm(let presented, _):
-                    return "\(host.hostname) identified itself with a \(presented.algorithm) "
-                        + "key, which isn't recorded for this host. Nothing was sent. If its "
-                        + "host keys changed, forget the recorded keys under Host key and check again."
+                    return String(localized: """
+                        \(host.hostname) identified itself with a \(presented.algorithm) \
+                        key, which isn't recorded for this host. Nothing was sent. If its \
+                        host keys changed, forget the recorded keys under Host key and check again.
+                        """)
                 }
             }
         }
         if error is DeadlineExceeded {
-            return "No answer from \(host.hostname) after \(Int(connectDeadline)) seconds — check the address and port, and that the host is reachable from this network."
+            return String(localized: "No answer from \(host.hostname) after \(Int(connectDeadline)) seconds — check the address and port, and that the host is reachable from this network.")
         }
         return connectFailureMessage(String(describing: error), host: host)
     }
@@ -131,28 +137,28 @@ enum HostTest {
         let lower = detail.lowercased()
         if lower.contains("authentication") || lower.contains("permission denied") {
             return host.authMethod == .password
-                ? "\(host.hostname) rejected the sign-in — check the user name and password."
-                : "\(host.hostname) rejected the key — check the user name, and that the key's public half is in ~/.ssh/authorized_keys on the host."
+                ? String(localized: "\(host.hostname) rejected the sign-in — check the user name and password.")
+                : String(localized: "\(host.hostname) rejected the key — check the user name, and that the key's public half is in ~/.ssh/authorized_keys on the host.")
         }
         if lower.contains("connection refused") || lower.contains("econnrefused") {
-            return "\(host.hostname) refused the connection on port \(host.port) — is an SSH server listening there?"
+            return String(localized: "\(host.hostname) refused the connection on port \(String(host.port)) — is an SSH server listening there?")
         }
         if lower.contains("dnsaerror") || lower.contains("dnsaaaaerror")
             || lower.contains("nodename nor servname")
             || lower.contains("name or service not known") {
-            return "Couldn't find “\(host.hostname)” — check the address for typos."
+            return String(localized: "Couldn't find “\(host.hostname)” — check the address for typos.")
         }
         if lower.contains("timed out") || lower.contains("timeout") {
-            return "\(host.hostname) didn't answer — check the port, and any firewall between this device and the host."
+            return String(localized: "\(host.hostname) didn't answer — check the port, and any firewall between this device and the host.")
         }
         if lower.contains("network is unreachable") || lower.contains("enetunreach")
             || lower.contains("no route to host") || lower.contains("ehostunreach") {
-            return "No route to \(host.hostname) — check this device's network connection."
+            return String(localized: "No route to \(host.hostname) — check this device's network connection.")
         }
         if lower.contains("connection reset") || lower.contains("econnreset") {
-            return "\(host.hostname) dropped the connection — the port may not speak SSH."
+            return String(localized: "\(host.hostname) dropped the connection — the port may not speak SSH.")
         }
-        return "Couldn't connect to \(host.hostname): \(detail)"
+        return String(localized: "Couldn't connect to \(host.hostname): \(detail)")
     }
 
 }

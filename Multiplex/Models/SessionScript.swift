@@ -49,7 +49,7 @@ struct SessionScript: Identifiable, Hashable {
         let collapsed = firstLine
             .split(whereSeparator: \Character.isWhitespace)
             .joined(separator: " ")
-        guard !collapsed.isEmpty else { return "Script" }
+        guard !collapsed.isEmpty else { return String(localized: "Script") }
         guard collapsed.count > Self.maximumFallbackNameLength else { return collapsed }
         return String(collapsed.prefix(Self.maximumFallbackNameLength - 1)) + "…"
     }

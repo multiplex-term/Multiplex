@@ -408,7 +408,9 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = form.editing == nil ? "Add Host" : "Host Settings"
+        title = form.editing == nil
+            ? String(localized: "Add Host")
+            : String(localized: "Host Settings")
         view.backgroundColor = GlassPrototype.sheetGround
         configureNavigation()
         configureScrollView()
@@ -477,11 +479,13 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private var modeDetail: String {
         switch resolvedMode {
         case .bind:
-            return "Run the mpx CLI on the machine you're adding and it offers "
-                + "itself — no address, user, or key to type here. Can't "
-                + "install it? Switch to MANUAL."
+            return String(localized: """
+                Run the mpx CLI on the machine you're adding and it offers \
+                itself — no address, user, or key to type here. Can't \
+                install it? Switch to MANUAL.
+                """)
         case .manual:
-            return "Type the SSH destination yourself. Nothing to install on the machine."
+            return String(localized: "Type the SSH destination yourself. Nothing to install on the machine.")
         }
     }
 
@@ -491,7 +495,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         navigationItem.titleView = UIKitChassisLabel(title ?? "", size: 12)
         #endif
         cancellationItem = UIBarButtonItem(
-            title: "Cancel",
+            title: String(localized: "Cancel"),
             style: .plain,
             target: self,
             action: #selector(cancelPressed)
@@ -500,12 +504,12 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         navigationItem.leftBarButtonItem = cancellationItem
 
         let save = UIBarButtonItem(
-            title: "Save",
+            title: String(localized: "Save"),
             style: .plain,
             target: self,
             action: #selector(savePressed)
         )
-        save.accessibilityLabel = "Save"
+        save.accessibilityLabel = String(localized: "Save")
         saveItem = save
     }
 
@@ -674,7 +678,9 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     }
 
     private func updateNavigationItems() {
-        cancellationItem.title = resolvedMode == .bind ? "Done" : "Cancel"
+        cancellationItem.title = resolvedMode == .bind
+            ? String(localized: "Done")
+            : String(localized: "Cancel")
         cancellationItem.accessibilityLabel = cancellationItem.title
         navigationItem.rightBarButtonItem = resolvedMode == .manual ? saveItem : nil
         updateSaveAvailability()
@@ -731,29 +737,39 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
         hostSection = makeHostSection()
         monitoringSection = makeMonitoringSection()
-        credentialsSection = AddHostSectionView(title: "Credentials", detail: nil, rows: [])
+        credentialsSection = AddHostSectionView(
+            title: String(localized: "Credentials"), detail: nil, rows: []
+        )
         credentialsSection.accessibilityIdentifier = "addhost.section.credentials"
-        testSection = AddHostSectionView(title: "Signal check", detail: nil, rows: [])
+        testSection = AddHostSectionView(
+            title: String(localized: "Signal check"), detail: nil, rows: []
+        )
         testSection.accessibilityIdentifier = "addhost.section.signal"
-        hostKeySection = AddHostSectionView(title: "Host key", detail: nil, rows: [])
+        hostKeySection = AddHostSectionView(
+            title: String(localized: "Host key"), detail: nil, rows: []
+        )
         hostKeySection.accessibilityIdentifier = "addhost.section.hostkey"
         workingDirectoriesSection = AddHostSectionView(
-            title: "New session defaults",
+            title: String(localized: "New session defaults"),
             detail: nil,
             rows: []
         )
         workingDirectoriesSection.accessibilityIdentifier = "addhost.section.directories"
         tmuxConfSection = makeTmuxConfSection()
         scriptsSection = AddHostSectionView(
-            title: "Session setup scripts",
+            title: String(localized: "Session setup scripts"),
             detail: nil,
             rows: []
         )
         scriptsSection.accessibilityIdentifier = "addhost.section.scripts"
         agentModelsSection = makeAgentModelsSection()
-        transportSection = AddHostSectionView(title: "Transport", detail: nil, rows: [])
+        transportSection = AddHostSectionView(
+            title: String(localized: "Transport"), detail: nil, rows: []
+        )
         transportSection.accessibilityIdentifier = "addhost.section.transport"
-        backendSection = AddHostSectionView(title: "Backend", detail: nil, rows: [])
+        backendSection = AddHostSectionView(
+            title: String(localized: "Backend"), detail: nil, rows: []
+        )
         backendSection.accessibilityIdentifier = "addhost.section.backend"
 
         // Host key sits last, after Transport. It stopped being a read-out
@@ -785,7 +801,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private func makeHostSection() -> AddHostSectionView {
         configureTextField(nameField, placeholder: "devbox", identifier: "addhost.name")
-        nameField.accessibilityLabel = "Name"
+        nameField.accessibilityLabel = String(localized: "Name")
         nameField.text = form.name
         nameField.addTarget(self, action: #selector(identityFieldChanged(_:)), for: .editingChanged)
 
@@ -795,7 +811,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             identifier: "addhost.hostname"
         )
         hostnameField.text = form.hostname
-        hostnameField.accessibilityLabel = "Address"
+        hostnameField.accessibilityLabel = String(localized: "Address")
         hostnameField.keyboardType = .URL
         hostnameField.autocorrectionType = .no
         hostnameField.autocapitalizationType = .none
@@ -803,13 +819,13 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
         configureTextField(portField, placeholder: "22", identifier: "addhost.port")
         portField.text = form.port
-        portField.accessibilityLabel = "Port"
+        portField.accessibilityLabel = String(localized: "Port")
         portField.keyboardType = .numberPad
         portField.addTarget(self, action: #selector(identityFieldChanged(_:)), for: .editingChanged)
 
         configureTextField(usernameField, placeholder: "root", identifier: "addhost.username")
         usernameField.text = form.username
-        usernameField.accessibilityLabel = "User"
+        usernameField.accessibilityLabel = String(localized: "User")
         usernameField.keyboardType = .asciiCapable
         usernameField.autocorrectionType = .no
         usernameField.autocapitalizationType = .none
@@ -817,14 +833,16 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         usernameField.addTarget(self, action: #selector(identityFieldChanged(_:)), for: .editingChanged)
 
         let section = AddHostSectionView(
-            title: "Host identity",
-            detail: "The name labels this host on the deck. Address, port, and user "
-                + "form the SSH destination.",
+            title: String(localized: "Host identity"),
+            detail: String(localized: """
+                The name labels this host on the deck. Address, port, and user \
+                form the SSH destination.
+                """),
             rows: [
-                AddHostFieldRow(label: "Name", inputView: nameField),
-                AddHostFieldRow(label: "Address", inputView: hostnameField),
-                AddHostFieldRow(label: "Port", inputView: portField),
-                AddHostFieldRow(label: "User", inputView: usernameField),
+                AddHostFieldRow(label: String(localized: "Name"), inputView: nameField),
+                AddHostFieldRow(label: String(localized: "Address"), inputView: hostnameField),
+                AddHostFieldRow(label: String(localized: "Port"), inputView: portField),
+                AddHostFieldRow(label: String(localized: "User"), inputView: usernameField),
             ]
         )
         section.accessibilityIdentifier = "addhost.section.host"
@@ -833,9 +851,11 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private func makeMonitoringSection() -> AddHostSectionView {
         let control = SettingsBooleanRow(
-            title: "Connect on the deck",
+            title: String(localized: "Connect on the deck"),
             isOn: form.isEnabled,
-            accessibilityHint: "Off keeps the host in the fleet without connecting to it"
+            accessibilityHint: String(
+                localized: "Off keeps the host in the fleet without connecting to it"
+            )
         ) { [weak self] enabled in
             guard let self else { return }
             self.form.isEnabled = enabled
@@ -843,10 +863,12 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         }
         monitoringControl = control
         let keepAlive = SettingsBooleanRow(
-            title: "Keep alive in background",
+            title: String(localized: "Keep alive in background"),
             isOn: form.backgroundKeepAlive,
-            accessibilityHint: "Holds this host's sessions and probing open for the extra "
-                + "seconds iOS grants after you leave the app"
+            accessibilityHint: String(localized: """
+                Holds this host's sessions and probing open for the extra \
+                seconds iOS grants after you leave the app
+                """)
         ) { [weak self] enabled in
             guard let self else { return }
             self.form.backgroundKeepAlive = enabled
@@ -854,7 +876,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         }
         backgroundKeepAliveControl = keepAlive
         let section = AddHostSectionView(
-            title: "Monitoring",
+            title: String(localized: "Monitoring"),
             detail: monitoringDetail,
             rows: [control, keepAlive]
         )
@@ -867,28 +889,36 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     /// doing so for a moment after you look away.
     private var monitoringDetail: String {
         let connect = form.isEnabled
-            ? "The deck probes this host about every five seconds while it's in "
-                + "front, and its sessions appear as live tiles."
-            : "Off parks the host on the deck without dialling it: no probing, no tiles, "
-                + "and widgets or Shortcuts report it as disabled. Terminal windows already "
-                + "open keep running, and Signal check below still connects on demand."
+            ? String(localized: """
+                The deck probes this host about every five seconds while it's in \
+                front, and its sessions appear as live tiles.
+                """)
+            : String(localized: """
+                Off parks the host on the deck without dialling it: no probing, no tiles, \
+                and widgets or Shortcuts report it as disabled. Terminal windows already \
+                open keep running, and Signal check below still connects on demand.
+                """)
         // Sized to the mechanism on purpose. iOS grants a leaving app a short
         // stretch of extra running time and nothing more; the modes that would
         // buy minutes are for apps genuinely playing audio or tracking
         // location, so the promise here stops where the grant does.
         let keepAlive = form.backgroundKeepAlive
-            ? "Leaving the app holds this host's sessions and probing open for the extra "
-                + "time iOS grants — tens of seconds, not minutes. Agent alerts still reach "
-                + "you inside that window; after it the app suspends as usual and tabs "
-                + "reattach when you come back."
-            : "Background keep-alive is off: leaving the app suspends it, this host's "
-                + "sessions drop, and its tabs reattach when you return."
+            ? String(localized: """
+                Leaving the app holds this host's sessions and probing open for the extra \
+                time iOS grants — tens of seconds, not minutes. Agent alerts still reach \
+                you inside that window; after it the app suspends as usual and tabs \
+                reattach when you come back.
+                """)
+            : String(localized: """
+                Background keep-alive is off: leaving the app suspends it, this host's \
+                sessions drop, and its tabs reattach when you return.
+                """)
         return connect + "\n\n" + keepAlive
     }
 
     private func renderCredentials() {
         let authLabel = addHostLabel(
-            "Sign in with",
+            String(localized: "Sign in with"),
             font: UIKitChassis.uiFont(10, weight: .semibold),
             color: UIKitChassis.signal2
         )
@@ -909,22 +939,24 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         switch form.authMethod {
         case .password:
             let secret = AddHostRevealableSecretField(
-                title: "Password",
-                prompt: "Required",
+                title: String(localized: "Password"),
+                prompt: String(localized: "Required"),
                 text: form.password
             ) { [weak self] text in
                 self?.updateTestSensitive { $0.password = text }
             }
             secret.textField.accessibilityIdentifier = "addhost.password"
             passwordField = secret
-            rows.append(AddHostFieldRow(label: "Password", inputView: secret))
+            rows.append(AddHostFieldRow(label: String(localized: "Password"), inputView: secret))
             credentialsSection.setDetail(
-                "Stored in iCloud Keychain, never in the host record."
+                String(localized: "Stored in iCloud Keychain, never in the host record.")
             )
         case .privateKey:
             if form.privateKeyConcealed {
                 let reveal = makeConcealedPrivateKeyButton()
-                rows.append(AddHostFieldRow(label: "Private key", inputView: reveal))
+                rows.append(AddHostFieldRow(
+                    label: String(localized: "Private key"), inputView: reveal
+                ))
             } else {
                 let keyView = AddHostGrowingTextView(
                     text: form.privateKey,
@@ -933,7 +965,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                     minimumLines: 4,
                     maximumLines: 8
                 )
-                keyView.accessibilityLabel = "Private key"
+                keyView.accessibilityLabel = String(localized: "Private key")
                 keyView.accessibilityIdentifier = "addhost.privateKey"
                 keyView.autocorrectionType = .no
                 keyView.autocapitalizationType = .none
@@ -942,21 +974,25 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                     self?.updateTestSensitive { $0.privateKey = text }
                 }
                 privateKeyView = keyView
-                rows.append(AddHostFieldRow(label: "Private key", inputView: keyView))
+                rows.append(AddHostFieldRow(
+                    label: String(localized: "Private key"), inputView: keyView
+                ))
             }
             let secret = AddHostRevealableSecretField(
-                title: "Passphrase",
-                prompt: "Optional",
+                title: String(localized: "Passphrase"),
+                prompt: String(localized: "Optional"),
                 text: form.passphrase
             ) { [weak self] text in
                 self?.updateTestSensitive { $0.passphrase = text }
             }
             secret.textField.accessibilityIdentifier = "addhost.passphrase"
             passphraseField = secret
-            rows.append(AddHostFieldRow(label: "Passphrase", inputView: secret))
+            rows.append(AddHostFieldRow(label: String(localized: "Passphrase"), inputView: secret))
             credentialsSection.setDetail(
-                "The OpenSSH key is stored in iCloud Keychain. Leave its passphrase "
-                    + "blank to enter it when connecting, or save the passphrase there too."
+                String(localized: """
+                    The OpenSSH key is stored in iCloud Keychain. Leave its passphrase \
+                    blank to enter it when connecting, or save the passphrase there too.
+                    """)
             )
         }
         credentialsSection.setRows(rows)
@@ -966,8 +1002,8 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         let button = UIButton(type: .custom)
         button.backgroundColor = .clear
         button.hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
-        button.accessibilityLabel = "Edit private key"
-        button.accessibilityHint = "Shows the saved key"
+        button.accessibilityLabel = String(localized: "Edit private key")
+        button.accessibilityHint = String(localized: "Shows the saved key")
         button.accessibilityIdentifier = "addhost.privateKeyConcealed"
         let bullets = addHostLabel(
             String(repeating: "•", count: 8),
@@ -1002,29 +1038,31 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private func makeTmuxConfSection() -> AddHostSectionView {
         let textView = AddHostGrowingTextView(
             text: form.newSessionTmuxConf,
-            placeholder: "cleared — nothing applied",
+            placeholder: String(localized: "cleared — nothing applied"),
             font: UIKitChassis.monoFont(12),
             minimumLines: 2,
             maximumLines: 6
         )
         textView.autocorrectionType = .no
         textView.autocapitalizationType = .none
-        textView.accessibilityLabel = "Options"
+        textView.accessibilityLabel = String(localized: "Options")
         textView.accessibilityIdentifier = "addhost.tmuxConf"
         textView.onTextChange = { [weak self] text in
             self?.form.newSessionTmuxConf = text
         }
         newSessionTmuxConfView = textView
         let section = AddHostSectionView(
-            title: "New session tmux conf",
-            detail: "One option per line, like a .tmux.conf (mouse on, history-limit "
-                + "50000). Each line is applied when Multiplex creates a session with "
-                + "tmux set-option -t that session. Attaching never applies anything, "
-                + "and session-scoped options do not change sessions made on the host. "
-                + "Hosts start with mouse on and focus-events on; clear the field to "
-                + "apply nothing. Focus events and other server-scoped options still "
-                + "reach the whole tmux server.",
-            rows: [AddHostFieldRow(label: "Options", inputView: textView)]
+            title: String(localized: "New session tmux conf"),
+            detail: String(localized: """
+                One option per line, like a .tmux.conf (mouse on, history-limit \
+                50000). Each line is applied when Multiplex creates a session with \
+                tmux set-option -t that session. Attaching never applies anything, \
+                and session-scoped options do not change sessions made on the host. \
+                Hosts start with mouse on and focus-events on; clear the field to \
+                apply nothing. Focus events and other server-scoped options still \
+                reach the whole tmux server.
+                """),
+            rows: [AddHostFieldRow(label: String(localized: "Options"), inputView: textView)]
         )
         section.accessibilityIdentifier = "addhost.section.tmuxConf"
         return section
@@ -1042,7 +1080,9 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             )
             textView.autocorrectionType = .no
             textView.autocapitalizationType = .none
-            textView.accessibilityLabel = "\(agent.displayName) models, one per line"
+            textView.accessibilityLabel = String(
+                localized: "\(agent.displayName) models, one per line"
+            )
             textView.accessibilityIdentifier = "addhost.models.\(agent.rawValue)"
             textView.onTextChange = { [weak self] text in
                 self?.form.modelText[agent] = text
@@ -1051,10 +1091,12 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             rows.append(AddHostFieldRow(label: agent.displayName, inputView: textView))
         }
         let section = AddHostSectionView(
-            title: "Agent launch models",
-            detail: "One model id per line, in picker order. New Session, the Open Agent "
-                + "shortcut, and the host widget offer them as choices, passed as "
-                + "--model; nothing is applied unless chosen at launch.",
+            title: String(localized: "Agent launch models"),
+            detail: String(localized: """
+                One model id per line, in picker order. New Session, the Open Agent \
+                shortcut, and the host widget offer them as choices, passed as \
+                --model; nothing is applied unless chosen at launch.
+                """),
             rows: rows
         )
         section.accessibilityIdentifier = "addhost.section.agentModels"
@@ -1063,10 +1105,10 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private func modelPlaceholder(for agent: AgentKind) -> String {
         switch agent {
-        case .claudeCode: return "opus, sonnet, or a full model id"
-        case .codex: return "model id per line"
-        case .pi: return "provider/model-id per line"
-        case .grok: return "grok-build, or a full model id"
+        case .claudeCode: return String(localized: "opus, sonnet, or a full model id")
+        case .codex: return String(localized: "model id per line")
+        case .pi: return String(localized: "provider/model-id per line")
+        case .grok: return String(localized: "grok-build, or a full model id")
         }
     }
 
@@ -1075,16 +1117,20 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private var testDetail: String {
         let backend = form.sessionBackend.rawValue
         return form.useMosh
-            ? "Signs in over SSH with the settings above, then looks for \(backend) and "
-                + "mosh-server on the host."
-            : "Signs in over SSH with the settings above, then looks for \(backend) "
-                + "on the host."
+            ? String(localized: """
+                Signs in over SSH with the settings above, then looks for \(backend) and \
+                mosh-server on the host.
+                """)
+            : String(localized: """
+                Signs in over SSH with the settings above, then looks for \(backend) \
+                on the host.
+                """)
     }
 
     private func renderTestSection() {
         let chip = UIKitChassisChip(
             "TEST CONNECTION",
-            accessibilityLabel: "Test connection"
+            accessibilityLabel: String(localized: "Test connection")
         ) { [weak self] in
             self?.runTest()
         }
@@ -1168,12 +1214,18 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private var hostKeyDetail: String {
         if forgetHostKeysArmed {
-            return "Tap again to forget. The next connection trusts whatever answers, and records that."
+            return String(localized: """
+                Tap again to forget. The next connection trusts whatever answers, and records that.
+                """)
         }
         return recordedHostKeys.isEmpty
-            ? "With nothing here, the first connection trusts what answers and records it. "
-                + "Paste a key you already have and it is checked instead."
-            : "Checked on every connection. Forget these only if you rebuilt the server."
+            ? String(localized: """
+                With nothing here, the first connection trusts what answers and records it. \
+                Paste a key you already have and it is checked instead.
+                """)
+            : String(localized: """
+                Checked on every connection. Forget these only if you rebuilt the server.
+                """)
     }
 
     private func renderHostKeys() {
@@ -1200,8 +1252,8 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             let forget = UIKitChassisChip(
                 forgetHostKeysArmed ? "CONFIRM FORGET" : "FORGET",
                 accessibilityLabel: forgetHostKeysArmed
-                    ? "Confirm forgetting recorded host keys"
-                    : "Forget recorded host keys"
+                    ? String(localized: "Confirm forgetting recorded host keys")
+                    : String(localized: "Forget recorded host keys")
             ) { [weak self] in self?.forgetHostKeysTapped() }
             forget.accessibilityIdentifier = "addhost.hostkey.forget"
             let forgetRow = UIStackView(arrangedSubviews: [forget, addHostFlexibleSpacer()])
@@ -1229,7 +1281,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             placeholder: "SHA256:… or ssh-ed25519 AAAA…",
             font: UIKitChassis.monoFont(11)
         )
-        expectedHostKeyField.accessibilityLabel = "Expected host key"
+        expectedHostKeyField.accessibilityLabel = String(localized: "Expected host key")
         expectedHostKeyField.accessibilityIdentifier = "addhost.hostkey.expected"
         expectedHostKeyField.autocorrectionType = .no
         expectedHostKeyField.autocapitalizationType = .none
@@ -1248,7 +1300,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         updateExpectedHostKeyStatus()
 
         let caption = addHostLabel(
-            "Expected key (optional)",
+            String(localized: "Expected key (optional)"),
             font: UIKitChassis.uiFont(10, weight: .semibold),
             color: UIKitChassis.signal2
         )
@@ -1280,14 +1332,16 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         expectedHostKeyStatus.isHidden = false
         guard let pin = HostKeyPin(userInput: text) else {
             expectedHostKeyStatus.textColor = TallyPalette.caution
-            expectedHostKeyStatus.text = "Not a host key. Paste a SHA256: fingerprint, or a "
-                + "public key line from the machine's /etc/ssh."
+            expectedHostKeyStatus.text = String(localized: """
+                Not a host key. Paste a SHA256: fingerprint, or a \
+                public key line from the machine's /etc/ssh.
+                """)
             return
         }
         expectedHostKeyStatus.textColor = UIKitChassis.signal2
         expectedHostKeyStatus.text = pin.algorithm == HostKeyPin.anyAlgorithm
-            ? "Will verify against \(pin.fingerprint)"
-            : "Will verify against \(pin.algorithm) \(pin.fingerprint)"
+            ? String(localized: "Will verify against \(pin.fingerprint)")
+            : String(localized: "Will verify against \(pin.algorithm) \(pin.fingerprint)")
     }
 
     private func forgetHostKeysTapped() {
@@ -1330,19 +1384,19 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 var warnings: [String] = []
                 if !report.multiplexerFound {
                     let backend = host.sessionBackend.rawValue
-                    warnings.append(
-                        "\(backend) wasn't found on the host — the deck can't list sessions "
-                            + "there. Plain shells still work."
-                    )
+                    warnings.append(String(localized: """
+                        \(backend) wasn't found on the host — the deck can't list sessions \
+                        there. Plain shells still work.
+                        """))
                 }
                 if report.moshServerFound == false {
-                    warnings.append(
-                        "mosh-server wasn't found — mosh attaches will fail. Install it "
-                            + "on the host or set its path below."
-                    )
+                    warnings.append(String(localized: """
+                        mosh-server wasn't found — mosh attaches will fail. Install it \
+                        on the host or set its path below.
+                        """))
                 }
                 self.testState = .passed(
-                    headline: "Connected to \(host.hostname) as \(host.username).",
+                    headline: String(localized: "Connected to \(host.hostname) as \(host.username)."),
                     warnings: warnings
                 )
             case .failed(let message):
@@ -1367,10 +1421,14 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private var workingDirectoriesDetail: String {
         form.workingDirectories.isEmpty
-            ? "New sessions start in the host's home directory. Add paths to make them "
-                + "available in New Session."
-            : "The first path is the default. New Session can choose another path or "
-                + "the host's home directory."
+            ? String(localized: """
+                New sessions start in the host's home directory. Add paths to make them \
+                available in New Session.
+                """)
+            : String(localized: """
+                The first path is the default. New Session can choose another path or \
+                the host's home directory.
+                """)
     }
 
     private func renderWorkingDirectories() {
@@ -1381,10 +1439,10 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             configureInlineField(
                 field,
                 text: directory.path,
-                placeholder: "Directory",
+                placeholder: String(localized: "Directory"),
                 font: UIKitChassis.monoFont(11)
             )
-            field.accessibilityLabel = "Directory"
+            field.accessibilityLabel = String(localized: "Directory")
             field.accessibilityIdentifier = "addhost.directory.\(directory.id.uuidString)"
             field.autocorrectionType = .no
             field.autocapitalizationType = .none
@@ -1414,7 +1472,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 AddHostInlineWell(contentView: field),
                 AddHostIconButton(
                     systemImage: "arrow.up",
-                    accessibilityLabel: "Move directory up",
+                    accessibilityLabel: String(localized: "Move directory up"),
                     enabled: index > 0
                 ) { [weak self] in
                     self?.form.moveWorkingDirectory(id: directory.id, offset: -1)
@@ -1422,7 +1480,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 },
                 AddHostIconButton(
                     systemImage: "arrow.down",
-                    accessibilityLabel: "Move directory down",
+                    accessibilityLabel: String(localized: "Move directory down"),
                     enabled: index < form.workingDirectories.count - 1
                 ) { [weak self] in
                     self?.form.moveWorkingDirectory(id: directory.id, offset: 1)
@@ -1430,7 +1488,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 },
                 AddHostIconButton(
                     systemImage: "trash",
-                    accessibilityLabel: "Delete directory"
+                    accessibilityLabel: String(localized: "Delete directory")
                 ) { [weak self] in
                     self?.form.removeWorkingDirectory(id: directory.id)
                     self?.renderWorkingDirectories()
@@ -1448,7 +1506,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             placeholder: "~/projects/app",
             font: UIKitChassis.monoFont(11)
         )
-        newWorkingDirectoryField.accessibilityLabel = "Add directory"
+        newWorkingDirectoryField.accessibilityLabel = String(localized: "Add directory")
         newWorkingDirectoryField.accessibilityIdentifier = "addhost.newDirectory"
         newWorkingDirectoryField.autocorrectionType = .no
         newWorkingDirectoryField.autocapitalizationType = .none
@@ -1467,7 +1525,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         let add = UIKitChassisChip(
             "ADD",
             systemImage: "plus",
-            accessibilityLabel: "Add directory"
+            accessibilityLabel: String(localized: "Add directory")
         ) { [weak self] in self?.addWorkingDirectory() }
         addDirectoryChip = add
         updateAddDirectoryAvailability()
@@ -1479,7 +1537,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         addRow.alignment = .center
         addRow.spacing = 8
         let addLabel = addHostLabel(
-            "Add directory",
+            String(localized: "Add directory"),
             font: UIKitChassis.uiFont(10, weight: .semibold),
             color: UIKitChassis.signal2
         )
@@ -1509,10 +1567,14 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private var scriptsDetail: String {
         form.scripts.isEmpty
-            ? "New Session can type a chosen script into the fresh shell before anything "
-                + "launches. Add one to make it available."
-            : "New Session offers these by name; the chosen one is typed into the fresh "
-                + "shell before the launch command."
+            ? String(localized: """
+                New Session can type a chosen script into the fresh shell before anything \
+                launches. Add one to make it available.
+                """)
+            : String(localized: """
+                New Session offers these by name; the chosen one is typed into the fresh \
+                shell before the launch command.
+                """)
     }
 
     private func renderScripts() {
@@ -1524,12 +1586,12 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             configureInlineField(
                 name,
                 text: script.name,
-                placeholder: "Name",
+                placeholder: String(localized: "Name"),
                 font: UIKitChassis.uiFont(11, weight: .medium)
             )
             name.autocorrectionType = .no
             name.autocapitalizationType = .none
-            name.accessibilityLabel = "Script name"
+            name.accessibilityLabel = String(localized: "Script name")
             name.accessibilityIdentifier = "addhost.scriptName.\(script.id.uuidString)"
             name.addAction(UIAction { [weak self, weak name] _ in
                 guard let self,
@@ -1545,7 +1607,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 AddHostInlineWell(contentView: name),
                 AddHostIconButton(
                     systemImage: "arrow.up",
-                    accessibilityLabel: "Move script up",
+                    accessibilityLabel: String(localized: "Move script up"),
                     enabled: index > 0
                 ) { [weak self] in
                     self?.form.moveScript(id: script.id, offset: -1)
@@ -1553,7 +1615,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 },
                 AddHostIconButton(
                     systemImage: "arrow.down",
-                    accessibilityLabel: "Move script down",
+                    accessibilityLabel: String(localized: "Move script down"),
                     enabled: index < form.scripts.count - 1
                 ) { [weak self] in
                     self?.form.moveScript(id: script.id, offset: 1)
@@ -1561,7 +1623,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 },
                 AddHostIconButton(
                     systemImage: "trash",
-                    accessibilityLabel: "Delete script"
+                    accessibilityLabel: String(localized: "Delete script")
                 ) { [weak self] in
                     self?.form.scripts.removeAll { $0.id == script.id }
                     self?.renderScripts()
@@ -1580,7 +1642,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             )
             body.autocorrectionType = .no
             body.autocapitalizationType = .none
-            body.accessibilityLabel = "Script commands"
+            body.accessibilityLabel = String(localized: "Script commands")
             body.accessibilityIdentifier = "addhost.scriptBody.\(script.id.uuidString)"
             body.onTextChange = { [weak self] text in
                 guard let self,
@@ -1600,7 +1662,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         let add = UIKitChassisChip(
             "ADD SCRIPT",
             systemImage: "plus",
-            accessibilityLabel: "Add script"
+            accessibilityLabel: String(localized: "Add script")
         ) { [weak self] in
             self?.form.scripts.append(AddHostFormState.ScriptRow())
             self?.renderScripts()
@@ -1619,19 +1681,25 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         let enabled = enabledBackends
         var detail: String
         if enabled.contains(.herdr) {
-            detail = "The deck monitors herdr (herdr.dev) sessions and their "
-                + "agents through the herdr CLI — one tile per session, its "
-                + "workspaces as the tile's window lines; a tile attaches "
-                + "the full herdr client. The tmux options editor doesn't "
-                + "apply to herdr sessions."
+            detail = String(localized: """
+                The deck monitors herdr (herdr.dev) sessions and their \
+                agents through the herdr CLI — one tile per session, its \
+                workspaces as the tile's window lines; a tile attaches \
+                the full herdr client. The tmux options editor doesn't \
+                apply to herdr sessions.
+                """)
         } else {
-            detail = "The deck monitors a remote tmux server — sessions, "
-                + "windows, and agent panes. herdr (herdr.dev) is the "
-                + "alternative for hosts that run it."
+            detail = String(localized: """
+                The deck monitors a remote tmux server — sessions, \
+                windows, and agent panes. herdr (herdr.dev) is the \
+                alternative for hosts that run it.
+                """)
         }
         if enabled.count > 1 {
-            detail += "\n\nBoth are shown, each tile marked with the backend "
-                + "it came from. That \(HostGuide.secondBackendCost)."
+            detail += "\n\n" + String(localized: """
+                Both are shown, each tile marked with the backend \
+                it came from. That \(HostGuide.secondBackendCost).
+                """)
         }
         return detail
     }
@@ -1647,7 +1715,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         }
         checks.accessibilityIdentifier = "addhost.backendChecks"
         let checksLabel = addHostLabel(
-            "Backends",
+            String(localized: "Backends"),
             font: UIKitChassis.uiFont(10, weight: .semibold),
             color: UIKitChassis.signal2
         )
@@ -1675,13 +1743,14 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             }
             bar.accessibilityIdentifier = "addhost.backendBar"
             let label = addHostLabel(
-                "New sessions run on",
+                String(localized: "New sessions run on"),
                 font: UIKitChassis.uiFont(10, weight: .semibold),
                 color: UIKitChassis.signal2
             )
-            label.accessibilityHint =
-                "The backend New Session, widgets, and Shortcuts start on "
-                + "unless they name another"
+            label.accessibilityHint = String(localized: """
+                The backend New Session, widgets, and Shortcuts start on \
+                unless they name another
+                """)
             stack.addArrangedSubview(label)
             stack.addArrangedSubview(bar)
             stack.setCustomSpacing(16, after: checks)
@@ -1718,22 +1787,24 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private var transportDetail: String {
         if form.useMosh {
-            return "Terminals attach over UDP and survive roaming or sleep. SSH still "
-                + "signs in, starts mosh-server, and probes the deck."
+            return String(localized: """
+                Terminals attach over UDP and survive roaming or sleep. SSH still \
+                signs in, starts mosh-server, and probes the deck.
+                """)
         }
-        return "SSH carries both the control connection and attached terminals."
+        return String(localized: "SSH carries both the control connection and attached terminals.")
     }
 
     private func renderTransport() {
         moshPortsInvalidRow = nil
         let requiresPro = moshRequiresPro
         let control = SettingsBooleanRow(
-            title: "Connect with mosh",
+            title: String(localized: "Connect with mosh"),
             isOn: form.useMosh,
             status: requiresPro ? "PRO" : nil,
             statusIsProminent: true,
             optimisticallyUpdates: !requiresPro,
-            accessibilityHint: requiresPro ? "Requires Multiplex Pro" : nil
+            accessibilityHint: requiresPro ? String(localized: "Requires Multiplex Pro") : nil
         ) { [weak self] enabled in
             guard let self else { return }
             if enabled && self.moshRequiresPro {
@@ -1769,18 +1840,20 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 identifier: "addhost.moshPorts"
             )
             ports.text = form.moshPorts
-            ports.accessibilityLabel = "UDP port or range"
+            ports.accessibilityLabel = String(localized: "UDP port or range")
             ports.keyboardType = .numbersAndPunctuation
             ports.autocorrectionType = .no
             ports.autocapitalizationType = .none
             ports.addTarget(self, action: #selector(moshFieldChanged(_:)), for: .editingChanged)
             moshPortsField = ports
-            rows.append(AddHostFieldRow(label: "UDP port or range", inputView: ports))
+            rows.append(AddHostFieldRow(
+                label: String(localized: "UDP port or range"), inputView: ports
+            ))
 
             let invalid = UIStackView(arrangedSubviews: [
                 UIKitTallyLamp(caption: "INVALID", color: TallyPalette.caution),
                 addHostLabel(
-                    "Use one port or a range from 1 to 65535.",
+                    String(localized: "Use one port or a range from 1 to 65535."),
                     font: UIKitChassis.uiFont(10),
                     color: UIKitChassis.signal2
                 ),
@@ -2517,8 +2590,8 @@ private final class AddHostChoiceButton: UIButton {
             accessibilityTraits.insert(.toggleButton)
         }
         accessibilityValue = checkable
-            ? (selected ? "Checked" : "Unchecked")
-            : (selected ? "Selected" : "Not selected")
+            ? (selected ? String(localized: "Checked") : String(localized: "Unchecked"))
+            : (selected ? String(localized: "Selected") : String(localized: "Not selected"))
         if selected {
             accessibilityTraits.insert(.selected)
         } else {
@@ -2749,7 +2822,9 @@ final class AddHostRevealableSecretField: UIView, UITextFieldDelegate {
             )
         )
         revealButton.setImage(image, for: .normal)
-        revealButton.accessibilityLabel = revealed ? "Hide \(title)" : "Show \(title)"
+        revealButton.accessibilityLabel = revealed
+            ? String(localized: "Hide \(title)")
+            : String(localized: "Show \(title)")
     }
 
     private static func bullets(_ count: Int) -> String {

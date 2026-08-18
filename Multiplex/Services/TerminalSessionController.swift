@@ -470,7 +470,7 @@ final class TerminalSessionController {
             else { return }
             captureKeyPassphraseChallenge(from: error)
             let message = (error as? SSHConnectionError)?.userMessage(host: host)
-                ?? "Couldn't reach \(host.name). \(error.localizedDescription)"
+                ?? String(localized: "Couldn't reach \(host.name). \(error.localizedDescription)")
             status = .ended(message)
             self.connection = nil
             transport = nil
@@ -548,7 +548,12 @@ final class TerminalSessionController {
             let message = (error as? MoshBootstrapError)?.userMessage(host: host)
                 ?? (error as? MoshSession.Failure)?.userMessage(host: host)
                 ?? (error as? SSHConnectionError)?.userMessage(host: host)
-                ?? "Couldn't reach \(host.name) over mosh. \(error.localizedDescription)"
+                ?? String(
+                    localized: """
+                        Couldn't reach \(host.name) over mosh. \
+                        \(error.localizedDescription)
+                        """
+                )
             status = .ended(message)
             moshSession = nil
             transport = nil
@@ -1464,11 +1469,11 @@ final class TerminalSessionController {
                 }
             guard !Task.isCancelled, agentHistory != nil else { return }
             guard let result else {
-                agentHistory = .unavailable("NO WORKING DIRECTORY")
+                agentHistory = .unavailable(String(localized: "NO WORKING DIRECTORY"))
                 return
             }
             guard result.filePath != nil else {
-                agentHistory = .unavailable("NO SESSION FILE")
+                agentHistory = .unavailable(String(localized: "NO SESSION FILE"))
                 return
             }
             agentHistory = .loaded(
@@ -1479,7 +1484,7 @@ final class TerminalSessionController {
             )
         } catch {
             guard !Task.isCancelled, agentHistory != nil else { return }
-            agentHistory = .unavailable("HISTORY UNAVAILABLE")
+            agentHistory = .unavailable(String(localized: "HISTORY UNAVAILABLE"))
         }
     }
 
@@ -1547,7 +1552,7 @@ final class TerminalSessionController {
                 guard let prologue = isHerdr
                     ? AgentSessionHistory.parseHerdrJumpPrologue(prologueOutput)
                     : AgentSessionHistory.parseJumpPrologue(prologueOutput)
-                else { return .failed("SESSION NOT FOUND") }
+                else { return .failed(String(localized: "SESSION NOT FOUND")) }
                 // The walk's coordinate: tmux aims at the session (its
                 // active pane answers); herdr aims at the prologue's
                 // bake-vetted focused pane.
@@ -1557,15 +1562,15 @@ final class TerminalSessionController {
                 switch AgentAttention.classify(
                     title: prologue.paneTitle, tail: prologue.capture
                 ) {
-                case .busy: return .failed("AGENT IS BUSY")
-                case .needsYou: return .failed("ANSWER THE AGENT FIRST")
+                case .busy: return .failed(String(localized: "AGENT IS BUSY"))
+                case .needsYou: return .failed(String(localized: "ANSWER THE AGENT FIRST"))
                 case .idle: break
                 }
                 let targetNeedles = AgentSessionHistory.needles(
                     for: message, paneColumns: prologue.paneWidth
                 )
                 guard let targetPrimary = targetNeedles.first else {
-                    return .failed("MESSAGE TOO SHORT TO FIND")
+                    return .failed(String(localized: "MESSAGE TOO SHORT TO FIND"))
                 }
                 let entries = AgentSessionHistory.needleEntries(
                     for: allMessages, paneColumns: prologue.paneWidth
@@ -1622,23 +1627,23 @@ final class TerminalSessionController {
                     // the needles were built against), so name it.
                     return .failed(
                         prologue.clientSizeCount > 1
-                            ? "ANOTHER CLIENT RESIZES THIS SESSION"
-                            : "NOT IN THE VISIBLE TRANSCRIPT"
+                            ? String(localized: "ANOTHER CLIENT RESIZES THIS SESSION")
+                            : String(localized: "NOT IN THE VISIBLE TRANSCRIPT")
                     )
                 case .short:
-                    return .failed("TERMINAL TOO SHORT TO JUMP")
+                    return .failed(String(localized: "TERMINAL TOO SHORT TO JUMP"))
                 case .resized:
                     return .failed(
                         prologue.clientSizeCount > 1
-                            ? "ANOTHER CLIENT RESIZES THIS SESSION"
-                            : "RESIZED MID-JUMP — TRY AGAIN"
+                            ? String(localized: "ANOTHER CLIENT RESIZES THIS SESSION")
+                            : String(localized: "RESIZED MID-JUMP — TRY AGAIN")
                     )
                 case nil:
-                    return .failed("SEARCH FAILED")
+                    return .failed(String(localized: "SEARCH FAILED"))
                 }
             }
         } catch {
-            outcome = .failed("SEARCH FAILED")
+            outcome = .failed(String(localized: "SEARCH FAILED"))
         }
 
         switch outcome {
@@ -1765,7 +1770,8 @@ final class TerminalSessionController {
         !host.useMosh && route.sessionBackend != nil
     }
 
-    static let uploadUnavailableMessage = "File upload requires tmux or herdr over SSH"
+    static let uploadUnavailableMessage =
+        String(localized: "File upload requires tmux or herdr over SSH")
 
     func deliverDrop(_ files: [DroppedFile]) {
         // The jump search owns the pane's input while it pages; the FINDING
@@ -1810,7 +1816,7 @@ final class TerminalSessionController {
         } catch is CancellationError {
             dropState = nil
         } catch {
-            dropState = .failed((error as? DropError)?.message ?? "Upload failed")
+            dropState = .failed((error as? DropError)?.message ?? String(localized: "Upload failed"))
             dropClearTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled else { return }
@@ -1845,7 +1851,7 @@ final class TerminalSessionController {
     ) async throws -> [String] {
         let uploads = try files.map { file -> SSHUpload in
             guard file.data.count <= DropText.maxBytes else {
-                throw DropError(message: "\(file.name) is over 64 MB")
+                throw DropError(message: String(localized: "\(file.name) is over 64 MB"))
             }
             return SSHUpload(
                 data: file.data,
@@ -2113,7 +2119,7 @@ final class TerminalSessionController {
             return
         }
         guard status == .live, let connection else {
-            failTalkbackAttachment(id, "Not connected")
+            failTalkbackAttachment(id, String(localized: "Not connected"))
             return
         }
         do {
@@ -2132,12 +2138,16 @@ final class TerminalSessionController {
                     }
                 }
             }
-            guard let path = paths.first else { throw DropError(message: "Upload failed") }
+            guard let path = paths.first else {
+                throw DropError(message: String(localized: "Upload failed"))
+            }
             talkback.update(id) { $0.state = .ready(path: path) }
         } catch is CancellationError {
-            failTalkbackAttachment(id, "Cancelled")
+            failTalkbackAttachment(id, String(localized: "Cancelled"))
         } catch {
-            failTalkbackAttachment(id, (error as? DropError)?.message ?? "Upload failed")
+            failTalkbackAttachment(
+                id, (error as? DropError)?.message ?? String(localized: "Upload failed")
+            )
         }
     }
 

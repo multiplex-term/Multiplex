@@ -126,7 +126,10 @@ enum ExternalActionPerformer {
         guard let host = resolveHost(action.hostRef, in: context.store) else {
             context.presentFailure(ExternalActionFailure(
                 hostName: action.hostRef.displayName,
-                message: "No configured host matches this shortcut. Pick a host in the widget or shortcut settings."
+                message: String(localized: """
+                    No configured host matches this shortcut. Pick a host in the \
+                    widget or shortcut settings.
+                    """)
             ))
             return
         }
@@ -137,7 +140,10 @@ enum ExternalActionPerformer {
         guard host.isEnabled else {
             context.presentFailure(ExternalActionFailure(
                 hostName: host.name,
-                message: "\(host.name) is disabled. Enable it on the deck to open sessions on it."
+                message: String(localized: """
+                    \(host.name) is disabled. Enable it on the deck to open \
+                    sessions on it.
+                    """)
             ))
             return
         }
@@ -351,7 +357,8 @@ enum ExternalActionPerformer {
         guard let target = TerminalPathTarget.resolveExplicit(path, line: line) else {
             context.presentFailure(ExternalActionFailure(
                 hostName: host.name,
-                message: "Enter a remote file path and an optional positive line number."
+                message: String(
+                    localized: "Enter a remote file path and an optional positive line number.")
             ))
             return
         }
@@ -404,15 +411,16 @@ enum ExternalActionPerformer {
         // The RESOLVED session's backend names the thing that didn't
         // happen, not the host's primary.
         switch (backend, placement) {
-        case (.tmux, _): noun = "window"
-        case (.herdr, .tab): noun = "tab"
-        case (.herdr, .workspace): noun = "workspace"
+        case (.tmux, _): noun = String(localized: "window")
+        case (.herdr, .tab): noun = String(localized: "tab")
+        case (.herdr, .workspace): noun = String(localized: "workspace")
         }
         let message: String
         if case .failed(let reason) = model.phase {
             message = reason
         } else {
-            message = "Couldn't open a new \(noun) in session \(session) on \(host.name)."
+            message = String(
+                localized: "Couldn't open a new \(noun) in session \(session) on \(host.name).")
         }
         context.presentFailure(ExternalActionFailure(hostName: host.name, message: message))
     }
@@ -434,7 +442,7 @@ enum ExternalActionPerformer {
             if case .failed(let reason) = model.phase {
                 message = reason
             } else {
-                message = "Couldn't create the session on \(host.name)."
+                message = String(localized: "Couldn't create the session on \(host.name).")
             }
         }
         context.presentFailure(ExternalActionFailure(hostName: host.name, message: message))
@@ -443,7 +451,7 @@ enum ExternalActionPerformer {
     private static func failureMessage(for phase: HostConnectionModel.Phase, host: Host) -> String {
         switch phase {
         case .failed(let reason): reason
-        default: "Couldn't reach \(host.name). No response."
+        default: String(localized: "Couldn't reach \(host.name). No response.")
         }
     }
 }

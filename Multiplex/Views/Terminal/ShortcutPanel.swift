@@ -315,12 +315,12 @@ final class ShortcutPanelViewController: UIViewController {
             field.clearButtonMode = .whileEditing
         }
         let commit = UIAlertAction(
-            title: "Rename", style: .default
+            title: String(localized: "Rename"), style: .default
         ) { [weak self, weak alert] _ in
             self?.confirmRename(item, to: alert?.textFields?.first?.text ?? "")
         }
         alert.addAction(commit)
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: String(localized: "Cancel"), style: .cancel))
         present(alert, animated: true)
     }
 
@@ -654,7 +654,9 @@ private final class ShortcutItemButton: ShortcutPressControl {
 
     func setArmed(_ armed: Bool) {
         isArmed = armed
-        commandLabel.setText(armed ? "press again to close" : item.command)
+        commandLabel.setText(
+            armed ? String(localized: "press again to close") : item.command
+        )
         bindingLabel.configure(
             armed ? "AGAIN" : item.bindingLabel,
             font: UIKitChassis.monoFont(9, weight: .semibold),
@@ -683,10 +685,10 @@ private final class ShortcutItemButton: ShortcutPressControl {
         isArmed: Bool
     ) -> String {
         if isArmed {
-            return "\(item.title), press again to close"
+            return String(localized: "\(item.title), press again to close")
         }
         if item.requiresDoubleActivation {
-            return "\(item.title), \(item.command), press twice to confirm"
+            return String(localized: "\(item.title), \(item.command), press twice to confirm")
         }
         return "\(item.title), \(item.command), \(item.bindingLabel)"
     }
@@ -721,8 +723,9 @@ private final class ShortcutCompactItemButton: ShortcutPressControl {
         minimumHeight(40)
         accessibilityIdentifier = item.accessibilityIdentifier
         accessibilityLabel = "\(item.title), \(item.command), \(item.bindingLabel)"
-        accessibilityHint =
-            "Hold for \(TmuxShortcut.coarseResizeCells)-cell steps, repeating until release."
+        accessibilityHint = String(
+            localized: "Hold for \(TmuxShortcut.coarseResizeCells)-cell steps, repeating until release."
+        )
 
         let face = UIImageView(
             image: item.symbolName.flatMap(UIImage.init(systemName:))
@@ -849,8 +852,8 @@ private final class ShortcutChoiceButton: ShortcutPressControl {
         choice.isActive = active
         activeLabel.isHidden = !active
         accessibilityLabel = active
-            ? "\(noun.capitalized) \(choice.index), \(choice.name), current \(noun)"
-            : "Switch to \(noun) \(choice.index), \(choice.name)"
+            ? String(localized: "\(noun.capitalized) \(choice.index), \(choice.name), current \(noun)")
+            : String(localized: "Switch to \(noun) \(choice.index), \(choice.name)")
     }
 }
 

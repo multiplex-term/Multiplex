@@ -16,26 +16,29 @@ struct AgentPromptFormState {
     }
 
     var directoryLabel: String {
-        guard let directory, directory != "~" else { return "Home" }
+        guard let directory, directory != "~" else { return String(localized: "Home") }
         return directory
     }
 
     var modelDetail: String {
         let trimmed = model.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
-            return "Uses \(request.agent.displayName)'s own default model."
+            return String(localized: "Uses \(request.agent.displayName)'s own default model.")
         }
-        return "Launches as \(request.agent.launchCommand(model: trimmed, initialPrompt: ""))."
+        let command = request.agent.launchCommand(model: trimmed, initialPrompt: "")
+        return String(localized: "Launches as \(command).")
     }
 
     var directoryDetail: String {
         guard !request.host.workingDirs.isEmpty else {
-            return "Uses the host's login-shell home directory."
+            return String(localized: "Uses the host's login-shell home directory.")
         }
         if let directory, directory != "~" {
-            return "Starts in \(directory). Choose Home to use the login shell's default."
+            return String(localized: """
+                Starts in \(directory). Choose Home to use the login shell's default.
+                """)
         }
-        return "Uses the host's login-shell home directory."
+        return String(localized: "Uses the host's login-shell home directory.")
     }
 
     var launchAction: ExternalAction {
@@ -57,7 +60,7 @@ struct AgentPromptFormState {
     /// The sheet's title names an existing-session target — where the
     /// launch types is part of what the person approves here.
     var title: String {
-        var title = "\(request.agent.displayName) on \(request.host.name)"
+        var title = String(localized: "\(request.agent.displayName) on \(request.host.name)")
         if case .existingSession(let name, _) = request.target {
             title += " · \(name)"
         }
@@ -102,7 +105,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
         form = AgentPromptFormState(request: request)
         self.submit = submit
         promptTextView = AgentPromptTextView(
-            placeholder: "What should \(request.agent.displayName) do?"
+            placeholder: String(localized: "What should \(request.agent.displayName) do?")
         )
         super.init(nibName: nil, bundle: nil)
     }
@@ -121,23 +124,23 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
         navigationItem.titleView = UIKitChassisLabel(title, size: 12)
         #endif
         let cancel = UIBarButtonItem(
-            title: "Cancel",
+            title: String(localized: "Cancel"),
             style: .plain,
             target: self,
             action: #selector(cancelPressed)
         )
         cancel.tintColor = UIKitChassis.signal
-        cancel.accessibilityLabel = "Cancel"
+        cancel.accessibilityLabel = String(localized: "Cancel")
         navigationItem.leftBarButtonItem = cancel
 
         let launch = UIBarButtonItem(
-            title: "Launch",
+            title: String(localized: "Launch"),
             style: .plain,
             target: self,
             action: #selector(launchPressed)
         )
         launch.tintColor = UIKitChassis.signal
-        launch.accessibilityLabel = "Launch"
+        launch.accessibilityLabel = String(localized: "Launch")
         navigationItem.rightBarButtonItem = launch
 
         configureContent()
@@ -216,9 +219,9 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
     }
 
     private func makePromptSection() -> UIView {
-        promptTextView.accessibilityLabel = "Prompt"
+        promptTextView.accessibilityLabel = String(localized: "Prompt")
         promptTextView.accessibilityHint =
-            "What should \(form.request.agent.displayName) do?"
+            String(localized: "What should \(form.request.agent.displayName) do?")
         promptTextView.accessibilityIdentifier = "agentPrompt.prompt"
         promptTextView.onTextChange = { [weak self] text in
             self?.form.prompt = text
@@ -244,17 +247,21 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
         height.isActive = true
         promptHeightConstraint = height
 
-        let field = makeField(label: "Prompt", input: promptWell)
+        let field = makeField(label: String(localized: "Prompt"), input: promptWell)
+        let agentName = form.request.agent.displayName
         return AgentPromptSectionView(
-            title: "First prompt",
-            detail: "Sent as \(form.request.agent.displayName)'s launch argument — it starts working on it immediately. Leave empty to open \(form.request.agent.displayName) without a prompt.",
+            title: String(localized: "First prompt"),
+            detail: String(localized: """
+                Sent as \(agentName)'s launch argument — it starts working on it \
+                immediately. Leave empty to open \(agentName) without a prompt.
+                """),
             contentView: field
         )
     }
 
     private func makeModelSection() -> UIView {
         modelField.text = form.model
-        modelField.placeholder = "Agent default"
+        modelField.placeholder = String(localized: "Agent default")
         modelField.font = UIKitChassis.monoFont(12)
         modelField.textColor = UIKitChassis.signal
         modelField.tintColor = UIKitChassis.signal
@@ -268,7 +275,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
         modelField.returnKeyType = .done
         modelField.delegate = self
         modelField.accessibilityLabel =
-            "Optional model for \(form.request.agent.displayName)"
+            String(localized: "Optional model for \(form.request.agent.displayName)")
         modelField.accessibilityIdentifier = "agentPrompt.model"
         modelField.addTarget(self, action: #selector(modelChanged), for: .editingChanged)
         modelField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -295,9 +302,9 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
             row.bottomAnchor.constraint(equalTo: well.bottomAnchor, constant: -9),
         ])
 
-        let field = makeField(label: "Model", input: well)
+        let field = makeField(label: String(localized: "Model"), input: well)
         let section = AgentPromptSectionView(
-            title: "Model",
+            title: String(localized: "Model"),
             detail: form.modelDetail,
             contentView: field
         )
@@ -314,7 +321,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
             let startsIn = UILabel()
             startsIn.font = UIKitChassis.uiFont(10, weight: .semibold)
             startsIn.textColor = UIKitChassis.signal2
-            startsIn.text = "Starts in"
+            startsIn.text = String(localized: "Starts in")
 
             let home = UILabel()
             home.font = UIKitChassis.monoFont(10, weight: .medium)
@@ -328,24 +335,24 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
             row.alignment = .center
             row.spacing = 12
             row.isAccessibilityElement = true
-            row.accessibilityLabel = "Starts in, Home"
+            row.accessibilityLabel = String(localized: "Starts in, Home")
             startsIn.isAccessibilityElement = false
             home.isAccessibilityElement = false
             content = row
         } else {
             let button = AgentPromptDirectoryButton()
             button.setDirectory(form.directoryLabel)
-            button.accessibilityLabel = "Starting directory"
+            button.accessibilityLabel = String(localized: "Starting directory")
             button.accessibilityValue = form.directoryLabel
             button.accessibilityIdentifier = "agentPrompt.directory"
             button.menu = makeDirectoryMenu()
             button.showsMenuAsPrimaryAction = true
             directoryButton = button
-            content = makeField(label: "Starts in", input: button)
+            content = makeField(label: String(localized: "Starts in"), input: button)
         }
 
         let section = AgentPromptSectionView(
-            title: "Directory",
+            title: String(localized: "Directory"),
             detail: form.directoryDetail,
             contentView: content
         )
@@ -382,7 +389,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
         button.backgroundColor = GlassPrototype.strataChassis
         button.hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
         button.accessibilityLabel =
-            "Configured models for \(form.request.agent.displayName)"
+            String(localized: "Configured models for \(form.request.agent.displayName)")
         button.accessibilityIdentifier = "agentPrompt.modelMenu"
         button.showsMenuAsPrimaryAction = true
 
@@ -404,7 +411,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
                 self?.selectModel(candidate)
             }
         }
-        let defaultAction = UIAction(title: "Agent default") { [weak self] _ in
+        let defaultAction = UIAction(title: String(localized: "Agent default")) { [weak self] _ in
             self?.selectModel("")
         }
         children.append(UIMenu(options: .displayInline, children: [defaultAction]))
@@ -418,7 +425,7 @@ final class AgentPromptSheetViewController: UIViewController, UITextFieldDelegat
                 self?.selectDirectory(directory)
             }
         }
-        let home = UIAction(title: "Home") { [weak self] _ in
+        let home = UIAction(title: String(localized: "Home")) { [weak self] _ in
             self?.selectDirectory("~")
         }
         children.append(UIMenu(options: .displayInline, children: [home]))

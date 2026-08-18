@@ -154,6 +154,11 @@ Simulator caveat: Xcode 27's DeviceHub always bridges the Mac keyboard as
 *hardware*, so the software keyboard never auto-shows (Device → Keyboard →
 Toggle Software Keyboard).
 
+**Language for a capture:** append `-AppleLanguages "(zh-Hant)"` (or `(ja)`)
+to `simctl launch … app.multiplexterm.multiplex`; UIKit honours the launch
+argument per process, so no `.GlobalPreferences` edit or reboot is needed
+(unlike the dictation chip's preferred-language seeding below).
+
 **DEBUG notification hooks** — `xcrun simctl spawn <UDID> notifyutil -p
 app.multiplexterm.multiplex.<name>`:
 

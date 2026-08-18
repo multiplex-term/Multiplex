@@ -155,7 +155,7 @@ final class TerminalTabStripView: UIView, UIDropInteractionDelegate {
         self.split = split
         self.close = close
         self.reorder = reorder
-        accessibilityLabel = "\(items.count) tabs"
+        accessibilityLabel = String(localized: "\(items.count) tabs")
 
         // The window re-renders this strip on every observed change of its
         // own (a ~5 s host probe is enough), and an Observation registration
@@ -202,14 +202,14 @@ final class TerminalTabStripView: UIView, UIDropInteractionDelegate {
         var actions: [UIMenuElement] = []
         if canSplit(id: id) {
             actions.append(UIAction(
-                title: "Move to New Window",
+                title: String(localized: "Move to New Window"),
                 image: UIImage(systemName: "macwindow.badge.plus")
             ) { [weak self] _ in
                 self?.splitTab(id: id)
             })
         }
         actions.append(UIAction(
-            title: "Close Tab",
+            title: String(localized: "Close Tab"),
             image: UIImage(systemName: "xmark"),
             attributes: .destructive
         ) { [weak self] _ in
@@ -685,7 +685,7 @@ final class TerminalTabCell: UIView,
         isAccessibilityElement = true
         accessibilityTraits = Self.traits(isActive: item.isActive)
         accessibilityLabel = Self.accessibilityLabel(for: item)
-        accessibilityHint = canReorder ? "Drag to reorder within this window" : nil
+        accessibilityHint = canReorder ? String(localized: "Drag to reorder within this window") : nil
         accessibilityCustomActions = makeAccessibilityActions()
 
         let drag = UIDragInteraction(delegate: self)
@@ -760,7 +760,7 @@ final class TerminalTabCell: UIView,
         if self.canReorder != canReorder {
             self.canReorder = canReorder
             tabDragInteraction?.isEnabled = canReorder
-            accessibilityHint = canReorder ? "Drag to reorder within this window" : nil
+            accessibilityHint = canReorder ? String(localized: "Drag to reorder within this window") : nil
         }
         let nextLabelText = Self.label(for: item)
         if labelText != nextLabelText {
@@ -791,7 +791,9 @@ final class TerminalTabCell: UIView,
     }
 
     private static func accessibilityLabel(for item: TerminalTabStrip.Item) -> String {
-        "\(item.title) tab\(item.isActive ? ", active" : "")"
+        item.isActive
+            ? String(localized: "\(item.title) tab, active")
+            : String(localized: "\(item.title) tab")
     }
 
     private static func ink(isActive: Bool) -> UIColor {
@@ -921,7 +923,7 @@ final class TerminalTabCell: UIView,
         var actions: [UIAccessibilityCustomAction] = []
         if canSplit {
             actions.append(UIAccessibilityCustomAction(
-                name: "Move to New Window",
+                name: String(localized: "Move to New Window"),
                 actionHandler: { [weak self] _ in
                     self?.split()
                     return self != nil
@@ -929,7 +931,7 @@ final class TerminalTabCell: UIView,
             ))
         }
         actions.append(UIAccessibilityCustomAction(
-            name: "Close Tab",
+            name: String(localized: "Close Tab"),
             actionHandler: { [weak self] _ in
                 self?.close()
                 return self != nil

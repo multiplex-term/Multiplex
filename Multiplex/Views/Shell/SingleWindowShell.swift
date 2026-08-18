@@ -1169,13 +1169,13 @@ final class SingleWindowShellEmptyTerminalView: UIView {
         backgroundColor = UIKitChassis.screen
 
         let title = UIKitChassisLabel(
-            "No terminal selected",
+            String(localized: "No terminal selected"),
             size: 13,
             color: UIKitChassis.signal3
         )
         title.accessibilityIdentifier = "singleWindowShell.emptyTitle"
         let detail = UILabel()
-        detail.text = "Choose a session from the deck to attach it here."
+        detail.text = String(localized: "Choose a session from the deck to attach it here.")
         detail.font = .preferredFont(forTextStyle: .footnote)
         detail.adjustsFontForContentSizeCategory = true
         detail.textColor = UIKitChassis.signal2

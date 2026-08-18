@@ -113,7 +113,7 @@ class FileAttachPickerPresenterViewController: UIViewController,
         var actions: [UIMenuElement] = []
         #if !os(visionOS)
         actions.append(UIAction(
-            title: "Camera…",
+            title: String(localized: "Camera…"),
             image: UIImage(systemName: "camera"),
             identifier: UIAction.Identifier("terminal.attach.camera"),
             attributes: enabled && FileAttachAvailability.cameraAvailable
@@ -123,7 +123,7 @@ class FileAttachPickerPresenterViewController: UIViewController,
         })
         #endif
         actions.append(UIAction(
-            title: "Photo Library…",
+            title: String(localized: "Photo Library…"),
             image: UIImage(systemName: "photo.on.rectangle"),
             identifier: UIAction.Identifier("terminal.attach.photos"),
             attributes: enabled ? [] : .disabled
@@ -131,7 +131,7 @@ class FileAttachPickerPresenterViewController: UIViewController,
             self?.request(.photoLibrary, target: target)
         })
         actions.append(UIAction(
-            title: "Files…",
+            title: String(localized: "Files…"),
             image: UIImage(systemName: "folder"),
             identifier: UIAction.Identifier("terminal.attach.files"),
             attributes: enabled ? [] : .disabled
@@ -463,7 +463,7 @@ final class FileAttachBadgeButton: UIButton {
         layer.borderWidth = 1
         showsMenuAsPrimaryAction = true
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
-        accessibilityLabel = "Send a file to this session"
+        accessibilityLabel = String(localized: "Send a file to this session")
 
         symbolView.image = UIImage(
             systemName: "paperclip",

@@ -41,7 +41,7 @@ enum SessionTargetChoices {
         let backends = (backendsRaw ?? []).filter { !$0.isEmpty }
         guard backends.count > 1 else { return [] }
         var choices = [
-            Choice(value: hostDefaultBackendValue, title: "Host Default"),
+            Choice(value: hostDefaultBackendValue, title: String(localized: "Host Default")),
         ]
         var seen = Set<String>()
         for backend in backends where seen.insert(backend).inserted {
@@ -54,7 +54,7 @@ enum SessionTargetChoices {
     /// query flash-dismisses the picker) and the published snapshot's
     /// session names follow, deduped in the snapshot's own order.
     static func sessionChoices(names: [String]) -> [Choice] {
-        var choices = [Choice(value: newSessionValue, title: "New Session")]
+        var choices = [Choice(value: newSessionValue, title: String(localized: "New Session"))]
         var seen = Set<String>()
         for raw in names {
             let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -74,10 +74,10 @@ enum SessionTargetChoices {
     static func placementChoices(backendRaw: String?) -> [Choice] {
         if backendRaw == herdrBackendRaw {
             return [
-                Choice(value: "tab", title: "New Tab (Focused Workspace)"),
-                Choice(value: "workspace", title: "New Workspace"),
+                Choice(value: "tab", title: String(localized: "New Tab (Focused Workspace)")),
+                Choice(value: "workspace", title: String(localized: "New Workspace")),
             ]
         }
-        return [Choice(value: "window", title: "New Window")]
+        return [Choice(value: "window", title: String(localized: "New Window"))]
     }
 }

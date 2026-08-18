@@ -122,11 +122,11 @@ final class ExternalActionUIKitCoordinator: NSObject,
         acknowledged: @escaping () -> Void
     ) -> UIAlertController {
         let alert = UIAlertController(
-            title: "Can't Open \(failure.hostName)",
+            title: String(localized: "Can't Open \(failure.hostName)"),
             message: failure.message,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "OK", style: .cancel) { _ in
+        alert.addAction(UIAlertAction(title: String(localized: "OK"), style: .cancel) { _ in
             acknowledged()
         })
         return alert
@@ -143,10 +143,10 @@ final class ExternalActionUIKitCoordinator: NSObject,
             message: confirmation.message,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
+        alert.addAction(UIAlertAction(title: String(localized: "Cancel"), style: .cancel) { _ in
             answered(false)
         })
-        alert.addAction(UIAlertAction(title: "Run", style: .default) { _ in
+        alert.addAction(UIAlertAction(title: String(localized: "Run"), style: .default) { _ in
             answered(true)
         })
         return alert

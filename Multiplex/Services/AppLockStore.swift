@@ -133,7 +133,7 @@ final class AppLockStore {
         guard enabled != isEnabled else { return }
         if enabled {
             guard await authenticate(
-                "Confirm \(Self.methodName) to require it when Multiplex opens"
+                String(localized: "Confirm \(Self.methodName) to require it when Multiplex opens")
             ) else { return }
         }
         isEnabled = enabled
@@ -145,7 +145,7 @@ final class AppLockStore {
         guard !isAuthenticating else { return }
         isAuthenticating = true
         defer { isAuthenticating = false }
-        if await authenticate("Unlock Multiplex") {
+        if await authenticate(String(localized: "Unlock Multiplex")) {
             isLocked = false
         }
     }
@@ -179,12 +179,12 @@ final class AppLockStore {
         let context = LAContext()
         guard context.canEvaluatePolicy(
             .deviceOwnerAuthenticationWithBiometrics, error: nil
-        ) else { return "device passcode" }
+        ) else { return String(localized: "device passcode") }
         switch context.biometryType {
         case .faceID: return "Face ID"
         case .touchID: return "Touch ID"
         case .opticID: return "Optic ID"
-        default: return "device passcode"
+        default: return String(localized: "device passcode")
         }
     }
 

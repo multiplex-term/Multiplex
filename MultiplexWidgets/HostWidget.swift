@@ -106,7 +106,7 @@ struct HostWidgetView: View {
             HStack {
                 SeenStamp(date: host.probedAt)
                 Spacer(minLength: 4)
-                Text("\(host.sessions.count) SESS")
+                Text(verbatim: "\(host.sessions.count) SESS")
                     .font(.widgetMono(7.5))
                     .foregroundStyle(palette.signal3)
             }
@@ -224,7 +224,7 @@ struct HostWidgetView: View {
 
                 HStack(spacing: 4) {
                     SeenStamp(date: host.probedAt)
-                    Text("· \(host.sessions.count) SESS")
+                    Text(verbatim: "· \(host.sessions.count) SESS")
                         .font(.widgetMono(7.5))
                         .foregroundStyle(palette.signal3)
                 }
@@ -246,9 +246,9 @@ struct HostWidgetView: View {
         if let session, !session.miniatureLines.isEmpty {
             MiniatureScreen(lines: session.miniatureLines)
         } else if session != nil {
-            HatchScreen(caption: "No recent frame")
+            HatchScreen(caption: String(localized: "No recent frame"))
         } else {
-            HatchScreen(caption: "No sessions")
+            HatchScreen(caption: String(localized: "No sessions"))
         }
     }
 }
