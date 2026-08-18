@@ -80,8 +80,8 @@ enum TerminalGuide {
             title: "LONG PRESS",
             tag: nil,
             body: [
-                .text("The same block, right where you pressed. On a link or file path, "
-                    + "its confirm sheet comes first."),
+                .text("The same block, right where you pressed — and it reaches links "
+                    + "and paths at any mouse mode, when a tap belongs to the remote."),
             ]
         ),
         TerminalGuideEntry(
@@ -122,10 +122,11 @@ enum TerminalGuide {
             id: "link",
             figure: 6,
             bank: .linksPaths,
-            title: "HOLD A LINK",
+            title: "PRESS A LINK",
             tag: nil,
             body: [
-                .text("Nothing opens by itself. The sheet shows where it really points — "),
+                .text("Nothing opens by itself. A press raises a sheet showing where it "
+                    + "really points — "),
                 .control("OPEN"),
                 .text(", or dock the page beside this tab as a "),
                 .control("⌗ VIEWPORT"),
@@ -136,9 +137,10 @@ enum TerminalGuide {
             id: "path",
             figure: 7,
             bank: .linksPaths,
-            title: "HOLD A PATH",
+            title: "PRESS A PATH",
             tag: nil,
             body: [
+                .text("Same press, its own sheet: "),
                 .control("▤ VIEW"),
                 .text(" opens it in the File Viewer. A "),
                 .key(":120"),

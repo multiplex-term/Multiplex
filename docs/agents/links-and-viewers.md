@@ -4,9 +4,15 @@ Load-bearing decisions split from AGENTS.md — read before touching terminal
 link/path resolution, the ⌗ viewport, or the ▤ file viewer.
 
 - **A terminal link is confirmed, never followed** (`TerminalLink`, pure +
-  tested; `TerminalLinkSheet`). Long press is the activation route on
-  every platform — it is local at any mouse mode, while a tap belongs to
-  the remote under mouse tracking (tap activates only without it). Rules:
+  tested; `TerminalLinkSheet`). **A press is the activation route** — a
+  tap over a target the app claims confirms it at any mouse mode, and the
+  remote gets the click only on cells the app declines (2026-08-18; the
+  earlier long-press-only rule kept every tap for the remote under mouse
+  tracking, which made the feature unfindable under tmux `mouse on`, this
+  app's default). Accepted trade: over a path or URL, tmux stops switching
+  panes and vim stops placing the cursor — the same trade the visionOS
+  gaze regions already make. Long press stays the second route, local at
+  any mouse mode. Rules:
   the scheme allowlist handed to the system is `http`/`https`/`mailto`
   and nothing else — notably NOT `multiplex:`, which
   `ExternalActionRouter` would accept, so pane output can't launch an
@@ -83,7 +89,7 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   .fileViewer`; pure models in `Models/FileViewer/`; records in
   `local-plan/file-viewer-bakeoff/` + `local-plan/file-viewer.md`). Two
   summons: + TAB ▸ File Viewer roots at the pane cwd ($HOME when no pane
-  answers), and a long-pressed path (`TerminalPathTarget`; `:12[:col]` and
+  answers), and a pressed path (`TerminalPathTarget`; `:12[:col]` and
   tool-call-style `:12-18[:col]` suffixes ride as line targets) raises
   `TerminalFilePathSheet` → ▤
   VIEW. `file:///absolute/path` and `file://localhost/absolute/path` take

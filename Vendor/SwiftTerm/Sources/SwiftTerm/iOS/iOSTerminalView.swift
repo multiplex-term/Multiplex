@@ -1216,17 +1216,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         if isFirstResponder {
             let tapHit = calculateTapHit(gesture: gestureRecognizer).grid
-            // Multiplex patch: a tap belongs to the remote whenever the client
-            // asked for mouse tracking. Upstream resolves links first, which
-            // means any URL-shaped text under the finger silently swallows the
-            // click — tmux `mouse on` (this app's default) stops switching
-            // panes there, and vim stops placing the cursor. Long press is the
-            // link route in that state; see `longPress`.
-            let remoteWantsTap = allowMouseReporting
-                && !shiftBypassesMouseReporting(for: gestureRecognizer)
-                && terminal.mouseMode.sendButtonPress()
-            if !remoteWantsTap,
-               let result = linkForClick(at: tapHit, hasCommandModifier: commandActive),
+            // Multiplex patch: a tap over a target the app claims outranks the
+            // remote click at every mouse mode — reaching a path or a URL by
+            // press is the common intent, and long press is a gesture the
+            // reader has to know about. Only cells the app declines
+            // (`activateLink` returns false) fall through to mouse reporting,
+            // so tmux keeps switching panes and vim keeps placing the cursor
+            // everywhere else. This is the same trade the visionOS gaze
+            // regions already make: a lit link is a hit region.
+            if let result = linkForClick(at: tapHit, hasCommandModifier: commandActive),
                activateLink(result, at: tapHit) {
                 return
             }

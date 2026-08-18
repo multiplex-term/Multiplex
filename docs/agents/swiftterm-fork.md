@@ -122,9 +122,10 @@ input encoding, or terminal rendering.
       `linkActivationIgnoresHighlight` (upstream needed pointer hover),
       `linkActivationHandler` (the app can decline a match; carries the
       pressed buffer `Position` so the app can name the pane under the
-      finger), one `activateLink` for both gestures — `singleTap` skips
-      links while the remote wants the tap; `longPress` resolves one
-      before its menu.
+      finger), one `activateLink` for both gestures — `singleTap`
+      resolves one BEFORE mouse reporting at any mouse mode (a claimed
+      target outranks the remote click; declined cells fall through and
+      still report); `longPress` resolves one before its menu.
     - Implicit link detection is split-pane-aware (`paneSegment` /
       `buildPaneSegmentLineMap`): a row carrying vertical pane-border
       glyphs (│ family; ASCII `|` deliberately excluded — it's shell
