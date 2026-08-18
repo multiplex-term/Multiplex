@@ -14,7 +14,13 @@ changelog looked right in every editor and App Store Connect refused the
 character. The caps live in that one file, required by `fastlane/Fastfile`
 too, so the lane that fails an archive and the job that fails a pull request
 can never disagree. Add a glyph to the allowlist only after an upload has
-actually accepted it.
+actually accepted it. Localized listings (`fastlane/metadata/zh-Hant`, `ja`
+— every en-US file mirrored, same caps) are allowed their whole scripts by
+Unicode block (`MetadataLimits::SCRIPT_RANGES`: ideographs, kana, bopomofo,
+CJK punctuation, full-width forms) instead of glyph-by-glyph; en-US and
+the TestFlight changelog stay glyph-strict, and the changelog stays
+English. When en-US copy changes, change the two mirrors in the same PR
+(glossary in `i18n.md`; run `zhtw-mcp lint` over the zh-Hant files).
 
 - **App icon is a hand-authored Icon Composer package** (`AppIcon.icon`;
   spec + bake-off in `DESIGN.md`); icon.json lists groups
