@@ -99,6 +99,12 @@ Citadel 0.12.0 is pinned because 0.12.1 changed its `swift-nio-ssh` source to an
 
 - PATH fixups assume a POSIX-like login shell; csh/fish may need tmux on the default PATH.
 
+## Credits
+
+- Built largely with GPT 5.6 Sol and Claude Fable / Opus.
+- Design guidance: [Leonxlnx/taste-skill](https://github.com/Leonxlnx/taste-skill) and [emilkowalski/skills](https://github.com/emilkowalski/skills).
+- [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) and [Citadel](https://github.com/orlandos-nl/Citadel): the terminal emulator and SSH stack this app stands on (see [Third-party code](#third-party-code)).
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
