@@ -7635,7 +7635,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Metal 繪製器"
+            "value" : "Metal renderer"
           }
         }
       }
@@ -13385,7 +13385,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "終端機繪製器"
+            "value" : "終端機 renderer"
           }
         }
       }
