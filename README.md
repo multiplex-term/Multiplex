@@ -22,11 +22,11 @@ Some features require Multiplex Pro; see [`docs/store-metadata.md`](docs/store-m
 
 | Vision Pro | iPad |
 | :-: | :-: |
-| <video src="https://github.com/user-attachments/assets/90e6e0f2-cdab-4e8f-993a-e6fc5359d7c6" alt="Multiplex AVP demo" width="200" /> | <video src="https://github.com/user-attachments/assets/d25aa980-f3d3-4910-856b-836c3eec20cc" alt="Multiplex iPad demo" width="200" /> | 
+| <video src="https://github.com/user-attachments/assets/90e6e0f2-cdab-4e8f-993a-e6fc5359d7c6" alt="Multiplex AVP demo" width="200" /> | <video src="https://github.com/user-attachments/assets/b6cd31c8-17d8-4fd2-b742-ffcaa30451b4" alt="Multiplex iPad demo" width="200" /> | 
 
-> Vision Pro: Run Claude Code in herdr, open the File Viewer and inline browser (using [serve-sim](https://github.com/EvanBacon/serve-sim)), then send a “create PR” message by pressing an Agent Bar key.
+> Vision Pro: Run Claude Code in herdr, open the File Viewer and inline browser (using [serve-sim](https://github.com/EvanBacon/serve-sim)), then send a "create PR" message by pressing an Agent Bar key.
 
-> iPad: Run Pi in herdr, open the File Viewer and inline browser, then send a “create PR” message by pressing an Agent Bar key.
+> iPad: Run Claude Code in tmux, use tmux shortcuts to split and resize panes, see diff in the File Viewer, then send a "commit in current branch" message by pressing an Agent Bar key.
 
 ## Screenshots
 
@@ -79,6 +79,12 @@ The local harness runs a user-mode sshd on `127.0.0.1:2222` without touching `~/
 
 Point `MULTIPLEX_SEED_HOST` at `Tools/dev-sshd/state/seed.json` to seed a DEBUG build. See [`docs/agents/e2e-headless.md`](docs/agents/e2e-headless.md) for the full headless workflow.
 
+## mpx CLI
+
+[`mpx`](https://github.com/multiplex-term/mpx-cli) is the companion CLI for binding a machine. Run `mpx bind` on the remote host and it appears on the deck with the app's SSH key enrolled and the host key fingerprints pinned from the first connection — nothing typed. The offer reaches the app by QR, local-network announcement with a PIN, or `--copy` to the clipboard; the default handshake never moves a private key.
+
+Install and usage: [multiplex-term/mpx-cli](https://github.com/multiplex-term/mpx-cli).
+
 ## Third-party code
 
 | Library | Version | Role |
@@ -92,6 +98,12 @@ Citadel 0.12.0 is pinned because 0.12.1 changed its `swift-nio-ssh` source to an
 ## Known limits
 
 - PATH fixups assume a POSIX-like login shell; csh/fish may need tmux on the default PATH.
+
+## Credits
+
+- Built largely with GPT 5.6 Sol and Claude Fable / Opus.
+- Design guidance: [Leonxlnx/taste-skill](https://github.com/Leonxlnx/taste-skill) and [emilkowalski/skills](https://github.com/emilkowalski/skills).
+- [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) and [Citadel](https://github.com/orlandos-nl/Citadel): the terminal emulator and SSH stack this app stands on (see [Third-party code](#third-party-code)).
 
 ## License
 

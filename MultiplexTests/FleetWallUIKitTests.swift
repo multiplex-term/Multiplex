@@ -440,6 +440,7 @@ final class FleetWallUIKitTests: XCTestCase {
             attach: { attaches += 1 },
             attachNewWindow: {},
             newHerdrTab: {},
+            copyHandoffCommand: {},
             delete: {},
             droppedSession: { _ in }
         ))
@@ -452,7 +453,10 @@ final class FleetWallUIKitTests: XCTestCase {
         XCTAssertTrue(tile.accessibilityActivate())
         XCTAssertEqual(attaches, 1)
         let menu = tile.menuProvider?()
-        XCTAssertEqual(menuTitles(menu), ["Attach in New Window", "Delete Session…"])
+        XCTAssertEqual(
+            menuTitles(menu),
+            ["Attach in New Window", "Copy Command for Handoff", "Delete Session…"]
+        )
 
         let copy = visibleText(in: tile)
         XCTAssertTrue(copy.contains("WAITING FOR APPROVAL…"))
@@ -478,6 +482,7 @@ final class FleetWallUIKitTests: XCTestCase {
             attach: {},
             attachNewWindow: {},
             newHerdrTab: {},
+            copyHandoffCommand: {},
             delete: {},
             droppedSession: { _ in }
         ))
@@ -651,6 +656,7 @@ final class FleetWallUIKitTests: XCTestCase {
                 attach: {},
                 attachNewWindow: {},
                 newHerdrTab: {},
+                copyHandoffCommand: {},
                 delete: {},
                 droppedSession: { _ in }
             ))
@@ -662,7 +668,8 @@ final class FleetWallUIKitTests: XCTestCase {
         let open = tile(hasOpenTab: true)
         XCTAssertEqual(
             menuTitles(open.menuProvider?()),
-            ["Attach in New Window", "New Tab in Workspace", "Delete Session…"],
+            ["Attach in New Window", "New Tab in Workspace",
+             "Copy Command for Handoff", "Delete Session…"],
             "A herdr tile carries the terminal window's + TAB row"
         )
         XCTAssertTrue(shownText(in: open).contains("LIVE"))
@@ -709,6 +716,7 @@ final class FleetWallUIKitTests: XCTestCase {
                 attach: {},
                 attachNewWindow: {},
                 newHerdrTab: {},
+                copyHandoffCommand: {},
                 delete: {},
                 droppedSession: droppedSession
             ))
@@ -795,6 +803,7 @@ final class FleetWallUIKitTests: XCTestCase {
             attach: { attached += 1 },
             attachNewWindow: {},
             newHerdrTab: {},
+            copyHandoffCommand: {},
             delete: {},
             droppedSession: { _ in }
         ))

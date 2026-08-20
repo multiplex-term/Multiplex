@@ -29,15 +29,15 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
         XCTAssertNotNil(chip(named: "whatsNew.done", in: controller.view))
     }
 
-    /// Vision Pro is told about the floating bars and never about the key
-    /// rail's window edge, which it does not have.
-    func testTheVisionCardSwapsInTheFloatingBarsAndLeavesOutTheKeyRail() {
+    /// Vision Pro is told about the File Viewer's PDFs and sound files and
+    /// never about keys tapping back, which it has no haptics for.
+    func testTheVisionCardSwapsInTheFileViewerAndLeavesOutTheHaptics() {
         let controller = WhatsNewViewController(platform: .vision)
         render(controller, width: 620, height: 700)
 
         let rendered = renderedText(in: controller.view).joined(separator: "\n")
-        XCTAssertTrue(rendered.contains("BARS FLOAT BELOW THE WINDOW"))
-        XCTAssertFalse(rendered.contains("THE KEY RAIL MEETS THE WINDOW'S EDGE"))
+        XCTAssertTrue(rendered.contains("PDFS AND SOUND FILES IN THE FILE VIEWER"))
+        XCTAssertFalse(rendered.contains("KEYS TAP BACK"))
     }
 
     func testBothChipsReportThroughTheirOwnCallback() throws {
@@ -83,8 +83,8 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
 
     // MARK: The full record
 
-    /// Both releases' records, each under its own header — a reader updating
-    /// from 1.2 straight to 1.3.1 is owed 1.3's story too.
+    /// Every release's record, each under its own header — a reader updating
+    /// from 1.2 straight to 1.4 is owed 1.3's and 1.3.1's stories too.
     func testTheLogCarriesEveryReleasesChangesForItsPlatform() {
         let controller = ReleaseLogViewController(platform: .pad)
         render(controller, width: 720, height: 4_800)
@@ -105,10 +105,8 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
                 XCTAssertTrue(rendered.contains(bank.bank.title))
             }
         }
-        XCTAssertFalse(
-            rendered.contains(ReleaseNoteBank.appearance.title),
-            "an empty bank must not head a section"
-        )
+        // 1.4's live theme editing heads APPEARANCE on iPad; the earlier
+        // records' GLASS-only bank must still not, so GLASS never renders.
         XCTAssertFalse(rendered.contains("GLASS"))
     }
 

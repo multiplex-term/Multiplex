@@ -507,7 +507,11 @@ routing, tab moves, keyboard avoidance, or secret fields.
   (shipped-and-caught 2026-08-17; proof is the `kbd` log line `talkback
   field focused key=true terminalResponder=false`). A per-press
   `focusRequest` counter is what focuses the field, so a tab switch back to
-  an open box never steals the keyboard.
+  an open box never steals the keyboard. ⚠ Closing the box hands the
+  keyboard to the pane: `renderTalkback` claims the terminal BEFORE
+  `prepareForRemoval`, and `claim` resigns the borrower only AFTER the
+  terminal became first responder — an explicit resign first dismisses and
+  re-presents the keyboard (2026-08-18, `kbd` log: WillHide → WillShow).
   **Bytes**: SEND = ONE paste (landed attachment paths via
   `DropText.typedPaths`, then the sanitized body — `ComposedText`, bracketed
   only when the pane has mode 2004 on) through `TerminalView.send`, then a

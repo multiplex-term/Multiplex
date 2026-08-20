@@ -138,7 +138,7 @@ struct ReleaseNotesRelease: Equatable {
 enum ReleaseNotes {
     /// Newest first. The launch card speaks only for the first; the log
     /// carries them all.
-    static let releases: [ReleaseNotesRelease] = [v131, v13]
+    static let releases: [ReleaseNotesRelease] = [v14, v131, v13]
 
     /// The release the launch card announces.
     static var current: ReleaseNotesRelease { releases[0] }
@@ -174,6 +174,203 @@ enum ReleaseNotes {
     static func alsoLine(for platform: ReleaseNotePlatform) -> String? {
         current.alsoLine(for: platform)
     }
+
+    // MARK: - 1.4
+
+    private static let v14 = ReleaseNotesRelease(
+        version: "1.4",
+        promise: "Hold CTRL for the chords your keyboard cannot press, write "
+            + "to your agent in a message box, and watch every host's latency "
+            + "from the deck.",
+        entries: [
+            // MARK: Terminal
+            ReleaseNoteEntry(
+                id: "keycommands",
+                bank: .terminal,
+                title: "Hold CTRL for Key Commands",
+                body: "Hold CTRL on the key rail or the key cluster for saved "
+                    + "chords the software keyboard cannot press — Shift+Enter, "
+                    + "a double Ctrl-C, Option+Backspace to delete a word. "
+                    + "CUSTOM SETUP adds any Ctrl/Shift/Option chord or a "
+                    + "one-line text macro, repeated up to five times, closing "
+                    + "the panel or not, synced to your other devices. Free "
+                    + "keeps five; Pro raises the set to twelve. The Guide "
+                    + "gains a HOLD CTRL card.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "messagebox",
+                bank: .terminal,
+                title: "A message box for your agent",
+                body: "The speech-bubble key on the key rail opens a chat-style "
+                    + "field under the terminal: write with autocorrect and "
+                    + "your keyboard's dictation, attach photos or files "
+                    + "(uploaded to the pane's folder), then send it all as one "
+                    + "message. The rail keeps driving the pane while you "
+                    + "write; the Guide gains a MESSAGE BOX card.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "tmuxpanel",
+                bank: .terminal,
+                title: "The TMUX panel stays open — and resizes panes",
+                body: "The shortcut panel holds while you switch or move "
+                    + "between windows, workspaces and panes, with ACTIVE "
+                    + "following where you land. An arrow row resizes panes — "
+                    + "tap to nudge, hold to repeat. Every command runs over "
+                    + "the control connection, so no more stray letters from a "
+                    + "dropped prefix; Rename Window gets its own name field, "
+                    + "and the cycling rows are gone — those are directly "
+                    + "selectable.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "a TMUX panel that stays open and resizes panes"
+            ),
+            ReleaseNoteEntry(
+                id: "dictation",
+                bank: .terminal,
+                title: "Dictate in your own languages",
+                body: "Tap the globe in the LISTENING bar to switch among your "
+                    + "preferred languages.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "dictation in your own languages"
+            ),
+            ReleaseNoteEntry(
+                id: "taplinks",
+                bank: .terminal,
+                title: "Tap a link or path",
+                body: "Its sheet comes up on the first press, tmux mouse on or "
+                    + "not, and a file name at the right edge no longer "
+                    + "swallows the next row's word.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "links and paths that open on tap"
+            ),
+            ReleaseNoteEntry(
+                id: "fvmedia",
+                bank: .terminal,
+                title: "PDFs and sound files in the File Viewer",
+                body: "PDFs open as continuous pages with pinch to zoom and a "
+                    + "page readout; locked ones offer UNLOCK. MP3, M4A, WAV, "
+                    + "FLAC, AIFF and CAF play with PLAY/PAUSE, a scrubber, "
+                    + "15 s skips and a remembered volume — and keep playing "
+                    + "while you type elsewhere.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "grok",
+                bank: .terminal,
+                title: "Grok Build joins the agent roster",
+                body: "Detected in panes, with its own chip strip, NEW SESSION "
+                    + "launch with model and first prompt, and Pro alerts when "
+                    + "it needs permission or an answer.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "Grok Build on the agent roster"
+            ),
+            ReleaseNoteEntry(
+                id: "haptics",
+                bank: .terminal,
+                title: "Keys tap back",
+                body: "The key rail, panel buttons and agent chips give a light "
+                    + "haptic on press.",
+                tag: "iPhone · iPad",
+                platforms: ReleaseNotePlatform.iOS,
+                mention: nil
+            ),
+
+            // MARK: Appearance
+            ReleaseNoteEntry(
+                id: "themelive",
+                bank: .appearance,
+                title: "Theme edits show live",
+                body: "Open terminal windows follow the editor as you change "
+                    + "colors — Save keeps them, Back restores the old theme.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "live theme editing"
+            ),
+
+            // MARK: Elsewhere
+            ReleaseNoteEntry(
+                id: "stats",
+                bank: .elsewhere,
+                title: "Connection Stats",
+                body: "A live latency chip on every host rail, and a Pro board "
+                    + "with per-host drill-in: round-trips, typing echo, mosh "
+                    + "loss and roams, reconnects, and data volume. Off switch "
+                    + "in Settings.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "widgetsession",
+                bank: .elsewhere,
+                title: "Widgets show the session you last opened",
+                body: "On each host, herdr included — or the one you pick in "
+                    + "the widget's Session setting.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "widgets that follow your last session"
+            ),
+        ],
+        highlights: [
+            ReleaseNoteHighlight(
+                id: "keycommands",
+                covers: ["keycommands"],
+                title: "Hold CTRL for Key Commands",
+                body: "Saved chords the software keyboard cannot press — "
+                    + "Shift+Enter, a double Ctrl-C — plus your own, synced "
+                    + "across devices.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "messagebox",
+                covers: ["messagebox"],
+                title: "A message box for your agent",
+                body: "Write with autocorrect and dictation, attach photos or "
+                    + "files, and send it all as one message.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "stats",
+                covers: ["stats"],
+                title: "Connection Stats",
+                body: "A live latency chip on every host rail; Pro drills into "
+                    + "round-trips, echo, mosh loss and reconnects.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "haptics",
+                covers: ["haptics"],
+                title: "Keys tap back",
+                body: "The key rail, panel buttons and agent chips give a light "
+                    + "haptic on press.",
+                tag: "iPhone · iPad",
+                platforms: ReleaseNotePlatform.iOS
+            ),
+            ReleaseNoteHighlight(
+                id: "fvmedia",
+                covers: ["fvmedia"],
+                title: "PDFs and sound files in the File Viewer",
+                body: "Continuous pages with pinch to zoom; sound files play "
+                    + "on while you type elsewhere.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+        ]
+    )
 
     // MARK: - 1.3.1
 

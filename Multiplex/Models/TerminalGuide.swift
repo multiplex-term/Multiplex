@@ -83,8 +83,8 @@ enum TerminalGuide {
             tag: nil,
             body: [
                 .text(String(localized: """
-                    The same block, right where you pressed. On a link or file path, its \
-                    confirm sheet comes first.
+                    The same block, right where you pressed — and it reaches links and \
+                    paths at any mouse mode, when a tap belongs to the remote.
                     """)),
             ]
         ),
@@ -133,11 +133,12 @@ enum TerminalGuide {
             id: "link",
             figure: 6,
             bank: .linksPaths,
-            title: String(localized: "HOLD A LINK"),
+            title: String(localized: "PRESS A LINK"),
             tag: nil,
             body: [
                 .text(String(localized: """
-                    Nothing opens by itself. The sheet shows where it really points —\u{20}
+                    Nothing opens by itself. A press raises a sheet showing where it \
+                    really points —\u{20}
                     """)),
                 .control("OPEN"),
                 .text(String(localized: ", or dock the page beside this tab as a ")),
@@ -151,9 +152,10 @@ enum TerminalGuide {
             id: "path",
             figure: 7,
             bank: .linksPaths,
-            title: String(localized: "HOLD A PATH"),
+            title: String(localized: "PRESS A PATH"),
             tag: nil,
             body: [
+                .text(String(localized: "Same press, its own sheet: ")),
                 .control("▤ VIEW"),
                 .text(String(localized: " opens it in the File Viewer. A ")),
                 .key(":120"),

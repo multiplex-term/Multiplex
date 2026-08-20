@@ -316,11 +316,8 @@ def ensure_external_group(name)
       public_link_enabled: false,
       public_link_limit_enabled: false,
     ).to_models.first
-  elsif group.public_link_enabled
-    UI.important("TestFlight group '#{name}' had a public link — disabling it (invitation only)")
-    group = group.update(attributes: { public_link_enabled: false })
   else
-    UI.message("TestFlight group '#{name}' is present and invitation only")
+    UI.message("TestFlight group '#{name}' is present")
   end
 
   group

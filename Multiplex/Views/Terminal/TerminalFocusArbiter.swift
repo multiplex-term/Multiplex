@@ -64,11 +64,11 @@ enum TerminalFocusArbiter {
     static func claim(_ view: TerminalView) {
         guard !inputSuppressed else { return }
         installObserversIfNeeded()
-        // A borrowed keyboard comes back before any terminal takes it —
-        // even one in another window, which UIKit would leave alone.
-        if let borrower, borrower.isFirstResponder {
-            _ = borrower.resignFirstResponder()
-        }
+        // The borrower resigns only AFTER the terminal became first
+        // responder: an explicit resign first dismisses and re-presents the
+        // keyboard; letting `becomeFirstResponder` displace the field keeps
+        // it up. A field in another window still needs the explicit resign.
+        let lentField = borrower
         borrower = nil
         // Stage Manager can transiently clear `isKeyWindow` while the user
         // moves that very window. The terminal still owns the live input
@@ -82,6 +82,9 @@ enum TerminalFocusArbiter {
                 keyboardLogger.debug("kbd-focus-preserved transientNonKey=true")
             }
             #endif
+            if let lentField, lentField.isFirstResponder {
+                _ = lentField.resignFirstResponder()
+            }
             return
         }
         let switching = current !== view
@@ -110,6 +113,9 @@ enum TerminalFocusArbiter {
         }
         if !view.isFirstResponder {
             _ = view.becomeFirstResponder()
+        }
+        if let lentField, lentField.isFirstResponder {
+            _ = lentField.resignFirstResponder()
         }
     }
 

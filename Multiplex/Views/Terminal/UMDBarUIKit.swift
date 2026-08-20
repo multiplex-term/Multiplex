@@ -80,6 +80,7 @@ private struct UMDBarPresentationKey: Equatable {
     var mergeSources: [UMDBarMergeSourceKey]
     var hasCloseSession: Bool
     var hasKeychainTip: Bool
+    var hasConnectionStats: Bool
     var extraNewTabTarget: TerminalRoute.NewTabTarget?
     var shortcutBackend: Host.SessionBackend?
     var style: UMDBarStyle
@@ -99,6 +100,7 @@ private struct UMDBarPresentationKey: Equatable {
         }
         hasCloseSession = configuration.closeSession != nil
         hasKeychainTip = configuration.keychainTip != nil
+        hasConnectionStats = configuration.showConnectionStats != nil
         extraNewTabTarget = configuration.extraNewTabTarget
         shortcutBackend = configuration.shortcutBackend
         style = configuration.style

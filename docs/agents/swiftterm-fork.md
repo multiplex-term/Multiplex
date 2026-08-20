@@ -122,9 +122,10 @@ input encoding, or terminal rendering.
       `linkActivationIgnoresHighlight` (upstream needed pointer hover),
       `linkActivationHandler` (the app can decline a match; carries the
       pressed buffer `Position` so the app can name the pane under the
-      finger), one `activateLink` for both gestures — `singleTap` skips
-      links while the remote wants the tap; `longPress` resolves one
-      before its menu.
+      finger), one `activateLink` for both gestures — `singleTap`
+      resolves one BEFORE mouse reporting at any mouse mode (a claimed
+      target outranks the remote click; declined cells fall through and
+      still report); `longPress` resolves one before its menu.
     - Implicit link detection is split-pane-aware (`paneSegment` /
       `buildPaneSegmentLineMap`): a row carrying vertical pane-border
       glyphs (│ family; ASCII `|` deliberately excluded — it's shell
@@ -134,6 +135,16 @@ input encoding, or terminal rendering.
       across the joined rows, upper segment reaching the segment's right
       edge, seam forming a link. Border-free rows keep the whole-row path
       untouched. Locked by `TerminalSplitPaneLinkTests`.
+    - Both row-join heuristics (whole-row and pane-segment; never the
+      `isWrapped` chain) decline a seam that butts a FINISHED file name
+      against a plain word (`Terminal.seamGluesFinishedFileToWord`):
+      upper side ends in `.` + 2–8 word chars, lower side opens with ≥ 3
+      word chars before any `/` or `.`. Listing rows (`git status`, build
+      logs) reach the right edge routinely, and the join used to read
+      `Sources/foo/test.ts`⏎`modified:` as one path `test.tsmodified`.
+      Accepted trade: a wrap landing inside a long extension (`.swi`⏎`ft`)
+      splits into two presses. Locked in
+      `GhosttyImplicitLinkDetectionTests`.
     - visionOS coalesces pending redraws to one 90 Hz frame (~11.1 ms) in
       `queuePendingDisplay`; the upstream 16.67 ms delay assumed a 60 Hz
       display and beat against Vision Pro's 90 Hz compositor during

@@ -290,6 +290,38 @@ enum HerdrSessionLaunch {
     }
 }
 
+/// The one-line command the session tile's "Copy Command for Handoff" puts on
+/// the clipboard — the LOCAL attach for someone sitting at the host machine
+/// itself. A paste target is an interactive desktop shell, so no ssh wrapper,
+/// no PATH scaffolding, no `-u`: the user's own shell already has all three.
+enum SessionHandoff {
+    static func command(session: TmuxSession) -> String {
+        switch session.backend {
+        case .tmux:
+            return "tmux attach-session -t \(plainWordOrQuoted(session.name))"
+        case .herdr:
+            let name = session.name.isEmpty
+                ? HerdrSessionLaunch.primarySessionName : session.name
+            return "herdr session attach \(plainWordOrQuoted(name))"
+        }
+    }
+
+    /// A simple name stays bare — quoting it would only add noise to the
+    /// common paste — but anything a shell could reinterpret gets single
+    /// quotes.
+    private static func plainWordOrQuoted(_ word: String) -> String {
+        let plain = word.unicodeScalars.allSatisfy { scalar in
+            switch scalar {
+            case "a"..."z", "A"..."Z", "0"..."9", ".", "-", "_", "@", ":":
+                true
+            default:
+                false
+            }
+        }
+        return plain && !word.isEmpty ? word : word.shellQuoted
+    }
+}
+
 /// Starts a tmux server outside an SSH login scope when the remote supports
 /// systemd user scopes. Linux hosts with `KillUserProcesses=yes` reap every
 /// process left in `session-*.scope` when the SSH client disconnects; a tmux
