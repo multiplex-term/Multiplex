@@ -428,6 +428,50 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertEqual(events, ["fresh"])
     }
 
+    func testTogglingConnectionStatsRebuildsOverflowMenu() throws {
+        let state = UMDBarObservedState(
+            status: .live,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: false,
+            hardwareKeyboardConnected: false
+        )
+        let controller = UMDBarViewController(configuration: configuration(
+            showConnectionStats: {},
+            style: .shell,
+            availableWidth: 375
+        ))
+        controller.loadViewIfNeeded()
+        controller.applyObservedState(state)
+
+        func statsRow() throws -> UIAction? {
+            let overflow = try XCTUnwrap(
+                control("umd.overflow", in: controller.view) as? UIButton
+            )
+            return actions(in: try XCTUnwrap(overflow.menu))
+                .first { $0.identifier == UIAction.Identifier("umd.connectionStats") }
+        }
+        XCTAssertNotNil(try statsRow())
+
+        // Turning the stats setting off must drop the row from an already
+        // built menu — the presence of the callback is part of the key.
+        controller.update(configuration: configuration(
+            showConnectionStats: nil,
+            style: .shell,
+            availableWidth: 375
+        ))
+        controller.applyObservedState(state)
+        XCTAssertNil(try statsRow())
+
+        controller.update(configuration: configuration(
+            showConnectionStats: {},
+            style: .shell,
+            availableWidth: 375
+        ))
+        controller.applyObservedState(state)
+        XCTAssertNotNil(try statsRow())
+    }
+
     private func configuration(
         controller: TerminalSessionController? = nil,
         title: String = "agent · devbox",

@@ -195,15 +195,13 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         renderAndObserve()
     }
 
+    var fieldHasKeyboard: Bool { textView.isFirstResponder }
+
     /// The window is about to drop the composer: stop observing so a late
-    /// render can't touch a controller that moved on. Reports whether the
-    /// field held the keyboard, so the caller can hand it back to the pane.
-    @discardableResult
-    func prepareForRemoval() -> Bool {
+    /// render can't touch a controller that moved on.
+    func prepareForRemoval() {
         observationGeneration &+= 1
-        let hadKeyboard = textView.isFirstResponder
-        if hadKeyboard { textView.resignFirstResponder() }
-        return hadKeyboard
+        if textView.isFirstResponder { textView.resignFirstResponder() }
     }
 
     /// Take the keyboard — now if the view is on screen, else at the first

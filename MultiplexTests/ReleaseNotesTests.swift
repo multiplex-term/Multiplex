@@ -4,18 +4,18 @@ import XCTest
 final class ReleaseNotesTests: XCTestCase {
     // MARK: Content
 
-    /// The card speaks for the newest release only — 1.3.1's fixes, not a
+    /// The card speaks for the newest release only — 1.4's features, not a
     /// merge of every release the log still carries.
     func testTheCardAnnouncesTheNewestRelease() {
-        XCTAssertEqual(ReleaseNotes.version, "1.3.1")
+        XCTAssertEqual(ReleaseNotes.version, "1.4")
         XCTAssertEqual(ReleaseNotes.releases.first?.version, ReleaseNotes.version)
         XCTAssertEqual(ReleaseNotes.promise, ReleaseNotes.current.promise)
     }
 
     /// The card's whole premise is four rows, and the fourth is where the
-    /// platform filter earns its keep: an iPad reader is told about the key
-    /// rail, a Vision Pro reader about the floating bars, and neither hears
-    /// the other's.
+    /// platform filter earns its keep: an iPhone or iPad reader is told the
+    /// keys tap back, a Vision Pro reader (which has no haptics) gets the
+    /// File Viewer's PDFs and sound files instead.
     func testTheCardsFourthRowIsTheOneAboutThisPlatform() {
         for platform in ReleaseNotePlatform.allCases {
             XCTAssertEqual(
@@ -24,32 +24,52 @@ final class ReleaseNotesTests: XCTestCase {
                 "\(platform) must fill the card"
             )
         }
-        XCTAssertEqual(ReleaseNotes.highlights(for: .pad).last?.id, "keyrail")
-        XCTAssertEqual(ReleaseNotes.highlights(for: .vision).last?.id, "ornaments")
-        XCTAssertEqual(ReleaseNotes.highlights(for: .phone).last?.id, "keyrail")
+        XCTAssertEqual(ReleaseNotes.highlights(for: .pad).last?.id, "haptics")
+        XCTAssertEqual(ReleaseNotes.highlights(for: .vision).last?.id, "fvmedia")
+        XCTAssertEqual(ReleaseNotes.highlights(for: .phone).last?.id, "haptics")
     }
 
-    func testVisionOnlyFixesNeverReachAnIPadAndTheKeyRailNeverAVisionPro() {
+    func testHapticsNeverReachAVisionPro() {
         let padIDs = ReleaseNotes.entries(for: .pad).map(\.id)
+        XCTAssertTrue(padIDs.contains("haptics"))
+        XCTAssertTrue(padIDs.contains("keycommands"))
+
+        let visionIDs = ReleaseNotes.entries(for: .vision).map(\.id)
+        XCTAssertFalse(visionIDs.contains("haptics"))
+        XCTAssertTrue(visionIDs.contains("keycommands"))
+        XCTAssertTrue(visionIDs.contains("fvmedia"))
+
+        let phoneIDs = ReleaseNotes.entries(for: .phone).map(\.id)
+        XCTAssertTrue(phoneIDs.contains("haptics"))
+    }
+
+    /// The 1.3.1 record rides along under the 1.4 log, and its platform
+    /// scoping still holds: the floating bars never on an iPad, the key rail
+    /// never on a Vision Pro.
+    func testTheBankedOneThreeOneRecordKeepsItsPlatformScoping() throws {
+        let v131 = try XCTUnwrap(
+            ReleaseNotes.releases.first { $0.version == "1.3.1" },
+            "the log dropped the 1.3.1 record"
+        )
+        let padIDs = v131.entries(for: .pad).map(\.id)
         XCTAssertFalse(padIDs.contains("ornaments"))
         XCTAssertFalse(padIDs.contains("ninety"))
         XCTAssertFalse(padIDs.contains("wheelpin"))
         XCTAssertTrue(padIDs.contains("keyrail"))
         XCTAssertTrue(padIDs.contains("metal"))
 
-        let visionIDs = ReleaseNotes.entries(for: .vision).map(\.id)
+        let visionIDs = v131.entries(for: .vision).map(\.id)
         XCTAssertTrue(visionIDs.contains("ornaments"))
         XCTAssertTrue(visionIDs.contains("ninety"))
         XCTAssertFalse(visionIDs.contains("keyrail"))
 
-        let phoneIDs = ReleaseNotes.entries(for: .phone).map(\.id)
+        let phoneIDs = v131.entries(for: .phone).map(\.id)
         XCTAssertTrue(phoneIDs.contains("keyrail"))
         XCTAssertFalse(phoneIDs.contains("ornaments"))
     }
 
-    /// The 1.3 record rides along under the 1.3.1 log, and its platform
-    /// scoping still holds: GLASS never on an iPad, keep-alive never on a
-    /// Vision Pro.
+    /// The 1.3 record rides along too, and its platform scoping still holds:
+    /// GLASS never on an iPad, keep-alive never on a Vision Pro.
     func testTheBankedThirteenRecordKeepsItsPlatformScoping() throws {
         let v13 = try XCTUnwrap(
             ReleaseNotes.releases.first { $0.version == "1.3" },
@@ -95,13 +115,17 @@ final class ReleaseNotesTests: XCTestCase {
                 }
             }
         }
-        // APPEARANCE holds only GLASS, so it must not head an empty section
-        // on iPad — in either release's record.
-        for release in ReleaseNotes.releases {
+        // Before 1.4, APPEARANCE held only GLASS, so it must not head an empty
+        // section on iPad in those records; 1.4's live theme editing is for
+        // every platform, so there it heads a section everywhere.
+        for release in ReleaseNotes.releases where release.version != "1.4" {
             XCTAssertFalse(release.banks(for: .pad).map(\.bank).contains(.appearance))
         }
         let v13 = ReleaseNotes.releases.first { $0.version == "1.3" }
         XCTAssertEqual(v13?.banks(for: .vision).map(\.bank).contains(.appearance), true)
+        for platform in ReleaseNotePlatform.allCases {
+            XCTAssertTrue(ReleaseNotes.banks(for: platform).map(\.bank).contains(.appearance))
+        }
     }
 
     /// The card says what it is leaving out, and must never re-offer something

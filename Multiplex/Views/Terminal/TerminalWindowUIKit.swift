@@ -2219,19 +2219,19 @@ extension TerminalWindowViewController {
         #endif
         guard talkbackOpen, let controller = activeController else {
             if let existing = talkbackController {
-                let hadKeyboard = existing.prepareForRemoval()
+                // Hand the keyboard to the pane BEFORE the box goes, so it
+                // changes hands instead of dropping and rising again.
+                if existing.fieldHasKeyboard,
+                   let terminal = existing.configuration.controller.terminalView {
+                    TerminalFocusArbiter.resumeAfterPresentation(terminal)
+                }
+                existing.prepareForRemoval()
                 // visionOS mounts the composer in the bottom ornament, never
                 // in-window (the shell there is a test-only configuration).
                 #if !os(visionOS)
                 unmount(existing)
                 #endif
                 talkbackController = nil
-                // The field held the keyboard: hand it back to the pane it
-                // was talking to, if that pane still owns focus.
-                if hadKeyboard {
-                    let terminal = existing.configuration.controller.terminalView
-                    if let terminal { TerminalFocusArbiter.resumeAfterPresentation(terminal) }
-                }
                 unfoldHelperAfterTalkback()
             }
             renderedTalkbackHeight = 0

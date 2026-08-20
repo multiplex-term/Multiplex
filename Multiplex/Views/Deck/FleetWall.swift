@@ -1792,6 +1792,10 @@ private final class FleetHostSectionView: UIView {
                     newHerdrTab: { [weak self] in
                         self?.configuration.requestNewHerdrTab(session)
                     },
+                    copyHandoffCommand: {
+                        UIPasteboard.general.string =
+                            SessionHandoff.command(session: session)
+                    },
                     delete: { [weak self] in
                         self?.configuration.requestDeleteSession(session)
                     },
@@ -2803,6 +2807,9 @@ struct FleetSessionTileConfiguration {
     /// The herdr-only menu row — a tab in this session's focused workspace.
     /// Displayed only when `sessionBackend == .herdr`.
     let newHerdrTab: () -> Void
+    /// Puts `SessionHandoff.command` on the pasteboard — the local attach
+    /// line for a terminal on the host machine itself.
+    let copyHandoffCommand: () -> Void
     let delete: () -> Void
     let droppedSession: (String) -> Void
 
@@ -2939,6 +2946,9 @@ final class FleetSessionTileView: FleetPressView,
                     configuration.newHerdrTab()
                 })
             }
+            children.append(UIAction(title: String(localized: "Copy Command for Handoff")) { _ in
+                configuration.copyHandoffCommand()
+            })
             children.append(
                 UIAction(
                     title: String(localized: "Delete Session…"),

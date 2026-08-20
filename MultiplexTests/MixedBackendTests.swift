@@ -133,7 +133,7 @@ final class MixedBackendTests: XCTestCase {
                 duplicateAttachTitle: "Attach in New Window",
                 openTabAccessibilityText: "Open",
                 attach: {}, attachNewWindow: {}, newHerdrTab: {},
-                delete: {}, droppedSession: { _ in }
+                copyHandoffCommand: {}, delete: {}, droppedSession: { _ in }
             ))
             return tile.accessibilityLabel ?? ""
         }

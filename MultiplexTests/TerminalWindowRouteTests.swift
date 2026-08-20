@@ -185,4 +185,45 @@ final class TerminalWindowRouteTests: XCTestCase {
         XCTAssertTrue(decoded.remoteCommand?.hasSuffix(
             "exec tmux attach-session -t 'deploy'") == true)
     }
+
+    // MARK: SessionHandoff
+
+    private func handoffSession(
+        name: String, backend: Host.SessionBackend = .tmux
+    ) -> TmuxSession {
+        var session = TmuxSession(name: name, windows: [], created: .distantPast)
+        session.backend = backend
+        return session
+    }
+
+    func testHandoffCommandIsTheBareLocalAttachLine() {
+        XCTAssertEqual(
+            SessionHandoff.command(session: handoffSession(name: "main")),
+            "tmux attach-session -t main"
+        )
+        XCTAssertEqual(
+            SessionHandoff.command(
+                session: handoffSession(name: "main", backend: .herdr)),
+            "herdr session attach main"
+        )
+    }
+
+    func testHandoffCommandQuotesAHostileSessionName() {
+        XCTAssertEqual(
+            SessionHandoff.command(session: handoffSession(name: "my session")),
+            "tmux attach-session -t 'my session'"
+        )
+        XCTAssertEqual(
+            SessionHandoff.command(session: handoffSession(name: "it's")),
+            "tmux attach-session -t 'it'\\''s'"
+        )
+    }
+
+    func testHandoffCommandForAnEmptyHerdrNameFallsBackToDefault() {
+        XCTAssertEqual(
+            SessionHandoff.command(
+                session: handoffSession(name: "", backend: .herdr)),
+            "herdr session attach default"
+        )
+    }
 }
