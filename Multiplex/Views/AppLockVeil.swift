@@ -190,7 +190,7 @@ final class AppLockView: UIView {
         lamp.alignment = .center
         lamp.spacing = Metrics.lampSpacing
         lamp.isAccessibilityElement = true
-        lamp.accessibilityLabel = "locked"
+        lamp.accessibilityLabel = String(localized: "locked")
 
         configure(
             titleLabel,
@@ -199,8 +199,9 @@ final class AppLockView: UIView {
             kerning: 15 * scale * 0.09,
             color: TallyPalette.signal
         )
-        titleLabel.accessibilityLabel =
-            "Multiplex is locked. Unlock with \(AppLockStore.methodName)."
+        titleLabel.accessibilityLabel = String(
+            localized: "Multiplex is locked. Unlock with \(AppLockStore.methodName)."
+        )
 
         configure(
             methodLabel,
@@ -256,8 +257,8 @@ final class AppLockView: UIView {
             effect: .highlight,
             shape: .rect(cornerRadius: 2)
         )
-        unlockButton.accessibilityLabel = "Unlock"
-        unlockButton.accessibilityHint = "Unlocks Multiplex with \(AppLockStore.methodName)"
+        unlockButton.accessibilityLabel = String(localized: "Unlock")
+        unlockButton.accessibilityHint = String(localized: "Unlocks Multiplex with \(AppLockStore.methodName)")
         unlockButton.addTarget(self, action: #selector(unlockPressed), for: .touchUpInside)
     }
 

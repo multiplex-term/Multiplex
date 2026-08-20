@@ -1,4 +1,5 @@
 import AppIntents
+import Foundation
 
 /// The CLI agent as an intent/widget-configuration parameter. Raw values
 /// mirror `AgentKind` one-to-one (unit-tested) so the app maps with
@@ -42,7 +43,7 @@ enum AgentModelChoices {
     /// "Agent Default" leads even when the host has nothing configured —
     /// which is also the honest way to say where configuration lives.
     static func choices(configured: [String]) -> [Choice] {
-        var choices = [Choice(value: agentDefaultValue, title: "Agent Default")]
+        var choices = [Choice(value: agentDefaultValue, title: String(localized: "Agent Default"))]
         choices += values(configured: configured).map {
             Choice(value: $0, title: $0)
         }

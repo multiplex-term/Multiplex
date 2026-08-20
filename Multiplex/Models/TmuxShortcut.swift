@@ -1,3 +1,5 @@
+import Foundation
+
 /// Familiar tmux commands exposed by the terminal chrome. Most use the stock
 /// binding: Control-B (the default prefix) followed by one key. Destructive
 /// commands are confirmed by our UI, then run over the SSH control connection
@@ -11,6 +13,16 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
         case panes = "Panes"
         case resize = "Resize Pane"
         case windows = "Windows"
+
+        /// Section header shown in the panel; the raw value stays English
+        /// because it also names accessibility identifiers.
+        var title: String {
+            switch self {
+            case .panes: String(localized: "Panes")
+            case .resize: String(localized: "Resize Pane")
+            case .windows: String(localized: "Windows")
+            }
+        }
     }
 
     case splitLeftRight
@@ -46,21 +58,21 @@ enum TmuxShortcut: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .splitLeftRight: "Split Left / Right"
-        case .splitTopBottom: "Split Top / Bottom"
-        case .togglePaneZoom: "Toggle Pane Zoom"
-        case .copyMode: "Copy Mode"
-        case .closePane: "Close Pane"
-        case .resizeLeft: "Resize Left"
-        case .resizeDown: "Resize Down"
-        case .resizeUp: "Resize Up"
-        case .resizeRight: "Resize Right"
-        case .newWindow: "New Window"
-        case .chooseWindow: "Choose Window"
-        case .nextWindow: "Next Window"
-        case .previousWindow: "Previous Window"
-        case .renameWindow: "Rename Window"
-        case .closeWindow: "Close Window"
+        case .splitLeftRight: String(localized: "Split Left / Right")
+        case .splitTopBottom: String(localized: "Split Top / Bottom")
+        case .togglePaneZoom: String(localized: "Toggle Pane Zoom")
+        case .copyMode: String(localized: "Copy Mode")
+        case .closePane: String(localized: "Close Pane")
+        case .resizeLeft: String(localized: "Resize Left")
+        case .resizeDown: String(localized: "Resize Down")
+        case .resizeUp: String(localized: "Resize Up")
+        case .resizeRight: String(localized: "Resize Right")
+        case .newWindow: String(localized: "New Window")
+        case .chooseWindow: String(localized: "Choose Window")
+        case .nextWindow: String(localized: "Next Window")
+        case .previousWindow: String(localized: "Previous Window")
+        case .renameWindow: String(localized: "Rename Window")
+        case .closeWindow: String(localized: "Close Window")
         }
     }
 

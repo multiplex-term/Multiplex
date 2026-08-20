@@ -396,11 +396,11 @@ enum ShortcutSetupScriptOptions {
         var choices = [
             Choice(
                 value: ExternalSetupScriptSelection.rememberedToken,
-                title: "New Session Default"
+                title: String(localized: "New Session Default")
             ),
             Choice(
                 value: ExternalSetupScriptSelection.noneToken,
-                title: "None"
+                title: String(localized: "None")
             ),
         ]
         var seen = Set<UUID>()
@@ -408,7 +408,7 @@ enum ShortcutSetupScriptOptions {
             let name = script.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
             choices.append(Choice(
                 value: script.id.uuidString,
-                title: name.isEmpty ? "Script" : name
+                title: name.isEmpty ? String(localized: "Script") : name
             ))
         }
         return choices

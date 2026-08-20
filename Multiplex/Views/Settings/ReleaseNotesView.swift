@@ -149,7 +149,7 @@ final class WhatsNewViewController: UIViewController, AppAppearanceFollowing {
         version.font = UIKitChassis.monoFont(11)
         version.textColor = UIKitChassis.signal2
         version.text = ReleaseNotes.version
-        version.accessibilityLabel = "Version \(ReleaseNotes.version)"
+        version.accessibilityLabel = String(localized: "Version \(ReleaseNotes.version)")
 
         let row = UIStackView(arrangedSubviews: [mark, ReleaseNotesChrome.spacer(), version])
         row.axis = .horizontal
@@ -228,14 +228,14 @@ final class WhatsNewViewController: UIViewController, AppAppearanceFollowing {
     private func makeActions() -> UIView {
         let fullNotes = UIKitChassisChip(
             "FULL NOTES",
-            accessibilityLabel: "Full notes"
+            accessibilityLabel: String(localized: "Full notes")
         ) { [weak self] in
             self?.onFullNotes?()
         }
         let done = UIKitChassisChip(
             "DONE",
             prominent: true,
-            accessibilityLabel: "Done"
+            accessibilityLabel: String(localized: "Done")
         ) { [weak self] in
             self?.onDone?()
         }
@@ -338,21 +338,21 @@ final class ReleaseLogViewController: UIViewController, AppAppearanceFollowing {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "What’s New"
+        title = String(localized: "What’s New")
         view.backgroundColor = GlassPrototype.sheetGround
         navigationItem.largeTitleDisplayMode = .never
         #if os(visionOS)
-        navigationItem.titleView = UIKitChassisLabel("What’s New", size: 12)
+        navigationItem.titleView = UIKitChassisLabel(String(localized: "What’s New"), size: 12)
         #endif
 
         let done = UIBarButtonItem(
-            title: "Done",
+            title: String(localized: "Done"),
             style: .plain,
             target: self,
             action: #selector(donePressed)
         )
         done.tintColor = UIKitChassis.signal
-        done.accessibilityLabel = "Done"
+        done.accessibilityLabel = String(localized: "Done")
         navigationItem.rightBarButtonItem = done
 
         configureContent()

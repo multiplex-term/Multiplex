@@ -150,7 +150,7 @@ final class AgentHistoryPanelViewController: UIViewController {
 
         let close = UIKitChassisChip(
             "CLOSE",
-            accessibilityLabel: "Close",
+            accessibilityLabel: String(localized: "Close"),
             action: { [weak self] in self?.dismiss() }
         )
         close.accessibilityIdentifier = "agentHistory.close"
@@ -208,9 +208,9 @@ final class AgentHistoryPanelViewController: UIViewController {
             // token every other busy indicator in the app uses.
             spinner.color = UIKitChassis.signal2
             spinner.startAnimating()
-            spinner.accessibilityLabel = "Reading session file"
+            spinner.accessibilityLabel = String(localized: "Reading session file")
             let label = UIKitChassisLabel(
-                "READING SESSION FILE",
+                String(localized: "READING SESSION FILE"),
                 size: 9,
                 color: UIKitChassis.signal3
             )
@@ -236,7 +236,7 @@ final class AgentHistoryPanelViewController: UIViewController {
             if messages.isEmpty {
                 content = makeStatusRow([
                     UIKitChassisLabel(
-                        "NO MESSAGES YET",
+                        String(localized: "NO MESSAGES YET"),
                         size: 9,
                         color: UIKitChassis.signal3
                     ),
@@ -478,7 +478,7 @@ private final class AgentHistoryMessageRowView: UIView {
         if showsJump {
             let jumpButton = UIKitChassisChip(
                 "JUMP",
-                accessibilityLabel: "Scroll the terminal back to this message",
+                accessibilityLabel: String(localized: "Scroll the terminal back to this message"),
                 action: { jump(message) }
             )
             jumpButton.accessibilityIdentifier = "agentHistory.jump.\(message.ordinal)"
@@ -521,8 +521,8 @@ private final class AgentHistoryMessageRowView: UIView {
             $0.removeFromSuperview()
         }
         messageControl.accessibilityLabel = expanded
-            ? "Collapse message"
-            : "Expand message"
+            ? String(localized: "Collapse message")
+            : String(localized: "Expand message")
 
         if expanded {
             let fullText = AgentHistorySelectableTextView(text: message.text)

@@ -155,10 +155,10 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         sessionName: String?,
         isResuming: Bool
     ) -> String {
-        guard isResuming else { return "Connecting to \(hostName)…" }
+        guard isResuming else { return String(localized: "Connecting to \(hostName)…") }
         return sessionName == nil
-            ? "Reconnecting to \(hostName)…"
-            : "Reattaching to \(hostName)…"
+            ? String(localized: "Reconnecting to \(hostName)…")
+            : String(localized: "Reattaching to \(hostName)…")
     }
 
     // MARK: Drop interaction
@@ -627,13 +627,15 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
 
     private func makeMissingHostPanel() -> UIView {
         let title = UILabel()
-        title.text = "This host was removed"
+        title.text = String(localized: "This host was removed")
         title.font = UIKitChassis.monoFont(17, weight: .semibold)
         title.textColor = UIKitChassis.signal
         title.textAlignment = .center
 
         let detail = UILabel()
-        detail.text = "The tab can't reconnect because its host no longer exists in the deck."
+        detail.text = String(localized: """
+            The tab can't reconnect because its host no longer exists in the deck.
+            """)
         // Body copy, not chrome: a semantic style keeps Dynamic Type (fixed
         // `uiFont` sizes ignore it, and the two mechanisms never compound).
         detail.font = .preferredFont(forTextStyle: .subheadline)
@@ -646,7 +648,7 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         let close = UIKitChassisChip(
             "CLOSE TAB",
             prominent: true,
-            accessibilityLabel: "Close tab",
+            accessibilityLabel: String(localized: "Close tab"),
             action: configuration.close
         )
         let panel = TerminalPanePanelView(arrangedSubviews: [title, detail, close])
@@ -725,12 +727,12 @@ final class TerminalPanePanelView: UIKitTallyBorderedView {
         let reconnectChip = UIKitChassisChip(
             "RECONNECT",
             prominent: true,
-            accessibilityLabel: "Reconnect",
+            accessibilityLabel: String(localized: "Reconnect"),
             action: reconnect
         )
         let closeChip = UIKitChassisChip(
             "CLOSE TAB",
-            accessibilityLabel: "Close tab",
+            accessibilityLabel: String(localized: "Close tab"),
             action: close
         )
         let actions = UIStackView(arrangedSubviews: [reconnectChip, closeChip])
@@ -739,7 +741,8 @@ final class TerminalPanePanelView: UIKitTallyBorderedView {
         actions.spacing = 12
         views.append(actions)
         let panel = TerminalPanePanelView(arrangedSubviews: views)
-        panel.accessibilityLabel = reason.map { "Ended, \($0)" } ?? "Detached"
+        panel.accessibilityLabel = reason.map { String(localized: "Ended, \($0)") }
+            ?? String(localized: "Detached")
         return panel
     }
 }
@@ -781,7 +784,7 @@ final class TerminalContextBarView: UIKitTallyBorderedView {
             UIKitChassisChip(
                 "DONE",
                 prominent: true,
-                accessibilityLabel: "Done",
+                accessibilityLabel: String(localized: "Done"),
                 action: done
             ),
         ])
@@ -812,7 +815,7 @@ final class TerminalSelectionActionsOverlay {
         copyChip = UIKitChassisChip(
             "COPY",
             prominent: true,
-            accessibilityLabel: "Copy selection",
+            accessibilityLabel: String(localized: "Copy selection"),
             action: { [weak terminal] in
                 terminal?.copy(nil)
                 done()
@@ -823,12 +826,12 @@ final class TerminalSelectionActionsOverlay {
             copyChip,
             UIKitChassisChip(
                 "SELECT ALL",
-                accessibilityLabel: "Select all in pane",
+                accessibilityLabel: String(localized: "Select all in pane"),
                 action: { [weak terminal] in terminal?.selectAll(nil) }
             ),
             UIKitChassisChip(
                 "DONE",
-                accessibilityLabel: "Done selecting",
+                accessibilityLabel: String(localized: "Done selecting"),
                 action: done
             ),
         ])
@@ -936,24 +939,24 @@ final class TerminalSelectionMenuOverlay {
             UIKitChassisChip(
                 "SELECT",
                 prominent: true,
-                accessibilityLabel: "Select text",
+                accessibilityLabel: String(localized: "Select text"),
                 action: { [weak self] in self?.performSelect() }
             ),
             UIKitChassisChip(
                 "SELECT ALL",
-                accessibilityLabel: "Select all in pane",
+                accessibilityLabel: String(localized: "Select all in pane"),
                 action: { [weak self] in self?.performSelectAll() }
             ),
             UIKitChassisChip(
                 "PASTE",
-                accessibilityLabel: "Paste",
+                accessibilityLabel: String(localized: "Paste"),
                 action: { [weak self] in self?.performPaste() }
             ),
         ]
         if remoteMenu != nil {
             items.append(UIKitChassisChip(
                 "MENU",
-                accessibilityLabel: "Open the remote pane menu",
+                accessibilityLabel: String(localized: "Open the remote pane menu"),
                 action: { [weak self] in self?.performRemoteMenu() }
             ))
         }
@@ -1043,19 +1046,19 @@ extension TerminalContextBarView {
                 pendingLabel.textColor = UIKitChassis.signal3
                 pendingLabel.lineBreakMode = .byTruncatingHead
                 pendingLabel.numberOfLines = 1
-                pendingLabel.accessibilityLabel = "Heard, not typed yet: \(pending)"
+                pendingLabel.accessibilityLabel = String(localized: "Heard, not typed yet: \(pending)")
                 pendingLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 320).isActive = true
                 items.append(pendingLabel)
             }
             items.append(UIKitChassisChip(
                 "CANCEL",
-                accessibilityLabel: "Cancel dictation",
+                accessibilityLabel: String(localized: "Cancel dictation"),
                 action: cancel
             ))
             items.append(UIKitChassisChip(
                 "STOP",
                 prominent: true,
-                accessibilityLabel: "Stop dictation",
+                accessibilityLabel: String(localized: "Stop dictation"),
                 action: stop
             ))
             return TerminalContextBarView(items: items)
@@ -1084,11 +1087,12 @@ extension TerminalContextBarView {
     ) -> UIView {
         let button = UIButton(type: .custom)
         button.accessibilityIdentifier = "terminalPane.dictation.language"
-        button.accessibilityLabel =
-            "Dictation language: \(language.name) \(language.region). Change"
+        button.accessibilityLabel = String(
+            localized: "Dictation language: \(language.name) \(language.region). Change"
+        )
         button.showsMenuAsPrimaryAction = true
         button.menu = UIMenu(
-            title: "Dictation language",
+            title: String(localized: "Dictation language"),
             options: .singleSelection,
             children: choices.map { choice in
                 UIAction(
@@ -1158,7 +1162,7 @@ extension TerminalContextBarView {
             preview = value
             action = UIKitChassisChip(
                 "CANCEL",
-                accessibilityLabel: "Cancel finding message",
+                accessibilityLabel: String(localized: "Cancel finding message"),
                 action: cancel
             )
         case .jumped(let value, _):
@@ -1167,7 +1171,7 @@ extension TerminalContextBarView {
             action = UIKitChassisChip(
                 "BACK TO LIVE",
                 prominent: true,
-                accessibilityLabel: "Back to live",
+                accessibilityLabel: String(localized: "Back to live"),
                 action: backToLive
             )
         }
@@ -1252,8 +1256,12 @@ final class TerminalKeyboardLockedView: UIKitTallyBorderedView {
         )
         mic.tintColor = isDictating ? UIKitChassis.chassis : UIKitChassis.signal2
         mic.backgroundColor = isDictating ? UIKitChassis.signal2 : .clear
-        mic.accessibilityLabel = isDictating ? "Stop dictation" : "Dictate"
-        mic.accessibilityHint = "Types what you say into the session as you speak, never pressing Return"
+        mic.accessibilityLabel = isDictating
+            ? String(localized: "Stop dictation")
+            : String(localized: "Dictate")
+        mic.accessibilityHint = String(localized: """
+            Types what you say into the session as you speak, never pressing Return
+            """)
         mic.addAction(UIAction { _ in toggleDictation() }, for: .touchUpInside)
         mic.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -1286,7 +1294,7 @@ final class TerminalHistoryFindingVeilView: UIView {
         super.init(frame: frame)
         backgroundColor = UIKitChassis.screen.withAlphaComponent(0.72)
         isAccessibilityElement = true
-        accessibilityLabel = "Searching transcript"
+        accessibilityLabel = String(localized: "Searching transcript")
 
         let progress = UIActivityIndicatorView(style: .medium)
         progress.color = UIKitChassis.signal2

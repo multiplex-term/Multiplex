@@ -34,21 +34,21 @@ final class TerminalGuideViewController: UIViewController, AppAppearanceFollowin
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Guide"
+        title = String(localized: "Guide")
         view.backgroundColor = GlassPrototype.sheetGround
         navigationItem.largeTitleDisplayMode = .never
         #if os(visionOS)
-        navigationItem.titleView = UIKitChassisLabel("Guide", size: 12)
+        navigationItem.titleView = UIKitChassisLabel(String(localized: "Guide"), size: 12)
         #endif
 
         let done = UIBarButtonItem(
-            title: "Done",
+            title: String(localized: "Done"),
             style: .plain,
             target: self,
             action: #selector(donePressed)
         )
         done.tintColor = UIKitChassis.signal
-        done.accessibilityLabel = "Done"
+        done.accessibilityLabel = String(localized: "Done")
         navigationItem.rightBarButtonItem = done
 
         configureContent()
@@ -519,7 +519,7 @@ private final class TerminalGuideSettingsButton: UIButton {
         layer.cornerRadius = 2
         clipsToBounds = true
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
-        accessibilityLabel = "Open Settings"
+        accessibilityLabel = String(localized: "Open Settings")
 
         captionLabel.isUserInteractionEnabled = false
         captionLabel.isAccessibilityElement = false

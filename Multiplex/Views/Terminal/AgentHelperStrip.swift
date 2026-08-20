@@ -249,14 +249,14 @@ final class AgentHelperStripViewController: UIViewController,
         }
         if !customs.isEmpty {
             groups.append(UIMenu(
-                title: "Custom",
+                title: String(localized: "Custom"),
                 options: .displayInline,
                 children: customs
             ))
         }
 
         let customize = UIAction(
-            title: "Customize Commands…",
+            title: String(localized: "Customize Commands…"),
             image: UIImage(systemName: "slider.horizontal.3")
         ) { [weak self] _ in
             self?.perform(.customize)
@@ -337,7 +337,9 @@ final class AgentHelperStripViewController: UIViewController,
         if isCollapsed {
             let dot = AgentHelperStripDotButton(
                 glyph: configuration.agent.glyph,
-                accessibilityLabel: "Show \(configuration.agent.displayName) helpers",
+                accessibilityLabel: String(
+                    localized: "Show \(configuration.agent.displayName) helpers"
+                ),
                 action: { [weak self] in self?.perform(.expand) }
             )
             dot.accessibilityIdentifier = "agentHelpers.dot"
@@ -362,7 +364,9 @@ final class AgentHelperStripViewController: UIViewController,
 
         let agent = AgentHelperStripTitleButton(
             title: configuration.agent.displayName,
-            accessibilityLabel: "Hide \(configuration.agent.displayName) helpers",
+            accessibilityLabel: String(
+                localized: "Hide \(configuration.agent.displayName) helpers"
+            ),
             action: { [weak self] in self?.perform(.collapse) }
         )
         agent.accessibilityIdentifier = "agentHelpers.agent"
@@ -382,14 +386,14 @@ final class AgentHelperStripViewController: UIViewController,
             row.addArrangedSubview(makeCommandRail(historyAvailable: available))
         } else {
             let pro = AgentHelperStripButton(
-                caption: "✳ AGENT HELPERS · PRO",
+                caption: String(localized: "✳ AGENT HELPERS · PRO"),
                 prominent: true,
-                accessibilityLabel: "Agent helpers Pro",
+                accessibilityLabel: String(localized: "Agent helpers Pro"),
                 action: { [weak self] in self?.perform(.openPaywall) }
             )
             pro.accessibilityIdentifier = "agentHelpers.pro"
             let detail = UILabel()
-            detail.text = "Free daily command taps return tomorrow"
+            detail.text = String(localized: "Free daily command taps return tomorrow")
             detail.font = UIKitChassis.monoFont(8, weight: .medium)
             detail.textColor = UIKitChassis.signal3
             detail.numberOfLines = 1
@@ -449,10 +453,15 @@ final class AgentHelperStripViewController: UIViewController,
         ])
 
         for command in barCustomCommands {
+            let submitMode = command.autoSubmit
+                ? String(localized: "auto submit")
+                : String(localized: "type only")
             let button = AgentHelperStripButton(
                 caption: command.barLabel ?? command.menuLabel,
                 color: TallyPalette.customCommand,
-                accessibilityLabel: "Custom command \(command.menuLabel), \(command.autoSubmit ? "auto submit" : "type only")",
+                accessibilityLabel: String(
+                    localized: "Custom command \(command.menuLabel), \(submitMode)"
+                ),
                 action: { [weak self] in self?.perform(.send(command.agentCommand)) }
             )
             button.accessibilityIdentifier = "agentHelpers.custom.\(command.id.uuidString)"
@@ -471,7 +480,9 @@ final class AgentHelperStripViewController: UIViewController,
 
         let more = AgentHelperStripButton(
             caption: "MORE",
-            accessibilityLabel: "More \(configuration.agent.displayName) commands"
+            accessibilityLabel: String(
+                localized: "More \(configuration.agent.displayName) commands"
+            )
         )
         more.accessibilityIdentifier = "agentHelpers.more"
         more.menu = makeMoreMenu()
@@ -484,7 +495,9 @@ final class AgentHelperStripViewController: UIViewController,
         if historyAvailable {
             let history = AgentHelperStripButton(
                 caption: "HIST",
-                accessibilityLabel: "Message history for \(configuration.agent.displayName)",
+                accessibilityLabel: String(
+                    localized: "Message history for \(configuration.agent.displayName)"
+                ),
                 action: { [weak self] in self?.perform(.history) }
             )
             history.accessibilityIdentifier = "agentHelpers.history"

@@ -177,34 +177,34 @@ enum SSHConnectionError: Error {
     func userMessage(host: Host) -> String {
         switch self {
         case .missingCredentials:
-            "No saved credentials for \(host.name). Edit the host and sign in again."
+            String(localized: "No saved credentials for \(host.name). Edit the host and sign in again.")
         case .keyPassphraseRequired:
-            "The private key for \(host.name) is encrypted. Enter its passphrase to connect."
+            String(localized: "The private key for \(host.name) is encrypted. Enter its passphrase to connect.")
         case .incorrectKeyPassphrase:
-            "The passphrase didn't unlock the private key for \(host.name). Try again."
+            String(localized: "The passphrase didn't unlock the private key for \(host.name). Try again.")
         case .unsupportedKey:
-            "The private key for \(host.name) couldn't be read. Paste an OpenSSH ed25519 or RSA key."
+            String(localized: "The private key for \(host.name) couldn't be read. Paste an OpenSSH ed25519 or RSA key.")
         case .connectFailed(let detail):
-            "Couldn't reach \(host.name) (\(detail))."
+            String(localized: "Couldn't reach \(host.name) (\(detail)).")
         case .notConnected:
-            "Not connected to \(host.name)."
+            String(localized: "Not connected to \(host.name).")
         case .hostKeyRefused(let refusal):
             switch refusal {
             case .changed(let expected, let presented):
-                """
-                \(host.name) presented a different SSH host key than the one \
-                Multiplex recorded. Either the server was rebuilt, or something \
-                is impersonating it. Nothing was sent. \
-                Recorded \(expected.fingerprint), got \(presented.fingerprint). \
-                If you rebuilt it, forget the recorded key in Host Settings.
-                """
+                String(localized: """
+                    \(host.name) presented a different SSH host key than the one \
+                    Multiplex recorded. Either the server was rebuilt, or something \
+                    is impersonating it. Nothing was sent. \
+                    Recorded \(expected.fingerprint), got \(presented.fingerprint). \
+                    If you rebuilt it, forget the recorded key in Host Settings.
+                    """)
             case .unrecognizedAlgorithm(let presented, _):
-                """
-                \(host.name) identified itself with a \(presented.algorithm) key, \
-                which isn't among the keys Multiplex recorded for it. \
-                Nothing was sent. If the server's host keys changed, forget the \
-                recorded keys in Host Settings.
-                """
+                String(localized: """
+                    \(host.name) identified itself with a \(presented.algorithm) key, \
+                    which isn't among the keys Multiplex recorded for it. \
+                    Nothing was sent. If the server's host keys changed, forget the \
+                    recorded keys in Host Settings.
+                    """)
             }
         }
     }
@@ -497,7 +497,7 @@ actor SSHConnection {
                     }
                 }
                 guard let file else {
-                    throw DropError(message: "Couldn't create \(upload.preferredName)")
+                    throw DropError(message: String(localized: "Couldn't create \(upload.preferredName)"))
                 }
                 do {
                     let chunkSize = 512 * 1024

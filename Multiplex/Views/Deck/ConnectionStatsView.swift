@@ -49,21 +49,22 @@ final class ConnectionStatsViewController: UIViewController, AppAppearanceFollow
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Connection Stats"
+        title = String(localized: "Connection Stats")
         view.backgroundColor = GlassPrototype.sheetGround
         navigationItem.largeTitleDisplayMode = .never
         #if os(visionOS)
-        navigationItem.titleView = UIKitChassisLabel("Connection Stats", size: 12)
+        navigationItem.titleView = UIKitChassisLabel(
+            String(localized: "Connection Stats"), size: 12)
         #endif
 
         let done = UIBarButtonItem(
-            title: "Done",
+            title: String(localized: "Done"),
             style: .plain,
             target: self,
             action: #selector(donePressed)
         )
         done.tintColor = UIKitChassis.signal
-        done.accessibilityLabel = "Done"
+        done.accessibilityLabel = String(localized: "Done")
         navigationItem.rightBarButtonItem = done
 
         configureContent()
@@ -100,9 +101,11 @@ final class ConnectionStatsViewController: UIViewController, AppAppearanceFollow
         footerLabel.font = UIKitChassis.monoFont(8)
         footerLabel.textColor = UIKitChassis.signal3
         footerLabel.numberOfLines = 0
-        footerLabel.text = "MOSH SAMPLES EVERY DATAGRAM · SSH HAS NO KEEPALIVE — "
-            + "RTT IS THE DECK PROBE · ECHO MEASURED WHILE YOU TYPE · "
-            + "SESSION-ONLY, NOTHING LEAVES THIS DEVICE"
+        footerLabel.text = String(localized: """
+            MOSH SAMPLES EVERY DATAGRAM · SSH HAS NO KEEPALIVE — \
+            RTT IS THE DECK PROBE · ECHO MEASURED WHILE YOU TYPE · \
+            SESSION-ONLY, NOTHING LEAVES THIS DEVICE
+            """)
 
         contentStack.axis = .vertical
         contentStack.alignment = .fill
@@ -152,7 +155,8 @@ final class ConnectionStatsViewController: UIViewController, AppAppearanceFollow
             notice.font = UIKitChassis.uiFont(13)
             notice.textColor = UIKitChassis.signal2
             notice.numberOfLines = 0
-            notice.text = "Connection stats are turned off in Settings."
+            notice.text = String(
+                localized: "Connection stats are turned off in Settings.")
             views.append(notice)
             replaceContent(with: views)
             return
@@ -177,7 +181,7 @@ final class ConnectionStatsViewController: UIViewController, AppAppearanceFollow
             let empty = UILabel()
             empty.font = UIKitChassis.uiFont(13)
             empty.textColor = UIKitChassis.signal2
-            empty.text = "No hosts yet."
+            empty.text = String(localized: "No hosts yet.")
             views.append(empty)
         }
         for row in rows {
@@ -363,9 +367,10 @@ private final class ConnectionStatsStripView: UIKitTallyBorderedView {
 
         headerRow.accessibilityLabel = "\(host.name), "
             + (runLabel.text ?? "").lowercased()
-            + (expanded ? ", expanded" : "")
+            + (expanded ? String(localized: ", expanded") : "")
         headerRow.accessibilityHint = expanded
-            ? "Collapses connection details" : "Expands connection details"
+            ? String(localized: "Collapses connection details")
+            : String(localized: "Expands connection details")
 
         rebuildCluster(
             stats: stats,
@@ -502,9 +507,12 @@ private final class ConnectionStatsStripView: UIKitTallyBorderedView {
         // The honesty line: what this host's numbers actually are.
         let honesty = label(size: 8, ink: UIKitChassis.signal3, lines: 0)
         honesty.text = mosh != nil
-            ? "MOSH LINK — SRTT FROM EVERY DATAGRAM · LOSS FROM SEQUENCE GAPS"
-            : "SSH LINK — NO KEEPALIVE · RTT SAMPLED BY THE DECK PROBE · "
-                + "ECHO MEASURED WHILE YOU TYPE"
+            ? String(localized:
+                "MOSH LINK — SRTT FROM EVERY DATAGRAM · LOSS FROM SEQUENCE GAPS")
+            : String(localized: """
+                SSH LINK — NO KEEPALIVE · RTT SAMPLED BY THE DECK PROBE · \
+                ECHO MEASURED WHILE YOU TYPE
+                """)
         clusterStack.addArrangedSubview(hairline())
         clusterStack.addArrangedSubview(padded(honesty))
     }

@@ -54,6 +54,7 @@ final class SettingsUIKitTests: XCTestCase {
             "Agent alerts",
             "App lock",
             "Multiplex Pro",
+            "Language",
             "About",
         ])
 

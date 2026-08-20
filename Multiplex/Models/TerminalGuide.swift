@@ -1,3 +1,5 @@
+import Foundation
+
 enum TerminalGuideBank: CaseIterable, Equatable {
     case touchPointer
     case linksPaths
@@ -7,11 +9,11 @@ enum TerminalGuideBank: CaseIterable, Equatable {
 
     var title: String {
         switch self {
-        case .touchPointer: "TOUCH & POINTER"
-        case .linksPaths: "LINKS & PATHS"
-        case .keyboard: "KEYBOARD"
-        case .herdrPanes: "HERDR PANES"
-        case .clipboard: "CLIPBOARD"
+        case .touchPointer: String(localized: "TOUCH & POINTER")
+        case .linksPaths: String(localized: "LINKS & PATHS")
+        case .keyboard: String(localized: "KEYBOARD")
+        case .herdrPanes: String(localized: "HERDR PANES")
+        case .clipboard: String(localized: "CLIPBOARD")
         }
     }
 }
@@ -58,13 +60,13 @@ enum TerminalGuide {
             id: "doubletap",
             figure: 1,
             bank: .touchPointer,
-            title: "DOUBLE TAP",
+            title: String(localized: "DOUBLE TAP"),
             tag: nil,
             body: [
-                .text(
-                    "Tap or click twice. The remote gets two real clicks first — "
-                        + "then the selection block rises at that spot: "
-                ),
+                .text(String(localized: """
+                    Tap or click twice. The remote gets two real clicks first — then the \
+                    selection block rises at that spot:\u{20}
+                    """)),
                 .control("SELECT"),
                 .text(" · "),
                 .control("SELECT ALL"),
@@ -77,98 +79,115 @@ enum TerminalGuide {
             id: "longpress",
             figure: 2,
             bank: .touchPointer,
-            title: "LONG PRESS",
+            title: String(localized: "LONG PRESS"),
             tag: nil,
             body: [
-                .text("The same block, right where you pressed — and it reaches links "
-                    + "and paths at any mouse mode, when a tap belongs to the remote."),
+                .text(String(localized: """
+                    The same block, right where you pressed — and it reaches links and \
+                    paths at any mouse mode, when a tap belongs to the remote.
+                    """)),
             ]
         ),
         TerminalGuideEntry(
             id: "rightclick",
             figure: 3,
             bank: .touchPointer,
-            title: "RIGHT CLICK",
-            tag: "Pointer",
+            title: String(localized: "RIGHT CLICK"),
+            tag: String(localized: "Pointer"),
             body: [
-                .text("A mouse's secondary click runs the same chain as a long press. On herdr it adds "),
+                .text(String(localized: """
+                    A mouse's secondary click runs the same chain as a long press. On herdr \
+                    it adds\u{20}
+                    """)),
                 .control("MENU"),
-                .text(" — the remote's own pane menu."),
+                .text(String(localized: " — the remote's own pane menu.")),
             ]
         ),
         TerminalGuideEntry(
             id: "pan",
             figure: 4,
             bank: .touchPointer,
-            title: "PAN TO SCROLL",
+            title: String(localized: "PAN TO SCROLL"),
             tag: nil,
             body: [
-                .text("A drag scrolls the remote screen itself — the app speaks wheel, "
-                    + "or arrow keys in full-screen apps. There is no separate local "
-                    + "scrollback to fall out of."),
+                .text(String(localized: """
+                    A drag scrolls the remote screen itself — the app speaks wheel, or \
+                    arrow keys in full-screen apps. There is no separate local scrollback \
+                    to fall out of.
+                    """)),
             ]
         ),
         TerminalGuideEntry(
             id: "edgeswipe",
             figure: 5,
             bank: .touchPointer,
-            title: "EDGE SWIPE",
+            title: String(localized: "EDGE SWIPE"),
             tag: "iPhone",
             body: [
-                .text("From the screen's left edge, swipe right to step back to the deck."),
+                .text(String(localized: """
+                    From the screen's left edge, swipe right to step back to the deck.
+                    """)),
             ]
         ),
         TerminalGuideEntry(
             id: "link",
             figure: 6,
             bank: .linksPaths,
-            title: "PRESS A LINK",
+            title: String(localized: "PRESS A LINK"),
             tag: nil,
             body: [
-                .text("Nothing opens by itself. A press raises a sheet showing where it "
-                    + "really points — "),
+                .text(String(localized: """
+                    Nothing opens by itself. A press raises a sheet showing where it \
+                    really points —\u{20}
+                    """)),
                 .control("OPEN"),
-                .text(", or dock the page beside this tab as a "),
+                .text(String(localized: ", or dock the page beside this tab as a ")),
                 .control("⌗ VIEWPORT"),
-                .text(". On Vision Pro, links glow under your eye; pinch for the same sheet."),
+                .text(String(localized: """
+                    . On Vision Pro, links glow under your eye; pinch for the same sheet.
+                    """)),
             ]
         ),
         TerminalGuideEntry(
             id: "path",
             figure: 7,
             bank: .linksPaths,
-            title: "PRESS A PATH",
+            title: String(localized: "PRESS A PATH"),
             tag: nil,
             body: [
-                .text("Same press, its own sheet: "),
+                .text(String(localized: "Same press, its own sheet: ")),
                 .control("▤ VIEW"),
-                .text(" opens it in the File Viewer. A "),
+                .text(String(localized: " opens it in the File Viewer. A ")),
                 .key(":120"),
-                .text(" after the name scrolls to that line."),
+                .text(String(localized: " after the name scrolls to that line.")),
             ]
         ),
         TerminalGuideEntry(
             id: "kbdlock",
             figure: 8,
             bank: .keyboard,
-            title: "LOCK THE KEYBOARD",
+            title: String(localized: "LOCK THE KEYBOARD"),
             tag: "iPhone · iPad",
             body: [
-                .text("Hold the "),
+                .text(String(localized: "Hold the ")),
                 .key("⌨"),
-                .text(" key about half a second: taps stop summoning the keyboard. "
-                    + "Hold again — or ⋯ → Unlock Keyboard — to release."),
+                .text(String(localized: """
+                     key about half a second: taps stop summoning the keyboard. Hold \
+                    again — or ⋯ → Unlock Keyboard — to release.
+                    """)),
             ]
         ),
         TerminalGuideEntry(
             id: "dictate",
             figure: 9,
             bank: .keyboard,
-            title: "DICTATE",
+            title: String(localized: "DICTATE"),
             tag: "iPhone · iPad",
             body: [
-                .text("With a hardware keyboard — or while locked — the mic key listens. "
-                    + "Words type once they settle, and nothing is ever submitted for you."),
+                .text(String(localized: """
+                    With a hardware keyboard — or while locked — the mic key listens. Words \
+                    type once they settle, and nothing is ever submitted for you.
+                    """)),
             ]
         ),
         TerminalGuideEntry(
@@ -176,90 +195,106 @@ enum TerminalGuide {
             figure: 10,
             bank: .keyboard,
             title: "SHIFT + RETURN",
-            tag: "HW keyboard",
+            tag: String(localized: "HW keyboard"),
             body: [
-                .text("A newline that doesn't send the line."),
+                .text(String(localized: "A newline that doesn't send the line.")),
             ]
         ),
         TerminalGuideEntry(
             id: "shortcutkey",
             figure: 11,
             bank: .keyboard,
-            title: "THE TMUX / HRDR KEY",
+            title: String(localized: "THE TMUX / HRDR KEY"),
             tag: nil,
             body: [
-                .text("One key on the rail opens the whole shortcut panel: copy mode, "
-                    + "splits, windows, workspaces, and the confirmed closes."),
+                .text(String(localized: """
+                    One key on the rail opens the whole shortcut panel: copy mode, splits, \
+                    windows, workspaces, and the confirmed closes.
+                    """)),
             ]
         ),
         TerminalGuideEntry(
             id: "keycommands",
             figure: 12,
             bank: .keyboard,
-            title: "HOLD CTRL",
+            title: String(localized: "HOLD CTRL"),
             tag: nil,
             body: [
-                .text("A tap latches "),
+                .text(String(localized: "A tap latches ")),
                 .key("CTRL"),
-                .text("; a hold opens KEY COMMANDS — "),
+                .text(String(localized: "; a hold opens KEY COMMANDS — ")),
                 .key("⇧⏎"),
-                .text(" newline, a double "),
+                .text(String(localized: " newline, a double ")),
                 .key("⌃C"),
                 .text(", "),
                 .key("⌥⌫"),
-                .text(" delete-word, and your own chords or one-line text macros "
-                    + "from CUSTOM SETUP, on every device."),
+                .text(String(localized: """
+                     delete-word, and your own chords or one-line text macros from CUSTOM \
+                    SETUP, on every device.
+                    """)),
             ]
         ),
         TerminalGuideEntry(
             id: "talkback",
             figure: 13,
             bank: .keyboard,
-            title: "MESSAGE BOX",
+            title: String(localized: "MESSAGE BOX"),
             tag: nil,
             body: [
-                .text("The speech-bubble key beside "),
+                .text(String(localized: "The speech-bubble key beside ")),
                 .key("RET"),
-                .text(" opens a message box: write with autocorrect and your keyboard's "
-                    + "own dictation, attach photos or files, then "),
+                .text(String(localized: """
+                     opens a message box: write with autocorrect and your keyboard's own \
+                    dictation, attach photos or files, then\u{20}
+                    """)),
                 .control("↑"),
-                .text(" sends it all as one message. The rail keeps driving the pane "
-                    + "while you write; hold "),
+                .text(String(localized: """
+                     sends it all as one message. The rail keeps driving the pane while you \
+                    write; hold\u{20}
+                    """)),
                 .control("↑"),
-                .text(" to type without submitting. Locking the keyboard closes it."),
+                .text(String(localized: """
+                     to type without submitting. Locking the keyboard closes it.
+                    """)),
             ]
         ),
         TerminalGuideEntry(
             id: "resize",
             figure: 14,
             bank: .herdrPanes,
-            title: "RESIZE PANES",
+            title: String(localized: "RESIZE PANES"),
             tag: "herdr",
             body: [
-                .text("Hold a pane border until it wakes, then drag it where you want."),
+                .text(String(localized: """
+                    Hold a pane border until it wakes, then drag it where you want.
+                    """)),
             ]
         ),
         TerminalGuideEntry(
             id: "panemenu",
             figure: 15,
             bank: .herdrPanes,
-            title: "PANE MENU",
+            title: String(localized: "PANE MENU"),
             tag: "herdr",
             body: [
                 .control("MENU"),
-                .text(" in the press block right-clicks the remote for you — herdr's "
-                    + "pane menu opens under your finger."),
+                .text(String(localized: """
+                     in the press block right-clicks the remote for you — herdr's pane menu \
+                    opens under your finger.
+                    """)),
             ]
         ),
         TerminalGuideEntry(
             id: "paste",
             figure: nil,
             bank: .clipboard,
-            title: "\"ALLOW PASTE\" EVERY TIME?",
+            title: String(localized: "\"ALLOW PASTE\" EVERY TIME?"),
             tag: "iPhone · iPad",
             body: [
-                .text("iOS asks before Multiplex may read another app's copy. To stop "
-                    + "the prompt: Settings → Multiplex → Paste from Other Apps → Allow."),
+                .text(String(localized: """
+                    iOS asks before Multiplex may read another app's copy. To stop the \
+                    prompt: Settings → Multiplex → Paste from Other Apps → Allow.
+                    """)),
             ]
         ),
     ]

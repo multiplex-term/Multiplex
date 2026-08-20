@@ -91,9 +91,14 @@ struct TerminalTheme: Codable, Hashable, Identifiable {
     }
 
     static let ansiNames: [String] = [
-        "Black", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White",
-        "Bright Black", "Bright Red", "Bright Green", "Bright Yellow",
-        "Bright Blue", "Bright Magenta", "Bright Cyan", "Bright White",
+        String(localized: "Black"), String(localized: "Red"),
+        String(localized: "Green"), String(localized: "Yellow"),
+        String(localized: "Blue"), String(localized: "Magenta"),
+        String(localized: "Cyan"), String(localized: "White"),
+        String(localized: "Bright Black"), String(localized: "Bright Red"),
+        String(localized: "Bright Green"), String(localized: "Bright Yellow"),
+        String(localized: "Bright Blue"), String(localized: "Bright Magenta"),
+        String(localized: "Bright Cyan"), String(localized: "Bright White"),
     ]
 }
 

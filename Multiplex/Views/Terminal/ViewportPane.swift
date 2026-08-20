@@ -54,8 +54,10 @@ struct ViewportOrnamentConfiguration {
 final class ViewportPaneViewController: UIViewController,
     UIAdaptivePresentationControllerDelegate
 {
-    static let clearBrowsingMessage = "Clears cookies, caches, and site storage for every "
-        + "viewport page — dev-server logins included. This page reloads signed out."
+    static let clearBrowsingMessage = String(localized: """
+        Clears cookies, caches, and site storage for every viewport page — dev-server \
+        logins included. This page reloads signed out.
+        """)
 
     private let controller: ViewportController
     private var contentSafeArea: UIEdgeInsets
@@ -266,13 +268,13 @@ final class ViewportPaneViewController: UIViewController,
         backChip = chip(
             "",
             systemImage: "chevron.left",
-            accessibility: "Back"
+            accessibility: String(localized: "Back")
         ) { [weak controller] in controller?.goBack() }
         backChip.accessibilityIdentifier = "viewport.back"
         reloadChip = chip(
             "",
             systemImage: "arrow.clockwise",
-            accessibility: "Reload"
+            accessibility: String(localized: "Reload")
         ) { [weak self] in
             guard let self else { return }
             if self.state?.isLoading == true {
@@ -289,18 +291,25 @@ final class ViewportPaneViewController: UIViewController,
         urlButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
         urlButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         urlButton.hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
-        urlButton.accessibilityHint = "Edits the address"
+        urlButton.accessibilityHint = String(localized: "Edits the address")
         urlButton.addAction(UIAction { [weak self] _ in self?.beginEditingAddress() }, for: .touchUpInside)
         urlButton.showsMenuAsPrimaryAction = false
         urlButton.menu = makeAddressMenu()
         urlButton.accessibilityIdentifier = "viewport.address"
 
         reachBadge.setContentHuggingPriority(.required, for: .horizontal)
-        systemChip = chip("SYSTEM", accessibility: "Open in the system browser") { [weak controller] in
+        systemChip = chip(
+            "SYSTEM",
+            accessibility: String(localized: "Open in the system browser")
+        ) { [weak controller] in
             controller?.openInSystemBrowser()
         }
         systemChip.accessibilityIdentifier = "viewport.system"
-        closeChip = chip("CLOSE", prominent: true, accessibility: "Close viewport") { [weak self] in
+        closeChip = chip(
+            "CLOSE",
+            prominent: true,
+            accessibility: String(localized: "Close viewport")
+        ) { [weak self] in
             self?.closeAction()
         }
         closeChip.accessibilityIdentifier = "viewport.close"
@@ -322,11 +331,13 @@ final class ViewportPaneViewController: UIViewController,
             caption: "",
             systemImage: state.isLoading ? "xmark" : "arrow.clockwise"
         )
-        reloadChip.accessibilityLabel = state.isLoading ? "Stop loading" : "Reload"
+        reloadChip.accessibilityLabel = state.isLoading
+            ? String(localized: "Stop loading")
+            : String(localized: "Reload")
         urlButton.setAttributedTitle(Self.readoutText(state.displayURL), for: .normal)
         urlButton.accessibilityLabel = state.displayURL.absoluteString
         reachBadge.setText(state.railTag)
-        reachBadge.accessibilityLabel = "Reach: \(state.railTag)"
+        reachBadge.accessibilityLabel = String(localized: "Reach: \(state.railTag)")
         progressLine.isHidden = !state.isLoading
         updateProgressWidth()
         if !showsInWindowRail { ornamentRailDidChange() }
@@ -397,11 +408,14 @@ final class ViewportPaneViewController: UIViewController,
 
     private func makeAddressMenu() -> UIMenu {
         UIMenu(children: [
-            UIAction(title: "Copy Address", image: UIImage(systemName: "doc.on.doc")) { [weak controller] _ in
+            UIAction(
+                title: String(localized: "Copy Address"),
+                image: UIImage(systemName: "doc.on.doc")
+            ) { [weak controller] _ in
                 controller?.copyURL()
             },
             UIAction(
-                title: "Clear Browsing Data…",
+                title: String(localized: "Clear Browsing Data…"),
                 image: UIImage(systemName: "trash"),
                 attributes: .destructive
             ) { [weak self] _ in self?.presentClearBrowsingDataConfirmation() },
@@ -505,12 +519,15 @@ final class ViewportPaneViewController: UIViewController,
         case .internet:
             nil
         case .lan:
-            "This address lives on \(hostName)'s network — "
-                + "the device must share it to load the page."
+            String(localized: """
+                This address lives on \(hostName)'s network — the device must share it to \
+                load the page.
+                """)
         case .remoteLoopback:
-            "This page rides \(hostName)'s own address. "
-                + "The server must listen beyond loopback (vite --host, "
-                + "-H 0.0.0.0) for anything to answer."
+            String(localized: """
+                This page rides \(hostName)'s own address. The server must listen beyond \
+                loopback (vite --host, -H 0.0.0.0) for anything to answer.
+                """)
         }
     }
 
@@ -518,15 +535,21 @@ final class ViewportPaneViewController: UIViewController,
 
     func makeClearBrowsingDataAlert() -> UIAlertController {
         let alert = UIAlertController(
-            title: "Clear Browsing Data",
+            title: String(localized: "Clear Browsing Data"),
             message: Self.clearBrowsingMessage,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Clear"),
+            style: .destructive
+        ) { [weak self] _ in
             self?.controller.clearBrowsingData()
             self?.presentPendingExternalLinkIfPossible()
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Cancel"),
+            style: .cancel
+        ) { [weak self] _ in
             self?.presentPendingExternalLinkIfPossible()
         })
         return alert
@@ -609,7 +632,7 @@ final class ViewportBadgeView: UIKitTallyBorderedView {
 final class ViewportAddressEditorView: UIKitTallyBorderedView, UITextFieldDelegate {
     private(set) var textField = UITextField()
     private(set) var rejectedLabel = UIKitChassisLabel(
-        "WEB ADDRESSES ONLY",
+        String(localized: "WEB ADDRESSES ONLY"),
         size: 8,
         color: TallyPalette.caution
     )
@@ -629,7 +652,7 @@ final class ViewportAddressEditorView: UIKitTallyBorderedView, UITextFieldDelega
 
         let caption = UIKitChassisLabel("ADDRESS", size: 9, color: UIKitChassis.signal3)
         textField.text = text
-        textField.placeholder = "host:port or https://…"
+        textField.placeholder = String(localized: "host:port or https://…")
         textField.font = UIKitChassis.monoFont(12)
         textField.textColor = UIKitChassis.signal
         textField.tintColor = UIKitChassis.signal
@@ -649,12 +672,12 @@ final class ViewportAddressEditorView: UIKitTallyBorderedView, UITextFieldDelega
         goChip = UIKitChassisChip(
             "GO",
             prominent: true,
-            accessibilityLabel: "Go",
+            accessibilityLabel: String(localized: "Go"),
             action: submit
         )
         cancelChip = UIKitChassisChip(
             "CANCEL",
-            accessibilityLabel: "Cancel address edit",
+            accessibilityLabel: String(localized: "Cancel address edit"),
             action: cancel
         )
         let row = UIStackView(arrangedSubviews: [
@@ -736,12 +759,12 @@ final class ViewportFailureOverlayView: UIView {
         retryChip = UIKitChassisChip(
             "RETRY",
             prominent: true,
-            accessibilityLabel: "Retry",
+            accessibilityLabel: String(localized: "Retry"),
             action: retry
         )
         systemChip = UIKitChassisChip(
             "SYSTEM",
-            accessibilityLabel: "Open in the system browser",
+            accessibilityLabel: String(localized: "Open in the system browser"),
             action: openSystem
         )
         let actions = UIStackView(arrangedSubviews: [retryChip, systemChip])
@@ -959,7 +982,7 @@ final class ViewportUMDViewController: UIViewController {
         deckChip = chip(
             configuration.style == .shell ? configuration.deckControlLabel : "DECK",
             accessibility: configuration.style == .shell
-                ? configuration.deckControlLabel.capitalized : "Deck",
+                ? configuration.deckControlLabel.capitalized : String(localized: "Deck"),
             action: .showDeck
         )
         let title = UIKitChassisLabel(
@@ -987,7 +1010,9 @@ final class ViewportUMDViewController: UIViewController {
             if !configuration.mergeSources.isEmpty {
                 let menu = ViewportMenuButton(
                     caption: "MERGE",
-                    accessibilityLabel: "Merge another window into this one",
+                    accessibilityLabel: String(
+                        localized: "Merge another window into this one"
+                    ),
                     menu: makeMergeMenu()
                 )
                 mergeButton = menu
@@ -1045,11 +1070,19 @@ final class ViewportUMDViewController: UIViewController {
         var views: [UIView] = []
 
         if state.canGoBack || state.canGoForward {
-            let back = fileChip("◂", accessibility: "Back", action: fileViewer.goBack)
+            let back = fileChip(
+                "◂",
+                accessibility: String(localized: "Back"),
+                action: fileViewer.goBack
+            )
             back.accessibilityIdentifier = "fileViewer.back"
             setChipEnabled(back, state.canGoBack)
             fileBackChip = back
-            let forward = fileChip("▸", accessibility: "Forward", action: fileViewer.goForward)
+            let forward = fileChip(
+                "▸",
+                accessibility: String(localized: "Forward"),
+                action: fileViewer.goForward
+            )
             forward.accessibilityIdentifier = "fileViewer.forward"
             setChipEnabled(forward, state.canGoForward)
             fileForwardChip = forward
@@ -1064,7 +1097,7 @@ final class ViewportUMDViewController: UIViewController {
             let source = fileChip(
                 "SOURCE",
                 prominent: state.sourceSelected,
-                accessibility: "Show source",
+                accessibility: String(localized: "Show source"),
                 action: fileViewer.showSource
             )
             source.accessibilityIdentifier = "fileViewer.source"
@@ -1072,7 +1105,7 @@ final class ViewportUMDViewController: UIViewController {
             let diff = fileChip(
                 "DIFF",
                 prominent: !state.sourceSelected,
-                accessibility: "Show diff",
+                accessibility: String(localized: "Show diff"),
                 action: fileViewer.showDiff
             )
             diff.accessibilityIdentifier = "fileViewer.diff"
@@ -1081,7 +1114,7 @@ final class ViewportUMDViewController: UIViewController {
             segment.axis = .horizontal
             segment.alignment = .center
             segment.spacing = 4
-            segment.accessibilityLabel = "Source or diff"
+            segment.accessibilityLabel = String(localized: "Source or diff")
             views.append(segment)
         }
 
@@ -1091,7 +1124,8 @@ final class ViewportUMDViewController: UIViewController {
                 caption,
                 prominent: selected,
                 accessibility: selected
-                    ? "Back to rendered markdown" : "Select source text to copy",
+                    ? String(localized: "Back to rendered markdown")
+                    : String(localized: "Select source text to copy"),
                 action: fileViewer.toggleMarkdownSelection
             )
             select.accessibilityIdentifier = "fileViewer.markdownSelect"
@@ -1120,7 +1154,7 @@ final class ViewportUMDViewController: UIViewController {
         views.append(path)
 
         let host = FileViewerBadgeView(state.hostName.uppercased())
-        host.accessibilityLabel = "Files on \(state.hostName)"
+        host.accessibilityLabel = String(localized: "Files on \(state.hostName)")
         host.setContentHuggingPriority(.required, for: .horizontal)
         fileHostBadge = host
         views.append(host)
@@ -1128,7 +1162,8 @@ final class ViewportUMDViewController: UIViewController {
         let tree = fileChip(
             state.treeCaption,
             accessibility: state.treeCaption == "HIDE"
-                ? "Hide the file tree" : "Show the file tree",
+                ? String(localized: "Hide the file tree")
+                : String(localized: "Show the file tree"),
             action: fileViewer.toggleTree
         )
         tree.accessibilityIdentifier = "fileViewer.tree"
@@ -1137,7 +1172,7 @@ final class ViewportUMDViewController: UIViewController {
 
         let refresh = fileChip(
             "REFRESH",
-            accessibility: "Refresh file viewer",
+            accessibility: String(localized: "Refresh file viewer"),
             action: fileViewer.refresh
         )
         refresh.accessibilityIdentifier = "fileViewer.refresh"
@@ -1214,7 +1249,7 @@ final class ViewportUMDViewController: UIViewController {
             let label = FileViewerTextScale.percentLabel(textScale.scale)
             let reset = chip(
                 label,
-                accessibility: "Text size \(label); resets to 100 percent",
+                accessibility: String(localized: "Text size \(label); resets to 100 percent"),
                 action: .textScaleReset
             )
             reset.accessibilityIdentifier = "viewportUMD.textScaleReset"
@@ -1224,7 +1259,7 @@ final class ViewportUMDViewController: UIViewController {
 
         let smaller = chip(
             "A−",
-            accessibility: "Smaller text",
+            accessibility: String(localized: "Smaller text"),
             action: .textScaleStep(-1)
         )
         smaller.accessibilityIdentifier = "viewportUMD.textSmaller"
@@ -1234,7 +1269,7 @@ final class ViewportUMDViewController: UIViewController {
 
         let larger = chip(
             "A+",
-            accessibility: "Larger text",
+            accessibility: String(localized: "Larger text"),
             action: .textScaleStep(1)
         )
         larger.accessibilityIdentifier = "viewportUMD.textLarger"
@@ -1352,20 +1387,22 @@ final class ViewportSwitchboardViewController: UIViewController {
 
     private func render() {
         guard let viewport = configuration.viewport else { return }
-        deckChip = chip("DECK", accessibility: "Deck") { [weak self] in
+        deckChip = chip("DECK", accessibility: String(localized: "Deck")) { [weak self] in
             self?.configuration.showDeck()
         }
         backChip = chip(
             "",
             systemImage: "chevron.left",
-            accessibility: "Back"
+            accessibility: String(localized: "Back")
         ) { [weak self] in self?.configuration.viewport?.goBack() }
         backChip.accessibilityIdentifier = "viewport.back"
         setChipEnabled(backChip, viewport.key.canGoBack)
         reloadChip = chip(
             "",
             systemImage: viewport.key.isLoading ? "xmark" : "arrow.clockwise",
-            accessibility: viewport.key.isLoading ? "Stop loading" : "Reload"
+            accessibility: viewport.key.isLoading
+                ? String(localized: "Stop loading")
+                : String(localized: "Reload")
         ) { [weak self] in self?.configuration.viewport?.reloadOrStop() }
         reloadChip.accessibilityIdentifier = "viewport.reload"
         let navigateRow = UIStackView(arrangedSubviews: [
@@ -1383,7 +1420,7 @@ final class ViewportSwitchboardViewController: UIViewController {
             for: .normal
         )
         addressButton.accessibilityLabel = viewport.key.displayURL.absoluteString
-        addressButton.accessibilityHint = "Edits the address"
+        addressButton.accessibilityHint = String(localized: "Edits the address")
         addressButton.accessibilityIdentifier = "viewport.address"
         addressButton.hoverStyle = UIHoverStyle(
             effect: .highlight,
@@ -1401,7 +1438,7 @@ final class ViewportSwitchboardViewController: UIViewController {
             addressButton.widthAnchor.constraint(lessThanOrEqualToConstant: 300),
         ])
         reachBadge = ViewportBadgeView(viewport.key.railTag)
-        reachBadge.accessibilityLabel = "Reach: \(viewport.key.railTag)"
+        reachBadge.accessibilityLabel = String(localized: "Reach: \(viewport.key.railTag)")
         reachBadge.setContentHuggingPriority(.required, for: .horizontal)
         let locateRow = UIStackView(arrangedSubviews: [addressButton, reachBadge])
         configure(row: locateRow, spacing: 10)
@@ -1410,7 +1447,10 @@ final class ViewportSwitchboardViewController: UIViewController {
             progress: viewport.key.isLoading ? viewport.key.progress : nil
         )
 
-        systemChip = chip("SYSTEM", accessibility: "Open in the system browser") { [weak self] in
+        systemChip = chip(
+            "SYSTEM",
+            accessibility: String(localized: "Open in the system browser")
+        ) { [weak self] in
             self?.configuration.viewport?.openInSystemBrowser()
         }
         systemChip.accessibilityIdentifier = "viewport.system"
@@ -1418,7 +1458,7 @@ final class ViewportSwitchboardViewController: UIViewController {
         if !configuration.mergeSources.isEmpty {
             let menu = ViewportMenuButton(
                 caption: "⋯",
-                accessibilityLabel: "Merge another window into this one",
+                accessibilityLabel: String(localized: "Merge another window into this one"),
                 menu: mergeMenu()
             )
             mergeButton = menu
@@ -1483,11 +1523,14 @@ final class ViewportSwitchboardViewController: UIViewController {
 
     private func addressMenu() -> UIMenu {
         UIMenu(children: [
-            UIAction(title: "Copy Address", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+            UIAction(
+                title: String(localized: "Copy Address"),
+                image: UIImage(systemName: "doc.on.doc")
+            ) { [weak self] _ in
                 self?.configuration.viewport?.copyAddress()
             },
             UIAction(
-                title: "Clear Browsing Data…",
+                title: String(localized: "Clear Browsing Data…"),
                 image: UIImage(systemName: "trash"),
                 attributes: .destructive
             ) { [weak self] _ in
@@ -1497,7 +1540,7 @@ final class ViewportSwitchboardViewController: UIViewController {
     }
 
     private func mergeMenu() -> UIMenu {
-        UIMenu(title: "Merge", children: configuration.mergeSources.map { source in
+        UIMenu(title: String(localized: "Merge"), children: configuration.mergeSources.map { source in
             UIAction(
                 title: source.label,
                 image: UIImage(systemName: "macwindow"),

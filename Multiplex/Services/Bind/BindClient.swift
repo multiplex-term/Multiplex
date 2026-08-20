@@ -24,10 +24,10 @@ enum BindClient {
 
         var errorDescription: String? {
             switch self {
-            case .unreachable(let detail): "Couldn't reach the machine — \(detail)"
+            case .unreachable(let detail): String(localized: "Couldn't reach the machine — \(detail)")
             case .rejected(let reason): reason
-            case .wire(let detail): "The bind exchange broke off — \(detail)"
-            case .timedOut: "No answer from mpx bind — is it still running?"
+            case .wire(let detail): String(localized: "The bind exchange broke off — \(detail)")
+            case .timedOut: String(localized: "No answer from mpx bind — is it still running?")
             }
         }
     }
@@ -144,10 +144,10 @@ enum BindClient {
 
     private static func rejectionMessage(_ raw: String?) -> String {
         switch raw {
-        case "wrong pin": "That PIN didn't match — check the terminal and try again."
-        case "declined on the host": "The machine declined the bind."
-        case .some(let reason): "The machine refused: \(reason)"
-        case nil: "The machine refused the bind."
+        case "wrong pin": String(localized: "That PIN didn't match — check the terminal and try again.")
+        case "declined on the host": String(localized: "The machine declined the bind.")
+        case .some(let reason): String(localized: "The machine refused: \(reason)")
+        case nil: String(localized: "The machine refused the bind.")
         }
     }
 

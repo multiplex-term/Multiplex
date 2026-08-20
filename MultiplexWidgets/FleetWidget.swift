@@ -75,7 +75,7 @@ struct FleetWidgetView: View {
             HStack {
                 WidgetLabel("multiplex · fleet", size: 10)
                 Spacer(minLength: 4)
-                Text("\(entry.hosts.count) HOSTS · \(sessionCount) SESS")
+                Text(verbatim: "\(entry.hosts.count) HOSTS · \(sessionCount) SESS")
                     .font(.widgetMono(7.5))
                     .foregroundStyle(palette.signal3)
             }
@@ -218,9 +218,9 @@ struct FleetWidgetView: View {
                 if let session = tile.session, !session.miniatureLines.isEmpty {
                     MiniatureScreen(lines: session.miniatureLines, fontSize: 7)
                 } else if tile.session != nil {
-                    HatchScreen(caption: "No recent frame")
+                    HatchScreen(caption: String(localized: "No recent frame"))
                 } else {
-                    HatchScreen(caption: "No recent data")
+                    HatchScreen(caption: String(localized: "No recent data"))
                 }
             }
             HStack {

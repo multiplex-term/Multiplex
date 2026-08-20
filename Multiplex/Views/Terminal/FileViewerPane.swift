@@ -678,7 +678,9 @@ final class FileViewerPaneViewController: UIViewController {
                 additions: diff.additions,
                 deletions: diff.deletions
             )
-            headerCountsLabel.accessibilityLabel = "\(diff.additions) additions, \(diff.deletions) deletions"
+            headerCountsLabel.accessibilityLabel = String(
+                localized: "\(diff.additions) additions, \(diff.deletions) deletions"
+            )
             headerCountsLabel.isHidden = false
         } else {
             headerCountsLabel.isHidden = true
@@ -688,7 +690,7 @@ final class FileViewerPaneViewController: UIViewController {
     private func headerName(_ state: FileViewerPaneObservedState) -> String {
         switch state.body {
         case .document(let document): document.name
-        case .diff(_, .repo): "Working tree vs HEAD"
+        case .diff(_, .repo): String(localized: "Working tree vs HEAD")
         case .diff(_, .file(let path)): FileTree.name(of: path)
         case .loading(let label): label
         case .failure: "—"
@@ -763,13 +765,16 @@ final class FileViewerPaneViewController: UIViewController {
         // rail stays uncluttered. The pair shows together (a dimmed twin
         // keeps the other from jumping around) and dims like REFRESH does.
         if state.canGoBack || state.canGoForward {
-            let back = makeChip("◂", accessibility: "Back") { [weak controller] in
+            let back = makeChip("◂", accessibility: String(localized: "Back")) { [weak controller] in
                 controller?.goBack()
             }
             back.accessibilityIdentifier = "fileViewer.back"
             setChipEnabled(back, state.canGoBack)
             backChip = back
-            let forward = makeChip("▸", accessibility: "Forward") { [weak controller] in
+            let forward = makeChip(
+                "▸",
+                accessibility: String(localized: "Forward")
+            ) { [weak controller] in
                 controller?.goForward()
             }
             forward.accessibilityIdentifier = "fileViewer.forward"
@@ -789,13 +794,13 @@ final class FileViewerPaneViewController: UIViewController {
             let source = makeChip(
                 "SOURCE",
                 prominent: sourceMode,
-                accessibility: "Show source"
+                accessibility: String(localized: "Show source")
             ) { [weak controller] in controller?.showSource() }
             source.accessibilityIdentifier = "fileViewer.source"
             let diff = makeChip(
                 "DIFF",
                 prominent: !sourceMode,
-                accessibility: "Show diff"
+                accessibility: String(localized: "Show diff")
             ) { [weak self] in
                 guard let self,
                       case .document(let document) = self.observedState?.body
@@ -812,7 +817,7 @@ final class FileViewerPaneViewController: UIViewController {
             mode.alignment = .center
             mode.spacing = 4
             mode.isAccessibilityElement = false
-            mode.accessibilityLabel = "Source or diff"
+            mode.accessibilityLabel = String(localized: "Source or diff")
             railStack.addArrangedSubview(mode)
         }
 
@@ -821,8 +826,8 @@ final class FileViewerPaneViewController: UIViewController {
                 selectingMarkdownSource ? "DONE" : "SELECT",
                 prominent: selectingMarkdownSource,
                 accessibility: selectingMarkdownSource
-                    ? "Back to rendered markdown"
-                    : "Select source text to copy"
+                    ? String(localized: "Back to rendered markdown")
+                    : String(localized: "Select source text to copy")
             ) { [weak self] in self?.toggleMarkdownSelection() }
             select.accessibilityIdentifier = "fileViewer.markdownSelect"
             selectChip = select
@@ -834,20 +839,25 @@ final class FileViewerPaneViewController: UIViewController {
         railStack.addArrangedSubview(railPathLabel)
 
         let host = FileViewerBadgeView(state.hostName.uppercased())
-        host.accessibilityLabel = "Files on \(state.hostName)"
+        host.accessibilityLabel = String(localized: "Files on \(state.hostName)")
         host.setContentHuggingPriority(.required, for: .horizontal)
         railStack.addArrangedSubview(host)
 
         let treeVisible = isCompactLayout ? drawerOpen : treeDocked
         let tree = makeChip(
             treeVisible ? "HIDE" : "TREE",
-            accessibility: treeVisible ? "Hide the file tree" : "Show the file tree"
+            accessibility: treeVisible
+                ? String(localized: "Hide the file tree")
+                : String(localized: "Show the file tree")
         ) { [weak self] in self?.toggleTree() }
         tree.accessibilityIdentifier = "fileViewer.tree"
         treeChip = tree
         railStack.addArrangedSubview(tree)
 
-        let refresh = makeChip("REFRESH", accessibility: "Refresh file viewer") { [weak controller] in
+        let refresh = makeChip(
+            "REFRESH",
+            accessibility: String(localized: "Refresh file viewer")
+        ) { [weak controller] in
             controller?.refresh()
         }
         refresh.accessibilityIdentifier = "fileViewer.refresh"
@@ -858,7 +868,7 @@ final class FileViewerPaneViewController: UIViewController {
         let close = makeChip(
             "CLOSE",
             prominent: true,
-            accessibility: "Close file viewer"
+            accessibility: String(localized: "Close file viewer")
         ) { [weak self] in self?.closeAction() }
         close.accessibilityIdentifier = "fileViewer.close"
         closeChip = close
@@ -1063,9 +1073,12 @@ final class FileViewerPaneViewController: UIViewController {
     private func makeBody(for state: FileViewerPaneObservedState) -> UIView {
         switch state.body {
         case .idle:
+            let gitHint = state.hasGitRoot
+                ? String(localized: ", or open the branch's diff from its ± counts")
+                : ""
             return FileViewerMessageView(
                 caption: "NO FILE ON SCREEN",
-                detail: "Pick a file from the tree\(state.hasGitRoot ? ", or open the branch's diff from its ± counts" : "").",
+                detail: String(localized: "Pick a file from the tree\(gitHint)."),
                 captionColor: UIKitChassis.signal3,
                 detailFont: UIFont.preferredFont(forTextStyle: .footnote),
                 maximumWidth: 300
@@ -1119,7 +1132,10 @@ final class FileViewerPaneViewController: UIViewController {
                 return verdictPanel(
                     document,
                     caption: "LOCKED",
-                    message: "Password-protected. Unlocking opens it on this screen only — the password is not kept.",
+                    message: String(localized: """
+                        Password-protected. Unlocking opens it on this screen only — the \
+                        password is not kept.
+                        """),
                     action: ("UNLOCK…", { [weak self] in self?.presentPDFUnlock(retrying: false) })
                 )
             }
@@ -1135,8 +1151,10 @@ final class FileViewerPaneViewController: UIViewController {
                 return verdictPanel(
                     document,
                     caption: "CAN'T PLAY",
-                    message: "This device can't decode it — a format Core Audio doesn't read "
-                        + "(Ogg Vorbis, for one), or not audio at all."
+                    message: String(localized: """
+                        This device can't decode it — a format Core Audio doesn't read (Ogg \
+                        Vorbis, for one), or not audio at all.
+                        """)
                 )
             }
             let view = FileViewerAudioContentView(volumeStore: .shared)
@@ -1171,7 +1189,9 @@ final class FileViewerPaneViewController: UIViewController {
 
     private func binaryBody(_ document: FileViewerController.Document) -> UIView {
         verdictPanel(
-            document, caption: "BINARY", message: "Not text — Multiplex won't render it as code."
+            document,
+            caption: "BINARY",
+            message: String(localized: "Not text — Multiplex won't render it as code.")
         )
     }
 
@@ -1203,21 +1223,27 @@ final class FileViewerPaneViewController: UIViewController {
     private func presentPDFUnlock(retrying: Bool) {
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(
-            title: "Unlock PDF",
+            title: String(localized: "Unlock PDF"),
             message: retrying
-                ? "That password didn't unlock it. Try again."
-                : "Enter the document's password.",
+                ? String(localized: "That password didn't unlock it. Try again.")
+                : String(localized: "Enter the document's password."),
             preferredStyle: .alert
         )
         alert.addTextField { field in
             field.isSecureTextEntry = true
-            field.placeholder = "Password"
+            field.placeholder = String(localized: "Password")
             field.returnKeyType = .go
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak alert] _ in
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Cancel"),
+            style: .cancel
+        ) { [weak alert] _ in
             alert?.textFields?.first?.text = ""
         })
-        alert.addAction(UIAlertAction(title: "Unlock", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Unlock"),
+            style: .default
+        ) { [weak self, weak alert] _ in
             let password = alert?.textFields?.first?.text ?? ""
             alert?.textFields?.first?.text = ""
             guard let self else { return }
@@ -1591,7 +1617,9 @@ class FileViewerPanelHostView: UIView {
 enum FileViewerZoomReadout {
     static func makeChip(action: @escaping () -> Void) -> UIKitChassisChip {
         let chip = UIKitChassisChip(
-            "100% · FIT", accessibilityLabel: "Zoom 100 percent; resets to fit", action: action
+            "100% · FIT",
+            accessibilityLabel: String(localized: "Zoom 100 percent; resets to fit"),
+            action: action
         )
         chip.isHidden = true
         return chip
@@ -1601,7 +1629,7 @@ enum FileViewerZoomReadout {
     static func show(ratio: CGFloat, on chip: UIKitChassisChip) {
         let percent = Int((ratio * 100).rounded())
         chip.setContent(caption: "\(percent)% · FIT", systemImage: nil)
-        chip.accessibilityLabel = "Zoom \(percent) percent; resets to fit"
+        chip.accessibilityLabel = String(localized: "Zoom \(percent) percent; resets to fit")
         chip.isHidden = abs(ratio - 1) < 0.01
     }
 }
@@ -1653,7 +1681,10 @@ final class FileViewerCodeContentView: UIView {
     override init(frame: CGRect) {
         let caption = UIKitChassisLabel("TRUNCATED", size: 8, color: TallyPalette.caution)
         let detail = UILabel()
-        detail.text = "Showing the first \(FileViewerController.formatBytes(UInt64(FileViewerController.textByteLimit)))."
+        detail.text = String(localized: """
+            Showing the first \
+            \(FileViewerController.formatBytes(UInt64(FileViewerController.textByteLimit))).
+            """)
         detail.font = UIFont.preferredFont(forTextStyle: .footnote)
         detail.adjustsFontForContentSizeCategory = true
         detail.textColor = UIKitChassis.signal3
@@ -1799,7 +1830,7 @@ final class FileViewerDiffContentView: UIView {
     private(set) var textView = makeFileViewerTextView()
     private(set) var cleanView = FileViewerMessageView(
         caption: "NOTHING TO DIFF",
-        detail: "The working tree matches HEAD here.",
+        detail: String(localized: "The working tree matches HEAD here."),
         captionColor: UIKitChassis.signal3,
         detailFont: UIFont.preferredFont(forTextStyle: .footnote),
         topInset: 60
@@ -1902,7 +1933,7 @@ final class FileViewerImageContentView: UIView, UIScrollViewDelegate {
 
         imageView.contentMode = .scaleAspectFit
         imageView.isAccessibilityElement = true
-        imageView.accessibilityLabel = "Image, pinch to zoom"
+        imageView.accessibilityLabel = String(localized: "Image, pinch to zoom")
         scrollView.addSubview(imageView)
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped))
         doubleTap.numberOfTapsRequired = 2
@@ -2174,8 +2205,8 @@ final class FileViewerAudioContentView: FileViewerPanelHostView {
 
     init(volumeStore: FileViewerAudioVolumeStore) {
         self.volumeStore = volumeStore
-        slider = makeChassisSlider(accessibilityLabel: "Playback position")
-        volumeSlider = makeChassisSlider(accessibilityLabel: "Volume")
+        slider = makeChassisSlider(accessibilityLabel: String(localized: "Playback position"))
+        volumeSlider = makeChassisSlider(accessibilityLabel: String(localized: "Volume"))
         super.init(panel: panel, outerInset: 20)
 
         panel.backgroundColor = UIKitChassis.bezel
@@ -2192,7 +2223,7 @@ final class FileViewerAudioContentView: FileViewerPanelHostView {
         backChip = UIKitChassisChip(
             "15",
             systemImage: "gobackward",
-            accessibilityLabel: "Back 15 seconds",
+            accessibilityLabel: String(localized: "Back 15 seconds"),
             action: { [weak self] in
                 self?.clip?.skip(by: -FileViewerAudioClip.skipInterval)
                 self?.refresh()
@@ -2202,7 +2233,7 @@ final class FileViewerAudioContentView: FileViewerPanelHostView {
             "PLAY",
             systemImage: "play.fill",
             prominent: true,
-            accessibilityLabel: "Play",
+            accessibilityLabel: String(localized: "Play"),
             action: { [weak self] in
                 self?.clip?.togglePlayback()
                 self?.refresh()
@@ -2211,7 +2242,7 @@ final class FileViewerAudioContentView: FileViewerPanelHostView {
         forwardChip = UIKitChassisChip(
             "15",
             systemImage: "goforward",
-            accessibilityLabel: "Forward 15 seconds",
+            accessibilityLabel: String(localized: "Forward 15 seconds"),
             action: { [weak self] in
                 self?.clip?.skip(by: FileViewerAudioClip.skipInterval)
                 self?.refresh()
@@ -2320,7 +2351,9 @@ final class FileViewerAudioContentView: FileViewerPanelHostView {
             caption: playing ? "PAUSE" : "PLAY",
             systemImage: playing ? "pause.fill" : "play.fill"
         )
-        playChip.accessibilityLabel = playing ? "Pause" : "Play"
+        playChip.accessibilityLabel = playing
+            ? String(localized: "Pause")
+            : String(localized: "Play")
         setLamp(playing ? .playing : (clip.currentTime > 0 ? .paused : .ready))
         let duration = clip.duration
         let position = duration > 0 ? Float(clip.currentTime / duration) : 0
@@ -2330,7 +2363,9 @@ final class FileViewerAudioContentView: FileViewerPanelHostView {
         let elapsed = FileViewerAudioClock.label(clip.currentTime)
         if elapsedLabel.text != elapsed {
             elapsedLabel.text = elapsed
-            slider.accessibilityValue = "\(elapsed) of \(FileViewerAudioClock.label(duration))"
+            slider.accessibilityValue = String(
+                localized: "\(elapsed) of \(FileViewerAudioClock.label(duration))"
+            )
         }
         // The clock only moves while the clip plays; a paused panel needs no
         // wakeups, and the tick that sees playback end stops itself.
@@ -2758,7 +2793,7 @@ final class FileViewerMarkdownImageView: UIKitTallyBorderedView {
         self.openFull = openFull
         openChip = UIKitChassisChip(
             "OPEN FILE",
-            accessibilityLabel: "Open this file on its own screen",
+            accessibilityLabel: String(localized: "Open this file on its own screen"),
             action: openFull
         )
         super.init(frame: .zero)
@@ -2814,7 +2849,7 @@ final class FileViewerMarkdownImageView: UIKitTallyBorderedView {
             captionLabel.isHidden = false
             openChip.isHidden = true
             isAccessibilityElement = true
-            accessibilityLabel = "Loading image"
+            accessibilityLabel = String(localized: "Loading image")
         case .ready(let image):
             imageView.image = image
             imageView.isHidden = false
@@ -2822,16 +2857,16 @@ final class FileViewerMarkdownImageView: UIKitTallyBorderedView {
             openChip.isHidden = true
             isAccessibilityElement = false
             imageView.isAccessibilityElement = true
-            imageView.accessibilityLabel = "Image, opens on its own screen"
+            imageView.accessibilityLabel = String(localized: "Image, opens on its own screen")
             imageView.accessibilityTraits = .button
         case .failed(let reason):
             imageView.image = nil
             imageView.isHidden = true
-            captionLabel.setText("CAN'T SHOW — \(reason)")
+            captionLabel.setText(String(localized: "CAN'T SHOW — \(reason)"))
             captionLabel.isHidden = false
             openChip.isHidden = false
             isAccessibilityElement = true
-            accessibilityLabel = "Can't show this image. \(reason)"
+            accessibilityLabel = String(localized: "Can't show this image. \(reason)")
         }
         applyHeight()
     }

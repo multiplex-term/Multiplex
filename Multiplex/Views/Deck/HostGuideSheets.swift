@@ -90,7 +90,7 @@ final class UIKitCopyableCommandField: UIKitTallyBorderedView {
         copyChip = UIKitChassisChip(
             "COPY",
             systemImage: "doc.on.doc",
-            accessibilityLabel: "Copy command",
+            accessibilityLabel: String(localized: "Copy command"),
             action: { [weak self] in self?.copyCommand() }
         )
         copyChip.setContentHuggingPriority(.required, for: .horizontal)
@@ -162,13 +162,13 @@ class UIKitHostGuideSheetViewController: UIViewController, AppAppearanceFollowin
         navigationItem.titleView = UIKitChassisLabel(sheetTitle, size: 12)
         #endif
         let done = UIBarButtonItem(
-            title: "Done",
+            title: String(localized: "Done"),
             style: .plain,
             target: self,
             action: #selector(donePressed)
         )
         done.tintColor = UIKitChassis.signal
-        done.accessibilityLabel = "Done"
+        done.accessibilityLabel = String(localized: "Done")
         navigationItem.rightBarButtonItem = done
 
         configureContent()
@@ -267,7 +267,8 @@ final class TmuxInstallViewController: UIKitHostGuideSheetViewController {
 
     init(host: Host) {
         self.host = host
-        super.init(title: "Install \(host.sessionBackend.rawValue)")
+        super.init(title: String(
+            localized: "Install \(host.sessionBackend.rawValue)"))
     }
 
     @available(*, unavailable)
@@ -287,20 +288,23 @@ final class TmuxInstallViewController: UIKitHostGuideSheetViewController {
         }
 
         addSection(UIKitTallyFormSectionView(
-            title: "The deck runs on \(multiplexer)",
-            detail: "The deck re-probes every few seconds — "
-                + "session tiles light up as soon as \(multiplexer) is on "
-                + "the host. \(probePathDetail)",
+            title: String(localized: "The deck runs on \(multiplexer)"),
+            detail: String(localized: """
+                The deck re-probes every few seconds — session tiles light up \
+                as soon as \(multiplexer) is on the host. \(probePathDetail)
+                """),
             contentView: rowStack
         ))
     }
 
     var intro: String {
-        "Sessions, live tiles, and attach all come from a \(multiplexer) "
-            + "server on each host, and \(host.name) doesn't have "
-            + "\(multiplexer) yet. You can still use a plain shell — the "
-            + "SHELL chip on the host's rail opens one. For the full deck, "
-            + "install \(multiplexer) on the host:"
+        String(localized: """
+            Sessions, live tiles, and attach all come from a \(multiplexer) \
+            server on each host, and \(host.name) doesn't have \
+            \(multiplexer) yet. You can still use a plain shell — the \
+            SHELL chip on the host's rail opens one. For the full deck, \
+            install \(multiplexer) on the host:
+            """)
     }
 }
 
@@ -315,7 +319,7 @@ final class KeychainUnlockViewController: UIKitHostGuideSheetViewController {
     init(host: Host, sessionNames: [String]) {
         self.host = host
         self.sessionNames = sessionNames
-        super.init(title: "Keychain locked")
+        super.init(title: String(localized: "Keychain locked"))
     }
 
     @available(*, unavailable)
@@ -331,7 +335,8 @@ final class KeychainUnlockViewController: UIKitHostGuideSheetViewController {
             let sessions = UILabel()
             sessions.font = UIKitChassis.monoFont(10)
             sessions.textColor = UIKitChassis.signal3
-            sessions.text = "Detected in: " + sessionNames.joined(separator: " · ")
+            sessions.text = String(localized: "Detected in: ")
+                + sessionNames.joined(separator: " · ")
             sessions.numberOfLines = 0
             rowStack.addArrangedSubview(sessions)
         }
@@ -340,21 +345,24 @@ final class KeychainUnlockViewController: UIKitHostGuideSheetViewController {
         ))
 
         addSection(UIKitTallyFormSectionView(
-            title: "Claude Code shows signed out",
-            detail: "The command prompts for that Mac account's "
-                + "login password. The unlock holds until macOS "
-                + "locks the keychain again — after a restart, "
-                + "or per the keychain's own lock settings.",
+            title: String(localized: "Claude Code shows signed out"),
+            detail: String(localized: """
+                The command prompts for that Mac account's login password. \
+                The unlock holds until macOS locks the keychain again — after \
+                a restart, or per the keychain's own lock settings.
+                """),
             contentView: rowStack
         ))
     }
 
     var intro: String {
-        "Claude Code on \(host.name) is waiting at its sign-in screen, but "
-            + "the stored login is probably intact: on a Mac, Claude Code "
-            + "keeps its credentials in the login keychain, and an SSH or "
-            + "tmux session never unlocks it — no GUI login happened. "
-            + "Unlock it once in any shell on \(host.name), then restart "
-            + "Claude Code:"
+        String(localized: """
+            Claude Code on \(host.name) is waiting at its sign-in screen, but \
+            the stored login is probably intact: on a Mac, Claude Code \
+            keeps its credentials in the login keychain, and an SSH or \
+            tmux session never unlocks it — no GUI login happened. \
+            Unlock it once in any shell on \(host.name), then restart \
+            Claude Code:
+            """)
     }
 }

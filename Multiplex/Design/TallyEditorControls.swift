@@ -90,7 +90,7 @@ final class TallyEditorSwitch: UIControl {
     private func render(animated: Bool = false) {
         track.setOn(isOn, animated: animated)
         caption.setInk(isOn ? UIKitChassis.signal : UIKitChassis.signal2)
-        accessibilityValue = isOn ? "On" : "Off"
+        accessibilityValue = isOn ? String(localized: "On") : String(localized: "Off")
         if isOn {
             accessibilityTraits.insert(.selected)
         } else {
@@ -238,7 +238,7 @@ enum TallyEditorRowActions {
     ) -> Trio {
         let up = TallyEditorRowActionButton(
             systemImage: "arrow.up",
-            accessibilityLabel: "Move command up",
+            accessibilityLabel: String(localized: "Move command up"),
             enabled: index > 0,
             scale: scale,
             action: { move(-1) }
@@ -246,7 +246,7 @@ enum TallyEditorRowActions {
         up.accessibilityIdentifier = "\(identifierPrefix).moveUp.\(rowID.uuidString)"
         let down = TallyEditorRowActionButton(
             systemImage: "arrow.down",
-            accessibilityLabel: "Move command down",
+            accessibilityLabel: String(localized: "Move command down"),
             enabled: index < count - 1,
             scale: scale,
             action: { move(1) }
@@ -254,7 +254,7 @@ enum TallyEditorRowActions {
         down.accessibilityIdentifier = "\(identifierPrefix).moveDown.\(rowID.uuidString)"
         let trash = TallyEditorRowActionButton(
             systemImage: "trash",
-            accessibilityLabel: "Delete command",
+            accessibilityLabel: String(localized: "Delete command"),
             enabled: true,
             scale: scale,
             action: delete
@@ -334,7 +334,9 @@ enum TallyEditorFooter {
             addState == .upgrade ? "ADD COMMAND · PRO" : "ADD COMMAND",
             systemImage: "plus",
             prominent: addState == .upgrade,
-            accessibilityLabel: addState == .upgrade ? "Add command with Multiplex Pro" : "Add command",
+            accessibilityLabel: addState == .upgrade
+                ? String(localized: "Add command with Multiplex Pro")
+                : String(localized: "Add command"),
             action: add
         )
         addChip.accessibilityIdentifier = "\(identifierPrefix).add"
@@ -344,14 +346,14 @@ enum TallyEditorFooter {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let cancelChip = UIKitChassisChip(
             "CANCEL",
-            accessibilityLabel: "Cancel",
+            accessibilityLabel: String(localized: "Cancel"),
             action: cancel
         )
         cancelChip.accessibilityIdentifier = "\(identifierPrefix).cancel"
         let doneChip = UIKitChassisChip(
             "DONE",
             prominent: true,
-            accessibilityLabel: "Done",
+            accessibilityLabel: String(localized: "Done"),
             action: done
         )
         doneChip.accessibilityIdentifier = "\(identifierPrefix).done"

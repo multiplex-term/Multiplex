@@ -72,21 +72,21 @@ final class LicensesViewController: UIViewController, AppAppearanceFollowing {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Open Source Licenses"
+        title = String(localized: "Open Source Licenses")
         view.backgroundColor = GlassPrototype.sheetGround
         navigationItem.largeTitleDisplayMode = .never
         #if os(visionOS)
-        navigationItem.titleView = UIKitChassisLabel("Open Source Licenses", size: 12)
+        navigationItem.titleView = UIKitChassisLabel(String(localized: "Open Source Licenses"), size: 12)
         #endif
         if presentingViewController != nil || navigationController?.presentingViewController != nil {
             let done = UIBarButtonItem(
-                title: "Done",
+                title: String(localized: "Done"),
                 style: .plain,
                 target: self,
                 action: #selector(donePressed)
             )
             done.tintColor = UIKitChassis.signal
-            done.accessibilityLabel = "Done"
+            done.accessibilityLabel = String(localized: "Done")
             navigationItem.rightBarButtonItem = done
         }
         rebuildLayout()
@@ -269,7 +269,7 @@ final class LicensesViewController: UIViewController, AppAppearanceFollowing {
     }
 
     private func makeFooterNote() -> UIView {
-        let title = UIKitChassisLabel("Mosh transport", size: 9)
+        let title = UIKitChassisLabel(String(localized: "Mosh transport"), size: 9)
         let detail = licenseLabel(
             footerNote,
             font: UIKitChassis.uiFont(10),
@@ -327,7 +327,7 @@ final class LicensesViewController: UIViewController, AppAppearanceFollowing {
     }
 
     private func makeRegistryPane() -> UIView {
-        let title = UIKitChassisLabel("Components", size: 10)
+        let title = UIKitChassisLabel(String(localized: "Components"), size: 10)
         let count = licenseLabel(
             "\(components.count) SHIPPED",
             font: UIKitChassis.monoFont(8, weight: .medium),
@@ -571,9 +571,9 @@ private final class LicenseComponentRow: UIControl {
         isAccessibilityElement = true
         accessibilityTraits = .button
         accessibilityLabel = component.name
-        accessibilityValue = "Version \(component.version), "
+        accessibilityValue = String(localized: "Version \(component.version), ")
             + component.family.displayName
-            + (component.isVendored ? ", vendored" : "")
+            + (component.isVendored ? String(localized: ", vendored") : "")
         addAction(UIAction { _ in action() }, for: .touchUpInside)
 
         let name = licenseLabel(
@@ -744,7 +744,7 @@ private final class LicenseFilterChip: UIControl {
                     .resolvedColor(with: traitCollection),
             ]
         )
-        accessibilityValue = active ? "Selected" : "Not selected"
+        accessibilityValue = active ? String(localized: "Selected") : String(localized: "Not selected")
         if active {
             accessibilityTraits.insert(.selected)
         } else {
@@ -766,7 +766,7 @@ private final class LicenseTextPaneView: UIKitTallyBorderedView {
     private lazy var copyChip = UIKitChassisChip(
         "COPY",
         systemImage: "doc.on.doc",
-        accessibilityLabel: "Copy license text"
+        accessibilityLabel: String(localized: "Copy license text")
     ) { [weak self] in
         self?.copyLicense()
     }
@@ -791,8 +791,8 @@ private final class LicenseTextPaneView: UIKitTallyBorderedView {
         vendorLabel.isHidden = component.vendorNote == nil
         vendoredBadge.isHidden = !component.isVendored
         textView.text = component.licenseText
-        textView.accessibilityLabel = "\(component.name) license text"
-        copyChip.accessibilityLabel = "Copy \(component.name) license text"
+        textView.accessibilityLabel = String(localized: "\(component.name) license text")
+        copyChip.accessibilityLabel = String(localized: "Copy \(component.name) license text")
         textView.setContentOffset(.zero, animated: false)
     }
 
@@ -872,7 +872,7 @@ private final class LicenseTextPaneView: UIKitTallyBorderedView {
 
     private func copyLicense() {
         UIPasteboard.general.string = component.licenseText
-        UIAccessibility.post(notification: .announcement, argument: "License copied")
+        UIAccessibility.post(notification: .announcement, argument: String(localized: "License copied"))
     }
 }
 

@@ -8,11 +8,11 @@ enum MoshBootstrapError: Error {
     func userMessage(host: Host) -> String {
         switch self {
         case .dnsFailure:
-            "Couldn't resolve \(host.hostname)."
+            String(localized: "Couldn't resolve \(host.hostname).")
         case .sshFailed(let detail):
-            "Couldn't reach \(host.name) to start mosh (\(detail))."
+            String(localized: "Couldn't reach \(host.name) to start mosh (\(detail)).")
         case .serverFailed(let detail):
-            "mosh-server didn't start on \(host.name): \(detail)"
+            String(localized: "mosh-server didn't start on \(host.name): \(detail)")
         }
     }
 }
@@ -97,7 +97,7 @@ enum MoshBootstrap {
             .filter { !$0.isEmpty && !$0.hasPrefix("[mosh-server") }
         let tail = lines.suffix(2).joined(separator: " · ")
         let clipped = tail.count > 160 ? String(tail.prefix(160)) + "…" : tail
-        return clipped.isEmpty ? "no output" : clipped
+        return clipped.isEmpty ? String(localized: "no output") : clipped
     }
 
     // MARK: - Resolution
@@ -214,6 +214,6 @@ enum MoshBootstrap {
             }
             throw MoshBootstrapError.serverFailed(failureDetail(output))
         }
-        throw MoshBootstrapError.serverFailed("gave up after fallbacks")
+        throw MoshBootstrapError.serverFailed(String(localized: "gave up after fallbacks"))
     }
 }

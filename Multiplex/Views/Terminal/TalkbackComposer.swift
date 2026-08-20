@@ -423,7 +423,7 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        closeButton.accessibilityLabel = "Close message box"
+        closeButton.accessibilityLabel = String(localized: "Close message box")
         closeButton.accessibilityIdentifier = "terminal.talkback.close"
         closeButton.addTarget(self, action: #selector(closePressed), for: .touchUpInside)
 
@@ -460,13 +460,13 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         line.alignment = .bottom
         line.spacing = Self.lineSpacing
 
-        attachButton.accessibilityLabel = "Attach a file"
+        attachButton.accessibilityLabel = String(localized: "Attach a file")
         attachButton.accessibilityIdentifier = "terminal.talkback.attach"
         attachButton.showsMenuAsPrimaryAction = true
 
         textView.delegate = self
         textView.accessibilityIdentifier = "terminal.talkback.field"
-        textView.accessibilityLabel = "Message"
+        textView.accessibilityLabel = String(localized: "Message")
         textView.font = UIKitChassis.uiFont(15)
         textView.textColor = UIKitChassis.signal
         textView.backgroundColor = .clear
@@ -504,7 +504,7 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
             ),
         ])
 
-        sendButton.accessibilityLabel = "Send"
+        sendButton.accessibilityLabel = String(localized: "Send")
         sendButton.accessibilityIdentifier = "terminal.talkback.send"
         sendButton.addTarget(self, action: #selector(sendPressed), for: .touchUpInside)
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(sendHeld(_:)))
@@ -642,10 +642,10 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
             needsYouLamp = nil
         }
         header.accessibilityLabel = [
-            "To", presentation.targetLabel,
+            String(localized: "To"), presentation.targetLabel,
             presentation.agent?.displayName,
-            running ? "running" : nil,
-            needsYou ? "needs you" : nil,
+            running ? String(localized: "running") : nil,
+            needsYou ? String(localized: "needs you") : nil,
         ].compactMap { $0 }.joined(separator: " ")
     }
 
@@ -702,15 +702,15 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         case .ready:
             sendButton.style = .prominent
             sendButton.isEnabled = true
-            sendButton.accessibilityLabel = "Send"
+            sendButton.accessibilityLabel = String(localized: "Send")
         case .waiting:
             sendButton.style = .waiting
             sendButton.isEnabled = false
-            sendButton.accessibilityLabel = "Send, waiting for uploads"
+            sendButton.accessibilityLabel = String(localized: "Send, waiting for uploads")
         case .disabled:
             sendButton.style = .dim
             sendButton.isEnabled = false
-            sendButton.accessibilityLabel = "Send"
+            sendButton.accessibilityLabel = String(localized: "Send")
         }
     }
 
@@ -1127,7 +1127,7 @@ final class TalkbackAttachmentView: UIControl {
             scrim.layer.addSublayer(ring)
         }
 
-        removeBadge.accessibilityLabel = "Remove attachment"
+        removeBadge.accessibilityLabel = String(localized: "Remove attachment")
         removeBadge.setImage(
             UIImage(
                 systemName: "xmark",
@@ -1209,13 +1209,14 @@ final class TalkbackAttachmentView: UIControl {
             ringFill.isHidden = false
             ringFill.strokeEnd = max(0.02, min(1, fraction))
             detailLabel.setText(byteText, ink: UIKitChassis.signal3)
-            accessibilityLabel = "\(attachment.name), uploading \(Int(fraction * 100)) percent"
+            let percent = Int(fraction * 100)
+            accessibilityLabel = String(localized: "\(attachment.name), uploading \(percent) percent")
         case .ready:
             detailLabel.setText(
                 isSquare ? byteText : "\(byteText) ✓",
                 ink: UIKitChassis.signal3
             )
-            accessibilityLabel = "\(attachment.name), \(byteText), attached"
+            accessibilityLabel = String(localized: "\(attachment.name), \(byteText), attached")
         case .failed(let reason):
             // The photo stays visible under a scrim so the amber caption
             // reads; documents keep their name and say why.
@@ -1231,8 +1232,8 @@ final class TalkbackAttachmentView: UIControl {
                 )
             }
             tile.tallyBorderColor = TallyPalette.caution
-            accessibilityLabel = "\(attachment.name), upload failed, \(reason)"
-            accessibilityHint = "Retries the upload"
+            accessibilityLabel = String(localized: "\(attachment.name), upload failed, \(reason)")
+            accessibilityHint = String(localized: "Retries the upload")
         }
     }
 

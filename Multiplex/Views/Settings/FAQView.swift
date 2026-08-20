@@ -28,13 +28,13 @@ final class FAQViewController: UIViewController, AppAppearanceFollowing {
         navigationItem.titleView = UIKitChassisLabel("FAQ", size: 12)
         #endif
         let done = UIBarButtonItem(
-            title: "Done",
+            title: String(localized: "Done"),
             style: .plain,
             target: self,
             action: #selector(donePressed)
         )
         done.tintColor = UIKitChassis.signal
-        done.accessibilityLabel = "Done"
+        done.accessibilityLabel = String(localized: "Done")
         navigationItem.rightBarButtonItem = done
 
         configureContent()
@@ -220,34 +220,38 @@ private struct FAQEntry {
     static let all: [FAQEntry] = [
         FAQEntry(
             id: "host-needs-multiplexer",
-            question: "A host shows no tmux or herdr",
-            answer: "The deck is built around a session multiplexer on each "
-                + "host — sessions, live tiles, and attach all come from it. "
-                + "Each host runs one, tmux or herdr, chosen in its settings "
-                + "under Sessions run on. A host without that multiplexer "
-                + "still works as a plain shell (the SHELL chip on its rail), "
-                + "it just has no session tiles. To get the full deck, "
-                + "install the one the host is set to:",
+            question: String(localized: "A host shows no tmux or herdr"),
+            answer: String(localized: """
+                The deck is built around a session multiplexer on each host — sessions, \
+                live tiles, and attach all come from it. Each host runs one, tmux or \
+                herdr, chosen in its settings under Sessions run on. A host without that \
+                multiplexer still works as a plain shell (the SHELL chip on its rail), it \
+                just has no session tiles. To get the full deck, install the one the host \
+                is set to:
+                """),
             offersMultiplexerInstall: true,
-            postscript: "The deck re-probes every few seconds and lights the "
-                + "tile as soon as the multiplexer lands — no restart, and "
-                + "nothing to configure on the host."
+            postscript: String(localized: """
+                The deck re-probes every few seconds and lights the tile as soon as the \
+                multiplexer lands — no restart, and nothing to configure on the host.
+                """)
         ),
         FAQEntry(
             id: "claude-code-tmux-keychain",
-            question: "Claude Code shows signed out in tmux",
-            answer: "On a Mac host, Claude Code keeps its credentials in the "
-                + "login keychain, and an SSH or tmux session never unlocks it — "
-                + "no GUI login happened — so Claude Code starts as if you were "
-                + "signed out even though your login is intact. Unlock the "
-                + "keychain once inside the tmux session, then restart Claude "
-                + "Code:",
+            question: String(localized: "Claude Code shows signed out in tmux"),
+            answer: String(localized: """
+                On a Mac host, Claude Code keeps its credentials in the login keychain, \
+                and an SSH or tmux session never unlocks it — no GUI login happened — so \
+                Claude Code starts as if you were signed out even though your login is \
+                intact. Unlock the keychain once inside the tmux session, then restart \
+                Claude Code:
+                """),
             commands: [HostGuide.keychainUnlock],
-            postscript: "The command prompts for that Mac account's login "
-                + "password. The unlock holds until macOS locks the keychain "
-                + "again — after a restart, or per the keychain's own lock "
-                + "settings. When the deck detects this state it also points "
-                + "here: the host's rail reads KEYCHAIN LOCKED."
+            postscript: String(localized: """
+                The command prompts for that Mac account's login password. The unlock \
+                holds until macOS locks the keychain again — after a restart, or per the \
+                keychain's own lock settings. When the deck detects this state it also \
+                points here: the host's rail reads KEYCHAIN LOCKED.
+                """)
         )
     ]
 }

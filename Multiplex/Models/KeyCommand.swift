@@ -96,19 +96,21 @@ struct KeyCommand: Identifiable, Codable, Hashable {
             return parts.joined(separator: " · ")
         case .cellHint:
             var parts: [String] = []
-            if submits { parts.append("submits") }
+            if submits { parts.append(String(localized: "submits")) }
             if isRepeating { parts.append("×\(repeatCount) · \(repeatGapMilliseconds) ms") }
-            if !closesPanel { parts.append("stays open") }
+            if !closesPanel { parts.append(String(localized: "stays open")) }
             return parts.joined(separator: " · ")
         case .spoken:
             var text: String
             switch kind {
             case .chord(let chord): text = chord.accessibilityName
-            case .text(let snippet): text = "Type \(snippet.normalizedText)"
+            case .text(let snippet): text = String(localized: "Type \(snippet.normalizedText)")
             }
-            if submits { text += ", then Enter" }
-            if isRepeating { text += ", \(repeatCount) times" }
-            text += closesPanel ? ", closes the panel" : ", panel stays open"
+            if submits { text += String(localized: ", then Enter") }
+            if isRepeating { text += String(localized: ", \(repeatCount) times") }
+            text += closesPanel
+                ? String(localized: ", closes the panel")
+                : String(localized: ", panel stays open")
             return text
         }
     }

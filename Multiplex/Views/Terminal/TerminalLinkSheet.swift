@@ -162,7 +162,9 @@ final class TerminalLinkSheetViewController: UIViewController {
     private let reachLabel = UILabel()
     private let actionStack = UIStackView()
     private let actionSpacer = UIView()
-    private let navigationTitleLabel = UIKitChassisLabel("Open link", size: 12)
+    private let navigationTitleLabel = UIKitChassisLabel(
+        String(localized: "Open link"), size: 12
+    )
     private let editor: UIKitTerminalEditableValueBox
     private var sectionView: UIKitTallyFormSectionView!
     private var viewportChip: UIKitChassisChip!
@@ -238,7 +240,7 @@ final class TerminalLinkSheetViewController: UIViewController {
         navigationItem.titleView = navigationTitleLabel
         #endif
         let cancel = UIBarButtonItem(
-            title: "Cancel",
+            title: String(localized: "Cancel"),
             style: .plain,
             target: self,
             action: #selector(cancelPressed)
@@ -352,18 +354,18 @@ final class TerminalLinkSheetViewController: UIViewController {
         viewportChip = UIKitChassisChip(
             "⌗ VIEWPORT",
             prominent: true,
-            accessibilityLabel: "Viewport"
+            accessibilityLabel: String(localized: "Viewport")
         ) { [weak self] in self?.viewportPressed() }
         openChip = UIKitChassisChip(
             "OPEN",
             systemImage: "arrow.up.forward.app",
             prominent: true,
-            accessibilityLabel: "Open"
+            accessibilityLabel: String(localized: "Open")
         ) { [weak self] in self?.openPressed() }
         copyChip = UIKitChassisChip(
             "COPY",
             systemImage: "doc.on.doc",
-            accessibilityLabel: "Copy"
+            accessibilityLabel: String(localized: "Copy")
         ) { [weak self] in self?.copyPressed() }
 
         for chip in [viewportChip, openChip, copyChip] {
@@ -389,15 +391,19 @@ final class TerminalLinkSheetViewController: UIViewController {
         let link = editedLink
         let viewport = editedViewport
 
-        title = link?.openableURL == nil ? "Can't open link" : "Open link"
+        title = link?.openableURL == nil
+            ? String(localized: "Can't open link")
+            : String(localized: "Open link")
         #if os(visionOS)
-        navigationTitleLabel.setText(title ?? "Open link")
+        navigationTitleLabel.setText(title ?? String(localized: "Open link"))
         #endif
 
         hostNameLabel.text = link?.host
         hostNameLabel.accessibilityLabel = link?.host
         hostStack.isHidden = link?.host == nil
-        editor.setNote(link == nil ? "NOT AN ADDRESS MULTIPLEX CAN READ" : nil)
+        editor.setNote(
+            link == nil ? String(localized: "NOT AN ADDRESS MULTIPLEX CAN READ") : nil
+        )
 
         reachLabel.text = viewport.map(reachDescription)
         reachLabel.accessibilityLabel = viewport.map(reachDescription)
@@ -421,17 +427,21 @@ final class TerminalLinkSheetViewController: UIViewController {
     ) -> String {
         if let viewport, onOpenViewport != nil {
             return switch viewport.reach {
-            case .internet: "A public address"
-            case .lan: "On this device's network"
+            case .internet: String(localized: "A public address")
+            case .lan: String(localized: "On this device's network")
             case .remoteLoopback:
-                "Lives on \(viewport.viaHostName ?? "the host"), not this device"
+                String(localized: """
+                    Lives on \(viewport.viaHostName ?? String(localized: "the host")), \
+                    not this device
+                    """)
             }
         }
-        guard let link else { return "Not a usable address" }
+        guard let link else { return String(localized: "Not a usable address") }
         return switch link.kind {
-        case .openable: "Leaves Multiplex"
-        case .blockedScheme(let scheme): "\(scheme.uppercased()) links stay here"
-        case .malformed: "Not a usable address"
+        case .openable: String(localized: "Leaves Multiplex")
+        case .blockedScheme(let scheme):
+            String(localized: "\(scheme.uppercased()) links stay here")
+        case .malformed: String(localized: "Not a usable address")
         }
     }
 
@@ -442,34 +452,44 @@ final class TerminalLinkSheetViewController: UIViewController {
         if let viewport, onOpenViewport != nil {
             return switch viewport.reach {
             case .internet, .lan:
-                "The viewport renders this address inside Multiplex; OPEN "
-                    + "still hands it to the system browser. It came from the "
-                    + "host — check the address above before opening."
+                String(localized: """
+                    The viewport renders this address inside Multiplex; OPEN still hands it \
+                    to the system browser. It came from the host — check the address above \
+                    before opening.
+                    """)
             case .remoteLoopback:
-                "localhost in a remote pane is the host's own loopback — an "
-                    + "address this device can't dial. VIA aims the viewport "
-                    + "at the address that already reaches the host; the "
-                    + "server must listen beyond loopback (vite --host) to answer."
+                String(localized: """
+                    localhost in a remote pane is the host's own loopback — an address this \
+                    device can't dial. VIA aims the viewport at the address that already \
+                    reaches the host; the server must listen beyond loopback (vite --host) \
+                    to answer.
+                    """)
             }
         }
         guard let link else {
-            return "The field holds nothing Multiplex can open — a target "
-                + "needs a web or mail address. Edit it, or copy the text "
-                + "if it's still useful."
+            return String(localized: """
+                The field holds nothing Multiplex can open — a target needs a web or mail \
+                address. Edit it, or copy the text if it's still useful.
+                """)
         }
         return switch link.kind {
         case .openable:
-            "This address came from the host, and a hyperlink's visible text "
-                + "can differ from where it points — check the host above "
-                + "before opening it outside Multiplex. The target is "
-                + "editable when detection caught the wrong text."
+            String(localized: """
+                This address came from the host, and a hyperlink's visible text can differ \
+                from where it points — check the host above before opening it outside \
+                Multiplex. The target is editable when detection caught the wrong text.
+                """)
         case .blockedScheme(let scheme):
-            "Multiplex opens web and mail links only. A \(scheme): link from a "
-                + "remote pane would act on this device, so it is shown rather "
-                + "than followed — copy it if you want it elsewhere."
+            String(localized: """
+                Multiplex opens web and mail links only. A \(scheme): link from a remote \
+                pane would act on this device, so it is shown rather than followed — copy \
+                it if you want it elsewhere.
+                """)
         case .malformed:
-            "The text looked like a link but has no address Multiplex can "
-                + "open. Copy it if it's still useful."
+            String(localized: """
+                The text looked like a link but has no address Multiplex can open. Copy it \
+                if it's still useful.
+                """)
         }
     }
 
@@ -484,13 +504,13 @@ final class TerminalLinkSheetViewController: UIViewController {
     private func reachDescription(_ viewport: ViewportOffer) -> String {
         switch viewport.reach {
         case .internet:
-            return "INTERNET — OPENS FROM THIS DEVICE"
+            return String(localized: "INTERNET — OPENS FROM THIS DEVICE")
         case .lan:
-            return "LAN — DIALLED FROM THIS DEVICE, NETWORK PERMITTING"
+            return String(localized: "LAN — DIALLED FROM THIS DEVICE, NETWORK PERMITTING")
         case .remoteLoopback:
             var rewritten = viewport.url.host() ?? ""
             if let port = viewport.url.port { rewritten += ":\(port)" }
-            return "REMOTE LOOPBACK → REWRITES TO \(rewritten)"
+            return String(localized: "REMOTE LOOPBACK → REWRITES TO \(rewritten)")
         }
     }
 

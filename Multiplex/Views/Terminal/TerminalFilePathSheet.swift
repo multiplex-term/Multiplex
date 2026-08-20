@@ -64,7 +64,7 @@ final class TerminalFilePathSheetViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "View file"
+        title = String(localized: "View file")
         view.backgroundColor = GlassPrototype.sheetGround
         configureNavigation()
         configureContent()
@@ -105,10 +105,12 @@ final class TerminalFilePathSheetViewController: UIViewController {
     private func configureNavigation() {
         navigationItem.largeTitleDisplayMode = .never
         #if os(visionOS)
-        navigationItem.titleView = UIKitChassisLabel("View file", size: 12)
+        navigationItem.titleView = UIKitChassisLabel(
+            String(localized: "View file"), size: 12
+        )
         #endif
         let cancel = UIBarButtonItem(
-            title: "Cancel",
+            title: String(localized: "Cancel"),
             style: .plain,
             target: self,
             action: #selector(cancelPressed)
@@ -171,12 +173,12 @@ final class TerminalFilePathSheetViewController: UIViewController {
         viewChip = UIKitChassisChip(
             "▤ VIEW",
             prominent: true,
-            accessibilityLabel: "View"
+            accessibilityLabel: String(localized: "View")
         ) { [weak self] in self?.viewPressed() }
         copyChip = UIKitChassisChip(
             "COPY",
             systemImage: "doc.on.doc",
-            accessibilityLabel: "Copy"
+            accessibilityLabel: String(localized: "Copy")
         ) { [weak self] in self?.copyPressed() }
         for chip in [viewChip, copyChip] {
             chip?.setContentHuggingPriority(.required, for: .horizontal)
@@ -249,7 +251,9 @@ final class TerminalFilePathSheetViewController: UIViewController {
         let target = editedTarget
         hostNameLabel.text = hostName
         hostNameLabel.accessibilityLabel = hostName
-        editor.setNote(target == nil ? "NOT A PATH MULTIPLEX CAN READ" : nil)
+        editor.setNote(
+            target == nil ? String(localized: "NOT A PATH MULTIPLEX CAN READ") : nil
+        )
         // Resolution can shed what it reads as prose (a spaced press
         // arrives with its sentence tail), so when the opened path is not
         // the field's text, say so — verbatim, mono: a path is screen
@@ -285,25 +289,28 @@ final class TerminalFilePathSheetViewController: UIViewController {
 
     private func sectionTitle(for target: TerminalPathTarget?) -> String {
         switch target?.base {
-        case .absolute: "A path on \(hostName)"
-        case .home: "In \(hostName)'s home"
-        case .workingDirectory: "Relative to the pane's directory"
-        case nil: "Not a usable path"
+        case .absolute: String(localized: "A path on \(hostName)")
+        case .home: String(localized: "In \(hostName)'s home")
+        case .workingDirectory: String(localized: "Relative to the pane's directory")
+        case nil: String(localized: "Not a usable path")
         }
     }
 
     private func detail(for target: TerminalPathTarget?) -> String {
         guard let target else {
-            return "The field holds nothing the viewer can resolve — a "
-                + "relative path needs a directory in it, and spaces only "
-                + "work behind /, ~/, ./ or $HOME/. Edit it, or copy the "
-                + "text if it's still useful."
+            return String(localized: """
+                The field holds nothing the viewer can resolve — a relative path needs a \
+                directory in it, and spaces only work behind /, ~/, ./ or $HOME/. Edit it, \
+                or copy the text if it's still useful.
+                """)
         }
-        var text = "VIEW opens it read-only in the file viewer, beside this "
-            + "session — nothing runs, nothing is written. The path is "
-            + "editable when detection caught the wrong text."
+        var text = String(localized: """
+            VIEW opens it read-only in the file viewer, beside this session — nothing \
+            runs, nothing is written. The path is editable when detection caught the \
+            wrong text.
+            """)
         if target.base == .workingDirectory {
-            text += " It resolves against the pane's current directory."
+            text += " " + String(localized: "It resolves against the pane's current directory.")
         }
         return text
     }

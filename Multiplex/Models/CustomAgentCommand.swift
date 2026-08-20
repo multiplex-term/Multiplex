@@ -63,7 +63,7 @@ struct CustomAgentCommand: Identifiable, Codable, Hashable {
     /// The actual payload is never truncated.
     var menuLabel: String {
         let value = normalizedContent
-        guard !value.isEmpty else { return "Custom command" }
+        guard !value.isEmpty else { return String(localized: "Custom command") }
 
         let lines = value.split(separator: "\n", omittingEmptySubsequences: false)
         let firstLine = lines.first.map(String.init) ?? value

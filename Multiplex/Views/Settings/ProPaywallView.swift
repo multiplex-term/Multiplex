@@ -85,13 +85,13 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
         #endif
 
         let done = UIBarButtonItem(
-            title: "Done",
+            title: String(localized: "Done"),
             style: .plain,
             target: self,
             action: #selector(donePressed)
         )
         done.tintColor = UIKitChassis.signal
-        done.accessibilityLabel = "Done"
+        done.accessibilityLabel = String(localized: "Done")
         navigationItem.rightBarButtonItem = done
     }
 
@@ -155,17 +155,18 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
         let brand = UIKitChassisLabel("Multiplex Pro", size: 18)
 
         let promise = makeLabel(
-            "Buy once. Use it on iPad and Vision Pro.",
+            String(localized: "Buy once. Use it on iPad and Vision Pro."),
             style: .title3,
             weight: .semibold,
             color: UIKitChassis.signal
         )
         let freeTier = makeLabel(
-            "The free tier stays useful: two hosts, spatial SSH terminals, "
-                + "live agent detection, built-in themes, "
-                + "\(EntitlementStore.freeKeyCommandLimit) saved Key Commands and "
-                + "\(EntitlementStore.dailySlashChipLimit) built-in or custom "
-                + "agent-command taps each day.",
+            String(localized: """
+                The free tier stays useful: two hosts, spatial SSH terminals, live agent \
+                detection, built-in themes, \(EntitlementStore.freeKeyCommandLimit) saved Key \
+                Commands and \(EntitlementStore.dailySlashChipLimit) built-in or custom \
+                agent-command taps each day.
+                """),
             style: .subheadline,
             color: UIKitChassis.signal2
         )
@@ -180,34 +181,44 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
     private func makeFeatures() -> UIView {
         let stack = UIStackView(arrangedSubviews: [
             makeFeature(
-                "UNLIMITED HOSTS",
-                "Keep your work box, homelab and servers on one live fleet wall."
+                String(localized: "UNLIMITED HOSTS"),
+                String(localized: "Keep your work box, homelab and servers on one live fleet wall.")
             ),
             makeFeature(
-                "MOSH TRANSPORT",
-                "Keep terminals alive through headset sleep, network roaming and IP changes."
+                String(localized: "MOSH TRANSPORT"),
+                String(localized: """
+                    Keep terminals alive through headset sleep, network roaming and IP changes.
+                    """)
             ),
             makeFeature(
-                "AGENT HELPERS + ALERTS",
-                "Use Claude Code, Codex, Pi, and Grok Build quick commands without the daily "
-                    + "limit, browse a Claude Code session's prompt history and jump "
-                    + "its transcript back to any message, and get a banner when an "
-                    + "unwatched supported session needs you."
+                String(localized: "AGENT HELPERS + ALERTS"),
+                String(localized: """
+                    Use Claude Code, Codex, Pi, and Grok Build quick commands without the daily \
+                    limit, browse a Claude Code session's prompt history and jump its transcript \
+                    back to any message, and get a banner when an unwatched supported session \
+                    needs you.
+                    """)
             ),
             makeFeature(
-                "CONNECTION STATS",
-                "Open the fleet board behind every rail chip: round-trips, typing "
-                    + "echo, mosh loss and roams, reconnects, and data volume per host."
+                String(localized: "CONNECTION STATS"),
+                String(localized: """
+                    Open the fleet board behind every rail chip: round-trips, typing echo, mosh \
+                    loss and roams, reconnects, and data volume per host.
+                    """)
             ),
             makeFeature(
-                "CUSTOM THEMES",
-                "Build and edit terminal palettes while the Tally chassis stays consistent."
+                String(localized: "CUSTOM THEMES"),
+                String(localized: """
+                    Build and edit terminal palettes while the Tally chassis stays consistent.
+                    """)
             ),
             makeFeature(
-                "\(KeyCommandSet.maximumCount) KEY COMMANDS",
-                "Grow the hold-CTRL set of saved chords and text macros from "
-                    + "\(EntitlementStore.freeKeyCommandLimit) to \(KeyCommandSet.maximumCount), "
-                    + "synced to every device."
+                String(localized: "\(KeyCommandSet.maximumCount) KEY COMMANDS"),
+                String(localized: """
+                    Grow the hold-CTRL set of saved chords and text macros from \
+                    \(EntitlementStore.freeKeyCommandLimit) to \(KeyCommandSet.maximumCount), \
+                    synced to every device.
+                    """)
             ),
         ])
         stack.axis = .vertical
@@ -258,7 +269,7 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
             for: .touchUpInside
         )
         purchaseButton.accessibilityHint =
-            "Purchases the non-consumable Multiplex Pro unlock"
+            String(localized: "Purchases the non-consumable Multiplex Pro unlock")
 
         commerceMessageLabel.font = ProPaywallFont.font(for: .footnote)
         commerceMessageLabel.adjustsFontForContentSizeCategory = true
@@ -275,10 +286,10 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
             for: .touchUpInside
         )
         restoreButton.accessibilityHint =
-            "Checks this Apple ID for a Multiplex Pro purchase"
+            String(localized: "Checks this Apple ID for a Multiplex Pro purchase")
 
         let payment = makeLabel(
-            "Payment is charged to your Apple ID. No subscription.",
+            String(localized: "Payment is charged to your Apple ID. No subscription."),
             style: .caption1,
             color: UIKitChassis.signal3
         )
@@ -313,13 +324,13 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
         check.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let title = makeLabel(
-            "Multiplex Pro is unlocked",
+            String(localized: "Multiplex Pro is unlocked"),
             style: .headline,
             weight: .semibold,
             color: UIKitChassis.signal
         )
         let detail = makeLabel(
-            "This purchase is available on your devices with the same Apple ID.",
+            String(localized: "This purchase is available on your devices with the same Apple ID."),
             style: .footnote,
             color: UIKitChassis.signal2
         )
@@ -333,8 +344,10 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
         row.alignment = .center
         row.spacing = 10
         row.isAccessibilityElement = true
-        row.accessibilityLabel = "Multiplex Pro is unlocked. "
-            + "This purchase is available on your devices with the same Apple ID."
+        row.accessibilityLabel = String(localized: """
+            Multiplex Pro is unlocked. This purchase is available on your devices with the same \
+            Apple ID.
+            """)
         title.isAccessibilityElement = false
         detail.isAccessibilityElement = false
         check.isAccessibilityElement = false
@@ -384,16 +397,16 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
         purchaseButton.isHidden = state.isPro
 
         let purchaseLabel = state.productDisplayPrice.map {
-            "Unlock Multiplex Pro · \($0)"
-        } ?? "Unlock Multiplex Pro"
+            String(localized: "Unlock Multiplex Pro · \($0)")
+        } ?? String(localized: "Unlock Multiplex Pro")
         purchaseButton.setPurchaseTitle(purchaseLabel)
         purchaseButton.setPurchasing(state.commerceState == .purchasing)
         purchaseButton.isEnabled = !state.purchaseIsUnavailable
 
         restoreButton.setTitle(
             state.commerceState == .restoring
-                ? "Restoring Purchases…"
-                : "Restore Purchases",
+                ? String(localized: "Restoring Purchases…")
+                : String(localized: "Restore Purchases"),
             for: .normal
         )
         restoreButton.isEnabled = !state.restoreIsUnavailable
@@ -412,34 +425,37 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
             if state.isPro {
                 return nil
             } else if state.productIsLoading {
-                return "Loading the App Store price…"
+                return String(localized: "Loading the App Store price…")
             } else {
                 return state.productLoadError
             }
         case .purchasing:
-            return "Waiting for the App Store…"
+            return String(localized: "Waiting for the App Store…")
         case .pending:
-            return "Purchase pending approval. Pro unlocks automatically if approved. "
-                + "If it was declined, tap Restore Purchases to check again."
+            return String(localized: """
+                Purchase pending approval. Pro unlocks automatically if approved. If it was \
+                declined, tap Restore Purchases to check again.
+                """)
         case .purchased:
-            return "Purchase complete."
+            return String(localized: "Purchase complete.")
         case .restoring:
-            return "Checking your App Store purchases…"
+            return String(localized: "Checking your App Store purchases…")
         case .restored:
             if state.isPro {
-                return "Multiplex Pro was restored."
+                return String(localized: "Multiplex Pro was restored.")
             }
             // Restore succeeded and genuinely found nothing. On TestFlight
             // that is the expected answer for a production purchase — the
             // test store and the App Store never share transactions — so
             // say why instead of letting the empty result read as a bug.
             if state.storeEnvironmentIsSandbox {
-                return "No Multiplex Pro purchase was found for this Apple ID. "
-                    + "TestFlight builds use Apple's test store, so a purchase "
-                    + "made in the App Store version doesn't appear here. Pro "
-                    + "can be unlocked again inside TestFlight free of charge."
+                return String(localized: """
+                    No Multiplex Pro purchase was found for this Apple ID. TestFlight builds use \
+                    Apple's test store, so a purchase made in the App Store version doesn't \
+                    appear here. Pro can be unlocked again inside TestFlight free of charge.
+                    """)
             }
-            return "No Multiplex Pro purchase was found for this Apple ID."
+            return String(localized: "No Multiplex Pro purchase was found for this Apple ID.")
         case .failed(let message):
             return message
         }

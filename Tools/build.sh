@@ -10,6 +10,8 @@
 #   ./Tools/build.sh verify [vos|ipad]   build + install + drive end-to-end
 #                                        against the local sshd/tmux harness
 #   ./Tools/build.sh interop             round-trip against real mosh-server
+#   ./Tools/build.sh strings             sync the String Catalogs from the
+#                                        last visionOS build's .stringsdata
 #   ./Tools/build.sh all                 gen + lint + build both + test
 #
 # Single source of truth for destinations, the shared DerivedData path, and the
@@ -76,6 +78,25 @@ lint() {
     # `--strict` promotes warnings to errors: the tree is clean, so anything
     # new should fail the command rather than scroll past.
     swiftlint lint --strict "$@"
+}
+
+# String Catalog sync. `xcodebuild` emits per-file .stringsdata (every
+# `String(localized:)` / SwiftUI `Text` literal) but only the Xcode IDE folds
+# them back into the .xcstrings; this is the same `xcstringstool sync` the IDE
+# runs. Run after `build vos`; commit the catalog diff. Keys that vanish from
+# source are marked stale (Xcode's behaviour), never silently deleted.
+strings() {
+    local inter="$DERIVED/Build/Intermediates.noindex/Multiplex.build/Debug-xrsimulator"
+    [ -d "$inter" ] || { echo "run ./Tools/build.sh build vos first" >&2; exit 1; }
+    local target catalog
+    for pair in "Multiplex:Multiplex/Localizable.xcstrings" \
+                "MultiplexWidgets:MultiplexWidgets/Localizable.xcstrings"; do
+        target="${pair%%:*}"; catalog="${pair#*:}"
+        # shellcheck disable=SC2046
+        xcrun xcstringstool sync "$catalog" --stringsdata \
+            $(find "$inter/$target.build/Objects-normal" -name '*.stringsdata')
+        echo "synced $catalog"
+    done
 }
 
 # Trailing arguments go straight to xcodebuild, so a caller (CI) can add
@@ -169,6 +190,7 @@ case "${1:-}" in
     test) shift; run_tests "$@" ;;
     verify) verify "${2:-vos}" ;;
     interop) interop ;;
+    strings) strings ;;
     all) gen; lint; build vos; build ipad; run_tests vos ;;
     *) sed -n '2,18p' "$0"; exit 1 ;;
 esac

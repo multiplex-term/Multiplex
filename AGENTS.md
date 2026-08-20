@@ -105,6 +105,9 @@ approaches. Don't re-litigate a recorded decision without new facts.
   doc.
 - `design-conventions.md` — TALLY tokens, appearance system, type scaling,
   platform splits. Color is state, never decoration.
+- `i18n.md` — String Catalogs (zh-Hant, ja), the A/B/C string tiers (TALLY
+  chrome stays English), glossary, `./Tools/build.sh strings`. Wrap new
+  user-visible prose in `String(localized:)`.
 
 ## Known limits (v1)
 

@@ -226,11 +226,11 @@ final class DictationSession {
 
     private func authorizeAndBegin() async {
         guard await Self.requestSpeechAuthorization() else {
-            deliver(.failure("Speech recognition access is off in Settings"))
+            deliver(.failure(String(localized: "Speech recognition access is off in Settings")))
             return
         }
         guard await Self.requestMicrophoneAccess() else {
-            deliver(.failure("Microphone access is off in Settings"))
+            deliver(.failure(String(localized: "Microphone access is off in Settings")))
             return
         }
         await begin()
@@ -276,7 +276,7 @@ final class DictationSession {
         } catch {
             Self.logger.error("dictation-audio-failed \(error.localizedDescription, privacy: .public)")
             stopAudio()
-            deliver(.failure("The microphone couldn't be opened"))
+            deliver(.failure(String(localized: "The microphone couldn't be opened")))
             return
         }
 
@@ -295,7 +295,7 @@ final class DictationSession {
         guard onFinish != nil, !isListening else { return }
         if analyzerBox == nil {
             guard let recognizer = makeRecognizer(), recognizer.isAvailable else {
-                deliver(.failure("Dictation isn't available for this language"))
+                deliver(.failure(String(localized: "Dictation isn't available for this language")))
                 return
             }
             self.recognizer = recognizer
@@ -307,7 +307,7 @@ final class DictationSession {
         } catch {
             Self.logger.error("dictation-audio-failed \(error.localizedDescription, privacy: .public)")
             stopAudio()
-            deliver(.failure("The microphone couldn't be opened"))
+            deliver(.failure(String(localized: "The microphone couldn't be opened")))
             return
         }
 
@@ -449,7 +449,7 @@ final class DictationSession {
             // and a bar that simply vanishes mid-dictation reads as the
             // feature quietly breaking.
             Self.logger.error("dictation-restart-exhausted")
-            deliver(.failure("Dictation stopped unexpectedly"))
+            deliver(.failure(String(localized: "Dictation stopped unexpectedly")))
             return
         }
         scheduleSegment()
@@ -570,7 +570,7 @@ final class DictationSession {
             onDeviceRecognition = recognizer?.supportsOnDeviceRecognition ?? false
         }
         guard recognizer?.isAvailable == true else {
-            deliver(.failure("Dictation isn't available for this language"))
+            deliver(.failure(String(localized: "Dictation isn't available for this language")))
             return
         }
         beginSegment()
@@ -623,7 +623,7 @@ final class DictationSession {
         // On STOP this is the expected ending, and everything heard was
         // finalized on the way out. Otherwise the analyzer gave up on its
         // own, which the pane says rather than leaving a dead LISTENING bar.
-        deliver(finishing || error == nil ? .ended : .failure("Dictation stopped unexpectedly"))
+        deliver(finishing || error == nil ? .ended : .failure(String(localized: "Dictation stopped unexpectedly")))
     }
 
     // MARK: Audio

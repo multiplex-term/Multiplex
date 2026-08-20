@@ -190,12 +190,12 @@ struct FileViewerTextContent {
                 builder.line(pieces, ground: fileGround)
             }
             if file.isBinary {
-                builder.line([("Binary files differ.", font, quietInk)])
+                builder.line([(String(localized: "Binary files differ."), font, quietInk)])
             } else if file.hunks.isEmpty {
                 builder.line([(
                     file.kind == .renamed
-                        ? "Rename only — contents unchanged."
-                        : "No textual hunks.",
+                        ? String(localized: "Rename only — contents unchanged.")
+                        : String(localized: "No textual hunks."),
                     font, quietInk
                 )])
             }

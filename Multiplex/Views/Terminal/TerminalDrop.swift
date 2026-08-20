@@ -151,7 +151,7 @@ final class DropTargetVeilView: UIView {
         ])
 
         isAccessibilityElement = true
-        accessibilityLabel = "Drop to upload"
+        accessibilityLabel = String(localized: "Drop to upload")
         refreshResolvedLayerColors()
     }
 

@@ -1,3 +1,5 @@
+import Foundation
+
 /// Familiar herdr commands exposed by the terminal chrome — the herdr-backend
 /// sibling of `TmuxShortcut`. herdr's default prefix is Control-B like tmux's,
 /// and non-destructive rows send the stock prefix binding through SwiftTerm.
@@ -17,6 +19,16 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
         case panes = "Panes"
         case tabs = "Tabs"
         case workspaces = "Workspaces"
+
+        /// Section header shown in the panel; the raw value stays English
+        /// because it also names accessibility identifiers.
+        var title: String {
+            switch self {
+            case .panes: String(localized: "Panes")
+            case .tabs: String(localized: "Tabs")
+            case .workspaces: String(localized: "Workspaces")
+            }
+        }
     }
 
     /// What a confirmed destructive row closes. The raw value is herdr's own
@@ -50,14 +62,14 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .splitLeftRight: "Split Left / Right"
-        case .splitTopBottom: "Split Top / Bottom"
-        case .closePane: "Close Pane"
-        case .newTab: "New Tab"
-        case .closeTab: "Close Tab"
-        case .newWorkspace: "New Workspace"
-        case .renameWorkspace: "Rename Workspace"
-        case .closeWorkspace: "Close Workspace"
+        case .splitLeftRight: String(localized: "Split Left / Right")
+        case .splitTopBottom: String(localized: "Split Top / Bottom")
+        case .closePane: String(localized: "Close Pane")
+        case .newTab: String(localized: "New Tab")
+        case .closeTab: String(localized: "Close Tab")
+        case .newWorkspace: String(localized: "New Workspace")
+        case .renameWorkspace: String(localized: "Rename Workspace")
+        case .closeWorkspace: String(localized: "Close Workspace")
         }
     }
 

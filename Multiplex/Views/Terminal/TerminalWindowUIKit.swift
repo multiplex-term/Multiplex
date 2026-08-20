@@ -975,19 +975,26 @@ final class TerminalWindowViewController: UIViewController,
               let host = store.host(id: activeTab.hostID)
         else { return }
         let message = activeTab.sessionBackend == .herdr
-            ? "Stops “\(sessionName)” on \(host.name), deletes its saved state when "
-                + "herdr allows it, then closes the tab."
-            : "Kills “\(sessionName)” on \(host.name) and everything running in it, "
-                + "then closes the tab."
+            ? String(localized: """
+                Stops “\(sessionName)” on \(host.name), deletes its saved state when \
+                herdr allows it, then closes the tab.
+                """)
+            : String(localized: """
+                Kills “\(sessionName)” on \(host.name) and everything running in it, \
+                then closes the tab.
+                """)
         let alert = UIAlertController(
-            title: "Close Session",
+            title: String(localized: "Close Session"),
             message: message,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Close Session", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Close Session"),
+            style: .destructive
+        ) { [weak self] _ in
             self?.closeSession(activeTab)
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: String(localized: "Cancel"), style: .cancel))
         present(alert, animated: true)
     }
 
@@ -1095,10 +1102,11 @@ final class TerminalWindowViewController: UIViewController,
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(
             title: target.failureTitle,
-            message: reason ?? "Check the connection to \(hostName) and try again.",
+            message: reason
+                ?? String(localized: "Check the connection to \(hostName) and try again."),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        alert.addAction(UIAlertAction(title: String(localized: "OK"), style: .cancel))
         present(alert, animated: true)
     }
 
@@ -1840,7 +1848,7 @@ extension TerminalWindowViewController {
     }
 
     private var windowTitle: String {
-        guard let activeTab else { return "Terminal" }
+        guard let activeTab else { return String(localized: "Terminal") }
         let hostName = store.host(id: activeTab.hostID)?.name
         let title = tabTitle(for: activeTab)
         return hostName.map { "\(title) — \($0)" } ?? title
@@ -1854,7 +1862,9 @@ extension TerminalWindowViewController {
     }
 
     private var auxiliaryCloseLabel: String {
-        activeTab?.isFileViewer == true ? "Close file viewer" : "Close viewport"
+        activeTab?.isFileViewer == true
+            ? String(localized: "Close file viewer")
+            : String(localized: "Close viewport")
     }
 
     /// The herdr-only second `+ TAB` entry the active tab offers — the one
@@ -2761,7 +2771,7 @@ extension TerminalWindowViewController {
             presentedActivationID = featureID
             let sheet = TerminalFilePathSheetViewController(
                 target: target,
-                hostName: activeTabHost?.name ?? "the host",
+                hostName: activeTabHost?.name ?? String(localized: "the host"),
                 onView: { [weak self] in self?.openFileViewer(target: $0) },
                 onCopy: { [weak controller] in controller?.copyConfirmedTarget($0) }
             )

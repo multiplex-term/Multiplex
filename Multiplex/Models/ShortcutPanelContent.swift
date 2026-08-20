@@ -1,3 +1,5 @@
+import Foundation
+
 /// Pure presentation records for the shared multiplexer-shortcut panel: one
 /// UIKit dropdown renders both the tmux and the herdr shortcut sets. Derived
 /// entirely from `TmuxShortcut`/`HerdrShortcut` so the enums stay the single
@@ -94,15 +96,15 @@ struct ShortcutPanelContent: Equatable, Sendable {
         prefixLabel: "DEFAULT PREFIX  ⌃B",
         sections: TmuxShortcut.Group.allCases.map { group in
             ShortcutPanelSection(
-                title: group.rawValue,
+                title: group.title,
                 accessibilityIdentifier: "tmuxGroup.\(group.rawValue)",
                 items: TmuxShortcut.shortcuts(in: group).map(ShortcutPanelItem.init)
             )
         },
-        switchSectionTitle: "Switch Window",
+        switchSectionTitle: String(localized: "Switch Window"),
         switchSectionAccessibilityIdentifier: "tmuxWindowSection",
         switchChoiceAccessibilityPrefix: "tmuxWindow.",
-        switchNoun: "window"
+        switchNoun: String(localized: "window")
     )
 
     /// herdr's default prefix is also Control-B (`herdr --default-config`,
@@ -112,15 +114,15 @@ struct ShortcutPanelContent: Equatable, Sendable {
         prefixLabel: "DEFAULT PREFIX  ⌃B",
         sections: HerdrShortcut.Group.allCases.map { group in
             ShortcutPanelSection(
-                title: group.rawValue,
+                title: group.title,
                 accessibilityIdentifier: "herdrGroup.\(group.rawValue)",
                 items: HerdrShortcut.shortcuts(in: group).map(ShortcutPanelItem.init)
             )
         },
-        switchSectionTitle: "Switch Workspace",
+        switchSectionTitle: String(localized: "Switch Workspace"),
         switchSectionAccessibilityIdentifier: "herdrWorkspaceSection",
         switchChoiceAccessibilityPrefix: "herdrWorkspace.",
-        switchNoun: "workspace"
+        switchNoun: String(localized: "workspace")
     )
 
     /// The panel for one terminal tab's backend; nil hides the chrome

@@ -1015,18 +1015,25 @@ final class DeckWindowViewController: UIViewController {
 
     private func presentLocalNetworkAlert() {
         let alert = UIAlertController(
-            title: "Local Network Access Is Off",
-            message: "Multiplex can’t reach SSH hosts on your local network. Turn on Local Network access in Settings.",
+            title: String(localized: "Local Network Access Is Off"),
+            message: String(localized: """
+                Multiplex can’t reach SSH hosts on your local network. Turn on \
+                Local Network access in Settings.
+                """),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Open Settings"), style: .default
+        ) { [weak self] _ in
             guard let self,
                   let url = URL(string: UIApplication.openSettingsURLString)
             else { return }
             self.configuration.openURL(url)
             self.alertActionEndedPresentation()
         })
-        alert.addAction(UIAlertAction(title: "Not Now", style: .cancel) { [weak self] _ in
+        alert.addAction(UIAlertAction(
+            title: String(localized: "Not Now"), style: .cancel
+        ) { [weak self] _ in
             self?.alertActionEndedPresentation()
         })
         ownedPresentation = alert

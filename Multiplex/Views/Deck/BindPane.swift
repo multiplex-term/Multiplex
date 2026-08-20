@@ -6,43 +6,67 @@ import VisionKit
 #endif
 
 private enum BindPaneCopy {
-    static let machineDetail = "Copy a line, run it in a terminal on the machine you "
-        + "want to add, then leave mpx bind running. Nothing here runs on this device."
-    static let incomingEmptyDetail = "Machines running mpx bind on this network appear "
-        + "here on their own. Confirm each one with the 6-digit PIN its terminal printed."
-    static let incomingDiscoveredDetail = "Heard on your network. Check the address and "
-        + "fingerprint against the terminal, then type its PIN."
-    static let incomingPayloadDetail = "From a scanned or pasted bind code."
-    static let backendTmuxDetail = "Every machine bound from this pane is added on this "
-        + "backend — binding proves who a machine is, not what it runs. tmux is the remote "
-        + "server the deck monitors: sessions, windows, and agent panes. Change it later in "
-        + "Host Settings."
-    static let backendHerdrDetail = "Every machine bound from this pane is added on this "
-        + "backend — binding proves who a machine is, not what it runs. The deck monitors "
-        + "herdr (herdr.dev) sessions and their agents through the herdr CLI, one tile per "
-        + "session. Change it later in Host Settings."
+    static let machineDetail = String(localized: """
+        Copy a line, run it in a terminal on the machine you \
+        want to add, then leave mpx bind running. Nothing here runs on this device.
+        """)
+    static let incomingEmptyDetail = String(localized: """
+        Machines running mpx bind on this network appear \
+        here on their own. Confirm each one with the 6-digit PIN its terminal printed.
+        """)
+    static let incomingDiscoveredDetail = String(localized: """
+        Heard on your network. Check the address and \
+        fingerprint against the terminal, then type its PIN.
+        """)
+    static let incomingPayloadDetail = String(localized: "From a scanned or pasted bind code.")
+    static let backendTmuxDetail = String(localized: """
+        Every machine bound from this pane is added on this \
+        backend — binding proves who a machine is, not what it runs. tmux is the remote \
+        server the deck monitors: sessions, windows, and agent panes. Change it later in \
+        Host Settings.
+        """)
+    static let backendHerdrDetail = String(localized: """
+        Every machine bound from this pane is added on this \
+        backend — binding proves who a machine is, not what it runs. The deck monitors \
+        herdr (herdr.dev) sessions and their agents through the herdr CLI, one tile per \
+        session. Change it later in Host Settings.
+        """)
     /// Both checked. The cost sentence is `HostGuide`'s, so this and the
     /// deck's offer confirmation can't drift on what the escalation costs.
-    static let backendMixedDetail = "Every machine bound from this pane is added showing "
-        + "both — binding proves who a machine is, not what it runs. Each tile is marked "
-        + "with the backend it came from, and that \(HostGuide.secondBackendCost). Change "
-        + "it later in Host Settings."
-    static let passphraseDetail = "Optional, for every machine bound from this pane: its "
-        + "SSH key is generated sealed with this passphrase, which is then saved in the "
-        + "host's settings so connecting keeps working. Clear it in Host Settings to be "
-        + "asked when connecting instead. Empty means the key is stored unlocked, "
-        + "exactly as before."
-    static let elsewhereDetail = "A machine on another network — a VPS, a box behind a "
-        + "firewall — can't announce itself here. Scan the QR its terminal printed, or "
-        + "have it hand you the code."
-    static let pasteLead = "Paste needs the code on this device's clipboard, and mpx "
-        + "never takes a clipboard unless you ask it to. Run it with --copy instead:"
-    static let pastePostscript = "Over SSH that uses OSC 52, so the code lands on your "
-        + "local terminal's clipboard and Universal Clipboard carries it here."
-    static let pasteFailure = "The clipboard doesn’t hold a bind code. Copy the "
-        + "multiplex:// line the CLI printed."
-    static let footer = "Binding never sends a private key: this device makes its own key "
-        + "and the machine adds the public half to authorized_keys. mpx unbind removes it."
+    static let backendMixedDetail = String(localized: """
+        Every machine bound from this pane is added showing \
+        both — binding proves who a machine is, not what it runs. Each tile is marked \
+        with the backend it came from, and that \(HostGuide.secondBackendCost). Change \
+        it later in Host Settings.
+        """)
+    static let passphraseDetail = String(localized: """
+        Optional, for every machine bound from this pane: its \
+        SSH key is generated sealed with this passphrase, which is then saved in the \
+        host's settings so connecting keeps working. Clear it in Host Settings to be \
+        asked when connecting instead. Empty means the key is stored unlocked, \
+        exactly as before.
+        """)
+    static let elsewhereDetail = String(localized: """
+        A machine on another network — a VPS, a box behind a \
+        firewall — can't announce itself here. Scan the QR its terminal printed, or \
+        have it hand you the code.
+        """)
+    static let pasteLead = String(localized: """
+        Paste needs the code on this device's clipboard, and mpx \
+        never takes a clipboard unless you ask it to. Run it with --copy instead:
+        """)
+    static let pastePostscript = String(localized: """
+        Over SSH that uses OSC 52, so the code lands on your \
+        local terminal's clipboard and Universal Clipboard carries it here.
+        """)
+    static let pasteFailure = String(localized: """
+        The clipboard doesn’t hold a bind code. Copy the \
+        multiplex:// line the CLI printed.
+        """)
+    static let footer = String(localized: """
+        Binding never sends a private key: this device makes its own key \
+        and the machine adds the public half to authorized_keys. mpx unbind removes it.
+        """)
 }
 
 private extension BindController.Pending {
@@ -64,9 +88,9 @@ private extension BindController.Pending {
 
     var busyCaption: String {
         switch stage {
-        case .binding: "Proving the PIN…"
-        case .enrolling: "Enrolling this device’s key…"
-        case .checking: "Checking the connection…"
+        case .binding: String(localized: "Proving the PIN…")
+        case .enrolling: String(localized: "Enrolling this device’s key…")
+        case .checking: String(localized: "Checking the connection…")
         default: ""
         }
     }
@@ -289,7 +313,7 @@ final class BindPaneViewController: UIViewController {
         ))
 
         let section = UIKitTallyFormSectionView(
-            title: "On the machine",
+            title: String(localized: "On the machine"),
             detail: BindPaneCopy.machineDetail,
             contentView: commands
         )
@@ -311,7 +335,7 @@ final class BindPaneViewController: UIViewController {
         backendContent.alignment = .fill
         backendContent.spacing = 8
         let section = UIKitTallyFormSectionView(
-            title: "Backend",
+            title: String(localized: "Backend"),
             detail: Self.backendDetail(for: bind.backends),
             contentView: backendContent
         )
@@ -340,7 +364,7 @@ final class BindPaneViewController: UIViewController {
             bind?.backends.setEnabled(enabled)
         }
         checks.accessibilityIdentifier = "bind.backendChecks"
-        backendContent.addArrangedSubview(bindBackendLabel("Backends"))
+        backendContent.addArrangedSubview(bindBackendLabel(String(localized: "Backends")))
         backendContent.addArrangedSubview(checks)
 
         guard backends.isMixed else { return }
@@ -353,10 +377,11 @@ final class BindPaneViewController: UIViewController {
             bind?.backends.setPreferred(backend)
         }
         bar.accessibilityIdentifier = "bind.backendBar"
-        let label = bindBackendLabel("New sessions run on")
-        label.accessibilityHint =
-            "The backend New Session, widgets, and Shortcuts start on "
-            + "unless they name another"
+        let label = bindBackendLabel(String(localized: "New sessions run on"))
+        label.accessibilityHint = String(localized: """
+            The backend New Session, widgets, and Shortcuts start on \
+            unless they name another
+            """)
         backendContent.addArrangedSubview(label)
         backendContent.addArrangedSubview(bar)
         backendContent.setCustomSpacing(16, after: checks)
@@ -377,7 +402,7 @@ final class BindPaneViewController: UIViewController {
             bind?.keyPassphrase = text
         }
         let section = UIKitTallyFormSectionView(
-            title: "Key passphrase",
+            title: String(localized: "Key passphrase"),
             detail: BindPaneCopy.passphraseDetail,
             contentView: passphraseField
         )
@@ -411,7 +436,7 @@ final class BindPaneViewController: UIViewController {
             let scan = UIKitChassisChip(
                 "SCAN QR",
                 systemImage: "qrcode.viewfinder",
-                accessibilityLabel: "Scan QR code",
+                accessibilityLabel: String(localized: "Scan QR code"),
                 action: { [weak self] in self?.presentScanner() }
             )
             scan.accessibilityIdentifier = "bind.scan"
@@ -445,7 +470,7 @@ final class BindPaneViewController: UIViewController {
         content.spacing = 10
 
         return UIKitTallyFormSectionView(
-            title: "Somewhere else",
+            title: String(localized: "Somewhere else"),
             detail: BindPaneCopy.elsewhereDetail,
             contentView: content
         )
@@ -496,8 +521,12 @@ final class BindPaneViewController: UIViewController {
                 .foregroundColor: UIKitChassis.signal3,
             ]
         )
+        // A translation may not carry the command verbatim; NSNotFound would
+        // trap inside addAttribute.
         let range = (BindPaneCopy.footer as NSString).range(of: "mpx unbind")
-        attributed.addAttribute(.font, value: UIKitChassis.monoFont(10), range: range)
+        if range.location != NSNotFound {
+            attributed.addAttribute(.font, value: UIKitChassis.monoFont(10), range: range)
+        }
         label.attributedText = attributed
 
         let container = UIView()
@@ -622,7 +651,7 @@ private final class BindIncomingSectionView: UIView {
         super.init(frame: .zero)
         accessibilityIdentifier = "bind.section.incoming"
 
-        let title = UIKitChassisLabel("Asking to bind", size: 10)
+        let title = UIKitChassisLabel(String(localized: "Asking to bind"), size: 10)
         title.accessibilityTraits.insert(.header)
         let header = UIView()
         header.backgroundColor = UIKitChassis.bezel
@@ -711,7 +740,7 @@ private final class BindListeningRowView: UIView {
 
         let lamp = UIKitTallyLamp(caption: "LISTENING", color: TallyPalette.caution)
         let message = BindUI.label(
-            "No machine has answered yet.",
+            String(localized: "No machine has answered yet."),
             font: UIKitChassis.uiFont(11),
             color: UIKitChassis.signal2,
             lines: 1
@@ -776,7 +805,7 @@ final class BindCandidateRowView: UIView {
 
     func apply(_ pending: BindController.Pending) {
         nameLabel.setText(pending.name)
-        accessibilityLabel = "\(pending.name) is asking to bind"
+        accessibilityLabel = String(localized: "\(pending.name) is asking to bind")
         accessibilityIdentifier = "bind.candidate.\(pending.id)"
 
         userLabel.text = "\(pending.user.isEmpty ? "?" : pending.user) @ \(pending.name)"
@@ -797,7 +826,7 @@ final class BindCandidateRowView: UIView {
         pinInput.setCandidate(name: pending.name, id: pending.id)
         pinInput.setPIN(pending.pin)
 
-        dismissChip.accessibilityLabel = "Dismiss \(pending.name)"
+        dismissChip.accessibilityLabel = String(localized: "Dismiss \(pending.name)")
         confirmChip.setContent(caption: pending.retryLabel, systemImage: nil)
         confirmChip.accessibilityLabel =
             "\(pending.retryLabel.capitalized) \(pending.name)"
@@ -876,8 +905,10 @@ final class BindCandidateRowView: UIView {
         contestedLabel.textColor = TallyPalette.caution
         contestedLabel.numberOfLines = 0
         contestedLabel.isHidden = true
-        contestedLabel.text = "Another announcement is using this name. If you started "
-            + "only one mpx bind, one of these isn't your machine — scan its QR instead."
+        contestedLabel.text = String(localized: """
+            Another announcement is using this name. If you started \
+            only one mpx bind, one of these isn't your machine — scan its QR instead.
+            """)
         contestedLabel.accessibilityIdentifier = "bind.candidate.contested"
 
         errorLabel.font = UIKitChassis.uiFont(10)
@@ -892,12 +923,12 @@ final class BindCandidateRowView: UIView {
 
         dismissChip = UIKitChassisChip(
             "DISMISS",
-            accessibilityLabel: "Dismiss machine",
+            accessibilityLabel: String(localized: "Dismiss machine"),
             action: { [weak self] in self?.dismiss() }
         )
         confirmChip = UIKitChassisChip(
             "ENROLL",
-            accessibilityLabel: "Enroll machine",
+            accessibilityLabel: String(localized: "Enroll machine"),
             action: { [weak self] in
                 guard let self, self.canSubmit else { return }
                 self.confirm()
@@ -936,7 +967,7 @@ final class BindCandidateRowView: UIView {
 
         boundLabel.font = UIKitChassis.uiFont(10)
         boundLabel.textColor = UIKitChassis.signal2
-        boundLabel.text = "Added to the fleet — it's on the deck now."
+        boundLabel.text = String(localized: "Added to the fleet — it's on the deck now.")
         boundLabel.numberOfLines = 0
         boundLabel.isHidden = true
 
@@ -1059,7 +1090,7 @@ private final class BindPINInputView: UIView, UITextFieldDelegate {
     required init?(coder: NSCoder) { fatalError("unused") }
 
     func setCandidate(name: String, id: String) {
-        field.accessibilityLabel = "PIN from \(name)’s terminal"
+        field.accessibilityLabel = String(localized: "PIN from \(name)’s terminal")
         field.accessibilityIdentifier = "bind.pin.\(id)"
     }
 
@@ -1125,7 +1156,7 @@ private final class BindRevealableSecretField: UIView, UITextFieldDelegate {
         field.textColor = UIKitChassis.signal
         field.tintColor = UIKitChassis.signal
         field.attributedPlaceholder = NSAttributedString(
-            string: "Optional",
+            string: String(localized: "Optional"),
             attributes: [.foregroundColor: UIKitChassis.signal3]
         )
         field.autocorrectionType = .no
@@ -1136,7 +1167,7 @@ private final class BindRevealableSecretField: UIView, UITextFieldDelegate {
         field.autocapitalizationType = .none
         field.keyboardType = .asciiCapable
         field.textContentType = UITextContentType(rawValue: "")
-        field.accessibilityLabel = "Key passphrase"
+        field.accessibilityLabel = String(localized: "Key passphrase")
         field.accessibilityIdentifier = "bind.keyPassphrase"
         field.delegate = self
         field.addTarget(self, action: #selector(editingChanged), for: .editingChanged)
@@ -1228,8 +1259,8 @@ private final class BindRevealableSecretField: UIView, UITextFieldDelegate {
             for: .normal
         )
         revealButton.accessibilityLabel = revealed
-            ? "Hide Key passphrase"
-            : "Show Key passphrase"
+            ? String(localized: "Hide Key passphrase")
+            : String(localized: "Show Key passphrase")
     }
 
     private static func bullets(_ count: Int) -> String {
@@ -1256,7 +1287,7 @@ private enum BindUI {
 
 @MainActor
 private final class BindPasteControl: UIPasteControl {
-    static let spokenLabel = "Paste bind code"
+    static let spokenLabel = String(localized: "Paste bind code")
 
     /// `UIPasteControl` rewrites its accessibility label to the generic
     /// “Paste” after its target/configuration updates. VoiceOver needs the
@@ -1318,16 +1349,16 @@ private final class BindScannerViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Scan Bind Code"
+        title = String(localized: "Scan Bind Code")
         navigationItem.largeTitleDisplayMode = .never
         let cancel = UIBarButtonItem(
-            title: "Cancel",
+            title: String(localized: "Cancel"),
             style: .plain,
             target: self,
             action: #selector(cancelPressed)
         )
         cancel.tintColor = UIKitChassis.signal
-        cancel.accessibilityLabel = "Cancel"
+        cancel.accessibilityLabel = String(localized: "Cancel")
         navigationItem.leftBarButtonItem = cancel
 
         guard DataScannerViewController.isSupported,
@@ -1370,7 +1401,7 @@ private final class BindScannerViewController: UIViewController {
     private func showUnavailable() {
         view.backgroundColor = GlassPrototype.clearedChassis
         let label = UILabel()
-        label.text = "This device can’t scan. Paste the bind code instead."
+        label.text = String(localized: "This device can’t scan. Paste the bind code instead.")
         label.textColor = UIKitChassis.signal2
         label.numberOfLines = 0
         label.textAlignment = .center

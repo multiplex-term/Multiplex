@@ -6,11 +6,11 @@ import UIKit
 /// synchronizable Keychain item.
 @MainActor
 final class SSHKeyPassphrasePromptPresenterViewController: UIViewController {
-    static let titleText = "Unlock SSH Key"
-    static let fieldPlaceholder = "Key passphrase"
-    static let connectOnceTitle = "Connect Once"
-    static let saveAndConnectTitle = "Save & Connect"
-    static let cancelTitle = "Cancel"
+    static let titleText = String(localized: "Unlock SSH Key")
+    static let fieldPlaceholder = String(localized: "Key passphrase")
+    static let connectOnceTitle = String(localized: "Connect Once")
+    static let saveAndConnectTitle = String(localized: "Save & Connect")
+    static let cancelTitle = String(localized: "Cancel")
 
     private(set) var currentAlertController: UIAlertController?
     private(set) var lastPresentedID: UUID?
@@ -48,9 +48,9 @@ final class SSHKeyPassphrasePromptPresenterViewController: UIViewController {
     static func message(for challenge: SSHKeyPassphraseChallenge) -> String {
         switch challenge.reason {
         case .required:
-            return "The private key for “\(challenge.hostName)” is encrypted. Connect Once keeps the passphrase until Multiplex closes. Save & Connect stores it in iCloud Keychain for your other devices."
+            return String(localized: "The private key for “\(challenge.hostName)” is encrypted. Connect Once keeps the passphrase until Multiplex closes. Save & Connect stores it in iCloud Keychain for your other devices.")
         case .incorrect:
-            return "That passphrase didn't unlock the private key for “\(challenge.hostName)”. Try again. Save & Connect replaces the copy in iCloud Keychain."
+            return String(localized: "That passphrase didn't unlock the private key for “\(challenge.hostName)”. Try again. Save & Connect replaces the copy in iCloud Keychain.")
         }
     }
 

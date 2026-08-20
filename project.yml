@@ -1,6 +1,12 @@
 name: Multiplex
 options:
   bundleIdPrefix: app.multiplexterm
+  # Localizations live in String Catalogs (Localizable.xcstrings per bundle,
+  # InfoPlist.xcstrings for the plist strings). English is the source; the
+  # catalog is filled by the build (SWIFT_EMIT_LOC_STRINGS below), never by
+  # hand-adding keys — see docs/agents/i18n.md.
+  developmentLanguage: en
+  knownRegions: [en, zh-Hant, ja]
   createIntermediateGroups: true
   deploymentTarget:
     iOS: "17.0"
@@ -44,6 +50,10 @@ settings:
     # declaring it as a target dependency; explicit module builds reject that.
     SWIFT_ENABLE_EXPLICIT_MODULES: NO
     _EXPERIMENTAL_SWIFT_EXPLICIT_MODULES: NO
+    # String Catalogs: the build extracts `String(localized:)` / SwiftUI
+    # `Text` literals into the target's Localizable.xcstrings.
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
 
 schemes:
   Multiplex:

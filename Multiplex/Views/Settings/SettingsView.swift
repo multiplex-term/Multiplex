@@ -65,7 +65,7 @@ final class SettingsViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Settings"
+        title = String(localized: "Settings")
         view.backgroundColor = GlassPrototype.sheetGround
         configureNavigation()
         configureContent()
@@ -101,16 +101,16 @@ final class SettingsViewController: UIViewController {
     private func configureNavigation() {
         navigationItem.largeTitleDisplayMode = .never
         #if os(visionOS)
-        navigationItem.titleView = UIKitChassisLabel("Settings", size: 12)
+        navigationItem.titleView = UIKitChassisLabel(String(localized: "Settings"), size: 12)
         #endif
         let done = UIBarButtonItem(
-            title: "Done",
+            title: String(localized: "Done"),
             style: .plain,
             target: self,
             action: #selector(donePressed)
         )
         done.tintColor = UIKitChassis.signal
-        done.accessibilityLabel = "Done"
+        done.accessibilityLabel = String(localized: "Done")
         navigationItem.rightBarButtonItem = done
     }
 
@@ -246,6 +246,7 @@ final class SettingsViewController: UIViewController {
             makeAlertsSection(state),
             makeAppLockSection(state),
             makeProSection(state),
+            makeLanguageSection(),
             makeAboutSection(),
             makePrivacyLink(),
         ]
@@ -275,16 +276,18 @@ final class SettingsViewController: UIViewController {
         appearanceChoiceBar = bar
         let appearanceDetail: String
         if GlassPrototype.enabled {
-            appearanceDetail = "System follows the device. The deck, terminal chrome, "
-                + "and forms switch together. Dark and Glass share the dark terminal "
-                + "theme below."
+            appearanceDetail = String(localized: """
+                System follows the device. The deck, terminal chrome, and forms switch \
+                together. Dark and Glass share the dark terminal theme below.
+                """)
         } else {
-            appearanceDetail = "System follows the device. The deck, terminal chrome, "
-                + "and forms switch together; each appearance keeps its own terminal "
-                + "theme below."
+            appearanceDetail = String(localized: """
+                System follows the device. The deck, terminal chrome, and forms switch \
+                together; each appearance keeps its own terminal theme below.
+                """)
         }
         let section = SettingsSectionView(
-            title: "Appearance",
+            title: String(localized: "Appearance"),
             detail: appearanceDetail,
             rows: [SettingsInsetRow(contentView: bar)]
         )
@@ -318,7 +321,7 @@ final class SettingsViewController: UIViewController {
     ) -> UIView {
         let name = UIKitChassisLabel(theme.name, size: 12)
         let surface = settingsTrackedLabel(
-            "TERMINAL SURFACE",
+            String(localized: "TERMINAL SURFACE"),
             font: UIKitChassis.monoFont(8, weight: .medium),
             color: UIKitChassis.signal3,
             kern: 1
@@ -342,16 +345,18 @@ final class SettingsViewController: UIViewController {
         let ownership: String
         switch choice {
         case .glass:
-            ownership = "Glass shares this dark terminal theme with Dark."
+            ownership = String(localized: "Glass shares this dark terminal theme with Dark.")
         case .dark where GlassPrototype.enabled:
-            ownership = "Dark shares this terminal theme with Glass."
+            ownership = String(localized: "Dark shares this terminal theme with Glass.")
         default:
-            ownership = "This is the \(resolvedAppearance == .light ? "light" : "dark") "
-                + "theme now on screen."
+            let mode = resolvedAppearance == .light
+                ? String(localized: "light")
+                : String(localized: "dark")
+            ownership = String(localized: "This is the \(mode) theme now on screen.")
         }
         return SettingsSectionView(
-            title: "Current theme",
-            detail: "Selections apply to every terminal immediately. \(ownership)",
+            title: String(localized: "Current theme"),
+            detail: String(localized: "Selections apply to every terminal immediately. \(ownership)"),
             rows: [SettingsInsetRow(contentView: body)]
         )
     }
@@ -366,9 +371,11 @@ final class SettingsViewController: UIViewController {
             )
         }
         return SettingsSectionView(
-            title: "Built-in themes",
-            detail: "Choose a terminal palette. Press and hold a theme to duplicate it "
-                + "as a custom starting point.",
+            title: String(localized: "Built-in themes"),
+            detail: String(localized: """
+                Choose a terminal palette. Press and hold a theme to duplicate it as a custom \
+                starting point.
+                """),
             rows: rows
         )
     }
@@ -381,12 +388,12 @@ final class SettingsViewController: UIViewController {
         var rows: [UIView] = []
         if state.customThemes.isEmpty {
             let emptyTitle = UIKitChassisLabel(
-                "No custom themes",
+                String(localized: "No custom themes"),
                 size: 10,
                 color: UIKitChassis.signal3
             )
             let emptyDetail = settingsLabel(
-                "Start from the active palette, then tune its surface and ANSI colors.",
+                String(localized: "Start from the active palette, then tune its surface and ANSI colors."),
                 font: UIKitChassis.uiFont(10),
                 color: UIKitChassis.signal2
             )
@@ -410,7 +417,7 @@ final class SettingsViewController: UIViewController {
         let newTheme = UIKitChassisChip(
             "NEW THEME",
             systemImage: "plus",
-            accessibilityLabel: "New theme"
+            accessibilityLabel: String(localized: "New theme")
         ) { [weak self] in
             self?.requestThemeEditor(selectedTheme.asCustom(named: "New Theme"))
         }
@@ -424,26 +431,36 @@ final class SettingsViewController: UIViewController {
         rows.append(SettingsInsetRow(contentView: actionRow))
 
         let detail = state.canMutateCustomThemes
-            ? "New themes begin with the active palette. Use the row menu to edit, "
-                + "duplicate, or delete one."
-            : "Creating, duplicating, and editing custom themes requires Multiplex Pro. "
-                + "Existing themes remain selectable and deletable."
-        return SettingsSectionView(title: "Your themes", detail: detail, rows: rows)
+            ? String(localized: """
+                New themes begin with the active palette. Use the row menu to edit, duplicate, \
+                or delete one.
+                """)
+            : String(localized: """
+                Creating, duplicating, and editing custom themes requires Multiplex Pro. \
+                Existing themes remain selectable and deletable.
+                """)
+        return SettingsSectionView(
+            title: String(localized: "Your themes"),
+            detail: detail,
+            rows: rows
+        )
     }
 
     private func makeRendererSection() -> UIView {
         // Reads and writes the defaults-backed switch directly: no store
         // observes it, and the row's optimistic flip is the honest state.
         let control = SettingsBooleanRow(
-            title: "Metal renderer",
+            title: String(localized: "Metal renderer"),
             isOn: MetalRendererSetting.isEnabled
         ) { enabled in
             MetalRendererSetting.setEnabled(enabled)
         }
         return SettingsSectionView(
-            title: "Terminal renderer",
-            detail: "Draws terminal text on the GPU instead of CoreGraphics. "
-                + "Takes effect for newly opened terminal windows.",
+            title: String(localized: "Terminal renderer"),
+            detail: String(localized: """
+                Draws terminal text on the GPU instead of CoreGraphics. Takes effect for newly \
+                opened terminal windows.
+                """),
             rows: [control]
         )
     }
@@ -455,18 +472,19 @@ final class SettingsViewController: UIViewController {
         // here leaves the device; the detail line carries the stops-measuring
         // half of the promise.
         let control = SettingsBooleanRow(
-            title: "Show connection stats",
+            title: String(localized: "Show connection stats"),
             isOn: ConnectionStatsCenter.shared.isCollecting
         ) { enabled in
             ConnectionStatsCenter.shared.setCollecting(enabled)
         }
         return SettingsSectionView(
-            title: "Connection stats",
-            detail: "Round-trips, echo latency, loss, and volume — numbers the "
-                + "transports already compute, measured passively and kept in "
-                + "memory for this session only. Nothing is stored or synced. "
-                + "Off hides the rail chips and the stats board and stops "
-                + "measuring. The live chip is free; the board requires Pro.",
+            title: String(localized: "Connection stats"),
+            detail: String(localized: """
+                Round-trips, echo latency, loss, and volume — numbers the transports already \
+                compute, measured passively and kept in memory for this session only. Nothing \
+                is stored or synced. Off hides the rail chips and the stats board and stops \
+                measuring. The live chip is free; the board requires Pro.
+                """),
             rows: [control]
         )
     }
@@ -474,14 +492,14 @@ final class SettingsViewController: UIViewController {
     private func makeAlertsSection(_ state: ViewState) -> UIView {
         let alertsOn = state.canScheduleAgentAlerts && state.alertsEnabled
         let control = SettingsBooleanRow(
-            title: "Agent alerts",
+            title: String(localized: "Agent alerts"),
             isOn: alertsOn,
             status: state.canScheduleAgentAlerts ? nil : "PRO",
             statusIsProminent: true,
             optimisticallyUpdates: state.canScheduleAgentAlerts,
             accessibilityHint: state.canScheduleAgentAlerts
                 ? nil
-                : "Requires Multiplex Pro"
+                : String(localized: "Requires Multiplex Pro")
         ) { [weak self] enabled in
             guard let self else { return }
             if enabled && !self.entitlements.canScheduleAgentAlerts {
@@ -501,16 +519,18 @@ final class SettingsViewController: UIViewController {
         if !state.canScheduleAgentAlerts {
             rows.append(SettingsInsetRow(contentView: settingsLeadingView(UIKitChassisChip(
                 "VIEW MULTIPLEX PRO",
-                accessibilityLabel: "View Multiplex Pro"
+                accessibilityLabel: String(localized: "View Multiplex Pro")
             ) { [weak self] in
                 self?.presentPaywall()
             })))
         }
         return SettingsSectionView(
-            title: "Agent alerts",
-            detail: "Posts a banner when Claude Code, Codex, or Grok Build finishes a turn, "
-                + "asks a question, or wants permission in a session you are not typing in. "
-                + "Multiplex must remain open. Requires Pro.",
+            title: String(localized: "Agent alerts"),
+            detail: String(localized: """
+                Posts a banner when Claude Code, Codex, or Grok Build finishes a turn, asks a \
+                question, or wants permission in a session you are not typing in. Multiplex \
+                must remain open. Requires Pro.
+                """),
             rows: rows
         )
     }
@@ -518,10 +538,10 @@ final class SettingsViewController: UIViewController {
     private func makeAppLockSection(_ state: ViewState) -> UIView {
         let method = AppLockStore.methodName
         let control = SettingsBooleanRow(
-            title: "Require \(method)",
+            title: String(localized: "Require \(method)"),
             isOn: state.appLockEnabled,
             optimisticallyUpdates: false,
-            accessibilityHint: "Locks the app behind \(method)"
+            accessibilityHint: String(localized: "Locks the app behind \(method)")
         ) { [weak self] enabled in
             guard let self else { return }
             Task { @MainActor in
@@ -533,17 +553,24 @@ final class SettingsViewController: UIViewController {
         }
         appLockControl = control
         return SettingsSectionView(
-            title: "App lock",
-            detail: "Require \(method) when Multiplex opens or returns from the background. "
-                + "The deck and every terminal stay covered until you authenticate; "
-                + "connections and the wall keep running. This device only.",
+            title: String(localized: "App lock"),
+            detail: String(localized: """
+                Require \(method) when Multiplex opens or returns from the background. The deck \
+                and every terminal stay covered until you authenticate; connections and the \
+                wall keep running. This device only.
+                """),
             rows: [control]
         )
     }
 
     private func makeProSection(_ state: ViewState) -> UIView {
         let entitlementStatus = UIStackView(arrangedSubviews: [
-            UIKitChassisLabel(state.isPro ? "Pro unlocked" : "Free tier", size: 11),
+            UIKitChassisLabel(
+                state.isPro
+                    ? String(localized: "Pro unlocked")
+                    : String(localized: "Free tier"),
+                size: 11
+            ),
             settingsFlexibleSpacer(),
             SettingsBadgeView(
                 state.isPro ? "UNLOCKED" : "FREE",
@@ -555,25 +582,27 @@ final class SettingsViewController: UIViewController {
         entitlementStatus.spacing = 12
 
         var rows: [UIView] = [SettingsInsetRow(contentView: entitlementStatus)]
-        rows.append(proRow("Unlimited Hosts", state: state))
-        rows.append(proRow("Mosh Transport", state: state))
+        rows.append(proRow(String(localized: "Unlimited Hosts"), state: state))
+        rows.append(proRow(String(localized: "Mosh Transport"), state: state))
         rows.append(proRow(
-            "Agent Helpers",
+            String(localized: "Agent Helpers"),
             freeStatus: "\(EntitlementStore.dailySlashChipLimit) / DAY",
             state: state
         ))
-        rows.append(proRow("Agent Alerts", state: state))
-        rows.append(proRow("Connection Stats", state: state))
-        rows.append(proRow("Custom Themes", state: state))
+        rows.append(proRow(String(localized: "Agent Alerts"), state: state))
+        rows.append(proRow(String(localized: "Connection Stats"), state: state))
+        rows.append(proRow(String(localized: "Custom Themes"), state: state))
         rows.append(proRow(
-            "Key Commands",
+            String(localized: "Key Commands"),
             freeStatus: "UP TO \(EntitlementStore.freeKeyCommandLimit)",
             state: state
         ))
         rows.append(SettingsInsetRow(contentView: settingsLeadingView(UIKitChassisChip(
             state.isPro ? "PRO DETAILS" : "UNLOCK MULTIPLEX PRO",
             prominent: true,
-            accessibilityLabel: state.isPro ? "Pro details" : "Unlock Multiplex Pro"
+            accessibilityLabel: state.isPro
+                ? String(localized: "Pro details")
+                : String(localized: "Unlock Multiplex Pro")
         ) { [weak self] in
             self?.presentPaywall()
         })))
@@ -590,10 +619,12 @@ final class SettingsViewController: UIViewController {
 
         return SettingsSectionView(
             title: "Multiplex Pro",
-            detail: "Pro adds unlimited hosts, mosh, unlimited agent-helper commands, "
-                + "alerts, connection stats, custom themes, and a \(KeyCommandSet.maximumCount)-command Key Commands set "
-                + "(free keeps \(EntitlementStore.freeKeyCommandLimit)). SSH terminals, agent "
-                + "detection, and the wall's live state stay free.",
+            detail: String(localized: """
+                Pro adds unlimited hosts, mosh, unlimited agent-helper commands, alerts, \
+                connection stats, custom themes, and a \(KeyCommandSet.maximumCount)-command \
+                Key Commands set (free keeps \(EntitlementStore.freeKeyCommandLimit)). SSH \
+                terminals, agent detection, and the wall's live state stay free.
+                """),
             rows: rows
         )
     }
@@ -614,24 +645,50 @@ final class SettingsViewController: UIViewController {
         return SettingsInsetRow(contentView: row)
     }
 
+    /// Language is chosen per app in Settings.app (iOS/visionOS add the row
+    /// once the bundle carries a second localization); Multiplex only points
+    /// there — see docs/agents/i18n.md for why there is no in-app picker.
+    private func makeLanguageSection() -> UIView {
+        let language = SettingsNavigationRow(
+            title: String(localized: "Language"),
+            accessibilityLabel: String(localized: "Language, opens system settings"),
+            symbolName: "arrow.up.right"
+        ) {
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+        }
+        language.accessibilityIdentifier = "settings.language"
+        language.accessibilityTraits = .link
+        return SettingsSectionView(
+            title: String(localized: "Language"),
+            detail: String(localized: """
+                Multiplex follows the language you pick for it in Settings. English, \
+                Traditional Chinese and Japanese are available; the terminal chrome stays English.
+                """),
+            rows: [language]
+        )
+    }
+
     private func makeAboutSection() -> UIView {
         let whatsNew = SettingsNavigationRow(
-            title: "What’s New",
-            accessibilityLabel: "What’s new"
+            title: String(localized: "What’s New"),
+            accessibilityLabel: String(localized: "What’s new")
         ) { [weak self] in
             self?.showReleaseLog()
         }
         whatsNew.accessibilityIdentifier = "settings.whatsNew"
         let licenses = SettingsNavigationRow(
-            title: "Open Source Licenses",
-            accessibilityLabel: "Open source licenses"
+            title: String(localized: "Open Source Licenses"),
+            accessibilityLabel: String(localized: "Open source licenses")
         ) { [weak self] in
             self?.showLicenses()
         }
         return SettingsSectionView(
-            title: "About",
-            detail: "Everything Multiplex \(ReleaseNotes.version) changed, and the "
-                + "license notices for the third-party code shipped with it.",
+            title: String(localized: "About"),
+            detail: String(localized: """
+                Everything Multiplex \(ReleaseNotes.version) changed, and the license notices \
+                for the third-party code shipped with it.
+                """),
             rows: [whatsNew, licenses]
         )
     }
@@ -641,7 +698,7 @@ final class SettingsViewController: UIViewController {
         let chip = UIKitChassisChip(
             "PRIVACY POLICY",
             systemImage: "arrow.up.right",
-            accessibilityLabel: "Privacy policy"
+            accessibilityLabel: String(localized: "Privacy policy")
         ) { [weak self] in
             self?.openPrivacy()
         }
@@ -931,7 +988,12 @@ final class SettingsInsetRow: UIView {
 final class SettingsNavigationRow: UIControl {
     private let action: () -> Void
 
-    init(title: String, accessibilityLabel: String, action: @escaping () -> Void) {
+    init(
+        title: String,
+        accessibilityLabel: String,
+        symbolName: String = "chevron.right",
+        action: @escaping () -> Void
+    ) {
         self.action = action
         super.init(frame: .zero)
         backgroundColor = GlassPrototype.strataChassis
@@ -943,7 +1005,7 @@ final class SettingsNavigationRow: UIControl {
 
         let titleLabel = UIKitChassisLabel(title, size: 10)
         let chevron = UIImageView(image: UIImage(
-            systemName: "chevron.right",
+            systemName: symbolName,
             withConfiguration: UIImage.SymbolConfiguration(
                 pointSize: 9 * Theme.typeScale,
                 weight: .semibold
@@ -1131,7 +1193,7 @@ private final class SettingsChoiceButton: UIButton {
         layer.borderColor = (selected ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
             .resolvedColor(with: traitCollection)
             .cgColor
-        accessibilityValue = selected ? "Selected" : "Not selected"
+        accessibilityValue = selected ? String(localized: "Selected") : String(localized: "Not selected")
         if selected {
             accessibilityTraits.insert(.selected)
         } else {
@@ -1239,7 +1301,7 @@ final class SettingsBooleanRow: UIControl {
 
     private func refresh(animated: Bool = false) {
         indicator.setOn(isOn, animated: animated)
-        accessibilityValue = isOn ? "On" : "Off"
+        accessibilityValue = isOn ? String(localized: "On") : String(localized: "Off")
     }
 }
 
@@ -1395,7 +1457,7 @@ final class UIKitThemePreviewView: UIKitTallyBorderedView {
             ])
             ansiStack.addArrangedSubview(swatch)
         }
-        accessibilityLabel = "Preview of the \(theme.name) terminal theme"
+        accessibilityLabel = String(localized: "Preview of the \(theme.name) terminal theme")
     }
 
     private func configure() {
@@ -1476,13 +1538,16 @@ private final class SettingsThemeRowView: UIView {
         menuProvider = {
             var actions: [UIMenuElement] = []
             if let edit {
-                actions.append(UIAction(title: "Edit…") { _ in edit() })
+                actions.append(UIAction(title: String(localized: "Edit…")) { _ in edit() })
             }
             if let duplicate {
-                actions.append(UIAction(title: "Duplicate") { _ in duplicate() })
+                actions.append(UIAction(title: String(localized: "Duplicate")) { _ in duplicate() })
             }
             if let delete {
-                actions.append(UIAction(title: "Delete", attributes: .destructive) { _ in
+                actions.append(UIAction(
+                    title: String(localized: "Delete"),
+                    attributes: .destructive
+                ) { _ in
                     delete()
                 })
             }
@@ -1499,8 +1564,10 @@ private final class SettingsThemeRowView: UIView {
             shape: .rect(cornerRadius: 2)
         )
         selectControl.isAccessibilityElement = true
-        selectControl.accessibilityLabel = "\(theme.name) theme"
-        selectControl.accessibilityValue = isSelected ? "Selected" : "Not selected"
+        selectControl.accessibilityLabel = String(localized: "\(theme.name) theme")
+        selectControl.accessibilityValue = isSelected
+            ? String(localized: "Selected")
+            : String(localized: "Not selected")
         selectControl.accessibilityTraits = .button
         if isSelected { selectControl.accessibilityTraits.insert(.selected) }
         selectControl.addAction(UIAction { _ in select() }, for: .touchUpInside)
@@ -1528,7 +1595,7 @@ private final class SettingsThemeRowView: UIView {
             actionButton.backgroundColor = .clear
             actionButton.menu = menu
             actionButton.showsMenuAsPrimaryAction = true
-            actionButton.accessibilityLabel = "Actions for \(theme.name)"
+            actionButton.accessibilityLabel = String(localized: "Actions for \(theme.name)")
             actionButton.hoverStyle = UIHoverStyle(
                 effect: .highlight,
                 shape: .rect(cornerRadius: 2)
@@ -1593,7 +1660,9 @@ private final class SettingsThemeRowContentView: UIView {
         preview = UIKitThemePreviewView(theme: theme, compact: true)
         let name = UIKitChassisLabel(theme.name, size: 11)
         let kind = settingsTrackedLabel(
-            theme.isBuiltIn ? "BUILT-IN PALETTE" : "CUSTOM PALETTE",
+            theme.isBuiltIn
+                ? String(localized: "BUILT-IN PALETTE")
+                : String(localized: "CUSTOM PALETTE"),
             font: UIKitChassis.monoFont(8, weight: .medium),
             color: UIKitChassis.signal3,
             kern: 1

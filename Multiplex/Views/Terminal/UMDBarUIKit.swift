@@ -579,7 +579,7 @@ final class UMDBarViewController: UIViewController,
         menuButton(
             caption: "MERGE",
             identifier: "umd.merge",
-            accessibilityLabel: "Merge another window into this one",
+            accessibilityLabel: String(localized: "Merge another window into this one"),
             menu: makeMergeMenu(titled: false)
         )
     }
@@ -590,7 +590,7 @@ final class UMDBarViewController: UIViewController,
         actionButton(
             caption: "GUIDE",
             identifier: "umd.guide",
-            accessibilityLabel: "Guide",
+            accessibilityLabel: String(localized: "Guide"),
             action: .showGuide
         )
     }
@@ -601,7 +601,7 @@ final class UMDBarViewController: UIViewController,
                 caption: "DETACH",
                 prominent: true,
                 identifier: "umd.detach",
-                accessibilityLabel: "Detach",
+                accessibilityLabel: String(localized: "Detach"),
                 action: .detach
             )
         }
@@ -609,7 +609,7 @@ final class UMDBarViewController: UIViewController,
             caption: "DETACH",
             prominent: true,
             identifier: "umd.detach",
-            accessibilityLabel: "Detach or close the session",
+            accessibilityLabel: String(localized: "Detach or close the session"),
             menu: makeDetachMenu()
         )
     }
@@ -625,7 +625,7 @@ final class UMDBarViewController: UIViewController,
             caption: "",
             systemImage: "ellipsis",
             identifier: "umd.overflow",
-            accessibilityLabel: "Terminal actions",
+            accessibilityLabel: String(localized: "Terminal actions"),
             menu: menu
         )
     }
@@ -638,8 +638,8 @@ final class UMDBarViewController: UIViewController,
             systemImage: "command",
             prominent: false,
             accessibilityLabel: backend == .herdr
-                ? "Show herdr shortcuts"
-                : "Show tmux shortcuts"
+                ? String(localized: "Show herdr shortcuts")
+                : String(localized: "Show tmux shortcuts")
         )
         button.accessibilityIdentifier = "umd.tmux"
         button.isEnabled = currentObservedState.status == .live
@@ -656,7 +656,7 @@ final class UMDBarViewController: UIViewController,
         if configuration.controller?.host.useMosh == true {
             let mosh = UMDStateBadgeView(
                 caption: "MOSH",
-                accessibilityLabel: "Connects over mosh"
+                accessibilityLabel: String(localized: "Connects over mosh")
             )
             mosh.accessibilityIdentifier = "umd.status.mosh"
             views.append(mosh)
@@ -689,8 +689,10 @@ final class UMDBarViewController: UIViewController,
             )
             let button = UMDLampButton(
                 lamp: lamp,
-                accessibilityLabel: "The Mac's keychain is locked, so Claude Code shows signed out",
-                accessibilityHint: "Shows how to unlock the keychain",
+                accessibilityLabel: String(localized: """
+                    The Mac's keychain is locked, so Claude Code shows signed out
+                    """),
+                accessibilityHint: String(localized: "Shows how to unlock the keychain"),
                 action: { [weak self] in self?.configuration.keychainTip?() }
             )
             button.accessibilityIdentifier = "umd.status.keychain"
@@ -749,7 +751,7 @@ final class UMDBarViewController: UIViewController,
             options: .displayInline,
             children: [
                 menuAction(
-                    title: "File Viewer",
+                    title: String(localized: "File Viewer"),
                     identifier: "umd.newTab.fileViewer",
                     action: .openFileViewer
                 ),
@@ -774,7 +776,7 @@ final class UMDBarViewController: UIViewController,
                 options: .displayInline,
                 children: [
                     menuAction(
-                        title: "Merge All Windows",
+                        title: String(localized: "Merge All Windows"),
                         image: UIImage(systemName: "rectangle.stack"),
                         identifier: "umd.mergeAll",
                         action: .mergeAll
@@ -782,18 +784,21 @@ final class UMDBarViewController: UIViewController,
                 ]
             ))
         }
-        return UIMenu(title: titled ? "Merge Window" : "", children: children)
+        return UIMenu(
+            title: titled ? String(localized: "Merge Window") : "",
+            children: children
+        )
     }
 
     private func makeDetachMenu() -> UIMenu {
         UIMenu(children: [
             menuAction(
-                title: "Detach",
+                title: String(localized: "Detach"),
                 identifier: "umd.detach.action",
                 action: .detach
             ),
             menuAction(
-                title: "Close Session",
+                title: String(localized: "Close Session"),
                 identifier: "umd.closeSession",
                 attributes: .destructive,
                 action: .closeSession
@@ -809,7 +814,8 @@ final class UMDBarViewController: UIViewController,
         if configuration.controller != nil, offersKeyboardLock {
             children.append(menuAction(
                 title: currentObservedState.keyboardLocked
-                    ? "Unlock Keyboard" : "Lock Keyboard Closed",
+                    ? String(localized: "Unlock Keyboard")
+                    : String(localized: "Lock Keyboard Closed"),
                 image: UIImage(
                     systemName: currentObservedState.keyboardLocked
                         ? "lock.open" : "lock"
@@ -821,7 +827,7 @@ final class UMDBarViewController: UIViewController,
         #endif
         if configuration.showConnectionStats != nil {
             children.append(menuAction(
-                title: "Connection Stats…",
+                title: String(localized: "Connection Stats…"),
                 image: UIImage(systemName: "waveform.path.ecg"),
                 identifier: "umd.connectionStats",
                 action: .showConnectionStats
@@ -831,28 +837,31 @@ final class UMDBarViewController: UIViewController,
             // The wide rows carry GUIDE as its own chip; it rides the menu
             // only where the direct actions have been displaced.
             children.append(menuAction(
-                title: "Guide",
+                title: String(localized: "Guide"),
                 image: UIImage(systemName: "questionmark.circle"),
                 identifier: "umd.guide.action",
                 action: .showGuide
             ))
             children.append(UIMenu(
-                title: "Text Size",
+                title: String(localized: "Text Size"),
                 options: .displayInline,
                 children: [
                     menuAction(
-                        title: "Smaller Text",
+                        title: String(localized: "Smaller Text"),
                         identifier: "umd.fontDown.action",
                         action: .fontDown
                     ),
                     menuAction(
-                        title: "Larger Text",
+                        title: String(localized: "Larger Text"),
                         identifier: "umd.fontUp.action",
                         action: .fontUp
                     ),
                 ]
             ))
-            children.append(UIMenu(title: "New Tab", children: makeNewTabMenu().children))
+            children.append(UIMenu(
+                title: String(localized: "New Tab"),
+                children: makeNewTabMenu().children
+            ))
             if FileAttachAvailability.canOffer(for: configuration.controller) {
                 children.append(makeFileAttachMenu())
             }
@@ -861,14 +870,14 @@ final class UMDBarViewController: UIViewController,
             }
             var closingActions: [UIMenuElement] = [
                 menuAction(
-                    title: "Detach",
+                    title: String(localized: "Detach"),
                     identifier: "umd.detach.action",
                     action: .detach
                 ),
             ]
             if configuration.closeSession != nil {
                 closingActions.append(menuAction(
-                    title: "Close Session",
+                    title: String(localized: "Close Session"),
                     identifier: "umd.closeSession",
                     attributes: .destructive,
                     action: .closeSession
@@ -888,7 +897,7 @@ final class UMDBarViewController: UIViewController,
         var actions: [UIMenuElement] = []
         #if !os(visionOS)
         actions.append(menuAction(
-            title: "Camera…",
+            title: String(localized: "Camera…"),
             image: UIImage(systemName: "camera"),
             identifier: "umd.attach.camera",
             attributes: enabled && FileAttachAvailability.cameraAvailable
@@ -897,21 +906,21 @@ final class UMDBarViewController: UIViewController,
         ))
         #endif
         actions.append(menuAction(
-            title: "Photo Library…",
+            title: String(localized: "Photo Library…"),
             image: UIImage(systemName: "photo.on.rectangle"),
             identifier: "umd.attach.photos",
             attributes: enabled ? [] : .disabled,
             action: .attach(.photoLibrary)
         ))
         actions.append(menuAction(
-            title: "Files…",
+            title: String(localized: "Files…"),
             image: UIImage(systemName: "folder"),
             identifier: "umd.attach.files",
             attributes: enabled ? [] : .disabled,
             action: .attach(.files)
         ))
         return UIMenu(
-            title: "Send File…",
+            title: String(localized: "Send File…"),
             image: UIImage(systemName: "paperclip"),
             children: actions
         )

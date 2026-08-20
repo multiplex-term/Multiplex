@@ -165,6 +165,7 @@ enum TalkbackMessage {
 
     /// The field's empty-state copy, in the target's own name.
     static func placeholder(agentName: String?) -> String {
-        agentName.map { "Message \($0)…" } ?? "Message this pane…"
+        agentName.map { String(localized: "Message \($0)…") }
+            ?? String(localized: "Message this pane…")
     }
 }

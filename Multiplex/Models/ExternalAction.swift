@@ -10,7 +10,7 @@ enum ExternalHostRef: Hashable {
     /// What a not-found failure calls the host.
     var displayName: String {
         switch self {
-        case .id: "Host"
+        case .id: String(localized: "Host")
         case .named(let name): name
         }
     }
@@ -412,13 +412,14 @@ struct ExternalActionConfirmation: Equatable {
     static func make(for action: ExternalAction, hostName: String) -> ExternalActionConfirmation {
         switch action {
         case .openShell(_, let sessionName, _):
-            let target = sessionName.map { "session \($0)" } ?? "a session"
+            let target = sessionName.map { String(localized: "session \($0)") }
+                ?? String(localized: "a session")
             return ExternalActionConfirmation(
-                title: "Open \(hostName)?",
-                message: """
+                title: String(localized: "Open \(hostName)?"),
+                message: String(localized: """
                     Something outside Multiplex asked to open \(target) on \
                     \(hostName). Open it only if you started this.
-                    """,
+                    """),
                 action: action
             )
         case .openAgent(_, let agent, let prompt, _, _, _, _, let target, _):
@@ -426,32 +427,40 @@ struct ExternalActionConfirmation: Equatable {
             // the launch types into that session, not a fresh one.
             var location = hostName
             if case .existingSession(let name, _) = target {
-                location = "\(hostName) in session \(name)"
+                location = String(localized: "\(hostName) in session \(name)")
             }
-            var message = """
-                Something outside Multiplex asked to launch \
-                \(agent.displayName) on \(location)
-                """
+            let message: String
             if let prompt, !prompt.isEmpty {
-                message += " with this first prompt:\n\n\(prompt)"
+                message = String(localized: """
+                    Something outside Multiplex asked to launch \
+                    \(agent.displayName) on \(location) with this first prompt:
+
+                    \(prompt)
+
+                    Run it only if you started this.
+                    """)
             } else {
-                message += "."
+                message = String(localized: """
+                    Something outside Multiplex asked to launch \
+                    \(agent.displayName) on \(location).
+
+                    Run it only if you started this.
+                    """)
             }
-            message += "\n\nRun it only if you started this."
             return ExternalActionConfirmation(
-                title: "Launch \(agent.displayName) on \(hostName)?",
+                title: String(localized: "Launch \(agent.displayName) on \(hostName)?"),
                 message: message,
                 action: action
             )
         case .openFile(_, let path, let line):
-            let location = line.map { "\(path), line \($0)" } ?? path
+            let location = line.map { String(localized: "\(path), line \(String($0))") } ?? path
             return ExternalActionConfirmation(
-                title: "Open file on \(hostName)?",
-                message: """
+                title: String(localized: "Open file on \(hostName)?"),
+                message: String(localized: """
                     Something outside Multiplex asked to view \(location) on \
                     \(hostName). The file opens read-only. Open it only if you \
                     started this.
-                    """,
+                    """),
                 action: action
             )
         }
