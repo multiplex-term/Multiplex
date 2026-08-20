@@ -4164,22 +4164,6 @@
         }
       }
     },
-    "Copy Command for Handoff" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "引き継ぎ用コマンドをコピー"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "複製交接指令"
-          }
-        }
-      }
-    },
     "Copy a line, run it in a terminal on the machine you want to add, then leave mpx bind running. Nothing here runs on this device." : {
       "localizations" : {
         "ja" : {
@@ -4224,6 +4208,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "複製指令"
+          }
+        }
+      }
+    },
+    "Copy Command for Handoff" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "引き継ぎ用コマンドをコピー"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "複製交接指令"
           }
         }
       }
@@ -9176,13 +9176,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "自動で開くものはありません。押すと実際の指し先を示すシートが表示されます — "
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "不會自行開啟任何東西。按下後會出現面板，顯示它實際指向的位置 — "
           }
         }
@@ -10010,38 +10010,6 @@
         }
       }
     },
-    "PRESS A LINK" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "リンクを押す"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "按下連結"
-          }
-        }
-      }
-    },
-    "PRESS A PATH" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "パスを押す"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "按下路徑"
-          }
-        }
-      }
-    },
     "Panes" : {
       "localizations" : {
         "ja" : {
@@ -10390,6 +10358,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "當 Claude Code、Codex 或 Grok Build 在你沒有在輸入的工作階段中完成回合、提出問題或請求權限時顯示橫幅。Multiplex 必須保持開啟。需要 Pro。"
+          }
+        }
+      }
+    },
+    "PRESS A LINK" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リンクを押す"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按下連結"
+          }
+        }
+      }
+    },
+    "PRESS A PATH" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パスを押す"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按下路徑"
           }
         }
       }
@@ -11498,13 +11498,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "同じ押し方で、専用のシートが開きます："
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "同樣的按法，有專屬的面板："
           }
         }
@@ -11832,22 +11832,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "工作階段"
-          }
-        }
-      }
-    },
-    "The same block, right where you pressed — and it reaches links and paths at any mouse mode, when a tap belongs to the remote." : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "押した場所にそのままブロックが出ます — タップがリモート側のものになるどのマウスモードでも、リンクやパスに届きます。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "同樣的區塊，就在你按住的位置 — 而且無論哪種滑鼠模式，即使點按屬於遠端，也能觸及連結與路徑。"
           }
         }
       }
@@ -14380,6 +14364,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此購買項目不是有效的 Multiplex Pro 權利。"
+          }
+        }
+      }
+    },
+    "The same block, right where you pressed — and it reaches links and paths at any mouse mode, when a tap belongs to the remote." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "押した場所にそのままブロックが出ます — タップがリモート側のものになるどのマウスモードでも、リンクやパスに届きます。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同樣的區塊，就在你按住的位置 — 而且無論哪種滑鼠模式，即使點按屬於遠端，也能觸及連結與路徑。"
           }
         }
       }
