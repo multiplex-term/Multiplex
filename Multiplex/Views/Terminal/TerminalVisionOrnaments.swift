@@ -129,6 +129,23 @@ final class TerminalVisionOrnamentState {
     /// window: the composer reports, the window re-renders, `revision`
     /// bumps, and the mount re-asks the composer for its size.
     private(set) var talkbackController: TalkbackComposerViewController?
+    /// Active terminal tab's SIDECAR mount. It is independent of the bottom
+    /// console presentation: the active route remains a terminal while this
+    /// controller hangs from the scene's trailing edge.
+    private(set) var sidePanelController: SidePanelViewController?
+    /// The strip the side-panel mount is hosted at — twice the window's
+    /// width × its height; it follows a window resize, never a drag, so a
+    /// drag never changes the ornament's own size.
+    private(set) var sidePanelSize: CGSize = .zero
+    /// Where the card sits inside the strip, in the strip's coordinates —
+    /// reported by the controller on its content cadence (never per drag
+    /// tick); under GLASS the system glass platter follows it.
+    private(set) var sidePanelCardFrame: CGRect = .zero
+
+    func setSidePanelCardFrame(_ frame: CGRect) {
+        guard sidePanelCardFrame != frame else { return }
+        sidePanelCardFrame = frame
+    }
     /// The helper controller is native UIKit, so its app-wide collapse choice
     /// is not observable by SwiftUI on its own. Mirror it into ornament state:
     /// this value is the animation trigger for the full rail ↔ corner dot
@@ -162,13 +179,23 @@ final class TerminalVisionOrnamentState {
         umdController: UIViewController?,
         helperController: AgentHelperStripViewController?,
         talkbackController: TalkbackComposerViewController? = nil,
+        sidePanelController: SidePanelViewController? = nil,
         windowWidth: CGFloat,
+        windowHeight: CGFloat = 0,
         interfaceStyle: UIUserInterfaceStyle,
         forceRevision: Bool
     ) {
         self.interfaceStyle = interfaceStyle
         let nextHelper = isAuxiliary ? nil : helperController
         let nextTalkback = isAuxiliary ? nil : talkbackController
+        // The ornament hosts the whole strip; the card's place inside it is
+        // the controller's (and the store's) business, never the ornament's.
+        let nextSidePanelSize = sidePanelController == nil
+            ? CGSize.zero
+            : CGSize(
+                width: SidePanelWidth.visionStripWidth(windowWidth: windowWidth),
+                height: max(0, windowHeight)
+            )
         let nextPresentation = TerminalVisionOrnamentPresentation.resolve(
             tabCount: tabCount,
             isAuxiliary: isAuxiliary,
@@ -182,11 +209,15 @@ final class TerminalVisionOrnamentState {
             || self.umdController !== umdController
             || self.helperController !== nextHelper
             || self.talkbackController !== nextTalkback
+            || self.sidePanelController !== sidePanelController
+            || sidePanelSize != nextSidePanelSize
             || helperCollapsed != nextHelperCollapsed
         self.activeTerminalController = activeTerminalController
         self.umdController = umdController
         self.helperController = nextHelper
         self.talkbackController = nextTalkback
+        self.sidePanelController = sidePanelController
+        sidePanelSize = nextSidePanelSize
         helperCollapsed = nextHelperCollapsed
         presentation = nextPresentation
         refreshUMDContentSize()
@@ -210,6 +241,9 @@ final class TerminalVisionOrnamentState {
         umdController = nil
         helperController = nil
         talkbackController = nil
+        sidePanelController = nil
+        sidePanelSize = .zero
+        sidePanelCardFrame = .zero
         helperCollapsed = false
         umdContentSize = .zero
         presentation = TerminalVisionOrnamentPresentation(
@@ -254,7 +288,16 @@ final class TerminalVisionOrnamentCoordinator {
         ) {
             TerminalVisionBottomOrnament(state: state)
         }
-        owner.ornaments = [top, bottom]
+        // Centred on the trailing edge: the side-panel strip is as wide as the
+        // widest panel and straddles the glass, so the panel can hang outside
+        // it or reach in over the terminal — see TerminalVisionSidePanelOrnament.
+        let trailing = UIHostingOrnament(
+            sceneAnchor: UnitPoint.trailing,
+            contentAlignment: SwiftUI.Alignment.center
+        ) {
+            TerminalVisionSidePanelOrnament(state: state)
+        }
+        owner.ornaments = [top, bottom, trailing]
         installed = true
     }
 
@@ -265,7 +308,9 @@ final class TerminalVisionOrnamentCoordinator {
         umdController: UIViewController?,
         helperController: AgentHelperStripViewController?,
         talkbackController: TalkbackComposerViewController? = nil,
+        sidePanelController: SidePanelViewController? = nil,
         windowWidth: CGFloat,
+        windowHeight: CGFloat = 0,
         interfaceStyle: UIUserInterfaceStyle,
         forceRevision: Bool = false
     ) {
@@ -276,7 +321,9 @@ final class TerminalVisionOrnamentCoordinator {
             umdController: umdController,
             helperController: helperController,
             talkbackController: talkbackController,
+            sidePanelController: sidePanelController,
             windowWidth: windowWidth,
+            windowHeight: windowHeight,
             interfaceStyle: interfaceStyle,
             forceRevision: forceRevision
         )
@@ -309,6 +356,60 @@ private struct TerminalVisionTopOrnament: View {
             )
             .fixedSize()
             .modifier(GlassPrototypeSlabGround(cornerRadius: 10))
+        }
+    }
+}
+
+/// ⚠ No SwiftUI animation or transition on this content, on purpose: an
+/// animated removal of the slab (↗ TAB, ✕) left MRUIKit's coalescing
+/// ornament updater holding the whole scene batch — the window kept
+/// showing the old tab for ~6 s until an unrelated update flushed it
+/// ("Animation settings for update are incompatible with pending changes",
+/// visionOS 27 sim, 2026-08-21). Replacement still re-mounts through `.id`.
+///
+/// Static on purpose: the ornament hosts ONE fixed strip and everything that
+/// moves during a drag moves inside `SidePanelViewController`, in UIKit;
+/// under GLASS the platter follows `sidePanelCardFrame`.
+private struct TerminalVisionSidePanelOrnament: View {
+    @Bindable var state: TerminalVisionOrnamentState
+
+    @ViewBuilder
+    var body: some View {
+        if let controller = state.sidePanelController {
+            let size = state.sidePanelSize
+            TerminalVisionControllerMount(
+                controller: controller,
+                sizing: .fixed(size),
+                revision: state.revision,
+                interfaceStyle: state.interfaceStyle
+            )
+            .frame(width: size.width, height: size.height)
+            .id(ObjectIdentifier(controller))
+            .background(alignment: .topLeading) {
+                TerminalVisionSidePanelGlass(state: state)
+            }
+            .fixedSize()
+        }
+    }
+}
+
+/// PROTOTYPE(GLASS): the card paints its own smoke (UIKit, live); this is the
+/// system glass platter under it, the one piece of the slab only SwiftUI can
+/// draw. Empty in every other appearance, so nothing observes the card frame.
+private struct TerminalVisionSidePanelGlass: View {
+    @Bindable var state: TerminalVisionOrnamentState
+
+    @ViewBuilder
+    var body: some View {
+        if GlassPrototype.enabled && GlassSelectionState.shared.isGlass {
+            let frame = state.sidePanelCardFrame
+            if !frame.isEmpty {
+                Color.clear
+                    .frame(width: frame.width, height: frame.height)
+                    .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 14))
+                    .offset(x: frame.minX, y: frame.minY)
+                    .allowsHitTesting(false)
+            }
         }
     }
 }
@@ -985,6 +1086,9 @@ private enum TerminalVisionControllerSizing: Equatable {
     case terminalUMD
     case auxiliaryUMD
     case switchboardSlab
+    /// Exact SIDECAR geometry. A trailing ornament is re-laid out only when
+    /// the grip commits a rung; it never streams continuous proposals.
+    case fixed(CGSize)
     /// The Talkback slab: the composer's own arithmetic at the width the
     /// window handed it.
     case talkback
@@ -1129,6 +1233,8 @@ private final class TerminalVisionControllerHost: UIViewController {
             if let slab = content as? ViewportSwitchboardSlabViewController {
                 return slab.fittingContentSize(for: proposedWidth)
             }
+        case .fixed(let size):
+            return size
         case .talkback:
             if let composer = content as? TalkbackComposerViewController {
                 return composer.fittingContentSize()

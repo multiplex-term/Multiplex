@@ -362,6 +362,13 @@ final class FileViewerController: AuxiliaryPaneController {
         }
     }
 
+    /// Minted only when ↗ TAB moves this live controller out of a side panel.
+    /// Prefer what is on screen, then the summons' own path or directory
+    /// while the first SSH read is still in flight.
+    var routeMode: TerminalRoute.Mode {
+        .fileViewer(path: railPath.isEmpty ? target?.path ?? startDirectory ?? "~" : railPath)
+    }
+
     // MARK: Connection
 
     @ObservationIgnored private var connection: SSHConnection?

@@ -118,6 +118,9 @@ app.multiplexterm.multiplex`):
 - `MULTIPLEX_FORCE_SHELL=1|0` — force the single-window shell on/off.
   Default: iPhone always shell, iPad only when `UIWindowScene.isFullScreen`,
   visionOS never. Logged under category `shell`.
+- `MULTIPLEX_SIDE_PANEL=0` — DEBUG-only legacy road: terminal-confirmed ▤/⌗
+  viewers dock as tabs instead of side panels. Pass
+  `SIMCTL_CHILD_MULTIPLEX_SIDE_PANEL=0` to preserve older recipes.
 
 **iOS 27 scene/screenshot notes:** a first-ever install can connect an empty
 scene (uninstall from that sim, then install + launch once more); a freshly
@@ -136,7 +139,18 @@ Synthetic events (System Events) never reach a *simulator* but DO reach the
 Mac app — how the Mac keyboard paths were verified headlessly.
 
 Drive a live session from the Mac side: `tmux send-keys -t main:2 'echo hi'
-Enter`.
+Enter`. ⚠ The attached client shows the session's CURRENT window, and `demo`
+leaves `main` on `1:server` (a busy fake API log whose `/v1/sessions` lines are
+themselves path-shaped — `debug.link` will pick them up); for a proof that
+needs its own text on screen, `tmux new-window -t main -n proof` first and
+send-keys to `main:proof`.
+
+⚠ A proof driver that only `simctl terminate`s and relaunches runs whatever
+the simulator already has: `xcrun simctl install <UDID> <Products/…/Multiplex.app>`
+after every rebuild (keeps the container; `uninstall` first if SpringBoard
+shows a placeholder icon and refuses the launch — "denied by service delegate
+(SBMainWorkspace)"). A stale binary once passed as "geometry unchanged"
+(2026-08-21).
 
 **mosh path**: seed with `state/seed-mosh.json` (same host/UUID, `useMosh:
 true`; `seed-mosh-v6.json` for IPv6). SSH is used only to launch
@@ -212,7 +226,16 @@ app.multiplexterm.multiplex.<name>`:
   text both resolvers decline must present nothing). `debug.linkopen` runs
   OPEN; `debug.viewportopen` runs the sheet's ⌗ VIEWPORT chip;
   `debug.linkregions` logs the visionOS gaze-region inventory (category
-  `links`, debug level).
+  `links`, debug level). `debug.link` + `debug.pathview` or
+  `debug.viewportopen` now lands in a panel in a classic visionOS window or an
+  iPad window whose pane is regular-width and ≥660 pt; use the env override
+  above to prove the old tab road.
+- `debug.sidepanelsplit` / `debug.sidepanelclose` — press the active panel's
+  ↗ TAB / ✕ in the focused terminal window. Like every terminal hook they
+  need the terminal to own `TerminalFocusArbiter`; a fresh seeded launch
+  occasionally leaves it unclaimed, so fire `debug.summon` once first. `debug.sidepanelwidth` persists
+  the next width (visionOS: the next of 400/520/680; iPad: 360 ↔ 560), so a
+  relaunch screenshot pair proves both resize and memory.
 - `debug.msgjump` / `debug.msgjumpback` — jump the focused Claude terminal
   to its oldest prompt / BACK TO LIVE; prove both with host-side
   capture-pane.

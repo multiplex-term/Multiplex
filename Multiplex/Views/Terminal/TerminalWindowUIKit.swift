@@ -241,6 +241,14 @@ final class TerminalWindowViewController: UIViewController,
     )
     #endif
     private var paneControllers: [UUID: UIViewController] = [:]
+    /// View mounts are cached per host tab so switching away detaches the
+    /// panel from the window without cancelling a file load or WebKit page.
+    /// `TerminalWorkspace` still owns every auxiliary controller and decides
+    /// shutdown; this cache owns presentation only.
+    private var sidePanelViewControllers: [UUID: SidePanelViewController] = [:]
+    private var mountedSidePanelHostID: UUID?
+    private var transientSidePanelWidth: CGFloat?
+    private var sidePanelConversionScheduledFor: UUID?
     private var umdController: UIViewController?
     private var helperController: AgentHelperStripViewController?
     /// The active tab's open Talkback composer — one per window, re-pointed
@@ -518,6 +526,12 @@ final class TerminalWindowViewController: UIViewController,
             unmount(controller)
         }
         paneControllers.removeAll()
+        for controller in sidePanelViewControllers.values {
+            controller.prepareForRemoval()
+            if controller.parent === self { unmount(controller) }
+        }
+        sidePanelViewControllers.removeAll()
+        mountedSidePanelHostID = nil
         replaceUMD(with: nil)
         replaceHelper(with: nil)
         passphrasePresenter.update(
@@ -541,6 +555,41 @@ final class TerminalWindowViewController: UIViewController,
     }
     private var activeTabHost: Host? {
         activeTab.flatMap { store.host(id: $0.hostID) }
+    }
+    /// Which remembered width bucket this device uses.
+    private var sidePanelPlatform: SidePanelPlatform? {
+        #if os(visionOS)
+        .visionOS
+        #else
+        UIDevice.current.userInterfaceIdiom == .pad ? .iPad : nil
+        #endif
+    }
+    /// How this window presents a panel: the visionOS classic window hangs
+    /// it from a trailing ornament; the iPad and the visionOS Shell lay a
+    /// card over the pane. nil where no panel is ever admitted (iPhone).
+    private var sidePanelStyle: SidePanelPresentationStyle? {
+        #if os(visionOS)
+        shell == nil ? .visionOrnament : .iPadOverlay
+        #else
+        sidePanelPlatform == nil ? nil : .iPadOverlay
+        #endif
+    }
+    private var sidePanelEnvironmentOverride: String? {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["MULTIPLEX_SIDE_PANEL"]
+        #else
+        nil
+        #endif
+    }
+    private func admitsSidePanel(anchor: TerminalRoute) -> Bool {
+        guard let style = sidePanelStyle else { return false }
+        return SidePanelPolicy.admitsPanel(
+            style: style,
+            paneWidth: rootView.paneContainer.bounds.width,
+            isCompactWidth: traitCollection.horizontalSizeClass == .compact,
+            anchorIsTerminal: !anchor.isAuxiliaryPane,
+            environmentOverride: sidePanelEnvironmentOverride
+        )
     }
     private var terminalFocusAllowed: Bool {
         shell?.terminalFocusAllowed ?? true
@@ -755,14 +804,26 @@ final class TerminalWindowViewController: UIViewController,
             _ = KeyboardLock.shared.isLocked
             _ = HardwareKeyboardMonitor.shared.isConnected
             #endif
-            for tab in route.tabs where tab.isAuxiliaryPane {
-                _ = workspace.auxiliaryController(for: tab.id)?.tabLabel
+            var showsFileViewer = false
+            for tab in route.tabs {
+                if tab.isAuxiliaryPane {
+                    _ = workspace.auxiliaryController(for: tab.id)?.tabLabel
+                    showsFileViewer = showsFileViewer || tab.isFileViewer
+                } else {
+                    let panel = workspace.sidePanel(for: tab.id)
+                    _ = panel?.tabLabel
+                    showsFileViewer = showsFileViewer || panel is FileViewerController
+                }
+            }
+            if let platform = sidePanelPlatform {
+                _ = SidePanelWidthStore.shared.width(for: platform)
+                if sidePanelStyle == .visionOrnament {
+                    _ = SidePanelWidthStore.shared.visionOverhang
+                }
             }
             // The rail's A− / A+ readout — a pinch inside the pane (or the
             // same chips in another window) has to reach it.
-            if route.tabs.contains(where: \.isFileViewer) {
-                _ = FileViewerTextScaleStore.shared.scale
-            }
+            if showsFileViewer { _ = FileViewerTextScaleStore.shared.scale }
             return detectedAgent
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -809,6 +870,7 @@ final class TerminalWindowViewController: UIViewController,
         // Before the panes: their bottom inset reads the composer's height.
         renderTalkback()
         reconcilePaneControllers()
+        renderSidePanel()
         renderTabStrip()
         renderUMD()
         renderHelper()
@@ -881,6 +943,15 @@ final class TerminalWindowViewController: UIViewController,
             },
             adopt: { [weak self] tabs in
                 self?.mutateRoute { $0.merge(tabs) }
+            },
+            openFileViewer: { [weak self] hostID, target in
+                guard let self,
+                      let activeTab,
+                      !activeTab.isAuxiliaryPane,
+                      activeTab.hostID == hostID
+                else { return false }
+                openFileViewer(target: target)
+                return true
             }
         ))
     }
@@ -1110,7 +1181,10 @@ final class TerminalWindowViewController: UIViewController,
         present(alert, animated: true)
     }
 
-    func openFileViewer(target: TerminalPathTarget?) {
+    func openFileViewer(
+        target: TerminalPathTarget?,
+        allowsPanel: Bool = true
+    ) {
         guard let activeTab, let host = store.host(id: activeTab.hostID) else { return }
         let anchorID = activeTab.id
         let hostID = activeTab.hostID
@@ -1126,6 +1200,23 @@ final class TerminalWindowViewController: UIViewController,
                 ? nil : workspace.controller(for: anchorID)?.pathPressScreenCell
             let cwd = await workspace.controller(for: anchorID)?
                 .paneWorkingDirectory(pressedAt: cell)
+            guard let anchor = route.tabs.first(where: { $0.id == anchorID }) else { return }
+            if allowsPanel, admitsSidePanel(anchor: anchor) {
+                workspace.openSidePanel(
+                    hostTabID: anchorID,
+                    controller: FileViewerController(
+                        tabID: UUID(),
+                        host: host,
+                        startDirectory: cwd,
+                        anchorSession: anchorSession,
+                        anchorCell: cell,
+                        target: target
+                    )
+                )
+                renderNow()
+                return
+            }
+
             let tab = TerminalRoute(
                 hostID: hostID,
                 mode: .fileViewer(path: target?.path ?? cwd ?? "~")
@@ -1152,6 +1243,25 @@ final class TerminalWindowViewController: UIViewController,
               let sourceController = workspace.fileViewerController(for: sourceTabID),
               let host = store.host(id: sourceTab.hostID)
         else { return }
+        openFileInNewViewerTab(
+            row,
+            sourceController: sourceController,
+            hostID: sourceTab.hostID,
+            after: sourceTabID,
+            host: host
+        )
+    }
+
+    private func openFileInNewViewerTab(
+        _ row: FileTree.Row,
+        sourceController: FileViewerController,
+        hostID: UUID,
+        after anchorID: UUID,
+        host suppliedHost: Host? = nil
+    ) {
+        guard !row.entry.isDirectory,
+              let host = suppliedHost ?? store.host(id: hostID)
+        else { return }
         let path = row.entry.path
         // Tree entries are absolute remote paths. Carry that authority into
         // a fresh, in-memory viewer controller, registered before its route
@@ -1163,7 +1273,7 @@ final class TerminalWindowViewController: UIViewController,
             line: nil
         )
         let tab = TerminalRoute(
-            hostID: sourceTab.hostID,
+            hostID: hostID,
             mode: .fileViewer(path: path)
         )
         workspace.openFileViewer(
@@ -1174,18 +1284,30 @@ final class TerminalWindowViewController: UIViewController,
             target: target,
             targetPresentation: sourceController.selectionPresentation(for: row)
         )
-        dock(tab, after: sourceTabID)
+        dock(tab, after: anchorID)
     }
 
     func openViewport(_ offer: ViewportOffer) {
         guard let activeTab else { return }
-        openViewport(offer, after: activeTab.id)
+        openViewport(offer, after: activeTab.id, allowsPanel: true)
     }
 
-    private func openViewport(_ offer: ViewportOffer, after anchorID: UUID) {
+    private func openViewport(
+        _ offer: ViewportOffer,
+        after anchorID: UUID,
+        allowsPanel: Bool = true
+    ) {
         guard let anchor = route.tabs.first(where: { $0.id == anchorID }),
               let host = store.host(id: anchor.hostID)
         else { return }
+        if allowsPanel, admitsSidePanel(anchor: anchor) {
+            workspace.openSidePanel(
+                hostTabID: anchorID,
+                controller: ViewportController(tabID: UUID(), offer: offer, host: host)
+            )
+            renderNow()
+            return
+        }
         let tab = TerminalRoute(
             hostID: anchor.hostID,
             mode: .viewport(urlString: offer.url.absoluteString)
@@ -1252,6 +1374,7 @@ final class TerminalWindowViewController: UIViewController,
         MessageJumpDebugHook.install()
         TerminalLinkDebugHook.install()
         FileViewerDebugHook.install()
+        SidePanelDebugHook.install()
         #endif
         guard let hostID = activeTab?.hostID,
               let host = store.host(id: hostID)
@@ -1648,9 +1771,7 @@ extension TerminalWindowViewController {
             guard let pane else { continue }
             if paneControllers[tab.id] == nil {
                 paneControllers[tab.id] = pane
-                addChild(pane)
-                rootView.paneContainer.addSubview(pane.view)
-                pane.didMove(toParent: self)
+                mount(pane, in: rootView.paneContainer)
             }
             pane.view.frame = rootView.paneContainer.bounds
             pane.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -1659,6 +1780,257 @@ extension TerminalWindowViewController {
             pane.view.accessibilityElementsHidden = !isActive
             updatePaneController(pane, for: tab, isActive: isActive)
         }
+    }
+
+    private func renderSidePanel() {
+        let desiredHost = activeTab.flatMap { tab in
+            tab.isAuxiliaryPane ? nil : tab.id
+        }
+        // Inactive wrappers stay cached while their workspace controller is
+        // alive, so a hidden file keeps loading; a wrapper whose controller
+        // closed goes now. The desired host's REPLACED wrapper stays for the
+        // crossfade below and is released when it completes.
+        for (hostID, cached) in sidePanelViewControllers {
+            let live = workspace.sidePanel(for: hostID)
+            guard live !== cached.controller, !(hostID == desiredHost && live != nil) else { continue }
+            sidePanelViewControllers.removeValue(forKey: hostID)
+            cached.prepareForRemoval()
+            if cached.parent === self { unmount(cached) }
+        }
+
+        guard let hostID = desiredHost,
+              let auxiliary = workspace.sidePanel(for: hostID),
+              let hostTab = route.tabs.first(where: { $0.id == hostID })
+        else {
+            unmountCurrentSidePanel()
+            return
+        }
+
+        let previousForHost = sidePanelViewControllers[hostID]
+        let panel: SidePanelViewController
+        if let previousForHost, previousForHost.controller === auxiliary {
+            panel = previousForHost
+        } else {
+            panel = makeSidePanelViewController(hostTab: hostTab, controller: auxiliary)
+            sidePanelViewControllers[hostID] = panel
+        }
+        let replaced = previousForHost !== panel ? previousForHost : nil
+        panel.setPresented(true)
+
+        if sidePanelStyle == .visionOrnament {
+            // The ornament hosts the controller; the strip lays itself out.
+            panel.updateWidth(resolvedSidePanelWidth())
+            panel.updateOverhang(SidePanelWidthStore.shared.visionOverhang)
+            panel.refreshHeader()
+            replaced?.prepareForRemoval()
+            mountedSidePanelHostID = hostID
+            panel.loadViewIfNeeded()
+            return
+        }
+
+        // In-window: `layoutInWindowSidePanel` frames the container and
+        // hands the card its width on every layout pass.
+        panel.refreshHeader()
+        let oldMounted = mountedSidePanelHostID.flatMap {
+            $0 == hostID ? previousForHost : sidePanelViewControllers[$0]
+        }
+        let changes = { [self] in
+            if let oldMounted, oldMounted !== panel, oldMounted.parent === self {
+                oldMounted.setPresented(false)
+                unmount(oldMounted)
+            }
+            if panel.parent !== self { mount(panel, in: rootView.sidePanelContainer) }
+            panel.view.isHidden = false
+            mountedSidePanelHostID = hostID
+            rootView.sidePanelContainer.isHidden = false
+            layoutInWindowSidePanel()
+        }
+        if replaced != nil, animatesChrome {
+            UIView.transition(
+                with: rootView.sidePanelContainer,
+                duration: 0.3,
+                options: [.transitionCrossDissolve, .allowAnimatedContent],
+                animations: changes
+            ) { _ in replaced?.prepareForRemoval() }
+        } else {
+            changes()
+            replaced?.prepareForRemoval()
+        }
+    }
+
+    private func makeSidePanelViewController(
+        hostTab: TerminalRoute,
+        controller: any AuxiliaryPaneController
+    ) -> SidePanelViewController {
+        let hostTabID = hostTab.id
+        let hostID = hostTab.hostID
+        // The row is UIKit inside the hosted controller: a rail change only
+        // refreshes it, never the window's ornaments.
+        let refreshHeader: () -> Void = { [weak self] in
+            self?.sidePanelViewControllers[hostTabID]?.refreshHeader()
+        }
+        let pane: UIViewController
+        if let viewport = controller as? ViewportController {
+            pane = ViewportPaneViewController(
+                controller: viewport,
+                contentSafeArea: .zero,
+                showsInWindowRail: false,
+                ornamentRailDidChange: refreshHeader,
+                borrowKeyboard: { [weak self] field in
+                    let terminal = self?.workspace.controller(for: hostTabID)?.terminalView
+                    TerminalFocusArbiter.lend(terminal, to: field)
+                },
+                close: { [weak self] in
+                    self?.closeSidePanel(hostTabID: hostTabID)
+                }
+            )
+        } else if let fileViewer = controller as? FileViewerController {
+            pane = FileViewerPaneViewController(
+                controller: fileViewer,
+                contentSafeArea: .zero,
+                isActive: true,
+                showsInWindowRail: false,
+                ornamentRailDidChange: refreshHeader,
+                openInNewTab: { [weak self, weak fileViewer] row in
+                    guard let fileViewer else { return }
+                    self?.openFileInNewViewerTab(
+                        row,
+                        sourceController: fileViewer,
+                        hostID: hostID,
+                        after: hostTabID
+                    )
+                },
+                openViewport: { [weak self] offer in
+                    self?.openViewport(
+                        offer,
+                        after: hostTabID,
+                        allowsPanel: false
+                    )
+                },
+                close: { [weak self] in
+                    self?.closeSidePanel(hostTabID: hostTabID)
+                }
+            )
+        } else {
+            preconditionFailure("Unsupported side-panel controller")
+        }
+
+        let style = sidePanelStyle ?? .iPadOverlay
+        let panel = SidePanelViewController(
+            controller: controller,
+            paneController: pane,
+            presentationStyle: style,
+            width: resolvedSidePanelWidth(),
+            overhang: style == .visionOrnament
+                ? SidePanelWidthStore.shared.visionOverhang : 0,
+            split: { [weak self] in
+                self?.splitSidePanelToTab(hostTabID: hostTabID)
+            },
+            close: { [weak self] in
+                self?.closeSidePanel(hostTabID: hostTabID)
+            },
+            resize: { [weak self] width, overhang, phase in
+                self?.sidePanelDidResize(
+                    width: width,
+                    overhang: overhang,
+                    phase: phase,
+                    hostTabID: hostTabID
+                )
+            }
+        )
+        #if os(visionOS)
+        if style == .visionOrnament {
+            panel.onCardFrameChange = { [weak self] frame in
+                self?.visionOrnaments.state.setSidePanelCardFrame(frame)
+            }
+        }
+        #endif
+        return panel
+    }
+
+    private func unmountCurrentSidePanel() {
+        if sidePanelStyle == .visionOrnament {
+            if let hostID = mountedSidePanelHostID {
+                sidePanelViewControllers[hostID]?.setPresented(false)
+            }
+            mountedSidePanelHostID = nil
+            return
+        }
+        guard let hostID = mountedSidePanelHostID else {
+            rootView.sidePanelContainer.isHidden = true
+            return
+        }
+        if let panel = sidePanelViewControllers[hostID], panel.parent === self {
+            panel.setPresented(false)
+            unmount(panel)
+        }
+        mountedSidePanelHostID = nil
+        rootView.sidePanelContainer.isHidden = true
+    }
+
+    /// The remembered width as this window can show it: an overlay clamps
+    /// to its pane here; the ornament's card clamps itself to the strip.
+    private func resolvedSidePanelWidth() -> CGFloat {
+        guard let platform = sidePanelPlatform, let style = sidePanelStyle else { return 0 }
+        if let transientSidePanelWidth { return transientSidePanelWidth }
+        let stored = SidePanelWidthStore.shared.width(for: platform)
+        switch style {
+        case .iPadOverlay:
+            return SidePanelWidth.clamped(stored, paneWidth: rootView.paneContainer.bounds.width)
+        case .visionOrnament:
+            return stored
+        }
+    }
+
+    private func sidePanelDidResize(
+        width: CGFloat,
+        overhang: CGFloat,
+        phase: SidePanelResizePhase,
+        hostTabID: UUID
+    ) {
+        guard mountedSidePanelHostID == hostTabID,
+              let panel = sidePanelViewControllers[hostTabID]
+        else { return }
+        switch panel.presentationStyle {
+        case .visionOrnament:
+            // The strip laid itself out live; only the release persists.
+            guard phase == .ended else { return }
+            SidePanelWidthStore.shared.setVisionGeometry(width: width, overhang: overhang)
+            renderNow()
+        case .iPadOverlay:
+            // Only the overlay moves per tick; the rest of the chrome waits
+            // for the release's render.
+            let clamped = SidePanelWidth.clamped(
+                width,
+                paneWidth: rootView.paneContainer.bounds.width
+            )
+            transientSidePanelWidth = clamped
+            layoutInWindowSidePanel()
+            guard phase == .ended else { return }
+            if let platform = sidePanelPlatform {
+                SidePanelWidthStore.shared.setWidth(clamped, for: platform)
+            }
+            transientSidePanelWidth = nil
+            renderNow()
+        }
+    }
+
+    func closeSidePanel(hostTabID: UUID) {
+        workspace.closeSidePanel(hostTabID: hostTabID)
+        renderNow()
+    }
+
+    func splitSidePanelToTab(hostTabID: UUID) {
+        guard let hostTab = route.tabs.first(where: { $0.id == hostTabID }),
+              !hostTab.isAuxiliaryPane,
+              let controller = workspace.detachSidePanel(hostTabID: hostTabID)
+        else { return }
+
+        let auxiliaryTab = TerminalRoute(hostID: hostTab.hostID, mode: controller.routeMode)
+        // Register first: `dock` mutates the route synchronously and
+        // `syncTabs` strips controller-less auxiliaries by design.
+        workspace.adoptAuxiliary(controller, tabID: auxiliaryTab.id)
+        dock(auxiliaryTab, after: hostTabID)
     }
 
     private var showsInWindowAuxiliaryRail: Bool {
@@ -1710,7 +2082,7 @@ extension TerminalWindowViewController {
                     self?.openFileInNewViewerTab(row, after: tab.id)
                 },
                 openViewport: { [weak self] offer in
-                    self?.openViewport(offer, after: tab.id)
+                    self?.openViewport(offer, after: tab.id, allowsPanel: false)
                 },
                 close: { [weak self] in self?.closeTab(tab.id) }
             )
@@ -1744,7 +2116,7 @@ extension TerminalWindowViewController {
                     self?.openFileInNewViewerTab(row, after: tab.id)
                 },
                 openViewport: { [weak self] offer in
-                    self?.openViewport(offer, after: tab.id)
+                    self?.openViewport(offer, after: tab.id, allowsPanel: false)
                 },
                 close: { [weak self] in self?.closeTab(tab.id) },
                 ornamentRailDidChange: { [weak self] in
@@ -1788,6 +2160,14 @@ extension TerminalWindowViewController {
         (pane as? TerminalPaneViewController)?.prepareForRemoval()
         (pane as? ViewportPaneViewController)?.prepareForRemoval()
         (pane as? FileViewerPaneViewController)?.prepareForRemoval()
+    }
+
+    private func mount(_ controller: UIViewController, in container: UIView) {
+        addChild(controller)
+        container.addSubview(controller.view)
+        controller.view.frame = container.bounds
+        controller.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        controller.didMove(toParent: self)
     }
 
     private func unmount(_ controller: UIViewController) {
@@ -1834,7 +2214,9 @@ extension TerminalWindowViewController {
                 hostName: multiHost ? store.host(id: tab.hostID)?.name : nil,
                 controller: workspace.controller(for: tab.id),
                 isActive: tab.id == activeTab?.id,
-                isAuxiliary: tab.isAuxiliaryPane
+                isAuxiliary: tab.isAuxiliaryPane,
+                hasSidePanel: !tab.isAuxiliaryPane
+                    && workspace.sidePanel(for: tab.id) != nil
             )
         }
     }
@@ -2052,7 +2434,9 @@ extension TerminalWindowViewController {
             fontUp: { [weak self] in self?.changeFont(by: 1) },
             newSession: { [weak self] in self?.openNewTab(launching: $0) },
             newHerdrWorkspaceTab: { [weak self] in self?.openNewHerdrWorkspaceTab() },
-            openFileViewer: { [weak self] in self?.openFileViewer(target: nil) },
+            openFileViewer: { [weak self] in
+                self?.openFileViewer(target: nil, allowsPanel: false)
+            },
             merge: { [weak self] in self?.merge($0) },
             detach: { [weak self] in self?.detachActiveTab() },
             closeSession: activeTabHasSession
@@ -2362,6 +2746,9 @@ extension TerminalWindowViewController {
     private func updateVisionOrnaments(forceRevision: Bool = false) {
         guard shell == nil, !appLocked else { return }
         visionOrnaments.state.keyClusterContext.keyCommandPlan = keyCommandPlan
+        let sidePanel = mountedSidePanelHostID.flatMap {
+            sidePanelViewControllers[$0]
+        }
         visionOrnaments.update(
             tabCount: route.tabs.count,
             isAuxiliary: activeTab?.isAuxiliaryPane == true,
@@ -2369,7 +2756,9 @@ extension TerminalWindowViewController {
             umdController: umdController,
             helperController: helperController,
             talkbackController: talkbackController,
+            sidePanelController: sidePanel,
             windowWidth: rootView.bounds.width,
+            windowHeight: rootView.bounds.height,
             interfaceStyle: themes.appearance.interfaceStyle,
             forceRevision: forceRevision
         )
@@ -2463,6 +2852,14 @@ extension TerminalWindowViewController {
         visionOrnaments.state.revision
     }
 
+    var visionSidePanelControllerForTesting: SidePanelViewController? {
+        visionOrnaments.state.sidePanelController
+    }
+
+    var visionSidePanelSizeForTesting: CGSize {
+        visionOrnaments.state.sidePanelSize
+    }
+
     var visionShellKeyClusterForTesting: TerminalKeyClusterGroupView {
         visionShellKeyCluster
     }
@@ -2476,6 +2873,8 @@ extension TerminalWindowViewController {
         if shell == nil {
             refreshVisionHelperWidthIfNeeded()
             rootView.paneContainer.frame = bounds
+            rootView.sidePanelContainer.frame = .zero
+            rootView.sidePanelContainer.isHidden = true
             rootView.tabScrollView.frame = .zero
             rootView.umdContainer.frame = .zero
             rootView.helperContainer.frame = .zero
@@ -2728,6 +3127,67 @@ extension TerminalWindowViewController {
         for pane in paneControllers.values {
             pane.view.frame = rootView.paneContainer.bounds
         }
+        layoutInWindowSidePanel()
+    }
+
+    private func layoutInWindowSidePanel() {
+        guard let hostTabID = mountedSidePanelHostID,
+              let panel = sidePanelViewControllers[hostTabID],
+              panel.parent === self
+        else {
+            rootView.sidePanelContainer.frame = .zero
+            rootView.sidePanelContainer.isHidden = true
+            return
+        }
+
+        // A pane that shrank below the overlay's floor (Stage Manager) moves
+        // the panel into a tab instead.
+        if let hostTab = route.tabs.first(where: { $0.id == hostTabID }),
+           !admitsSidePanel(anchor: hostTab) {
+            scheduleSidePanelConversion(hostTabID: hostTabID)
+        }
+
+        let pane = rootView.paneContainer.frame
+        let width = resolvedSidePanelWidth()
+        let bottom: CGFloat = {
+            #if os(visionOS)
+            pane.maxY - (workspace.controller(for: hostTabID)?.keyboardObstruction ?? 0)
+            #else
+            // `paneContainer` owns both screen and key rail. The authored
+            // SIDECAR rectangle is the screen portion of that pane: use the
+            // same obstruction-lifted rail seam as Talkback so the full-width
+            // keys remain visible and interactive beneath the overlay.
+            paneChromeBottom
+            #endif
+        }()
+        let frame = SidePanelWidth.overlayContainerFrame(
+            pane: pane,
+            bottom: bottom,
+            width: width,
+            leadingOverhang: panel.leadingOverhang
+        )
+        rootView.sidePanelContainer.frame = frame
+        rootView.sidePanelContainer.isHidden = frame.isEmpty
+        panel.view.frame = rootView.sidePanelContainer.bounds
+        panel.updateWidth(width)
+    }
+
+    private func scheduleSidePanelConversion(hostTabID: UUID) {
+        guard sidePanelConversionScheduledFor != hostTabID else { return }
+        sidePanelConversionScheduledFor = hostTabID
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if sidePanelConversionScheduledFor == hostTabID {
+                    sidePanelConversionScheduledFor = nil
+                }
+            }
+            guard workspace.sidePanel(for: hostTabID) != nil,
+                  let hostTab = route.tabs.first(where: { $0.id == hostTabID }),
+                  !admitsSidePanel(anchor: hostTab)
+            else { return }
+            splitSidePanelToTab(hostTabID: hostTabID)
+        }
     }
 }
 
@@ -2914,6 +3374,15 @@ extension TerminalWindowViewController {
         }
         observe(.multiplexDebugFileViewer) { [weak self] in self?.debugOpenFileViewer() }
         observe(.multiplexDebugPathView) { [weak self] in self?.debugViewPendingPath() }
+        observe(.multiplexDebugSidePanelSplit) { [weak self] in
+            self?.debugSplitSidePanel()
+        }
+        observe(.multiplexDebugSidePanelClose) { [weak self] in
+            self?.debugCloseSidePanel()
+        }
+        observe(.multiplexDebugSidePanelWidth) { [weak self] in
+            self?.debugCycleSidePanelWidth()
+        }
         observe(.multiplexDebugFileViewerRepoDiff) { [weak self] in
             guard let self,
                   let activeTab,
@@ -3006,7 +3475,7 @@ extension TerminalWindowViewController {
 
     private func debugOpenFileViewer() {
         guard ownsFocusedTerminal else { return }
-        openFileViewer(target: nil)
+        openFileViewer(target: nil, allowsPanel: false)
     }
 
     private func debugViewPendingPath() {
@@ -3017,6 +3486,42 @@ extension TerminalWindowViewController {
         controller.dismissPendingPath()
         openFileViewer(target: target)
         dismissPresentedFeature()
+    }
+
+    /// The active terminal's open panel, while this window owns the focused
+    /// terminal — what the DEBUG panel hooks act on.
+    private var debugSidePanelHostTabID: UUID? {
+        guard ownsFocusedTerminal,
+              let hostTabID = activeTab?.id,
+              workspace.sidePanel(for: hostTabID) != nil
+        else { return nil }
+        return hostTabID
+    }
+
+    private func debugSplitSidePanel() {
+        guard let hostTabID = debugSidePanelHostTabID else { return }
+        splitSidePanelToTab(hostTabID: hostTabID)
+    }
+
+    private func debugCloseSidePanel() {
+        guard let hostTabID = debugSidePanelHostTabID else { return }
+        closeSidePanel(hostTabID: hostTabID)
+    }
+
+    private func debugCycleSidePanelWidth() {
+        guard debugSidePanelHostTabID != nil, let platform = sidePanelPlatform else { return }
+        let store = SidePanelWidthStore.shared
+        switch platform {
+        case .iPad:
+            store.setWidth(store.width(for: .iPad) < 460 ? 560 : 360, for: .iPad)
+        case .visionOS:
+            let width = store.width(for: .visionOS)
+            let next = SidePanelWidth.visionWidthCycle.first { $0 > width }
+                ?? SidePanelWidth.visionWidthCycle[0]
+            store.setWidth(next, for: .visionOS)
+        }
+        transientSidePanelWidth = nil
+        renderNow()
     }
 
     private func debugLogLinkRegions() {
@@ -3086,6 +3591,9 @@ final class TerminalWindowUIKitRootView: UIView {
     static let tabRailVerticalInset: CGFloat = 6
 
     let paneContainer = UIView()
+    /// iPad/Shell SIDECAR mount: a sibling over the pane, deliberately not
+    /// part of its layout or SwiftTerm's size proposal.
+    let sidePanelContainer = UIView()
     let tabScrollView = TerminalTabScrollView()
     let umdContainer = UIView()
     let helperContainer = UIView()
@@ -3113,6 +3621,9 @@ final class TerminalWindowUIKitRootView: UIView {
         tabDivider.backgroundColor = UIKitChassis.bezelHi
         umdContainer.backgroundColor = .clear
         helperContainer.backgroundColor = .clear
+        sidePanelContainer.backgroundColor = .clear
+        sidePanelContainer.clipsToBounds = false
+        sidePanelContainer.isHidden = true
         talkbackContainer.backgroundColor = .clear
         talkbackContainer.clipsToBounds = true
         bottomSafeAreaBackfill.backgroundColor = UIKitChassis.bezel
@@ -3125,10 +3636,12 @@ final class TerminalWindowUIKitRootView: UIView {
         addSubview(tabScrollView)
         addSubview(tabDivider)
         addSubview(umdContainer)
+        addSubview(sidePanelContainer)
         addSubview(talkbackContainer)
         addSubview(helperContainer)
         addSubview(bottomSafeAreaBackfill)
         paneContainer.accessibilityIdentifier = "terminalWindow.panes"
+        sidePanelContainer.accessibilityIdentifier = "terminalWindow.sidePanel"
         tabScrollView.accessibilityIdentifier = "terminalWindow.tabs"
         umdContainer.accessibilityIdentifier = "terminalWindow.umd"
         helperContainer.accessibilityIdentifier = "terminalWindow.helpers"

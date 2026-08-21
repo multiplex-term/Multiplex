@@ -167,7 +167,7 @@ agent's option picker without summoning it). Holding `CTRL` opens **KEY
 COMMANDS**, a two-tab TALLY popover on the shortcut panel's grammar:
 COMMANDS is a hairline grid of keycap chords (⇧↩ · ⌃C ×2 · ⌥⌫, and the user's
 own, in custom ink), CUSTOM SETUP is the agent editor's numbered list with an
-inline composer — bake-off record in `local-plan/key-commands-bakeoff/`. The
+inline composer. The
 speech-bubble key beside `RET` (`RET · talk · keyboard`, latched while open)
 opens **Talkback**, the chat-style message box: on visionOS a rounded card in
 its own slab hanging below the console row, on iPad and iPhone the same card
@@ -178,7 +178,14 @@ text field, and a filled ↑ that sends the message as one paste — attached
 files upload on pick and show as 46 pt previews (28 pt thumbs and compact
 document chips on the phone), their paths typed first. Chat grammar on the
 chassis: rounded, hairlined, chassis-grounded, so it still belongs to the
-window — bake-off record in `local-plan/talkback-bakeoff/` (Candidate B).
+window (bake-off Candidate B).
+A confirmed path or web link first opens in a **side panel** beside the live
+terminal, never resizing it: a shadowed card in front of the pane on iPad, one
+slab beside the glass on visionOS (bake-off candidate A, "Sidecar"). Its
+single action row — a header on iPad, a
+bottom bar on visionOS where the eye works the lower edge — leads with the
+panel's own controls, `✕` and `↗ TAB` (moves it into a tab), then the viewer's
+identity and its local controls (expanding as the width allows).
 The iPad toolbar keeps the
 full chip set: `DECK`,
 source label, lamp, then

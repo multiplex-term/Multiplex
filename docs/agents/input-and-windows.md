@@ -172,6 +172,28 @@ routing, tab moves, keyboard avoidance, or secret fields.
   above is about restacking keys under the UMD console line. Shell/iPad
   keep the in-window rails unchanged; re-verify placement visually when
   touching any of this.
+- **The side panel never participates in terminal layout or focus.** iPad
+  mounts the card over the pane container's inset rectangle, reuses the
+  pane's `keyboardObstruction`, and the address field borrows the host
+  terminal through `TerminalFocusArbiter.lend`. Its action row is a header on
+  iPad and a bottom bar on visionOS (`SidePanelRowEdge`) and surfaces chips in
+  measured priority order — `⋯` only for what did not fit. Classic visionOS
+  hangs it from a third trailing ornament whose content is ONE static mount:
+  a transparent strip twice the window's width, centred on the glass edge
+  (`SidePanelWidth.visionStripWidth(windowWidth:)`); the card lives inside it
+  as (width, `overhang` = right edge past the GLASS) with a handle on each
+  edge above the row, and the strip's empty part passes hits through
+  (`SidePanelStripView`). Decisions that cost device rounds — don't re-open
+  without new facts: geometry persists GLASS-relative, never strip-relative
+  (a strip-relative inset outlived a strip-width change and pinned the card);
+  a drag FREEZES the card into one blurred bitmap until RELEASE (no mid-drag
+  settle thaw — gaze-and-pinch events arrive with gaps), moves only frames,
+  and under GLASS the system platter steps out for the drag; nothing about
+  the ornament changes per tick (a SwiftUI-driven drag and a per-tick UIKit
+  relayout were both unusable on device) and its content carries no
+  animation/transition. ⚠ visionOS 27 sim only: after ↗ TAB on a ▤ panel the
+  glass keeps the old frame 3–6 s (CPU idle; ⌗, iPad and the shell present
+  in ≤ 1 s) — judge on device, don't chase it.
 - **A terminal window's title bar is app-owned, and its scene asks for
   `.minimal` window controls** (`TerminalClassicRailInsets`;
   `MultiplexSceneDelegate.preferredWindowingControlStyle(for:)`). Two

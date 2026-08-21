@@ -29,6 +29,45 @@ extension Notification.Name {
     static let multiplexDebugFileViewerPlay = Notification.Name(
         "MultiplexDebugFileViewerPlay"
     )
+    static let multiplexDebugSidePanelSplit = Notification.Name(
+        "MultiplexDebugSidePanelSplit"
+    )
+    static let multiplexDebugSidePanelClose = Notification.Name(
+        "MultiplexDebugSidePanelClose"
+    )
+    static let multiplexDebugSidePanelWidth = Notification.Name(
+        "MultiplexDebugSidePanelWidth"
+    )
+}
+
+/// SIDECAR's headless controls: ↗ TAB, ✕, and a persisted width cycle.
+@MainActor
+enum SidePanelDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        let center = NotificationCenter.default
+        var splitToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.sidepanelsplit", &splitToken, .main
+        ) { _ in
+            center.post(name: .multiplexDebugSidePanelSplit, object: nil)
+        }
+        var closeToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.sidepanelclose", &closeToken, .main
+        ) { _ in
+            center.post(name: .multiplexDebugSidePanelClose, object: nil)
+        }
+        var widthToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.sidepanelwidth", &widthToken, .main
+        ) { _ in
+            center.post(name: .multiplexDebugSidePanelWidth, object: nil)
+        }
+    }
 }
 
 /// `….debug.fileviewer` runs the focused window's + TAB ▸ File Viewer

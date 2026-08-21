@@ -240,6 +240,21 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   ⚠ `mountBlocksIfNeeded` must `setNeedsLayout` the scroll view before
   reading `contentSize`, or a teardown's stale tall height reads as a full
   viewport and the screen stays BLANK until the reader scrolls.
+- **The side panel is the first home for a terminal-summoned ▤/⌗ on iPad and
+  visionOS** (2026-08-21; `SidePanelViewController`, `SidePanelPolicy`,
+  `SidePanelWidth`): an overlay over the pane on regular-width iPad (≥ 660 pt)
+  and a trailing ornament on visionOS, so SwiftTerm never receives a resize.
+  One panel per host terminal tab — it follows the tab through merge/split,
+  hides without stopping behind another tab, and a second summon replaces and
+  shuts down the first. Path/link confirmations and external file actions on
+  an active terminal use it; + TAB ▸ File Viewer, tree-row "open in new tab",
+  summons anchored to an auxiliary tab, and README links from ▤ stay on the
+  tab road. ↗ TAB re-registers the live controller as an auxiliary tab
+  (`routeMode`); closing the panel or host tab shuts it down; panels are never
+  restored; a Stage Manager shrink below the floor makes the same panel→tab
+  move. Width is device-local and dragged live (iPad 320 … pane − 320;
+  visionOS from a handle on either edge, stored glass-relative). DEBUG
+  `MULTIPLEX_SIDE_PANEL=0` forces the tab road.
 - **PDFs and sound files are screens, not BINARY** (2026-08-15;
   `FileRenderKind.pdf` / `.audio`, `FileViewerPDFContentView`,
   `FileViewerAudioContentView`, `FileViewerAudioClip`). Both are read WHOLE

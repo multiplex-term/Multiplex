@@ -53,6 +53,7 @@ final class TerminalTabStripView: UIView, UIDropInteractionDelegate {
             var hostName: String?
             var isActive: Bool
             var isAuxiliary: Bool
+            var hasSidePanel: Bool
             var tallyState: TerminalTabTallyState
             var canSplit: Bool
         }
@@ -476,6 +477,7 @@ final class TerminalTabStripView: UIView, UIDropInteractionDelegate {
                 hostName: item.hostName,
                 isActive: item.isActive,
                 isAuxiliary: item.isAuxiliary,
+                hasSidePanel: item.hasSidePanel,
                 tallyState: state,
                 canSplit: canSplit(id: item.id)
             )
@@ -622,6 +624,7 @@ final class TerminalTabCell: UIView,
     private(set) var tallyState: TerminalTabTallyState
     private(set) var dotView: UIView?
     private(set) var sourceLabel: UIKitChassisLabel
+    private(set) var sidePanelMarkerLabel: UIKitChassisMonoLabel
 
     private let activate: () -> Void
     private let makeMenu: () -> UIMenu
@@ -670,6 +673,12 @@ final class TerminalTabCell: UIView,
             size: 10,
             color: Self.ink(isActive: item.isActive)
         )
+        sidePanelMarkerLabel = UIKitChassisMonoLabel(
+            "▸",
+            font: UIKitChassis.uiFont(10, weight: .semibold),
+            color: UIKitChassis.signal2
+        )
+        sidePanelMarkerLabel.isHidden = !item.hasSidePanel
         super.init(frame: .zero)
 
         backgroundColor = Self.ground(isActive: item.isActive)
@@ -740,6 +749,7 @@ final class TerminalTabCell: UIView,
         }
         sourceLabel.isAccessibilityElement = false
         contentStack.addArrangedSubview(sourceLabel)
+        contentStack.addArrangedSubview(sidePanelMarkerLabel)
     }
 
     @available(*, unavailable)
@@ -776,6 +786,7 @@ final class TerminalTabCell: UIView,
             // strip before that action has unwound.
             sourceLabel.setInk(Self.ink(isActive: item.isActive))
         }
+        sidePanelMarkerLabel.isHidden = !item.hasSidePanel
         accessibilityLabel = Self.accessibilityLabel(for: item)
         if self.tallyState != tallyState {
             self.tallyState = tallyState
@@ -791,7 +802,12 @@ final class TerminalTabCell: UIView,
     }
 
     private static func accessibilityLabel(for item: TerminalTabStrip.Item) -> String {
-        item.isActive
+        if item.hasSidePanel {
+            return item.isActive
+                ? String(localized: "\(item.title) tab, active, with side panel")
+                : String(localized: "\(item.title) tab, with side panel")
+        }
+        return item.isActive
             ? String(localized: "\(item.title) tab, active")
             : String(localized: "\(item.title) tab")
     }
@@ -825,8 +841,11 @@ final class TerminalTabCell: UIView,
         let label = sourceLabel.intrinsicContentSize
         let lamp = dotView == nil ? 0 : Self.lampSize
         let lampWidth = dotView == nil ? 0 : Self.lampSize + Self.contentSpacing
+        let markerWidth = sidePanelMarkerLabel.isHidden
+            ? 0
+            : sidePanelMarkerLabel.intrinsicContentSize.width + Self.contentSpacing
         return CGSize(
-            width: ceil(label.width + lampWidth + Self.horizontalInset * 2),
+            width: ceil(label.width + lampWidth + markerWidth + Self.horizontalInset * 2),
             height: ceil(max(label.height, lamp) + Self.verticalInset * 2)
         )
     }
@@ -987,6 +1006,8 @@ enum TerminalTabStrip {
         var isActive: Bool
         /// Auxiliary tabs carry their mark in the title and no tally dot.
         var isAuxiliary = false
+        /// A neutral ▸ follows a terminal title while its side panel exists.
+        var hasSidePanel = false
     }
 
 }

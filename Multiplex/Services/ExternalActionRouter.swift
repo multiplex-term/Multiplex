@@ -362,6 +362,12 @@ enum ExternalActionPerformer {
             ))
             return
         }
+        if context.workspace.openFileViewer(
+            target,
+            onActiveTerminalForHost: host.id
+        ) {
+            return
+        }
         let tab = TerminalRoute(hostID: host.id, mode: .fileViewer(path: target.path))
         context.workspace.openFileViewer(
             tab: tab,

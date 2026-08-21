@@ -287,6 +287,50 @@ final class ExternalActionTests: XCTestCase {
         workspace.closeTab(tab.id)
     }
 
+    @MainActor
+    func testOpenFileTargetsAnExistingActiveTerminalBeforeOpeningAFreshRoute() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = Host(name: "devbox", hostname: "127.0.0.1", username: "tester")
+        let store = HostStore(directory: directory, knownMirroredIDs: [])
+        store.add(host)
+        let workspace = TerminalWorkspace()
+        let terminal = TerminalRoute(hostID: host.id, mode: .shell)
+        var targeted: TerminalPathTarget?
+        workspace.registerWindow(.init(
+            id: UUID(),
+            tabs: [terminal],
+            label: "terminal",
+            reveal: { _ in },
+            surrender: { [] },
+            adopt: { _ in },
+            openFileViewer: { _, target in
+                targeted = target
+                return true
+            }
+        ))
+        var opened: TerminalWindowRoute?
+        let context = ExternalActionRouter.Context(
+            store: store,
+            hub: ConnectionHub(),
+            workspace: workspace,
+            open: { opened = $0 },
+            presentAgentPrompt: { _ in },
+            presentFailure: { _ in },
+            presentConfirmation: { _ in }
+        )
+
+        await ExternalActionPerformer.perform(
+            .openFile(host: .id(host.id), path: "/srv/project/App.swift", line: 42),
+            context: context
+        )
+
+        XCTAssertEqual(try XCTUnwrap(targeted).path, "/srv/project/App.swift")
+        XCTAssertEqual(targeted?.line, 42)
+        XCTAssertNil(opened, "the target window decides panel versus tab")
+    }
+
     // MARK: Session pick
 
     func testMostRecentSessionPicksNewestCreated() {

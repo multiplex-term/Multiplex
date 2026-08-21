@@ -62,6 +62,9 @@ final class ViewportPaneViewController: UIViewController,
     private let controller: ViewportController
     private var contentSafeArea: UIEdgeInsets
     private var closeAction: () -> Void
+    /// A side-panel address field borrows the host terminal's keyboard across
+    /// ornament windows. Ordinary viewport tabs leave this as a no-op.
+    private var borrowKeyboard: (UIView) -> Void
     private var observationGeneration = 0
     private var state: ViewportPaneObservedState?
     private var failureIdentity: String?
@@ -95,12 +98,14 @@ final class ViewportPaneViewController: UIViewController,
         contentSafeArea: UIEdgeInsets = .zero,
         showsInWindowRail: Bool = true,
         ornamentRailDidChange: @escaping () -> Void = {},
+        borrowKeyboard: @escaping (UIView) -> Void = { _ in },
         close: @escaping () -> Void
     ) {
         self.controller = controller
         self.contentSafeArea = contentSafeArea
         self.showsInWindowRail = showsInWindowRail
         self.ornamentRailDidChange = ornamentRailDidChange
+        self.borrowKeyboard = borrowKeyboard
         closeAction = close
         super.init(nibName: nil, bundle: nil)
     }
@@ -130,10 +135,12 @@ final class ViewportPaneViewController: UIViewController,
     func update(
         contentSafeArea: UIEdgeInsets,
         close: @escaping () -> Void,
-        ornamentRailDidChange: @escaping () -> Void = {}
+        ornamentRailDidChange: @escaping () -> Void = {},
+        borrowKeyboard: @escaping (UIView) -> Void = { _ in }
     ) {
         closeAction = close
         self.ornamentRailDidChange = ornamentRailDidChange
+        self.borrowKeyboard = borrowKeyboard
         if self.contentSafeArea != contentSafeArea {
             self.contentSafeArea = contentSafeArea
             if isViewLoaded { updateRailInsets() }
@@ -447,6 +454,7 @@ final class ViewportPaneViewController: UIViewController,
         if let addressEditor {
             addressEditor.setText(controller.displayURL.absoluteString)
             addressEditor.setRejected(false)
+            borrowKeyboard(addressEditor.textField)
             addressEditor.textField.becomeFirstResponder()
             return
         }
@@ -466,6 +474,7 @@ final class ViewportPaneViewController: UIViewController,
             editor.topAnchor.constraint(equalTo: pageArea.topAnchor, constant: 12),
         ])
         pageArea.bringSubviewToFront(editor)
+        borrowKeyboard(editor.textField)
         DispatchQueue.main.async { [weak editor] in editor?.textField.becomeFirstResponder() }
     }
 

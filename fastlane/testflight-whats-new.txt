@@ -1,6 +1,7 @@
 NEW SINCE 1.4.0
 • COPY COMMAND FOR HANDOFF — long-press a session tile on the deck to copy the attach line for a terminal on that machine itself (tmux and herdr alike).
 • TRADITIONAL CHINESE AND JAPANESE — pick per app in Settings → Multiplex → Language (LANGUAGE in Multiplex Settings takes you there).
+• SIDE PANEL — on iPad and Vision Pro a confirmed path or web link now opens beside the terminal instead of as a tab; resize it, open another (it replaces the first), or press TAB to move it into a tab. The terminal never changes size.
 
 PLEASE TRY
 1. Long-press a session tile, pick COPY COMMAND FOR HANDOFF, and paste it into a terminal on the host machine — it should attach the very session the tile shows.
