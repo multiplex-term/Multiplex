@@ -15,6 +15,9 @@ protocol AuxiliaryPaneController: AnyObject {
     /// The live tab-cell/UMD label (mark + subject) — follows what the pane
     /// is showing NOW, where the route only knows the summons.
     var tabLabel: String { get }
+    /// The route a tab would carry for what the pane shows now — minted when
+    /// ↗ TAB moves a live side panel into a tab.
+    var routeMode: TerminalRoute.Mode { get }
     func shutdown()
 }
 
@@ -110,11 +113,7 @@ final class TerminalWorkspace {
     /// without its controller is indistinguishable from a restored corpse.
     func openViewport(tab: TerminalRoute, offer: ViewportOffer, host: Host) {
         guard tab.isViewport, auxiliaryControllers[tab.id] == nil else { return }
-        auxiliaryControllers[tab.id] = ViewportController(
-            tabID: tab.id,
-            offer: offer,
-            host: host
-        )
+        auxiliaryControllers[tab.id] = ViewportController(tabID: tab.id, offer: offer, host: host)
     }
 
     func openFileViewer(
@@ -152,12 +151,52 @@ final class TerminalWorkspace {
         auxiliaryControllers[tabID] as? FileViewerController
     }
 
+    /// Registers a controller already alive under a freshly minted auxiliary
+    /// tab id. Call before adding that tab to a route, or `syncTabs` will
+    /// correctly mistake it for a restored corpse.
+    func adoptAuxiliary(_ controller: any AuxiliaryPaneController, tabID: UUID) {
+        if let replaced = auxiliaryControllers[tabID], replaced !== controller {
+            replaced.shutdown()
+        }
+        auxiliaryControllers[tabID] = controller
+    }
+
+    // MARK: Side panels (one per host terminal tab)
+
+    /// Side panels are keyed by the terminal tab that summoned them. That
+    /// host id survives merge/split, while the controller remains live here.
+    private var sidePanels: [UUID: any AuxiliaryPaneController] = [:]
+
+    func openSidePanel(
+        hostTabID: UUID,
+        controller: any AuxiliaryPaneController
+    ) {
+        if let previous = sidePanels[hostTabID], previous !== controller {
+            previous.shutdown()
+        }
+        sidePanels[hostTabID] = controller
+    }
+
+    func sidePanel(for hostTabID: UUID) -> (any AuxiliaryPaneController)? {
+        sidePanels[hostTabID]
+    }
+
+    func closeSidePanel(hostTabID: UUID) {
+        sidePanels.removeValue(forKey: hostTabID)?.shutdown()
+    }
+
+    /// Removes a panel without teardown so ↗ TAB can re-parent its live pane.
+    func detachSidePanel(hostTabID: UUID) -> (any AuxiliaryPaneController)? {
+        sidePanels.removeValue(forKey: hostTabID)
+    }
+
     /// Close a tab for real: detach the SSH channel (or shut the auxiliary
-    /// pane down) and drop the controller. Never called when a tab merely
-    /// moves.
+    /// pane down) and drop the controller. A terminal tab owns its side panel,
+    /// so closing the host releases that viewer too. Never called on a move.
     func closeTab(_ tabID: UUID) {
         controllers.removeValue(forKey: tabID)?.detach()
         auxiliaryControllers.removeValue(forKey: tabID)?.shutdown()
+        closeSidePanel(hostTabID: tabID)
     }
 
     /// Hosts with at least one live transport right now, whichever window
@@ -187,6 +226,10 @@ final class TerminalWorkspace {
         var surrender: @MainActor () -> [TerminalRoute]
         /// Appends tabs to the window — the receiving half of a merge.
         var adopt: @MainActor ([TerminalRoute]) -> Void
+        /// External file actions may use the active terminal as their anchor
+        /// when it is on the given host; auxiliary-active windows decline so a
+        /// document never gets evicted.
+        var openFileViewer: @MainActor (_ hostID: UUID, TerminalPathTarget) -> Bool = { _, _ in false }
     }
 
     private(set) var windows: [WindowEntry] = []
@@ -206,6 +249,16 @@ final class TerminalWorkspace {
     /// The windows `windowID` could merge into itself.
     func mergeSources(for windowID: UUID) -> [WindowEntry] {
         windows.filter { $0.id != windowID && !$0.tabs.isEmpty }
+    }
+
+    /// Widget/deep-link file summons prefer an already open terminal for the
+    /// target host. The window runs its ordinary panel admission policy; an
+    /// auxiliary active tab declines and the caller opens today's fresh tab.
+    func openFileViewer(
+        _ target: TerminalPathTarget,
+        onActiveTerminalForHost hostID: UUID
+    ) -> Bool {
+        windows.contains { $0.openFileViewer(hostID, target) }
     }
 
     /// True when an open terminal window already has a tab bound to this

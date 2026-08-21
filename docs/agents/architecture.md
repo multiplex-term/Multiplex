@@ -71,7 +71,8 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
                      WidgetPalette, and ACCENTED draws white-with-opacity
                      only — the channel the tint remap preserves.
   TerminalWorkspace  tab controllers keyed by tab id — merge/split move
-                     tabs across windows, shells stay live
+                     tabs across windows, shells stay live; a second map keys
+                     one summoned side-panel controller by its HOST tab id
     ViewportController   one per ⌗ viewport tab; owns the WKWebView so
                      moves re-parent the live page; in-memory only
     FileViewerController one per ▤ file-viewer tab; dials its OWN lazy
@@ -79,6 +80,9 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
                      isAuxiliaryPane rules with the viewport); its
                      Document owns the PDF / audio clip, so a moved tab
                      keeps page and position
+  SidePanelViewController one active-window mount around an existing ▤/⌗
+                     pane: 30 pt header + iPad seam or visionOS trailing slab;
+                     presentation only, never controller lifetime
   TerminalSessionController  one per tab; input pump + TerminalView
     TalkbackDraft        the tab's chat-style message box (text +
                          attachments; pure) beside its observed talkbackOpen

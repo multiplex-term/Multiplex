@@ -109,7 +109,7 @@ Free surfaces added 2026-07-18 (unreleased; ships with the next binary):
 | Widget extension | `MultiplexWidgets` (`app.multiplexterm.multiplex.widgets`), embedded in the app; iPadOS 17.0+, visionOS 26.0+ (WidgetKit does not exist on earlier visionOS — the app itself stays 1.0) |
 | Widgets | "Host Monitor" (small/medium, configurable: host, small-tap action, agent, optional model picked from the host's configured launch models, optional target session with an Open In placement, optional working directory from the host's configured list, ask-for-prompt) and "Fleet Wall" (medium/large, host order follows the deck) |
 | Widget data | Last-known sessions/miniatures plus configured agent model names and working directories from an App Group snapshot (`group.app.multiplexterm.multiplex`, `widget-state.json`, secret-free). Widgets never open connections and show no liveness claims — a relative SEEN stamp only |
-| App Shortcuts | "Open Shell" (attach the selected backend's most recent session or create), "Open File" (remote file path plus optional positive line number, or a tool-call-style `path:10-15` line range; opens read-only in a File Viewer tab, with relative paths based at the host's first configured working directory or home), and "Open Agent" (Claude Code/Codex/Pi, host-configured working-directory, setup-script, and launch-model pickers — models passed as `--model` — optional first prompt; works on tmux and herdr hosts, with Session + Open In pickers to launch inside an existing session: a new tmux window, or a herdr tab in the focused workspace / a new workspace) — run in-app; failures surface as an in-app alert |
+| App Shortcuts | "Open Shell" (attach the selected backend's most recent session or create), "Open File" (remote file path plus optional positive line number, or a tool-call-style `path:10-15` line range; opens read-only in the active terminal's side panel on iPad/Vision Pro when one is available, otherwise in a File Viewer tab, with relative paths based at the host's first configured working directory or home), and "Open Agent" (Claude Code/Codex/Pi, host-configured working-directory, setup-script, and launch-model pickers — models passed as `--model` — optional first prompt; works on tmux and herdr hosts, with Session + Open In pickers to launch inside an existing session: a new tmux window, or a herdr tab in the focused workspace / a new workspace) — run in-app; failures surface as an in-app alert |
 | URL scheme | `multiplex://open?host=<uuid|name>&action=shell\|agent[&session=…][&agent=…][&prompt=…][&ask=1][&dir=…][&script=<uuid\|none>][&model=…][&in=tab\|workspace\|window]` or `multiplex://open?host=<uuid|name>&action=file&path=…[&line=…]` — widget taps and user automation; omitting `script` uses the remembered New Session choice, omitting `model` uses the agent's default; on `action=agent`, `session` targets an existing session and `in` places the launch inside it (tmux: a new window; herdr: tab in the focused workspace / new workspace) |
 | Privacy impact | None: the App Group snapshot stays on-device, contains no credentials, and adds no new data collection; setup-script bodies remain in the app's host record and never become Shortcut parameter values |
 
@@ -238,9 +238,11 @@ Current product split:
   where the remote is not tracking the mouse; the confirmation shows the
   resolved target and its host, and unsupported schemes are shown for copying
   rather than followed), an
-  inline viewport browser for confirmed web links (⌗): the page docks as a
-  tab beside the session that printed it, splits into its own window and
-  merges back like any tab with the live page riding along, the sheet's
+  inline viewport browser for confirmed web links (⌗): on iPad and Vision Pro
+  the page first floats beside the terminal without resizing it, and ↗ TAB
+  re-keys the live page into a tab beside that session (compact iPhone and
+  narrow iPad stages use the tab directly); the resulting tab splits into its
+  own window and merges back with the live page riding along, the sheet's
   REACH row says which network the address lives on and rewrites a remote
   `localhost` to the host's own dialled address in the open, the rail's
   address is tap-to-edit (typed addresses ride the same web-only gate and

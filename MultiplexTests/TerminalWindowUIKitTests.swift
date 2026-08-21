@@ -359,6 +359,288 @@ final class TerminalWindowUIKitTests: XCTestCase {
     }
 
     #if !os(visionOS)
+    func testWideIPadPathViewMountsAPanelWithoutRelayingOutThePane() async throws {
+        let host = Host(
+            name: "devbox",
+            hostname: "127.0.0.1",
+            port: 1,
+            username: "dev"
+        )
+        let terminal = TerminalRoute(hostID: host.id, mode: .shell)
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tab: terminal),
+            hosts: [host]
+        )
+        defer {
+            fixture.controller.prepareForRemoval()
+            fixture.store.remove(host)
+        }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        fixture.controller.view.layoutIfNeeded()
+        let root = try XCTUnwrap(
+            fixture.controller.view as? TerminalWindowUIKitRootView
+        )
+        let paneFrame = root.paneContainer.frame
+        let target = try XCTUnwrap(TerminalPathTarget.resolveExplicit(
+            "/workspace/README.md",
+            line: 12
+        ))
+
+        fixture.controller.openFileViewer(target: target)
+        for _ in 0..<8 { await Task.yield() }
+        fixture.controller.view.layoutIfNeeded()
+
+        XCTAssertEqual(fixture.controller.route.tabs, [terminal])
+        XCTAssertNotNil(fixture.workspace.sidePanel(for: terminal.id))
+        XCTAssertFalse(root.sidePanelContainer.isHidden)
+        XCTAssertFalse(root.sidePanelContainer.subviews.isEmpty)
+        XCTAssertEqual(root.paneContainer.frame, paneFrame, "the overlay never resizes SwiftTerm")
+        XCTAssertEqual(root.sidePanelContainer.frame.maxX, paneFrame.maxX - 8, accuracy: 0.5)
+        XCTAssertEqual(root.sidePanelContainer.frame.minY, paneFrame.minY + 8, accuracy: 0.5)
+        XCTAssertEqual(
+            root.sidePanelContainer.frame.maxY,
+            paneFrame.maxY - TerminalKeyBar.barHeight(spendsBottomStrip: true) - 8,
+            accuracy: 0.5,
+            "the panel overlays the screen, never the full-width key rail"
+        )
+
+        let strip = try XCTUnwrap(descendant(
+            of: TerminalTabStripView.self,
+            in: fixture.controller.view
+        ))
+        XCTAssertFalse(try XCTUnwrap(strip.cells.first).sidePanelMarkerLabel.isHidden)
+    }
+
+    func testExplicitFileViewerTabDoorStaysATabAtWideWidth() async {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", port: 1, username: "dev")
+        let terminal = TerminalRoute(hostID: host.id, mode: .shell)
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tab: terminal),
+            hosts: [host]
+        )
+        defer {
+            fixture.controller.prepareForRemoval()
+            fixture.store.remove(host)
+        }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        fixture.controller.view.layoutIfNeeded()
+
+        fixture.controller.openFileViewer(target: nil, allowsPanel: false)
+        for _ in 0..<8 { await Task.yield() }
+
+        XCTAssertEqual(fixture.controller.route.tabs.count, 2)
+        XCTAssertTrue(fixture.controller.route.activeTab?.isFileViewer == true)
+        XCTAssertNil(fixture.workspace.sidePanel(for: terminal.id))
+    }
+
+    func testNarrowIPadAndDebugOverrideKeepTheTabRoad() {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", port: 1, username: "dev")
+        let offer = ViewportOffer(
+            url: URL(string: "https://example.com")!,
+            reach: .internet,
+            viaHostName: nil
+        )
+
+        do {
+            let terminal = TerminalRoute(hostID: host.id, mode: .shell)
+            let fixture = makeFixture(
+                route: TerminalWindowRoute(tab: terminal),
+                hosts: [host]
+            )
+            fixture.controller.loadViewIfNeeded()
+            fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 640, height: 700)
+            fixture.controller.view.layoutIfNeeded()
+            fixture.controller.openViewport(offer)
+
+            XCTAssertEqual(fixture.controller.route.tabs.count, 2)
+            XCTAssertTrue(fixture.controller.route.activeTab?.isViewport == true)
+            XCTAssertNil(fixture.workspace.sidePanel(for: terminal.id))
+            fixture.controller.prepareForRemoval()
+            fixture.store.remove(host)
+        }
+
+        setenv("MULTIPLEX_SIDE_PANEL", "0", 1)
+        defer { unsetenv("MULTIPLEX_SIDE_PANEL") }
+        let terminal = TerminalRoute(hostID: host.id, mode: .shell)
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tab: terminal),
+            hosts: [host]
+        )
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        fixture.controller.view.layoutIfNeeded()
+        fixture.controller.openViewport(offer)
+
+        XCTAssertEqual(fixture.controller.route.tabs.count, 2)
+        XCTAssertTrue(fixture.controller.route.activeTab?.isViewport == true)
+        XCTAssertNil(fixture.workspace.sidePanel(for: terminal.id))
+        fixture.controller.prepareForRemoval()
+        fixture.store.remove(host)
+    }
+
+    func testSidePanelSplitRekeysTheSameControllerIntoTheActiveRightHandTab() throws {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", port: 1, username: "dev")
+        let terminal = TerminalRoute(hostID: host.id, mode: .shell)
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tab: terminal),
+            hosts: [host]
+        )
+        defer {
+            fixture.controller.prepareForRemoval()
+            fixture.store.remove(host)
+        }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        fixture.controller.view.layoutIfNeeded()
+        fixture.controller.openViewport(ViewportOffer(
+            url: URL(string: "https://example.com/docs")!,
+            reach: .internet,
+            viaHostName: nil
+        ))
+        let panel = try XCTUnwrap(fixture.workspace.sidePanel(for: terminal.id))
+
+        fixture.controller.splitSidePanelToTab(hostTabID: terminal.id)
+
+        XCTAssertNil(fixture.workspace.sidePanel(for: terminal.id))
+        XCTAssertEqual(fixture.controller.route.tabs.count, 2)
+        XCTAssertEqual(fixture.controller.route.tabs[0], terminal)
+        let auxiliary = try XCTUnwrap(fixture.controller.route.activeTab)
+        XCTAssertTrue(auxiliary.isViewport)
+        XCTAssertEqual(fixture.controller.route.tabs[1].id, auxiliary.id)
+        XCTAssertTrue(fixture.workspace.auxiliaryController(for: auxiliary.id) === panel)
+    }
+
+    func testStageManagerShrinkConvertsPanelToTabWithoutLosingController() async throws {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", port: 1, username: "dev")
+        let terminal = TerminalRoute(hostID: host.id, mode: .shell)
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tab: terminal),
+            hosts: [host]
+        )
+        defer {
+            fixture.controller.prepareForRemoval()
+            fixture.store.remove(host)
+        }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        fixture.controller.view.layoutIfNeeded()
+        fixture.controller.openViewport(ViewportOffer(
+            url: URL(string: "https://example.com")!,
+            reach: .internet,
+            viaHostName: nil
+        ))
+        let panel = try XCTUnwrap(fixture.workspace.sidePanel(for: terminal.id))
+
+        fixture.controller.view.frame.size.width = 640
+        fixture.controller.view.setNeedsLayout()
+        fixture.controller.view.layoutIfNeeded()
+        for _ in 0..<8 { await Task.yield() }
+
+        XCTAssertNil(fixture.workspace.sidePanel(for: terminal.id))
+        let auxiliary = try XCTUnwrap(fixture.controller.route.activeTab)
+        XCTAssertTrue(auxiliary.isViewport)
+        XCTAssertTrue(fixture.workspace.auxiliaryController(for: auxiliary.id) === panel)
+    }
+
+    func testSummonFromAnAuxiliaryAnchorAlwaysDocksAnotherTab() {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", port: 1, username: "dev")
+        let firstOffer = ViewportOffer(
+            url: URL(string: "https://example.com/one")!,
+            reach: .internet,
+            viaHostName: nil
+        )
+        let first = TerminalRoute(
+            hostID: host.id,
+            mode: .viewport(urlString: firstOffer.url.absoluteString)
+        )
+        let workspace = TerminalWorkspace()
+        workspace.openViewport(tab: first, offer: firstOffer, host: host)
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tab: first),
+            hosts: [host],
+            workspace: workspace
+        )
+        defer {
+            fixture.controller.prepareForRemoval()
+            fixture.store.remove(host)
+        }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        fixture.controller.view.layoutIfNeeded()
+
+        fixture.controller.openViewport(ViewportOffer(
+            url: URL(string: "https://example.com/two")!,
+            reach: .internet,
+            viaHostName: nil
+        ))
+
+        XCTAssertEqual(fixture.controller.route.tabs.count, 2)
+        XCTAssertTrue(fixture.controller.route.tabs.allSatisfy(\.isViewport))
+        XCTAssertNil(workspace.sidePanel(for: first.id))
+    }
+
+    func testMergeCarriesPanelByHostTabIDAndReceivingWindowMountsIt() throws {
+        let workspace = TerminalWorkspace()
+        let sourceHost = Host(
+            name: "source",
+            hostname: "127.0.0.1",
+            port: 1,
+            username: "dev"
+        )
+        let targetHost = Host(
+            name: "target",
+            hostname: "127.0.0.1",
+            port: 1,
+            username: "dev"
+        )
+        let sourceTab = TerminalRoute(hostID: sourceHost.id, mode: .shell)
+        let targetTab = TerminalRoute(hostID: targetHost.id, mode: .shell)
+        let source = makeFixture(
+            route: TerminalWindowRoute(tab: sourceTab),
+            hosts: [sourceHost, targetHost],
+            workspace: workspace
+        )
+        let target = makeFixture(
+            route: TerminalWindowRoute(tab: targetTab),
+            hosts: [sourceHost, targetHost],
+            workspace: workspace
+        )
+        defer {
+            source.controller.prepareForRemoval()
+            target.controller.prepareForRemoval()
+            source.store.remove(sourceHost)
+            source.store.remove(targetHost)
+            target.store.remove(sourceHost)
+            target.store.remove(targetHost)
+        }
+        for fixture in [source, target] {
+            fixture.controller.loadViewIfNeeded()
+            fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+            fixture.controller.view.layoutIfNeeded()
+        }
+        source.controller.openViewport(ViewportOffer(
+            url: URL(string: "https://example.com")!,
+            reach: .internet,
+            viaHostName: nil
+        ))
+        let panel = try XCTUnwrap(workspace.sidePanel(for: sourceTab.id))
+
+        let moved = workspace.surrenderTabs(of: source.controller.route.id)
+        let receiver = try XCTUnwrap(
+            workspace.windows.first(where: { $0.id == target.controller.route.id })
+        )
+        receiver.adopt(moved)
+        target.controller.activate(sourceTab.id)
+        target.controller.view.layoutIfNeeded()
+
+        XCTAssertTrue(workspace.sidePanel(for: sourceTab.id) === panel)
+        XCTAssertFalse(try XCTUnwrap(
+            target.controller.view as? TerminalWindowUIKitRootView
+        ).sidePanelContainer.subviews.isEmpty)
+    }
+
     func testPaneBoundsStopAboveBottomStripOnlyWhenTheRailDoesNotSpendIt() {
         let bounds = CGRect(x: 0, y: 0, width: 950, height: 1_200)
         let safeArea = UIEdgeInsets(top: 0, left: 0, bottom: 21, right: 0)
@@ -802,6 +1084,55 @@ final class TerminalWindowUIKitTests: XCTestCase {
         )
     }
 
+    func testVisionSidePanelUsesThirdOrnamentWithoutChangingConsolePresentation() throws {
+        let host = Host(
+            name: "devbox",
+            hostname: "127.0.0.1",
+            port: 1,
+            username: "dev"
+        )
+        let terminal = TerminalRoute(hostID: host.id, mode: .shell)
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tab: terminal),
+            hosts: [host]
+        )
+        defer {
+            fixture.controller.prepareForRemoval()
+            fixture.store.remove(host)
+        }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 900, height: 620)
+        fixture.controller.view.layoutIfNeeded()
+        let before = fixture.controller.visionOrnamentPresentationForTesting
+
+        fixture.controller.openViewport(ViewportOffer(
+            url: URL(string: "https://example.com")!,
+            reach: .internet,
+            viaHostName: nil
+        ))
+        fixture.controller.view.layoutIfNeeded()
+
+        XCTAssertEqual(fixture.controller.ornaments.count, 3)
+        XCTAssertEqual(fixture.controller.route.tabs, [terminal])
+        XCTAssertNotNil(fixture.controller.visionSidePanelControllerForTesting)
+        XCTAssertEqual(fixture.controller.visionSidePanelSizeForTesting.height, 620)
+        XCTAssertEqual(
+            fixture.controller.visionSidePanelSizeForTesting.width,
+            1_800,
+            "the strip is twice the window, centred on its trailing edge"
+        )
+        XCTAssertEqual(
+            fixture.controller.visionOrnamentPresentationForTesting.bottom,
+            before.bottom,
+            "SIDECAR leaves the terminal console row in place"
+        )
+
+        fixture.controller.closeSidePanel(hostTabID: terminal.id)
+        XCTAssertNil(fixture.controller.visionSidePanelControllerForTesting)
+        XCTAssertEqual(fixture.controller.visionSidePanelSizeForTesting, .zero)
+        XCTAssertEqual(fixture.controller.visionOrnamentPresentationForTesting.bottom, before.bottom)
+    }
+
     func testClassicVisionWindowMovesNativeChromeOutOfWindowAndIntoOrnamentState() {
         let first = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "main"))
         let second = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "scratch"))
@@ -939,6 +1270,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
         route: TerminalWindowRoute,
         shell: TerminalWindowShellConfiguration? = nil,
         hosts: [Host] = [],
+        workspace suppliedWorkspace: TerminalWorkspace? = nil,
         performSceneIntent: @escaping (SceneWindowRouting.Intent) -> Void = { _ in },
         routeChanged: @escaping (TerminalWindowRoute) -> Void = { _ in }
     ) -> Fixture {
@@ -948,7 +1280,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
         let defaults = UserDefaults(
             suiteName: "app.multiplexterm.multiplex.tests.terminal-window.\(suffix)"
         )!
-        let workspace = TerminalWorkspace()
+        let workspace = suppliedWorkspace ?? TerminalWorkspace()
         let store = HostStore(directory: directory, knownMirroredIDs: [])
         for host in hosts { store.add(host) }
         let dependencies = TerminalWindowDependencies(

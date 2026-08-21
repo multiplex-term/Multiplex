@@ -129,6 +129,28 @@ final class ViewportPaneUIKitTests: XCTestCase {
         XCTAssertEqual(cancelCount, 1)
     }
 
+    func testSidePanelAddressEditorBorrowsKeyboardBeforeTakingResponder() throws {
+        let controller = makeViewportController()
+        controller.stopLoading()
+        weak var borrowed: UIView?
+        let pane = ViewportPaneViewController(
+            controller: controller,
+            showsInWindowRail: false,
+            borrowKeyboard: { borrowed = $0 },
+            close: {}
+        )
+        pane.loadViewIfNeeded()
+        defer {
+            pane.prepareForRemoval()
+            controller.shutdown()
+        }
+
+        pane.beginEditingAddress()
+
+        let field = try XCTUnwrap(pane.addressEditor?.textField)
+        XCTAssertTrue(borrowed === field)
+    }
+
     func testInteractiveLinkDismissClearsThePendingURL() throws {
         let controller = makeViewportController()
         controller.stopLoading()

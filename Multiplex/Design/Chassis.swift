@@ -890,3 +890,36 @@ extension UIViewController {
         scrollView.verticalScrollIndicatorInsets.bottom = inset
     }
 }
+
+extension UIKitChassisChip {
+    /// A chip in a rail: hugs its caption and never compresses, so a row
+    /// decides what fits by measuring the chips themselves.
+    static func rail(
+        _ caption: String,
+        systemImage: String? = nil,
+        prominent: Bool = false,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> UIKitChassisChip {
+        let chip = UIKitChassisChip(
+            caption,
+            systemImage: systemImage,
+            prominent: prominent,
+            accessibilityLabel: accessibilityLabel,
+            action: action
+        )
+        chip.setContentHuggingPriority(.required, for: .horizontal)
+        chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return chip
+    }
+
+    /// Dimmed and inert — the way a rail disables a chip.
+    var isEnabled: Bool {
+        get { isUserInteractionEnabled }
+        set {
+            isUserInteractionEnabled = newValue
+            alpha = newValue ? 1 : 0.45
+            accessibilityTraits = newValue ? .button : [.button, .notEnabled]
+        }
+    }
+}

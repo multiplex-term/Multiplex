@@ -131,6 +131,8 @@ final class ViewportController: AuxiliaryPaneController {
 
     var tabLabel: String { TerminalRoute.viewportLabel(displayURL.absoluteString) }
 
+    var routeMode: TerminalRoute.Mode { .viewport(urlString: displayURL.absoluteString) }
+
     func reload() {
         failure = nil
         if webView.url == nil {

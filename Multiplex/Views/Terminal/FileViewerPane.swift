@@ -294,8 +294,15 @@ final class FileViewerPaneViewController: UIViewController {
             self.contentSafeArea = contentSafeArea
             if isViewLoaded { updateRailInsets() }
         }
-        guard self.isActive != isActive else { return }
-        self.isActive = isActive
+        setActive(isActive)
+    }
+
+    /// Side-panel tab switches hide the mount without destroying it. Keep the
+    /// first load alive, but stop the five-second active-reader watch until
+    /// its host tab is visible again.
+    func setActive(_ active: Bool) {
+        guard isActive != active else { return }
+        isActive = active
         if isViewLoaded, startsController { restartWatch() }
     }
 
