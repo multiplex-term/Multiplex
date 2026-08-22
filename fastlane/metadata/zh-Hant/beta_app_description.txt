@@ -1,0 +1,28 @@
+Multiplex 是圍繞遠端 tmux 打造的空間 SSH 終端機，herdr 可作為每台主機的替代後端 — 原生支援 Apple Vision Pro、iPad 與 iPhone。
+
+Deck 是一面即時監控牆：每台主機同時探測，每個工作階段都算繪成方塊，顯示該工作階段真正的最後幾行畫面。點方塊即可連接，工作階段會在自己的視窗中開啟 — Vision Pro 上是空間視窗、iPad 上是幕前調度場景、iPhone 上是全螢幕窗格。視窗可合併成標籤頁再拆回去，Shell 不會斷。在 HERDR 模式下，一個方塊就是一個 herdr 工作階段，其工作區成為方塊的脊線，Agent 狀態來自 herdr 本身。
+
+Multiplex 也會認出窗格中執行的 Claude Code、Codex、Pi 與 Grok Build，並在終端機下方放上指令列。Multiplex Pro 加上：沒盯著的 Agent 完成回合或提問時的提醒、可一按跳到任一則訊息的 Claude Code 提示歷史、mosh、無限主機，以及自訂終端機主題編輯器。
+
+你需要什麼
+- 一台可透過 SSH 連上的主機（密碼，或 OpenSSH ed25519/RSA 金鑰）。
+- 該主機上有 tmux 1.8+ 或 herdr 0.7.5+，才有監控牆與持久工作階段。一般 SSH Shell 兩者皆不需要，但沒有方塊。
+- 想試 mosh 傳輸（Pro）的話，主機上要有 mosh-server。
+
+東西在哪裡
+- Deck 上的 + HOST 新增主機；探測立即開始。
+- 設定 → 外觀可即時切換外框；Vision Pro 在 SYSTEM、LIGHT、DARK 之外多了 GLASS。
+- 主機設定 → BACKEND 在 TMUX 與 HERDR 之間切換主機。→ MONITORING 也放著「背景保持連線」，預設關閉。
+- + NEW SESSION 建立持久工作階段，或以選填的設定指令碼、模型與第一個提示啟動 Agent。小工具與捷徑的啟動在兩種後端上都可用，也能進入既有的工作階段。
+- TMUX（Vision Pro 的底部列、iPad/iPhone 的按鍵列、窄 iPhone 的右上角）送出日常 tmux 指令。在 herdr 標籤頁上這個鍵顯示為 HRDR，送出 herdr 自己的指令。
+- 在終端機長按、點兩下或按右鍵，可在任一後端使用 SELECT / SELECT ALL / PASTE；選取會留在該窗格內。herdr 標籤頁另有 MENU，在該格開啟 herdr 自己的窗格選單。
+- FILE 從照片、檔案或相機上傳到目前窗格的工作目錄，並輸入遠端路徑但不按 Return。把檔案拖進來也一樣。
+- + TAB → 檔案檢視器可瀏覽主機檔案與 git 差異；長按終端機輸出裡的路徑，就在工作階段旁開啟該檔案。已算繪 Markdown 中的網頁連結可在停靠的檢視區或系統瀏覽器中開啟。
+- 終端機的 GUIDE 按鈕是該標籤頁手勢的圖解指南。
+- DETACH 關閉視窗；遠端工作階段繼續執行，方塊留在牆上。
+- 主畫面小工具顯示你在主機上最後開啟的工作階段 — 或你挑選的那個 — 加上 SHELL 與 AGENT 鍵；捷徑與 Siri 可開啟 Shell、以指定行或行範圍顯示遠端檔案，或啟動 Agent。
+
+主機、Agent 指令設定與密碼會透過 iCloud 鑰匙圈在你的裝置間同步，端對端加密。沒有 Multiplex 伺服器、沒有帳號、沒有分析。
+
+值得回報的問題
+任何導致連線中斷、鍵盤焦點遺失、視窗位置或大小錯亂，或終端機畫面亂碼的情況 — 請附上你的裝置、OS 版本與當時的操作。TestFlight 內的螢幕快照回饋會直接送達開發者。

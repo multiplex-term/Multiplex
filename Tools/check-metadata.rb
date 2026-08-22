@@ -71,13 +71,14 @@ end
 
 # Control characters and unvetted glyphs. Tabs are included: they survive into
 # the listing as literal whitespace nobody sees in the editor.
-def check_characters(path, body)
+# `locale` widens the allowlist to that locale's scripts (MetadataLimits::
+# SCRIPT_RANGES); the TestFlight changelog and en-US stay glyph-strict.
+def check_characters(path, body, locale = nil)
   body.each_char.with_index do |char, index|
     next if char == "\n"
-    ord = char.ord
-    next if ord >= 0x20 && ord < 0x7F
-    next if MetadataLimits::ALLOWED_GLYPHS.key?(char)
+    next if MetadataLimits.allowed_character?(char, locale)
 
+    ord = char.ord
     line = body[0, index].count("\n") + 1
     name = ord < 0x20 || ord == 0x7F ? "control character" : "character #{char}"
     error(
@@ -96,7 +97,7 @@ def check_length(path, body, limit)
   error(path, "is #{length} characters; App Store Connect allows #{limit}")
 end
 
-def check_file(path, limit)
+def check_file(path, limit, locale = nil)
   body = read_text(path)
   return if body.nil?
 
@@ -104,7 +105,7 @@ def check_file(path, limit)
     error(path, "is empty")
     return
   end
-  check_characters(path, body)
+  check_characters(path, body, locale)
   check_length(path, body, limit) if limit
   body
 end
@@ -137,7 +138,7 @@ end
 def locale_directories
   Dir.children(METADATA)
      .select { |name| File.directory?(File.join(METADATA, name)) }
-     .grep(/\A[a-z]{2}(-[A-Z]{2})?\z/)
+     .grep(/\A[a-z]{2}(-[A-Z][a-z]{3})?(-[A-Z]{2})?\z/) # en-US, ja, zh-Hant
      .sort
 end
 
@@ -166,7 +167,7 @@ def check_locales
         next
       end
 
-      body = check_file(path, MetadataLimits::LOCALIZED[field_for(basename)])
+      body = check_file(path, MetadataLimits::LOCALIZED[field_for(basename)], locale)
       check_url(path, body) if URL_FILES.include?(basename)
       check_keywords(path, body) if basename == "keywords"
     end

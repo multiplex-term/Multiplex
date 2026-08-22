@@ -50,4 +50,35 @@ module MetadataLimits
     "▸" => "forward glyph (File Viewer history)",
     "◂" => "back glyph (File Viewer history)",
   }.freeze
+
+  # Localized listings need whole scripts, not glyphs: a Traditional Chinese
+  # or Japanese description is thousands of distinct characters no allowlist
+  # could name. Each locale gets the Unicode blocks its copy is written in —
+  # the ideographs, kana, the CJK punctuation block (、。「」…) and the
+  # full-width forms (，：？！（）) — on top of ASCII and ALLOWED_GLYPHS. A
+  # character outside those blocks (an emoji, a stray Cyrillic look-alike)
+  # is still refused, and en-US stays glyph-strict.
+  CJK_RANGES = [
+    0x3000..0x303F,   # CJK Symbols and Punctuation
+    0x3040..0x309F,   # Hiragana
+    0x30A0..0x30FF,   # Katakana
+    0x3400..0x4DBF,   # CJK Unified Ideographs Extension A
+    0x4E00..0x9FFF,   # CJK Unified Ideographs
+    0xF900..0xFAFF,   # CJK Compatibility Ideographs
+    0xFF00..0xFFEF,   # Halfwidth and Fullwidth Forms
+  ].freeze
+
+  SCRIPT_RANGES = {
+    "zh-Hant" => CJK_RANGES + [0x3100..0x312F], # + Bopomofo
+    "ja" => CJK_RANGES,
+  }.freeze
+
+  # The single character test both the Fastfile and the checker apply.
+  def self.allowed_character?(char, locale)
+    ord = char.ord
+    return true if ord >= 0x20 && ord < 0x7F
+    return true if ALLOWED_GLYPHS.key?(char)
+
+    SCRIPT_RANGES.fetch(locale, []).any? { |range| range.cover?(ord) }
+  end
 end
