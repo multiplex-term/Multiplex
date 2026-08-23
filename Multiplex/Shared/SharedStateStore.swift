@@ -231,6 +231,7 @@ enum SharedStateStore {
         case "pi": "PI"
         case "grok": "GROK"
         case "antigravity": "AGY"
+        case "hermes": "HERMES"
         default: nil
         }
     }

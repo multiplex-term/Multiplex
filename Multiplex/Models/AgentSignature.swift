@@ -7,6 +7,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
     case pi
     case grok
     case antigravity
+    case hermes
 
     /// Strip header / accessibility voice.
     var displayName: String {
@@ -16,6 +17,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         case .pi: "Pi"
         case .grok: "Grok Build"
         case .antigravity: "Antigravity"
+        case .hermes: "Hermes"
         }
     }
 
@@ -30,6 +32,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         case .pi: "π"
         case .grok: "X"
         case .antigravity: "✦"
+        case .hermes: "☤"
         }
     }
 
@@ -41,6 +44,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         case .pi: "PI"
         case .grok: "GROK"
         case .antigravity: "AGY"
+        case .hermes: "HERMES"
         }
     }
 
@@ -54,6 +58,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         case .pi: "pi"
         case .grok: "grok"
         case .antigravity: "agy"
+        case .hermes: "hermes"
         }
     }
 
@@ -65,7 +70,11 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
     /// Grok Build source 2026-08-16: top-level `-m/--model` plus a
     /// positional interactive prompt, `grok --model grok-build "fix it"`;
     /// Antigravity CLI: top-level `--model` plus `-i/--prompt-interactive`
-    /// for interactive launch with initial prompt, `agy --model gemini-3.7-flash -i "fix it"`).
+    /// for interactive launch with initial prompt, `agy --model gemini-3.7-flash -i "fix it"`;
+    /// Hermes Agent source 2026-08-23: top-level `-m/--model`, but NO
+    /// interactive-with-prompt flag — `-q` answers one prompt and exits and
+    /// `-c/--continue` resumes the most recent session, so a prompt launch
+    /// chains the two: `hermes -q "fix it" && hermes --continue`).
     /// Shell quoting keeps prompt text inert; the model value is quoted too,
     /// which is load-bearing beyond hygiene — Claude aliases like
     /// `sonnet[1m]` would otherwise glob in zsh. Multiline prompts use
@@ -83,6 +92,8 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
             return "\(command) \(Self.shellArgument(for: prompt))"
         case .antigravity:
             return "\(command) -i \(Self.shellArgument(for: prompt))"
+        case .hermes:
+            return "\(command) -q \(Self.shellArgument(for: prompt)) && \(command) --continue"
         }
     }
 
@@ -139,7 +150,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
     var hasVerifiedAttentionSignals: Bool {
         switch self {
         case .claudeCode, .codex, .grok: true
-        case .pi, .antigravity: false
+        case .pi, .antigravity, .hermes: false
         }
     }
 }
@@ -249,14 +260,23 @@ enum AgentSignature {
     /// flags all false-positive otherwise). The interpreter rule covers
     /// shebang/JS wrappers ("node …/bin/claude", "node …/codex.js" spawn
     /// chains still expose the native child, but old installs may not).
+    /// Hermes is a Python venv entrypoint: its installer's `hermes` launcher
+    /// execs `…/venv/bin/python …/hermes-agent/hermes` (install.sh,
+    /// 2026-08-23), so the pane's comm is `python3.x`/`Python` and only
+    /// argv[1] names the agent — hence the `python*` rung.
     static func match(argv args: String) -> AgentKind? {
         let argv = args.split(separator: " ")
         guard let first = argv.first else { return nil }
         if let kind = agentNamed(basename(of: first)) { return kind }
-        if ["node", "bun"].contains(basename(of: first)), argv.count > 1 {
+        if isInterpreter(basename(of: first)), argv.count > 1 {
             return agentNamed(basename(of: argv[1]))
         }
         return nil
+    }
+
+    private static func isInterpreter(_ name: String) -> Bool {
+        if ["node", "bun"].contains(name) { return true }
+        return name.lowercased().hasPrefix("python")
     }
 
     /// Walk panePID and its descendants (the pane's own process tree —
@@ -304,6 +324,8 @@ enum AgentSignature {
     private static func agentNamed(_ name: String) -> AgentKind? {
         if name == "xai-grok-pager" { return .grok }
         if name == "antigravity" { return .antigravity }
+        // pyproject's second console script; the venv entrypoint is `hermes`.
+        if name == "hermes-agent" { return .hermes }
         return AgentKind.allCases.first { $0.launchCommand == name }
     }
 
@@ -398,7 +420,9 @@ enum AgentCommandPlacement: String, Codable, Hashable {
 /// Pi's list was verified against v0.80.7 on 2026-07-15. Grok Build's list
 /// comes from the xai-org/grok-build user guide (04-slash-commands.md,
 /// 03-keyboard-shortcuts.md; source synced 2026-08-16): Shift+Tab cycles
-/// Normal → Plan → Always-approve, so MODE applies as-is.
+/// Normal → Plan → Always-approve, so MODE applies as-is. Hermes Agent's
+/// list comes from hermes_cli/commands.py's COMMAND_REGISTRY (source synced
+/// 2026-08-23).
 enum AgentCommandSet {
     static func primary(for kind: AgentKind) -> [AgentCommand] {
         switch kind {
@@ -428,6 +452,13 @@ enum AgentCommandSet {
             return [.slash("clear"), .slash("resume"), .slash("diff"),
                     .slash("model"), .slash("permissions"), .slash("agents"),
                     .slash("skills")]
+        case .hermes:
+            // No /resume chip: Hermes's `/resume` is not a picker, it needs
+            // a session id argument (`/resume <id>`), so a tap would only
+            // leave a half-typed command in the composer.
+            return [.slash("new"), .slash("compress"), .slash("undo"),
+                    .slash("model"), .slash("approvals"), .slash("diff"),
+                    .slash("status")]
         }
     }
 
@@ -454,6 +485,11 @@ enum AgentCommandSet {
              .slash("credits"), .slash("tasks"), .slash("context"),
              .slash("statusline"), .slash("title"), .slash("fork"),
              .slash("rewind"), .slash("config")]
+        case .hermes:
+            [.slash("context"), .slash("retry"),
+             .slash("title"), .slash("history"), .slash("tools"),
+             .slash("skills"), .slash("memory"), .slash("usage"),
+             .slash("sessions"), .slash("yolo")]
         }
     }
 

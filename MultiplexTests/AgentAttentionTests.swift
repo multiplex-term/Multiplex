@@ -14,6 +14,7 @@ final class AgentAttentionTests: XCTestCase {
         XCTAssertTrue(AgentKind.grok.hasVerifiedAttentionSignals)
         XCTAssertFalse(AgentKind.pi.hasVerifiedAttentionSignals)
         XCTAssertFalse(AgentKind.antigravity.hasVerifiedAttentionSignals)
+        XCTAssertFalse(AgentKind.hermes.hasVerifiedAttentionSignals)
 
         let permissionTail = [
             "❯ 1. Yes",
@@ -33,6 +34,11 @@ final class AgentAttentionTests: XCTestCase {
             title: "✦ Antigravity",
             tail: permissionTail,
             agent: .antigravity
+        ))
+        XCTAssertNil(AgentAttention.classifyVerified(
+            title: "⠙ hermes",
+            tail: permissionTail,
+            agent: .hermes
         ))
         XCTAssertNil(AgentAttention.classifyVerified(
             title: "π - repo",

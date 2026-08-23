@@ -1341,6 +1341,7 @@ extension AgentKind {
         // the raw command name is the one spelling it can plausibly report.
         case "grok": self = .grok
         case "antigravity", "agy": self = .antigravity
+        case "hermes", "hermes-agent": self = .hermes
         default: return nil
         }
     }

@@ -104,7 +104,28 @@ HISTORY/jump.
   overflow (`/planning`, `/usage`, `/mcp`, `/credits`, `/tasks`, `/context`,
   `/statusline`, `/title`, `/fork`, `/rewind`, `/config`); attention fails soft
   (`hasVerifiedAttentionSignals = false`) until dynamic title/dialog signals
-  are pinned against live captures. herdr canonical IDs: `antigravity`, `agy`. Unknown-agent profiles in a synced Host record are now skipped
+  are pinned against live captures. herdr canonical IDs: `antigravity`, `agy`.
+  **Hermes Agent** (added 2026-08-23 from the NousResearch/hermes-agent
+  source + install.sh, no live process yet): a Python venv program — the
+  installed `~/.local/bin/hermes` (or `/usr/local/bin/hermes`) is a bash
+  wrapper that **execs `…/.hermes/hermes-agent/venv/bin/python
+  …/hermes-agent/hermes`**, so the pane's comm is `python3.x`/`Python` and
+  only argv[1] names it; `AgentSignature.match` therefore has a `python*`
+  interpreter rung beside `node`/`bun` (argv[1] basename must still be exactly
+  `hermes` or the pyproject script `hermes-agent` — never a substring).
+  Launch: top-level `-m/--model`, but **no interactive-with-prompt flag** —
+  `-q` is one-shot (answers, exits), so a prompt launch chains
+  `hermes -q '<prompt>' && hermes --continue` (`-c` resumes the most recent
+  session; the model rides both legs). Source-derived, unverified live. No
+  OSC title is written (its status bar is in-band), so there is no title
+  rule, no direct-shell fallback, and attention fails soft
+  (`hasVerifiedAttentionSignals = false`). Chips: `/new /compress /undo
+  /model /approvals /diff /status` + overflow from `COMMAND_REGISTRY`
+  (`/context /retry /title /history /tools /skills /memory /usage
+  /sessions /yolo`); **no `/resume` chip** — Hermes's `/resume` takes a
+  session id, not a picker (Jhen, 2026-08-23); no MODE chip (approval mode is `/approvals`/`/yolo`,
+  not a Shift+Tab cycle). herdr canonical IDs assumed `hermes`,
+  `hermes-agent`. Unknown-agent profiles in a synced Host record are now skipped
   on decode instead of failing the record — from this build on, a device
   that predates a newly added CLI keeps the host (older builds still drop
   the whole record; that ship has sailed). **Slash

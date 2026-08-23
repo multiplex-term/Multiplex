@@ -34,6 +34,13 @@ final class AgentSignatureTests: XCTestCase {
             AgentKind.antigravity.launchCommand(model: nil, initialPrompt: prompt),
             "agy -i 'Review the SSH path'"
         )
+        // Hermes has no interactive-with-prompt flag: `-q` answers one prompt
+        // and exits, `--continue` resumes that session interactively.
+        XCTAssertEqual(
+            AgentKind.hermes.launchCommand(model: nil, initialPrompt: prompt),
+            "hermes -q 'Review the SSH path' && hermes --continue"
+        )
+        XCTAssertEqual(AgentKind.hermes.launchCommand(model: nil, initialPrompt: "  "), "hermes")
     }
 
     func testLaunchCommandKeepsPromptInOneShellArgument() {
@@ -89,6 +96,12 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(
             AgentKind.antigravity.launchCommand(model: "gemini-3.7-flash", initialPrompt: "go"),
             "agy --model 'gemini-3.7-flash' -i 'go'"
+        )
+        // The resume leg carries the model too — both processes must agree.
+        XCTAssertEqual(
+            AgentKind.hermes.launchCommand(model: "anthropic/claude-sonnet-4", initialPrompt: "go"),
+            "hermes --model 'anthropic/claude-sonnet-4' -q 'go' "
+                + "&& hermes --model 'anthropic/claude-sonnet-4' --continue"
         )
     }
 
@@ -147,6 +160,13 @@ final class AgentSignatureTests: XCTestCase {
         // Antigravity CLI binary `agy` and alias `antigravity`.
         XCTAssertEqual(AgentSignature.classify(command: "agy", title: ""), .antigravity)
         XCTAssertEqual(AgentSignature.classify(command: "antigravity", title: ""), .antigravity)
+        // Hermes's launcher and pyproject console scripts.
+        XCTAssertEqual(AgentSignature.classify(command: "hermes", title: ""), .hermes)
+        XCTAssertEqual(AgentSignature.classify(command: "hermes-agent", title: ""), .hermes)
+        // Under the installer the pane's comm is the venv interpreter, which
+        // alone proves nothing — the ps walk decides.
+        XCTAssertNil(AgentSignature.classify(command: "python3.12", title: ""))
+        XCTAssertNil(AgentSignature.classify(command: "Python", title: ""))
         // Live macOS 27 comm: the installer's versioned download target,
         // clipped by the kernel.
         XCTAssertEqual(AgentSignature.classify(command: "grok-1.0.4-maco", title: ""), .grok)
@@ -223,6 +243,8 @@ final class AgentSignatureTests: XCTestCase {
             AgentSignature.classify(command: "grok", title: "✳ Claude Code"), .grok)
         XCTAssertEqual(
             AgentSignature.classify(command: "agy", title: "✳ Claude Code"), .antigravity)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "hermes", title: "✳ Claude Code"), .hermes)
     }
 
     // MARK: argv matching — exact argv[0] basename + interpreter rule
@@ -235,6 +257,24 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(AgentSignature.match(argv: "agy --model gemini-3.7-flash"), .antigravity)
         XCTAssertEqual(AgentSignature.match(argv: "/Users/dev/.local/bin/agy"), .antigravity)
         XCTAssertEqual(AgentSignature.match(argv: "/usr/local/bin/antigravity"), .antigravity)
+        // Hermes's installed launcher execs the venv interpreter on the
+        // checked-in entrypoint (install.sh, 2026-08-23); the bash wrapper
+        // itself is gone by then (exec), so argv[1] is the only name.
+        XCTAssertEqual(
+            AgentSignature.match(
+                argv: "/home/dev/.hermes/hermes-agent/venv/bin/python /home/dev/.hermes/hermes-agent/hermes"),
+            .hermes)
+        XCTAssertEqual(
+            AgentSignature.match(
+                argv: "/Users/dev/.hermes/hermes-agent/venv/bin/python3.12 "
+                    + "/Users/dev/.hermes/hermes-agent/hermes --model x"),
+            .hermes)
+        XCTAssertEqual(
+            AgentSignature.match(argv: "/opt/venv/bin/python3 /opt/venv/bin/hermes-agent"), .hermes)
+        // A bare interpreter, or one running something else, never matches.
+        XCTAssertNil(AgentSignature.match(argv: "python3"))
+        XCTAssertNil(AgentSignature.match(argv: "python3 /srv/app/manage.py runserver"))
+        XCTAssertNil(AgentSignature.match(argv: "python3 /home/dev/.hermes/tools/helper.py"))
         XCTAssertEqual(
             AgentSignature.match(argv: "node /usr/lib/node_modules/.bin/claude"), .claudeCode)
         XCTAssertEqual(AgentSignature.match(argv: "bun /x/bin/codex resume"), .codex)
@@ -591,6 +631,20 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertTrue(antigravityOverflow.contains(.slash("planning")))
         XCTAssertTrue(antigravityOverflow.contains(.slash("usage")))
         XCTAssertTrue(antigravityOverflow.contains(.slash("mcp")))
+
+        let hermes = AgentCommandSet.primary(for: .hermes)
+        let hermesOverflow = AgentCommandSet.overflow(for: .hermes)
+        XCTAssertEqual(
+            hermes,
+            [.slash("new"), .slash("compress"), .slash("undo"),
+             .slash("model"), .slash("approvals"), .slash("diff"),
+             .slash("status")]
+        )
+        // `/resume` needs an id argument in Hermes — never a chip.
+        XCTAssertFalse(AgentCommandSet.all(for: .hermes).contains(.slash("resume")))
+        XCTAssertTrue(hermesOverflow.contains(.slash("context")))
+        XCTAssertTrue(hermesOverflow.contains(.slash("yolo")))
+        XCTAssertFalse(hermes.contains(.mode))
     }
 
     func testBuiltInPlacementOverridesMoveCommandsWithoutChangingDefaults() {
