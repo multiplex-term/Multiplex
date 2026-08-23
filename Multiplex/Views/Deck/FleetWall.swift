@@ -4965,7 +4965,7 @@ private final class FleetLaunchChoiceView: UIView {
             ? selectedAgent.displayName
             : String(localized: "Not selected")
         agents.accessibilityHint = String(
-            localized: "Choose Claude Code, Codex, Pi, or Grok Build")
+            localized: "Choose Claude Code, Codex, Pi, Grok Build, Antigravity CLI, or Hermes")
         agents.menu = UIMenu(children: AgentKind.allCases.map { agent in
             UIAction(title: agent.displayName, state: agent == selectedAgent ? .on : .off) { [weak self] _ in
                 self?.onSelectAgent?(agent)

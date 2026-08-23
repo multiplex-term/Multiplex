@@ -3372,18 +3372,18 @@
         }
       }
     },
-    "Choose Claude Code, Codex, Pi, or Grok Build" : {
+    "Choose Claude Code, Codex, Pi, Grok Build, Antigravity CLI, or Hermes" : {
       "localizations" : {
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Claude Code、Codex、Pi、Grok Buildから選択します"
+            "value" : "Claude Code、Codex、Pi、Grok Build、Antigravity CLI、Hermesから選択します"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "選擇 Claude Code、Codex、Pi 或 Grok Build"
+            "value" : "選擇 Claude Code、Codex、Pi、Grok Build、Antigravity CLI 或 Hermes"
           }
         }
       }
@@ -12550,34 +12550,34 @@
         }
       }
     },
-    "Shared across Claude Code, Codex, Pi, and Grok Build" : {
+    "Shared across Claude Code, Codex, Pi, Grok Build, Antigravity CLI, and Hermes" : {
       "localizations" : {
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Claude Code、Codex、Pi、Grok Buildで共有"
+            "value" : "Claude Code、Codex、Pi、Grok Build、Antigravity CLI、Hermesで共有"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 Claude Code、Codex、Pi 與 Grok Build 之間共用"
+            "value" : "在 Claude Code、Codex、Pi、Grok Build、Antigravity CLI 與 Hermes 之間共用"
           }
         }
       }
     },
-    "Shared keeps one editable command synchronized across Claude Code, Codex, Pi, and Grok Build." : {
+    "Shared keeps one editable command synchronized across Claude Code, Codex, Pi, Grok Build, Antigravity CLI, and Hermes." : {
       "localizations" : {
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "「共有」にすると、編集できる1つのコマンドがClaude Code、Codex、Pi、Grok Buildの間で同期されます。"
+            "value" : "「共有」にすると、編集できる1つのコマンドがClaude Code、Codex、Pi、Grok Build、Antigravity CLI、Hermesの間で同期されます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "共用會讓同一個可編輯的指令在 Claude Code、Codex、Pi 與 Grok Build 之間保持同步。"
+            "value" : "共用會讓同一個可編輯的指令在 Claude Code、Codex、Pi、Grok Build、Antigravity CLI 與 Hermes 之間保持同步。"
           }
         }
       }
@@ -15855,18 +15855,18 @@
         }
       }
     },
-    "Use Claude Code, Codex, Pi, and Grok Build quick commands without the daily limit, browse a Claude Code session's prompt history and jump its transcript back to any message, and get a banner when an unwatched supported session needs you." : {
+    "Use Claude Code, Codex, Pi, Grok Build, Antigravity CLI, and Hermes quick commands without the daily limit, browse a Claude Code session's prompt history and jump its transcript back to any message, and get a banner when an unwatched supported session needs you." : {
       "localizations" : {
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Claude Code、Codex、Pi、Grok Buildのクイックコマンドを1日の上限なしで使用でき、Claude Codeセッションのプロンプト履歴を閲覧してトランスクリプトを任意のメッセージまでジャンプでき、見ていない対応セッションがあなたを必要とするときにバナーを受け取れます。"
+            "value" : "Claude Code、Codex、Pi、Grok Build、Antigravity CLI、Hermesのクイックコマンドを1日の上限なしで使用でき、Claude Codeセッションのプロンプト履歴を閲覧してトランスクリプトを任意のメッセージまでジャンプでき、見ていない対応セッションがあなたを必要とするときにバナーを受け取れます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "不受每日上限地使用 Claude Code、Codex、Pi 和 Grok Build 快速指令，瀏覽 Claude Code 工作階段的提示歷史並將對話記錄跳至任一則訊息，並在你沒在看的支援工作階段需要你時收到橫幅通知。"
+            "value" : "不受每日上限地使用 Claude Code、Codex、Pi、Grok Build、Antigravity CLI 與 Hermes 快速指令，瀏覽 Claude Code 工作階段的提示歷史並將對話記錄跳至任一則訊息，並在你沒在看的支援工作階段需要你時收到橫幅通知。"
           }
         }
       }

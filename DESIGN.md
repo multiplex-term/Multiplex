@@ -215,7 +215,7 @@ chassis language. MORE opens an anchored TALLY editor: a collapsed Built-in
 accordion reveals compact Bar/More choices, followed by ordered multiline
 custom rows with Submit, Bar, and Shared switches. Each host retains an
 independent setup that follows its host through iCloud Keychain; Shared keeps
-one custom command synchronized in that host's Claude Code, Codex, Pi, and Grok Build rails
+one custom command synchronized in that host's Claude Code, Codex, Pi, Grok Build, Antigravity CLI, and Hermes rails
 without changing another host. Commands opted into a rail use `customCommand`,
 a warm neutral that marks provenance without
 borrowing the red/amber/green state vocabulary. Their labels keep the first

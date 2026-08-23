@@ -12,7 +12,7 @@ A spatial SSH terminal for remote **tmux** — visionOS first, with iPadOS and i
 
 - **Fleet-wide deck:** live tmux and herdr sessions across every host, with password, OpenSSH-key, or `mpx bind` setup and iCloud Keychain sync.
 - **Real terminal windows:** spatial scenes on visionOS, Stage Manager on iPad, and an adaptive iPhone shell. Tabs can move or merge without reconnecting.
-- **Agent awareness:** detects Claude Code, Codex, Pi, and Grok Build; surfaces questions, permissions, and completed turns on the wall and through notifications.
+- **Agent awareness:** detects Claude Code, Codex, Pi, Grok Build, Antigravity CLI, and Hermes; surfaces questions, permissions, and completed turns on the wall and through notifications.
 - **Purpose-built input:** keyboard-focus arbitration, key rail with hold-CTRL Key Commands (saved chords and text macros), IME, dictation, remote scrolling, tmux Copy Mode, and text selection.
 - **More than a shell:** confirmed web links and remote paths open in a floating side panel beside the live terminal on iPad and Vision Pro (or move into a tab), alongside SFTP uploads, optional clean-room mosh, widgets, Shortcuts, deep links, and custom themes.
 

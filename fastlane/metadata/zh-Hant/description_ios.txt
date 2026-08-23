@@ -7,7 +7,7 @@ Multiplex 是為長期活在遠端持久工作階段裡的人打造的終端機 
 在 iPad 上，連接會把每個工作階段開在真正的場景中，可用於幕前調度、分割顯示與外接顯示器。把視窗合併成標籤頁，再拆回去 — SSH 連線、緩衝區與捲動記錄都跟著標籤頁走，Shell 永遠不會斷。在 iPhone 上，監控牆與終端機共用一個自適應的全螢幕 Shell。
 
 為 AI Agent 工作階段而生
-一步就能啟動 Claude Code、Codex、Pi 或 Grok Build，可選擇設定指令碼、模型與第一個提示。Multiplex 能在每個窗格中認出這四種 Agent，輔助按鈕會跟著前景的 Agent 走，指令因此送到真正接收你按鍵的程序 — 重新排列、加入自己的按鈕，每台主機都會在你所有裝置上記住這組設定。Pro 取消每日按鈕次數上限、在你沒盯著的回合結束或需要輸入時提醒你（tmux 上的 Claude Code、Codex 與 Grok Build；herdr 上則是 herdr 自己追蹤的每一個 Agent），並開啟 Claude Code 的提示歷史，一按就跳到對話記錄。在 tmux 與 herdr 標籤頁附加或拖放檔案：Multiplex 會上傳到窗格的工作目錄，並替你輸入遠端路徑。
+一步就能啟動 Claude Code、Codex、Pi、Grok Build、Antigravity CLI 或 Hermes，可選擇設定指令碼、模型與第一個提示。Multiplex 能在每個窗格中認出這六種 Agent，輔助按鈕會跟著前景的 Agent 走，指令因此送到真正接收你按鍵的程序 — 重新排列、加入自己的按鈕，每台主機都會在你所有裝置上記住這組設定。Pro 取消每日按鈕次數上限、在你沒盯著的回合結束或需要輸入時提醒你（tmux 上的 Claude Code、Codex 與 Grok Build；herdr 上則是 herdr 自己追蹤的每一個 Agent），並開啟 Claude Code 的提示歷史，一按就跳到對話記錄。在 tmux 與 herdr 標籤頁附加或拖放檔案：Multiplex 會上傳到窗格的工作目錄，並替你輸入遠端路徑。
 
 小工具與捷徑
 把主機放到主畫面 — 最後已知的工作階段畫面、誠實的 SEEN 時間戳，加上直通連線的 SHELL 與 AGENT 鍵 — 或用艦隊小工具一眼看盡所有主機。捷徑與 Siri 可以開啟 Shell、以指定行或行範圍顯示遠端檔案，或在選定目錄啟動 Agent — 開新的工作階段，或進入既有的那個。multiplex:// URL scheme 可驅動你自己的自動化。

@@ -193,8 +193,8 @@ final class ProPaywallViewController: UIViewController, AppAppearanceFollowing {
             makeFeature(
                 String(localized: "AGENT HELPERS + ALERTS"),
                 String(localized: """
-                    Use Claude Code, Codex, Pi, and Grok Build quick commands without the daily \
-                    limit, browse a Claude Code session's prompt history and jump its transcript \
+                    Use Claude Code, Codex, Pi, Grok Build, Antigravity CLI, and Hermes quick commands \
+                    without the daily limit, browse a Claude Code session's prompt history and jump its transcript \
                     back to any message, and get a banner when an unwatched supported session \
                     needs you.
                     """)

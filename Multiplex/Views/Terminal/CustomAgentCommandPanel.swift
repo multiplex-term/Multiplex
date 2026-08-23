@@ -367,7 +367,7 @@ final class CustomAgentCommandPanelViewController: UIViewController {
                 color: UIKitChassis.signal3,
                 text: String(localized: """
                     Shared keeps one editable command synchronized across \
-                    Claude Code, Codex, Pi, and Grok Build.
+                    Claude Code, Codex, Pi, Grok Build, Antigravity CLI, and Hermes.
                     """)
             ),
         ])
@@ -971,7 +971,7 @@ private final class CustomCommandRowView: UIView, UITextViewDelegate {
             makeSwitch(
                 label: "SHARED",
                 accessibilityLabel: String(
-                    localized: "Shared across Claude Code, Codex, Pi, and Grok Build"
+                    localized: "Shared across Claude Code, Codex, Pi, Grok Build, Antigravity CLI, and Hermes"
                 ),
                 value: command.shared,
                 keyPath: \.shared

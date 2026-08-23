@@ -2,7 +2,7 @@ Multiplex 是圍繞遠端 tmux 打造的空間 SSH 終端機，herdr 可作為�
 
 Deck 是一面即時監控牆：每台主機同時探測，每個工作階段都算繪成方塊，顯示該工作階段真正的最後幾行畫面。點方塊即可連接，工作階段會在自己的視窗中開啟 — Vision Pro 上是空間視窗、iPad 上是幕前調度場景、iPhone 上是全螢幕窗格。視窗可合併成標籤頁再拆回去，Shell 不會斷。在 HERDR 模式下，一個方塊就是一個 herdr 工作階段，其工作區成為方塊的脊線，Agent 狀態來自 herdr 本身。
 
-Multiplex 也會認出窗格中執行的 Claude Code、Codex、Pi 與 Grok Build，並在終端機下方放上指令列。Multiplex Pro 加上：沒盯著的 Agent 完成回合或提問時的提醒、可一按跳到任一則訊息的 Claude Code 提示歷史、mosh、無限主機，以及自訂終端機主題編輯器。
+Multiplex 也會認出窗格中執行的 Claude Code、Codex、Pi、Grok Build、Antigravity CLI 與 Hermes，並在終端機下方放上指令列。Multiplex Pro 加上：沒盯著的 Agent 完成回合或提問時的提醒、可一按跳到任一則訊息的 Claude Code 提示歷史、mosh、無限主機，以及自訂終端機主題編輯器。
 
 你需要什麼
 - 一台可透過 SSH 連上的主機（密碼，或 OpenSSH ed25519/RSA 金鑰）。
