@@ -201,7 +201,7 @@ enum AgentAttention {
         guard let agent, agent.hasVerifiedAttentionSignals else { return nil }
         switch agent {
         case .grok: return classifyGrok(title: title, tail: tail)
-        case .claudeCode, .codex, .pi: return classify(title: title, tail: tail)
+        case .claudeCode, .codex, .pi, .antigravity: return classify(title: title, tail: tail)
         }
     }
 

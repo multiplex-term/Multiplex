@@ -10,6 +10,7 @@ enum AgentChoice: String, AppEnum {
     case codex
     case pi
     case grok
+    case antigravity
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Agent"
     static let caseDisplayRepresentations: [AgentChoice: DisplayRepresentation] = [
@@ -17,6 +18,7 @@ enum AgentChoice: String, AppEnum {
         .codex: "Codex",
         .pi: "Pi",
         .grok: "Grok Build",
+        .antigravity: "Antigravity",
     ]
 }
 

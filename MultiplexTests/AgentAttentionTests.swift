@@ -13,6 +13,7 @@ final class AgentAttentionTests: XCTestCase {
         XCTAssertTrue(AgentKind.codex.hasVerifiedAttentionSignals)
         XCTAssertTrue(AgentKind.grok.hasVerifiedAttentionSignals)
         XCTAssertFalse(AgentKind.pi.hasVerifiedAttentionSignals)
+        XCTAssertFalse(AgentKind.antigravity.hasVerifiedAttentionSignals)
 
         let permissionTail = [
             "❯ 1. Yes",
@@ -20,13 +21,18 @@ final class AgentAttentionTests: XCTestCase {
             "Enter to select",
             "Do you want to proceed?",
         ]
-        // Pi has neither a verified RUNNING title transition nor verified
+        // Pi and Antigravity have neither a verified RUNNING title transition nor verified
         // question/permission shapes. Exercise those paths independently so
-        // adding a generic classifier rule cannot silently opt Pi back in.
+        // adding a generic classifier rule cannot silently opt them back in.
         XCTAssertNil(AgentAttention.classifyVerified(
             title: "⠙ working",
             tail: [],
             agent: .pi
+        ))
+        XCTAssertNil(AgentAttention.classifyVerified(
+            title: "✦ Antigravity",
+            tail: permissionTail,
+            agent: .antigravity
         ))
         XCTAssertNil(AgentAttention.classifyVerified(
             title: "π - repo",

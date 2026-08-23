@@ -13,7 +13,7 @@ final class UMDBarUIKitTests: XCTestCase {
         let newTab = try XCTUnwrap(control("umd.newTab", in: controller.view) as? UIButton)
         XCTAssertEqual(
             actions(in: try XCTUnwrap(newTab.menu)).map(\.title),
-            ["New Session", "Claude Code", "Codex", "Pi", "Grok Build",
+            ["New Session", "Claude Code", "Codex", "Pi", "Grok Build", "Antigravity",
              "New Tab in Workspace", "File Viewer"],
             "every backend leads with a session mint — the workspace tab is an extra row"
         )
@@ -27,7 +27,7 @@ final class UMDBarUIKitTests: XCTestCase {
         let plain = try XCTUnwrap(control("umd.newTab", in: tmux.view) as? UIButton)
         XCTAssertEqual(
             actions(in: try XCTUnwrap(plain.menu)).map(\.title),
-            ["New Session", "Claude Code", "Codex", "Pi", "Grok Build", "File Viewer"],
+            ["New Session", "Claude Code", "Codex", "Pi", "Grok Build", "Antigravity", "File Viewer"],
             "tmux windows belong to the prefix key and the shortcut panel, not app chrome"
         )
         XCTAssertEqual(

@@ -201,6 +201,7 @@ final class CustomAgentCommandTests: XCTestCase {
         let codex = [CustomAgentCommand(content: "/status")]
         let pi = [CustomAgentCommand(content: "/tree")]
         let grok = [CustomAgentCommand(content: "/doctor")]
+        let antigravity = [CustomAgentCommand(content: "/skills")]
         var configuration = AgentCommandConfiguration()
 
         configuration.replace(
@@ -229,6 +230,11 @@ final class CustomAgentCommandTests: XCTestCase {
             builtInPlacements: [:],
             for: .grok
         )
+        configuration.replace(
+            antigravity,
+            builtInPlacements: [:],
+            for: .antigravity
+        )
 
         let expectedPlacements: [String: AgentCommandPlacement] = [
             "/clear": .more,
@@ -238,6 +244,7 @@ final class CustomAgentCommandTests: XCTestCase {
         XCTAssertEqual(configuration.commands(for: .codex), codex)
         XCTAssertEqual(configuration.commands(for: .pi), pi)
         XCTAssertEqual(configuration.commands(for: .grok), grok)
+        XCTAssertEqual(configuration.commands(for: .antigravity), antigravity)
         XCTAssertEqual(configuration.profiles.map(\.agent), AgentKind.allCases)
         XCTAssertEqual(
             configuration.builtInPlacements(for: .claudeCode),

@@ -6,6 +6,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
     case codex
     case pi
     case grok
+    case antigravity
 
     /// Strip header / accessibility voice.
     var displayName: String {
@@ -14,6 +15,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         case .codex: "Codex"
         case .pi: "Pi"
         case .grok: "Grok Build"
+        case .antigravity: "Antigravity"
         }
     }
 
@@ -27,6 +29,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         case .codex: "◆"
         case .pi: "π"
         case .grok: "X"
+        case .antigravity: "✦"
         }
     }
 
@@ -37,6 +40,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         case .codex: "CODEX"
         case .pi: "PI"
         case .grok: "GROK"
+        case .antigravity: "AGY"
         }
     }
 
@@ -49,6 +53,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         case .codex: "codex"
         case .pi: "pi"
         case .grok: "grok"
+        case .antigravity: "agy"
         }
     }
 
@@ -58,7 +63,9 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
     /// (verified 2026-07-27: Claude Code 2.1.220, Codex rust 0.145.0, Pi
     /// 0.81.1 — Pi values may be `provider/id` with a `:<thinking>` suffix;
     /// Grok Build source 2026-08-16: top-level `-m/--model` plus a
-    /// positional interactive prompt, `grok --model grok-build "fix it"`).
+    /// positional interactive prompt, `grok --model grok-build "fix it"`;
+    /// Antigravity CLI: top-level `--model` plus `-i/--prompt-interactive`
+    /// for interactive launch with initial prompt, `agy --model gemini-3.7-flash -i "fix it"`).
     /// Shell quoting keeps prompt text inert; the model value is quoted too,
     /// which is load-bearing beyond hygiene — Claude aliases like
     /// `sonnet[1m]` would otherwise glob in zsh. Multiline prompts use
@@ -71,7 +78,12 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         }
         let prompt = Self.normalizedInitialPrompt(rawPrompt)
         guard !prompt.isEmpty else { return command }
-        return "\(command) \(Self.shellArgument(for: prompt))"
+        switch self {
+        case .claudeCode, .codex, .pi, .grok:
+            return "\(command) \(Self.shellArgument(for: prompt))"
+        case .antigravity:
+            return "\(command) -i \(Self.shellArgument(for: prompt))"
+        }
     }
 
     /// A model identifier fit to ride `--model` as one argv token, or nil —
@@ -127,7 +139,7 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
     var hasVerifiedAttentionSignals: Bool {
         switch self {
         case .claudeCode, .codex, .grok: true
-        case .pi: false
+        case .pi, .antigravity: false
         }
     }
 }
@@ -158,6 +170,8 @@ enum AgentSignature {
         // through v2.1.x). Never match bare "claude" — the default title is
         // whatever a shell prompt wrote there, often a hostname.
         if title.contains("Claude Code") || title.hasPrefix("✳ ") { return .claudeCode }
+        // Antigravity sets dynamic window titles containing "Antigravity" or "✦ ".
+        if title.contains("Antigravity") || title.hasPrefix("✦ ") { return .antigravity }
         // Pi's npm entrypoint remains `node` to tmux on macOS, while its
         // interactive UI writes this narrow OSC title. Pi leaves that title
         // behind after returning to the shell, so it is authoritative only
@@ -206,6 +220,9 @@ enum AgentSignature {
         }
         if title.hasSuffix(" - grok") {
             return .grok
+        }
+        if title.contains("Antigravity") || title.hasPrefix("✦ ") {
+            return .antigravity
         }
 
         let codexMasthead = visibleLines().contains { line in
@@ -286,6 +303,7 @@ enum AgentSignature {
     /// from-source build runs under its own name.
     private static func agentNamed(_ name: String) -> AgentKind? {
         if name == "xai-grok-pager" { return .grok }
+        if name == "antigravity" { return .antigravity }
         return AgentKind.allCases.first { $0.launchCommand == name }
     }
 
@@ -406,6 +424,10 @@ enum AgentCommandSet {
         case .grok:
             return [.slash("new"), .slash("resume"), .slash("compact"),
                     .slash("rewind"), .slash("model"), .slash("effort"), .mode]
+        case .antigravity:
+            return [.slash("clear"), .slash("resume"), .slash("diff"),
+                    .slash("model"), .slash("permissions"), .slash("agents"),
+                    .slash("skills")]
         }
     }
 
@@ -427,6 +449,11 @@ enum AgentCommandSet {
             [.slash("context"), .slash("fork"), .slash("plan"),
              .slash("skills"), .slash("export"), .slash("usage"),
              .slash("session-info"), .slash("doctor"), .todos]
+        case .antigravity:
+            [.slash("planning"), .slash("usage"), .slash("mcp"),
+             .slash("credits"), .slash("tasks"), .slash("context"),
+             .slash("statusline"), .slash("title"), .slash("fork"),
+             .slash("rewind"), .slash("config")]
         }
     }
 

@@ -95,7 +95,16 @@ HISTORY/jump.
   Mac, sim build, 2026-08-16: `⠋ - Sleep for 20 seconds… - <session> - grok`
   → `<session> - grok` → `alert posted for grok`); the ⚠ permission title
   and the question card are still source-derived — first live capture that
-  disagrees wins (sim proof recipe: `e2e-headless.md`, attention). herdr's canonical id for it is assumed to be `grok`. Unknown-agent profiles in a synced Host record are now skipped
+  disagrees wins (sim proof recipe: `e2e-headless.md`, attention). herdr's canonical id for it is assumed to be `grok`. **Antigravity CLI**
+  (added 2026-08-22 from official docs + live binary): binary `agy` (symlink /
+  alias `antigravity`); launch syntax `agy [--model <model>] [-i <prompt>]`
+  (interactive prompt requires `-i/--prompt-interactive`, unlike Claude/Codex/Pi
+  which take positional strings); slash commands include primary (`/clear`,
+  `/resume`, `/diff`, `/model`, `/permissions`, `/agents`, `/skills`) and
+  overflow (`/planning`, `/usage`, `/mcp`, `/credits`, `/tasks`, `/context`,
+  `/statusline`, `/title`, `/fork`, `/rewind`, `/config`); attention fails soft
+  (`hasVerifiedAttentionSignals = false`) until dynamic title/dialog signals
+  are pinned against live captures. herdr canonical IDs: `antigravity`, `agy`. Unknown-agent profiles in a synced Host record are now skipped
   on decode instead of failing the record — from this build on, a device
   that predates a newly added CLI keeps the host (older builds still drop
   the whole record; that ship has sailed). **Slash

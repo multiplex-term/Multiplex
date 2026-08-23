@@ -1109,6 +1109,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         case .codex: return String(localized: "model id per line")
         case .pi: return String(localized: "provider/model-id per line")
         case .grok: return String(localized: "grok-build, or a full model id")
+        case .antigravity: return String(localized: "gemini-3.7-flash, or a full model id")
         }
     }
 

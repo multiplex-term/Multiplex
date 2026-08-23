@@ -230,6 +230,7 @@ enum SharedStateStore {
         case "codex": "CODEX"
         case "pi": "PI"
         case "grok": "GROK"
+        case "antigravity": "AGY"
         default: nil
         }
     }

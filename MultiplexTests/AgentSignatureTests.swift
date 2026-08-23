@@ -29,6 +29,11 @@ final class AgentSignatureTests: XCTestCase {
             AgentKind.grok.launchCommand(model: nil, initialPrompt: prompt),
             "grok 'Review the SSH path'"
         )
+        // Antigravity CLI: `agy -i "fix it"` runs an initial prompt interactively.
+        XCTAssertEqual(
+            AgentKind.antigravity.launchCommand(model: nil, initialPrompt: prompt),
+            "agy -i 'Review the SSH path'"
+        )
     }
 
     func testLaunchCommandKeepsPromptInOneShellArgument() {
@@ -80,6 +85,10 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(
             AgentKind.grok.launchCommand(model: "grok-build", initialPrompt: "go"),
             "grok --model 'grok-build' 'go'"
+        )
+        XCTAssertEqual(
+            AgentKind.antigravity.launchCommand(model: "gemini-3.7-flash", initialPrompt: "go"),
+            "agy --model 'gemini-3.7-flash' -i 'go'"
         )
     }
 
@@ -135,6 +144,9 @@ final class AgentSignatureTests: XCTestCase {
         // Official installs ship `grok`; the cargo artifact keeps its name.
         XCTAssertEqual(AgentSignature.classify(command: "grok", title: ""), .grok)
         XCTAssertEqual(AgentSignature.classify(command: "xai-grok-pager", title: ""), .grok)
+        // Antigravity CLI binary `agy` and alias `antigravity`.
+        XCTAssertEqual(AgentSignature.classify(command: "agy", title: ""), .antigravity)
+        XCTAssertEqual(AgentSignature.classify(command: "antigravity", title: ""), .antigravity)
         // Live macOS 27 comm: the installer's versioned download target,
         // clipped by the kernel.
         XCTAssertEqual(AgentSignature.classify(command: "grok-1.0.4-maco", title: ""), .grok)
@@ -164,6 +176,12 @@ final class AgentSignatureTests: XCTestCase {
             AgentSignature.classify(command: "sleep", title: "✳ fixing the parser"), .claudeCode)
         XCTAssertEqual(
             AgentSignature.classify(command: "zsh", title: "some Claude Code session"), .claudeCode)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "cat", title: "✦ Antigravity"), .antigravity)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "sleep", title: "✦ fixing the parser"), .antigravity)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "zsh", title: "some Antigravity session"), .antigravity)
         // npm Pi remains `node` to tmux and identifies the interactive UI
         // with a narrow OSC title.
         XCTAssertEqual(
@@ -203,6 +221,8 @@ final class AgentSignatureTests: XCTestCase {
             AgentSignature.classify(command: "pi", title: "✳ Claude Code"), .pi)
         XCTAssertEqual(
             AgentSignature.classify(command: "grok", title: "✳ Claude Code"), .grok)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "agy", title: "✳ Claude Code"), .antigravity)
     }
 
     // MARK: argv matching — exact argv[0] basename + interpreter rule
@@ -212,6 +232,9 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(AgentSignature.match(argv: "/home/dev/.local/bin/codex"), .codex)
         XCTAssertEqual(AgentSignature.match(argv: "pi"), .pi)
         XCTAssertEqual(AgentSignature.match(argv: "/usr/local/bin/pi"), .pi)
+        XCTAssertEqual(AgentSignature.match(argv: "agy --model gemini-3.7-flash"), .antigravity)
+        XCTAssertEqual(AgentSignature.match(argv: "/Users/dev/.local/bin/agy"), .antigravity)
+        XCTAssertEqual(AgentSignature.match(argv: "/usr/local/bin/antigravity"), .antigravity)
         XCTAssertEqual(
             AgentSignature.match(argv: "node /usr/lib/node_modules/.bin/claude"), .claudeCode)
         XCTAssertEqual(AgentSignature.match(argv: "bun /x/bin/codex resume"), .codex)
@@ -556,6 +579,18 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertTrue(grokOverflow.contains(.slash("plan")))
         XCTAssertFalse(grok.contains(.transcript))
         XCTAssertFalse(grokOverflow.contains(.transcript))
+
+        let antigravity = AgentCommandSet.primary(for: .antigravity)
+        let antigravityOverflow = AgentCommandSet.overflow(for: .antigravity)
+        XCTAssertEqual(
+            antigravity,
+            [.slash("clear"), .slash("resume"), .slash("diff"),
+             .slash("model"), .slash("permissions"), .slash("agents"),
+             .slash("skills")]
+        )
+        XCTAssertTrue(antigravityOverflow.contains(.slash("planning")))
+        XCTAssertTrue(antigravityOverflow.contains(.slash("usage")))
+        XCTAssertTrue(antigravityOverflow.contains(.slash("mcp")))
     }
 
     func testBuiltInPlacementOverridesMoveCommandsWithoutChangingDefaults() {

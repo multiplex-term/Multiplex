@@ -493,6 +493,9 @@ final class HerdrProbeTests: XCTestCase {
         XCTAssertEqual(AgentKind(herdrAgent: "claude"), .claudeCode)
         XCTAssertEqual(AgentKind(herdrAgent: "codex"), .codex)
         XCTAssertEqual(AgentKind(herdrAgent: "pi"), .pi)
+        XCTAssertEqual(AgentKind(herdrAgent: "grok"), .grok)
+        XCTAssertEqual(AgentKind(herdrAgent: "antigravity"), .antigravity)
+        XCTAssertEqual(AgentKind(herdrAgent: "agy"), .antigravity)
         XCTAssertNil(AgentKind(herdrAgent: "opencode"))
     }
 
