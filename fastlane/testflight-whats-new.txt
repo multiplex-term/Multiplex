@@ -1,10 +1,12 @@
 NEW SINCE 1.4.0
+• SIDE PANEL — on iPad and Vision Pro a confirmed path or web link now opens beside the terminal instead of as a tab; resize it, open another (it replaces the first), or press TAB to move it into a tab. The terminal never changes size.
 • TRADITIONAL CHINESE AND JAPANESE — pick per app in Settings → Multiplex → Language (LANGUAGE in Multiplex Settings takes you there).
 • ANTIGRAVITY CLI AND HERMES AGENT — both detected on the deck, launchable from New Session, widgets and Shortcuts, each with its own helper chips.
-• SIDE PANEL — on iPad and Vision Pro a confirmed path or web link now opens beside the terminal instead of as a tab; resize it, open another (it replaces the first), or press TAB to move it into a tab. The terminal never changes size.
+• WHAT'S NEW CARD — the 1.4.1 card opens once after the update; FULL NOTES and Settings → About → What's New keep every release.
 
 PLEASE TRY
-1. Try it on a herdr session too — the pasted line should land without editing.
+1. Press a path in a tmux pane on iPad or Vision Pro and pick VIEW — it should open beside the terminal without the pane resizing; drag its edge, open a second path, then press TAB.
 2. Switch to Chinese or Japanese; open Add Host, Settings, GUIDE and an alert — report anything clipped or odd.
+3. Run agy or hermes in a pane: the tile should name the agent and the strip should show its chips.
 
 Feedback: screenshot in TestFlight

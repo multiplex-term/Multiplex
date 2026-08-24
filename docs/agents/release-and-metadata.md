@@ -49,7 +49,8 @@ English. When en-US copy changes, change the two mirrors in the same PR
 - **The release notes are one content model with two renderings, and the
   launch card is priced like the interruption it is** (`ReleaseNotes` pure +
   tested; `WhatsNewViewController` / `ReleaseLogViewController`;
-  `ReleaseNotesStore`). The card shows FOUR changes, no navigation bar, and
+  `ReleaseNotesStore`). The card shows up to FOUR changes (a patch release
+  shows what it has — 1.4.1 is three rows on an iPhone), no navigation bar, and
   ends inside one phone screen; FULL NOTES and Settings ▸ About ▸ What's New
   both open the full banked record — `ReleaseNotes.releases`, every release
   newest first, so a reader updating across two releases misses neither. The

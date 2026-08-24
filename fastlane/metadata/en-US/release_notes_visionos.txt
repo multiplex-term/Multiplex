@@ -1,12 +1,6 @@
-Multiplex 1.4 — hold CTRL for the chords your keyboard cannot press, write to your agent in a message box, and watch every host's latency from the deck.
+Multiplex 1.4.1 — links and paths open beside the terminal, the app speaks Traditional Chinese and Japanese, and Antigravity CLI and Hermes Agent join the agent roster.
 
-• Key Commands: hold CTRL on the key rail or the key cluster for saved chords the software keyboard cannot press — Shift+Enter, a double Ctrl-C, Option+Backspace to delete a word. CUSTOM SETUP adds any Ctrl/Shift/Option chord or a one-line text macro, repeated up to five times, closing the panel or not, synced to your other devices. Free keeps five; Pro raises the set to twelve. The Guide gains a HOLD CTRL card.
-• Message box: the speech-bubble key opens a chat-style field under the terminal — write with autocorrect and your keyboard's dictation, attach photos or files (uploaded to the pane's folder), then send it all as one message. The key rail keeps driving the pane while you write.
-• Connection Stats: a live latency chip on every host rail, and a Pro board with per-host drill-in — round-trips, typing echo, mosh loss and roams, reconnects, and data volume. Off switch in Settings.
-• The TMUX panel stays open while you switch or move between windows, workspaces and panes, with ACTIVE following where you land. An arrow row resizes panes — tap to nudge, hold to repeat. Commands run over the control connection, so no more stray letters from a dropped prefix; Rename Window gets its own name field, and the cycling rows are gone.
-• Dictate in your own languages: tap the globe in the LISTENING bar to switch among your preferred languages.
-• Tap a link or path and its sheet comes up on the first press, tmux mouse on or not; a file name at the right edge no longer swallows the next row's word.
-• The File Viewer opens PDFs — continuous pages, pinch to zoom, page readout, UNLOCK for locked files — and plays MP3, M4A, WAV, FLAC, AIFF and CAF with a scrubber, 15 s skips and a remembered volume, on while you type elsewhere.
-• Grok Build joins the agent roster: detected in panes, its own chip strip, NEW SESSION launch with model and first prompt, and Pro alerts when it needs permission or an answer.
-• Theme edits show live in open terminal windows — Save keeps them, Back restores the old theme.
-• Widgets show the session you last opened on each host, herdr included — or the one you pick in the widget's Session setting.
+• A confirmed web link or file path opens in a side panel hanging off the terminal window instead of a new tab — the terminal never changes size. Drag either edge to resize it, open another and it takes the first one's place, or press TAB to move it into a tab. Open File from Shortcuts lands there too.
+• Traditional Chinese and Japanese: sheets, alerts, menus, the Guide and notifications are translated. Pick the language per app in Settings ▸ Multiplex ▸ Language — the LANGUAGE row in Multiplex Settings takes you there. The short key labels stay English.
+• Antigravity CLI and Hermes Agent join the agent roster: both are detected in panes, each with its own chip strip, NEW SESSION launch with model and first prompt, and a place in widgets and Shortcuts. Hermes Agent runs the prompt, then reopens on that conversation.
+• Copy a session's attach command: long-press a session tile and pick Copy Command for Handoff — the clipboard gets the line that attaches that very session from a terminal on the host machine itself, tmux and herdr alike.

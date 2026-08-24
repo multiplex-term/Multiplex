@@ -15,7 +15,7 @@ behavior, or App Review flow changes.
 | SKU | `multiplex` |
 | Bundle ID | `app.multiplexterm.multiplex` |
 | Platforms | iOS (iPhone + iPad) and visionOS in one app record — the iPhone joined the universal iOS binary 2026-07-18 (single-window shell) and ships with the next binary |
-| Current version | 1.3.0 in `project.yml` (1.0 was the first submitted version; 1.1.0 remained unpublished during App Review, so its release-note content was carried forward into 1.2.0) |
+| Current version | 1.4.1 in `project.yml` (1.0 was the first submitted version; 1.1.0 remained unpublished during App Review, so its release-note content was carried forward into 1.2.0) |
 | Minimum OS | iOS 17.0; visionOS 1.0 |
 | Target release model | Free download with one non-consumable Pro unlock; confirm the base-app price manually |
 | Primary category | Developer Tools |

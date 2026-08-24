@@ -4,42 +4,66 @@ import XCTest
 final class ReleaseNotesTests: XCTestCase {
     // MARK: Content
 
-    /// The card speaks for the newest release only — 1.4's features, not a
+    /// The card speaks for the newest release only — 1.4.1's features, not a
     /// merge of every release the log still carries.
     func testTheCardAnnouncesTheNewestRelease() {
-        XCTAssertEqual(ReleaseNotes.version, "1.4")
+        XCTAssertEqual(ReleaseNotes.version, "1.4.1")
         XCTAssertEqual(ReleaseNotes.releases.first?.version, ReleaseNotes.version)
         XCTAssertEqual(ReleaseNotes.promise, ReleaseNotes.current.promise)
     }
 
-    /// The card's whole premise is four rows, and the fourth is where the
-    /// platform filter earns its keep: an iPhone or iPad reader is told the
-    /// keys tap back, a Vision Pro reader (which has no haptics) gets the
-    /// File Viewer's PDFs and sound files instead.
-    func testTheCardsFourthRowIsTheOneAboutThisPlatform() {
-        for platform in ReleaseNotePlatform.allCases {
+    /// The card leads with the row that is about this platform: the side
+    /// panel on iPad and Vision Pro. An iPhone never gets one, so its card is
+    /// the three changes it actually received — a patch release shows what it
+    /// has rather than padding to four.
+    func testTheCardLeadsWithTheRowAboutThisPlatform() {
+        for platform in [ReleaseNotePlatform.pad, .vision] {
             XCTAssertEqual(
                 ReleaseNotes.highlights(for: platform).count,
                 ReleaseNotes.highlightCount,
                 "\(platform) must fill the card"
             )
+            XCTAssertEqual(ReleaseNotes.highlights(for: platform).first?.id, "sidepanel")
         }
-        XCTAssertEqual(ReleaseNotes.highlights(for: .pad).last?.id, "haptics")
-        XCTAssertEqual(ReleaseNotes.highlights(for: .vision).last?.id, "fvmedia")
-        XCTAssertEqual(ReleaseNotes.highlights(for: .phone).last?.id, "haptics")
+        XCTAssertEqual(ReleaseNotes.highlights(for: .phone).count, 3)
+        XCTAssertFalse(ReleaseNotes.highlights(for: .phone).map(\.id).contains("sidepanel"))
     }
 
-    func testHapticsNeverReachAVisionPro() {
+    func testTheSidePanelNeverReachesAnIPhone() {
         let padIDs = ReleaseNotes.entries(for: .pad).map(\.id)
+        XCTAssertTrue(padIDs.contains("sidepanel"))
+        XCTAssertTrue(padIDs.contains("languages"))
+
+        let visionIDs = ReleaseNotes.entries(for: .vision).map(\.id)
+        XCTAssertTrue(visionIDs.contains("sidepanel"))
+        XCTAssertTrue(visionIDs.contains("agents"))
+
+        let phoneIDs = ReleaseNotes.entries(for: .phone).map(\.id)
+        XCTAssertFalse(phoneIDs.contains("sidepanel"))
+        XCTAssertTrue(phoneIDs.contains("handoff"))
+    }
+
+    /// The 1.4 record rides along under the 1.4.1 log, and its platform
+    /// scoping still holds: keys tap back never on a Vision Pro.
+    func testTheBankedOneFourRecordKeepsItsPlatformScoping() throws {
+        let v14 = try XCTUnwrap(
+            ReleaseNotes.releases.first { $0.version == "1.4" },
+            "the log dropped the 1.4 record"
+        )
+        XCTAssertEqual(v14.highlights(for: .pad).last?.id, "haptics")
+        XCTAssertEqual(v14.highlights(for: .vision).last?.id, "fvmedia")
+        XCTAssertEqual(v14.highlights(for: .phone).last?.id, "haptics")
+
+        let padIDs = v14.entries(for: .pad).map(\.id)
         XCTAssertTrue(padIDs.contains("haptics"))
         XCTAssertTrue(padIDs.contains("keycommands"))
 
-        let visionIDs = ReleaseNotes.entries(for: .vision).map(\.id)
+        let visionIDs = v14.entries(for: .vision).map(\.id)
         XCTAssertFalse(visionIDs.contains("haptics"))
         XCTAssertTrue(visionIDs.contains("keycommands"))
         XCTAssertTrue(visionIDs.contains("fvmedia"))
 
-        let phoneIDs = ReleaseNotes.entries(for: .phone).map(\.id)
+        let phoneIDs = v14.entries(for: .phone).map(\.id)
         XCTAssertTrue(phoneIDs.contains("haptics"))
     }
 
@@ -117,25 +141,32 @@ final class ReleaseNotesTests: XCTestCase {
         }
         // Before 1.4, APPEARANCE held only GLASS, so it must not head an empty
         // section on iPad in those records; 1.4's live theme editing is for
-        // every platform, so there it heads a section everywhere.
+        // every platform, so there it heads a section everywhere. 1.4.1 has
+        // nothing under APPEARANCE at all.
         for release in ReleaseNotes.releases where release.version != "1.4" {
             XCTAssertFalse(release.banks(for: .pad).map(\.bank).contains(.appearance))
         }
         let v13 = ReleaseNotes.releases.first { $0.version == "1.3" }
         XCTAssertEqual(v13?.banks(for: .vision).map(\.bank).contains(.appearance), true)
+        let v14 = ReleaseNotes.releases.first { $0.version == "1.4" }
         for platform in ReleaseNotePlatform.allCases {
-            XCTAssertTrue(ReleaseNotes.banks(for: platform).map(\.bank).contains(.appearance))
+            XCTAssertEqual(v14?.banks(for: platform).map(\.bank).contains(.appearance), true)
         }
     }
 
     /// The card says what it is leaving out, and must never re-offer something
-    /// it already showed.
+    /// it already showed. A card that showed everything (1.4.1) says nothing.
     func testTheAlsoLineNeverRenamesSomethingTheCardAlreadyShowed() throws {
         for release in ReleaseNotes.releases {
             for platform in ReleaseNotePlatform.allCases {
-                let also = try XCTUnwrap(release.alsoLine(for: platform))
                 let shown = release.highlights(for: platform)
                     .reduce(into: Set<String>()) { $0.formUnion($1.covers) }
+                guard release.entries(for: platform).contains(where: { !shown.contains($0.id) })
+                else {
+                    XCTAssertNil(release.alsoLine(for: platform), "\(release.version) \(platform)")
+                    continue
+                }
+                let also = try XCTUnwrap(release.alsoLine(for: platform))
                 for id in shown {
                     guard let mention = release.entries
                         .first(where: { $0.id == id })?.mention else { continue }
@@ -157,6 +188,10 @@ final class ReleaseNotesTests: XCTestCase {
                 let remaining = release.entries(for: platform)
                     .filter { !shown.contains($0.id) }
                 let named = remaining.compactMap(\.mention).prefix(3)
+                guard !remaining.isEmpty else {
+                    XCTAssertNil(release.alsoLine(for: platform))
+                    continue
+                }
                 let also = try XCTUnwrap(release.alsoLine(for: platform))
 
                 XCTAssertTrue(also.hasPrefix("Also in \(release.version): "))

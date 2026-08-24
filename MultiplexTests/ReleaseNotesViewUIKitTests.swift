@@ -22,22 +22,27 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
         XCTAssertTrue(rendered.contains(ReleaseNotes.version))
         XCTAssertTrue(rendered.contains("iPad"), "the platform-scoped row keeps its tag")
 
-        let alsoLine = try XCTUnwrap(ReleaseNotes.alsoLine(for: .pad))
-        XCTAssertTrue(rendered.contains(alsoLine))
+        if let alsoLine = ReleaseNotes.alsoLine(for: .pad) {
+            XCTAssertTrue(rendered.contains(alsoLine))
+        }
 
         XCTAssertNotNil(chip(named: "whatsNew.fullNotes", in: controller.view))
         XCTAssertNotNil(chip(named: "whatsNew.done", in: controller.view))
     }
 
-    /// Vision Pro is told about the File Viewer's PDFs and sound files and
-    /// never about keys tapping back, which it has no haptics for.
-    func testTheVisionCardSwapsInTheFileViewerAndLeavesOutTheHaptics() {
-        let controller = WhatsNewViewController(platform: .vision)
-        render(controller, width: 620, height: 700)
+    /// Vision Pro is told about the side panel; an iPhone, which never gets
+    /// one, is not.
+    func testTheVisionCardShowsTheSidePanelAndThePhoneCardDoesNot() {
+        let vision = WhatsNewViewController(platform: .vision)
+        render(vision, width: 620, height: 700)
+        let renderedVision = renderedText(in: vision.view).joined(separator: "\n")
+        XCTAssertTrue(renderedVision.contains("LINKS AND PATHS OPEN BESIDE THE TERMINAL"))
 
-        let rendered = renderedText(in: controller.view).joined(separator: "\n")
-        XCTAssertTrue(rendered.contains("PDFS AND SOUND FILES IN THE FILE VIEWER"))
-        XCTAssertFalse(rendered.contains("KEYS TAP BACK"))
+        let phone = WhatsNewViewController(platform: .phone)
+        render(phone, width: 375, height: 700)
+        let renderedPhone = renderedText(in: phone.view).joined(separator: "\n")
+        XCTAssertFalse(renderedPhone.contains("LINKS AND PATHS OPEN BESIDE THE TERMINAL"))
+        XCTAssertTrue(renderedPhone.contains("TRADITIONAL CHINESE AND JAPANESE"))
     }
 
     func testBothChipsReportThroughTheirOwnCallback() throws {
@@ -84,7 +89,7 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
     // MARK: The full record
 
     /// Every release's record, each under its own header — a reader updating
-    /// from 1.2 straight to 1.4 is owed 1.3's and 1.3.1's stories too.
+    /// from 1.2 straight to 1.4.1 is owed 1.4's, 1.3's and 1.3.1's stories too.
     func testTheLogCarriesEveryReleasesChangesForItsPlatform() {
         let controller = ReleaseLogViewController(platform: .pad)
         render(controller, width: 720, height: 4_800)

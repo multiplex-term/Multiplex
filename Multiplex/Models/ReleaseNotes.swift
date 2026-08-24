@@ -138,7 +138,7 @@ struct ReleaseNotesRelease: Equatable {
 enum ReleaseNotes {
     /// Newest first. The launch card speaks only for the first; the log
     /// carries them all.
-    static let releases: [ReleaseNotesRelease] = [v14, v131, v13]
+    static let releases: [ReleaseNotesRelease] = [v141, v14, v131, v13]
 
     /// The release the launch card announces.
     static var current: ReleaseNotesRelease { releases[0] }
@@ -151,7 +151,9 @@ enum ReleaseNotes {
     static var promise: String { current.promise }
 
     /// The card is a five-second read. Four rows is what fits every device
-    /// without scrolling; the rest is one press away.
+    /// without scrolling; the rest is one press away. A patch release with
+    /// fewer changes for a platform shows what it has — 1.4.1 is three rows
+    /// on an iPhone, which the side panel never reaches.
     static let highlightCount = 4
 
     static var allEntries: [ReleaseNoteEntry] { current.entries }
@@ -174,6 +176,110 @@ enum ReleaseNotes {
     static func alsoLine(for platform: ReleaseNotePlatform) -> String? {
         current.alsoLine(for: platform)
     }
+
+    // MARK: - 1.4.1
+
+    private static let v141 = ReleaseNotesRelease(
+        version: "1.4.1",
+        promise: "Links and paths open beside the terminal, the app speaks "
+            + "Traditional Chinese and Japanese, and Antigravity CLI and "
+            + "Hermes Agent join the agent roster.",
+        entries: [
+            // MARK: Terminal
+            ReleaseNoteEntry(
+                id: "sidepanel",
+                bank: .terminal,
+                title: "Links and paths open beside the terminal",
+                body: "A confirmed web link or file path opens in a side panel "
+                    + "next to the pane instead of a new tab — the terminal "
+                    + "never changes size. Drag its edge to resize it, open "
+                    + "another and it takes the first one's place, or press "
+                    + "↗ TAB to move it into a tab. Open File from Shortcuts "
+                    + "lands there too.",
+                tag: "iPad · Vision Pro",
+                platforms: [.pad, .vision],
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "agents",
+                bank: .terminal,
+                title: "Antigravity CLI and Hermes Agent join the agent roster",
+                body: "Both are detected in panes, each with its own chip "
+                    + "strip, NEW SESSION launch with model and first prompt, "
+                    + "and a place in widgets and Shortcuts. Hermes Agent runs the "
+                    + "prompt, then reopens on that conversation.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "Antigravity CLI and Hermes Agent on the roster"
+            ),
+
+            // MARK: Elsewhere
+            ReleaseNoteEntry(
+                id: "languages",
+                bank: .elsewhere,
+                title: "Traditional Chinese and Japanese",
+                body: "Sheets, alerts, menus, the Guide and notifications are "
+                    + "translated; pick the language per app in Settings ▸ "
+                    + "Multiplex ▸ Language — the LANGUAGE row in Multiplex "
+                    + "Settings takes you there. The short key labels stay "
+                    + "English.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "Traditional Chinese and Japanese"
+            ),
+            ReleaseNoteEntry(
+                id: "handoff",
+                bank: .elsewhere,
+                title: "Copy a session's attach command",
+                body: "Long-press a session tile and pick Copy Command for "
+                    + "Handoff: the clipboard gets the line that attaches that "
+                    + "very session from a terminal on the host machine itself "
+                    + "— tmux and herdr alike.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "copy-for-handoff on session tiles"
+            ),
+        ],
+        highlights: [
+            ReleaseNoteHighlight(
+                id: "sidepanel",
+                covers: ["sidepanel"],
+                title: "Links and paths open beside the terminal",
+                body: "A side panel next to the pane — resize it, replace it, "
+                    + "or press ↗ TAB to make it a tab. The terminal never "
+                    + "changes size.",
+                tag: "iPad · Vision Pro",
+                platforms: [.pad, .vision]
+            ),
+            ReleaseNoteHighlight(
+                id: "languages",
+                covers: ["languages"],
+                title: "Traditional Chinese and Japanese",
+                body: "Pick the language per app in Settings ▸ Multiplex ▸ "
+                    + "Language; the LANGUAGE row takes you there.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "agents",
+                covers: ["agents"],
+                title: "Antigravity CLI and Hermes Agent join the roster",
+                body: "Detected in panes, with their own chips and NEW SESSION "
+                    + "launch with model and first prompt.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "handoff",
+                covers: ["handoff"],
+                title: "Copy a session's attach command",
+                body: "Long-press a tile for the line that attaches that "
+                    + "session from a terminal on the host itself.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+        ]
+    )
 
     // MARK: - 1.4
 
