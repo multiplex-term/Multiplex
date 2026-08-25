@@ -89,7 +89,9 @@ routing, tab moves, keyboard avoidance, or secret fields.
   CTRL rides `controlModifier`, latch released on
   `.terminalViewControlModifierReset`. **Hold CTRL (0.3 s,
   `KeyCommandPanelViewController.controlHoldDuration`; a tap still
-  latches and never fires the hold) opens KEY COMMANDS** — a popover
+  latches and never fires the hold) opens KEY COMMANDS** — the recognized
+  hold cancels the control's tap at source, and opening it first retires any
+  already-raised C / B quick slab, so the two CTRL surfaces never coexist. The panel is
   anchored to the CTRL key on both platforms (`KeyCommandPanelViewController`
   in `KeyCommandPanel.swift`; ONE `KeyCommandPanelPresenter` owns present /
   dismiss / focus-resume / popover delegate for both hosts — `TerminalKeyBar`

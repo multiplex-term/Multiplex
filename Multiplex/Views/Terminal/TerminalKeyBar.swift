@@ -240,7 +240,7 @@ final class TerminalTallyKeyControl: UIControl {
             action: #selector(longPressed(_:))
         )
         recognizer.minimumPressDuration = longPressDuration
-        recognizer.cancelsTouchesInView = false
+        recognizer.cancelsTouchesInView = true
         addGestureRecognizer(recognizer)
         longPressRecognizer = recognizer
     }
@@ -644,6 +644,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     /// pane's configuration; the rail carries it to the presenter unread.
     var keyCommandPlan: KeyCommandPlan = .unrestricted
     private var ctrlComboView: TerminalCtrlComboView?
+    var ctrlCombosArePresentedForTesting: Bool { ctrlComboView != nil }
 
     /// What forces a rebuild of the row. The talk key's latch is deliberately
     /// not part of it — it flips in place, like CTRL's, so opening the
@@ -969,6 +970,8 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             click()
             terminal.send(EscapeSequences.cmdEsc)
         case .ctrl:
+            // Ignore a late tap after the hold presents.
+            guard !keyCommandsPresenter.isPresented else { return }
             let latched = !terminal.controlModifier
             terminal.controlModifier = latched
             ctrlLatched = latched
@@ -1025,6 +1028,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     /// TMUX dropdown to its own. The presenter owns the lifecycle; this rail
     /// supplies the anchor, the click, and the opaque chassis ground.
     private func showKeyCommandsPanel() {
+        hideCtrlCombos()
         guard let terminal, let presenter = presentingViewController else { return }
         let sceneWidth = window?.bounds.width ?? presenter.view.bounds.width
         keyCommandsPresenter.present(
@@ -1101,7 +1105,10 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     }
 
     private func showCtrlCombos() {
-        guard ctrlComboView == nil, let window else { return }
+        guard !keyCommandsPresenter.isPresented,
+              ctrlComboView == nil,
+              let window
+        else { return }
         let slab = TerminalCtrlComboView(
             faceHeight: 34,
             padding: 8,
@@ -1572,7 +1579,10 @@ final class TerminalKeyClusterContext {
     }
 
     func toggleControl(from group: TerminalKeyClusterGroupView) {
-        guard let terminal = observedTerminal else { return }
+        // Ignore a late tap after a cluster hold presents.
+        guard allowsCtrlComboPresentation,
+              let terminal = observedTerminal
+        else { return }
         let latched = !terminal.controlModifier
         terminal.controlModifier = latched
         ctrlLatched = latched
@@ -1594,6 +1604,17 @@ final class TerminalKeyClusterContext {
 
     private func broadcast() {
         for group in groups.allObjects { group.applyContextState() }
+    }
+
+    // `ViewThatFits` can retain multiple cluster candidates.
+    var allowsCtrlComboPresentation: Bool {
+        !groups.allObjects.contains { $0.keyCommandsArePresented }
+    }
+
+    func prepareForKeyCommandsPresentation() -> Bool {
+        guard allowsCtrlComboPresentation else { return false }
+        hideCtrlCombos()
+        return true
     }
 
     private func hideCtrlCombos() {
@@ -1668,6 +1689,8 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     private(set) var keys: [TerminalTallyKeyControl] = []
 
     var carriesControlKey: Bool { role != .trailing }
+    var keyCommandsArePresented: Bool { keyCommandsPresenter.isPresented }
+    var ctrlCombosArePresentedForTesting: Bool { comboPopoverController != nil }
 
     init(
         role: Role,
@@ -1740,7 +1763,8 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     }
 
     func showCtrlCombos() {
-        guard comboPopoverController == nil,
+        guard context.allowsCtrlComboPresentation,
+              comboPopoverController == nil,
               let ctrlKey,
               let presenter = presentingViewController
         else { return }
@@ -1786,7 +1810,8 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     /// ornament supplies the anchor and carries its appearance and glass
     /// mirroring across the popover's own window.
     func showKeyCommands() {
-        guard let ctrlKey,
+        guard context.prepareForKeyCommandsPresentation(),
+              let ctrlKey,
               let terminal = context.observedTerminal,
               let presenter = presentingViewController
         else { return }
