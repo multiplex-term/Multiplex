@@ -155,6 +155,34 @@ routing, tab moves, keyboard avoidance, or secret fields.
   still *builds* its stock accessory on
   visionOS and `commitTextInput` prefers its `controlModifier` —
   `SwiftTermView` nils `inputAccessoryView` there; don't remove that.
+- **Arrange Keys (2026-08-27)** — `⋯` → Arrange Keys… (a menu row: every
+  key hold is taken and a held key is unfindable); per tab, never persisted
+  (`TerminalSessionController.keyBarArranging`). The ORDER is a slot
+  permutation (`KeyBarOrder`; a slot names a position — keyboard/mic share
+  `.keyboard`, TMUX/HRDR `.shortcuts`), device-local in `KeyBarOrderStore`;
+  gaps and widths never move (rail groups are counted at layout, the
+  ornament's ten keys split 3 lead / 7 trail, CTRL's slab follows the key).
+  **The move is the tab strip's drag and drop**: each key is a
+  `UIDragInteraction` source (`TerminalChromeDragItem`, the item recipe tabs
+  share — the pane's file gate refuses any `TerminalChromeDragPayload`), one
+  `KeyBarDropCoordinator` is the drop delegate for the rail and the cluster
+  (`KeyBarDropSurface`); target = nearest other key by centre
+  (`RowDropGeometry`), rightward lands after it, leftward before
+  (`KeyBarOrder.moving` moves only the dragged key in the full order).
+  Never a custom recognizer drag: the keys stay live and hoverable (visionOS
+  gaze targets interactive elements) and the system preview is the one
+  thing that floats over the UMD's glass.
+  Rails reconcile the order in layout, never in the render signature, so
+  nothing re-creates a key mid-mode. iPad: the ARRANGE KEYS bar (RESET ·
+  DONE) hangs over the rail like the C / B slab (`mountOverRail`); leaving
+  the window ends the mode.
+  visionOS: drop hosts are both slabs plus the UMD and bar slabs (a release
+  over the title lands beside the nearer key); the bar is ornament role
+  `.arrange` below the console row, one `ArrangeKeysBarViewController` per
+  tab that watches the store for RESET; a tab switch ends the mode; GUIDE
+  rides the `⋯` (`guideIsDirectChip`). Proofs: `debug.arrangekeys`,
+  `debug.arrangekeysmove`, `build.sh uitest ipad` (the visionOS sim lifts
+  nothing; fake `UIDropSession` tests cover the coordinator).
 - **Auxiliary tabs wear their whole bottom chrome in the ornament
   (2026-08-10)** — on classic visionOS windows the in-window ▤/⌗ rails are
   not mounted (`showsInWindowRail: false`); their end chips collided with

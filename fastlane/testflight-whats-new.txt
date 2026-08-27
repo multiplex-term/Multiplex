@@ -1,7 +1,11 @@
 NEW SINCE 1.4.1
 • CTRL SHORTCUTS — holding CTRL now replaces an already-open C / B quick-key slab with Key Commands instead of leaving both open.
+• Vision Pro: GUIDE moves from the console row into the three-dot menu.
+• ARRANGE KEYS — the terminal's three-dot menu gains Arrange Keys: the keys wiggle, drag any key onto the key it should sit beside (the same drag and drop as the window's tabs), then DONE in the ARRANGE KEYS bar beside them (above the rail on iPad and iPhone; below the console row on Vision Pro, where a key can be dropped on the other side of the title). RESET there restores the shipped order. The order is remembered on this device and applies to every tab.
 
 PLEASE TRY
 1. Tap CTRL to open C / B, then hold CTRL; only Key Commands should remain.
+2. Three-dot menu → Arrange Keys, press TAB until it lifts, drop it on an arrow key, DONE. The new order should hold on other tabs and after a relaunch; rotate the phone to check narrower rows keep it too. RESET in the bar should put it back.
+3. Vision Pro: Arrange Keys, then pinch and hold ESC in the left group, carry it onto a key in the right group and let go; it should land there (and come back the same way), and DONE below the console row ends the mode.
 
 Feedback: screenshot in TestFlight

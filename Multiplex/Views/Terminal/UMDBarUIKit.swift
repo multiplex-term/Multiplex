@@ -67,6 +67,9 @@ struct UMDBarObservedState: Equatable {
     var needsYou: Bool
     var keyboardLocked: Bool
     var hardwareKeyboardConnected: Bool
+    /// The tab's key rail / cluster is in Arrange Keys: the menu row reads
+    /// DONE instead.
+    var keyBarArranging = false
 }
 
 private struct UMDBarMergeSourceKey: Equatable {
@@ -130,6 +133,7 @@ enum UMDBarAction: Equatable {
     case detach
     case closeSession
     case toggleKeyboardLock
+    case toggleKeyBarArranging
     case showGuide
     case showConnectionStats
     case attach(FileAttachPicker)
@@ -253,6 +257,8 @@ final class UMDBarViewController: UIViewController,
             #if !os(visionOS)
             configuration.controller?.toggleKeyboardLock()
             #endif
+        case .toggleKeyBarArranging:
+            configuration.controller?.toggleKeyBarArranging()
         case .showGuide:
             showGuide()
         case .showConnectionStats:
@@ -296,7 +302,8 @@ final class UMDBarViewController: UIViewController,
                     #else
                     HardwareKeyboardMonitor.shared.isConnected
                     #endif
-                }()
+                }(),
+                keyBarArranging: configuration.controller?.keyBarArranging ?? false
             )
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -370,7 +377,9 @@ final class UMDBarViewController: UIViewController,
         if !configuration.mergeSources.isEmpty {
             views.append(mergeButton())
         }
-        views.append(guideButton())
+        if guideIsDirectChip(displacesDirectActions: false) {
+            views.append(guideButton())
+        }
         if let overflow = overflowButtonIfNeeded(displacesDirectActions: false) {
             views.append(overflow)
         }
@@ -455,7 +464,9 @@ final class UMDBarViewController: UIViewController,
             if !configuration.mergeSources.isEmpty {
                 views.append(mergeButton())
             }
-            views.append(guideButton())
+            if guideIsDirectChip(displacesDirectActions: false) {
+                views.append(guideButton())
+            }
             if let overflow = overflowButtonIfNeeded(
                 displacesDirectActions: false
             ) {
@@ -584,8 +595,17 @@ final class UMDBarViewController: UIViewController,
         )
     }
 
-    /// GUIDE is a direct chip wherever the rail has room; only the compact
-    /// row — which displaces every direct action — carries it in the `⋯`.
+    /// GUIDE is a direct chip where an iPad/iPhone rail has room; the compact
+    /// row and every visionOS row carry it in the `⋯` instead. One decision
+    /// for the row builders and the menu.
+    private func guideIsDirectChip(displacesDirectActions: Bool) -> Bool {
+        #if os(visionOS)
+        false
+        #else
+        !displacesDirectActions
+        #endif
+    }
+
     private func guideButton() -> UMDBarButton {
         actionButton(
             caption: "GUIDE",
@@ -825,6 +845,21 @@ final class UMDBarViewController: UIViewController,
             ))
         }
         #endif
+        // Arrange Keys: a menu row on purpose — every key hold is spoken for
+        // and a held key is unfindable. Reads DONE while the mode is on.
+        if configuration.controller != nil {
+            children.append(menuAction(
+                title: currentObservedState.keyBarArranging
+                    ? String(localized: "Done Arranging Keys")
+                    : String(localized: "Arrange Keys…"),
+                image: UIImage(
+                    systemName: currentObservedState.keyBarArranging
+                        ? "checkmark" : "arrow.left.arrow.right"
+                ),
+                identifier: "umd.arrangeKeys",
+                action: .toggleKeyBarArranging
+            ))
+        }
         if configuration.showConnectionStats != nil {
             children.append(menuAction(
                 title: String(localized: "Connection Stats…"),
@@ -833,15 +868,15 @@ final class UMDBarViewController: UIViewController,
                 action: .showConnectionStats
             ))
         }
-        if displacesDirectActions {
-            // The wide rows carry GUIDE as its own chip; it rides the menu
-            // only where the direct actions have been displaced.
+        if !guideIsDirectChip(displacesDirectActions: displacesDirectActions) {
             children.append(menuAction(
                 title: String(localized: "Guide"),
                 image: UIImage(systemName: "questionmark.circle"),
                 identifier: "umd.guide.action",
                 action: .showGuide
             ))
+        }
+        if displacesDirectActions {
             children.append(UIMenu(
                 title: String(localized: "Text Size"),
                 options: .displayInline,

@@ -254,6 +254,10 @@ final class TerminalWindowViewController: UIViewController,
     /// The active tab's open Talkback composer — one per window, re-pointed
     /// at whichever tab is active; nil while that tab's box is closed.
     private var talkbackController: TalkbackComposerViewController?
+    #if os(visionOS)
+    /// The active tab's ARRANGE KEYS bar as its own ornament slab.
+    private var arrangeBarController: ArrangeKeysBarViewController?
+    #endif
     /// Whether opening the box folded the helper strip to its dot (so
     /// closing can unfold it) — the strip stays as the user left it otherwise.
     private var talkbackFoldedHelper = false
@@ -795,6 +799,9 @@ final class TerminalWindowViewController: UIViewController,
             _ = activeController?.pendingLink
             _ = activeController?.pendingPath
             _ = activeController?.talkbackOpen
+            #if os(visionOS)
+            _ = activeController?.keyBarArranging
+            #endif
             // The eyebrow's telemetry matters only while a box is open —
             // otherwise an attention edge on the host is not this window's.
             if talkbackOpen { _ = activeTabAgentState }
@@ -2749,6 +2756,7 @@ extension TerminalWindowViewController {
         let sidePanel = mountedSidePanelHostID.flatMap {
             sidePanelViewControllers[$0]
         }
+        renderVisionArrangeBar()
         visionOrnaments.update(
             tabCount: route.tabs.count,
             isAuxiliary: activeTab?.isAuxiliaryPane == true,
@@ -2756,12 +2764,23 @@ extension TerminalWindowViewController {
             umdController: umdController,
             helperController: helperController,
             talkbackController: talkbackController,
+            arrangeBarController: arrangeBarController,
             sidePanelController: sidePanel,
             windowWidth: rootView.bounds.width,
             windowHeight: rootView.bounds.height,
             interfaceStyle: themes.appearance.interfaceStyle,
             forceRevision: forceRevision
         )
+    }
+
+    /// One bar per tab; it watches the order (RESET) itself.
+    private func renderVisionArrangeBar() {
+        guard let controller = activeController, controller.keyBarArranging else {
+            arrangeBarController = nil
+            return
+        }
+        if arrangeBarController?.controller === controller { return }
+        arrangeBarController = ArrangeKeysBarViewController(controller: controller)
     }
 
     private var visionFloatingHelperMaximumWidth: CGFloat {

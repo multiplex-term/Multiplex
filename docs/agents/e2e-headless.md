@@ -254,6 +254,27 @@ app.multiplexterm.multiplex.<name>`:
 - `debug.tmuxclosepane` / `debug.tmuxclosewindow` — the already-confirmed
   destructive close actions (disposable sessions only).
 - `debug.keybar` — iPad key-bar proof: a shell prompt capture shows `~|/-^C`.
+- `debug.arrangekeys` — the `⋯` menu's Arrange Keys on the focused terminal's
+  key rail (iPad/iPhone) or ornament cluster (visionOS); post again for DONE.
+  Proof is the wiggling keys and the ARRANGE KEYS bar — above the rail on
+  iPad, its own slab below the console row on visionOS.
+  `debug.arrangekeysmove` moves the leftmost key to the sequence's end
+  through the order model — a headless drop (no route drags a key); on
+  visionOS that is a crossing from the leading slab to the trailing one.
+  Proof is the row in the new order on every tab, the RESET chip appearing,
+  and the same order after a relaunch. The drag and drop itself (a system
+  `UIDragInteraction` → `UIDropInteraction`, the tab strip's) needs real
+  touches: `./Tools/build.sh uitest [vos|ipad]` runs the XCUITest
+  `MultiplexUITests/ArrangeKeysUITests` (harness up, seeded host; ESC pressed
+  until it lifts, carried onto TAB, held, released), the only headless route
+  that drives a drag session on an Xcode 27 simulator. Its rows land in the
+  xcodebuild log (`ArrangeKeysUITests row:`) and the app's lifts and drops
+  under `log stream --predicate 'category == "keys"' --level debug`.
+  ⚠ XCUITest reports each rail key twice (one element, two paths) — query
+  with `firstMatch`, dedupe rows by identifier. ⚠ The visionOS simulator
+  cannot synthesize a lift for a `UIDragInteraction` (nor for a long-press
+  recognizer): `uitest vos` proves the mode and the bar and skips the drag;
+  the drop plumbing is covered by the fake-session unit tests.
 - `debug.kbdlock` — toggle the software-keyboard lock headlessly.
 - `debug.fvselect` — the file viewer's markdown SELECT mode.
 - `debug.fvimage` — press the first image placeholder on the rendered
