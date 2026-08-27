@@ -1,28 +1,34 @@
-Multiplex is a terminal for people who live inside persistent remote sessions — built native for Apple Vision Pro.
+Multiplex is a terminal for people who live inside persistent remote sessions — open source, built native for Apple Vision Pro.
 
 THE WALL
-Hosts probe concurrently. Every session is a live monitor: its actual last screen lines, one spine segment per window, red LIVE while attached. See the whole fleet before attaching; NO SIGNAL reconnects in one tap. Run tmux, or switch a host to herdr — one tile per session, its workspaces on the spine, agent state read from herdr itself.
+Hosts probe concurrently. Every session is a live monitor: its actual last screen lines, red LIVE while attached. See the fleet before attaching; NO SIGNAL reconnects in one tap. Run tmux, or switch a host to herdr — one tile per session, agent state from herdr itself.
 
 A WINDOW PER SESSION
-Attach opens the session in its own spatial window — build logs above your editor, a server dashboard across the room. Merge windows into tabs and split them back out; the SSH connection, buffer, and scrollback move with the tab, so shells never drop.
+Attach opens the session in its own spatial window — build logs above your editor, a server dashboard across the room. Merge windows into tabs and split them back out; the SSH connection and scrollback move with the tab, so shells never drop.
 
 BUILT FOR AI AGENT SESSIONS
-Start Claude Code, Codex, Pi, Grok Build, Antigravity CLI, or Hermes with an optional setup script, model, and first prompt in one step. Multiplex spots all six across every pane, and helper chips follow the foreground agent so commands reach the process receiving your keystrokes — rearrange them, add your own, and every host remembers its setup on all your devices. Pro removes the daily chip limit, alerts you when an unwatched turn finishes or needs input (Claude Code, Codex, and Grok Build on tmux; on herdr, every agent herdr itself tracks), and opens Claude Code prompt history with one-tap transcript jumps. Attach or drop files on tmux and herdr tabs: Multiplex uploads into the pane's working directory and types the remote path.
+Start Claude Code, Codex, Pi, Grok Build, Antigravity CLI, or Hermes with a setup script, model, and first prompt in one step. Multiplex spots all six in any pane; helper chips follow the foreground agent — commands reach the process receiving your keystrokes; rearrange or add your own, synced everywhere. A message box takes longer prompts: autocorrect, dictation, attached or dropped files land in the pane's directory, sent as one message. Pro lifts the daily chip limit, alerts you when an unwatched turn ends or needs input (Claude Code, Codex, Grok Build on tmux; all agents on herdr), and opens Claude Code prompt history with transcript jumps.
+
+FILES & LINKS BESIDE THE TERMINAL
+Tap a link or path — Multiplex confirms the resolved target first. Files open read-only in the ▤ File Viewer: code, rendered Markdown, images, PDFs, sound files, git diffs. Web links can open in an inline ⌗ viewport. Both float in a panel beside the terminal window — the terminal never changes size — or move into a tab.
 
 WIDGETS & SHORTCUTS
-On visionOS 26 or later, pin a host in your space — last-known session frames with an honest SEEN stamp, plus SHELL and AGENT keys straight into a connection — or a fleet widget showing every host at a glance. Shortcuts and Siri open a shell, show a remote file at an optional line or line range, or launch an agent in a chosen directory, as a fresh session or inside one you already have. A multiplex:// URL scheme drives your own automations.
+On visionOS 26+, pin a host in your space — last-known frames, an honest SEEN stamp, SHELL and AGENT keys straight into a connection — or a fleet widget for every host at a glance. Shortcuts and Siri open a shell, show a remote file, or launch an agent in a chosen directory, fresh or inside an existing session. A multiplex:// URL scheme drives automations.
 
 MOSH BUILT IN
 With Pro, switch a host to mosh and the session survives sleep, roaming, and IP changes — a native Swift mosh client, no companion app.
 
-A REAL TERMINAL
-Full xterm-256color emulation, multilingual system-keyboard input, gaze-and-pinch clicks for mouse-aware TUIs, hardware keyboards, live PTY resize, and a built-in menu of everyday tmux commands — with herdr's own set on herdr tabs. Hold CTRL for Key Commands: saved chords the software keyboard cannot press (Shift+Enter, a double Ctrl-C, Option+Backspace to delete a word) and one-line text macros, with your own repeats and stay-open rules, kept in sync across your devices. Long-press or double-pinch for pane-clamped text selection on either backend. System, Light, Dark, and smoked Glass switch the whole chassis; Glass admits the room and shares Dark's terminal theme. Ten themes built in, and Pro adds an editor for background, text, cursor, and all 16 ANSI colors.
+CONNECTION STATS
+A live latency chip on every host rail; Pro opens the full per-host board: round-trips, typing echo, mosh loss and roams, reconnects, data volume. Measured in-session; nothing leaves the device.
 
-PRIVATE BY DESIGN
-Hosts, agent-command setups, and secrets sync between your devices through iCloud Keychain, end-to-end encrypted. Nothing touches our servers — there are none. No account, no analytics, no tracking.
+A REAL TERMINAL
+xterm-256color emulation, multilingual system-keyboard input, gaze-and-pinch clicks for mouse TUIs, hardware keyboards, live PTY resize, and a menu of everyday tmux (or herdr) commands. Hold CTRL for Key Commands: saved chords the software keyboard cannot press (Shift+Enter, a double Ctrl-C) and one-line text macros, synced everywhere. Pane-clamped selection on long press or double pinch. System, Light, Dark, and smoked Glass switch the whole chassis; Glass admits the room and shares Dark's terminal theme. Ten themes built in; Pro adds an editor down to all 16 ANSI colors. The app speaks English, Traditional Chinese, and Japanese.
+
+OPEN SOURCE, PRIVATE BY DESIGN
+The complete app — terminal engine, mosh client, and all — is open source, Apache 2.0, at github.com/multiplex-term/Multiplex. Read the code that holds your keys, or build it yourself. Hosts, command setups, and secrets sync through iCloud Keychain, end-to-end encrypted. Nothing touches our servers — there are none. No account, no analytics, no tracking.
 
 MULTIPLEX PRO
-One purchase, no subscription: unlimited hosts, mosh, agent notifications, the unmetered command strip, custom themes, and twelve Key Commands on all your devices. Free includes two hosts, the full spatial experience, five Key Commands, and 10 agent-command chip taps a day.
+One purchase, no subscription: unlimited hosts, mosh, agent notifications, the Connection Stats board, the unmetered command strip, custom themes, and twelve Key Commands. Free includes two hosts, the full spatial experience, five Key Commands, and 10 chip taps a day.
 
 WHAT YOU NEED
-A remote host you can reach over SSH (password or OpenSSH ed25519/RSA key). The live wall and persistent sessions need tmux 1.8+ or herdr 0.7.5+; plain SSH shells work without either. mosh needs mosh-server on the host.
+A remote host reachable over SSH (password or ed25519/RSA key). The wall and persistent sessions need tmux 1.8+ or herdr 0.7.5+; plain SSH shells need neither. mosh needs mosh-server on the host.

@@ -59,6 +59,11 @@ should describe spatial windows rather than iPhone/iPad windowing. Pass
 | iOS | iPhone adaptive shell, iPad scenes/Stage Manager, Home Screen widgets | SYSTEM / LIGHT / DARK only |
 | visionOS | Spatial windows and, on visionOS 26+, widgets pinned in the room | SYSTEM / LIGHT / DARK / GLASS |
 
+Both descriptions state that Multiplex is open source (Apache-2.0,
+`github.com/multiplex-term/Multiplex` — the repository has been public since
+2026-08-12). Keep that claim in sync with the repository's actual visibility
+and license before every metadata upload.
+
 ## Open-source licenses
 
 Free surface added 2026-08-03 (unreleased; ships with the next binary):
@@ -278,6 +283,10 @@ Current product split:
 - Pro: unlimited hosts, mosh, unmetered built-in and custom agent command
   chips, Claude Code/Codex agent alerts from tmux sessions and plain shells
   plus lifecycle-backed Claude Code/Codex/Pi alerts from herdr sessions,
+  the Connection Stats board (per-host drill-in: round-trips, typing echo,
+  mosh loss and roams, reconnects, data volume; the free tier keeps the live
+  latency chip on each host rail, and everything is measured in-session with
+  an off switch in Settings),
   the HISTORY panel (a Claude Code session's prompt history read from
   Claude's own session file, with full text where the TUI truncates, plus
   jump-back-to-message on tmux and herdr tabs — Claude Code only; Codex/Pi
