@@ -211,9 +211,8 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
     }
 
     static func isFileDropCandidate(_ session: UIDropSession) -> Bool {
-        let isTabDrag = session.localDragSession?.localContext is TerminalTabDragPayload
-            || session.items.contains { $0.localObject is TerminalTabDragPayload }
-        return !isTabDrag
+        // The window's own chrome on the move is never a file.
+        return !TerminalChromeDragItem.isChromeDrag(session)
             && session.hasItemsConforming(toTypeIdentifiers: [UTType.item.identifier])
     }
 
@@ -790,6 +789,105 @@ final class TerminalContextBarView: UIKitTallyBorderedView {
         ])
     }
 
+    /// Arrange Keys: the lamp, RESET off the shipped order, DONE — the
+    /// copy-mode bar's anatomy. No hint text: the wiggling row is the
+    /// instruction, and the bar must fit a 375 pt phone.
+    static func arrangeKeys(
+        canReset: Bool,
+        reset: @escaping () -> Void,
+        done: @escaping () -> Void
+    ) -> TerminalContextBarView {
+        var items: [UIView] = [
+            UIKitTallyLamp(caption: "ARRANGE KEYS", color: TallyPalette.caution),
+        ]
+        if canReset {
+            let chip = UIKitChassisChip(
+                "RESET",
+                accessibilityLabel: String(localized: "Restore the standard key order"),
+                action: reset
+            )
+            chip.accessibilityIdentifier = "terminalPane.context.arrangeKeys.reset"
+            items.append(chip)
+        }
+        let doneChip = UIKitChassisChip(
+            "DONE",
+            prominent: true,
+            accessibilityLabel: String(localized: "Done arranging keys"),
+            action: done
+        )
+        doneChip.accessibilityIdentifier = "terminalPane.context.arrangeKeys.done"
+        items.append(doneChip)
+        return TerminalContextBarView(items: items)
+    }
+}
+
+/// The ARRANGE KEYS bar for the visionOS ornament mount — one per tab; it
+/// watches the order itself and swaps RESET in place, reporting the new
+/// size through `preferredContentSize`.
+@MainActor
+final class ArrangeKeysBarViewController: UIViewController {
+    private(set) weak var controller: TerminalSessionController?
+    private let orderStore: KeyBarOrderStore
+    private var bar: TerminalContextBarView?
+    private(set) var canReset = false
+    private var observationGeneration = 0
+    /// Measured once per bar: a constraint solve per SwiftUI size query
+    /// would run twice a layout pass.
+    private var fittingSize = CGSize.zero
+
+    init(controller: TerminalSessionController, orderStore: KeyBarOrderStore = .shared) {
+        self.controller = controller
+        self.orderStore = orderStore
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func loadView() {
+        let root = UIView()
+        root.backgroundColor = .clear
+        view = root
+        observeOrder()
+    }
+
+    func fittingContentSize() -> CGSize {
+        loadViewIfNeeded()
+        return fittingSize
+    }
+
+    private func observeOrder() {
+        observationGeneration &+= 1
+        let generation = observationGeneration
+        let canReset = withObservationTracking {
+            !orderStore.order.isStandard
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, generation == self.observationGeneration else { return }
+                self.observeOrder()
+            }
+        }
+        guard bar == nil || canReset != self.canReset else { return }
+        self.canReset = canReset
+        bar?.removeFromSuperview()
+        let bar = TerminalContextBarView.arrangeKeys(
+            canReset: canReset,
+            reset: { [orderStore] in orderStore.reset() },
+            done: { [weak self] in self?.controller?.setKeyBarArranging(false) }
+        )
+        bar.accessibilityIdentifier = "terminal.arrangeBar"
+        view.addSubview(bar)
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bar.topAnchor.constraint(equalTo: view.topAnchor),
+            bar.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        self.bar = bar
+        fittingSize = bar.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        preferredContentSize = fittingSize
+    }
 }
 
 /// Select Text mode's ONE piece of chrome — the mode lamp, its selection

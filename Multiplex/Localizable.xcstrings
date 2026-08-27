@@ -2328,6 +2328,22 @@
         }
       }
     },
+    "Arrange Keys…" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "キーを並べ替え…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "排列按鍵…"
+          }
+        }
+      }
+    },
     "Arrow down" : {
       "localizations" : {
         "ja" : {
@@ -5506,6 +5522,38 @@
         }
       }
     },
+    "Done Arranging Keys" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "キーの並べ替えを完了"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "完成排列按鍵"
+          }
+        }
+      }
+    },
+    "Done arranging keys" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "キーの並べ替えを完了"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "完成排列按鍵"
+          }
+        }
+      }
+    },
     "Done selecting" : {
       "localizations" : {
         "ja" : {
@@ -5550,6 +5598,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "點兩下"
+          }
+        }
+      }
+    },
+    "Drag to move this key" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ドラッグしてこのキーを移動"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "拖曳以移動此按鍵"
           }
         }
       }
@@ -8378,6 +8442,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "將檔案檢視器移至標籤頁"
+          }
+        }
+      }
+    },
+    "Move left" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "左へ移動"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "向左移動"
+          }
+        }
+      }
+    },
+    "Move right" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "右へ移動"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "向右移動"
           }
         }
       }
@@ -11794,6 +11890,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "回復購買項目"
+          }
+        }
+      }
+    },
+    "Restore the standard key order" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "標準のキー順序に戻す"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "恢復標準按鍵順序"
           }
         }
       }

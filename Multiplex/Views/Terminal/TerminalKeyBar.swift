@@ -1,6 +1,8 @@
 import Observation
+import os
 import SwiftTerm
 import UIKit
+import UniformTypeIdentifiers
 #if DEBUG
 import notify
 #endif
@@ -9,7 +11,7 @@ import notify
 /// transparent control can stay at a full touch target while `faceInset`
 /// narrows only the painted chassis face in the compact phone tiers.
 @MainActor
-final class TerminalTallyKeyControl: UIControl {
+final class TerminalTallyKeyControl: UIControl, UIDragInteractionDelegate {
     enum Face {
         case text(String, font: UIFont, kerning: CGFloat)
         case symbol(String, pointSize: CGFloat, weight: UIImage.SymbolWeight)
@@ -37,7 +39,41 @@ final class TerminalTallyKeyControl: UIControl {
     var preferredSize: CGSize {
         didSet { invalidateIntrinsicContentSize() }
     }
+    /// Arrange Keys: the face wiggles, press and hold are inert, and the key
+    /// is a system drag source (the tab strip's `UIDragInteraction`). It
+    /// stays a live, hoverable target — visionOS gaze needs one.
+    var isArranging = false {
+        didSet {
+            guard isArranging != oldValue else { return }
+            longPressRecognizer?.isEnabled = !isArranging
+            cancelRepeat()
+            isHighlighted = false
+            if isArranging {
+                startWiggle()
+                installArrangeDragInteraction()
+                observeForegroundForWiggle()
+            } else {
+                stopWiggle()
+                setDraggedAway(false)
+                setDropTarget(false)
+                arrangeDragInteraction?.isEnabled = false
+                foregroundObserver.map(NotificationCenter.default.removeObserver)
+                foregroundObserver = nil
+            }
+            accessibilityHint = isArranging ? String(localized: "Drag to move this key") : nil
+        }
+    }
+    /// The owner mints the drag item for a lift of this key; nil declines.
+    var arrangeDragItem: ((UIDragSession) -> UIDragItem?)?
 
+    private static let wiggleAnimationKey = "arrange.wiggle"
+    private var arrangeDragInteraction: UIDragInteraction?
+    private var foregroundObserver: NSObjectProtocol?
+    var isArrangeDragSourceForTesting: Bool { arrangeDragInteraction?.isEnabled == true }
+    /// Lifted into a system drag: the slot reads as the hole the key left.
+    private(set) var isDraggedAway = false
+    /// The key a drop would land on, lit the way a tab cell's target is.
+    private(set) var isDropTarget = false
     private let faceView = UIKitTallyBorderedView()
     private let textLabel = UILabel()
     private let symbolView = UIImageView()
@@ -116,6 +152,10 @@ final class TerminalTallyKeyControl: UIControl {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
+    deinit {
+        foregroundObserver.map(NotificationCenter.default.removeObserver)
+    }
+
     override var intrinsicContentSize: CGSize { preferredSize }
 
     override var isHighlighted: Bool {
@@ -141,11 +181,97 @@ final class TerminalTallyKeyControl: UIControl {
     }
 
     override func accessibilityActivate() -> Bool {
+        guard !isArranging else { return false }
         primaryAction()
         return true
     }
 
+    /// Installed on first use, toggled with the mode.
+    private func installArrangeDragInteraction() {
+        if let arrangeDragInteraction {
+            arrangeDragInteraction.isEnabled = true
+            return
+        }
+        let drag = TerminalTabDragPolicy.makeDragInteraction(delegate: self)
+        addInteraction(drag)
+        arrangeDragInteraction = drag
+    }
+
+    /// Backgrounding strips layer animations; a key still in the mode
+    /// wiggles again on return.
+    private func observeForegroundForWiggle() {
+        guard foregroundObserver == nil else { return }
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.resumeWiggleIfNeeded() }
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // Core Animation drops a layer's animations when it leaves the
+        // window; a key re-mounted mid-mode wiggles again.
+        if isArranging, window != nil { startWiggle() }
+    }
+
+    /// The slot dims to the hole the key left while the system carries its preview.
+    func setDraggedAway(_ away: Bool) {
+        guard isDraggedAway != away else { return }
+        isDraggedAway = away
+        refreshAppearance()
+        if away {
+            stopWiggle()
+        } else if isArranging {
+            startWiggle()
+        }
+    }
+
+    func setDropTarget(_ targeted: Bool) {
+        guard isDropTarget != targeted else { return }
+        isDropTarget = targeted
+        refreshAppearance()
+    }
+
+    /// Holds the wiggle still for a landing animation.
+    func suspendWiggle() {
+        stopWiggle()
+    }
+
+    /// Restarts a wiggle backgrounding dropped or a landing paused.
+    func resumeWiggleIfNeeded() {
+        guard isArranging, !isDraggedAway else { return }
+        startWiggle()
+    }
+
+    private func startWiggle() {
+        guard window != nil,
+              layer.animation(forKey: Self.wiggleAnimationKey) == nil,
+              !UIAccessibility.isReduceMotionEnabled
+        else { return }
+        let amplitude = 1.5 * CGFloat.pi / 180
+        let rotation = CAKeyframeAnimation(keyPath: "transform.rotation.z")
+        rotation.values = [-amplitude, amplitude, -amplitude]
+        rotation.keyTimes = [0, 0.5, 1]
+        rotation.duration = 0.14
+        rotation.timingFunctions = [
+            CAMediaTimingFunction(name: .easeInEaseOut),
+            CAMediaTimingFunction(name: .easeInEaseOut),
+        ]
+        rotation.repeatCount = .greatestFiniteMagnitude
+        // Out of phase with its neighbours, or the row rocks as one slab.
+        rotation.timeOffset = Double.random(in: 0..<rotation.duration)
+        layer.add(rotation, forKey: Self.wiggleAnimationKey)
+    }
+
+    private func stopWiggle() {
+        layer.removeAnimation(forKey: Self.wiggleAnimationKey)
+    }
+
     @objc private func pressBegan() {
+        guard !isArranging else { return }
         TerminalKeyHaptics.keyPress(on: self)
         isHighlighted = true
         didRepeat = false
@@ -154,6 +280,7 @@ final class TerminalTallyKeyControl: UIControl {
     }
 
     @objc private func pressEntered() {
+        guard !isArranging else { return }
         isHighlighted = true
         scheduleRepeatIfNeeded()
     }
@@ -166,7 +293,7 @@ final class TerminalTallyKeyControl: UIControl {
     @objc private func pressEndedInside() {
         isHighlighted = false
         cancelRepeat()
-        guard !didRepeat, !didLongPress else { return }
+        guard !didRepeat, !didLongPress, !isArranging else { return }
         primaryAction()
     }
 
@@ -198,6 +325,7 @@ final class TerminalTallyKeyControl: UIControl {
     }
 
     @objc private func longPressed(_ recognizer: UILongPressGestureRecognizer) {
+        guard !isArranging else { return }
         switch recognizer.state {
         case .began:
             didLongPress = true
@@ -247,7 +375,7 @@ final class TerminalTallyKeyControl: UIControl {
 
     private func refreshAppearance() {
         accessibilityTraits = isLatched ? [.button, .selected] : .button
-        alpha = isEnabled ? 1 : 0.45
+        alpha = isDraggedAway ? 0.3 : isEnabled ? 1 : 0.45
         let foreground = isLatched ? UIKitChassis.chassis : UIKitChassis.signal2
         textLabel.textColor = foreground
         symbolView.tintColor = foreground
@@ -263,10 +391,71 @@ final class TerminalTallyKeyControl: UIControl {
             : UIKitChassis.chassis
         faceView.backgroundColor = isLatched
             ? UIKitChassis.signal2
-            : isHighlighted ? UIKitChassis.bezelHi : restingFace
-        faceView.tallyBorderColor = isLatched
+            : isHighlighted || isDropTarget ? UIKitChassis.bezelHi : restingFace
+        // The drop target wears the signal border a tab cell does.
+        faceView.tallyBorderColor = isLatched || isDropTarget
             ? UIKitChassis.signal2
             : UIKitChassis.bezelHi
+    }
+
+    // MARK: Arrange Keys drag source
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        itemsForBeginning session: UIDragSession
+    ) -> [UIDragItem] {
+        guard isArranging, let item = arrangeDragItem?(session) else { return [] }
+        item.previewProvider = { [weak self] in
+            guard let self else { return nil }
+            return UIDragPreview(view: self, parameters: self.dragPreviewParameters())
+        }
+        return [item]
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        previewForLifting item: UIDragItem,
+        session: UIDragSession
+    ) -> UITargetedDragPreview? {
+        UITargetedDragPreview(view: self, parameters: dragPreviewParameters())
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        sessionWillBegin session: UIDragSession
+    ) {
+        setDraggedAway(true)
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        sessionDidEnd session: UIDragSession,
+        with operation: UIDropOperation
+    ) {
+        setDraggedAway(false)
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        sessionIsRestrictedToDraggingApplication session: UIDragSession
+    ) -> Bool {
+        true
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        prefersFullSizePreviewsFor session: UIDragSession
+    ) -> Bool {
+        true
+    }
+
+    private func dragPreviewParameters() -> UIDragPreviewParameters {
+        let parameters = UIDragPreviewParameters()
+        let path = UIBezierPath(rect: faceView.frame)
+        parameters.backgroundColor = .clear
+        parameters.visiblePath = path
+        parameters.shadowPath = path
+        return parameters
     }
 }
 
@@ -369,6 +558,264 @@ final class TerminalCtrlComboViewController: UIViewController {
     override func loadView() {
         view = comboView
     }
+}
+
+private let keyArrangeLog = Logger(subsystem: "app.multiplexterm.multiplex", category: "keys")
+
+/// A key in a row with the slot it occupies.
+struct RenderedKey {
+    let slot: KeyBarSlot
+    let control: TerminalTallyKeyControl
+}
+
+/// Local-object marker for an Arrange Keys drag.
+struct KeyBarDragPayload: TerminalChromeDragPayload {
+    static let dragTypeTag = "application/x-multiplex-key-slot"
+    var surfaceID: UUID
+    var slot: KeyBarSlot
+}
+
+/// What a drop surface — the rail, the cluster context — tells the
+/// coordinator.
+@MainActor
+protocol KeyBarDropSurface: AnyObject {
+    /// Arrange Keys is on and the slot is on this surface.
+    func canArrange(_ slot: KeyBarSlot) -> Bool
+    /// Every key on the surface, in row order.
+    var dropControls: [RenderedKey] { get }
+    /// Lands `source` on `target`, writing the order; false when nothing moves.
+    func dropKey(_ source: KeyBarSlot, onto target: KeyBarSlot) -> Bool
+    /// Lays the surface out after a commit so the row shows the new order.
+    func layoutAfterDrop()
+}
+
+/// The tab strip's drop dance for a row of keys, shared by the iPad rail
+/// and the visionOS cluster: a process-local item per lift, the nearest
+/// other key as the target (lit like a tab cell's), and a landing that
+/// parks the displaced keys on their old centres for UIKit's drop animator
+/// while the preview flies to the key's new control.
+@MainActor
+final class KeyBarDropCoordinator: NSObject, UIDropInteractionDelegate {
+    private unowned let surface: any KeyBarDropSurface
+    private let surfaceID = UUID()
+    private var targetSlot: KeyBarSlot?
+    private var pending: (slot: KeyBarSlot, landed: TerminalTallyKeyControl, displaced: [TerminalTallyKeyControl])?
+
+    init(surface: any KeyBarDropSurface) {
+        self.surface = surface
+    }
+
+    /// Idempotent: a host asked twice keeps one interaction.
+    func installDropTarget(on host: UIView) {
+        guard !host.interactions.contains(where: { ($0 as? UIDropInteraction)?.delegate === self })
+        else { return }
+        host.addInteraction(UIDropInteraction(delegate: self))
+    }
+
+    func makeDragItem(for slot: KeyBarSlot, session: UIDragSession) -> UIDragItem? {
+        guard surface.canArrange(slot), surface.dropControls.count > 1 else { return nil }
+        keyArrangeLog.debug("arrange lift \(slot.rawValue, privacy: .public)")
+        return TerminalChromeDragItem.make(
+            KeyBarDragPayload(surfaceID: surfaceID, slot: slot),
+            session: session
+        )
+    }
+
+    func clearTarget() {
+        setTarget(nil)
+    }
+
+    /// A rebuild mid-landing (a tier change) replaces the keys; nothing is
+    /// left parked.
+    func cancelLanding() {
+        finishLanding()
+    }
+
+    /// The key a drop at `point` (in `view`'s coordinates) lands on: the
+    /// nearest other key by centre, nil over the dragged key's own slot.
+    func targetSlot(at point: CGPoint, in view: UIView, source: KeyBarSlot) -> KeyBarSlot? {
+        let row = surface.dropControls
+        guard let sourceIndex = row.firstIndex(where: { $0.slot == source }) else { return nil }
+        let frames = row.map { entry in
+            entry.control.superview?.convert(entry.control.frame, to: view) ?? entry.control.frame
+        }
+        return RowDropGeometry.dropTargetIndex(
+            x: point.x,
+            restingFrames: frames,
+            sourceIndex: sourceIndex
+        ).map { row[$0].slot }
+    }
+
+    private func source(of session: UIDropSession) -> KeyBarSlot? {
+        guard let payload = TerminalChromeDragItem.payload(KeyBarDragPayload.self, from: session),
+              payload.surfaceID == surfaceID,
+              surface.canArrange(payload.slot)
+        else { return nil }
+        return payload.slot
+    }
+
+    private func target(for session: UIDropSession, in interaction: UIDropInteraction) -> KeyBarSlot? {
+        guard let view = interaction.view, let source = source(of: session) else { return nil }
+        return targetSlot(at: session.location(in: view), in: view, source: source)
+    }
+
+    private func setTarget(_ slot: KeyBarSlot?) {
+        guard targetSlot != slot else { return }
+        targetSlot = slot
+        for entry in surface.dropControls {
+            entry.control.setDropTarget(entry.slot == slot)
+        }
+    }
+
+    private func center(of control: UIView, in view: UIView) -> CGPoint {
+        control.superview?.convert(control.center, to: view) ?? control.center
+    }
+
+    private func land(_ source: KeyBarSlot, on target: KeyBarSlot, in view: UIView) {
+        finishLanding()
+        surface.layoutAfterDrop()
+        var oldCenters: [KeyBarSlot: CGPoint] = [:]
+        for entry in surface.dropControls {
+            oldCenters[entry.slot] = center(of: entry.control, in: view)
+        }
+        var landed = false
+        UIView.performWithoutAnimation {
+            landed = surface.dropKey(source, onto: target)
+            surface.layoutAfterDrop()
+        }
+        guard landed else { return }
+        var key: TerminalTallyKeyControl?
+        var displaced: [TerminalTallyKeyControl] = []
+        UIView.performWithoutAnimation {
+            for entry in surface.dropControls {
+                if entry.slot == source {
+                    key = entry.control
+                    continue
+                }
+                guard let oldCenter = oldCenters[entry.slot] else { continue }
+                let dx = oldCenter.x - center(of: entry.control, in: view).x
+                guard abs(dx) > 0.5 else { continue }
+                entry.control.suspendWiggle()
+                entry.control.transform = CGAffineTransform(translationX: dx, y: 0)
+                displaced.append(entry.control)
+            }
+        }
+        guard let key else { return }
+        pending = (source, key, displaced)
+        keyArrangeLog.debug(
+            "arrange drop \(source.rawValue, privacy: .public) onto \(target.rawValue, privacy: .public)"
+        )
+    }
+
+    private func finishLanding(slot: KeyBarSlot? = nil) {
+        guard let pending, slot == nil || slot == pending.slot else { return }
+        UIView.performWithoutAnimation {
+            for control in pending.displaced {
+                control.transform = .identity
+                control.resumeWiggleIfNeeded()
+            }
+        }
+        self.pending = nil
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        canHandle session: UIDropSession
+    ) -> Bool {
+        source(of: session) != nil
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        sessionDidEnter session: UIDropSession
+    ) {
+        setTarget(target(for: session, in: interaction))
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        sessionDidUpdate session: UIDropSession
+    ) -> UIDropProposal {
+        let target = target(for: session, in: interaction)
+        setTarget(target)
+        return UIDropProposal(operation: target == nil ? .forbidden : .move)
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        sessionDidExit session: UIDropSession
+    ) {
+        setTarget(nil)
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        sessionDidEnd session: UIDropSession
+    ) {
+        setTarget(nil)
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        previewForDropping item: UIDragItem,
+        withDefault defaultPreview: UITargetedDragPreview
+    ) -> UITargetedDragPreview? {
+        guard let payload = item.localObject as? KeyBarDragPayload,
+              let pending,
+              payload.slot == pending.slot,
+              let container = pending.landed.superview
+        else { return defaultPreview }
+        return defaultPreview.retargetedPreview(
+            with: UIDragPreviewTarget(container: container, center: pending.landed.center)
+        )
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        performDrop session: UIDropSession
+    ) {
+        guard let view = interaction.view, let source = source(of: session) else { return }
+        let target = targetSlot(at: session.location(in: view), in: view, source: source)
+        setTarget(nil)
+        guard let target else { return }
+        land(source, on: target, in: view)
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        item: UIDragItem,
+        willAnimateDropWith animator: UIDragAnimating
+    ) {
+        guard let payload = item.localObject as? KeyBarDragPayload,
+              let pending,
+              payload.slot == pending.slot
+        else { return }
+        animator.addAnimations { [weak self] in
+            guard self?.pending?.slot == pending.slot else { return }
+            for control in pending.displaced {
+                control.transform = .identity
+            }
+        }
+        animator.addCompletion { [weak self] _ in
+            self?.finishLanding(slot: pending.slot)
+        }
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction,
+        concludeDrop session: UIDropSession
+    ) {
+        finishLanding()
+    }
+}
+
+/// VoiceOver's road through the mode: one step left or right.
+@MainActor
+private func keyMoveActions(_ move: @escaping (Int) -> Bool) -> [UIAccessibilityCustomAction] {
+    [
+        UIAccessibilityCustomAction(name: String(localized: "Move left")) { _ in move(-1) },
+        UIAccessibilityCustomAction(name: String(localized: "Move right")) { _ in move(1) },
+    ]
 }
 
 /// The talk key's VoiceOver name on the rail and in the visionOS cluster —
@@ -552,6 +999,55 @@ enum TerminalKeyBarLayout {
             $0.idealWidth(includesReturn: includesReturn) <= usable + 0.5
         } ?? candidates[candidates.count - 1]
     }
+
+    /// The resting frame of every key in a row of `keyCount`, in row order.
+    /// Groups are counted, never named — three keys, the tier's symbols, the
+    /// rest — so a custom order permutes keys across the same slots and the
+    /// gaps stay put. The slack between the minimum row and the usable width
+    /// is spread evenly over the group gaps.
+    static func keyFrames(
+        specification: Specification,
+        keyCount: Int,
+        includesReturn: Bool,
+        width: CGFloat,
+        contentSafeArea: UIEdgeInsets,
+        keyTop: CGFloat,
+        keyHeight: CGFloat
+    ) -> [CGRect] {
+        guard keyCount > 0 else { return [] }
+        let metric = specification.metric
+        let leftCount = min(3, keyCount)
+        let symbolCount = min(specification.symbols.count, keyCount - leftCount)
+        let rightCount = keyCount - leftCount - symbolCount
+        var counts = [leftCount]
+        if symbolCount > 0 { counts.append(symbolCount) }
+        if rightCount > 0 { counts.append(rightCount) }
+        let groupGap = includesReturn ? min(metric.groupGap, 8) : metric.groupGap
+        let internalSpacingCount = counts.reduce(0) { $0 + max(0, $1 - 1) }
+        let minimumContentWidth = CGFloat(keyCount) * metric.keyWidth
+            + CGFloat(internalSpacingCount) * metric.spacing
+            + CGFloat(counts.count - 1) * groupGap
+        let available = max(
+            0,
+            width - contentSafeArea.left - contentSafeArea.right
+                - specification.edgeInset * 2
+        )
+        let flexibleGap = groupGap
+            + max(0, available - minimumContentWidth) / CGFloat(max(1, counts.count - 1))
+
+        var frames: [CGRect] = []
+        frames.reserveCapacity(keyCount)
+        var x = contentSafeArea.left + specification.edgeInset
+        for (groupIndex, count) in counts.enumerated() {
+            for keyIndex in 0..<count {
+                frames.append(CGRect(x: x, y: keyTop, width: metric.keyWidth, height: keyHeight))
+                x += metric.keyWidth
+                if keyIndex < count - 1 { x += metric.spacing }
+            }
+            if groupIndex < counts.count - 1 { x += flexibleGap }
+        }
+        return frames
+    }
 }
 
 struct TerminalKeyBarObservedState: Equatable {
@@ -560,6 +1056,11 @@ struct TerminalKeyBarObservedState: Equatable {
     var isDictating: Bool
     /// The talk key latches while this tab's message box is open.
     var talkbackOpen: Bool
+    /// Arrange Keys is on for this tab: the keys wiggle and drag, and none
+    /// of them sends.
+    var arranging: Bool
+    /// The app-wide key order (`KeyBarOrderStore`).
+    var order: KeyBarOrder
 }
 
 /// The iPad terminal's app-owned TALLY key rail. It is a normal UIKit sibling
@@ -567,7 +1068,7 @@ struct TerminalKeyBarObservedState: Equatable {
 /// That avoids TextInputUI's Stage Manager rehosting path while preserving one
 /// ordered byte route for every key.
 @MainActor
-final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
+final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface {
     /// The rail is the window's bottom edge on iPad: its keys keep their
     /// full press target, and the chassis below them is trimmed to a hairline
     /// so the terminal keeps the row (the window's own rounded corner and,
@@ -630,14 +1131,29 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     /// backend-independent by construction.
     private let shortcutBackend: Host.SessionBackend?
     private let showsReturnKey: Bool
+    /// The app-wide key order; injected so a test rail can arrange against
+    /// its own defaults.
+    private let orderStore: KeyBarOrderStore
     private let topBorder = UIView()
     private var ctrlLatched = false
     private var observedState: TerminalKeyBarObservedState?
     private var observationGeneration = 0
     private var renderedSignature: RenderSignature?
-    private(set) var renderedKeys: [TerminalTallyKeyControl] = []
+    /// The row in the user's order — every key with the slot it occupies.
+    private var rendered: [RenderedKey] = []
+    var renderedKeys: [TerminalTallyKeyControl] { rendered.map(\.control) }
+    var renderedSlots: [KeyBarSlot] { rendered.map(\.slot) }
     private weak var ctrlKeyControl: TerminalTallyKeyControl?
     private weak var talkKeyControl: TerminalTallyKeyControl?
+    private weak var shortcutKeyControl: TerminalTallyKeyControl?
+    private(set) lazy var dropCoordinator = KeyBarDropCoordinator(surface: self)
+    /// The ARRANGE KEYS bar — the mode's lamp, RESET, DONE — hung over the
+    /// rail the way the C / B slab is, so it rides with the keys above a
+    /// docked keyboard.
+    private var arrangeBar: TerminalContextBarView?
+    private var arrangeBarOffersReset = false
+    var isArrangingForTesting: Bool { observedState?.arranging == true }
+    var arrangeBarForTesting: TerminalContextBarView? { arrangeBar }
     private weak var shortcutPopoverController: UIViewController?
     private let keyCommandsPresenter = KeyCommandPanelPresenter()
     /// The tier's Key Commands cap and paywall route, handed down with the
@@ -668,13 +1184,15 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         controller: TerminalSessionController?,
         performShortcut: @escaping (ShortcutPanelItem) -> Void,
         finishTmuxCopyMode: @escaping () -> Void,
-        shortcutBackend: Host.SessionBackend?
+        shortcutBackend: Host.SessionBackend?,
+        orderStore: KeyBarOrderStore = .shared
     ) {
         self.terminal = terminal
         self.controller = controller
         self.performShortcut = performShortcut
         self.finishTmuxCopyMode = finishTmuxCopyMode
         self.shortcutBackend = shortcutBackend
+        self.orderStore = orderStore
         showsReturnKey = UIDevice.current.userInterfaceIdiom == .pad
         ctrlLatched = terminal.controlModifier
         super.init(frame: .zero)
@@ -684,6 +1202,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         topBorder.backgroundColor = UIKitChassis.bezelHi
         topBorder.isAccessibilityElement = false
         addSubview(topBorder)
+        dropCoordinator.installDropTarget(on: self)
         HardwareKeyboardMonitor.shared.startIfNeeded()
 
         NotificationCenter.default.addObserver(
@@ -733,8 +1252,15 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                 rebuildRow(specification: specification, state: state)
                 renderedSignature = signature
             }
+            // The order permutes the same keys: the row flips in place.
+            let arranged = orderStore.order.arrange(renderedSlots)
+            if arranged != renderedSlots {
+                let bySlot = Dictionary(uniqueKeysWithValues: rendered.map { ($0.slot, $0) })
+                rendered = arranged.compactMap { bySlot[$0] }
+            }
             talkKeyControl?.isLatched = state.talkbackOpen
             talkKeyControl?.accessibilityLabel = talkbackKeyLabel(open: state.talkbackOpen)
+            applyArranging(state.arranging, offersReset: !orderStore.order.isStandard)
             layoutRow(specification: specification, includesReturn: includesReturn)
             bringSubviewToFront(topBorder)
         }
@@ -742,7 +1268,33 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
 
     override func willMove(toWindow newWindow: UIWindow?) {
         super.willMove(toWindow: newWindow)
-        if newWindow == nil { hideCtrlCombos() }
+        if newWindow == nil {
+            hideCtrlCombos()
+            // The mode is this rail's to show; a rail leaving the window (a
+            // tab switch, a merge, a close) takes the mode with it.
+            hideArrangeBar()
+            controller?.setKeyBarArranging(false)
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // The bar mounts in the window; a rail that joins one mid-mode
+        // (rare — the mode ends on leaving) hangs it on the next pass.
+        if window != nil, observedState?.arranging == true { setNeedsLayout() }
+    }
+
+    override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        // A key released over the terminal above the rail still lands.
+        if let superview { dropCoordinator.installDropTarget(on: superview) }
+    }
+
+    /// Tests paint a state without waiting on the observation's turn — the
+    /// UMD bar's and the pane's seam.
+    func applyObservedState(_ state: TerminalKeyBarObservedState) {
+        observedState = state
+        setNeedsLayout()
     }
 
     @objc private func controlModifierDidReset() {
@@ -756,7 +1308,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
             hardwareKeyboardConnected: HardwareKeyboardMonitor.shared.isConnected,
             keyboardLocked: KeyboardLock.shared.isLocked,
             isDictating: controller?.isDictating == true,
-            talkbackOpen: controller?.talkbackOpen == true
+            talkbackOpen: controller?.talkbackOpen == true,
+            arranging: controller?.keyBarArranging == true,
+            order: orderStore.order
         )
     }
 
@@ -781,10 +1335,12 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         specification: TerminalKeyBarLayout.Specification,
         state: TerminalKeyBarObservedState
     ) {
-        for key in renderedKeys { key.removeFromSuperview() }
-        renderedKeys.removeAll(keepingCapacity: true)
+        dropCoordinator.cancelLanding()
+        for entry in rendered { entry.control.removeFromSuperview() }
+        rendered.removeAll(keepingCapacity: true)
         ctrlKeyControl = nil
         talkKeyControl = nil
+        shortcutKeyControl = nil
         let metric = specification.metric
         let includesReturn = showsReturnKey || state.keyboardLocked
 
@@ -792,44 +1348,54 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         // key opens Key Commands and never toggles the latch.
         var control = caps(
             "CTRL", .ctrl, String(localized: "Control"),
-            identifier: "control", latched: ctrlLatched
+            identifier: "control", slot: .control, latched: ctrlLatched
         )
         control.longPressKey = .keyCommands
-        var groups: [[RailKey]] = [[
-            caps("ESC", .esc, String(localized: "Escape"), identifier: "escape"),
+        var descriptors: [RailKey] = [
+            caps("ESC", .esc, String(localized: "Escape"), identifier: "escape", slot: .escape),
             control,
-            caps("TAB", .tab, String(localized: "Tab"), identifier: "tab"),
-        ]]
-        if !specification.symbols.isEmpty {
-            groups.append(specification.symbols.map { symbol in
+            caps("TAB", .tab, String(localized: "Tab"), identifier: "tab", slot: .tab),
+        ]
+        descriptors += specification.symbols.compactMap { symbol in
+            symbolSlot(symbol).map { slot in
                 RailKey(
                     key: .text(symbol),
+                    slot: slot,
                     face: .text(symbol, font: UIKitChassis.monoFont(15), kerning: 0),
                     accessibility: symbol,
-                    identifier: "symbol.\(symbolIdentifier(symbol))"
+                    identifier: "symbol.\(slot.rawValue)"
                 )
-            })
+            }
         }
-
-        var right: [RailKey] = []
         if specification.pageKeys {
-            right.append(arrowKey(
-                "arrow.up.to.line", .pageUp, String(localized: "Page up"), identifier: "pageUp"
+            descriptors.append(arrowKey(
+                "arrow.up.to.line", .pageUp, String(localized: "Page up"),
+                identifier: "pageUp", slot: .pageUp
             ))
-            right.append(arrowKey(
+            descriptors.append(arrowKey(
                 "arrow.down.to.line", .pageDown, String(localized: "Page down"),
-                identifier: "pageDown"
+                identifier: "pageDown", slot: .pageDown
             ))
         }
-        right.append(contentsOf: [
-            arrowKey("arrow.left", .left, String(localized: "Arrow left"), identifier: "left"),
-            arrowKey("arrow.up", .up, String(localized: "Arrow up"), identifier: "up"),
-            arrowKey("arrow.down", .down, String(localized: "Arrow down"), identifier: "down"),
-            arrowKey("arrow.right", .right, String(localized: "Arrow right"), identifier: "right"),
+        descriptors.append(contentsOf: [
+            arrowKey(
+                "arrow.left", .left, String(localized: "Arrow left"),
+                identifier: "left", slot: .left
+            ),
+            arrowKey("arrow.up", .up, String(localized: "Arrow up"), identifier: "up", slot: .up),
+            arrowKey(
+                "arrow.down", .down, String(localized: "Arrow down"),
+                identifier: "down", slot: .down
+            ),
+            arrowKey(
+                "arrow.right", .right, String(localized: "Arrow right"),
+                identifier: "right", slot: .right
+            ),
         ])
         if includesReturn {
-            right.append(RailKey(
+            descriptors.append(RailKey(
                 key: .returnKey,
+                slot: .returnKey,
                 face: .symbol("return", pointSize: 12, weight: .semibold),
                 accessibility: String(localized: "Return"),
                 identifier: "return"
@@ -837,16 +1403,20 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         }
         // Talkback — the message box under the pane; RET · talk · keyboard.
         // Latched while the box is open, like CTRL and the keyboard lock.
-        right.append(RailKey(
+        descriptors.append(RailKey(
             key: .talkback,
+            slot: .talkback,
             face: .symbol("text.bubble", pointSize: 13, weight: .semibold),
             accessibility: talkbackKeyLabel(open: state.talkbackOpen),
             identifier: "talkback",
             latched: state.talkbackOpen
         ))
+        // One slot, two occupants — the mic beside a hardware keyboard, the
+        // keyboard key without one. An order names the slot, so it holds.
         if state.hardwareKeyboardConnected {
-            right.append(RailKey(
+            descriptors.append(RailKey(
                 key: .dictation,
+                slot: .keyboard,
                 face: .symbol(
                     state.isDictating ? "mic.fill" : "mic",
                     pointSize: 13,
@@ -859,8 +1429,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                 latched: state.isDictating
             ))
         } else {
-            right.append(RailKey(
+            descriptors.append(RailKey(
                 key: .keyboard,
+                slot: .keyboard,
                 face: .symbol(
                     state.keyboardLocked ? "lock.fill" : "keyboard",
                     pointSize: 13,
@@ -879,8 +1450,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         if specification.tmux, let backend = shortcutBackend {
             // The identifier names the slot, not the occupant — debug hooks
             // and tests address "tmux" for either backend's key.
-            right.append(RailKey(
+            descriptors.append(RailKey(
                 key: .showShortcutPanel,
+                slot: .shortcuts,
                 face: .text(
                     backend == .herdr ? "HRDR" : "TMUX",
                     font: UIKitChassis.monoFont(9, weight: .semibold),
@@ -892,75 +1464,173 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
                 identifier: "tmux"
             ))
         }
-        groups.append(right)
 
-        for group in groups {
-            for descriptor in group {
-                let control = TerminalTallyKeyControl(
-                    face: descriptor.face,
-                    width: metric.keyWidth,
-                    height: Self.keyHeight,
-                    accessibilityLabel: descriptor.accessibility,
-                    accessibilityIdentifier: "terminal.keybar.\(descriptor.identifier)",
-                    repeats: descriptor.repeats,
-                    latched: descriptor.latched,
-                    faceInset: metric.faceInset,
-                    longPressAction: descriptor.longPressKey.map { key in
-                        { [weak self] in self?.press(key) }
-                    },
-                    action: { [weak self] in self?.press(descriptor.key) }
-                )
-                if let hold = descriptor.longPressKey { control.longPressDuration = hold.holdDuration }
-                control.accessibilityUserInputLabels = [descriptor.accessibility]
-                addSubview(control)
-                renderedKeys.append(control)
-                if descriptor.identifier == "control" { ctrlKeyControl = control }
-                if descriptor.identifier == "talkback" { talkKeyControl = control }
+        // The tier decided WHICH keys the row carries; the order decides
+        // where each one sits. Groups are counted at layout, so the gaps
+        // stay put whatever lands in them.
+        let bySlot = Dictionary(uniqueKeysWithValues: descriptors.map { ($0.slot, $0) })
+        for slot in orderStore.order.arrange(descriptors.map(\.slot)) {
+            guard let descriptor = bySlot[slot] else { continue }
+            let control = TerminalTallyKeyControl(
+                face: descriptor.face,
+                width: metric.keyWidth,
+                height: Self.keyHeight,
+                accessibilityLabel: descriptor.accessibility,
+                accessibilityIdentifier: "terminal.keybar.\(descriptor.identifier)",
+                repeats: descriptor.repeats,
+                latched: descriptor.latched,
+                faceInset: metric.faceInset,
+                longPressAction: descriptor.longPressKey.map { key in
+                    { [weak self] in self?.press(key) }
+                },
+                action: { [weak self] in self?.press(descriptor.key) }
+            )
+            if let hold = descriptor.longPressKey { control.longPressDuration = hold.holdDuration }
+            control.accessibilityUserInputLabels = [descriptor.accessibility]
+            control.arrangeDragItem = { [weak self] session in
+                self?.dropCoordinator.makeDragItem(for: slot, session: session)
+            }
+            addSubview(control)
+            rendered.append(RenderedKey(slot: slot, control: control))
+            switch slot {
+            case .control: ctrlKeyControl = control
+            case .talkback: talkKeyControl = control
+            case .shortcuts: shortcutKeyControl = control
+            default: break
             }
         }
+    }
+
+    /// Every key's resting frame for the row as it stands (`rendered` order).
+    private func restingFrames(
+        specification: TerminalKeyBarLayout.Specification,
+        includesReturn: Bool
+    ) -> [CGRect] {
+        TerminalKeyBarLayout.keyFrames(
+            specification: specification,
+            keyCount: rendered.count,
+            includesReturn: includesReturn,
+            width: bounds.width,
+            contentSafeArea: contentSafeArea,
+            keyTop: Self.keyTopInset,
+            keyHeight: Self.keyHeight
+        )
     }
 
     private func layoutRow(
         specification: TerminalKeyBarLayout.Specification,
         includesReturn: Bool
     ) {
-        let metric = specification.metric
-        let leftCount = 3
-        let symbolCount = specification.symbols.count
-        let rightCount = renderedKeys.count - leftCount - symbolCount
-        let counts = symbolCount > 0
-            ? [leftCount, symbolCount, rightCount]
-            : [leftCount, rightCount]
-        let groupGap = includesReturn ? min(metric.groupGap, 8) : metric.groupGap
-        let internalSpacingCount = counts.reduce(0) { $0 + max(0, $1 - 1) }
-        let minimumContentWidth = CGFloat(renderedKeys.count) * metric.keyWidth
-            + CGFloat(internalSpacingCount) * metric.spacing
-            + CGFloat(counts.count - 1) * groupGap
-        let available = max(
-            0,
-            bounds.width - contentSafeArea.left - contentSafeArea.right
-                - specification.edgeInset * 2
-        )
-        let flexibleGap = groupGap
-            + max(0, available - minimumContentWidth) / CGFloat(max(1, counts.count - 1))
-
-        var index = 0
-        var x = contentSafeArea.left + specification.edgeInset
-        for groupIndex in counts.indices {
-            for keyIndex in 0..<counts[groupIndex] {
-                let key = renderedKeys[index]
-                key.frame = CGRect(
-                    x: x,
-                    y: Self.keyTopInset,
-                    width: metric.keyWidth,
-                    height: Self.keyHeight
-                )
-                x += metric.keyWidth
-                if keyIndex < counts[groupIndex] - 1 { x += metric.spacing }
-                index += 1
-            }
-            if groupIndex < counts.count - 1 { x += flexibleGap }
+        let frames = restingFrames(specification: specification, includesReturn: includesReturn)
+        for (entry, frame) in zip(rendered, frames) {
+            entry.control.frame = frame
         }
+    }
+
+    // MARK: Arrange Keys
+
+    /// Flips the mode in place — never a rebuild under a finger.
+    /// `offersReset`: the order differs from the shipped one.
+    private func applyArranging(_ arranging: Bool, offersReset: Bool) {
+        if !arranging { dropCoordinator.clearTarget() }
+        for entry in rendered where entry.control.isArranging != arranging {
+            entry.control.isArranging = arranging
+            entry.control.accessibilityCustomActions = arranging
+                ? keyMoveActions { [weak self] in self?.moveKey(entry.slot, by: $0) ?? false }
+                : nil
+        }
+        if arranging {
+            showArrangeBar(offersReset: offersReset)
+        } else {
+            hideArrangeBar()
+        }
+    }
+
+    private func showArrangeBar(offersReset: Bool) {
+        if arrangeBar != nil, arrangeBarOffersReset == offersReset { return }
+        hideArrangeBar()
+        let bar = TerminalContextBarView.arrangeKeys(
+            canReset: offersReset,
+            reset: { [weak self] in self?.orderStore.reset() },
+            done: { [weak self] in self?.controller?.setKeyBarArranging(false) }
+        )
+        bar.accessibilityIdentifier = "terminal.keybar.arrangeBar"
+        guard mountOverRail(bar, centerX: bar.centerXAnchor.constraint(equalTo: centerXAnchor)) else { return }
+        dropCoordinator.installDropTarget(on: bar)
+        arrangeBar = bar
+        arrangeBarOffersReset = offersReset
+    }
+
+    private func hideArrangeBar() {
+        arrangeBar?.removeFromSuperview()
+        arrangeBar = nil
+    }
+
+    /// The C / B slab's mount, shared with the ARRANGE KEYS bar: a window
+    /// subview pinned over the rail's top, so it rides with the rail above a
+    /// docked keyboard. The slab may overrun the trailing edge (the C / B
+    /// slab on a phone); the bar is clamped inside both.
+    @discardableResult
+    private func mountOverRail(
+        _ slab: UIView,
+        centerX: NSLayoutConstraint,
+        clampsTrailing: Bool = true
+    ) -> Bool {
+        guard let window else { return false }
+        slab.translatesAutoresizingMaskIntoConstraints = false
+        window.addSubview(slab)
+        centerX.priority = .defaultHigh
+        var constraints = [
+            centerX,
+            slab.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 8),
+            slab.bottomAnchor.constraint(equalTo: topAnchor, constant: -6),
+        ]
+        if clampsTrailing {
+            constraints.append(slab.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8))
+        }
+        NSLayoutConstraint.activate(constraints)
+        return true
+    }
+
+    /// One step along the row — VoiceOver's road and the headless proof's.
+    @discardableResult
+    func moveKey(_ slot: KeyBarSlot, by delta: Int) -> Bool {
+        let slots = renderedSlots
+        guard let index = slots.firstIndex(of: slot),
+              slots.indices.contains(index + delta)
+        else { return false }
+        let order = orderStore.order.moving(slot, toVisibleIndex: index + delta, among: slots)
+        guard order != orderStore.order else { return false }
+        orderStore.setOrder(order)
+        return true
+    }
+
+    // MARK: KeyBarDropSurface
+
+    func canArrange(_ slot: KeyBarSlot) -> Bool {
+        observedState?.arranging == true && rendered.contains { $0.slot == slot }
+    }
+
+    var dropControls: [RenderedKey] { rendered }
+
+    /// Lands `source` on `target` and writes the order; the layout pass
+    /// flips the row in place from the store's change.
+    @discardableResult
+    func dropKey(_ source: KeyBarSlot, onto target: KeyBarSlot) -> Bool {
+        let slots = renderedSlots
+        guard source != target,
+              slots.contains(source),
+              let targetIndex = slots.firstIndex(of: target)
+        else { return false }
+        let order = orderStore.order.moving(source, toVisibleIndex: targetIndex, among: slots)
+        guard order != orderStore.order else { return false }
+        orderStore.setOrder(order)
+        setNeedsLayout()
+        return true
+    }
+
+    func layoutAfterDrop() {
+        layoutIfNeeded()
     }
 
     private func press(_ key: TerminalKey) {
@@ -1091,7 +1761,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         controller.preferredContentSize = controller.fittingContentSize()
         if let popover = controller.popoverPresentationController {
             popover.sourceView = self
-            popover.sourceRect = CGRect(
+            // Anchored to the TMUX/HRDR key wherever the order put it; the
+            // trailing corner is the fallback for a rail without the key.
+            popover.sourceRect = shortcutKeyControl?.frame ?? CGRect(
                 x: bounds.maxX - 44,
                 y: bounds.minY,
                 width: 44,
@@ -1105,10 +1777,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
     }
 
     private func showCtrlCombos() {
-        guard !keyCommandsPresenter.isPresented,
-              ctrlComboView == nil,
-              let window
-        else { return }
+        guard !keyCommandsPresenter.isPresented, ctrlComboView == nil, window != nil else { return }
         let slab = TerminalCtrlComboView(
             faceHeight: 34,
             padding: 8,
@@ -1116,20 +1785,13 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         ) { [weak self] letter in
             self?.sendCtrlCombo(letter)
         }
-        slab.translatesAutoresizingMaskIntoConstraints = false
-        window.addSubview(slab)
         layoutIfNeeded()
         let anchorX = ctrlKeyControl?.frame.midX ?? 85
-        let centerX = slab.centerXAnchor.constraint(
-            equalTo: leadingAnchor,
-            constant: anchorX
+        mountOverRail(
+            slab,
+            centerX: slab.centerXAnchor.constraint(equalTo: leadingAnchor, constant: anchorX),
+            clampsTrailing: false
         )
-        centerX.priority = .defaultHigh
-        NSLayoutConstraint.activate([
-            centerX,
-            slab.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 8),
-            slab.bottomAnchor.constraint(equalTo: topAnchor, constant: -6),
-        ])
         ctrlComboView = slab
     }
 
@@ -1167,10 +1829,12 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         _ key: TerminalKey,
         _ accessibility: String,
         identifier: String,
+        slot: KeyBarSlot,
         latched: Bool = false
     ) -> RailKey {
         RailKey(
             key: key,
+            slot: slot,
             face: .text(
                 label,
                 font: UIKitChassis.monoFont(11, weight: .semibold),
@@ -1186,10 +1850,12 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         _ image: String,
         _ key: TerminalKey,
         _ accessibility: String,
-        identifier: String
+        identifier: String,
+        slot: KeyBarSlot
     ) -> RailKey {
         RailKey(
             key: key,
+            slot: slot,
             face: .symbol(image, pointSize: 12, weight: .semibold),
             accessibility: accessibility,
             identifier: identifier,
@@ -1197,13 +1863,13 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         )
     }
 
-    private func symbolIdentifier(_ symbol: String) -> String {
+    private func symbolSlot(_ symbol: String) -> KeyBarSlot? {
         switch symbol {
-        case "~": "tilde"
-        case "|": "pipe"
-        case "/": "slash"
-        case "-": "hyphen"
-        default: symbol
+        case "~": .tilde
+        case "|": .pipe
+        case "/": .slash
+        case "-": .hyphen
+        default: nil
         }
     }
 
@@ -1290,11 +1956,26 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback {
         guard let terminal, TerminalFocusArbiter.current === terminal else { return }
         if !terminal.controlModifier { press(.ctrl) }
     }
+
+    /// The `⋯` menu's Arrange Keys, headlessly (no simulator route can open
+    /// a native menu). Posting again is DONE.
+    func debugToggleArranging() {
+        controller?.toggleKeyBarArranging()
+    }
+
+    /// A headless drop: the leftmost key moves to the row's end through the
+    /// order model, proving the write-back and every rail's rebuild.
+    func debugMoveFirstKeyToEnd() {
+        guard let first = renderedSlots.first else { return }
+        moveKey(first, by: rendered.count - 1)
+    }
     #endif
 }
 
 private struct RailKey {
     var key: TerminalKey
+    /// The position this key occupies in the user's order.
+    var slot: KeyBarSlot
     var face: TerminalTallyKeyControl.Face
     var accessibility: String
     var identifier: String
@@ -1409,10 +2090,13 @@ enum TmuxShortcutDebugHook {
         ) { _ in focusedBar()?.debugShowCtrlCombos() }
     }
 
-    private static func focusedBar() -> TerminalKeyBar? {
-        guard let view = TerminalFocusArbiter.current else { return nil }
-        return view.superview?.subviews.compactMap { $0 as? TerminalKeyBar }.first
-    }
+}
+
+/// The rail beside the focused terminal — every headless hook's target.
+@MainActor
+private func focusedBar() -> TerminalKeyBar? {
+    guard let view = TerminalFocusArbiter.current else { return nil }
+    return view.superview?.subviews.compactMap { $0 as? TerminalKeyBar }.first
 }
 
 @MainActor
@@ -1425,22 +2109,22 @@ enum KeyBarDebugHook {
         var token: Int32 = 0
         notify_register_dispatch(
             "app.multiplexterm.multiplex.debug.keybar", &token, .main
-        ) { _ in
-            guard let view = TerminalFocusArbiter.current,
-                  let bar = view.superview?.subviews.compactMap({ $0 as? TerminalKeyBar }).first
-            else { return }
-            bar.debugExercise()
-        }
+        ) { _ in focusedBar()?.debugExercise() }
 
         var dictationToken: Int32 = 0
         notify_register_dispatch(
             "app.multiplexterm.multiplex.debug.dictation", &dictationToken, .main
-        ) { _ in
-            guard let view = TerminalFocusArbiter.current,
-                  let bar = view.superview?.subviews.compactMap({ $0 as? TerminalKeyBar }).first
-            else { return }
-            bar.debugToggleDictation()
-        }
+        ) { _ in focusedBar()?.debugToggleDictation() }
+
+        var arrangeToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.arrangekeys", &arrangeToken, .main
+        ) { _ in focusedBar()?.debugToggleArranging() }
+
+        var arrangeMoveToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.arrangekeysmove", &arrangeMoveToken, .main
+        ) { _ in focusedBar()?.debugMoveFirstKeyToEnd() }
     }
 }
 #endif
@@ -1460,17 +2144,30 @@ struct TerminalKeyClusterMetric: Equatable {
 
 /// One shared owner per ornament. ViewThatFits may construct several native
 /// metric candidates, so terminal state and DEBUG routing live here to ensure
-/// one notification still emits one proof sequence.
+/// one notification still emits one proof sequence. It is also the Arrange
+/// Keys drop surface: the two slabs flanking the UMD are separate views, and
+/// a key dropped on the other slab crosses the UMD.
 @MainActor
-final class TerminalKeyClusterContext {
+final class TerminalKeyClusterContext: KeyBarDropSurface {
+    /// The keys the ornament carries, in shipped order — three leading, seven
+    /// trailing. The user's order permutes them across those ten slots.
+    static let ornamentSlots: [KeyBarSlot] = [
+        .escape, .control, .tab, .left, .up, .down, .right, .returnKey, .talkback, .keyboard,
+    ]
+    static let leadingSlotCount = 3
+    private static let arrowSlots: Set<KeyBarSlot> = [.left, .up, .down, .right]
+
     private weak var controller: TerminalSessionController?
     private(set) weak var observedTerminal: TerminalView?
     /// The tier's Key Commands cap and paywall route, set by the window that
     /// holds the entitlement store; every group of this context presents
     /// with it.
     var keyCommandPlan: KeyCommandPlan = .unrestricted
+    private let orderStore: KeyBarOrderStore
     private let groups = NSHashTable<TerminalKeyClusterGroupView>.weakObjects()
     private var controlResetObserver: NSObjectProtocol?
+    private var stateObservationGeneration = 0
+    private(set) lazy var dropCoordinator = KeyBarDropCoordinator(surface: self)
     #if DEBUG
     private var debugObservers: [NSObjectProtocol] = []
     #endif
@@ -1479,8 +2176,13 @@ final class TerminalKeyClusterContext {
     /// The talk key latches while the active tab's message box is open —
     /// read from the controller, never mirrored.
     var talkbackOpen: Bool { controller?.talkbackOpen == true }
+    /// Arrange Keys is on for the active tab.
+    var arranging: Bool { controller?.keyBarArranging == true }
+    var order: KeyBarOrder { orderStore.order }
 
-    init() {
+    init(orderStore: KeyBarOrderStore = .shared) {
+        self.orderStore = orderStore
+        observeOrderAndMode()
         #if DEBUG
         KeyClusterDebugHook.install()
         let center = NotificationCenter.default
@@ -1509,6 +2211,20 @@ final class TerminalKeyClusterContext {
                     self?.debugShowKeyCommands(mode)
                 }
             },
+            center.addObserver(
+                forName: .multiplexDebugArrangeKeys,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.debugToggleArranging() }
+            },
+            center.addObserver(
+                forName: .multiplexDebugArrangeKeysMove,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.debugMoveFirstKeyToEnd() }
+            },
         ]
         #endif
     }
@@ -1531,8 +2247,19 @@ final class TerminalKeyClusterContext {
 
     func update(controller: TerminalSessionController?) {
         let controllerChanged = self.controller !== controller
+        if controllerChanged {
+            // The mode is the active tab's to show; a tab going off the
+            // ornament takes it along (the iPad rail ends it on leaving its
+            // window — there is no such moment for an ornament slab).
+            self.controller?.setKeyBarArranging(false)
+            dropCoordinator.clearTarget()
+        }
         self.controller = controller
         let terminal = controller?.terminalView
+        if controllerChanged {
+            observeOrderAndMode()
+            rebuildAllIfSlotsChanged()
+        }
         // Every group applies the context's state on its own update; only a
         // changed terminal re-registers the latch-reset observer.
         guard controllerChanged || observedTerminal !== terminal else { return }
@@ -1555,8 +2282,118 @@ final class TerminalKeyClusterContext {
 
     func register(_ group: TerminalKeyClusterGroupView) {
         groups.add(group)
+        dropCoordinator.installDropTarget(on: group)
         group.applyContextState()
     }
+
+    /// The console row is one drop surface: the ornament enrols the UMD and
+    /// the ARRANGE KEYS slab between and below the key slabs, so a key
+    /// released there still lands beside the nearer key.
+    func installDropTarget(on host: UIView) {
+        dropCoordinator.installDropTarget(on: host)
+    }
+
+    // MARK: Order
+
+    /// The keys a role shows, in the user's order: the first three of the
+    /// ornament's sequence lead, the other seven trail; a standalone slab
+    /// shows the lot (its minimal tier drops the arrows first).
+    func slots(for role: TerminalKeyClusterGroupView.Role, minimal: Bool) -> [KeyBarSlot] {
+        let ordered = order.arrange(Self.ornamentSlots)
+        switch role {
+        case .leading:
+            return Array(ordered.prefix(Self.leadingSlotCount))
+        case .trailing:
+            return Array(ordered.dropFirst(Self.leadingSlotCount))
+        case .standalone:
+            return minimal
+                ? order.arrange(Self.ornamentSlots.filter { !Self.arrowSlots.contains($0) })
+                : ordered
+        }
+    }
+
+    /// The store's order and the tab's mode, watched here rather than by
+    /// each fitting candidate: a change rebuilds the slabs whose keys moved
+    /// and flips the arranging state on every registered group.
+    private func observeOrderAndMode() {
+        stateObservationGeneration &+= 1
+        let generation = stateObservationGeneration
+        withObservationTracking {
+            _ = orderStore.order
+            _ = controller?.keyBarArranging
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, generation == self.stateObservationGeneration else { return }
+                self.observeOrderAndMode()
+                self.rebuildAllIfSlotsChanged()
+                self.broadcast()
+            }
+        }
+    }
+
+    /// Only slabs whose rendered keys no longer match the order rebuild.
+    private func rebuildAllIfSlotsChanged() {
+        for group in groups.allObjects { group.rebuildIfSlotsChanged() }
+    }
+
+    /// One step along the sequence — VoiceOver's road and the headless
+    /// proof's; crossing the UMD is just an index.
+    @discardableResult
+    func moveKey(_ slot: KeyBarSlot, by delta: Int) -> Bool {
+        let sequence = dropControls.map(\.slot)
+        guard let index = sequence.firstIndex(of: slot),
+              sequence.indices.contains(index + delta)
+        else { return false }
+        let moved = order.moving(slot, toVisibleIndex: index + delta, among: sequence)
+        guard moved != order else { return false }
+        orderStore.setOrder(moved)
+        rebuildAllIfSlotsChanged()
+        return true
+    }
+
+    // MARK: KeyBarDropSurface
+
+    /// The slabs on screen, leading first (or the standalone one alone).
+    /// `ViewThatFits` may keep discarded candidates registered; only one per
+    /// role is in the window with real bounds.
+    private func visibleGroups() -> [TerminalKeyClusterGroupView] {
+        let onScreen = groups.allObjects.filter {
+            $0.window != nil && !$0.isHidden && $0.alpha > 0 && !$0.bounds.isEmpty
+        }
+        if let standalone = onScreen.first(where: { $0.role == .standalone }) { return [standalone] }
+        return [onScreen.first { $0.role == .leading }, onScreen.first { $0.role == .trailing }]
+            .compactMap { $0 }
+    }
+
+    func canArrange(_ slot: KeyBarSlot) -> Bool {
+        arranging && dropControls.contains { $0.slot == slot }
+    }
+
+    /// Both slabs' keys as one row.
+    var dropControls: [RenderedKey] { visibleGroups().flatMap(\.rendered) }
+
+    /// Lands `source` on `target` and writes the order — across the UMD
+    /// when the target sits in the other slab; the slabs whose keys moved
+    /// rebuild.
+    @discardableResult
+    func dropKey(_ source: KeyBarSlot, onto target: KeyBarSlot) -> Bool {
+        let sequence = dropControls.map(\.slot)
+        guard source != target,
+              sequence.contains(source),
+              let targetIndex = sequence.firstIndex(of: target)
+        else { return false }
+        let moved = order.moving(source, toVisibleIndex: targetIndex, among: sequence)
+        guard moved != order else { return false }
+        orderStore.setOrder(moved)
+        rebuildAllIfSlotsChanged()
+        return true
+    }
+
+    func layoutAfterDrop() {
+        for group in visibleGroups() { group.layoutIfNeeded() }
+    }
+
+    // MARK: Keys
 
     func sendEscape() { observedTerminal?.send(EscapeSequences.cmdEsc) }
     func sendTab() { observedTerminal?.send([0x09]) }
@@ -1661,6 +2498,25 @@ final class TerminalKeyClusterContext {
         else { return }
         visibleControlGroup?.debugShowKeyCommands(mode)
     }
+
+    /// The `⋯` menu's Arrange Keys, headlessly; posting again is DONE.
+    private func debugToggleArranging() {
+        guard let terminal = observedTerminal,
+              TerminalFocusArbiter.current === terminal
+        else { return }
+        controller?.toggleKeyBarArranging()
+    }
+
+    /// A headless drop: the leftmost key moves to the sequence's end — from
+    /// the leading slab across the UMD into the trailing one.
+    private func debugMoveFirstKeyToEnd() {
+        guard let terminal = observedTerminal,
+              TerminalFocusArbiter.current === terminal
+        else { return }
+        let sequence = dropControls.map(\.slot)
+        guard let first = sequence.first else { return }
+        moveKey(first, by: sequence.count - 1)
+    }
     #endif
 }
 
@@ -1686,9 +2542,13 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     private weak var talkKey: TerminalTallyKeyControl?
     private weak var comboPopoverController: UIViewController?
     private let keyCommandsPresenter = KeyCommandPanelPresenter()
-    private(set) var keys: [TerminalTallyKeyControl] = []
+    /// The slab's keys with the slots they occupy, in row order.
+    private(set) var rendered: [RenderedKey] = []
+    var keys: [TerminalTallyKeyControl] { rendered.map(\.control) }
+    var renderedSlots: [KeyBarSlot] { rendered.map(\.slot) }
 
-    var carriesControlKey: Bool { role != .trailing }
+    /// Whether the CTRL key landed in this slab (the user's order decides).
+    var carriesControlKey: Bool { ctrlKey != nil }
     var keyCommandsArePresented: Bool { keyCommandsPresenter.isPresented }
     var ctrlCombosArePresentedForTesting: Bool { comboPopoverController != nil }
 
@@ -1724,7 +2584,7 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         if variant != standaloneVariant {
             rebuildKeys(variant: variant)
         }
-        layoutKeys(variant: variant)
+        layoutKeys()
     }
 
     override func willMove(toWindow newWindow: UIWindow?) {
@@ -1741,6 +2601,21 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         ctrlKey?.isLatched = context.ctrlLatched
         talkKey?.isLatched = context.talkbackOpen
         talkKey?.accessibilityLabel = talkbackKeyLabel(open: context.talkbackOpen)
+        let arranging = context.arranging
+        for entry in rendered where entry.control.isArranging != arranging {
+            entry.control.isArranging = arranging
+            entry.control.accessibilityCustomActions = arranging
+                ? keyMoveActions { [weak context] in context?.moveKey(entry.slot, by: $0) ?? false }
+                : nil
+        }
+    }
+
+    /// Rebuilds only when the order changed this slab's keys.
+    func rebuildIfSlotsChanged() {
+        let expected = context.slots(for: role, minimal: standaloneVariant == .minimal)
+        guard renderedSlots != expected else { return }
+        rebuildKeys(variant: standaloneVariant)
+        setNeedsLayout()
     }
 
     func fittingSize(maximumWidth: CGFloat?) -> CGSize {
@@ -1839,9 +2714,71 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     }
     #endif
 
+    // MARK: Geometry
+
+    /// Every slot's resting frame, in row order — the slab's authored
+    /// rhythm, which never changes with the order.
+    private func slotFrames() -> [CGRect] {
+        let runs: [Int]
+        switch role {
+        case .leading:
+            runs = [rendered.count]
+        case .trailing:
+            runs = [4] + Array(repeating: 1, count: max(0, rendered.count - 4))
+        case .standalone:
+            let arrows = standaloneVariant == .minimal ? 0 : 4
+            runs = [3] + (arrows > 0 ? [arrows] : [])
+                + Array(repeating: 1, count: max(0, rendered.count - 3 - arrows))
+        }
+        return Self.slotFrames(
+            widths: rendered.map(\.control.preferredSize.width),
+            runs: runs,
+            spacing: activeMetric.spacing,
+            groupGap: activeMetric.groupGap
+        )
+    }
+
+    /// Runs of keys `spacing` apart and a `groupGap` between runs (the
+    /// pre-UIKit `HStack(spacing: groupGap)`), from the slab's 12-point
+    /// inset. Pure: the drop geometry reads these frames.
+    static func slotFrames(
+        widths: [CGFloat],
+        runs: [Int],
+        spacing: CGFloat,
+        groupGap: CGFloat
+    ) -> [CGRect] {
+        var frames: [CGRect] = []
+        var remaining = widths[...]
+        var x: CGFloat = 12
+        for (runIndex, count) in runs.enumerated() {
+            if runIndex > 0 { x += groupGap }
+            for index in 0..<count {
+                guard let width = remaining.popFirst() else { return frames }
+                frames.append(CGRect(x: x, y: 9, width: width, height: 26))
+                x += width
+                if index < count - 1 { x += spacing }
+            }
+        }
+        return frames
+    }
+
+    private func layoutKeys() {
+        for (entry, frame) in zip(rendered, slotFrames()) {
+            entry.control.frame = frame
+        }
+    }
+
+    private var activeMetric: TerminalKeyClusterMetric {
+        role == .standalone && standaloneVariant != .regular
+            ? TerminalKeyClusterMetric.compact
+            : metric
+    }
+
+    // MARK: Keys
+
     private func rebuildKeys(variant: StandaloneVariant?) {
-        for key in keys { key.removeFromSuperview() }
-        keys.removeAll(keepingCapacity: true)
+        for entry in rendered { entry.control.removeFromSuperview() }
+        rendered.removeAll(keepingCapacity: true)
         ctrlKey = nil
         talkKey = nil
         standaloneVariant = variant
@@ -1854,17 +2791,35 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
             activeMetric = metric
             minimal = false
         }
+        // The slab's slots are authored; the user's order decides which key
+        // sits in each — so a key can lead here and trail after a drag.
+        for slot in context.slots(for: role, minimal: minimal) {
+            guard let control = makeKey(slot, activeMetric) else { continue }
+            control.arrangeDragItem = { [weak context] session in
+                context?.dropCoordinator.makeDragItem(for: slot, session: session)
+            }
+            addSubview(control)
+            rendered.append(RenderedKey(slot: slot, control: control))
+        }
+        applyContextState()
+    }
 
-        if role != .trailing {
-            append(caps(
-                "ESC", String(localized: "Escape"), activeMetric, identifier: "escape"
-            ) { [weak context] in
+    /// Rail-only slots never reach a cluster (`ornamentSlots`): nil, never
+    /// a stand-in key.
+    private func makeKey(
+        _ slot: KeyBarSlot,
+        _ metric: TerminalKeyClusterMetric
+    ) -> TerminalTallyKeyControl? {
+        switch slot {
+        case .escape:
+            return caps("ESC", String(localized: "Escape"), metric, identifier: "escape") { [weak context] in
                 context?.sendEscape()
-            })
+            }
+        case .control:
             let control = caps(
                 "CTRL",
                 String(localized: "Control"),
-                activeMetric,
+                metric,
                 identifier: "control",
                 latched: context.ctrlLatched
             ) { [weak self, weak context] in
@@ -1876,126 +2831,74 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
             control.longPressAction = { [weak self] in
                 self?.showKeyCommands()
             }
-            append(control)
             ctrlKey = control
-            append(caps(
-                "TAB", String(localized: "Tab"), activeMetric, identifier: "tab"
-            ) { [weak context] in
+            return control
+        case .tab:
+            return caps("TAB", String(localized: "Tab"), metric, identifier: "tab") { [weak context] in
                 context?.sendTab()
-            })
-        }
-        if role != .leading {
-            if !minimal {
-                append(arrow(
-                    "arrow.left", String(localized: "Arrow left"), activeMetric,
-                    identifier: "left",
-                    app: EscapeSequences.moveLeftApp,
-                    normal: EscapeSequences.moveLeftNormal
-                ))
-                append(arrow(
-                    "arrow.up", String(localized: "Arrow up"), activeMetric,
-                    identifier: "up",
-                    app: EscapeSequences.moveUpApp,
-                    normal: EscapeSequences.moveUpNormal
-                ))
-                append(arrow(
-                    "arrow.down", String(localized: "Arrow down"), activeMetric,
-                    identifier: "down",
-                    app: EscapeSequences.moveDownApp,
-                    normal: EscapeSequences.moveDownNormal
-                ))
-                append(arrow(
-                    "arrow.right", String(localized: "Arrow right"), activeMetric,
-                    identifier: "right",
-                    app: EscapeSequences.moveRightApp,
-                    normal: EscapeSequences.moveRightNormal
-                ))
             }
-            append(TerminalTallyKeyControl(
+        case .left:
+            return arrow(
+                "arrow.left", String(localized: "Arrow left"), metric,
+                identifier: "left",
+                app: EscapeSequences.moveLeftApp,
+                normal: EscapeSequences.moveLeftNormal
+            )
+        case .up:
+            return arrow(
+                "arrow.up", String(localized: "Arrow up"), metric,
+                identifier: "up",
+                app: EscapeSequences.moveUpApp,
+                normal: EscapeSequences.moveUpNormal
+            )
+        case .down:
+            return arrow(
+                "arrow.down", String(localized: "Arrow down"), metric,
+                identifier: "down",
+                app: EscapeSequences.moveDownApp,
+                normal: EscapeSequences.moveDownNormal
+            )
+        case .right:
+            return arrow(
+                "arrow.right", String(localized: "Arrow right"), metric,
+                identifier: "right",
+                app: EscapeSequences.moveRightApp,
+                normal: EscapeSequences.moveRightNormal
+            )
+        case .returnKey:
+            return TerminalTallyKeyControl(
                 face: .symbol("return", pointSize: 12, weight: .semibold),
-                width: activeMetric.keyWidth,
+                width: metric.keyWidth,
                 height: 26,
                 accessibilityLabel: String(localized: "Return"),
                 accessibilityIdentifier: "terminal.keyCluster.return",
                 action: { [weak context] in context?.sendReturn() }
-            ))
+            )
+        case .talkback:
             // Talkback — RET · talk · keyboard, mirroring the iPad rail;
             // latched while the message box is open.
             let talk = TerminalTallyKeyControl(
                 face: .symbol("text.bubble", pointSize: 12, weight: .semibold),
-                width: activeMetric.keyWidth,
+                width: metric.keyWidth,
                 height: 26,
                 accessibilityLabel: talkbackKeyLabel(open: context.talkbackOpen),
                 accessibilityIdentifier: "terminal.keyCluster.talkback",
                 latched: context.talkbackOpen,
                 action: { [weak context] in context?.toggleTalkback() }
             )
-            append(talk)
             talkKey = talk
-            let keyboard = TerminalTallyKeyControl(
+            return talk
+        case .keyboard:
+            return TerminalTallyKeyControl(
                 face: .symbol("keyboard", pointSize: 12, weight: .semibold),
-                width: activeMetric.keyWidth,
+                width: metric.keyWidth,
                 height: 26,
                 accessibilityLabel: String(localized: "Show or hide keyboard"),
                 accessibilityIdentifier: "terminal.keyCluster.keyboard",
                 action: { [weak context] in context?.toggleKeyboard() }
             )
-            append(keyboard)
-        }
-    }
-
-    private func layoutKeys(variant: StandaloneVariant?) {
-        let activeMetric = role == .standalone && variant != .regular
-            ? TerminalKeyClusterMetric.compact
-            : metric
-        var x: CGFloat = 12
-        let y: CGFloat = 9
-        // `layout(range:)` leaves the cursor on the last key's trailing edge
-        // with no spacing appended, so a group boundary advances by the whole
-        // `groupGap` — the pre-UIKit `HStack(spacing: groupGap)` gap, and what
-        // the reserved slab widths below already pay for. Subtracting
-        // `spacing` here packed the keys left and dumped the slack on the
-        // right edge.
-        switch role {
-        case .leading:
-            layout(range: keys.indices, x: &x, y: y, spacing: activeMetric.spacing)
-        case .trailing:
-            layout(range: 0..<4, x: &x, y: y, spacing: activeMetric.spacing)
-            x += activeMetric.groupGap
-            layout(range: 4..<keys.count, x: &x, y: y, spacing: activeMetric.groupGap)
-        case .standalone:
-            layout(range: 0..<3, x: &x, y: y, spacing: activeMetric.spacing)
-            x += activeMetric.groupGap
-            let arrowCount = variant == .minimal ? 0 : 4
-            if arrowCount > 0 {
-                layout(range: 3..<(3 + arrowCount), x: &x, y: y, spacing: activeMetric.spacing)
-                x += activeMetric.groupGap
-            }
-            layout(
-                range: (3 + arrowCount)..<keys.count,
-                x: &x,
-                y: y,
-                spacing: activeMetric.groupGap
-            )
-        }
-    }
-
-    private func layout(
-        range: Range<Int>,
-        x: inout CGFloat,
-        y: CGFloat,
-        spacing: CGFloat
-    ) {
-        for index in range {
-            let key = keys[index]
-            key.frame = CGRect(
-                x: x,
-                y: y,
-                width: key.preferredSize.width,
-                height: key.preferredSize.height
-            )
-            x += key.preferredSize.width
-            if index < range.upperBound - 1 { x += spacing }
+        default:
+            return nil
         }
     }
 
@@ -2028,11 +2931,6 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         let groups = minimal ? 4 : 5
         return 24 + left + arrows + metric.keyWidth * 3
             + CGFloat(groups - 1) * metric.groupGap
-    }
-
-    private func append(_ key: TerminalTallyKeyControl) {
-        addSubview(key)
-        keys.append(key)
     }
 
     private func caps(
@@ -2113,6 +3011,8 @@ extension Notification.Name {
     static let multiplexDebugKeyCluster = Notification.Name("MultiplexDebugKeyCluster")
     static let multiplexDebugCtrlCombos = Notification.Name("MultiplexDebugCtrlCombos")
     static let multiplexDebugKeyCommands = Notification.Name("MultiplexDebugKeyCommands")
+    static let multiplexDebugArrangeKeys = Notification.Name("MultiplexDebugArrangeKeys")
+    static let multiplexDebugArrangeKeysMove = Notification.Name("MultiplexDebugArrangeKeysMove")
 }
 
 @MainActor
@@ -2145,6 +3045,20 @@ enum KeyClusterDebugHook {
                     name: .multiplexDebugKeyCommands, object: nil, userInfo: ["mode": mode]
                 )
             }
+        }
+
+        var arrangeToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.arrangekeys", &arrangeToken, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugArrangeKeys, object: nil)
+        }
+
+        var arrangeMoveToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.arrangekeysmove", &arrangeMoveToken, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugArrangeKeysMove, object: nil)
         }
     }
 }

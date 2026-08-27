@@ -9,6 +9,8 @@
 #                                        run unit tests (default: vos)
 #   ./Tools/build.sh verify [vos|ipad]   build + install + drive end-to-end
 #                                        against the local sshd/tmux harness
+#   ./Tools/build.sh uitest [vos|ipad]   XCUITest real-touch runs (the Arrange
+#                                        Keys press-and-drag) against the harness
 #   ./Tools/build.sh interop             round-trip against real mosh-server
 #   ./Tools/build.sh strings             sync the String Catalogs from the
 #                                        last visionOS build's .stringsdata
@@ -160,6 +162,22 @@ verify() {
     echo "verify OK — inspect the screenshot to confirm output rendered."
 }
 
+# Real touches through XCUITest — the one headless route that drives a
+# gesture recognizer on an Xcode 27 simulator (simctl has no tap/drag, idb is
+# dead). Seeds the host through the runner's environment (xcodebuild forwards
+# TEST_RUNNER_* variables to the runner, which hands them to the app).
+uitest() {
+    local plat="${1:-vos}"
+    shift || true
+    echo "== starting harness =="
+    "$HARNESS" start
+    "$HARNESS" demo
+    TEST_RUNNER_MULTIPLEX_SEED_HOST="$SEED" \
+        xcodebuild -project "$PROJECT" -scheme MultiplexUITests \
+        -destination "id=$(require_udid "$plat")" \
+        -derivedDataPath "$DERIVED" test "$@"
+}
+
 interop() {
     command -v swiftc >/dev/null || { echo "swiftc not found" >&2; exit 1; }
     command -v mosh-server >/dev/null || {
@@ -189,6 +207,7 @@ case "${1:-}" in
     build) shift; build "$@" ;;
     test) shift; run_tests "$@" ;;
     verify) verify "${2:-vos}" ;;
+    uitest) shift; uitest "$@" ;;
     interop) interop ;;
     strings) strings ;;
     all) gen; lint; build vos; build ipad; run_tests vos ;;

@@ -1010,6 +1010,23 @@ final class TerminalWindowUIKitTests: XCTestCase {
         XCTAssertEqual(collapsedHelper.size, CGSize(width: 600, height: 88))
         XCTAssertEqual(collapsedHelper.helperOrigin, CGPoint(x: 0, y: 4))
         XCTAssertEqual(collapsedHelper.consoleOrigin, CGPoint(x: 0, y: 44))
+
+        // The ARRANGE KEYS bar hangs directly below the console row, the
+        // Talkback slab below it; the lower half grows by both, the console
+        // top stays the midpoint.
+        let arranging = TerminalVisionConsoleGeometry.resolve(
+            helperSize: nil,
+            consoleSize: CGSize(width: 600, height: 44),
+            arrangeSize: CGSize(width: 240, height: 34),
+            talkbackSize: CGSize(width: 500, height: 120),
+            helperLeading: false,
+            spacing: 10
+        )
+        XCTAssertEqual(arranging.size, CGSize(width: 600, height: 436))
+        XCTAssertEqual(arranging.consoleOrigin, CGPoint(x: 0, y: 218))
+        XCTAssertEqual(arranging.arrangeOrigin, CGPoint(x: 180, y: 272))
+        XCTAssertEqual(arranging.talkbackOrigin, CGPoint(x: 50, y: 316))
+        XCTAssertNil(helperless.arrangeOrigin)
     }
 
     func testVisionStackedDeckGeometryHangsTheExtraRowBelowTheAnchor() {

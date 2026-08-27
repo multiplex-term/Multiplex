@@ -73,6 +73,16 @@ schemes:
       config: Debug
       targets:
         - MultiplexTests
+  # Real-touch UI tests (XCUITest): the one route that drives a gesture
+  # recognizer end to end on an Xcode 27 simulator. Not part of CI.
+  MultiplexUITests:
+    build:
+      targets:
+        MultiplexUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - MultiplexUITests
 
 targets:
   Multiplex:
@@ -246,6 +256,18 @@ targets:
         # exists on visionOS only from 26.0 (the app itself stays 1.0).
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         XROS_DEPLOYMENT_TARGET: "26.0"
+
+  MultiplexUITests:
+    type: bundle.ui-testing
+    supportedDestinations: [iOS, visionOS]
+    sources:
+      - path: MultiplexUITests
+    dependencies:
+      - target: Multiplex
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Multiplex
 
   MultiplexTests:
     type: bundle.unit-test

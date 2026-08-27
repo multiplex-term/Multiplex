@@ -362,7 +362,22 @@ final class TerminalSessionController {
             TerminalFocusArbiter.lock(terminalView)
         }
     }
+
     #endif
+
+    /// Arrange Keys — the key rail's / cluster's reorder mode, per tab like
+    /// the message box and never persisted (the ORDER is, in
+    /// `KeyBarOrderStore`).
+    private(set) var keyBarArranging = false
+
+    func setKeyBarArranging(_ arranging: Bool) {
+        guard keyBarArranging != arranging else { return }
+        keyBarArranging = arranging
+    }
+
+    func toggleKeyBarArranging() {
+        setKeyBarArranging(!keyBarArranging)
+    }
 
     /// Scene became active again: re-assert focus only if this terminal is
     /// already the app-wide owner — every window's scene activates at once

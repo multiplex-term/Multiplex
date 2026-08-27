@@ -14,12 +14,70 @@ enum TerminalTabDragPolicy {
             isIOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac
         )
     }
+
+    /// A drag interaction under the policy.
+    @MainActor
+    static func makeDragInteraction(delegate: any UIDragInteractionDelegate) -> UIDragInteraction {
+        let drag = UIDragInteraction(delegate: delegate)
+        #if compiler(>=6.4)
+        if #available(iOS 27.0, visionOS 27.0, *), allowsPointerDragBeforeLiftDelay {
+            drag.allowsPointerDragBeforeLiftDelay = true
+        }
+        #endif
+        return drag
+    }
 }
 
-/// Local-object marker shared with the terminal's file-drop gate. The provider
-/// carries only a process-local representation; this second gate keeps the
-/// file surface honest even if UIKit hands nested targets only the local item.
-struct TerminalTabDragPayload {
+/// The window's own chrome on the move — a tab, an Arrange Keys key. Its item
+/// is process-local and outside `public.item`, so no other drop surface can
+/// mistake it for text or a file, and one gate refuses every kind.
+protocol TerminalChromeDragPayload {
+    /// The item's private MIME tag.
+    static var dragTypeTag: String { get }
+}
+
+@MainActor
+enum TerminalChromeDragItem {
+    /// The payload rides the session and the item: nested targets may be
+    /// handed only the local item.
+    static func make(_ payload: some TerminalChromeDragPayload, session: UIDragSession) -> UIDragItem? {
+        guard let dragType = UTType(
+            tag: type(of: payload).dragTypeTag,
+            tagClass: .mimeType,
+            conformingTo: nil
+        ) else { return nil }
+        session.localContext = payload
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(
+            forTypeIdentifier: dragType.identifier,
+            visibility: .ownProcess
+        ) { completion in
+            completion(Data(), nil)
+            return nil
+        }
+        let item = UIDragItem(itemProvider: provider)
+        item.localObject = payload
+        return item
+    }
+
+    static func payload<Payload: TerminalChromeDragPayload>(
+        _ type: Payload.Type,
+        from session: UIDropSession
+    ) -> Payload? {
+        if let payload = session.localDragSession?.localContext as? Payload {
+            return payload
+        }
+        return session.items.lazy.compactMap { $0.localObject as? Payload }.first
+    }
+
+    static func isChromeDrag(_ session: UIDropSession) -> Bool {
+        session.localDragSession?.localContext is any TerminalChromeDragPayload
+            || session.items.contains { $0.localObject is any TerminalChromeDragPayload }
+    }
+}
+
+struct TerminalTabDragPayload: TerminalChromeDragPayload {
+    static let dragTypeTag = "application/x-multiplex-window-tab"
     var stripID: UUID
     var tabID: UUID
 }
@@ -29,14 +87,6 @@ struct TerminalTabDragPayload {
 @MainActor
 final class TerminalTabStripView: UIView, UIDropInteractionDelegate {
     static let cellSpacing: CGFloat = 4
-
-    /// Process-local and outside `public.item`: other drop surfaces cannot
-    /// mistake this representation for text or a file.
-    private static let dragType = UTType(
-        tag: "application/x-multiplex-window-tab",
-        tagClass: .mimeType,
-        conformingTo: nil
-    )
 
     /// Closures deliberately stay out of the key: retained cells route every
     /// action through this view, whose callback properties `apply` refreshes.
@@ -231,23 +281,11 @@ final class TerminalTabStripView: UIView, UIDropInteractionDelegate {
     }
 
     private func dragItem(for tabID: UUID, session: UIDragSession) -> UIDragItem? {
-        guard items.count > 1,
-              items.contains(where: { $0.id == tabID }),
-              let dragType = Self.dragType
-        else { return nil }
-        let payload = TerminalTabDragPayload(stripID: dragScopeID, tabID: tabID)
-        session.localContext = payload
-        let provider = NSItemProvider()
-        provider.registerDataRepresentation(
-            forTypeIdentifier: dragType.identifier,
-            visibility: .ownProcess
-        ) { completion in
-            completion(Data(), nil)
-            return nil
-        }
-        let item = UIDragItem(itemProvider: provider)
-        item.localObject = payload
-        return item
+        guard items.count > 1, items.contains(where: { $0.id == tabID }) else { return nil }
+        return TerminalChromeDragItem.make(
+            TerminalTabDragPayload(stripID: dragScopeID, tabID: tabID),
+            session: session
+        )
     }
 
     private func canHandleTabDrag(_ session: UIDropSession) -> Bool {
@@ -260,21 +298,15 @@ final class TerminalTabStripView: UIView, UIDropInteractionDelegate {
 
     private func dropTarget(for session: UIDropSession) -> UUID? {
         guard canHandleTabDrag(session),
-              let sourceID = dragPayload(from: session)?.tabID
+              let sourceID = dragPayload(from: session)?.tabID,
+              let sourceIndex = cells.firstIndex(where: { $0.itemID == sourceID })
         else { return nil }
-
-        let location = session.location(in: self)
-        if let source = cells.first(where: { $0.itemID == sourceID }),
-           location.x >= source.frame.minX - Self.cellSpacing / 2,
-           location.x <= source.frame.maxX + Self.cellSpacing / 2 {
-            return nil
-        }
-        return cells
-            .filter { $0.itemID != sourceID }
-            .min {
-                abs(location.x - $0.frame.midX) < abs(location.x - $1.frame.midX)
-            }?
-            .itemID
+        return RowDropGeometry.dropTargetIndex(
+            x: session.location(in: self).x,
+            restingFrames: cells.map(\.frame),
+            sourceIndex: sourceIndex,
+            slack: Self.cellSpacing / 2
+        ).map { cells[$0].itemID }
     }
 
     private func setDropTarget(_ id: UUID?) {
@@ -285,12 +317,7 @@ final class TerminalTabStripView: UIView, UIDropInteractionDelegate {
     }
 
     private func dragPayload(from session: UIDropSession) -> TerminalTabDragPayload? {
-        if let payload = session.localDragSession?.localContext as? TerminalTabDragPayload {
-            return payload
-        }
-        return session.items.lazy
-            .compactMap { $0.localObject as? TerminalTabDragPayload }
-            .first
+        TerminalChromeDragItem.payload(TerminalTabDragPayload.self, from: session)
     }
 
     /// Rebuild the stack at its committed order without exposing that jump,
@@ -697,14 +724,8 @@ final class TerminalTabCell: UIView,
         accessibilityHint = canReorder ? String(localized: "Drag to reorder within this window") : nil
         accessibilityCustomActions = makeAccessibilityActions()
 
-        let drag = UIDragInteraction(delegate: self)
+        let drag = TerminalTabDragPolicy.makeDragInteraction(delegate: self)
         drag.isEnabled = canReorder
-        #if compiler(>=6.4)
-        if #available(iOS 27.0, visionOS 27.0, *),
-           TerminalTabDragPolicy.allowsPointerDragBeforeLiftDelay {
-            drag.allowsPointerDragBeforeLiftDelay = true
-        }
-        #endif
         addInteraction(drag)
         tabDragInteraction = drag
 

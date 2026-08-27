@@ -53,28 +53,35 @@ struct TerminalVisionConsoleGeometry: Equatable {
     var size: CGSize
     var helperOrigin: CGPoint?
     var consoleOrigin: CGPoint
-    /// The Talkback slab hangs below the console row, `spacing` under it.
-    /// It lengthens the lower half — and so, symmetrically, the reported
-    /// bounds — while the console's top stays the exact midpoint.
+    /// The ARRANGE KEYS bar hangs `spacing` below the console row, the
+    /// Talkback slab below that; both lengthen the lower half symmetrically
+    /// so the console's top stays the midpoint.
+    var arrangeOrigin: CGPoint?
     var talkbackOrigin: CGPoint?
 
     static func resolve(
         helperSize: CGSize?,
         consoleSize: CGSize,
+        arrangeSize: CGSize? = nil,
         talkbackSize: CGSize? = nil,
         helperLeading: Bool,
         spacing: CGFloat
     ) -> Self {
         let helperSize = helperSize.map(Self.normalized)
         let consoleSize = Self.normalized(consoleSize)
+        let arrangeSize = arrangeSize.map(Self.normalized)
         let talkbackSize = talkbackSize.map(Self.normalized)
         let spacing = spacing.isFinite ? max(0, spacing) : 0
         let upperExtent = helperSize.map { $0.height + spacing } ?? 0
-        let lowerExtent = consoleSize.height + (talkbackSize.map { spacing + $0.height } ?? 0)
+        let arrangeExtent = arrangeSize.map { spacing + $0.height } ?? 0
+        let lowerExtent = consoleSize.height
+            + arrangeExtent
+            + (talkbackSize.map { spacing + $0.height } ?? 0)
         let halfHeight = max(upperExtent, lowerExtent)
         let width = max(
             helperSize?.width ?? 0,
             consoleSize.width,
+            arrangeSize?.width ?? 0,
             talkbackSize?.width ?? 0
         )
         let helperOrigin = helperSize.map { helperSize in
@@ -83,10 +90,16 @@ struct TerminalVisionConsoleGeometry: Equatable {
                 y: halfHeight - spacing - helperSize.height
             )
         }
+        let arrangeOrigin = arrangeSize.map { arrangeSize in
+            CGPoint(
+                x: (width - arrangeSize.width) / 2,
+                y: halfHeight + consoleSize.height + spacing
+            )
+        }
         let talkbackOrigin = talkbackSize.map { talkbackSize in
             CGPoint(
                 x: (width - talkbackSize.width) / 2,
-                y: halfHeight + consoleSize.height + spacing
+                y: halfHeight + consoleSize.height + arrangeExtent + spacing
             )
         }
         return Self(
@@ -96,6 +109,7 @@ struct TerminalVisionConsoleGeometry: Equatable {
                 x: (width - consoleSize.width) / 2,
                 y: halfHeight
             ),
+            arrangeOrigin: arrangeOrigin,
             talkbackOrigin: talkbackOrigin
         )
     }
@@ -129,6 +143,9 @@ final class TerminalVisionOrnamentState {
     /// window: the composer reports, the window re-renders, `revision`
     /// bumps, and the mount re-asks the composer for its size.
     private(set) var talkbackController: TalkbackComposerViewController?
+    /// The active tab's ARRANGE KEYS bar (its own slab below the console
+    /// row) while it arranges; identity is the revision.
+    private(set) var arrangeBarController: UIViewController?
     /// Active terminal tab's SIDECAR mount. It is independent of the bottom
     /// console presentation: the active route remains a terminal while this
     /// controller hangs from the scene's trailing edge.
@@ -179,6 +196,7 @@ final class TerminalVisionOrnamentState {
         umdController: UIViewController?,
         helperController: AgentHelperStripViewController?,
         talkbackController: TalkbackComposerViewController? = nil,
+        arrangeBarController: UIViewController? = nil,
         sidePanelController: SidePanelViewController? = nil,
         windowWidth: CGFloat,
         windowHeight: CGFloat = 0,
@@ -188,6 +206,7 @@ final class TerminalVisionOrnamentState {
         self.interfaceStyle = interfaceStyle
         let nextHelper = isAuxiliary ? nil : helperController
         let nextTalkback = isAuxiliary ? nil : talkbackController
+        let nextArrangeBar = isAuxiliary ? nil : arrangeBarController
         // The ornament hosts the whole strip; the card's place inside it is
         // the controller's (and the store's) business, never the ornament's.
         let nextSidePanelSize = sidePanelController == nil
@@ -209,6 +228,7 @@ final class TerminalVisionOrnamentState {
             || self.umdController !== umdController
             || self.helperController !== nextHelper
             || self.talkbackController !== nextTalkback
+            || self.arrangeBarController !== nextArrangeBar
             || self.sidePanelController !== sidePanelController
             || sidePanelSize != nextSidePanelSize
             || helperCollapsed != nextHelperCollapsed
@@ -216,6 +236,15 @@ final class TerminalVisionOrnamentState {
         self.umdController = umdController
         self.helperController = nextHelper
         self.talkbackController = nextTalkback
+        self.arrangeBarController = nextArrangeBar
+        // The console row is one drop surface: a key released over the UMD
+        // or the ARRANGE KEYS slab still lands beside the nearer key.
+        if !isAuxiliary, let umdController {
+            keyClusterContext.installDropTarget(on: umdController.view)
+        }
+        if let nextArrangeBar {
+            keyClusterContext.installDropTarget(on: nextArrangeBar.view)
+        }
         self.sidePanelController = sidePanelController
         sidePanelSize = nextSidePanelSize
         helperCollapsed = nextHelperCollapsed
@@ -236,11 +265,18 @@ final class TerminalVisionOrnamentState {
         umdContentSize = size
     }
 
+    /// A mounted slab reported its own size change (the ARRANGE KEYS bar's
+    /// RESET coming or going): the mounts re-measure on the next revision.
+    func refreshMountedSizes() {
+        revision &+= 1
+    }
+
     func clear() {
         activeTerminalController = nil
         umdController = nil
         helperController = nil
         talkbackController = nil
+        arrangeBarController = nil
         sidePanelController = nil
         sidePanelSize = .zero
         sidePanelCardFrame = .zero
@@ -308,6 +344,7 @@ final class TerminalVisionOrnamentCoordinator {
         umdController: UIViewController?,
         helperController: AgentHelperStripViewController?,
         talkbackController: TalkbackComposerViewController? = nil,
+        arrangeBarController: UIViewController? = nil,
         sidePanelController: SidePanelViewController? = nil,
         windowWidth: CGFloat,
         windowHeight: CGFloat = 0,
@@ -321,6 +358,7 @@ final class TerminalVisionOrnamentCoordinator {
             umdController: umdController,
             helperController: helperController,
             talkbackController: talkbackController,
+            arrangeBarController: arrangeBarController,
             sidePanelController: sidePanelController,
             windowWidth: windowWidth,
             windowHeight: windowHeight,
@@ -539,6 +577,25 @@ private struct TerminalVisionBottomOrnament: View {
                     value: .console
                 )
 
+                if let arrangeBar = state.arrangeBarController {
+                    // The ARRANGE KEYS bar: its own slab below the console row.
+                    TerminalVisionControllerMount(
+                        controller: arrangeBar,
+                        sizing: .arrangeBar,
+                        revision: state.revision,
+                        interfaceStyle: state.interfaceStyle,
+                        onContentSizeChange: { [state] in
+                            Task { @MainActor in state.refreshMountedSizes() }
+                        }
+                    )
+                    .fixedSize()
+                    .modifier(GlassPrototypeSlabGround(cornerRadius: 8))
+                    .layoutValue(
+                        key: TerminalVisionConsoleRoleKey.self,
+                        value: .arrange
+                    )
+                }
+
                 if let talkback = state.talkbackController {
                     // Content-sized like every slab (never window-width),
                     // hung below the console row: the composer's arithmetic
@@ -644,6 +701,7 @@ private struct TerminalVisionStackedDeckLayout: Layout {
 private enum TerminalVisionConsoleRole: Equatable {
     case helper
     case console
+    case arrange
     case talkback
 }
 
@@ -667,6 +725,7 @@ private struct TerminalVisionConsoleLayout: Layout {
         return TerminalVisionConsoleGeometry.resolve(
             helperSize: subview(.helper, in: subviews)?.sizeThatFits(proposal),
             consoleSize: console.sizeThatFits(proposal),
+            arrangeSize: subview(.arrange, in: subviews)?.sizeThatFits(proposal),
             talkbackSize: subview(.talkback, in: subviews)?.sizeThatFits(proposal),
             helperLeading: helperLeading,
             spacing: spacing
@@ -683,11 +742,14 @@ private struct TerminalVisionConsoleLayout: Layout {
         let helper = subview(.helper, in: subviews)
         let helperSize = helper?.sizeThatFits(proposal)
         let consoleSize = console.sizeThatFits(proposal)
+        let arrange = subview(.arrange, in: subviews)
+        let arrangeSize = arrange?.sizeThatFits(proposal)
         let talkback = subview(.talkback, in: subviews)
         let talkbackSize = talkback?.sizeThatFits(proposal)
         let geometry = TerminalVisionConsoleGeometry.resolve(
             helperSize: helperSize,
             consoleSize: consoleSize,
+            arrangeSize: arrangeSize,
             talkbackSize: talkbackSize,
             helperLeading: helperLeading,
             spacing: spacing
@@ -696,47 +758,18 @@ private struct TerminalVisionConsoleLayout: Layout {
             x: bounds.midX - geometry.size.width / 2,
             y: bounds.midY - geometry.size.height / 2
         )
-        console.place(
-            at: CGPoint(
-                x: origin.x + geometry.consoleOrigin.x,
-                y: origin.y + geometry.consoleOrigin.y
-            ),
-            anchor: .topLeading,
-            proposal: ProposedViewSize(
-                width: consoleSize.width,
-                height: consoleSize.height
-            )
-        )
-        if let helper,
-           let helperSize,
-           let helperOrigin = geometry.helperOrigin {
-            helper.place(
-                at: CGPoint(
-                    x: origin.x + helperOrigin.x,
-                    y: origin.y + helperOrigin.y
-                ),
+        func place(_ view: LayoutSubview?, at slot: CGPoint?, size: CGSize?) {
+            guard let view, let slot, let size else { return }
+            view.place(
+                at: CGPoint(x: origin.x + slot.x, y: origin.y + slot.y),
                 anchor: .topLeading,
-                proposal: ProposedViewSize(
-                    width: helperSize.width,
-                    height: helperSize.height
-                )
+                proposal: ProposedViewSize(width: size.width, height: size.height)
             )
         }
-        if let talkback,
-           let talkbackSize,
-           let talkbackOrigin = geometry.talkbackOrigin {
-            talkback.place(
-                at: CGPoint(
-                    x: origin.x + talkbackOrigin.x,
-                    y: origin.y + talkbackOrigin.y
-                ),
-                anchor: .topLeading,
-                proposal: ProposedViewSize(
-                    width: talkbackSize.width,
-                    height: talkbackSize.height
-                )
-            )
-        }
+        place(console, at: geometry.consoleOrigin, size: consoleSize)
+        place(helper, at: geometry.helperOrigin, size: helperSize)
+        place(arrange, at: geometry.arrangeOrigin, size: arrangeSize)
+        place(talkback, at: geometry.talkbackOrigin, size: talkbackSize)
     }
 
     private func subview(_ role: TerminalVisionConsoleRole, in subviews: Subviews) -> LayoutSubview? {
@@ -1092,6 +1125,8 @@ private enum TerminalVisionControllerSizing: Equatable {
     /// The Talkback slab: the composer's own arithmetic at the width the
     /// window handed it.
     case talkback
+    /// The ARRANGE KEYS bar: its compressed fitting size.
+    case arrangeBar
 }
 
 private struct TerminalVisionControllerMount: UIViewControllerRepresentable {
@@ -1238,6 +1273,10 @@ private final class TerminalVisionControllerHost: UIViewController {
         case .talkback:
             if let composer = content as? TalkbackComposerViewController {
                 return composer.fittingContentSize()
+            }
+        case .arrangeBar:
+            if let bar = content as? ArrangeKeysBarViewController {
+                return bar.fittingContentSize()
             }
         }
         content.loadViewIfNeeded()

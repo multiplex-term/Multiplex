@@ -176,7 +176,7 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertNotNil(control("umd.tmux", in: ornament.view))
     }
 
-    func testWideRailsCarryGuideAsItsOwnChipNeverInTheOverflow() throws {
+    func testWideRailsCarryGuideAsAChipOnIPadAndInTheOverflowOnVisionOS() throws {
         let terminal = terminalController(useMosh: false)
         let controller = UMDBarViewController(configuration: configuration(
             controller: terminal,
@@ -193,14 +193,27 @@ final class UMDBarUIKitTests: XCTestCase {
             hardwareKeyboardConnected: true
         ))
         XCTAssertNotNil(view("umd.shell.wide", in: controller.view))
-        let guide = try XCTUnwrap(control("umd.guide", in: controller.view))
-        XCTAssertEqual(guide.accessibilityLabel, "Guide")
-        // With GUIDE out of the menu the keyboard lock is its only other
-        // resident — hidden here (a hardware keyboard is connected, and on
-        // visionOS the row is compiled out), so the ⋯ has nothing to carry.
-        XCTAssertNil(control("umd.overflow", in: controller.view))
-
-        #if !os(visionOS)
+        let overflow = try XCTUnwrap(control("umd.overflow", in: controller.view) as? UIButton)
+        let regular = UMDBarViewController(configuration: configuration(controller: terminal))
+        regular.loadViewIfNeeded()
+        #if os(visionOS)
+        XCTAssertNil(control("umd.guide", in: controller.view))
+        XCTAssertNil(control("umd.guide", in: regular.view))
+        XCTAssertEqual(
+            actions(in: try XCTUnwrap(overflow.menu)).map(\.title),
+            ["Arrange Keys…", "Guide"]
+        )
+        #else
+        XCTAssertEqual(
+            try XCTUnwrap(control("umd.guide", in: controller.view)).accessibilityLabel,
+            "Guide"
+        )
+        XCTAssertNotNil(control("umd.guide", in: regular.view))
+        // A hardware keyboard hides the lock row; Arrange Keys stays.
+        XCTAssertEqual(
+            actions(in: try XCTUnwrap(overflow.menu)).map(\.title),
+            ["Arrange Keys…"]
+        )
         controller.applyObservedState(UMDBarObservedState(
             status: .live,
             contactLost: false,
@@ -208,24 +221,12 @@ final class UMDBarUIKitTests: XCTestCase {
             keyboardLocked: false,
             hardwareKeyboardConnected: false
         ))
-        let lock = try XCTUnwrap(
-            control("umd.overflow", in: controller.view) as? UIButton
-        )
+        let lock = try XCTUnwrap(control("umd.overflow", in: controller.view) as? UIButton)
         XCTAssertEqual(
             actions(in: try XCTUnwrap(lock.menu)).map(\.title),
-            ["Lock Keyboard Closed"]
+            ["Lock Keyboard Closed", "Arrange Keys…"]
         )
-        XCTAssertNotNil(control("umd.guide", in: controller.view))
         #endif
-
-        let regular = UMDBarViewController(configuration: configuration(
-            controller: terminal
-        ))
-        regular.loadViewIfNeeded()
-        XCTAssertNotNil(
-            control("umd.guide", in: regular.view),
-            "the classic window rail carries the chip too"
-        )
     }
 
     func testCompactOverflowContainsDisplacedActionsMergeDestructionAndFileSources() throws {
@@ -315,6 +316,48 @@ final class UMDBarUIKitTests: XCTestCase {
                 .contains("Unlock Keyboard")
         )
         #endif
+    }
+
+    func testOverflowCarriesArrangeKeysThatReadsDoneWhileArranging() throws {
+        let terminal = terminalController(useMosh: false)
+        let controller = UMDBarViewController(configuration: configuration(
+            controller: terminal,
+            style: .shell,
+            availableWidth: 375
+        ))
+        controller.loadViewIfNeeded()
+        controller.applyObservedState(UMDBarObservedState(
+            status: .live,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: false,
+            hardwareKeyboardConnected: false
+        ))
+        func arrangeRow() throws -> UIAction? {
+            let overflow = try XCTUnwrap(
+                control("umd.overflow", in: controller.view) as? UIButton
+            )
+            return actions(in: try XCTUnwrap(overflow.menu)).first {
+                $0.identifier.rawValue == "umd.arrangeKeys"
+            }
+        }
+
+        // Every platform: the rail arranges on iPad/iPhone, the ornament's
+        // cluster on visionOS.
+        XCTAssertEqual(try arrangeRow()?.title, "Arrange Keys…")
+        controller.perform(.toggleKeyBarArranging)
+        XCTAssertTrue(terminal.keyBarArranging)
+        controller.applyObservedState(UMDBarObservedState(
+            status: .live,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: false,
+            hardwareKeyboardConnected: false,
+            keyBarArranging: true
+        ))
+        XCTAssertEqual(try arrangeRow()?.title, "Done Arranging Keys")
+        controller.perform(.toggleKeyBarArranging)
+        XCTAssertFalse(terminal.keyBarArranging)
     }
 
     func testStatusClusterPreservesMoshConnectionAttentionAndKeychainSemantics() throws {
