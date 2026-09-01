@@ -69,14 +69,14 @@ final class BackgroundRefresh {
     /// a later registration.
     ///
     /// ⚠ `using:` must be `.main`, never `nil`. `nil` means *a default
-    /// background queue*, so the launch handler — and the expiration handler,
-    /// which the system delivers on the same queue — run off-main and every
+    /// background queue*, so the launch handler runs off-main and
     /// `MainActor.assumeIsolated` below traps. That shipped in 1.3.0 build
     /// 202608050 and crashed on the first real wake (EXC_BREAKPOINT in
     /// `_dispatch_assert_queue_fail`, iPad, 2026-08-05). The simulator cannot
     /// catch it: `submit` always throws there, so no wake ever reaches this
     /// closure and the `debug.bgrefresh` hook registers its own `.main`
-    /// dispatch instead.
+    /// dispatch instead. `.main` covers only THIS closure — the expiration
+    /// handler ignores the registration queue (see `run`).
     func register() {
         BGTaskScheduler.shared.register(
             forTaskWithIdentifier: Self.taskIdentifier,
@@ -156,9 +156,13 @@ final class BackgroundRefresh {
             guard !Task.isCancelled else { return }
             self?.finish(task, work: work, success: true, reason: "budget")
         }
+        // ⚠ The expiration handler ignores the `register(using:)` queue —
+        // iOS 27's bulk-expiry path (taken as the device sleeps) delivers it
+        // on a background worker thread, where `assumeIsolated` traps. Hop
+        // explicitly; `Task.cancel()` is thread-safe outside the hop.
         task.expirationHandler = { [weak self] in
-            MainActor.assumeIsolated {
-                deadline.cancel()
+            deadline.cancel()
+            Task { @MainActor in
                 // iOS is taking the time back now; report honestly so the
                 // scheduler does not learn to give us less.
                 self?.finish(task, work: work, success: false, reason: "expired")
