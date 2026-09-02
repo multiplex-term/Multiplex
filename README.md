@@ -55,7 +55,13 @@ Some features require Multiplex Pro; see [`docs/store-metadata.md`](docs/store-m
 
 ## Building
 
-Requires Xcode with the visionOS SDK and [XcodeGen](https://github.com/yonaskolb/XcodeGen). The project is generated, so edit `project.yml`, not the `.xcodeproj`.
+Requires Xcode with the visionOS SDK and [XcodeGen](https://github.com/yonaskolb/XcodeGen). Install the command-line prerequisites with [Homebrew](https://brew.sh/):
+
+```sh
+brew install xcodegen swiftlint
+```
+
+The Xcode project is generated, so edit `project.yml`, not the `.xcodeproj`. Regenerate it after project configuration changes:
 
 ```sh
 xcodegen generate
@@ -81,7 +87,7 @@ Point `MULTIPLEX_SEED_HOST` at `Tools/dev-sshd/state/seed.json` to seed a DEBUG 
 
 ## mpx CLI
 
-[`mpx`](https://github.com/multiplex-term/mpx-cli) is the companion CLI for binding a machine. Run `mpx bind` on the remote host and it appears on the deck with the app's SSH key enrolled and the host key fingerprints pinned from the first connection — nothing typed. The offer reaches the app by QR, local-network announcement with a PIN, or `--copy` to the clipboard; the default handshake never moves a private key.
+[`mpx`](https://multiplexterm.dev/mpx/) is the companion CLI for binding a machine. Run `mpx bind` on the remote host and it appears on the deck with the app's SSH key enrolled and the host key fingerprints pinned from the first connection — nothing typed. The offer reaches the app by QR, local-network announcement with a PIN, or `--copy` to the clipboard; the default handshake never moves a private key.
 
 Install and usage: [multiplex-term/mpx-cli](https://github.com/multiplex-term/mpx-cli).
 
