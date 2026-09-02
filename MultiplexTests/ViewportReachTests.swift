@@ -38,6 +38,13 @@ final class ViewportReachTests: XCTestCase {
         }
     }
 
+    func testIPv4MappedPrivateAddressesKeepTheirIPv4Reach() {
+        XCTAssertEqual(classify("http://[::ffff:192.168.1.68]:5173/"), .lan)
+        XCTAssertEqual(classify("http://[::ffff:10.0.0.5]/"), .lan)
+        XCTAssertEqual(classify("http://[::ffff:127.0.0.1]:8080/"), .remoteLoopback)
+        XCTAssertEqual(classify("http://[::ffff:8.8.8.8]/"), .internet)
+    }
+
     func testUnqualifiedSingleLabelIsLAN() {
         // A bare machine name resolves through the local network's search
         // domains — LAN by construction.

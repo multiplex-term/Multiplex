@@ -56,11 +56,19 @@ enum ViewportReach: Equatable {
         if host == "localhost" || host.hasSuffix(".localhost") { return true }
         if host == "0.0.0.0" || host == "::" || host == "::1" { return true }
         if let octets = ipv4Octets(host) { return octets[0] == 127 }
+        if let octets = ipv4MappedOctets(host) { return octets[0] == 127 }
         return false
     }
 
     private static func isLAN(_ host: String) -> Bool {
         if let octets = ipv4Octets(host) {
+            if octets[0] == 10 { return true }
+            if octets[0] == 192, octets[1] == 168 { return true }
+            if octets[0] == 172, (16...31).contains(octets[1]) { return true }
+            if octets[0] == 169, octets[1] == 254 { return true }
+            return false
+        }
+        if let octets = ipv4MappedOctets(host) {
             if octets[0] == 10 { return true }
             if octets[0] == 192, octets[1] == 168 { return true }
             if octets[0] == 172, (16...31).contains(octets[1]) { return true }
@@ -76,6 +84,14 @@ enum ViewportReach: Equatable {
         // network's search domains — LAN by construction.
         if !host.contains(".") && !host.contains(":") { return true }
         return false
+    }
+
+    /// The IPv4 payload of the common `::ffff:w.x.y.z` mapped form, or nil.
+    private static func ipv4MappedOctets(_ host: String) -> [Int]? {
+        guard let separator = host.lastIndex(of: ":"),
+              host[..<separator] == "::ffff"
+        else { return nil }
+        return ipv4Octets(String(host[host.index(after: separator)...]))
     }
 
     /// The four octets of a dotted-quad IPv4 literal, or nil for anything
