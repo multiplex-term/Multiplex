@@ -2,6 +2,7 @@ NEW SINCE 1.4.1
 • CTRL SHORTCUTS — holding CTRL now replaces an already-open C / B quick-key slab with Key Commands instead of leaving both open.
 • Vision Pro: GUIDE moves from the console row into the three-dot menu.
 • ARRANGE KEYS — the terminal's three-dot menu gains Arrange Keys: the keys wiggle, drag any key onto the key it should sit beside (the same drag and drop as the window's tabs), then DONE in the ARRANGE KEYS bar beside them (above the rail on iPad and iPhone; below the console row on Vision Pro, where a key can be dropped on the other side of the title). RESET there restores the shipped order. The order is remembered on this device and applies to every tab.
+• ⌗ VIEWPORT — an IPv4-mapped IPv6 address (::ffff:…, in any spelling) now gets the reach of the IPv4 it wraps, so a mapped localhost opens VIA the host instead of dialling this device.
 
 PLEASE TRY
 1. Tap CTRL to open C / B, then hold CTRL; only Key Commands should remain.

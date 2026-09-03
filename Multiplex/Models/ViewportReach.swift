@@ -37,7 +37,10 @@ enum ViewportReach: Equatable {
     /// The same verdict for a bare host — callers that already hold the
     /// authority (schemeless link resolution) skip building a probe URL.
     static func classify(host: String) -> ViewportReach {
-        let host = host.lowercased()
+        let lowered = host.lowercased()
+        // An IPv4-mapped IPv6 literal names its IPv4 payload; unmap once so
+        // every spelling takes the plain IPv4 verdict below.
+        let host = ipv4MappedLiteral(lowered) ?? lowered
         if isLoopback(host) { return .remoteLoopback }
         if isLAN(host) { return .lan }
         return .internet
@@ -56,19 +59,11 @@ enum ViewportReach: Equatable {
         if host == "localhost" || host.hasSuffix(".localhost") { return true }
         if host == "0.0.0.0" || host == "::" || host == "::1" { return true }
         if let octets = ipv4Octets(host) { return octets[0] == 127 }
-        if let octets = ipv4MappedOctets(host) { return octets[0] == 127 }
         return false
     }
 
     private static func isLAN(_ host: String) -> Bool {
         if let octets = ipv4Octets(host) {
-            if octets[0] == 10 { return true }
-            if octets[0] == 192, octets[1] == 168 { return true }
-            if octets[0] == 172, (16...31).contains(octets[1]) { return true }
-            if octets[0] == 169, octets[1] == 254 { return true }
-            return false
-        }
-        if let octets = ipv4MappedOctets(host) {
             if octets[0] == 10 { return true }
             if octets[0] == 192, octets[1] == 168 { return true }
             if octets[0] == 172, (16...31).contains(octets[1]) { return true }
@@ -86,12 +81,41 @@ enum ViewportReach: Equatable {
         return false
     }
 
-    /// The IPv4 payload of the common `::ffff:w.x.y.z` mapped form, or nil.
-    private static func ipv4MappedOctets(_ host: String) -> [Int]? {
-        guard let separator = host.lastIndex(of: ":"),
-              host[..<separator] == "::ffff"
+    /// The dotted quad inside an IPv4-mapped IPv6 literal (RFC 4291
+    /// §2.5.5.2) in any spelling — `::ffff:10.0.0.5`, `::ffff:a00:5`,
+    /// `0:0:0:0:0:ffff:10.0.0.5` — or nil for anything else. Servers print
+    /// all three (Go and Java favour the uncompressed form).
+    private static func ipv4MappedLiteral(_ host: String) -> String? {
+        let halves = host.components(separatedBy: "::")
+        guard host.contains(":"), halves.count <= 2 else { return nil }
+        func groups(_ half: String) -> [String] {
+            half.isEmpty ? [] : half.components(separatedBy: ":")
+        }
+        var head = groups(halves[0])
+        var tail = halves.count == 2 ? groups(halves[1]) : []
+        // A dotted-quad tail stands in for the last two groups.
+        var quad: String?
+        if let last = (tail.isEmpty ? head : tail).last, last.contains(".") {
+            guard ipv4Octets(last) != nil else { return nil }
+            quad = last
+            if tail.isEmpty { head.removeLast() } else { tail.removeLast() }
+        }
+        let width = quad == nil ? 8 : 6
+        let known = head.count + tail.count
+        if halves.count == 2 {
+            guard known < width else { return nil }
+            head += Array(repeating: "0", count: width - known) + tail
+        } else {
+            guard known == width else { return nil }
+        }
+        let words = head.map { UInt16($0, radix: 16) }
+        guard words.count == width,
+              words.prefix(5).allSatisfy({ $0 == 0 }),
+              words[5] == 0xffff
         else { return nil }
-        return ipv4Octets(String(host[host.index(after: separator)...]))
+        if let quad { return quad }
+        guard let high = words[6], let low = words[7] else { return nil }
+        return "\(high >> 8).\(high & 0xff).\(low >> 8).\(low & 0xff)"
     }
 
     /// The four octets of a dotted-quad IPv4 literal, or nil for anything

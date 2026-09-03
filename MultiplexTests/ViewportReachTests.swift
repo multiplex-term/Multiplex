@@ -45,6 +45,22 @@ final class ViewportReachTests: XCTestCase {
         XCTAssertEqual(classify("http://[::ffff:8.8.8.8]/"), .internet)
     }
 
+    func testIPv4MappedSpellingsAllUnmap() {
+        // Hex-compressed and uncompressed mapped forms name the same
+        // address as the dotted one — including the bind-all `0.0.0.0`.
+        XCTAssertEqual(classify("http://[::ffff:7f00:1]:8080/"), .remoteLoopback)
+        XCTAssertEqual(classify("http://[0:0:0:0:0:ffff:127.0.0.1]:8080/"), .remoteLoopback)
+        XCTAssertEqual(classify("http://[0:0:0:0:0:ffff:7f00:1]/"), .remoteLoopback)
+        XCTAssertEqual(classify("http://[::ffff:0.0.0.0]:3000/"), .remoteLoopback)
+        XCTAssertEqual(classify("http://[::ffff:c0a8:144]:5173/"), .lan)
+        XCTAssertEqual(classify("http://[::FFFF:169.254.10.10]/"), .lan)
+        XCTAssertEqual(classify("http://[0:0:0:0:0:ffff:808:808]/"), .internet)
+        // Not mapped: a wrong prefix, or too many groups, stays IPv6.
+        XCTAssertEqual(classify("http://[::fffe:7f00:1]/"), .internet)
+        XCTAssertEqual(classify("http://[1::ffff:127.0.0.1]/"), .internet)
+        XCTAssertEqual(classify("http://[fd00::ffff:127.0.0.1]/"), .lan)
+    }
+
     func testUnqualifiedSingleLabelIsLAN() {
         // A bare machine name resolves through the local network's search
         // domains — LAN by construction.
