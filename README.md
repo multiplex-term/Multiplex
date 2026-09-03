@@ -55,7 +55,13 @@ Some features require Multiplex Pro; see [`docs/store-metadata.md`](docs/store-m
 
 ## Building
 
-Requires Xcode with the visionOS SDK and [XcodeGen](https://github.com/yonaskolb/XcodeGen). The project is generated, so edit `project.yml`, not the `.xcodeproj`.
+Requires Xcode with the visionOS SDK and [XcodeGen](https://github.com/yonaskolb/XcodeGen). Install the command-line prerequisites with [Homebrew](https://brew.sh/):
+
+```sh
+brew install xcodegen swiftlint
+```
+
+The Xcode project is generated, so edit `project.yml`, not the `.xcodeproj`. Regenerate it after project configuration changes:
 
 ```sh
 xcodegen generate
