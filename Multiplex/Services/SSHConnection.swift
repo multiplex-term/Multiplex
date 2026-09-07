@@ -3,6 +3,7 @@ import Crypto
 import Foundation
 import NIOCore
 import NIOSSH
+import OSLog
 
 /// A passphrase entered from the connection-time prompt. Every connection to
 /// the same host can reuse it for the life of this process, while persistence
@@ -159,6 +160,7 @@ enum SSHConnectionError: Error {
     case incorrectKeyPassphrase
     case unsupportedKey
     case connectFailed(String)
+    case commandFailed(exitCode: Int, stderr: String)
     case notConnected
     /// The server's identity didn't match what this host has recorded. Kept
     /// distinct from `connectFailed` because it is the one failure the user
@@ -170,7 +172,7 @@ enum SSHConnectionError: Error {
         case .keyPassphraseRequired: .required
         case .incorrectKeyPassphrase: .incorrect
         case .missingCredentials, .unsupportedKey, .connectFailed, .notConnected,
-             .hostKeyRefused: nil
+             .hostKeyRefused, .commandFailed: nil
         }
     }
 
@@ -186,6 +188,10 @@ enum SSHConnectionError: Error {
             String(localized: "The private key for \(host.name) couldn't be read. Paste an OpenSSH ed25519 or RSA key.")
         case .connectFailed(let detail):
             String(localized: "Couldn't reach \(host.name) (\(detail)).")
+        case .commandFailed(let exitCode, let stderr):
+            RemoteShellDiagnosis.Rejection(
+                exitCode: exitCode, stderrHead: stderr, shellName: nil
+            ).message(host: host)
         case .notConnected:
             String(localized: "Not connected to \(host.name).")
         case .hostKeyRefused(let refusal):
@@ -434,15 +440,37 @@ actor SSHConnection {
     /// `commandOutputTooLarge` past it, which callers already treat as a
     /// failed command.
     static let maxExecResponseBytes = 16 << 20
+    private static let maxExecStderrBytes = 2 << 10
+    private static let execLogger = Logger(subsystem: "app.multiplexterm.multiplex", category: "exec")
 
     func exec(
         _ command: String,
         maxResponseBytes: Int = SSHConnection.maxExecResponseBytes
     ) async throws -> String {
         guard let client else { throw SSHConnectionError.notConnected }
-        let buffer = try await client.executeCommand(
-            command, maxResponseSize: maxResponseBytes)
-        return String(decoding: buffer.readableBytesView, as: UTF8.self)
+        var stdout = ByteBuffer()
+        var stderr = Data()
+        do {
+            let stream = try await client.executeCommandStream(command)
+            for try await chunk in stream {
+                switch chunk {
+                case .stdout(let buffer):
+                    guard buffer.readableBytes <= maxResponseBytes - stdout.readableBytes else {
+                        throw CitadelError.commandOutputTooLarge
+                    }
+                    stdout.writeImmutableBuffer(buffer)
+                case .stderr(let buffer):
+                    stderr.append(contentsOf: buffer.readableBytesView.prefix(Self.maxExecStderrBytes - stderr.count))
+                }
+            }
+        } catch let failure as SSHClient.CommandFailed {
+            let head = String(decoding: stderr, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Escape line breaks for one log line; remote stderr can contain private data.
+            Self.execLogger.error("Command failed (exit \(failure.exitCode)): \(head.debugDescription, privacy: .private)")
+            throw SSHConnectionError.commandFailed(exitCode: failure.exitCode, stderr: head)
+        }
+        return String(decoding: stdout.readableBytesView, as: UTF8.self)
     }
 
     // MARK: SFTP (file drops)

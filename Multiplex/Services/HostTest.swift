@@ -39,6 +39,16 @@ enum HostTest {
                 backend: host.sessionBackend,
                 checksMosh: host.useMosh
             ))
+        } catch SSHConnectionError.commandFailed(let exitCode, let stderr) {
+            let shellOutput = try? await deadlined(seconds: execDeadline) {
+                try await connection.exec(RemoteShellDiagnosis.command)
+            }
+            let rejection = RemoteShellDiagnosis.Rejection(
+                exitCode: exitCode,
+                stderrHead: stderr,
+                shellName: shellOutput.flatMap(RemoteShellDiagnosis.shellName(from:))
+            )
+            return .failed(rejection.message(host: host))
         } catch {
             return .failed(failureMessage(for: error, host: host))
         }
@@ -84,6 +94,9 @@ enum HostTest {
 
     /// Words that say what to fix, not what the transport saw.
     static func failureMessage(for error: Error, host: Host) -> String {
+        if let rejection = error as? RemoteShellDiagnosis.Rejection {
+            return rejection.message(host: host)
+        }
         if let ssh = error as? SSHConnectionError {
             switch ssh {
             case .missingCredentials:
@@ -101,6 +114,8 @@ enum HostTest {
                     """)
             case .connectFailed(let detail):
                 return connectFailureMessage(detail, host: host)
+            case .commandFailed:
+                return ssh.userMessage(host: host)
             case .notConnected:
                 return String(localized: "The connection closed before the check finished. Try again.")
             case .hostKeyRefused(let refusal):

@@ -103,7 +103,7 @@ Citadel 0.12.0 is pinned because 0.12.1 changed its `swift-nio-ssh` source to an
 
 ## Known limits
 
-- PATH fixups assume a POSIX-like login shell; csh/fish may need tmux on the default PATH.
+- fish/csh login shells can't run the probe yet; the deck tile and Test Connection now name the shell.
 
 ## Credits
 

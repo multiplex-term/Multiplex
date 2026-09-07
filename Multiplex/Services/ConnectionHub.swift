@@ -697,7 +697,22 @@ final class HostConnectionModel {
                     mayRetry: false
                 )
             } else {
-                markFailed(error, registerConnectFailure: !reusedLink)
+                var failure: Error = error
+                if case SSHConnectionError.commandFailed(let exitCode, let stderr) = error,
+                   let connection {
+                    // Diagnose on the failing primary's link before markFailed closes it.
+                    // No PATH prelude: this exec must also parse in fish/csh.
+                    let shellOutput = try? await deadlined {
+                        try await connection.exec(RemoteShellDiagnosis.command)
+                    }
+                    guard refreshGeneration == generation, !Task.isCancelled else { return }
+                    failure = RemoteShellDiagnosis.Rejection(
+                        exitCode: exitCode,
+                        stderrHead: stderr,
+                        shellName: shellOutput.flatMap(RemoteShellDiagnosis.shellName(from:))
+                    )
+                }
+                markFailed(failure, registerConnectFailure: !reusedLink)
             }
         }
     }
@@ -1659,6 +1674,9 @@ final class HostConnectionModel {
     }
 
     private func friendlyMessage(for error: Error) -> String {
+        if let rejection = error as? RemoteShellDiagnosis.Rejection {
+            return rejection.message(host: host)
+        }
         if let sshError = error as? SSHConnectionError {
             return sshError.userMessage(host: host)
         }

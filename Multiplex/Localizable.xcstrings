@@ -16661,6 +16661,116 @@
           }
         }
       }
+    },
+    "%@ rejected Multiplex's commands (exit %@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ rejected Multiplex's commands (exit %2$@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@はMultiplexのコマンドを拒否しました（終了コード%2$@）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 拒絕了 Multiplex 的指令（結束代碼 %2$@）"
+          }
+        }
+      }
+    },
+    "%@ rejected Multiplex's commands (exit %@): %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ rejected Multiplex's commands (exit %2$@): %3$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@はMultiplexのコマンドを拒否しました（終了コード%2$@）：%3$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 拒絕了 Multiplex 的指令（結束代碼 %2$@）：%3$@"
+          }
+        }
+      }
+    },
+    "%@'s login shell is %@. Multiplex's remote commands need a POSIX shell such as bash or zsh — change the account's login shell (chsh) or keep %@ for interactive use only." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@'s login shell is %2$@. Multiplex's remote commands need a POSIX shell such as bash or zsh — change the account's login shell (chsh) or keep %3$@ for interactive use only."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@のログインシェルは%2$@です。MultiplexのリモートコマンドにはbashやzshなどのPOSIXシェルが必要です — アカウントのログインシェルを変更（chsh）するか、%3$@は対話用途のみにしてください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 的登入 shell 是 %2$@。Multiplex 的遠端指令需要 POSIX shell（例如 bash 或 zsh）— 請更改帳號的登入 shell（chsh），或僅在互動使用時保留 %3$@。"
+          }
+        }
+      }
+    },
+    "%@'s shell (%@) rejected Multiplex's commands (exit %@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@'s shell (%2$@) rejected Multiplex's commands (exit %3$@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@のシェル（%2$@）はMultiplexのコマンドを拒否しました（終了コード%3$@）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 的 shell（%2$@）拒絕了 Multiplex 的指令（結束代碼 %3$@）"
+          }
+        }
+      }
+    },
+    "%@'s shell (%@) rejected Multiplex's commands (exit %@): %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@'s shell (%2$@) rejected Multiplex's commands (exit %3$@): %4$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@のシェル（%2$@）はMultiplexのコマンドを拒否しました（終了コード%3$@）：%4$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 的 shell（%2$@）拒絕了 Multiplex 的指令（結束代碼 %3$@）：%4$@"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

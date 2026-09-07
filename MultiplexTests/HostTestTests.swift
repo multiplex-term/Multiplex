@@ -69,6 +69,31 @@ final class HostTestTests: XCTestCase {
 
     // MARK: Failure wording
 
+    func testBareCommandFailureUsesPlainWordingAndIsNotAPassphraseFailure() {
+        let error = SSHConnectionError.commandFailed(exitCode: 127, stderr: "  parse error\nmore detail\n")
+        let expected = "devbox rejected Multiplex's commands (exit 127): parse error"
+        XCTAssertEqual(HostTest.failureMessage(for: error, host: host()), expected)
+        XCTAssertEqual(error.userMessage(host: host()), expected)
+        XCTAssertNil(error.keyPassphraseReason)
+    }
+
+    func testBareCommandFailureWithoutStderrOmitsTheColon() {
+        let error = SSHConnectionError.commandFailed(exitCode: 1, stderr: " \n\t")
+        let expected = "devbox rejected Multiplex's commands (exit 1)"
+        XCTAssertEqual(HostTest.failureMessage(for: error, host: host()), expected)
+        XCTAssertEqual(error.userMessage(host: host()), expected)
+    }
+
+    func testDiagnosedCommandFailureUsesShellWording() {
+        for shell: String? in ["fish", "csh", "zsh", nil] {
+            let rejection = RemoteShellDiagnosis.Rejection(exitCode: 127, stderrHead: "parse error", shellName: shell)
+            XCTAssertEqual(
+                HostTest.failureMessage(for: rejection, host: host()),
+                rejection.message(host: host())
+            )
+        }
+    }
+
     func testMissingCredentialsNameTheMissingSecret() {
         XCTAssertEqual(
             HostTest.failureMessage(for: SSHConnectionError.missingCredentials, host: host()),

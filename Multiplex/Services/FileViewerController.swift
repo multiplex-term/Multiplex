@@ -1164,7 +1164,7 @@ final class FileViewerController: AuxiliaryPaneController {
             case .notConnected:
                 return connectionError.userMessage(host: host)
                     + " " + String(localized: "REFRESH dials again.")
-            case .missingCredentials, .unsupportedKey, .connectFailed, .hostKeyRefused:
+            case .missingCredentials, .unsupportedKey, .connectFailed, .hostKeyRefused, .commandFailed:
                 // One copy source for connection failures, app-wide.
                 return connectionError.userMessage(host: host)
             }

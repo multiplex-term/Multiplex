@@ -115,7 +115,7 @@ approaches. Don't re-litigate a recorded decision without new facts.
   a host gets one: the bind OFFER, an expected key pasted into Add Host, or
   trust-on-first-use. Only the third has a window, and a host added before
   pinning shipped is always in it — its next connection is the trust anchor.
-- csh/fish remote shells may need tmux on the default PATH (the probe
-  prepends common Homebrew/local dirs but assumes POSIX-ish login shells).
+- fish/csh login shells can't run the probe yet; the deck tile and Test
+  Connection now name the shell.
 - Held-backspace auto-repeat rides an unverified input filler — see
   `docs/agents/input-and-windows.md`.

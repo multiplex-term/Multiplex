@@ -3,6 +3,12 @@
 Load-bearing decisions split from AGENTS.md — read before touching TmuxProbe,
 HerdrProbe, session creation/targeting, or file attach/drop.
 
+- **Login-shell rejection is diagnosed, not worked around.** Citadel drops
+  stderr by default; `SSHConnection.exec` keeps a bounded 2 KiB head and throws
+  `.commandFailed`. Every probe/check builder exits 0 by construction, so a
+  non-zero exit means the login shell refused the script (fish = 127, tcsh = 1).
+  The hub's primary failure and HostTest run `RemoteShellDiagnosis` to name it:
+  `echo "$SHELL"` is the one command that must never get the PATH prelude.
 - **tmux `-F` sanitizes control chars** (0x1F → `_`): the probe format is
   space-separated with the variable-length name last, correlated by
   `session_id`, tail-rejoined on parse. Don't switch to a control-char
