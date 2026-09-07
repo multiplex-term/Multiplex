@@ -1,6 +1,6 @@
-Multiplex 1.4.1 — links and paths open beside the terminal on iPad, the app speaks Traditional Chinese and Japanese, and Antigravity CLI and Hermes Agent join the agent roster.
+Multiplex 1.4.2 — arrange the keys your way, connect to fish and csh hosts, and open remote web addresses more reliably.
 
-• On iPad a confirmed web link or file path opens in a side panel next to the pane instead of a new tab — the terminal never changes size. Drag its edge to resize it, open another and it takes the first one's place, or press TAB to move it into a tab. Open File from Shortcuts lands there too.
-• Traditional Chinese and Japanese: sheets, alerts, menus, the Guide and notifications are translated. Pick the language per app in Settings ▸ Multiplex ▸ Language — the LANGUAGE row in Multiplex Settings takes you there. The short key labels stay English.
-• Antigravity CLI and Hermes Agent join the agent roster: both are detected in panes, each with its own chip strip, NEW SESSION launch with model and first prompt, and a place in widgets and Shortcuts. Hermes Agent runs the prompt, then reopens on that conversation.
-• Copy a session's attach command: long-press a session tile and pick Copy Command for Handoff — the clipboard gets the line that attaches that very session from a terminal on the host machine itself, tmux and herdr alike.
+• Arrange Keys: open the terminal's three-dot menu, drag keys into your preferred order, then press DONE. RESET restores the shipped order. Your layout is remembered on this device and applies to every tab.
+• Hosts with fish or csh now work: Multiplex runs its remote commands through sh, so Test Connection, deck refresh, New Session and attach work without changing the host's login shell. If a probe still fails, the error includes shell diagnostics.
+• CTRL panels no longer stack: holding CTRL replaces an open C / B quick-key panel with Key Commands instead of leaving both open.
+• The viewport recognises IPv4-mapped IPv6 addresses in every spelling. A mapped localhost opens via the SSH host rather than connecting to this device, and local-network addresses get the right reach label.

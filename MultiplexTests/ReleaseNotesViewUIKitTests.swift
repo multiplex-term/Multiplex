@@ -20,7 +20,6 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
         }
         XCTAssertTrue(rendered.contains(ReleaseNotes.promise))
         XCTAssertTrue(rendered.contains(ReleaseNotes.version))
-        XCTAssertTrue(rendered.contains("iPad"), "the platform-scoped row keeps its tag")
 
         if let alsoLine = ReleaseNotes.alsoLine(for: .pad) {
             XCTAssertTrue(rendered.contains(alsoLine))
@@ -30,19 +29,19 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
         XCTAssertNotNil(chip(named: "whatsNew.done", in: controller.view))
     }
 
-    /// Vision Pro is told about the side panel; an iPhone, which never gets
-    /// one, is not.
-    func testTheVisionCardShowsTheSidePanelAndThePhoneCardDoesNot() {
+    func testTheVisionCardMentionsGuideAndThePhoneCardDoesNot() {
         let vision = WhatsNewViewController(platform: .vision)
         render(vision, width: 620, height: 700)
         let renderedVision = renderedText(in: vision.view).joined(separator: "\n")
-        XCTAssertTrue(renderedVision.contains("LINKS AND PATHS OPEN BESIDE THE TERMINAL"))
+        XCTAssertTrue(renderedVision.contains("Guide in the three-dot menu"))
+        XCTAssertTrue(renderedVision.contains("CTRL PANELS NO LONGER STACK"))
 
         let phone = WhatsNewViewController(platform: .phone)
         render(phone, width: 375, height: 700)
         let renderedPhone = renderedText(in: phone.view).joined(separator: "\n")
-        XCTAssertFalse(renderedPhone.contains("LINKS AND PATHS OPEN BESIDE THE TERMINAL"))
-        XCTAssertTrue(renderedPhone.contains("TRADITIONAL CHINESE AND JAPANESE"))
+        XCTAssertFalse(renderedPhone.contains("Guide in the three-dot menu"))
+        XCTAssertTrue(renderedPhone.contains("CTRL PANELS NO LONGER STACK"))
+        XCTAssertTrue(renderedPhone.contains("ARRANGE THE KEYS YOUR WAY"))
     }
 
     func testBothChipsReportThroughTheirOwnCallback() throws {
@@ -89,7 +88,7 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
     // MARK: The full record
 
     /// Every release's record, each under its own header — a reader updating
-    /// from 1.2 straight to 1.4.1 is owed 1.4's, 1.3's and 1.3.1's stories too.
+    /// from 1.2 straight to 1.4.2 is owed every intervening release's story too.
     func testTheLogCarriesEveryReleasesChangesForItsPlatform() {
         let controller = ReleaseLogViewController(platform: .pad)
         render(controller, width: 720, height: 4_800)

@@ -4,43 +4,42 @@ import XCTest
 final class ReleaseNotesTests: XCTestCase {
     // MARK: Content
 
-    /// The card speaks for the newest release only — 1.4.1's features, not a
+    /// The card speaks for the newest release only — 1.4.2's features, not a
     /// merge of every release the log still carries.
     func testTheCardAnnouncesTheNewestRelease() {
-        XCTAssertEqual(ReleaseNotes.version, "1.4.1")
+        XCTAssertEqual(ReleaseNotes.version, "1.4.2")
+        XCTAssertEqual(ReleaseNotes.releases.map(\.version), ["1.4.2", "1.4.1", "1.4", "1.3.1", "1.3"])
         XCTAssertEqual(ReleaseNotes.releases.first?.version, ReleaseNotes.version)
         XCTAssertEqual(ReleaseNotes.promise, ReleaseNotes.current.promise)
     }
 
-    /// The card leads with the row that is about this platform: the side
-    /// panel on iPad and Vision Pro. An iPhone never gets one, so its card is
-    /// the three changes it actually received — a patch release shows what it
-    /// has rather than padding to four.
-    func testTheCardLeadsWithTheRowAboutThisPlatform() {
-        for platform in [ReleaseNotePlatform.pad, .vision] {
+    func testTheCardShowsTheSameFourChangesOnEveryPlatform() {
+        for platform in ReleaseNotePlatform.allCases {
             XCTAssertEqual(
-                ReleaseNotes.highlights(for: platform).count,
-                ReleaseNotes.highlightCount,
-                "\(platform) must fill the card"
+                ReleaseNotes.highlights(for: platform).map(\.id),
+                ["arrangekeys", "shells", "viewport", "ctrl"]
             )
-            XCTAssertEqual(ReleaseNotes.highlights(for: platform).first?.id, "sidepanel")
         }
-        XCTAssertEqual(ReleaseNotes.highlights(for: .phone).count, 3)
-        XCTAssertFalse(ReleaseNotes.highlights(for: .phone).map(\.id).contains("sidepanel"))
     }
 
-    func testTheSidePanelNeverReachesAnIPhone() {
-        let padIDs = ReleaseNotes.entries(for: .pad).map(\.id)
-        XCTAssertTrue(padIDs.contains("sidepanel"))
-        XCTAssertTrue(padIDs.contains("languages"))
+    func testGuideKeepsItsPlatformScoping() {
+        for platform in ReleaseNotePlatform.allCases {
+            let ids = ReleaseNotes.entries(for: platform).map(\.id)
+            XCTAssertEqual(ids.contains("guide"), platform == .vision)
+            XCTAssertTrue(ids.contains("ctrl"))
+        }
+    }
 
-        let visionIDs = ReleaseNotes.entries(for: .vision).map(\.id)
-        XCTAssertTrue(visionIDs.contains("sidepanel"))
-        XCTAssertTrue(visionIDs.contains("agents"))
-
-        let phoneIDs = ReleaseNotes.entries(for: .phone).map(\.id)
-        XCTAssertFalse(phoneIDs.contains("sidepanel"))
-        XCTAssertTrue(phoneIDs.contains("handoff"))
+    func testTheBankedOneFourOneRecordKeepsItsPlatformScoping() throws {
+        let v141 = try XCTUnwrap(ReleaseNotes.releases.first { $0.version == "1.4.1" })
+        for platform in [ReleaseNotePlatform.pad, .vision] {
+            XCTAssertEqual(v141.highlights(for: platform).count, 4)
+            XCTAssertEqual(v141.highlights(for: platform).first?.id, "sidepanel")
+            XCTAssertTrue(v141.entries(for: platform).map(\.id).contains("sidepanel"))
+        }
+        XCTAssertEqual(v141.highlights(for: .phone).count, 3)
+        XCTAssertFalse(v141.entries(for: .phone).map(\.id).contains("sidepanel"))
+        XCTAssertTrue(v141.entries(for: .phone).map(\.id).contains("handoff"))
     }
 
     /// The 1.4 record rides along under the 1.4.1 log, and its platform
@@ -256,6 +255,10 @@ final class ReleaseNotesTests: XCTestCase {
     /// 1.3.1's notes to the people who already saw 1.3's.
     func testANewNotesReleaseReopensTheCard() {
         XCTAssertEqual(
+            ReleaseNotesGate.decide(lastSeen: "1.4.1", current: ReleaseNotes.version, installHasPriorUse: true),
+            .show
+        )
+        XCTAssertEqual(
             ReleaseNotesGate.decide(lastSeen: "1.3", current: "1.3.1", installHasPriorUse: true),
             .show
         )
@@ -276,6 +279,10 @@ final class ReleaseNotesTests: XCTestCase {
     /// A patch BUILD without notes of its own leaves `ReleaseNotes.version`
     /// alone, compares equal, and must not re-present old notes.
     func testABuildWithoutItsOwnNotesDoesNotReopenTheCard() {
+        XCTAssertEqual(
+            ReleaseNotesGate.decide(lastSeen: "1.4.2", current: ReleaseNotes.version, installHasPriorUse: true),
+            .nothing
+        )
         XCTAssertEqual(
             ReleaseNotesGate.decide(lastSeen: "1.3", current: "1.3", installHasPriorUse: true),
             .nothing

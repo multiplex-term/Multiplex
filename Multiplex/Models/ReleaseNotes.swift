@@ -138,7 +138,7 @@ struct ReleaseNotesRelease: Equatable {
 enum ReleaseNotes {
     /// Newest first. The launch card speaks only for the first; the log
     /// carries them all.
-    static let releases: [ReleaseNotesRelease] = [v141, v14, v131, v13]
+    static let releases: [ReleaseNotesRelease] = [v142, v141, v14, v131, v13]
 
     /// The release the launch card announces.
     static var current: ReleaseNotesRelease { releases[0] }
@@ -176,6 +176,111 @@ enum ReleaseNotes {
     static func alsoLine(for platform: ReleaseNotePlatform) -> String? {
         current.alsoLine(for: platform)
     }
+
+    // MARK: - 1.4.2
+
+    private static let v142 = ReleaseNotesRelease(
+        version: "1.4.2",
+        promise: "Arrange the keys your way, connect to fish and csh hosts, "
+            + "and open remote web addresses more reliably.",
+        entries: [
+            ReleaseNoteEntry(
+                id: "shells",
+                bank: .backends,
+                title: "Hosts with fish or csh now work",
+                body: "Multiplex runs its remote commands through sh, so "
+                    + "Test Connection, deck refresh, New Session and attach "
+                    + "work without changing the host's login shell. If a "
+                    + "probe still fails, the error includes shell diagnostics.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "arrangekeys",
+                bank: .terminal,
+                title: "Arrange the keys your way",
+                body: "Open the terminal's three-dot menu and choose Arrange "
+                    + "Keys. Drag a key onto another to reorder, then press "
+                    + "DONE; RESET restores the shipped order. The layout "
+                    + "stays on this device and applies to every tab. On "
+                    + "Vision Pro, keys can cross to the other side of the title.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "ctrl",
+                bank: .terminal,
+                title: "CTRL panels no longer stack",
+                body: "Holding CTRL replaces an open C / B quick-key panel "
+                    + "with Key Commands instead of leaving both open.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "CTRL panels that no longer stack"
+            ),
+            ReleaseNoteEntry(
+                id: "viewport",
+                bank: .terminal,
+                title: "Remote web addresses take the right route",
+                body: "The viewport recognises IPv4-mapped IPv6 addresses "
+                    + "in every spelling. A mapped localhost opens via the "
+                    + "SSH host rather than connecting to this device, and "
+                    + "local-network addresses get the right reach label.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "guide",
+                bank: .terminal,
+                title: "Guide moves into the three-dot menu",
+                body: "Find Guide in the terminal's three-dot menu instead "
+                    + "of the console row.",
+                tag: "Vision Pro",
+                platforms: [.vision],
+                mention: "Guide in the three-dot menu"
+            ),
+        ],
+        highlights: [
+            ReleaseNoteHighlight(
+                id: "arrangekeys",
+                covers: ["arrangekeys"],
+                title: "Arrange the keys your way",
+                body: "Three-dot menu → Arrange Keys. Drag to reorder, then "
+                    + "DONE. Remembered on this device, across every tab.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "shells",
+                covers: ["shells"],
+                title: "Hosts with fish or csh now work",
+                body: "Connect, create and attach without changing the "
+                    + "host's login shell.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "viewport",
+                covers: ["viewport"],
+                title: "Remote links take the right route",
+                body: "Mapped IPv6 localhost addresses open via the SSH "
+                    + "host, not this device.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "ctrl",
+                covers: ["ctrl"],
+                title: "CTRL panels no longer stack",
+                body: "Hold CTRL to replace C / B with Key Commands "
+                    + "instead of leaving both open.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+        ]
+    )
 
     // MARK: - 1.4.1
 
