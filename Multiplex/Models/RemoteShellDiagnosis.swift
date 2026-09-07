@@ -1,6 +1,6 @@
 import Foundation
 
-/// The one exec that must never carry the POSIX PATH prelude: sshd runs exec
+/// The one exec that bypasses the POSIX envelope and PATH prelude: sshd runs exec
 /// requests through the account's login shell, including fish and csh.
 enum RemoteShellDiagnosis {
     static let command = "echo \"$SHELL\""
@@ -25,9 +25,8 @@ enum RemoteShellDiagnosis {
         func message(host: Host) -> String {
             if let shellName, !posixShells.contains(shellName) {
                 return String(localized: """
-                    \(host.name)'s login shell is \(shellName). Multiplex's remote commands need a POSIX shell \
-                    such as bash or zsh — change the account's login shell (chsh) or keep \(shellName) \
-                    for interactive use only.
+                    \(host.name)'s login shell is \(shellName), so Multiplex runs its commands through sh — \
+                    check that sh and printf work on the host (exit \(String(exitCode))).
                     """)
             }
             let firstLine = stderrHead.trimmingCharacters(in: .whitespacesAndNewlines)

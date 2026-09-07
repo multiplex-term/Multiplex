@@ -608,7 +608,8 @@ final class TerminalSessionController {
             handoffWatch = nil
         case .promptDetected:
             handoffWatch = nil
-            let payload = Data(ShellHandoff.payload(for: command).utf8)
+            let handoff = RemoteShellEnvelope.handoff(command)
+            let payload = Data(ShellHandoff.payload(for: handoff).utf8)
             // The ordered input pump keeps the re-type serialized with any
             // keystrokes; before the pump exists (output can arrive while
             // runSSH is still between openShell and startTransportPumps),

@@ -701,9 +701,10 @@ final class HostConnectionModel {
                 if case SSHConnectionError.commandFailed(let exitCode, let stderr) = error,
                    let connection {
                     // Diagnose on the failing primary's link before markFailed closes it.
-                    // No PATH prelude: this exec must also parse in fish/csh.
+                    // Raw (no envelope, no PATH prelude): it must parse in fish/csh and
+                    // answer even when sh itself could not start.
                     let shellOutput = try? await deadlined {
-                        try await connection.exec(RemoteShellDiagnosis.command)
+                        try await connection.diagnoseLoginShell()
                     }
                     guard refreshGeneration == generation, !Task.isCancelled else { return }
                     failure = RemoteShellDiagnosis.Rejection(

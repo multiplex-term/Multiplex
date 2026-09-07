@@ -101,10 +101,6 @@ Install and usage: [multiplex-term/mpx-cli](https://github.com/multiplex-term/mp
 
 Citadel 0.12.0 is pinned because 0.12.1 changed its `swift-nio-ssh` source to an unaudited fork. The mosh client is a clean-room implementation. The complete audited inventory and license texts live in `Multiplex/Models/LicenseCatalog.swift`.
 
-## Known limits
-
-- fish/csh login shells can't run the probe yet; the deck tile and Test Connection now name the shell.
-
 ## Credits
 
 - Built largely with GPT 5.6 Sol and Claude Fable / Opus.

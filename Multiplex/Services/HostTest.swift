@@ -41,7 +41,7 @@ enum HostTest {
             ))
         } catch SSHConnectionError.commandFailed(let exitCode, let stderr) {
             let shellOutput = try? await deadlined(seconds: execDeadline) {
-                try await connection.exec(RemoteShellDiagnosis.command)
+                try await connection.diagnoseLoginShell()
             }
             let rejection = RemoteShellDiagnosis.Rejection(
                 exitCode: exitCode,

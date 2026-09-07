@@ -3,12 +3,35 @@
 Load-bearing decisions split from AGENTS.md — read before touching TmuxProbe,
 HerdrProbe, session creation/targeting, or file attach/drop.
 
-- **Login-shell rejection is diagnosed, not worked around.** Citadel drops
-  stderr by default; `SSHConnection.exec` keeps a bounded 2 KiB head and throws
-  `.commandFailed`. Every probe/check builder exits 0 by construction, so a
-  non-zero exit means the login shell refused the script (fish = 127, tcsh = 1).
-  The hub's primary failure and HostTest run `RemoteShellDiagnosis` to name it:
-  `echo "$SHELL"` is the one command that must never get the PATH prelude.
+- **Every SSH exec rides `RemoteShellEnvelope`: `printf '<escaped>' | <command shell>`.**
+  sshd runs exec requests through the account's login shell, and fish (exit
+  127) / csh (exit 1) reject POSIX syntax at token one. The format escapes
+  `'` → `\047`, `\` → `\134`, `!` → `\041`, newline → `\012`, `%` → `%%`
+  (UTF-8 verbatim), so the outer command is one single-quoted string every
+  shell parses alike. The interpreter is always `sh` (POSIX guarantees it; a
+  per-host COMMAND SHELL field was built and withdrawn 2026-09-07).
+  - The payload is wrapped as `{ … } </dev/null`: sh must parse the whole
+    group before a stdin-reading child could eat the rest of the script, and
+    children inherit /dev/null. An empty payload becomes `:`.
+  - **PTY handoff keeps tty stdin**: `exec sh -c '<payload>'` when the
+    payload has no `'`, `\`, `!`, newline; otherwise
+    `exec sh -c 'eval "$(printf "<escaped + \042 \044 \140>")"'` —
+    only printf owns a pipe, eval/exec keep the tty. `String.universalArgument`
+    quotes user text for that line (double-quoted octal printf substitution
+    when plain quoting would break; trailing newlines keep POSIX quoting since
+    `$( )` strips them). Both the first handoff and the swallowed-prompt
+    re-type use it; `.shell` routes stay nil; mosh argv is untouched
+    (mosh-server execvp()s it).
+  - Rejected: literal `sh -c '<payload>'` (fish reads `\'`/`\\` inside
+    single quotes as escapes; csh chokes on `!` and literal newlines) and a
+    stdin-fed `sh` (Citadel 0.12.0 keeps its session internal).
+  - Citadel drops stderr; `SSHConnection.exec` keeps a 2 KiB head, logs under
+    `exec`, throws `.commandFailed`. Every builder exits 0 by construction, so
+    a nonzero exit means the command environment failed, never "tmux missing".
+    `RemoteShellDiagnosis.command` (`echo "$SHELL"`, via `diagnoseLoginShell`)
+    is the ONE raw exec — no envelope, no PATH prelude — so it still answers
+    when sh itself cannot start; its non-POSIX wording asks to check sh and
+    printf, not to change the login shell.
 - **tmux `-F` sanitizes control chars** (0x1F → `_`): the probe format is
   space-separated with the variable-length name last, correlated by
   `session_id`, tail-rejoined on parse. Don't switch to a control-char

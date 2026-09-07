@@ -33,9 +33,8 @@ final class RemoteShellDiagnosisTests: XCTestCase {
                 shellName: shell
             )
             XCTAssertEqual(rejection.message(host: host), """
-                devbox's login shell is \(shell). Multiplex's remote commands need a POSIX shell \
-                such as bash or zsh — change the account's login shell (chsh) or keep \(shell) \
-                for interactive use only.
+                devbox's login shell is \(shell), so Multiplex runs its commands through sh — \
+                check that sh and printf work on the host (exit \(shell == "fish" ? 127 : 1)).
                 """)
         }
     }

@@ -447,6 +447,19 @@ actor SSHConnection {
         _ command: String,
         maxResponseBytes: Int = SSHConnection.maxExecResponseBytes
     ) async throws -> String {
+        try await execute(
+            RemoteShellEnvelope.exec(command),
+            maxResponseBytes: maxResponseBytes
+        )
+    }
+
+    /// Only the login-shell diagnosis bypasses the envelope: it must still
+    /// answer when sh itself cannot start.
+    func diagnoseLoginShell() async throws -> String {
+        try await execute(RemoteShellDiagnosis.command, maxResponseBytes: Self.maxExecResponseBytes)
+    }
+
+    private func execute(_ command: String, maxResponseBytes: Int) async throws -> String {
         guard let client else { throw SSHConnectionError.notConnected }
         var stdout = ByteBuffer()
         var stderr = Data()
@@ -753,6 +766,7 @@ actor SSHConnection {
     ) async throws {
         guard let client else { throw SSHConnectionError.notConnected }
         guard shellTask == nil else { return }
+        let command = command.map { RemoteShellEnvelope.handoff($0) }
 
         let request = SSHChannelRequestEvent.PseudoTerminalRequest(
             wantReply: true,

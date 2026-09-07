@@ -86,12 +86,24 @@ final class HostTestTests: XCTestCase {
 
     func testDiagnosedCommandFailureUsesShellWording() {
         for shell: String? in ["fish", "csh", "zsh", nil] {
-            let rejection = RemoteShellDiagnosis.Rejection(exitCode: 127, stderrHead: "parse error", shellName: shell)
+            let rejection = RemoteShellDiagnosis.Rejection(
+                exitCode: 127, stderrHead: "parse error", shellName: shell
+            )
             XCTAssertEqual(
                 HostTest.failureMessage(for: rejection, host: host()),
                 rejection.message(host: host())
             )
         }
+    }
+
+    func testNonPOSIXFailureAsksToCheckSh() {
+        let rejection = RemoteShellDiagnosis.Rejection(
+            exitCode: 127, stderrHead: "not found", shellName: "fish"
+        )
+        XCTAssertEqual(HostTest.failureMessage(for: rejection, host: host()), """
+            devbox's login shell is fish, so Multiplex runs its commands through sh — \
+            check that sh and printf work on the host (exit 127).
+            """)
     }
 
     func testMissingCredentialsNameTheMissingSecret() {

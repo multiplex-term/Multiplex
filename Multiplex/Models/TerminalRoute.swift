@@ -74,14 +74,14 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
     var remoteCommand: String? {
         switch mode {
         case .attach(let name):
-            return "exec tmux attach-session -t \(name.shellQuoted)"
+            return "exec tmux attach-session -t \(name.universalArgument)"
         case .create(let name, let directory):
             return TmuxSessionLaunch.createAndAttachCommand(
                 sessionName: name,
                 directory: directory
             )
         case .herdrAttach(let sessionName):
-            return HerdrSessionLaunch.attachCommand(sessionName: sessionName)
+            return HerdrSessionLaunch.attachCommand(sessionName: sessionName, universalArguments: true)
         case .shell, .viewport, .fileViewer:
             return nil
         }
@@ -283,10 +283,11 @@ enum RemoteCommandEnvironment {
 enum HerdrSessionLaunch {
     static let primarySessionName = "default"
 
-    static func attachCommand(sessionName: String) -> String {
+    static func attachCommand(sessionName: String, universalArguments: Bool = false) -> String {
         let name = sessionName.isEmpty ? primarySessionName : sessionName
+        let argument = universalArguments ? name.universalArgument : name.shellQuoted
         return RemoteCommandEnvironment.herdrPathPrefix
-            + "exec herdr session attach \(name.shellQuoted)"
+            + "exec herdr session attach \(argument)"
     }
 }
 
@@ -346,17 +347,33 @@ enum TmuxSessionLaunch {
         if let directory {
             // A missing configured directory falls back to the login shell's
             // initial directory ($HOME) instead of failing session creation.
-            command += "cd \(directory.shellQuotedDirectory) 2>/dev/null; "
+            command += "cd \(directory.universalArgumentDirectory) 2>/dev/null; "
         }
         command += persistentRunnerDefinition
-        command += "tmux has-session -t \("=\(sessionName)".shellQuoted) 2>/dev/null"
-        command += " || multiplex_tmux new-session -d -s \(sessionName.shellQuoted) 2>/dev/null; "
-        command += "exec tmux attach-session -t \(sessionName.shellQuoted)"
+        command += "tmux has-session -t \("=\(sessionName)".universalArgument) 2>/dev/null"
+        command += " || multiplex_tmux new-session -d -s \(sessionName.universalArgument) 2>/dev/null; "
+        command += "exec tmux attach-session -t \(sessionName.universalArgument)"
         return command
     }
 }
 
 extension String {
+    /// POSIX argv inside a handoff payload, decoded only by its inner shell.
+    /// Double quotes prevent splitting/globbing of the decoded bytes. A final
+    /// newline cannot ride command substitution (which strips it), so that
+    /// rare case retains ordinary POSIX quoting; the handoff carrier protects
+    /// both forms from the login shell.
+    var universalArgument: String {
+        if RemoteShellEnvelope.isUniversallyQuotable(self) || hasSuffix("\n") { return shellQuoted }
+        return "\"$(printf '" + RemoteShellEnvelope.octal(self) + "')\""
+    }
+
+    var universalArgumentDirectory: String {
+        if self == "~" { return "\"$HOME\"" }
+        if hasPrefix("~/") { return "\"$HOME\"/" + String(dropFirst(2)).universalArgument }
+        return universalArgument
+    }
+
     /// Single-quote for POSIX shells; embedded quotes become '\''.
     var shellQuoted: String {
         "'" + replacingOccurrences(of: "'", with: "'\\''") + "'"
