@@ -24,6 +24,10 @@ struct FleetWallConfiguration {
     var presentation: FleetWall.Presentation
     var selectedTerminal: TerminalRoute?
     var shellSafeArea: UIEdgeInsets
+    /// What the header row alone clears beyond the safe area: a bare display
+    /// corner (iPhone Duo landscape, 55 pt corners — the wall below starts
+    /// under the curve's reach) and the inner-portrait status band.
+    var headerChrome = ShellHeaderChrome.none
     var reduceMotion: Bool
     var sceneIsActive: Bool
     var addHost: () -> Void
@@ -351,6 +355,7 @@ final class FleetWallViewController: UIViewController {
             || self.configuration.workspace !== configuration.workspace
         let layoutChanged = self.configuration.presentation != configuration.presentation
             || self.configuration.shellSafeArea != configuration.shellSafeArea
+            || self.configuration.headerChrome != configuration.headerChrome
             || self.configuration.usesSystemNavigation != configuration.usesSystemNavigation
         let activeChanged = self.configuration.sceneIsActive != configuration.sceneIsActive
         self.configuration = configuration
@@ -468,11 +473,19 @@ final class FleetWallViewController: UIViewController {
         // adjustment (its nav bar and home indicator ride on it).
         scrollView.contentInsetAdjustmentBehavior = shell ? .never : .automatic
 
-        let wallPadding: CGFloat = presentation == .shellRail ? 12 : 26
+        let wallPadding = resolvedWallPadding
         let safe = configuration.shellSafeArea
-        fixedHeaderLeadingConstraint?.constant = wallPadding + safe.left
-        fixedHeaderTrailingConstraint?.constant = -(wallPadding + safe.right)
-        fixedHeader.setTopInset(min(wallPadding, 16))
+        let chrome = configuration.headerChrome
+        fixedHeaderLeadingConstraint?.constant = wallPadding + safe.left + chrome.cornerInset
+        fixedHeaderTrailingConstraint?.constant = -(wallPadding + safe.right + chrome.bandTrailingClearance)
+        // In the Duo's status band the row centres in the band's height
+        // (the shell hands the band as content, not as safe area).
+        if chrome.bandHeight > 0 {
+            fixedHeader.setBandInsets(bandHeight: chrome.bandHeight)
+        } else {
+            fixedHeader.setTopInset(min(wallPadding, 16))
+            fixedHeader.setBottomInset(16)
+        }
 
         let leading = wallPadding + safe.left
         let trailing = wallPadding + safe.right
@@ -738,9 +751,24 @@ final class FleetWallViewController: UIViewController {
 
     // MARK: Responsive grid
 
+    /// One padding for the header, the grid, and the column count.
+    private var resolvedWallPadding: CGFloat {
+        switch configuration.presentation {
+        case .shellRail:
+            FleetTileGridSizing.railWallPadding
+        case .shellCompact:
+            // A regular-width single pane (iPhone Duo's inner display) takes
+            // the rail's padding so two minimum tiles fit.
+            traitCollection.horizontalSizeClass == .regular
+                ? FleetTileGridSizing.railWallPadding : FleetTileGridSizing.compactWallPadding
+        case .standard:
+            FleetTileGridSizing.compactWallPadding
+        }
+    }
+
     private func updateColumnCount() {
         guard isViewLoaded else { return }
-        let wallPadding: CGFloat = configuration.presentation == .shellRail ? 12 : 26
+        let wallPadding = resolvedWallPadding
         let safe = configuration.shellSafeArea
         let availableWidth = max(
             0,
@@ -1280,6 +1308,25 @@ private final class FleetHeaderView: UIView {
 
     func setTopInset(_ inset: CGFloat) {
         topConstraint?.constant = inset
+    }
+
+    func setBottomInset(_ inset: CGFloat) {
+        bottomConstraint?.constant = -inset
+    }
+
+    /// The row's own height without the wall's insets.
+    var rowHeight: CGFloat {
+        stack.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height
+    }
+
+    /// The row inside iPhone Duo's status band: its centre sits on the
+    /// system's glyph line (the clock's own line), the band is the header's
+    /// full height, the hairline at the band's bottom.
+    func setBandInsets(bandHeight: CGFloat) {
+        let center = SingleWindowShellLayout.topBandRowCenter(bandHeight: bandHeight)
+        let top = max(0, center - rowHeight / 2)
+        topConstraint?.constant = top
+        bottomConstraint?.constant = -max(0, bandHeight - top - rowHeight)
     }
 
     override func layoutSubviews() {

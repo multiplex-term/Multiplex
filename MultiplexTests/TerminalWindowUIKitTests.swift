@@ -204,7 +204,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
         let first = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "main"))
         let second = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "scratch"))
         let shell = TerminalWindowShellConfiguration(
-            deckControlLabel: "DECK",
+            deckControl: .back,
             availableWidth: 720,
             contentSafeArea: UIEdgeInsets(top: 4, left: 8, bottom: 12, right: 8),
             railOwnsBottomSafeArea: true,
@@ -240,7 +240,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
         // The rail only exists on the shell stage: a classic visionOS window
         // hands its strip to the ornament instead.
         let shell = TerminalWindowShellConfiguration(
-            deckControlLabel: "DECK",
+            deckControl: .back,
             availableWidth: 420,
             showDeck: {},
             openTerminalRoute: { _ in },
@@ -1182,7 +1182,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
     func testForcedVisionShellMountsAndFramesStandaloneKeyClusterInWindow() throws {
         let tab = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "main"))
         let shell = TerminalWindowShellConfiguration(
-            deckControlLabel: "DECK",
+            deckControl: .back,
             availableWidth: 420,
             showDeck: {},
             openTerminalRoute: { _ in },

@@ -10,6 +10,10 @@ enum UMDBarStyle: Equatable {
     case regular
     /// The adaptive single-window shell's slim full-width top rail.
     case shell
+    /// iPhone Duo: the shell's chips stand as a column of 44 pt faces inside
+    /// the system's side bar; the title and lamp move to the source strip
+    /// (`UMDBarViewController.sourceStripView`) over the pane.
+    case verticalColumn
 }
 
 @MainActor
@@ -40,7 +44,7 @@ struct UMDBarConfiguration {
     /// Which multiplexer owns the shortcut chip (TMUX/HRDR); nil hides it.
     var shortcutBackend: Host.SessionBackend?
     var style: UMDBarStyle
-    var deckControlLabel: String
+    var deckControl: ShellDeckControl
     var availableWidth: CGFloat?
     var contentSafeArea: UIEdgeInsets
     /// Chassis above and below the rail's faces. The shell keeps the
@@ -59,6 +63,17 @@ struct UMDBarConfiguration {
     /// The classic window's title bar matches the key rail at the other end
     /// of the pane; its faces keep their size and centre in the extra room.
     var minimumContentHeight: CGFloat = 0
+    /// `.verticalColumn` only: whole chips the column holds below the
+    /// system's clock glyphs and above the keyboard (`RailFit.capacity`).
+    var columnCapacity = 0
+    /// iPhone Duo: the row's centre line inside a status band (nil = the
+    /// rail's own padding rule) and the trailing width the row must not
+    /// cross (the clock cluster).
+    var bandRowCenterY: CGFloat?
+    var bandTrailingClearance: CGFloat = 0
+    /// iPhone Duo: the column chips' centre x inside the side strip (nil =
+    /// the strip's centre).
+    var columnCenterX: CGFloat?
 }
 
 struct UMDBarObservedState: Equatable {
@@ -87,12 +102,16 @@ private struct UMDBarPresentationKey: Equatable {
     var extraNewTabTarget: TerminalRoute.NewTabTarget?
     var shortcutBackend: Host.SessionBackend?
     var style: UMDBarStyle
-    var deckControlLabel: String
+    var deckControl: ShellDeckControl
     var availableWidth: CGFloat?
     var contentSafeArea: UIEdgeInsets
     var contentVerticalPadding: CGFloat
     var keyRailContentWidth: CGFloat?
     var minimumContentHeight: CGFloat
+    var columnCapacity: Int
+    var bandRowCenterY: CGFloat?
+    var bandTrailingClearance: CGFloat
+    var columnCenterX: CGFloat?
 
     @MainActor
     init(_ configuration: UMDBarConfiguration) {
@@ -107,12 +126,16 @@ private struct UMDBarPresentationKey: Equatable {
         extraNewTabTarget = configuration.extraNewTabTarget
         shortcutBackend = configuration.shortcutBackend
         style = configuration.style
-        deckControlLabel = configuration.deckControlLabel
+        deckControl = configuration.deckControl
         availableWidth = configuration.availableWidth
         contentSafeArea = configuration.contentSafeArea
         contentVerticalPadding = configuration.contentVerticalPadding
         keyRailContentWidth = configuration.keyRailContentWidth
         minimumContentHeight = configuration.minimumContentHeight
+        columnCapacity = configuration.columnCapacity
+        bandRowCenterY = configuration.bandRowCenterY
+        bandTrailingClearance = configuration.bandTrailingClearance
+        columnCenterX = configuration.columnCenterX
     }
 }
 
@@ -148,6 +171,10 @@ final class UMDBarViewController: UIViewController,
 {
     private var configuration: UMDBarConfiguration
     private let rootView = UMDBarRootView()
+    /// The 20 pt strip over the pane that carries the title and the lamp
+    /// while the rail stands as a column (`.verticalColumn`). The window
+    /// mounts it; this controller renders it alongside the column.
+    let sourceStripView = UMDSourceStripView()
     private(set) var fileAttachController: FileAttachMenuViewController
     private weak var shortcutPopoverController: ShortcutPanelViewController?
     private weak var shortcutButtonView: UMDBarButton?
@@ -160,6 +187,10 @@ final class UMDBarViewController: UIViewController,
     #endif
     private var observationGeneration = 0
     private var renderedKey: UMDBarRenderKey?
+    /// Measured chip widths by identifier and caption: a chip's width is a
+    /// function of its caption and the type scale, so the progressive shell
+    /// row measures each face once, not on every render.
+    private var chipWidthCache: [String: CGFloat] = [:]
     private var currentObservedState = UMDBarObservedState(
         status: nil,
         contactLost: false,
@@ -329,6 +360,14 @@ final class UMDBarViewController: UIViewController,
             content = makeRegularRow(state: state)
         case .shell:
             content = makeShellContent(state: state)
+        case .verticalColumn:
+            content = makeColumnContent(state: state)
+        }
+        if configuration.style == .verticalColumn {
+            sourceStripView.update(
+                title: titleLabel(size: 11),
+                status: statusCluster(state)
+            )
         }
         rootView.apply(
             content: content,
@@ -336,11 +375,150 @@ final class UMDBarViewController: UIViewController,
             availableWidth: configuration.availableWidth,
             safeArea: configuration.contentSafeArea,
             verticalPadding: configuration.contentVerticalPadding,
-            minimumHeight: configuration.minimumContentHeight
+            minimumHeight: configuration.minimumContentHeight,
+            bandRowCenterY: configuration.bandRowCenterY,
+            bandTrailingClearance: configuration.bandTrailingClearance,
+            columnCenterX: configuration.columnCenterX
         )
         view.setNeedsLayout()
         view.layoutIfNeeded()
         preferredContentSize = fittingContentSize()
+    }
+
+    /// iPhone Duo's column: the shell row's chips as 44 pt faces, top to
+    /// bottom in the HIG's order — navigation first, the prominent DETACH
+    /// last — trimmed by `RailFit` when the keyboard shortens the column,
+    /// with the dropped chips folded into ⋯.
+    private func makeColumnContent(state: UMDBarObservedState) -> UIView {
+        var offered: [RailItem] = [.deck, .fontDown, .fontUp, .newTab]
+        if FileAttachAvailability.canOffer(for: configuration.controller) {
+            offered.append(.file)
+        }
+        if configuration.shortcutBackend != nil, showsTopBarShortcut(state: state) {
+            offered.append(.shortcut)
+        }
+        offered.append(.overflow)
+        offered.append(.detach)
+        let visible = RailFit.columnItems(offered: offered, capacity: configuration.columnCapacity)
+        let overflowing = RailFit.overflowing(offered: offered, visible: visible)
+
+        let column = UIStackView()
+        column.axis = .vertical
+        column.alignment = .fill
+        column.distribution = .equalSpacing
+        column.spacing = RailFit.gap
+        for item in visible {
+            guard let chip = columnChip(for: item, state: state, overflowing: overflowing) else {
+                continue
+            }
+            column.addArrangedSubview(chip)
+        }
+        column.accessibilityIdentifier = "umd.column"
+        return column
+    }
+
+    private func columnChip(
+        for item: RailItem,
+        state: UMDBarObservedState,
+        overflowing: Set<RailItem>
+    ) -> UMDColumnChip? {
+        switch item {
+        case .deck:
+            let control = configuration.deckControl
+            let chip = UMDColumnChip(
+                caption: control == .hide ? "HIDE" : "DECK",
+                systemImage: control == .back ? "chevron.left" : "sidebar.leading",
+                prominent: false,
+                accessibilityLabel: control.label.capitalized
+            )
+            chip.accessibilityIdentifier = "umd.deck"
+            chip.addAction(UIAction { [weak self] _ in self?.perform(.showDeck) }, for: .touchUpInside)
+            return chip
+        case .fontDown:
+            let chip = UMDColumnChip(caption: "TEXT", glyph: "A−", prominent: false, accessibilityLabel: "A−")
+            chip.accessibilityIdentifier = "umd.fontDown"
+            chip.addAction(UIAction { [weak self] _ in self?.perform(.fontDown) }, for: .touchUpInside)
+            return chip
+        case .fontUp:
+            let chip = UMDColumnChip(caption: "TEXT", glyph: "A+", prominent: false, accessibilityLabel: "A+")
+            chip.accessibilityIdentifier = "umd.fontUp"
+            chip.addAction(UIAction { [weak self] _ in self?.perform(.fontUp) }, for: .touchUpInside)
+            return chip
+        case .newTab:
+            let chip = UMDColumnChip(
+                caption: "TAB",
+                systemImage: "plus",
+                prominent: false,
+                accessibilityLabel: TerminalRoute.NewTabTarget
+                    .controlAccessibilityLabel(offering: configuration.extraNewTabTarget)
+            )
+            chip.accessibilityIdentifier = "umd.newTab"
+            chip.menu = makeNewTabMenu()
+            chip.showsMenuAsPrimaryAction = true
+            return chip
+        case .file:
+            let chip = UMDColumnChip(
+                caption: "FILE",
+                systemImage: "paperclip",
+                prominent: false,
+                accessibilityLabel: String(localized: "Attach a file")
+            )
+            chip.accessibilityIdentifier = "umd.attach"
+            chip.menu = makeFileAttachMenu()
+            chip.showsMenuAsPrimaryAction = true
+            return chip
+        case .shortcut:
+            guard let backend = configuration.shortcutBackend else { return nil }
+            let chip = UMDColumnChip(
+                caption: backend == .herdr ? "HRDR" : "TMUX",
+                systemImage: "command",
+                prominent: false,
+                accessibilityLabel: backend == .herdr
+                    ? String(localized: "Show herdr shortcuts")
+                    : String(localized: "Show tmux shortcuts")
+            )
+            chip.accessibilityIdentifier = "umd.tmux"
+            chip.isEnabled = state.status == .live
+            chip.addAction(UIAction { [weak self, weak chip] _ in
+                guard let self, let chip else { return }
+                self.showShortcutPanel(from: chip)
+            }, for: .touchUpInside)
+            shortcutButtonView = nil
+            return chip
+        case .overflow:
+            let menu = makeOverflowMenu(overflowing: overflowing)
+            guard !menu.children.isEmpty else { return nil }
+            let chip = UMDColumnChip(
+                caption: "MORE",
+                systemImage: "ellipsis",
+                prominent: false,
+                accessibilityLabel: String(localized: "Terminal actions")
+            )
+            chip.accessibilityIdentifier = "umd.overflow"
+            chip.menu = menu
+            chip.showsMenuAsPrimaryAction = true
+            return chip
+        case .detach:
+            let chip = UMDColumnChip(
+                caption: "DETACH",
+                systemImage: "eject",
+                prominent: true,
+                accessibilityLabel: configuration.closeSession != nil
+                    ? String(localized: "Detach or close the session")
+                    : String(localized: "Detach")
+            )
+            chip.accessibilityIdentifier = "umd.detach"
+            if configuration.closeSession != nil {
+                chip.menu = makeDetachMenu()
+                chip.showsMenuAsPrimaryAction = true
+            } else {
+                chip.addAction(UIAction { [weak self] _ in self?.perform(.detach) }, for: .touchUpInside)
+            }
+            return chip
+        case .merge, .guide:
+            // The column never offers them: the ⋯ menu always carries both.
+            return nil
+        }
     }
 
     private func makeRegularRow(state: UMDBarObservedState) -> UIView {
@@ -377,10 +555,10 @@ final class UMDBarViewController: UIViewController,
         if !configuration.mergeSources.isEmpty {
             views.append(mergeButton())
         }
-        if guideIsDirectChip(displacesDirectActions: false) {
+        if guideIsDirectChip {
             views.append(guideButton())
         }
-        if let overflow = overflowButtonIfNeeded(displacesDirectActions: false) {
+        if let overflow = overflowButtonIfNeeded() {
             views.append(overflow)
         }
         views.append(divider())
@@ -395,101 +573,115 @@ final class UMDBarViewController: UIViewController,
     }
 
     private func makeShellContent(state: UMDBarObservedState) -> UIView {
-        let wide = makeShellRow(state: state, showsDirectActions: true)
-        let idealWidth = wide.systemLayoutSizeFitting(
-            UIView.layoutFittingCompressedSize
-        ).width + 20
-        let available = configuration.availableWidth ?? .greatestFiniteMagnitude
-
-        if idealWidth <= available {
-            wide.accessibilityIdentifier = "umd.shell.wide"
-            return wide
-        }
-
-        fileAttachController.parkAttachButton()
-        let compact = makeShellRow(state: state, showsDirectActions: false)
-        compact.accessibilityIdentifier = "umd.shell.compact"
-        return compact
-    }
-
-    private func makeShellRow(
-        state: UMDBarObservedState,
-        showsDirectActions: Bool
-    ) -> UIStackView {
+        // Build every direct chip once and let the pure row rule decide
+        // which survive the width; the rest ride the ⋯ menu.
+        let spacing: CGFloat = 8
+        let deckLabel = configuration.deckControl.label
         let deck = actionButton(
-            caption: configuration.deckControlLabel,
+            caption: deckLabel,
             identifier: "umd.deck",
-            accessibilityLabel: configuration.deckControlLabel.capitalized,
+            accessibilityLabel: deckLabel.capitalized,
             action: .showDeck
         )
         deck.setContentHuggingPriority(.required, for: .horizontal)
         deck.setContentCompressionResistancePriority(.required, for: .horizontal)
-
         let title = titleLabel(size: 11)
         title.setContentHuggingPriority(.defaultLow, for: .horizontal)
         title.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-
         let status = statusCluster(state)
         status.setContentHuggingPriority(.required, for: .horizontal)
         status.setContentCompressionResistancePriority(.required, for: .horizontal)
-
         let spacer = UIView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         spacer.widthAnchor.constraint(greaterThanOrEqualToConstant: 4).isActive = true
 
-        var views: [UIView] = [deck, title, status, spacer]
-        if showsDirectActions {
-            views.append(actionButton(
-                caption: "A−",
-                identifier: "umd.fontDown",
-                accessibilityLabel: "A−",
-                action: .fontDown
-            ))
-            views.append(actionButton(
-                caption: "A+",
-                identifier: "umd.fontUp",
-                accessibilityLabel: "A+",
-                action: .fontUp
-            ))
-            views.append(newTabButton())
-            views.append(fileAttachController.takeAttachButton())
-            if let backend = configuration.shortcutBackend,
-               showsTopBarShortcut(state: state) {
-                views.append(shortcutButton(backend))
-            }
-            // MERGE is a window-level road and belongs beside DETACH; the
-            // wide row is the only place it fits (the overflow carries it
-            // only when it displaces the direct actions).
-            if !configuration.mergeSources.isEmpty {
-                views.append(mergeButton())
-            }
-            if guideIsDirectChip(displacesDirectActions: false) {
-                views.append(guideButton())
-            }
-            if let overflow = overflowButtonIfNeeded(
-                displacesDirectActions: false
-            ) {
-                views.append(overflow)
-            }
-            views.append(detachButton())
+        var offered: [RailItem] = [.fontDown, .fontUp, .newTab]
+        var chips: [RailItem: UIView] = [
+            .fontDown: actionButton(
+                caption: "A−", identifier: "umd.fontDown", accessibilityLabel: "A−", action: .fontDown
+            ),
+            .fontUp: actionButton(
+                caption: "A+", identifier: "umd.fontUp", accessibilityLabel: "A+", action: .fontUp
+            ),
+            .newTab: newTabButton(),
+        ]
+        if FileAttachAvailability.canOffer(for: configuration.controller) {
+            offered.append(.file)
+            chips[.file] = fileAttachController.takeAttachButton()
+        }
+        if let backend = configuration.shortcutBackend, showsTopBarShortcut(state: state) {
+            offered.append(.shortcut)
+            chips[.shortcut] = shortcutButton(backend)
+        }
+        if !configuration.mergeSources.isEmpty {
+            offered.append(.merge)
+            chips[.merge] = mergeButton()
+        }
+        if guideIsDirectChip {
+            offered.append(.guide)
+            chips[.guide] = guideButton()
+        }
+        // The standing entries (keyboard lock, arrange, stats) keep ⋯ on the
+        // row whether or not anything drops; it always sits before DETACH.
+        if !makeOverflowMenu().children.isEmpty {
+            offered.append(.overflow)
+        }
+        offered.append(.detach)
+        chips[.detach] = detachButton()
+
+        let visible: [RailItem]
+        if let availableWidth = configuration.availableWidth {
+            var widths = chips.mapValues(measuredWidth)
+            widths[.overflow] = measuredWidth(overflowMenuButton(menu: UIMenu()))
+            let head = [deck, title, status]
+            let headWidth = head.reduce(0) { $0 + measuredWidth($1) } + CGFloat(head.count) * spacing + 4 + 20
+            visible = RailFit.rowItems(
+                offered: offered, widths: widths, spacing: spacing, available: availableWidth - headWidth
+            )
         } else {
-            if let overflow = overflowButtonIfNeeded(
-                displacesDirectActions: true
-            ) {
-                views.append(overflow)
-            }
-            if let backend = configuration.shortcutBackend,
-               showsTopBarShortcut(state: state) {
-                views.append(shortcutButton(backend))
+            visible = offered
+        }
+        let dropped = RailFit.overflowing(offered: offered, visible: visible)
+        if dropped.contains(.file) { fileAttachController.parkAttachButton() }
+        if dropped.contains(.shortcut) { shortcutButtonView = nil }
+
+        var views: [UIView] = [deck, title, status, spacer]
+        for item in visible {
+            if item == .overflow {
+                views.append(overflowMenuButton(menu: makeOverflowMenu(overflowing: dropped)))
+            } else if let chip = chips[item] {
+                views.append(chip)
             }
         }
 
         let row = UIStackView(arrangedSubviews: views)
         row.axis = .horizontal
         row.alignment = .center
-        row.spacing = 9
+        row.spacing = spacing
+        row.accessibilityIdentifier = dropped.isEmpty ? "umd.shell.wide" : "umd.shell.compact"
         return row
+    }
+
+    /// A chip's compressed width, remembered per identifier and caption
+    /// (`chipWidthCache`); anything else measures each time.
+    private func measuredWidth(_ view: UIView) -> CGFloat {
+        func measure() -> CGFloat {
+            view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        }
+        guard let chip = view as? UMDBarButton else { return measure() }
+        let key = "\(chip.accessibilityIdentifier ?? "")|\(chip.caption)"
+        if let width = chipWidthCache[key] { return width }
+        let width = measure()
+        chipWidthCache[key] = width
+        return width
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if traitCollection.preferredContentSizeCategory != previousTraitCollection?.preferredContentSizeCategory {
+            chipWidthCache.removeAll()
+        }
     }
 
     /// TMUX/HRDR names one road, and exactly one rail may draw it. The pane's
@@ -595,14 +787,14 @@ final class UMDBarViewController: UIViewController,
         )
     }
 
-    /// GUIDE is a direct chip where an iPad/iPhone rail has room; the compact
-    /// row and every visionOS row carry it in the `⋯` instead. One decision
-    /// for the row builders and the menu.
-    private func guideIsDirectChip(displacesDirectActions: Bool) -> Bool {
+    /// GUIDE is a direct chip on an iPad/iPhone rail (the row rule may still
+    /// drop it into `⋯`); every visionOS row carries it in the `⋯` instead.
+    /// One decision for the row builders and the menu.
+    private var guideIsDirectChip: Bool {
         #if os(visionOS)
         false
         #else
-        !displacesDirectActions
+        true
         #endif
     }
 
@@ -634,14 +826,14 @@ final class UMDBarViewController: UIViewController,
         )
     }
 
-    private func overflowButtonIfNeeded(
-        displacesDirectActions: Bool
-    ) -> UMDBarButton? {
-        let menu = makeOverflowMenu(
-            displacesDirectActions: displacesDirectActions
-        )
+    private func overflowButtonIfNeeded() -> UMDBarButton? {
+        let menu = makeOverflowMenu()
         guard !menu.children.isEmpty else { return nil }
-        return menuButton(
+        return overflowMenuButton(menu: menu)
+    }
+
+    private func overflowMenuButton(menu: UIMenu) -> UMDBarButton {
+        menuButton(
             caption: "",
             systemImage: "ellipsis",
             identifier: "umd.overflow",
@@ -826,8 +1018,11 @@ final class UMDBarViewController: UIViewController,
         ])
     }
 
-    private func makeOverflowMenu(displacesDirectActions: Bool) -> UIMenu {
+    /// The standing entries (keyboard lock, arrange, stats) plus the chips
+    /// the rail dropped (`overflowing`), so the menu carries exactly those.
+    private func makeOverflowMenu(overflowing: Set<RailItem> = []) -> UIMenu {
         var children: [UIMenuElement] = []
+        let carries: (RailItem) -> Bool = { overflowing.contains($0) }
         #if !os(visionOS)
         let offersKeyboardLock = currentObservedState.keyboardLocked
             || !currentObservedState.hardwareKeyboardConnected
@@ -868,7 +1063,7 @@ final class UMDBarViewController: UIViewController,
                 action: .showConnectionStats
             ))
         }
-        if !guideIsDirectChip(displacesDirectActions: displacesDirectActions) {
+        if !guideIsDirectChip || carries(.guide) {
             children.append(menuAction(
                 title: String(localized: "Guide"),
                 image: UIImage(systemName: "questionmark.circle"),
@@ -876,7 +1071,7 @@ final class UMDBarViewController: UIViewController,
                 action: .showGuide
             ))
         }
-        if displacesDirectActions {
+        if carries(.fontDown) || carries(.fontUp) {
             children.append(UIMenu(
                 title: String(localized: "Text Size"),
                 options: .displayInline,
@@ -893,16 +1088,22 @@ final class UMDBarViewController: UIViewController,
                     ),
                 ]
             ))
+        }
+        if carries(.newTab) {
             children.append(UIMenu(
                 title: String(localized: "New Tab"),
                 children: makeNewTabMenu().children
             ))
-            if FileAttachAvailability.canOffer(for: configuration.controller) {
-                children.append(makeFileAttachMenu())
-            }
-            if !configuration.mergeSources.isEmpty {
-                children.append(makeMergeMenu(titled: true))
-            }
+        }
+        if carries(.file), FileAttachAvailability.canOffer(for: configuration.controller) {
+            children.append(makeFileAttachMenu())
+        }
+        // MERGE has no column chip: the column always carries it here.
+        let carriesMerge = configuration.style == .verticalColumn || carries(.merge)
+        if carriesMerge, !configuration.mergeSources.isEmpty {
+            children.append(makeMergeMenu(titled: true))
+        }
+        if carries(.detach) {
             var closingActions: [UIMenuElement] = [
                 menuAction(
                     title: String(localized: "Detach"),
@@ -1312,7 +1513,10 @@ final class UMDBarRootView: UIView {
         availableWidth: CGFloat?,
         safeArea: UIEdgeInsets,
         verticalPadding: CGFloat = 8,
-        minimumHeight: CGFloat = 0
+        minimumHeight: CGFloat = 0,
+        bandRowCenterY: CGFloat? = nil,
+        bandTrailingClearance: CGFloat = 0,
+        columnCenterX: CGFloat? = nil
     ) {
         NSLayoutConstraint.deactivate(containerEdgeConstraints)
         NSLayoutConstraint.deactivate(contentEdgeConstraints)
@@ -1340,6 +1544,24 @@ final class UMDBarRootView: UIView {
                 contentContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
                 contentContainer.topAnchor.constraint(equalTo: topAnchor, constant: 11),
                 contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -11),
+            ]
+        case .verticalColumn:
+            // The column sits in the system's side bar on the chassis: no
+            // bezel slab, no rule; the chips carry their own borders.
+            layer.cornerRadius = 0
+            layer.borderWidth = 0
+            clipsToBounds = false
+            bottomRule.isHidden = true
+            // One column, one width: every chip is a fixed 44 pt square on
+            // the strip's own centre line (the clock and radio glyphs are
+            // centred in the same strip), 4 pt apart.
+            containerEdgeConstraints = [
+                contentContainer.topAnchor.constraint(equalTo: topAnchor),
+                columnCenterX.map {
+                    contentContainer.centerXAnchor.constraint(equalTo: leadingAnchor, constant: $0)
+                } ?? contentContainer.centerXAnchor.constraint(equalTo: centerXAnchor),
+                contentContainer.widthAnchor.constraint(equalToConstant: UMDColumnChip.side),
+                contentContainer.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
             ]
         case .shell:
             layer.cornerRadius = 0
@@ -1372,13 +1594,25 @@ final class UMDBarRootView: UIView {
                     lessThanOrEqualTo: bottomAnchor,
                     constant: -verticalPadding
                 ),
-                contentContainer.centerYAnchor.constraint(
+                bandRowCenterY.map {
+                    // iPhone Duo's status band: the row sits on the system's
+                    // glyph line, not the slab's centre.
+                    contentContainer.centerYAnchor.constraint(equalTo: topAnchor, constant: $0)
+                } ?? contentContainer.centerYAnchor.constraint(
                     equalTo: centerYAnchor,
                     constant: safeArea.top / 2
                 ),
             ]
+            if bandTrailingClearance > 0 {
+                // The row never reaches under the clock cluster; the slab does.
+                containerEdgeConstraints[1] = contentContainer.trailingAnchor.constraint(
+                    lessThanOrEqualTo: trailingAnchor,
+                    constant: -(Self.horizontalPadding + safeArea.right + bandTrailingClearance)
+                )
+            }
         }
         NSLayoutConstraint.activate(containerEdgeConstraints)
+        backgroundColor = style == .verticalColumn ? .clear : UIKitChassis.bezel
         contentEdgeConstraints = [
             content.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
@@ -1395,15 +1629,13 @@ final class UMDBarRootView: UIView {
 
     func fittingSize(proposedWidth: CGFloat?) -> CGSize {
         guard let contentView else { return .zero }
-        let horizontalInset: CGFloat
-        switch style {
-        case .regular:
-            horizontalInset = 36
-        case .shell:
-            // `availableWidth` already excludes the shell's side safe areas.
-            // The real frame is wider and spends those insets in `apply`.
-            horizontalInset = Self.horizontalPadding * 2
+        if style == .verticalColumn {
+            let size = contentView.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+            return CGSize(width: ceil(size.width), height: ceil(size.height))
         }
+        // The shell's `availableWidth` already excludes its side safe areas:
+        // the real frame is wider and spends those insets in `apply`.
+        let horizontalInset: CGFloat = style == .regular ? 36 : Self.horizontalPadding * 2
         let targetWidth = proposedWidth.map { max(0, $0 - horizontalInset) }
             ?? UIView.layoutFittingCompressedSize.width
         let horizontalPriority: UILayoutPriority = proposedWidth == nil
@@ -1439,12 +1671,212 @@ final class UMDBarRootView: UIView {
     }
 }
 
+/// A 44 × 44 face for iPhone Duo's vertical column: a symbol (or a text
+/// glyph such as A−) over a tiny caption, in the chip grammar of
+/// `UMDBarButton`.
 @MainActor
-final class UMDBarButton: UIButton {
+final class UMDColumnChip: UMDChipBase {
+    static let side: CGFloat = RailFit.chipHeight
+
+    private let symbolView = UIImageView()
+    private let glyphLabel = UILabel()
+    private let captionLabel = UILabel()
+    private let contentStack = UIStackView()
+    private let caption: String
+
+    init(
+        caption: String,
+        systemImage: String? = nil,
+        glyph: String? = nil,
+        prominent: Bool,
+        accessibilityLabel: String
+    ) {
+        self.caption = caption
+        super.init(prominent: prominent, accessibilityLabel: accessibilityLabel)
+
+        contentStack.axis = .vertical
+        contentStack.alignment = .center
+        contentStack.spacing = 3
+        contentStack.isUserInteractionEnabled = false
+        // The glyph slot is 16 pt tall whether it holds a symbol or a text
+        // glyph, so every chip's caption sits on the same line.
+        glyphLabel.setContentHuggingPriority(.required, for: .vertical)
+        addSubview(contentStack)
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: Self.side),
+            heightAnchor.constraint(equalToConstant: Self.side),
+            contentStack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            contentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        if let systemImage {
+            symbolView.image = UIImage(
+                systemName: systemImage,
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+            )
+            symbolView.contentMode = .scaleAspectFit
+            contentStack.addArrangedSubview(symbolView)
+            NSLayoutConstraint.activate([
+                symbolView.widthAnchor.constraint(equalToConstant: 16),
+                symbolView.heightAnchor.constraint(equalToConstant: 16),
+            ])
+        } else if let glyph {
+            glyphLabel.text = glyph
+            contentStack.addArrangedSubview(glyphLabel)
+            glyphLabel.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        }
+        captionLabel.heightAnchor.constraint(equalToConstant: 10).isActive = true
+        contentStack.addArrangedSubview(captionLabel)
+        refreshColors()
+    }
+
+    override func refreshColors() {
+        super.refreshColors()
+        symbolView.tintColor = ink
+        glyphLabel.attributedText = NSAttributedString(
+            string: glyphLabel.text ?? "",
+            attributes: [
+                .font: UIKitChassis.monoFont(13, weight: .semibold),
+                .foregroundColor: ink.resolvedColor(with: traitCollection),
+            ]
+        )
+        captionLabel.attributedText = NSAttributedString(
+            string: caption,
+            attributes: [
+                .font: UIKitChassis.monoFont(7, weight: .semibold),
+                .kern: 0.8,
+                .foregroundColor: UIKitChassis.signal2.resolvedColor(with: traitCollection),
+            ]
+        )
+    }
+}
+
+/// The 20 pt strip over the pane while the rail stands as a column: the
+/// source label and the captioned lamp the horizontal rail would carry.
+@MainActor
+final class UMDSourceStripView: UIView {
+    static let height: CGFloat = 20
+
+    private let row = UIStackView()
+    private let rule = UIView()
+    private var edgeConstraints: [NSLayoutConstraint] = []
+
+    /// No bezel slab, no rule under the row (iPhone Duo).
+    var isBare = false {
+        didSet {
+            guard isBare != oldValue else { return }
+            backgroundColor = isBare ? .clear : UIKitChassis.bezel
+            rule.isHidden = isBare
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIKitChassis.bezel
+        accessibilityIdentifier = "umd.sourceStrip"
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 10
+        addSubview(row)
+        addSubview(rule)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        rule.translatesAutoresizingMaskIntoConstraints = false
+        rule.backgroundColor = UIKitChassis.bezelHi
+        NSLayoutConstraint.activate([
+            rule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            rule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            rule.bottomAnchor.constraint(equalTo: bottomAnchor),
+            rule.heightAnchor.constraint(equalToConstant: 1),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        setInsets(.zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    /// Leading/trailing room the strip keeps: the pane's side safe areas plus
+    /// the display-corner inset the shell hands the rail.
+    func setInsets(_ insets: UIEdgeInsets) {
+        NSLayoutConstraint.deactivate(edgeConstraints)
+        edgeConstraints = [
+            row.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: UMDBarRootView.horizontalPadding + insets.left
+            ),
+            row.trailingAnchor.constraint(
+                lessThanOrEqualTo: trailingAnchor,
+                constant: -(UMDBarRootView.horizontalPadding + insets.right)
+            ),
+        ]
+        NSLayoutConstraint.activate(edgeConstraints)
+    }
+
+    func update(title: UIView, status: UIView) {
+        for view in row.arrangedSubviews {
+            row.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        title.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        status.setContentCompressionResistancePriority(.required, for: .horizontal)
+        row.addArrangedSubview(title)
+        row.addArrangedSubview(status)
+    }
+}
+
+/// The chip ground both rails share: the GLASS-prototype chassis with a
+/// 1 pt border, a dimmed disabled face, and a press that rests back on the
+/// ground the init chose (or the first press permanently flips the chip
+/// opaque on the glass bar — user report: "press TMUX breaks the button").
+@MainActor
+class UMDChipBase: UIButton {
+    let prominent: Bool
+
+    init(prominent: Bool, accessibilityLabel: String) {
+        self.prominent = prominent
+        super.init(frame: .zero)
+        self.accessibilityLabel = accessibilityLabel
+        backgroundColor = GlassPrototype.strataChassis
+        layer.borderWidth = 1
+        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override var isEnabled: Bool {
+        didSet { alpha = isEnabled ? 1 : 0.4 }
+    }
+
+    override var isHighlighted: Bool {
+        didSet {
+            backgroundColor = isHighlighted
+                ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
+        }
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+        else { return }
+        refreshColors()
+    }
+
+    var ink: UIColor { prominent ? UIKitChassis.signal : UIKitChassis.signal2 }
+
+    /// Subclasses re-ink their content after calling up.
+    func refreshColors() {
+        layer.borderColor = (prominent ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
+            .resolvedColor(with: traitCollection).cgColor
+    }
+}
+
+@MainActor
+final class UMDBarButton: UMDChipBase {
     private let contentStack = UIStackView()
     private let symbolView = UIImageView()
     private let captionLabel = UILabel()
-    private let prominent: Bool
+    let caption: String
 
     init(
         caption: String,
@@ -1452,12 +1884,8 @@ final class UMDBarButton: UIButton {
         prominent: Bool,
         accessibilityLabel: String
     ) {
-        self.prominent = prominent
-        super.init(frame: .zero)
-        self.accessibilityLabel = accessibilityLabel
-        backgroundColor = GlassPrototype.strataChassis
-        layer.borderWidth = 1
-        hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 2))
+        self.caption = caption
+        super.init(prominent: prominent, accessibilityLabel: accessibilityLabel)
 
         contentStack.axis = .horizontal
         contentStack.alignment = .center
@@ -1496,14 +1924,7 @@ final class UMDBarButton: UIButton {
         setContentHuggingPriority(.required, for: .vertical)
         setContentCompressionResistancePriority(.required, for: .horizontal)
         setContentCompressionResistancePriority(.required, for: .vertical)
-        refreshColors(caption: caption)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    override var isEnabled: Bool {
-        didSet { alpha = isEnabled ? 1 : 0.4 }
+        refreshColors()
     }
 
     override var intrinsicContentSize: CGSize {
@@ -1516,27 +1937,8 @@ final class UMDBarButton: UIButton {
         )
     }
 
-    override var isHighlighted: Bool {
-        // PROTOTYPE(GLASS): rest on strataChassis — the ground the init
-        // chose — or the first press permanently flips the chip opaque on
-        // the glass bar (user report: "press TMUX breaks the button").
-        didSet {
-            backgroundColor = isHighlighted
-                ? UIKitChassis.bezelHi : GlassPrototype.strataChassis
-        }
-    }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
-        else { return }
-        refreshColors(caption: captionLabel.attributedText?.string ?? "")
-    }
-
-    private func refreshColors(caption: String) {
-        let ink = prominent ? UIKitChassis.signal : UIKitChassis.signal2
-        layer.borderColor = (prominent ? UIKitChassis.signal2 : UIKitChassis.bezelHi)
-            .resolvedColor(with: traitCollection).cgColor
+    override func refreshColors() {
+        super.refreshColors()
         symbolView.tintColor = ink
         captionLabel.attributedText = NSAttributedString(
             string: caption,

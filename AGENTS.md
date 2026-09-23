@@ -103,6 +103,8 @@ approaches. Don't re-litigate a recorded decision without new facts.
   metadata duties. Before committing a user-visible change, append it to
   `fastlane/testflight-whats-new.txt` and reconcile store metadata per that
   doc.
+- `iphone-duo.md` — the foldable iPhone: display facts, the pose matrix,
+  and the expand / fold / rail-edge / panel-home rules the shell follows.
 - `design-conventions.md` — TALLY tokens, appearance system, type scaling,
   platform splits. Color is state, never decoration.
 - `i18n.md` — String Catalogs (zh-Hant, ja), the A/B/C string tiers (TALLY

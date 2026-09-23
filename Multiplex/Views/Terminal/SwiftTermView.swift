@@ -14,6 +14,8 @@ final class TerminalSurfaceView: UIView {
         var bottomChromeHeight: CGFloat = 0
         var contentSafeArea: UIEdgeInsets = .zero
         var railOwnsBottomSafeArea = false
+        /// The key rail drops its bezel slab and top rule.
+        var bareChrome = false
         var isActive = true
         /// Which multiplexer owns the rail's shortcut key (TMUX/HRDR); nil
         /// drops the key — plain shells and auxiliary panes have no panel.
@@ -203,6 +205,7 @@ final class TerminalSurfaceView: UIView {
         )
         keyBar.contentSafeArea = configuration.contentSafeArea
         keyBar.spendsBottomStrip = configuration.railOwnsBottomSafeArea
+        keyBar.bareChrome = configuration.bareChrome
         keyBar.keyCommandPlan = configuration.keyCommandPlan
         coordinator.keyBar = keyBar
         addSubview(view)
@@ -347,6 +350,7 @@ final class TerminalSurfaceView: UIView {
         )
         coordinator.updateContentSafeArea(configuration.contentSafeArea)
         coordinator.setRailOwnsBottomSafeArea(configuration.railOwnsBottomSafeArea)
+        coordinator.keyBar?.bareChrome = configuration.bareChrome
         coordinator.keyBar?.keyCommandPlan = configuration.keyCommandPlan
         if fontChanged {
             coordinator.terminalMetricsDidChange()

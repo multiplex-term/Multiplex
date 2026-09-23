@@ -45,7 +45,8 @@ sim_udid() {
     case "$1" in
         vos|visionos|xr) candidates="Apple Vision Pro" ;;
         ipad|ios)        candidates="iPad Pro 13-inch (M5)|iPad Pro 13-inch|iPad Pro|iPad Air|iPad" ;;
-        *) echo "unknown platform '$1' (use vos|ipad)" >&2; exit 2 ;;
+        duo|iphone)      candidates="iPhone Duo" ;;
+        *) echo "unknown platform '$1' (use vos|ipad|duo)" >&2; exit 2 ;;
     esac
     while IFS= read -r name; do
         list="$(xcrun simctl list devices available | grep -F "$name")"

@@ -842,6 +842,10 @@ enum TerminalKeyBarLayout {
         case tightTmux
         case returnAndTmuxFloor
         case essentialsFloor
+        /// Below the 375 pt floor (an iPhone Duo book page beside the 84 pt
+        /// system column keeps 371.5): the same keys on 32 pt faces, so the
+        /// rail never paints past its own bounds.
+        case narrowFloor
     }
 
     /// Window-edge daylight for the iPad-width tiers. The tight and floor
@@ -885,6 +889,10 @@ enum TerminalKeyBarLayout {
             faceInset: 1
         )
         static let compact = Metric(keyWidth: 36, spacing: 4, groupGap: 4)
+        /// 32 pt faces: 9 keys fit 316 pt, 10 (locked, RET) 333 — under any
+        /// page the Duo can cut. Engages only below the 375 floor.
+        static let narrow = Metric(keyWidth: 32, spacing: 2, groupGap: 2, faceInset: 1)
+        static let narrowReturn = Metric(keyWidth: 32, spacing: 0, groupGap: 1, faceInset: 1)
     }
 
     struct Specification: Equatable {
@@ -895,18 +903,24 @@ enum TerminalKeyBarLayout {
         var metric: Metric
         var edgeInset: CGFloat
 
-        func idealWidth(includesReturn: Bool) -> CGFloat {
-            let gap = includesReturn ? min(metric.groupGap, 8) : metric.groupGap
+        /// Keys per group: the modifiers, the symbols (when any), then
+        /// arrows · RET · talk · keyboard/mic · TMUX.
+        func groupCounts(includesReturn: Bool) -> [Int] {
             var groupCounts = [3]
             if !symbols.isEmpty { groupCounts.append(symbols.count) }
-            // arrows · RET · talk · keyboard/mic · TMUX
-            let rightCount = (pageKeys ? 2 : 0)
-                + 4
-                + (includesReturn ? 1 : 0)
-                + 1
-                + 1
-                + (tmux ? 1 : 0)
-            groupCounts.append(rightCount)
+            groupCounts.append(
+                (pageKeys ? 2 : 0) + 4 + (includesReturn ? 1 : 0) + 1 + 1 + (tmux ? 1 : 0)
+            )
+            return groupCounts
+        }
+
+        func keyCount(includesReturn: Bool) -> Int {
+            groupCounts(includesReturn: includesReturn).reduce(0, +)
+        }
+
+        func idealWidth(includesReturn: Bool) -> CGFloat {
+            let gap = includesReturn ? min(metric.groupGap, 8) : metric.groupGap
+            let groupCounts = groupCounts(includesReturn: includesReturn)
             let keys = groupCounts.reduce(0, +)
             let internalSpaces = groupCounts.reduce(0) { partial, count in
                 partial + max(0, count - 1)
@@ -984,6 +998,14 @@ enum TerminalKeyBarLayout {
             metric: includesReturn ? .returnFloor : .compact,
             edgeInset: includesReturn ? 7 : 8
         ))
+        result.append(Specification(
+            tier: .narrowFloor,
+            symbols: [],
+            pageKeys: false,
+            tmux: false,
+            metric: includesReturn ? .narrowReturn : .narrow,
+            edgeInset: 6
+        ))
         return result
     }
 
@@ -1032,16 +1054,24 @@ enum TerminalKeyBarLayout {
             width - contentSafeArea.left - contentSafeArea.right
                 - specification.edgeInset * 2
         )
+        // A row that cannot fit (a book page beside iPhone Duo's 84 pt
+        // column, or a tier rendered a pass before its replacement) narrows
+        // its faces rather than painting past its own bounds.
+        let overflow = minimumContentWidth - available
+        let keyWidth: CGFloat = overflow > 0
+            ? max(24, metric.keyWidth - overflow / CGFloat(keyCount))
+            : metric.keyWidth
+        let contentWidth = minimumContentWidth - CGFloat(keyCount) * (metric.keyWidth - keyWidth)
         let flexibleGap = groupGap
-            + max(0, available - minimumContentWidth) / CGFloat(max(1, counts.count - 1))
+            + max(0, available - contentWidth) / CGFloat(max(1, counts.count - 1))
 
         var frames: [CGRect] = []
         frames.reserveCapacity(keyCount)
         var x = contentSafeArea.left + specification.edgeInset
         for (groupIndex, count) in counts.enumerated() {
             for keyIndex in 0..<count {
-                frames.append(CGRect(x: x, y: keyTop, width: metric.keyWidth, height: keyHeight))
-                x += metric.keyWidth
+                frames.append(CGRect(x: x, y: keyTop, width: keyWidth, height: keyHeight))
+                x += keyWidth
                 if keyIndex < count - 1 { x += metric.spacing }
             }
             if groupIndex < counts.count - 1 { x += flexibleGap }
@@ -1119,6 +1149,16 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
         didSet {
             guard spendsBottomStrip != oldValue else { return }
             invalidateIntrinsicContentSize()
+        }
+    }
+
+    /// No bezel slab, no top rule: the faces sit straight on the chassis
+    /// (iPhone Duo). Geometry is untouched.
+    var bareChrome = false {
+        didSet {
+            guard bareChrome != oldValue else { return }
+            backgroundColor = bareChrome ? .clear : UIKitChassis.bezel
+            topBorder.isHidden = bareChrome
         }
     }
 
@@ -1248,7 +1288,8 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
                 includesReturn: includesReturn
             )
             let signature = RenderSignature(tier: specification.tier, state: state)
-            if renderedSignature != signature {
+            let expectedKeys = specification.keyCount(includesReturn: includesReturn)
+            if renderedSignature != signature || rendered.count != expectedKeys {
                 rebuildRow(specification: specification, state: state)
                 renderedSignature = signature
             }

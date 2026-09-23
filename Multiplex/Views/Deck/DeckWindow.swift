@@ -202,6 +202,9 @@ struct DeckWindowConfiguration {
     var presentation: FleetWall.Presentation = .standard
     var selectedTerminal: TerminalRoute?
     var shellSafeArea = UIEdgeInsets.zero
+    /// What the wall's header row clears beyond the safe area (a bare
+    /// display corner, iPhone Duo's status band); see `ShellHeaderChrome`.
+    var headerChrome = ShellHeaderChrome.none
     var sceneIsActive: Bool
     var reduceMotion: Bool
     var lifecycleDriver: DeckWindowLifecycleDriver
@@ -224,6 +227,7 @@ struct DeckWindowConfiguration {
         presentation: FleetWall.Presentation = .standard,
         selectedTerminal: TerminalRoute? = nil,
         shellSafeArea: UIEdgeInsets = .zero,
+        headerChrome: ShellHeaderChrome = .none,
         sceneIsActive: Bool,
         reduceMotion: Bool,
         lifecycleDriver: DeckWindowLifecycleDriver? = nil
@@ -245,6 +249,7 @@ struct DeckWindowConfiguration {
         self.presentation = presentation
         self.selectedTerminal = selectedTerminal
         self.shellSafeArea = shellSafeArea
+        self.headerChrome = headerChrome
         self.sceneIsActive = sceneIsActive
         self.reduceMotion = reduceMotion
         self.lifecycleDriver = lifecycleDriver ?? .live(
@@ -551,6 +556,7 @@ final class DeckWindowViewController: UIViewController {
             presentation: configuration.presentation,
             selectedTerminal: configuration.selectedTerminal,
             shellSafeArea: configuration.shellSafeArea,
+            headerChrome: configuration.headerChrome,
             reduceMotion: configuration.reduceMotion,
             sceneIsActive: configuration.sceneIsActive,
             addHost: { [weak self] in self?.requestAddHost() },
