@@ -17,9 +17,9 @@ struct TailscaleTunnelFailure: Error, LocalizedError, CustomStringConvertible, S
 /// node identity as an *input* and never writes a state directory: the app
 /// generates the three 32-byte private keys itself and persists them in the
 /// Keychain, so the "secrets never touch disk in plaintext" house rule holds
-/// without exception. Backed by an experimental upstream — the FFI is
-/// gated behind `TS_RS_EXPERIMENT` and all peer traffic relays through
-/// public DERP servers today.
+/// without exception. Upstream is pre-1.0 (crypto audited as of v0.6.0) and
+/// lists iOS as unsupported; peers relay through DERP unless a direct path
+/// is found.
 actor TailscaleTunnel {
     enum State: Equatable, Sendable {
         case stopped
@@ -65,7 +65,6 @@ actor TailscaleTunnel {
     private var device: OpaquePointer?
     private var startTask: Task<StartedNode, Error>?
     private static let envConfigured: Void = {
-        setenv("TS_RS_EXPERIMENT", "this_is_unstable_software", 1)
         #if !DEBUG
         // Keep the release console quiet; DEBUG keeps INFO for field
         // diagnosis. tailscale-rs logs to stderr via RUST_LOG only — there
@@ -328,6 +327,10 @@ actor TailscaleTunnel {
                             config.tags = nil
                             config.client_name = clientNamePointer
                             config.key_state = keyStatePointer
+                            // The node key persists in the Keychain, so the
+                            // node is a durable tailnet machine like any other
+                            // client — not one removed after going offline.
+                            config.ephemeral = false
                             return try authKey.withCString { authPointer in
                                 guard let device = ts_init(&config, authPointer) else {
                                     throw TailscaleTunnelFailure(
@@ -501,7 +504,7 @@ actor TailscaleTunnel {
 /// independent runtime commands, so the relay's two pump threads are safe;
 /// close must not race them, which the relay's finished-pump accounting
 /// guarantees.
-struct TailscaleHandleRemote: TailscaleRelayRemote {
+struct TailscaleHandleRemote: TailscaleRelayRemote, @unchecked Sendable {
     let stream: OpaquePointer
 
     func recv(into buffer: UnsafeMutableRawBufferPointer) -> Int {

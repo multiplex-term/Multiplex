@@ -95,6 +95,12 @@ typedef struct ts_config {
    * If `NULL`, ephemeral key state is generated.
    */
   struct ts_persisted_key_state *key_state;
+  /**
+   * Whether to register this node as ephemeral.
+   *
+   * Ephemeral nodes are removed from the tailnet after being offline for a brief period.
+   */
+  bool ephemeral;
 } ts_config;
 
 /**
@@ -221,7 +227,8 @@ void ts_init_tracing(void);
  * `auth_token`  must be able to be read according to [`CStr`] rules, i.e.
  * it must be NUL-terminated and valid for reading up to and including the NUL.
  * The string fields of `config` may be `NULL`, but if they are not, they must
- * obey the same invariants.
+ * obey the same invariants. `tags` must be either `NULL`, or a `NULL` terminated
+ * array of strings that must all obey the same invariant.
  */
 struct ts_device *ts_init(const struct ts_config *config, const char *auth_token);
 
