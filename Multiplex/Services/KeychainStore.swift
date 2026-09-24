@@ -10,6 +10,9 @@ import Security
 ///     which is how the host list itself crosses devices
 ///   - the Key Commands set: one item, last writer wins by `updatedAt`
 ///
+/// The one exception is the tailnet node identity, which is device-only by
+/// design (see `setTailnetNodeState`).
+///
 /// Every query MUST include `kSecAttrSynchronizable` (we use `…Any`): a query
 /// without the key matches only device-local items, so synced secrets would
 /// silently become invisible.
@@ -21,6 +24,8 @@ enum KeychainStore {
     /// iPad reaches the Vision Pro without a CloudKit container.
     private static let keyCommandService = "app.multiplexterm.multiplex.keycommands"
     private static let keyCommandAccount = "set"
+    private static let tailnetNodeService = "app.multiplexterm.multiplex.tailnet-node"
+    private static let tailnetNodeAccount = "key-state"
 
     enum Kind: String {
         case password
@@ -29,12 +34,6 @@ enum KeychainStore {
         /// The app-wide Tailscale auth key (tailscale-rs backend), stored
         /// under a fixed namespace UUID rather than a real host.
         case tailscaleAuthKey
-        /// The app-generated tailnet node identity: 96 bytes
-        /// (node ‖ machine ‖ network-lock, 32 each). tailscale-rs takes the
-        /// key state as an input and never exports it, so the app owns and
-        /// persists it here — this is why no plaintext state directory is
-        /// needed. Under the same fixed namespace UUID as the auth key.
-        case tailscaleKeyState
     }
 
     private static func account(_ hostID: UUID, _ kind: Kind) -> String {
@@ -56,13 +55,32 @@ enum KeychainStore {
         deleteItem(service: secretService, account: account(hostID, kind))
     }
 
-    /// Binary-secret accessors for the tailnet node identity (not UTF-8).
-    static func setData(_ value: Data, for hostID: UUID, kind: Kind) {
-        setItem(value, service: secretService, account: account(hostID, kind))
+    // MARK: - Tailnet node identity
+
+    /// The app-generated tailnet node identity: 96 bytes (node ‖ machine ‖
+    /// network-lock, 32 each). tailscale-rs takes the key state as an input,
+    /// so the app owns it — no plaintext state directory. Device-only: a
+    /// synced copy would hand every device the same node, and two devices
+    /// running one node key fight over it. Its own service, because
+    /// `migrateDeviceOnlyItems` re-syncs every device-local item under
+    /// `secretService`.
+    @discardableResult
+    static func setTailnetNodeState(_ data: Data) -> Bool {
+        let query = deviceOnlyQuery(service: tailnetNodeService, account: tailnetNodeAccount)
+        SecItemDelete(query as CFDictionary)
+        var add = query
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        add[kSecValueData as String] = data
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 
-    static func getData(for hostID: UUID, kind: Kind) -> Data? {
-        getItem(service: secretService, account: account(hostID, kind))
+    static func tailnetNodeState() -> Data? {
+        var query = deviceOnlyQuery(service: tailnetNodeService, account: tailnetNodeAccount)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+        return result as? Data
     }
 
     static func delete(for hostID: UUID) {
@@ -152,6 +170,15 @@ enum KeychainStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
+        ]
+    }
+
+    private static func deviceOnlyQuery(service: String, account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: false,
         ]
     }
 

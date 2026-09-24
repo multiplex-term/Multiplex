@@ -251,7 +251,7 @@ actor TailscaleTunnel {
     /// export API, so the app is the only owner.
     private static func loadOrCreateKeyState() async -> Data {
         await Task.detached(priority: .userInitiated) {
-            if let existing = KeychainStore.getData(for: identityNamespace, kind: .tailscaleKeyState),
+            if let existing = KeychainStore.tailnetNodeState(),
                existing.count == keyStateByteCount {
                 return existing
             }
@@ -260,7 +260,7 @@ actor TailscaleTunnel {
                 SecRandomCopyBytes(kSecRandomDefault, keyStateByteCount, $0.baseAddress!)
             }
             precondition(ok == errSecSuccess, "SecRandomCopyBytes failed for tailnet keys")
-            KeychainStore.setData(bytes, for: identityNamespace, kind: .tailscaleKeyState)
+            KeychainStore.setTailnetNodeState(bytes)
             return bytes
         }.value
     }
