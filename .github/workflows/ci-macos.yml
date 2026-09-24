@@ -1,4 +1,4 @@
-# Multiplex app CI. macos-26 carries Xcode 26 and the visionOS 26 simulator
+# Multiplex app CI. macos-27 carries Xcode 27 and the visionOS 27 simulator
 # runtime; the app targets visionOS 26 / iOS 17, so nothing older will do.
 #
 # Everything this workflow runs is a Tools/build.sh subcommand — the same
@@ -60,7 +60,7 @@ permissions:
 jobs:
   xcode:
     name: Lint, build, test
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
