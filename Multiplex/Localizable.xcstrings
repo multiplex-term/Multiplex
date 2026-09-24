@@ -2546,6 +2546,22 @@
         }
       }
     },
+    "Auth key" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "認証キー"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "驗證金鑰"
+          }
+        }
+      }
+    },
     "auto submit" : {
       "localizations" : {
         "ja" : {
@@ -4172,6 +4188,22 @@
         }
       }
     },
+    "Connect via Tailscale" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tailscale経由で接続"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "透過 Tailscale 連線"
+          }
+        }
+      }
+    },
     "Connect with mosh" : {
       "localizations" : {
         "ja" : {
@@ -4372,6 +4404,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Control %@"
+          }
+        }
+      }
+    },
+    "Control URL" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コントロールURL"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "控制伺服器 URL"
           }
         }
       }
@@ -6136,6 +6184,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "預期的金鑰（選填）"
+          }
+        }
+      }
+    },
+    "Experimental · SSH runs through this device's embedded Tailscale node. Add a reusable auth key in Settings. Mosh is unavailable on this path." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "実験的機能 · SSHはこのデバイスに組み込まれたTailscaleノードを経由します。「設定」で再利用可能な認証キーを追加してください。この経路ではmoshを使用できません。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "實驗性功能 · SSH 經由此裝置內建的 Tailscale 節點連線。請在「設定」中加入可重複使用的驗證金鑰。此路徑無法使用 mosh。"
+          }
+        }
+      }
+    },
+    "Experimental. Use a reusable auth key — it syncs through iCloud Keychain, and each device joins as its own tailnet node. The optional Headscale control URL stays on this device. Changes apply the next time the embedded node starts." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "実験的機能です。再利用可能な認証キーを使用してください — キーはiCloudキーチェーンで同期され、各デバイスはそれぞれ独立したtailnetノードとして参加します。オプションのHeadscaleコントロールURLはこのデバイスにのみ保存されます。変更は組み込みノードの次回起動時に反映されます。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "實驗性功能。請使用可重複使用的驗證金鑰——金鑰會透過 iCloud 鑰匙圈同步，每部裝置各自以獨立的 tailnet 節點加入。選用的 Headscale 控制伺服器 URL 只保留在此裝置上。變更會在內建節點下次啟動時生效。"
           }
         }
       }
@@ -8292,6 +8372,22 @@
         }
       }
     },
+    "mosh can't run over the embedded Tailscale connection — turn one of them off." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "moshは組み込みのTailscale接続上では動作しません — どちらか一方をオフにしてください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "mosh 無法在內建的 Tailscale 連線上執行——請關閉其中一項。"
+          }
+        }
+      }
+    },
     "MOSH LINK — SRTT FROM EVERY DATAGRAM · LOSS FROM SEQUENCE GAPS" : {
       "localizations" : {
         "ja" : {
@@ -9488,6 +9584,22 @@
         }
       }
     },
+    "No Tailscale auth key is set yet — add a reusable one in Settings › Tailscale, or this host can't connect." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tailscaleの認証キーがまだ設定されていません — 「設定 › Tailscale」で再利用可能なキーを追加しないと、このホストに接続できません。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未設定 Tailscale 驗證金鑰——請在「設定 › Tailscale」中加入可重複使用的金鑰，否則此主機無法連線。"
+          }
+        }
+      }
+    },
     "No terminal selected" : {
       "localizations" : {
         "ja" : {
@@ -10466,6 +10578,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "選填"
+          }
+        }
+      }
+    },
+    "Optional · Headscale URL" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オプション · Headscale URL"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選用 · Headscale URL"
           }
         }
       }
@@ -12128,6 +12256,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "往返、回應延遲、遺失率與流量 — 這些數字傳輸層本來就會算，只被動測量，而且僅在記憶體中保留這個工作階段。不會儲存也不會同步。關閉後會隱藏按鍵列上的統計顯示與統計面板，並停止測量。即時顯示是免費的；統計面板需要 Pro。"
+          }
+        }
+      }
+    },
+    "Routes this host's SSH connection through the embedded Tailscale node" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このホストのSSH接続を組み込みのTailscaleノード経由にします"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讓此主機的 SSH 連線經由內建的 Tailscale 節點"
           }
         }
       }
@@ -13824,6 +13968,22 @@
         }
       }
     },
+    "Starts the embedded Tailscale node, signs in to SSH through it, then looks for %@ on the host." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "組み込みのTailscaleノードを起動し、それを経由してSSHにサインインしてから、ホスト上の%@を探します。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "啟動內建的 Tailscale 節點，經由它登入 SSH，然後在主機上尋找 %@。"
+          }
+        }
+      }
+    },
     "stays open" : {
       "localizations" : {
         "ja" : {
@@ -14142,6 +14302,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "標籤頁"
+          }
+        }
+      }
+    },
+    "Tailscale auth key" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tailscale認証キー"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tailscale 驗證金鑰"
           }
         }
       }
@@ -15298,6 +15474,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此標籤頁無法重新連線，因為它的主機已不在 Deck 中。"
+          }
+        }
+      }
+    },
+    "The Tailscale backend isn't available in this build." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このビルドではTailscaleバックエンドを利用できません。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此版本不提供 Tailscale 後端。"
           }
         }
       }

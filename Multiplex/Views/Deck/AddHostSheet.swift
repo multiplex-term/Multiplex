@@ -58,6 +58,9 @@ struct AddHostFormState {
     /// silently changes the other.
     var secondaryBackends: Set<Host.SessionBackend> = []
     var useMosh = false
+    /// Mutually exclusive with `useMosh` for v1 — write both through
+    /// `setTailscale(_:)` / `setMosh(_:)`.
+    var useTailscale = false
     var moshServerPath = ""
     var moshPorts = ""
     var workingDirectories: [WorkingDirectory] = []
@@ -95,7 +98,8 @@ struct AddHostFormState {
         backgroundKeepAlive = host.backgroundKeepAlive
         sessionBackend = host.sessionBackend
         secondaryBackends = host.secondaryBackends
-        useMosh = host.useMosh
+        useTailscale = host.useTailscale
+        useMosh = host.useMosh && !host.useTailscale
         moshServerPath = host.moshServerPath ?? ""
         moshPorts = host.moshPorts ?? ""
         workingDirectories = host.workingDirs.map { WorkingDirectory(path: $0) }
@@ -107,6 +111,16 @@ struct AddHostFormState {
                 modelText[agent] = models.joined(separator: "\n")
             }
         }
+    }
+
+    mutating func setMosh(_ enabled: Bool) {
+        useMosh = enabled
+        if enabled { useTailscale = false }
+    }
+
+    mutating func setTailscale(_ enabled: Bool) {
+        useTailscale = enabled
+        if enabled { useMosh = false }
     }
 
     var isValid: Bool {
@@ -148,6 +162,7 @@ struct AddHostFormState {
             hostname, port, username, authMethod.rawValue,
             password, privateKey, passphrase,
             useMosh ? "mosh" : "ssh", moshServerPath,
+            useTailscale ? "tailscale" : "direct",
             sessionBackend.rawValue,
         ]
     }
@@ -188,7 +203,8 @@ struct AddHostFormState {
         host.isEnabled = isEnabled
         host.backgroundKeepAlive = backgroundKeepAlive
         host.backendSelection = backendSelection
-        host.useMosh = useMosh
+        host.useTailscale = useTailscale
+        host.useMosh = useMosh && !useTailscale
         let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
         let ports = moshPorts.trimmingCharacters(in: .whitespaces)
@@ -351,6 +367,10 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private var moshServerField: UITextField?
     private var moshPortsField: UITextField?
     private var moshPortsInvalidRow: UIView?
+    #if canImport(CTailscaleRS)
+    private var tailscaleAuthKeyConfigured: Bool?
+    private var tailscaleAuthKeyTask: Task<Void, Never>?
+    #endif
     private var addDirectoryChip: UIKitChassisChip?
 
     private let secretWriter: SecretWriter?
@@ -796,6 +816,9 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         renderWorkingDirectories()
         renderScripts()
         renderTransport()
+        #if canImport(CTailscaleRS)
+        if form.useTailscale { refreshTailscaleAuthKeyState() }
+        #endif
         renderBackend()
     }
 
@@ -1118,6 +1141,14 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private var testDetail: String {
         let backend = form.sessionBackend.rawValue
+        #if canImport(CTailscaleRS)
+        if form.useTailscale {
+            return String(localized: """
+                Starts the embedded Tailscale node, signs in to SSH through it, then \
+                looks for \(backend) on the host.
+                """)
+        }
+        #endif
         return form.useMosh
             ? String(localized: """
                 Signs in over SSH with the settings above, then looks for \(backend) and \
@@ -1788,6 +1819,14 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     }
 
     private var transportDetail: String {
+        #if canImport(CTailscaleRS)
+        if form.useTailscale {
+            return String(localized: """
+                Experimental · SSH runs through this device's embedded Tailscale node. \
+                Add a reusable auth key in Settings. Mosh is unavailable on this path.
+                """)
+        }
+        #endif
         if form.useMosh {
             return String(localized: """
                 Terminals attach over UDP and survive roaming or sleep. SSH still \
@@ -1814,12 +1853,16 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 Task { @MainActor [weak self] in self?.renderTransport() }
                 return
             }
-            self.updateTestSensitive { $0.useMosh = enabled }
+            self.updateTestSensitive { $0.setMosh(enabled) }
             self.renderTransport()
             self.renderTestSection()
         }
         moshControl = control
-        var rows: [UIView] = [control]
+        var rows: [UIView] = []
+        #if canImport(CTailscaleRS)
+        rows += tailscaleRows()
+        #endif
+        rows.append(control)
         if form.useMosh {
             let server = UITextField()
             configureTextField(
@@ -1876,6 +1919,51 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         transportSection.setRows(rows)
         updateSaveAvailability()
     }
+
+    #if canImport(CTailscaleRS)
+    private func tailscaleRows() -> [UIView] {
+        let toggle = SettingsBooleanRow(
+            title: String(localized: "Connect via Tailscale"),
+            isOn: form.useTailscale,
+            accessibilityHint: String(
+                localized: "Routes this host's SSH connection through the embedded Tailscale node"
+            )
+        ) { [weak self] enabled in
+            guard let self else { return }
+            self.updateTestSensitive { $0.setTailscale(enabled) }
+            self.renderTransport()
+            self.renderTestSection()
+            if enabled { self.refreshTailscaleAuthKeyState() }
+        }
+        toggle.accessibilityIdentifier = "addhost.tailscale"
+        guard form.useTailscale, tailscaleAuthKeyConfigured == false else { return [toggle] }
+        let tip = addHostLabel(
+            String(localized: """
+                No Tailscale auth key is set yet — add a reusable one in \
+                Settings › Tailscale, or this host can't connect.
+                """),
+            font: UIKitChassis.uiFont(10),
+            color: TallyPalette.caution
+        )
+        tip.numberOfLines = 0
+        return [toggle, AddHostInsetRow(contentView: tip)]
+    }
+
+    /// Re-read on every toggle-on: the sheet and Settings are never open at
+    /// once, so toggle-on is the freshest moment. nil until the read lands,
+    /// so the missing-key tip never flashes during load.
+    private func refreshTailscaleAuthKeyState() {
+        tailscaleAuthKeyTask?.cancel()
+        tailscaleAuthKeyTask = Task { @MainActor [weak self] in
+            let configuration = await TailscaleTunnel.loadConfiguration()
+            guard let self, !Task.isCancelled else { return }
+            self.tailscaleAuthKeyConfigured = !configuration.authKey
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+            if self.form.useTailscale { self.renderTransport() }
+        }
+    }
+    #endif
 
     // MARK: Observation / entitlement gates
 

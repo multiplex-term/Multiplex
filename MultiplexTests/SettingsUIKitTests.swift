@@ -44,7 +44,7 @@ final class SettingsUIKitTests: XCTestCase {
             of: UIKitChassisLabel.self,
             in: fixture.controller.view
         ).filter { $0.accessibilityTraits.contains(.header) }
-        XCTAssertEqual(headers.compactMap(\.accessibilityLabel), [
+        var expectedHeaders = [
             "Appearance",
             "Current theme",
             "Built-in themes",
@@ -56,7 +56,11 @@ final class SettingsUIKitTests: XCTestCase {
             "Multiplex Pro",
             "Language",
             "About",
-        ])
+        ]
+        #if canImport(CTailscaleRS)
+        expectedHeaders.insert("Tailscale", at: 6)
+        #endif
+        XCTAssertEqual(headers.compactMap(\.accessibilityLabel), expectedHeaders)
 
         let rendered = renderedText(in: fixture.controller.view)
         XCTAssertTrue(rendered.contains("TERMINAL SURFACE"))

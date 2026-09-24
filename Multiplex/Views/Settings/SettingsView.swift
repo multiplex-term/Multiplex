@@ -46,6 +46,11 @@ final class SettingsViewController: UIViewController {
     private var observationGeneration = 0
     private var didRunDebugPresentation = false
     private var hasEstablishedInitialTopAlignment = false
+    #if canImport(CTailscaleRS)
+    /// Built once and reused across renders so an in-progress auth-key edit
+    /// survives store-driven rebuilds of the other sections.
+    private var tailscaleSection: SettingsTailscaleSection?
+    #endif
 
     init(
         themes: ThemeStore,
@@ -69,6 +74,14 @@ final class SettingsViewController: UIViewController {
         view.backgroundColor = GlassPrototype.sheetGround
         configureNavigation()
         configureContent()
+        #if canImport(CTailscaleRS)
+        let tailscale = SettingsTailscaleSection()
+        tailscale.onDirtyChange = { [weak self] dirty in
+            self?.isModalInPresentation = dirty
+            self?.navigationController?.isModalInPresentation = dirty
+        }
+        tailscaleSection = tailscale
+        #endif
         observeStores()
         applyAppearance()
     }
@@ -243,6 +256,7 @@ final class SettingsViewController: UIViewController {
             ),
             makeRendererSection(),
             makeConnectionStatsSection(),
+            makeTailscaleSection(),
             makeAlertsSection(state),
             makeAppLockSection(state),
             makeProSection(state),
@@ -250,7 +264,7 @@ final class SettingsViewController: UIViewController {
             makeAboutSection(),
             makePrivacyLink(),
         ]
-        replaceContent(with: sections)
+        replaceContent(with: sections.compactMap(\.self))
 
         view.layoutIfNeeded()
         guard shouldPreserveOffset else { return }
@@ -487,6 +501,14 @@ final class SettingsViewController: UIViewController {
                 """),
             rows: [control]
         )
+    }
+
+    private func makeTailscaleSection() -> UIView? {
+        #if canImport(CTailscaleRS)
+        tailscaleSection
+        #else
+        nil
+        #endif
     }
 
     private func makeAlertsSection(_ state: ViewState) -> UIView {
@@ -849,6 +871,21 @@ final class SettingsViewController: UIViewController {
     }
 
     @objc private func donePressed() {
+        #if canImport(CTailscaleRS)
+        if let tailscaleSection, tailscaleSection.isDirty {
+            navigationItem.rightBarButtonItem?.isEnabled = false
+            Task { @MainActor [weak self] in
+                await tailscaleSection.save()
+                self?.navigationItem.rightBarButtonItem?.isEnabled = true
+                self?.finish()
+            }
+            return
+        }
+        #endif
+        finish()
+    }
+
+    private func finish() {
         if let onDone {
             onDone()
         } else {

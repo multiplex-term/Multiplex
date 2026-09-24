@@ -112,6 +112,8 @@ enum HostTest {
                     The private key couldn't be read. Paste an OpenSSH ed25519 \
                     or RSA key, including its BEGIN/END lines.
                     """)
+            case .tailscaleUnavailable:
+                return ssh.userMessage(host: host)
             case .connectFailed(let detail):
                 return connectFailureMessage(detail, host: host)
             case .commandFailed:
