@@ -60,7 +60,7 @@ permissions:
 jobs:
   xcode:
     name: Lint, build, test
-    runs-on: macos-27
+    runs-on: xcode-27
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
